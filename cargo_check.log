@@ -1,0 +1,352 @@
+    Checking MacroNest v1.0.0 (D:\app\MacroNest)
+warning: unused import: `DWMWCP_ROUND`
+  --> src\platform.rs:16:65
+   |
+16 |                 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_ROUND,
+   |                                                                 ^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `audio_duration`
+ --> src\ui\sound_panel.rs:2:68
+  |
+2 | use crate::ui::{CrosshairApp, AudioCardOutcome, AudioEditorTarget, audio_duration};
+  |                                                                    ^^^^^^^^^^^^^^
+
+warning: use of deprecated type alias `eframe::egui::Rounding`: Renamed to CornerRadius
+    --> src\ui\mod.rs:4185:34
+     |
+4185 |             let rounding = egui::Rounding::same(6);
+     |                                  ^^^^^^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+    --> src\ui\macro_panel.rs:6389:43
+     |
+6389 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("group-tip"), |ui| {␍
+     |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+    --> src\ui\macro_panel.rs:8567:60
+     |
+8567 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("preset-tip"), |ui| {␍
+     |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+     --> src\ui\macro_panel.rs:12120:67
+      |
+12120 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("lockkeys-warning-tip"), |ui| {␍
+      |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+     --> src\ui\macro_panel.rs:13690:67
+      |
+13690 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("lockmouse-warning-tip"), |ui| {␍
+      |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+     --> src\ui\macro_panel.rs:18014:59
+      |
+18014 | ...                   egui::show_tooltip_at_pointer(child_ui.ctx(), child_ui.layer_id(), response.id.with("step-tip"), |ui| {␍
+      |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+     --> src\ui\macro_panel.rs:18846:55
+      |
+18846 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), info_resp.id.with("delay-math-help-tip"), |ui| {␍
+      |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+     --> src\ui\macro_panel.rs:21929:67
+      |
+21929 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("lockkeys-compact-warning-tip"), |ui| {␍
+      |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+     --> src\ui\macro_panel.rs:23451:67
+      |
+23451 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("lockmouse-compact-warning-tip"), |ui| {␍
+      |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_text`: Use `egui::Tooltip` instead
+   --> src\ui\vision_panel.rs:546:47
+    |
+546 | ...                   egui::show_tooltip_text(
+    |                             ^^^^^^^^^^^^^^^^^
+
+warning: unreachable statement
+  --> src\ui\crosshair_panel.rs:10:9
+   |
+ 9 |         return;
+   |         ------ any code following this expression is unreachable
+10 |         ui.spacing_mut().slider_width = 260.0;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unreachable statement
+   |
+   = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+error[E0624]: associated function `draw_spinning_wand` is private
+    --> src\ui\macro_panel.rs:2001:35
+     |
+2001 | ...                   Self::draw_spinning_wand(ui, rect, Color32::from_rgb(255, 220, 100));␍
+     |                             ^^^^^^^^^^^^^^^^^^ private associated function
+     |
+    ::: src\ui\command_panel.rs:246:5
+     |
+ 246 |     fn draw_spinning_wand(ui: &mut egui::Ui, rect: egui::Rect, color: Color32) {
+     |     -------------------------------------------------------------------------- private associated function defined here
+
+warning: use of deprecated method `eframe::egui::Frame::rounding`: Renamed to `corner_radius`
+    --> src\ui\macro_panel.rs:3161:30
+     |
+3161 | ...                   .rounding(4.0)␍
+     |                        ^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Frame::rounding`: Renamed to `corner_radius`
+    --> src\ui\macro_panel.rs:4331:30
+     |
+4331 | ...                   .rounding(4.0)␍
+     |                        ^^^^^^^^
+
+warning: use of deprecated associated function `eframe::egui::Frame::none`: Use `Frame::NONE` or `Frame::new()` instead.
+    --> src\ui\macro_panel.rs:8751:58
+     |
+8751 | ...                   egui::Frame::none()␍
+     |                                    ^^^^
+
+warning: use of deprecated method `eframe::egui::Frame::rounding`: Renamed to `corner_radius`
+    --> src\ui\macro_panel.rs:8767:50
+     |
+8767 | ...                   .rounding(4.0)␍
+     |                        ^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:15456:73
+      |
+15456 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:15508:73
+      |
+15508 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:15540:73
+      |
+15540 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:15588:69
+      |
+15588 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:15640:73
+      |
+15640 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:15688:69
+      |
+15688 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:15732:69
+      |
+15732 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:25837:72
+      |
+25837 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:25889:72
+      |
+25889 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:25921:72
+      |
+25921 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:25969:68
+      |
+25969 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:26021:72
+      |
+26021 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:26069:68
+      |
+26069 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+     --> src\ui\macro_panel.rs:26113:68
+      |
+26113 | ...                   ui.close_menu();␍
+      |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Context::screen_rect`: screen_rect has been split into viewport_rect() and content_rect(). You likely should use content_rect()
+     --> src\ui\macro_panel.rs:28791:32
+      |
+28791 |         ui.add_space((ui.ctx().screen_rect().height() - 250.0).max(0.0));␍
+      |                                ^^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Context::screen_rect`: screen_rect has been split into viewport_rect() and content_rect(). You likely should use content_rect()
+    --> src\ui\mod.rs:1366:13
+     |
+1366 |         ctx.screen_rect().shrink(18.0)
+     |             ^^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Context::screen_rect`: screen_rect has been split into viewport_rect() and content_rect(). You likely should use content_rect()
+    --> src\ui\mod.rs:8127:37
+     |
+8127 |             let screen_center = ctx.screen_rect().center();
+     |                                     ^^^^^^^^^^^
+
+warning: unused import: `TextBuffer`
+ --> src\ui\window_panel.rs:2:94
+  |
+2 | use eframe::egui::{self, Button, RichText, DragValue, Sense, TextEdit, Color32, vec2, Frame, TextBuffer, ColorImage, TextureOptions};
+  |                                                                                              ^^^^^^^^^^
+
+warning: unused import: `TextBuffer`
+ --> src\ui\mouse_panel.rs:2:110
+  |
+2 | use eframe::egui::{self, Button, RichText, Margin, Slider, DragValue, Sense, TextEdit, Color32, vec2, Frame, TextBuffer};
+  |                                                                                                              ^^^^^^^^^^
+
+warning: unused import: `TextBuffer`
+ --> src\ui\vision_panel.rs:4:106
+  |
+4 | use eframe::egui::{self, Button, Margin, Slider, DragValue, Sense, TextEdit, Color32, pos2, vec2, Frame, TextBuffer, ColorImage, TextureO...
+  |                                                                                                          ^^^^^^^^^^
+
+warning: unused import: `TextBuffer`
+ --> src\ui\hud_panel.rs:1:76
+  |
+1 | use eframe::egui::{self, RichText, Slider, Sense, TextEdit, Color32, vec2, TextBuffer};
+  |                                                                            ^^^^^^^^^^
+
+warning: unused variable: `toggle_folder_enabled_id`
+    --> src\ui\macro_panel.rs:5593:17
+     |
+5593 |         let mut toggle_folder_enabled_id: Option<u32> = None;␍
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_toggle_folder_enabled_id`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src\ui\macro_panel.rs:3555:13
+     |
+3555 |         let mut release_folder_id = None;␍
+     |             ----^^^^^^^^^^^^^^^^^
+     |             |
+     |             help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src\ui\macro_panel.rs:5581:13
+     |
+5581 |         let mut toggle_collapsed_folder_id: Option<u32> = None;␍
+     |             ----^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\ui\macro_panel.rs:5585:13
+     |
+5585 |         let mut add_group_to_folder_id: Option<u32> = None;␍
+     |             ----^^^^^^^^^^^^^^^^^^^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\ui\macro_panel.rs:5593:13
+     |
+5593 |         let mut toggle_folder_enabled_id: Option<u32> = None;␍
+     |             ----^^^^^^^^^^^^^^^^^^^^^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\ui\macro_panel.rs:6013:25
+     |
+6013 |                     let mut import_group_after: Option<u32> = None; // insert_after_group_id␍
+     |                         ----^^^^^^^^^^^^^^^^^^
+     |                         |
+     |                         help: remove this `mut`
+
+warning: unused variable: `capture_target_snapshot`
+  --> src\ui\vision_panel.rs:20:13
+   |
+20 |         let capture_target_snapshot = self.capture_target.clone();
+   |             ^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_capture_target_snapshot`
+
+warning: unused variable: `selected_steps_snapshot`
+  --> src\ui\vision_panel.rs:21:13
+   |
+21 |         let selected_steps_snapshot = self.selected_macro_steps.clone();
+   |             ^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_selected_steps_snapshot`
+
+warning: unused variable: `pending_custom_preset_save`
+  --> src\ui\vision_panel.rs:82:13
+   |
+82 |         let pending_custom_preset_save: Option<()> = None;
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_pending_custom_preset_save`
+
+warning: unused variable: `open_windows`
+   --> src\ui\vision_panel.rs:115:21
+    |
+115 |                 let open_windows = self.open_windows.clone();
+    |                     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_open_windows`
+
+warning: unused variable: `rect_id`
+   --> src\ui\hud_panel.rs:450:13
+    |
+450 |         let rect_id = ui.make_persistent_id((id_source, "toolbox-rect"));
+    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_rect_id`
+
+warning: unused variable: `open_windows`
+  --> src\ui\command_panel.rs:29:13
+   |
+29 |         let open_windows = self.open_windows.clone();
+   |             ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_open_windows`
+
+warning: unused variable: `rect_id`
+    --> src\ui\mod.rs:4419:13
+     |
+4419 |         let rect_id = ui.make_persistent_id((id_source, "timer-rect"));
+     |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_rect_id`
+
+warning: value assigned to `final_insert_at` is never read
+    --> src\ui\mod.rs:5823:17
+     |
+5823 |         let mut final_insert_at = 0;
+     |                 ^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+     = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+For more information about this error, try `rustc --explain E0624`.
+warning: `MacroNest` (bin "MacroNest") generated 52 warnings
+error: could not compile `MacroNest` (bin "MacroNest") due to 1 previous error; 52 warnings emitted

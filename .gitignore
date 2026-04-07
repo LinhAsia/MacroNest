@@ -1,0 +1,12 @@
+/target
+/target_alt
+/target-devbuild
+/target-release-tmp
+*.exe
+*.pdb
+*.dll
+*.exp
+*.lib
+*.d
+.DS_Store
+Thumbs.db

@@ -1,0 +1,539 @@
+    Checking MacroNest v1.0.0 (D:\app\MacroNest)
+warning: unused import: `DWMWCP_ROUND`
+  --> src\platform.rs:16:65
+   |
+16 |                 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_ROUND,
+   |                                                                 ^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `audio_duration`
+ --> src\ui\sound_panel.rs:2:68
+  |
+2 | use crate::ui::{CrosshairApp, AudioCardOutcome, AudioEditorTarget, audio_duration};
+  |                                                                    ^^^^^^^^^^^^^^
+
+warning: use of deprecated type alias `eframe::egui::Rounding`: Renamed to CornerRadius
+    --> src\ui\mod.rs:4185:34
+     |
+4185 |             let rounding = egui::Rounding::same(6);
+     |                                  ^^^^^^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+    --> src\ui\macro_panel.rs:1942:43
+     |
+1942 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("group-tip"), |ui| {
+     |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+    --> src\ui\macro_panel.rs:2556:60
+     |
+2556 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("preset-tip"), |ui| {
+     |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+    --> src\ui\macro_panel.rs:3441:67
+     |
+3441 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("lockkeys-warning-tip"), |ui| {
+     |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+    --> src\ui\macro_panel.rs:3829:67
+     |
+3829 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("lockmouse-warning-tip"), |ui| {
+     |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+    --> src\ui\macro_panel.rs:4526:58
+     |
+4526 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), info_resp.id.with("delay-math-help-tip-header"), |ui| {
+     |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+    --> src\ui\macro_panel.rs:4899:59
+     |
+4899 | ...                   egui::show_tooltip_at_pointer(child_ui.ctx(), child_ui.layer_id(), response.id.with("step-tip"), |ui| {
+     |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+    --> src\ui\macro_panel.rs:5848:67
+     |
+5848 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("lockkeys-compact-warning-tip"), |ui| {
+     |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_at_pointer`: Use `egui::Tooltip` instead
+    --> src\ui\macro_panel.rs:6224:67
+     |
+6224 | ...                   egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("lockmouse-compact-warning-tip"), |ui| {
+     |                             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated function `eframe::egui::show_tooltip_text`: Use `egui::Tooltip` instead
+   --> src\ui\vision_panel.rs:546:47
+    |
+546 | ...                   egui::show_tooltip_text(
+    |                             ^^^^^^^^^^^^^^^^^
+
+warning: unreachable statement
+  --> src\ui\crosshair_panel.rs:10:9
+   |
+ 9 |         return;
+   |         ------ any code following this expression is unreachable
+10 |         ui.spacing_mut().slider_width = 260.0;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unreachable statement
+   |
+   = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: use of deprecated method `eframe::egui::Frame::rounding`: Renamed to `corner_radius`
+    --> src\ui\macro_panel.rs:1027:30
+     |
+1027 | ...                   .rounding(4.0)
+     |                        ^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Frame::rounding`: Renamed to `corner_radius`
+    --> src\ui\macro_panel.rs:1414:30
+     |
+1414 | ...                   .rounding(4.0)
+     |                        ^^^^^^^^
+
+warning: use of deprecated associated function `eframe::egui::Frame::none`: Use `Frame::NONE` or `Frame::new()` instead.
+    --> src\ui\macro_panel.rs:2600:58
+     |
+2600 | ...                   egui::Frame::none()
+     |                                    ^^^^
+
+warning: use of deprecated method `eframe::egui::Frame::rounding`: Renamed to `corner_radius`
+    --> src\ui\macro_panel.rs:2604:50
+     |
+2604 | ...                   .rounding(4.0)
+     |                        ^^^^^^^^
+
+error[E0599]: no method named `render_variable_suggestions` found for mutable reference `&mut CrosshairApp` in the current scope
+    --> src\ui\macro_panel.rs:3585:75
+     |
+3585 | ...                   self.render_variable_suggestions(ui, &mut step.key, language);
+     |                       -----^^^^^^^^^^^^^^^^^^^^^^^^^^^-----------------------------
+     |                       |    |
+     |                       |    this is an associated function, not a method
+     |                       help: use associated function syntax instead: `CrosshairApp::render_variable_suggestions(ui, &mut step.key, language)`
+     |
+     = note: found the following associated functions; to be used as methods, functions must have a `self` parameter
+note: the candidate is defined in an impl for the type `CrosshairApp`
+    --> src\ui\macro_panel.rs:7931:13
+     |
+7931 | /             fn render_variable_suggestions(
+7932 | |         ui: &mut egui::Ui,
+7933 | |         response: &egui::Response,
+7934 | |         text: &mut String,
+7935 | |         timer_names: &[String],
+7936 | |         _language: UiLanguage,
+7937 | |     ) {
+     | |_____^
+help: there is a method `render_variable_inspector` with a similar name, but with different arguments
+    --> src\ui\macro_panel.rs:7647:5
+     |
+7647 |     pub(crate) fn render_variable_inspector(&mut self, ui: &mut egui::Ui) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `render_variable_suggestions` found for mutable reference `&mut CrosshairApp` in the current scope
+    --> src\ui\macro_panel.rs:4017:78
+     |
+4017 | ...                   self.render_variable_suggestions(ui, &mut step.key, language);
+     |                       -----^^^^^^^^^^^^^^^^^^^^^^^^^^^-----------------------------
+     |                       |    |
+     |                       |    this is an associated function, not a method
+     |                       help: use associated function syntax instead: `CrosshairApp::render_variable_suggestions(ui, &mut step.key, language)`
+     |
+     = note: found the following associated functions; to be used as methods, functions must have a `self` parameter
+note: the candidate is defined in an impl for the type `CrosshairApp`
+    --> src\ui\macro_panel.rs:7931:13
+     |
+7931 | /             fn render_variable_suggestions(
+7932 | |         ui: &mut egui::Ui,
+7933 | |         response: &egui::Response,
+7934 | |         text: &mut String,
+7935 | |         timer_names: &[String],
+7936 | |         _language: UiLanguage,
+7937 | |     ) {
+     | |_____^
+help: there is a method `render_variable_inspector` with a similar name, but with different arguments
+    --> src\ui\macro_panel.rs:7647:5
+     |
+7647 |     pub(crate) fn render_variable_inspector(&mut self, ui: &mut egui::Ui) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `render_variable_suggestions_raw` found for mutable reference `&mut CrosshairApp` in the current scope
+    --> src\ui\macro_panel.rs:4166:70
+     |
+4166 | ...                   self.render_variable_suggestions_raw(ui, &mut step.if_variable_name, language);
+     |                       -----^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^------------------------------------------
+     |                       |    |
+     |                       |    this is an associated function, not a method
+     |                       help: use associated function syntax instead: `CrosshairApp::render_variable_suggestions_raw(ui, &mut step.if_variable_name, language)`
+     |
+     = note: found the following associated functions; to be used as methods, functions must have a `self` parameter
+note: the candidate is defined in an impl for the type `CrosshairApp`
+    --> src\ui\macro_panel.rs:8077:5
+     |
+8077 | /     fn render_variable_suggestions_raw(
+8078 | |         ui: &mut egui::Ui,
+8079 | |         response: &egui::Response,
+8080 | |         text: &mut String,
+8081 | |         timer_names: &[String],
+8082 | |         _language: UiLanguage,
+8083 | |     ) {
+     | |_____^
+help: there is a method `render_variable_inspector` with a similar name, but with different arguments
+    --> src\ui\macro_panel.rs:7647:5
+     |
+7647 |     pub(crate) fn render_variable_inspector(&mut self, ui: &mut egui::Ui) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `render_variable_suggestions` found for mutable reference `&mut CrosshairApp` in the current scope
+    --> src\ui\macro_panel.rs:4167:70
+     |
+4167 | ...                   self.render_variable_suggestions(ui, &mut step.key, language);
+     |                       -----^^^^^^^^^^^^^^^^^^^^^^^^^^^-----------------------------
+     |                       |    |
+     |                       |    this is an associated function, not a method
+     |                       help: use associated function syntax instead: `CrosshairApp::render_variable_suggestions(ui, &mut step.key, language)`
+     |
+     = note: found the following associated functions; to be used as methods, functions must have a `self` parameter
+note: the candidate is defined in an impl for the type `CrosshairApp`
+    --> src\ui\macro_panel.rs:7931:13
+     |
+7931 | /             fn render_variable_suggestions(
+7932 | |         ui: &mut egui::Ui,
+7933 | |         response: &egui::Response,
+7934 | |         text: &mut String,
+7935 | |         timer_names: &[String],
+7936 | |         _language: UiLanguage,
+7937 | |     ) {
+     | |_____^
+help: there is a method `render_variable_inspector` with a similar name, but with different arguments
+    --> src\ui\macro_panel.rs:7647:5
+     |
+7647 |     pub(crate) fn render_variable_inspector(&mut self, ui: &mut egui::Ui) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:4259:73
+     |
+4259 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:4271:73
+     |
+4271 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:4279:73
+     |
+4279 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:4290:69
+     |
+4290 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:4302:73
+     |
+4302 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:4313:69
+     |
+4313 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:4323:69
+     |
+4323 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+error[E0599]: no method named `render_variable_suggestions` found for mutable reference `&mut CrosshairApp` in the current scope
+    --> src\ui\macro_panel.rs:5984:75
+     |
+5984 | ...                   self.render_variable_suggestions(ui, &mut step.key, language);
+     |                       -----^^^^^^^^^^^^^^^^^^^^^^^^^^^-----------------------------
+     |                       |    |
+     |                       |    this is an associated function, not a method
+     |                       help: use associated function syntax instead: `CrosshairApp::render_variable_suggestions(ui, &mut step.key, language)`
+     |
+     = note: found the following associated functions; to be used as methods, functions must have a `self` parameter
+note: the candidate is defined in an impl for the type `CrosshairApp`
+    --> src\ui\macro_panel.rs:7931:13
+     |
+7931 | /             fn render_variable_suggestions(
+7932 | |         ui: &mut egui::Ui,
+7933 | |         response: &egui::Response,
+7934 | |         text: &mut String,
+7935 | |         timer_names: &[String],
+7936 | |         _language: UiLanguage,
+7937 | |     ) {
+     | |_____^
+help: there is a method `render_variable_inspector` with a similar name, but with different arguments
+    --> src\ui\macro_panel.rs:7647:5
+     |
+7647 |     pub(crate) fn render_variable_inspector(&mut self, ui: &mut egui::Ui) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `render_variable_suggestions` found for mutable reference `&mut CrosshairApp` in the current scope
+    --> src\ui\macro_panel.rs:6412:78
+     |
+6412 | ...                   self.render_variable_suggestions(ui, &mut step.key, language);
+     |                       -----^^^^^^^^^^^^^^^^^^^^^^^^^^^-----------------------------
+     |                       |    |
+     |                       |    this is an associated function, not a method
+     |                       help: use associated function syntax instead: `CrosshairApp::render_variable_suggestions(ui, &mut step.key, language)`
+     |
+     = note: found the following associated functions; to be used as methods, functions must have a `self` parameter
+note: the candidate is defined in an impl for the type `CrosshairApp`
+    --> src\ui\macro_panel.rs:7931:13
+     |
+7931 | /             fn render_variable_suggestions(
+7932 | |         ui: &mut egui::Ui,
+7933 | |         response: &egui::Response,
+7934 | |         text: &mut String,
+7935 | |         timer_names: &[String],
+7936 | |         _language: UiLanguage,
+7937 | |     ) {
+     | |_____^
+help: there is a method `render_variable_inspector` with a similar name, but with different arguments
+    --> src\ui\macro_panel.rs:7647:5
+     |
+7647 |     pub(crate) fn render_variable_inspector(&mut self, ui: &mut egui::Ui) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `render_variable_suggestions_raw` found for mutable reference `&mut CrosshairApp` in the current scope
+    --> src\ui\macro_panel.rs:6561:70
+     |
+6561 | ...                   self.render_variable_suggestions_raw(ui, &mut step.if_variable_name, language);
+     |                       -----^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^------------------------------------------
+     |                       |    |
+     |                       |    this is an associated function, not a method
+     |                       help: use associated function syntax instead: `CrosshairApp::render_variable_suggestions_raw(ui, &mut step.if_variable_name, language)`
+     |
+     = note: found the following associated functions; to be used as methods, functions must have a `self` parameter
+note: the candidate is defined in an impl for the type `CrosshairApp`
+    --> src\ui\macro_panel.rs:8077:5
+     |
+8077 | /     fn render_variable_suggestions_raw(
+8078 | |         ui: &mut egui::Ui,
+8079 | |         response: &egui::Response,
+8080 | |         text: &mut String,
+8081 | |         timer_names: &[String],
+8082 | |         _language: UiLanguage,
+8083 | |     ) {
+     | |_____^
+help: there is a method `render_variable_inspector` with a similar name, but with different arguments
+    --> src\ui\macro_panel.rs:7647:5
+     |
+7647 |     pub(crate) fn render_variable_inspector(&mut self, ui: &mut egui::Ui) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `render_variable_suggestions` found for mutable reference `&mut CrosshairApp` in the current scope
+    --> src\ui\macro_panel.rs:6562:70
+     |
+6562 | ...                   self.render_variable_suggestions(ui, &mut step.key, language);
+     |                       -----^^^^^^^^^^^^^^^^^^^^^^^^^^^-----------------------------
+     |                       |    |
+     |                       |    this is an associated function, not a method
+     |                       help: use associated function syntax instead: `CrosshairApp::render_variable_suggestions(ui, &mut step.key, language)`
+     |
+     = note: found the following associated functions; to be used as methods, functions must have a `self` parameter
+note: the candidate is defined in an impl for the type `CrosshairApp`
+    --> src\ui\macro_panel.rs:7931:13
+     |
+7931 | /             fn render_variable_suggestions(
+7932 | |         ui: &mut egui::Ui,
+7933 | |         response: &egui::Response,
+7934 | |         text: &mut String,
+7935 | |         timer_names: &[String],
+7936 | |         _language: UiLanguage,
+7937 | |     ) {
+     | |_____^
+help: there is a method `render_variable_inspector` with a similar name, but with different arguments
+    --> src\ui\macro_panel.rs:7647:5
+     |
+7647 |     pub(crate) fn render_variable_inspector(&mut self, ui: &mut egui::Ui) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:6805:72
+     |
+6805 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:6817:72
+     |
+6817 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:6825:72
+     |
+6825 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:6836:68
+     |
+6836 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:6848:72
+     |
+6848 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:6859:68
+     |
+6859 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Ui::close_menu`: Use `ui.close()` or `ui.close_kind(UiKind::Menu)` instead
+    --> src\ui\macro_panel.rs:6869:68
+     |
+6869 | ...                   ui.close_menu();
+     |                          ^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Context::screen_rect`: screen_rect has been split into viewport_rect() and content_rect(). You likely should use content_rect()
+    --> src\ui\macro_panel.rs:7563:32
+     |
+7563 |         ui.add_space((ui.ctx().screen_rect().height() - 250.0).max(0.0));
+     |                                ^^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Context::screen_rect`: screen_rect has been split into viewport_rect() and content_rect(). You likely should use content_rect()
+    --> src\ui\mod.rs:1366:13
+     |
+1366 |         ctx.screen_rect().shrink(18.0)
+     |             ^^^^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Context::screen_rect`: screen_rect has been split into viewport_rect() and content_rect(). You likely should use content_rect()
+    --> src\ui\mod.rs:8127:37
+     |
+8127 |             let screen_center = ctx.screen_rect().center();
+     |                                     ^^^^^^^^^^^
+
+warning: unused import: `TextBuffer`
+ --> src\ui\window_panel.rs:2:94
+  |
+2 | use eframe::egui::{self, Button, RichText, DragValue, Sense, TextEdit, Color32, vec2, Frame, TextBuffer, ColorImage, TextureOptions};
+  |                                                                                              ^^^^^^^^^^
+
+warning: unused import: `TextBuffer`
+ --> src\ui\mouse_panel.rs:2:110
+  |
+2 | use eframe::egui::{self, Button, RichText, Margin, Slider, DragValue, Sense, TextEdit, Color32, vec2, Frame, TextBuffer};
+  |                                                                                                              ^^^^^^^^^^
+
+warning: unused import: `TextBuffer`
+ --> src\ui\vision_panel.rs:4:106
+  |
+4 | use eframe::egui::{self, Button, Margin, Slider, DragValue, Sense, TextEdit, Color32, pos2, vec2, Frame, TextBuffer, ColorImage, TextureO...
+  |                                                                                                          ^^^^^^^^^^
+
+warning: unused import: `TextBuffer`
+ --> src\ui\hud_panel.rs:1:76
+  |
+1 | use eframe::egui::{self, RichText, Slider, Sense, TextEdit, Color32, vec2, TextBuffer};
+  |                                                                            ^^^^^^^^^^
+
+warning: unused variable: `area_res`
+    --> src\ui\macro_panel.rs:8045:13
+     |
+8045 |         let area_res = egui::Area::new(popup_id)
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_area_res`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src\ui\macro_panel.rs:8057:41
+     |
+8057 | ...                   let mut resp = ui.selectable_label(is_selected, sug);
+     |                           ----^^^^
+     |                           |
+     |                           help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `area_res`
+    --> src\ui\macro_panel.rs:8180:13
+     |
+8180 |         let area_res = egui::Area::new(popup_id)
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_area_res`
+
+warning: variable does not need to be mutable
+    --> src\ui\macro_panel.rs:8192:41
+     |
+8192 | ...                   let mut resp = ui.selectable_label(is_selected, sug);
+     |                           ----^^^^
+     |                           |
+     |                           help: remove this `mut`
+
+warning: unused variable: `capture_target_snapshot`
+  --> src\ui\vision_panel.rs:20:13
+   |
+20 |         let capture_target_snapshot = self.capture_target.clone();
+   |             ^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_capture_target_snapshot`
+
+warning: unused variable: `selected_steps_snapshot`
+  --> src\ui\vision_panel.rs:21:13
+   |
+21 |         let selected_steps_snapshot = self.selected_macro_steps.clone();
+   |             ^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_selected_steps_snapshot`
+
+warning: unused variable: `pending_custom_preset_save`
+  --> src\ui\vision_panel.rs:82:13
+   |
+82 |         let pending_custom_preset_save: Option<()> = None;
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_pending_custom_preset_save`
+
+warning: unused variable: `open_windows`
+   --> src\ui\vision_panel.rs:115:21
+    |
+115 |                 let open_windows = self.open_windows.clone();
+    |                     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_open_windows`
+
+warning: unused variable: `rect_id`
+   --> src\ui\hud_panel.rs:450:13
+    |
+450 |         let rect_id = ui.make_persistent_id((id_source, "toolbox-rect"));
+    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_rect_id`
+
+warning: unused variable: `open_windows`
+  --> src\ui\command_panel.rs:29:13
+   |
+29 |         let open_windows = self.open_windows.clone();
+   |             ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_open_windows`
+
+warning: unused variable: `rect_id`
+    --> src\ui\mod.rs:4419:13
+     |
+4419 |         let rect_id = ui.make_persistent_id((id_source, "timer-rect"));
+     |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_rect_id`
+
+warning: value assigned to `final_insert_at` is never read
+    --> src\ui\mod.rs:5823:17
+     |
+5823 |         let mut final_insert_at = 0;
+     |                 ^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+     = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `MacroNest` (bin "MacroNest") generated 50 warnings
+error: could not compile `MacroNest` (bin "MacroNest") due to 8 previous errors; 50 warnings emitted

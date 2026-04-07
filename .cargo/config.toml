@@ -1,0 +1,7 @@
+[env]
+LIBCLANG_PATH = "D:\\LLVM\\bin"
+OPENCV_CLANG_ARGS = "-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH"
+OPENCV_DISABLE_PROBES = "pkg_config,cmake,vcpkg,vcpkg_cmake"
+OPENCV_INCLUDE_PATHS = "D:\\deps\\opencv-4.10.0\\opencv\\build\\include"
+OPENCV_LINK_LIBS = "opencv_world4100"
+OPENCV_LINK_PATHS = "D:\\deps\\opencv-4.10.0\\opencv\\build\\x64\\vc16\\lib"
