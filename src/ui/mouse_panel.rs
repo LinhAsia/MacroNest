@@ -1640,8 +1640,7 @@ impl CrosshairApp {
                 // Directly and synchronously close the Arduino serial port and set flash flag.
                 // This is reliable because it directly acquires the mutex — no async channel delay.
                 crate::overlay::close_arduino_port_for_flash();
-                wait_for_serial_port_openable(&port, 115200, std::time::Duration::from_secs(5))
-                    .map_err(|error| anyhow::anyhow!("Could not release {port} before flashing: {error}"))?;
+                std::thread::sleep(std::time::Duration::from_millis(750));
 
                 // 1. Scan ports before touch
                 let ports_before = serialport::available_ports().unwrap_or_default();
