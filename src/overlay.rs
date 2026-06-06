@@ -12869,13 +12869,17 @@ mod windows_overlay {
 
     fn write_pitch_snapshot_vars(settings: &crate::model::PitchAudioSenseSettings, snapshot: &audiosense::PitchSnapshot) {
         if !settings.output_note_var.trim().is_empty() {
-            set_text_variable_value(&settings.output_note_var, &snapshot.note);
+            if snapshot.note != "--" && !snapshot.note.is_empty() {
+                set_text_variable_value(&settings.output_note_var, &snapshot.note);
+            }
         }
         if !settings.output_confidence_var.trim().is_empty() {
-            set_variable_value(
-                &settings.output_confidence_var,
-                clamp_f64_to_i32((snapshot.confidence * 1000.0) as f64),
-            );
+            if snapshot.note != "--" && !snapshot.note.is_empty() {
+                set_variable_value(
+                    &settings.output_confidence_var,
+                    clamp_f64_to_i32((snapshot.confidence * 1000.0) as f64),
+                );
+            }
         }
         if !settings.output_level_var.trim().is_empty() {
             set_variable_value(
