@@ -729,6 +729,7 @@ pub struct CrosshairApp {
     arduino_tools_downloaded: bool,
     arduino_flash_status: String,
     arduino_flash_running: bool,
+    arduino_restore_emulation_after_flash: bool,
     arduino_flash_result: Arc<parking_lot::Mutex<Option<Result<(), String>>>>,
     interception_installed: bool,
     copy_folder_feedback_until: Option<Instant>,
@@ -933,6 +934,7 @@ impl CrosshairApp {
             arduino_tools_downloaded: paths.avrdude_exe.exists() && paths.avrdude_conf.exists() && paths.arduino_firmware_hex.exists(),
             arduino_flash_status: String::new(),
             arduino_flash_running: false,
+            arduino_restore_emulation_after_flash: false,
             arduino_flash_result: Arc::new(parking_lot::Mutex::new(None)),
             interception_installed: false, // will update below
             copy_folder_feedback_until: None,

@@ -470,9 +470,18 @@ impl CrosshairApp {
         }
 
         if self.arduino_flash_running {
-            let mut res_guard = self.arduino_flash_result.lock();
-            if let Some(res) = res_guard.take() {
+            let flash_result = {
+                let mut res_guard = self.arduino_flash_result.lock();
+                res_guard.take()
+            };
+            if let Some(res) = flash_result {
                 self.arduino_flash_running = false;
+                self.refresh_arduino_ports();
+                if self.arduino_restore_emulation_after_flash {
+                    self.state.vision_settings.use_arduino_mouse = true;
+                    self.arduino_restore_emulation_after_flash = false;
+                    self.sync_vision_settings();
+                }
                 match res {
                     Ok(()) => {
                         self.arduino_flash_status = self.tr("Flash Success!", "Nạp thành công!").to_owned();
@@ -493,19 +502,22 @@ impl CrosshairApp {
         let arduino_panel_title = self.tr("Arduino Leonardo Emulation", "Giả lập phần cứng Arduino Leonardo");
 
         if self.arduino_available_ports.is_empty() {
-            if let Ok(ports) = serialport::available_ports() {
-                self.arduino_available_ports = ports.into_iter().map(|p| p.port_name).collect();
-            }
+            self.refresh_arduino_ports();
         }
 
-        let is_connected = !self.state.vision_settings.arduino_com_port.is_empty() 
+        let selected_port_exists = !self.state.vision_settings.arduino_com_port.is_empty()
             && self.arduino_available_ports.contains(&self.state.vision_settings.arduino_com_port);
+        let is_connected = selected_port_exists && self.state.vision_settings.use_arduino_mouse;
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.label(RichText::new(arduino_panel_title).strong());
             ui.add_space(8.0);
-            if is_connected {
+            if self.arduino_flash_running {
+                ui.label(RichText::new(self.tr("Flashing - port released", "Flashing - port released")).color(Color32::from_rgb(255, 206, 96)));
+            } else if selected_port_exists && !self.state.vision_settings.use_arduino_mouse {
+                ui.label(RichText::new(self.tr("Port selected - emulation off", "Port selected - emulation off")).color(Color32::from_rgb(255, 206, 96)));
+            } else if is_connected {
                 ui.label(RichText::new(self.tr("Connected", "Đang kết nối")).color(Color32::from_rgb(126, 224, 182)));
             } else {
                 ui.label(RichText::new(self.tr("Disconnected", "Chưa kết nối")).color(Color32::from_rgb(255, 96, 96)));
@@ -516,13 +528,13 @@ impl CrosshairApp {
         Self::show_preset_card(ui, self.state.vision_settings.use_arduino_mouse, |ui| {
             ui.horizontal(|ui| {
                 let mut checkbox_res = ui.add_enabled(
-                    is_connected,
+                    selected_port_exists,
                     egui::Checkbox::new(
                         &mut self.state.vision_settings.use_arduino_mouse,
                         label_arduino,
                     )
                 );
-                if !is_connected {
+                if !selected_port_exists {
                     checkbox_res = checkbox_res.on_hover_text(self.tr(
                         "Please plug in the Arduino board and select the correct COM port to enable emulation.",
                         "Vui lòng cắm mạch Arduino và chọn đúng cổng COM để kích hoạt giả lập."
@@ -534,9 +546,7 @@ impl CrosshairApp {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(refresh_txt).clicked() {
-                        if let Ok(ports) = serialport::available_ports() {
-                            self.arduino_available_ports = ports.into_iter().map(|p| p.port_name).collect();
-                        }
+                        self.refresh_arduino_ports();
                     }
 
                     let current_port = &mut self.state.vision_settings.arduino_com_port;
@@ -618,8 +628,8 @@ impl CrosshairApp {
             
             let spoof_panel_title = self.tr("Anti-Cheat Bypass & USB ID Spoofing", "Vượt Anti-Cheat & Giả lập ID cổng USB");
             ui.collapsing(spoof_panel_title, |ui| {
-                ui.set_enabled(is_connected);
-                if !is_connected {
+                ui.set_enabled(selected_port_exists);
+                if !selected_port_exists {
                     ui.colored_label(Color32::from_rgb(255, 96, 96), self.tr("Please plug in the Arduino and select COM port first.", "Vui lòng cắm mạch Arduino và chọn cổng COM trước."));
                     ui.add_space(4.0);
                 }
@@ -1548,6 +1558,29 @@ impl CrosshairApp {
         }
     }
 
+    fn refresh_arduino_ports(&mut self) {
+        let Ok(ports) = serialport::available_ports() else {
+            self.arduino_available_ports.clear();
+            return;
+        };
+        self.arduino_available_ports = ports.into_iter().map(|p| p.port_name).collect();
+        self.arduino_available_ports.sort();
+
+        let current_port = self.state.vision_settings.arduino_com_port.clone();
+        if current_port.is_empty() {
+            if self.arduino_available_ports.len() == 1 {
+                self.state.vision_settings.arduino_com_port = self.arduino_available_ports[0].clone();
+                self.sync_vision_settings();
+            }
+            return;
+        }
+
+        if !self.arduino_available_ports.contains(&current_port) && self.arduino_available_ports.len() == 1 {
+            self.state.vision_settings.arduino_com_port = self.arduino_available_ports[0].clone();
+            self.sync_vision_settings();
+        }
+    }
+
     pub(crate) fn start_arduino_tools_download(&mut self) {
         if self.arduino_download_job.is_some() {
             return;
@@ -1622,6 +1655,11 @@ impl CrosshairApp {
             return;
         }
 
+        self.arduino_restore_emulation_after_flash = self.state.vision_settings.use_arduino_mouse;
+        if self.state.vision_settings.use_arduino_mouse {
+            self.state.vision_settings.use_arduino_mouse = false;
+            self.sync_vision_settings();
+        }
         self.arduino_flash_running = true;
         self.arduino_flash_status = self.tr("Resetting board (1200 baud touch)...", "Đang khôi phục mạch (chạm 1200 baud)...").to_owned();
 
@@ -1650,10 +1688,15 @@ impl CrosshairApp {
                     .collect();
 
                 // 2. Perform 1200 baud touch to reset into bootloader mode
-                serialport::new(&port, 1200)
-                    .timeout(std::time::Duration::from_millis(500))
-                    .open()
-                    .map_err(|error| anyhow::anyhow!("Could not open {port} at 1200 baud to enter bootloader: {error}"))?;
+                touch_arduino_bootloader_port(
+                    &port,
+                    std::time::Duration::from_secs(8),
+                )
+                .map_err(|error| {
+                    anyhow::anyhow!(
+                        "Could not open {port} at 1200 baud to enter bootloader after releasing the app connection: {error}"
+                    )
+                })?;
 
                 // 3. Wait for bootloader COM port to re-appear
                 std::thread::sleep(std::time::Duration::from_millis(1500));
@@ -1843,6 +1886,34 @@ fn wait_for_serial_port_openable(
             Err(error) => {
                 last_error = Some(error.to_string());
                 std::thread::sleep(std::time::Duration::from_millis(150));
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "{}",
+        last_error.unwrap_or_else(|| "serial port was not available".to_owned())
+    )
+}
+
+fn touch_arduino_bootloader_port(
+    port: &str,
+    timeout: std::time::Duration,
+) -> anyhow::Result<()> {
+    let start = std::time::Instant::now();
+    let mut last_error = None;
+    while start.elapsed() < timeout {
+        match serialport::new(port, 1200)
+            .timeout(std::time::Duration::from_millis(500))
+            .open()
+        {
+            Ok(_) => {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                return Ok(());
+            }
+            Err(error) => {
+                last_error = Some(error.to_string());
+                std::thread::sleep(std::time::Duration::from_millis(250));
             }
         }
     }
