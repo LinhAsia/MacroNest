@@ -536,6 +536,24 @@ impl CrosshairApp {
             }
         });
 
+        let selected_port_text = if selected_port.is_empty() {
+            "none"
+        } else {
+            selected_port
+        };
+        let app_port_text = if arduino_open_port.is_empty() {
+            "none"
+        } else {
+            arduino_open_port.as_str()
+        };
+        ui.label(
+            RichText::new(format!(
+                "Selected: {selected_port_text} | App port: {app_port_text}"
+            ))
+            .small()
+            .weak(),
+        );
+
         let mut arduino_changed = false;
         Self::show_preset_card(ui, self.state.vision_settings.use_arduino_mouse, |ui| {
             ui.horizontal(|ui| {
