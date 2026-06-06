@@ -29,7 +29,7 @@ impl Default for PitchSnapshot {
     fn default() -> Self {
         Self {
             running: false,
-            note: "--".to_owned(),
+            note: "None".to_owned(),
             confidence: 0.0,
             level: 0.0,
             waveform: Vec::new(),
@@ -230,7 +230,7 @@ fn run_pitch_loop(
     let mut last_publish = Instant::now()
         .checked_sub(interval)
         .unwrap_or_else(Instant::now);
-    let mut last_note = "--".to_owned();
+    let mut last_note = "None".to_owned();
     let mut last_confidence = 0.0f32;
     let mut last_detected_at = Instant::now()
         .checked_sub(PITCH_HOLD_TIME)
@@ -287,12 +287,12 @@ fn run_pitch_loop(
                         last_detected_at = Instant::now();
                     }
                 } else if smoothed_level > 0.08
-                    && last_note != "--"
+                    && last_note != "None"
                     && last_detected_at.elapsed() <= PITCH_HOLD_TIME
                 {
                     last_confidence = (last_confidence * 0.92).clamp(0.0, 1.0);
                 } else {
-                    last_note = "--".to_owned();
+                    last_note = "None".to_owned();
                     last_confidence = 0.0;
                 }
 

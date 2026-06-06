@@ -12869,9 +12869,7 @@ mod windows_overlay {
 
     fn write_pitch_snapshot_vars(settings: &crate::model::PitchAudioSenseSettings, snapshot: &audiosense::PitchSnapshot) {
         if !settings.output_note_var.trim().is_empty() {
-            if snapshot.note != "--" && !snapshot.note.is_empty() {
-                set_text_variable_value(&settings.output_note_var, &snapshot.note);
-            }
+            set_text_variable_value(&settings.output_note_var, &snapshot.note);
         }
         if !settings.output_confidence_var.trim().is_empty() {
             set_variable_value(
