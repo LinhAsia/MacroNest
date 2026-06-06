@@ -1634,15 +1634,12 @@ impl CrosshairApp {
         *flash_result.lock() = None;
 
         let ui_lang = self.state.ui_language;
-        let overlay_tx = self.overlay_tx.clone();
 
         std::thread::spawn(move || {
             let run_flash = || -> anyhow::Result<()> {
-                // Tell the overlay thread to close any active serial port connection and pause reconnection attempts
-                let _ = overlay_tx.send(OverlayCommand::SetArduinoFlashInProgress(true));
-                // Give the overlay thread 300ms to receive and process the command (close the COM port)
-                // before we attempt the 1200-baud touch, which requires exclusive access to the port
-                std::thread::sleep(std::time::Duration::from_millis(300));
+                // Directly and synchronously close the Arduino serial port and set flash flag.
+                // This is reliable because it directly acquires the mutex — no async channel delay.
+                crate::overlay::close_arduino_port_for_flash();
                 
                 // 1. Scan ports before touch
                 let ports_before = serialport::available_ports().unwrap_or_default();
@@ -1757,8 +1754,8 @@ impl CrosshairApp {
             };
 
             let res = run_flash();
-            // Tell the overlay thread that flash is finished and background connection manager can resume
-            let _ = overlay_tx.send(OverlayCommand::SetArduinoFlashInProgress(false));
+            // Re-enable the background Arduino connection manager
+            crate::overlay::finish_arduino_flash();
             match res {
                 Ok(_) => {
                     *flash_result.lock() = Some(Ok(()));

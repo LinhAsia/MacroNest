@@ -537,6 +537,22 @@ mod windows_overlay {
         }
     }
 
+    /// Directly close the Arduino serial port and mark flash in progress.
+    /// Called from the flash thread to guarantee the port is released
+    /// before avrdude attempts to claim it, without relying on async channel timing.
+    pub fn close_arduino_port_for_flash() {
+        HOOK_STATE.lock().arduino_flash_in_progress = true;
+        let mut port_guard = ARDUINO_PORT.lock();
+        let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
+        *port_guard = None;
+        *name_guard = String::new();
+    }
+
+    /// Re-enable background Arduino connection after flash is complete.
+    pub fn finish_arduino_flash() {
+        HOOK_STATE.lock().arduino_flash_in_progress = false;
+    }
+
     pub fn set_ui_context(ctx: egui::Context) {
         *UI_CONTEXT.lock() = Some(ctx);
     }
