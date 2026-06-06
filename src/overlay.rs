@@ -190,6 +190,11 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static MACRO_RECORDING: Lazy<Mutex<Option<MacroRecordingSession>>> =
         Lazy::new(|| Mutex::new(None));
+    static ARDUINO_PORT: Lazy<Mutex<Option<Box<dyn serialport::SerialPort>>>> =
+        Lazy::new(|| Mutex::new(None));
+    static CURRENT_ARDUINO_PORT_NAME: Lazy<Mutex<String>> =
+        Lazy::new(|| Mutex::new(String::new()));
+
     pub(crate) static HOOK_STATE: Lazy<Mutex<HookState>> =
         Lazy::new(|| Mutex::new(HookState::default()));
     static ACTIVE_VIDEO_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> = Lazy::new(|| Mutex::new(None));
@@ -592,6 +597,8 @@ mod windows_overlay {
         opencv_dll_path: PathBuf,
         interception_dll_path: PathBuf,
         use_interception: bool,
+        use_arduino_mouse: bool,
+        arduino_com_port: String,
         interception_runtime_status: InterceptionRuntimeStatus,
         mouse_sensitivity_restore_on_exit: bool,
         mouse_sensitivity_exit_restore_speed: u32,
@@ -672,6 +679,8 @@ mod windows_overlay {
                 opencv_dll_path: PathBuf::new(),
                 interception_dll_path: PathBuf::new(),
                 use_interception: false,
+                use_arduino_mouse: false,
+                arduino_com_port: String::new(),
                 interception_runtime_status: InterceptionRuntimeStatus::Unavailable,
                 mouse_sensitivity_restore_on_exit: false,
                 mouse_sensitivity_exit_restore_speed: 6,
@@ -4015,6 +4024,8 @@ mod windows_overlay {
                 OverlayCommand::UpdateVisionSettings(settings) => {
                     let mut hook_state = HOOK_STATE.lock();
                     hook_state.use_interception = settings.use_interception;
+                    hook_state.use_arduino_mouse = settings.use_arduino_mouse;
+                    hook_state.arduino_com_port = settings.arduino_com_port.clone();
                 }
 
                 OverlayCommand::SetTrayIconVisible(visible) => {
@@ -10293,7 +10304,94 @@ mod windows_overlay {
         Ok(())
     }
 
+    fn write_arduino_data(bytes: &[u8]) -> Result<()> {
+        use std::io::Write;
+        let (use_arduino, com_port) = {
+            let state = HOOK_STATE.lock();
+            (state.use_arduino_mouse, state.arduino_com_port.clone())
+        };
+        if !use_arduino || com_port.is_empty() {
+            return Ok(());
+        }
+
+        let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
+        let mut port_guard = ARDUINO_PORT.lock();
+        if *name_guard != com_port || port_guard.is_none() {
+            *port_guard = None;
+            match serialport::new(&com_port, 115200)
+                .timeout(Duration::from_millis(10))
+                .open()
+            {
+                Ok(p) => {
+                    *port_guard = Some(p);
+                    *name_guard = com_port.clone();
+                }
+                Err(e) => {
+                    bail!("Failed to open serial port {}: {}", com_port, e);
+                }
+            }
+        }
+
+        if let Some(ref mut port) = *port_guard {
+            if let Err(e) = port.write_all(bytes) {
+                *port_guard = None;
+                bail!("Failed to write to serial port: {}", e);
+            }
+            let _ = port.flush();
+        }
+
+        Ok(())
+    }
+
     fn send_mouse_input(dw_flags: MOUSE_EVENT_FLAGS, mouse_data: u32) -> Result<()> {
+        let (use_arduino, com_port) = {
+            let state = HOOK_STATE.lock();
+            (state.use_arduino_mouse, state.arduino_com_port.clone())
+        };
+        if use_arduino && !com_port.is_empty() {
+            let mut sent_packet = false;
+            let mut send_btn = |btn: u8, state: u8| -> Result<()> {
+                let packet = [0xAA, 2, btn, state, 0, 0];
+                write_arduino_data(&packet)?;
+                Ok(())
+            };
+
+            if dw_flags.contains(MOUSEEVENTF_LEFTDOWN) {
+                send_btn(1, 1)?;
+                sent_packet = true;
+            }
+            if dw_flags.contains(MOUSEEVENTF_LEFTUP) {
+                send_btn(1, 0)?;
+                sent_packet = true;
+            }
+            if dw_flags.contains(MOUSEEVENTF_RIGHTDOWN) {
+                send_btn(2, 1)?;
+                sent_packet = true;
+            }
+            if dw_flags.contains(MOUSEEVENTF_RIGHTUP) {
+                send_btn(2, 0)?;
+                sent_packet = true;
+            }
+            if dw_flags.contains(MOUSEEVENTF_MIDDLEDOWN) {
+                send_btn(3, 1)?;
+                sent_packet = true;
+            }
+            if dw_flags.contains(MOUSEEVENTF_MIDDLEUP) {
+                send_btn(3, 0)?;
+                sent_packet = true;
+            }
+            if dw_flags.contains(MOUSEEVENTF_WHEEL) {
+                let val = (mouse_data as i32) / 120;
+                let val_byte = (val.clamp(-127, 127) as i8) as u8;
+                let packet = [0xAA, 3, val_byte, 0, 0, 0];
+                write_arduino_data(&packet)?;
+                sent_packet = true;
+            }
+
+            if sent_packet {
+                return Ok(());
+            }
+        }
         let suppressed_mouse_name =
             if dw_flags == MOUSEEVENTF_LEFTDOWN || dw_flags == MOUSEEVENTF_LEFTUP {
                 Some("MouseLeft")
@@ -10543,6 +10641,29 @@ mod windows_overlay {
     }
 
     fn send_mouse_move_absolute(x: i32, y: i32) -> Result<()> {
+        let (use_arduino, com_port) = {
+            let state = HOOK_STATE.lock();
+            (state.use_arduino_mouse, state.arduino_com_port.clone())
+        };
+        if use_arduino && !com_port.is_empty() {
+            let mut pos = POINT { x: 0, y: 0 };
+            unsafe {
+                let _ = GetCursorPos(&mut pos);
+            }
+            let dx = x - pos.x;
+            let dy = y - pos.y;
+            let packet = [
+                0xAA,
+                1,
+                ((dx >> 8) & 0xFF) as u8,
+                (dx & 0xFF) as u8,
+                ((dy >> 8) & 0xFF) as u8,
+                (dy & 0xFF) as u8,
+            ];
+            let _ = write_arduino_data(&packet);
+            return Ok(());
+        }
+
         let use_interception = {
             let state = HOOK_STATE.lock();
             state.use_interception
@@ -10706,6 +10827,23 @@ mod windows_overlay {
     }
 
     fn send_mouse_move_relative(dx: i32, dy: i32) -> Result<()> {
+        let (use_arduino, com_port) = {
+            let state = HOOK_STATE.lock();
+            (state.use_arduino_mouse, state.arduino_com_port.clone())
+        };
+        if use_arduino && !com_port.is_empty() {
+            let packet = [
+                0xAA,
+                1,
+                ((dx >> 8) & 0xFF) as u8,
+                (dx & 0xFF) as u8,
+                ((dy >> 8) & 0xFF) as u8,
+                (dy & 0xFF) as u8,
+            ];
+            let _ = write_arduino_data(&packet);
+            return Ok(());
+        }
+
         let use_interception = {
             let state = HOOK_STATE.lock();
             state.use_interception

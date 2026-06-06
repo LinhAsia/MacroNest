@@ -2010,6 +2010,8 @@ pub struct VisionSettings {
     pub trigger_hotkey: Option<HotkeyBinding>,
     pub click_after_move: bool,
     pub use_interception: bool,
+    pub use_arduino_mouse: bool,
+    pub arduino_com_port: String,
 }
 
 impl Default for VisionSettings {
@@ -2019,6 +2021,8 @@ impl Default for VisionSettings {
             trigger_hotkey: None,
             click_after_move: false,
             use_interception: false,
+            use_arduino_mouse: false,
+            arduino_com_port: String::new(),
         }
     }
 }

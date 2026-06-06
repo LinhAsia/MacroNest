@@ -447,6 +447,172 @@ impl CrosshairApp {
         if live_sync {
             self.persist_mouse_path_presets();
         }
+
+        let label_arduino = self.tr("Use Arduino Leonardo Mouse Emulation", "Sử dụng giả lập chuột Arduino Leonardo");
+        let refresh_txt = self.tr("🔄 Refresh Ports", "🔄 Tải lại danh sách cổng");
+        let select_port_txt = self.tr("Select Port", "Chọn cổng");
+        let com_port_lbl = self.tr("COM Port:", "Cổng COM:");
+        let guide_txt = self.tr("Setup Guide & Arduino Firmware", "Hướng dẫn cài đặt & Firmware Arduino");
+        let setup_guide_1 = self.tr(
+            "To prevent detection by anti-cheats, you should spoof the Vendor ID (VID) and Product ID (PID) of your Arduino Leonardo board at the firmware level:",
+            "Để tránh bị các ứng dụng/game phát hiện, bạn nên giả lập (spoof) Vendor ID (VID) và Product ID (PID) của bo mạch Arduino Leonardo ở cấp độ firmware:"
+        );
+        let setup_guide_2 = self.tr(
+            "1. Open boards.txt in the Arduino hardware packages folder:\n   C:\\Users\\<YourUser>\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\<version>\\boards.txt",
+            "1. Mở tệp boards.txt trong thư mục cài đặt phần cứng Arduino:\n   C:\\Users\\<TênUser>\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\<version>\\boards.txt"
+        );
+        let setup_guide_3 = self.tr(
+            "2. Search for the 'leonardo.build.vid' and 'leonardo.build.pid' variables, and change them to values of a standard commercial mouse (e.g., Logitech VID: 0x046D, PID: 0xC077).",
+            "2. Tìm các biến 'leonardo.build.vid' và 'leonardo.build.pid', rồi thay đổi giá trị của chúng thành mã của một chuột thương mại tiêu chuẩn (ví dụ, Logitech VID: 0x046D, PID: 0xC077)."
+        );
+        let setup_guide_4 = self.tr(
+            "3. Change string descriptors 'leonardo.build.usb_product' and 'leonardo.build.usb_manufacturer' to match standard mouse identifiers.",
+            "3. Đổi tên nhận diện chuỗi 'leonardo.build.usb_product' và 'leonardo.build.usb_manufacturer' sang chuột thông thường."
+        );
+        let upload_sketch_lbl = self.tr(
+            "Upload the following sketch to your Arduino Leonardo via Arduino IDE:",
+            "Nạp chương trình (sketch) sau vào Arduino Leonardo bằng Arduino IDE:"
+        );
+        let copy_code_lbl = self.tr("📋 Copy Code", "📋 Sao chép mã");
+        let copy_feedback_lbl = self.tr("Sketch code copied to clipboard!", "Đã sao chép mã nguồn sketch vào clipboard!");
+        let arduino_panel_title = self.tr("Arduino Leonardo Emulation", "Giả lập phần cứng Arduino Leonardo");
+
+        if self.arduino_available_ports.is_empty() {
+            if let Ok(ports) = serialport::available_ports() {
+                self.arduino_available_ports = ports.into_iter().map(|p| p.port_name).collect();
+            }
+        }
+
+        ui.add_space(8.0);
+        ui.label(RichText::new(arduino_panel_title).strong());
+
+        let mut arduino_changed = false;
+        Self::show_preset_card(ui, self.state.vision_settings.use_arduino_mouse, |ui| {
+            ui.horizontal(|ui| {
+                let checkbox_res = ui.checkbox(
+                    &mut self.state.vision_settings.use_arduino_mouse,
+                    label_arduino,
+                );
+                if checkbox_res.changed() {
+                    arduino_changed = true;
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(refresh_txt).clicked() {
+                        if let Ok(ports) = serialport::available_ports() {
+                            self.arduino_available_ports = ports.into_iter().map(|p| p.port_name).collect();
+                        }
+                    }
+
+                    let current_port = &mut self.state.vision_settings.arduino_com_port;
+                    egui::ComboBox::from_id_salt("arduino_com_port_combo")
+                        .width(120.0)
+                        .selected_text(if current_port.is_empty() {
+                            select_port_txt
+                        } else {
+                            current_port.as_str()
+                        })
+                        .show_ui(ui, |ui| {
+                            for port in &self.arduino_available_ports {
+                                let res = ui.selectable_value(current_port, port.clone(), port);
+                                if res.changed() {
+                                    arduino_changed = true;
+                                }
+                            }
+                        });
+
+                    ui.label(com_port_lbl);
+                });
+            });
+
+            ui.add_space(6.0);
+            
+            ui.collapsing(guide_txt, |ui| {
+                ui.label(setup_guide_1);
+                
+                ui.add_space(4.0);
+                ui.label(RichText::new(setup_guide_2).small().weak());
+                ui.label(RichText::new(setup_guide_3).small().weak());
+                ui.label(RichText::new(setup_guide_4).small().weak());
+
+                ui.add_space(6.0);
+                ui.label(RichText::new(upload_sketch_lbl).strong());
+                
+                let sketch_code = r#"#include <Mouse.h>
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial) { ; }
+  Mouse.begin();
+}
+
+void loop() {
+  if (Serial.available() >= 6) {
+    if (Serial.read() == 0xAA) {
+      int cmd = Serial.read();
+      if (cmd == 1) { // Move Relative
+        int dx_high = Serial.read();
+        int dx_low = Serial.read();
+        int dy_high = Serial.read();
+        int dy_low = Serial.read();
+        int16_t dx = (int16_t)((dx_high << 8) | dx_low);
+        int16_t dy = (int16_t)((dy_high << 8) | dy_low);
+        
+        while (dx != 0 || dy != 0) {
+          int moveX = constrain(dx, -127, 127);
+          int moveY = constrain(dy, -127, 127);
+          Mouse.move(moveX, moveY, 0);
+          dx -= moveX;
+          dy -= moveY;
+        }
+      }
+      else if (cmd == 2) { // Button Press/Release
+        int btn = Serial.read();
+        int state = Serial.read();
+        Serial.read(); Serial.read(); // Unused
+        char mouseBtn = MOUSE_LEFT;
+        if (btn == 2) mouseBtn = MOUSE_RIGHT;
+        else if (btn == 3) mouseBtn = MOUSE_MIDDLE;
+        
+        if (state == 1) Mouse.press(mouseBtn);
+        else Mouse.release(mouseBtn);
+      }
+      else if (cmd == 3) { // Wheel Scroll
+        int val = Serial.read();
+        if (val & 0x80) val |= 0xFFFFFF00;
+        Serial.read(); Serial.read(); Serial.read(); // Unused
+        Mouse.move(0, 0, val);
+      }
+    }
+  }
+}"#;
+
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.button(copy_code_lbl).clicked() {
+                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                            let _ = clipboard.set_text(sketch_code.to_string());
+                            self.status = copy_feedback_lbl.to_owned();
+                        }
+                    }
+                });
+                
+                ui.add_space(4.0);
+                let mut code_box = sketch_code;
+                ui.add(
+                    egui::TextEdit::multiline(&mut code_box)
+                        .font(egui::FontId::monospace(12.0))
+                        .desired_rows(15)
+                        .lock_focus(true)
+                        .interactive(false)
+                );
+            });
+        });
+
+        if arduino_changed {
+            self.sync_vision_settings();
+            self.persist();
+        }
     }
 
     pub(crate) fn render_mouse_path_preview(
