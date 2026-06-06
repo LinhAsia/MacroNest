@@ -20288,9 +20288,8 @@ impl CrosshairApp {
                     let current_preview_target = (group_id, macro_preset_id, step_index, is_hold_stop);
                     let mut geometry_preview_dirty = false;
                     ui.horizontal(|ui| {
-                        ui.label(Self::tr_lang(language, "Shape", "Hình dạng"));
                         ComboBox::from_id_salt((id_prefix, "geometry-shape"))
-                            .width(130.0)
+                            .width(90.0)
                             .selected_text(Self::geometry_shape_label(step.geometry_spec.shape, language))
                             .show_ui(ui, |ui| {
                                 for shape in Self::geometry_shapes() {
