@@ -536,7 +536,8 @@ pub struct AudioSenseMonitorSettings {
     pub input_device_name: Option<String>,
     #[serde(default = "default_audio_sense_updates_per_second")]
     pub updates_per_second: u32,
-    pub listen_forever: bool,
+    #[serde(default, alias = "listen_forever")]
+    pub permanent: bool,
     #[serde(default = "default_audio_sense_duration_ms")]
     pub duration_ms: u64,
 }
@@ -547,7 +548,7 @@ impl Default for AudioSenseMonitorSettings {
             source: AudioSenseSource::System,
             input_device_name: None,
             updates_per_second: default_audio_sense_updates_per_second(),
-            listen_forever: false,
+            permanent: false,
             duration_ms: default_audio_sense_duration_ms(),
         }
     }

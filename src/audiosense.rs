@@ -202,7 +202,7 @@ fn publish_interval(updates_per_second: u32) -> Duration {
 
 #[cfg(windows)]
 fn max_duration(settings: &AudioSenseMonitorSettings) -> Option<Duration> {
-    if settings.listen_forever {
+    if settings.permanent {
         None
     } else {
         Some(Duration::from_millis(settings.duration_ms.max(100)))

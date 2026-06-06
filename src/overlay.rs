@@ -16164,6 +16164,43 @@ mod windows_overlay {
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
+    pub(crate) fn is_audio_sense_active(
+        preset_id: Option<u32>,
+        macro_preset_id: u32,
+        step_index: usize,
+        is_hold_stop: bool,
+    ) -> bool {
+        let key = if let Some(pid) = preset_id {
+            audio_sense_monitor_key_for_preset(pid)
+        } else {
+            custom_audio_sense_monitor_key(macro_preset_id, step_index, is_hold_stop)
+        };
+        audio_sense_is_active(&key)
+    }
+
+    pub(crate) fn start_audio_sense_preview(
+        step: &MacroStep,
+        macro_preset_id: u32,
+        step_index: usize,
+        is_hold_stop: bool,
+    ) {
+        start_audio_sense_from_step(step, macro_preset_id, step_index, is_hold_stop, false);
+    }
+
+    pub(crate) fn stop_audio_sense(
+        preset_id: Option<u32>,
+        macro_preset_id: u32,
+        step_index: usize,
+        is_hold_stop: bool,
+    ) {
+        let key = if let Some(pid) = preset_id {
+            audio_sense_monitor_key_for_preset(pid)
+        } else {
+            custom_audio_sense_monitor_key(macro_preset_id, step_index, is_hold_stop)
+        };
+        set_audio_sense_active(&key, false);
+    }
+
     pub(crate) fn is_crosshair_active(profile_name: &str) -> bool {
         let name = profile_name.trim();
         if name.is_empty() {
@@ -16300,6 +16337,29 @@ mod fallback {
     }
 
     pub(crate) fn stop_geometry(_preset_id: u32, _step_index: usize) {}
+
+    pub(crate) fn is_audio_sense_active(
+        _preset_id: Option<u32>,
+        _macro_preset_id: u32,
+        _step_index: usize,
+        _is_hold_stop: bool,
+    ) -> bool {
+        false
+    }
+
+    pub(crate) fn start_audio_sense_preview(
+        _step: &MacroStep,
+        _macro_preset_id: u32,
+        _step_index: usize,
+        _is_hold_stop: bool,
+    ) {}
+
+    pub(crate) fn stop_audio_sense(
+        _preset_id: Option<u32>,
+        _macro_preset_id: u32,
+        _step_index: usize,
+        _is_hold_stop: bool,
+    ) {}
 
     pub(crate) fn is_crosshair_active(_profile_name: &str) -> bool {
         false

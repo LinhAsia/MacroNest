@@ -5362,6 +5362,9 @@ impl CrosshairApp {
                                                     if step.action == MacroAction::DrawGeometry {
                                                         step.geometry_collapsed = true;
                                                     }
+                                                    if step.action == MacroAction::StartAudioSensePreset {
+                                                        step.audio_sense_collapsed = true;
+                                                    }
                                                 }
                                             }
                                             if let Some((preview_group_id, _, _, _)) = self.draw_geometry_step_preview_target {
@@ -6634,6 +6637,9 @@ impl CrosshairApp {
                                                     for step in &mut preset.steps {
                                                         if step.action == MacroAction::DrawGeometry {
                                                             step.geometry_collapsed = true;
+                                                        }
+                                                        if step.action == MacroAction::StartAudioSensePreset {
+                                                            step.audio_sense_collapsed = true;
                                                         }
                                                     }
                                                     if let Some((_, preview_preset_id, _, _)) = self.draw_geometry_step_preview_target {
@@ -10585,6 +10591,10 @@ impl CrosshairApp {
                                                         ui,
                                                         language,
                                                         (group.id, preset.id, "hold-stop-audiosense-step"),
+                                                        group.id,
+                                                        preset.id,
+                                                        0,
+                                                        true,
                                                         &audio_sense_preset_options,
                                                         &mut self.state.audio_sense_presets,
                                                         &self.audio_sense_devices,
@@ -16794,6 +16804,10 @@ impl CrosshairApp {
                                                         ui,
                                                         language,
                                                         (group.id, preset.id, step_index, "normal-audiosense-step"),
+                                                        group.id,
+                                                        preset.id,
+                                                        step_index,
+                                                        false,
                                                         &audio_sense_preset_options,
                                                         &mut self.state.audio_sense_presets,
                                                         &self.audio_sense_devices,
@@ -20575,22 +20589,6 @@ impl CrosshairApp {
                         .speed(0.2),
                 )
                 .changed();
-            *live_sync |= ui
-                .checkbox(
-                    &mut settings.listen_forever,
-                    Self::tr_lang(language, "Forever", "Vinh vien"),
-                )
-                .changed();
-            if !settings.listen_forever {
-                ui.label("ms");
-                *live_sync |= ui
-                    .add(
-                        DragValue::new(&mut settings.duration_ms)
-                            .range(100..=60_000)
-                            .speed(10.0),
-                    )
-                    .changed();
-            }
         });
     }
 
@@ -20691,6 +20689,10 @@ impl CrosshairApp {
         ui: &mut egui::Ui,
         language: UiLanguage,
         id_prefix: impl std::hash::Hash + Copy,
+        group_id: u32,
+        macro_preset_id: u32,
+        step_index: usize,
+        is_hold_stop: bool,
         preset_options: &[(u32, String)],
         audio_sense_presets: &mut Vec<AudioSensePreset>,
         audio_sense_devices: &[String],
@@ -20795,21 +20797,93 @@ impl CrosshairApp {
                                         step.audio_sense_spec.kind = AudioSensePresetKind::Pitch;
                                         *live_sync = true;
                                     }
+
+                                    ui.add_space(6.0);
+                                    *live_sync |= ui
+                                        .checkbox(
+                                            &mut step.audio_sense_spec.pitch.monitor.permanent,
+                                            Self::tr_lang(language, "Permanent", "Vĩnh viễn"),
+                                        )
+                                        .changed();
+
+                                    if !step.audio_sense_spec.pitch.monitor.permanent {
+                                        ui.add_space(2.0);
+                                        ui.label("ms");
+                                        *live_sync |= ui
+                                            .add(
+                                                DragValue::new(&mut step.audio_sense_spec.pitch.monitor.duration_ms)
+                                                    .range(100..=60_000)
+                                                    .speed(10.0),
+                                            )
+                                            .changed();
+                                    }
+
+                                    ui.add_space(6.0);
+                                    let collapse_icon = if step.audio_sense_collapsed { 0xe5cc } else { 0xe5cf };
+                                    let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
+                                    if ui
+                                        .add_sized([18.0, 18.0], collapse_btn)
+                                        .on_hover_text(if step.audio_sense_collapsed { "Expand" } else { "Collapse" })
+                                        .clicked()
+                                    {
+                                        step.audio_sense_collapsed = !step.audio_sense_collapsed;
+                                        *live_sync = true;
+                                    }
+
+                                    ui.add_space(2.0);
+                                    let is_active = crate::overlay::is_audio_sense_active(
+                                        step.audio_sense_preset_id,
+                                        macro_preset_id,
+                                        step_index,
+                                        is_hold_stop,
+                                    );
+                                    let icon = if is_active { 0xe8f5 } else { 0xe8f4 };
+                                    let preview_btn = Button::new(Self::material_icon_text(icon, 12.0));
+                                    let preview_response = ui.add_sized([18.0, 18.0], preview_btn);
+                                    let tooltip = if is_active {
+                                        Self::tr_lang(language, "Stop preview", "Dừng xem trước")
+                                    } else {
+                                        Self::tr_lang(language, "Preview sound capture", "Xem trước âm thanh")
+                                    };
+                                    if preview_response.hovered() {
+                                        egui::show_tooltip_text(ui.ctx(), ui.layer_id(), preview_response.id, tooltip);
+                                    }
+                                    if preview_response.clicked() {
+                                        if is_active {
+                                            crate::overlay::stop_audio_sense(
+                                                step.audio_sense_preset_id,
+                                                macro_preset_id,
+                                                step_index,
+                                                is_hold_stop,
+                                            );
+                                        } else {
+                                            crate::overlay::start_audio_sense_preview(
+                                                step,
+                                                macro_preset_id,
+                                                step_index,
+                                                is_hold_stop,
+                                            );
+                                        }
+                                        *live_sync = true;
+                                    }
                                 }
                             }
                         });
                         match start_mode {
-                            1 => Self::render_audio_sense_pitch_custom_step(
-                                ui,
-                                language,
-                                id_prefix,
-                                audio_sense_devices,
-                                timer_names,
-                                step,
-                                live_sync,
-                                audio_sense_presets,
-                                audio_sense_presets_changed,
-                            ),
+                            1 if !step.audio_sense_collapsed => {
+                                ui.add_space(4.0);
+                                Self::render_audio_sense_pitch_custom_step(
+                                    ui,
+                                    language,
+                                    id_prefix,
+                                    audio_sense_devices,
+                                    timer_names,
+                                    step,
+                                    live_sync,
+                                    audio_sense_presets,
+                                    audio_sense_presets_changed,
+                                );
+                            }
                             _ => {}
                         }
                     });

@@ -331,11 +331,11 @@ impl CrosshairApp {
                                 .changed();
                             changed |= ui
                                 .checkbox(
-                                    &mut preset.pitch.monitor.listen_forever,
-                                    Self::tr_lang(language, "Listen forever", "Nghe vinh vien"),
+                                    &mut preset.pitch.monitor.permanent,
+                                    Self::tr_lang(language, "Permanent", "Vĩnh viễn"),
                                 )
                                 .changed();
-                            if !preset.pitch.monitor.listen_forever {
+                            if !preset.pitch.monitor.permanent {
                                 ui.label("ms");
                                 changed |= ui
                                     .add(
@@ -393,7 +393,7 @@ impl CrosshairApp {
         settings: &crate::model::AudioSenseMonitorSettings,
     ) -> crate::model::AudioSenseMonitorSettings {
         let mut monitor = settings.clone();
-        monitor.listen_forever = true;
+        monitor.permanent = true;
         monitor.updates_per_second = monitor.updates_per_second.max(60);
         monitor
     }
