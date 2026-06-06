@@ -609,6 +609,11 @@ impl CrosshairApp {
             
             let spoof_panel_title = self.tr("Anti-Cheat Bypass & USB ID Spoofing", "Vượt Anti-Cheat & Giả lập ID cổng USB");
             ui.collapsing(spoof_panel_title, |ui| {
+                ui.set_enabled(is_connected);
+                if !is_connected {
+                    ui.colored_label(Color32::from_rgb(255, 96, 96), self.tr("Please plug in the Arduino and select COM port first.", "Vui lòng cắm mạch Arduino và chọn cổng COM trước."));
+                    ui.add_space(4.0);
+                }
                 ui.add_space(4.0);
                 
                 let warning_text = self.tr(
