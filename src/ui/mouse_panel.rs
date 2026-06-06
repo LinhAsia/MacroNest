@@ -1640,6 +1640,9 @@ impl CrosshairApp {
             let run_flash = || -> anyhow::Result<()> {
                 // Tell the overlay thread to close any active serial port connection and pause reconnection attempts
                 let _ = overlay_tx.send(OverlayCommand::SetArduinoFlashInProgress(true));
+                // Give the overlay thread 300ms to receive and process the command (close the COM port)
+                // before we attempt the 1200-baud touch, which requires exclusive access to the port
+                std::thread::sleep(std::time::Duration::from_millis(300));
                 
                 // 1. Scan ports before touch
                 let ports_before = serialport::available_ports().unwrap_or_default();
