@@ -11,7 +11,7 @@ mod windows_platform {
             Graphics::Dwm::{
                 DWMNCRP_DISABLED, DWMNCRP_ENABLED, DWMWA_NCRENDERING_POLICY,
                 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND, DWMWCP_ROUND,
-                DwmSetWindowAttribute,
+                DwmSetWindowAttribute, DwmExtendFrameIntoClientArea,
             },
             System::Threading::{
                 CreateMutexW, GetCurrentProcess, HIGH_PRIORITY_CLASS, SetPriorityClass,
@@ -21,6 +21,7 @@ mod windows_platform {
                 Memory::{GHND, GlobalAlloc, GlobalLock, GlobalUnlock},
             },
             UI::{
+                Controls::MARGINS,
                 Shell::{
                     DROPFILES, IsUserAnAdmin, SetCurrentProcessExplicitAppUserModelID,
                     ShellExecuteW,
@@ -215,6 +216,14 @@ mod windows_platform {
                 &corner as *const _ as *const _,
                 std::mem::size_of_val(&corner) as u32,
             );
+
+            let margins = MARGINS {
+                cxLeftWidth: -1,
+                cxRightWidth: -1,
+                cyTopHeight: -1,
+                cyBottomHeight: -1,
+            };
+            let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
         }
         true
     }
