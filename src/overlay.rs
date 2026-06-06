@@ -397,6 +397,7 @@ mod windows_overlay {
         StopVideoPlayback,
         SetMacrosMasterEnabled(bool),
         UpdateVisionSettings(VisionSettings),
+        SetArduinoFlashInProgress(bool),
         SetVietnameseInputEnabled(bool),
         UpdateMacrosMasterHotkey(Option<HotkeyBinding>),
         RefreshPinOverlay,
@@ -601,6 +602,7 @@ mod windows_overlay {
         use_interception: bool,
         use_arduino_mouse: bool,
         arduino_com_port: String,
+        arduino_flash_in_progress: bool,
         interception_runtime_status: InterceptionRuntimeStatus,
         mouse_sensitivity_restore_on_exit: bool,
         mouse_sensitivity_exit_restore_speed: u32,
@@ -683,6 +685,7 @@ mod windows_overlay {
                 use_interception: false,
                 use_arduino_mouse: false,
                 arduino_com_port: String::new(),
+                arduino_flash_in_progress: false,
                 interception_runtime_status: InterceptionRuntimeStatus::Unavailable,
                 mouse_sensitivity_restore_on_exit: false,
                 mouse_sensitivity_exit_restore_speed: 6,
@@ -924,6 +927,55 @@ mod windows_overlay {
         let running = Arc::new(AtomicBool::new(true));
         let worker_running = running.clone();
         let poll_running = running.clone();
+
+        // Background thread to manage Arduino serial connection
+        let conn_manager_running = running.clone();
+        thread::spawn(move || {
+            let mut last_attempt = Instant::now() - Duration::from_secs(5);
+            while conn_manager_running.load(Ordering::Relaxed) {
+                let (use_arduino, com_port, flash_in_progress) = {
+                    let state = HOOK_STATE.lock();
+                    (
+                        state.use_arduino_mouse,
+                        state.arduino_com_port.clone(),
+                        state.arduino_flash_in_progress,
+                    )
+                };
+
+                if use_arduino && !com_port.is_empty() && !flash_in_progress {
+                    let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
+                    let mut port_guard = ARDUINO_PORT.lock();
+
+                    if *name_guard != com_port || port_guard.is_none() {
+                        *port_guard = None;
+                        *name_guard = String::new();
+
+                        if last_attempt.elapsed() >= Duration::from_secs(3) {
+                            last_attempt = Instant::now();
+                            match serialport::new(&com_port, 115200)
+                                .timeout(Duration::from_millis(10))
+                                .open()
+                            {
+                                Ok(p) => {
+                                    *port_guard = Some(p);
+                                    *name_guard = com_port.clone();
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                    }
+                } else {
+                    let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
+                    let mut port_guard = ARDUINO_PORT.lock();
+                    if port_guard.is_some() {
+                        *port_guard = None;
+                        *name_guard = String::new();
+                    }
+                }
+
+                thread::sleep(Duration::from_millis(500));
+            }
+        });
         thread::spawn(move || {
             while poll_running.load(Ordering::Relaxed) {
                 unsafe {
@@ -4028,31 +4080,17 @@ mod windows_overlay {
                     hook_state.use_interception = settings.use_interception;
                     hook_state.use_arduino_mouse = settings.use_arduino_mouse;
                     hook_state.arduino_com_port = settings.arduino_com_port.clone();
+                }
 
-                    // Pre-initialize Arduino serial port on a background thread
-                    let use_arduino = settings.use_arduino_mouse;
-                    let com_port = settings.arduino_com_port.clone();
-                    if use_arduino && !com_port.is_empty() {
-                        thread::spawn(move || {
-                            let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
-                            let mut port_guard = ARDUINO_PORT.lock();
-                            if *name_guard != com_port || port_guard.is_none() {
-                                *port_guard = None;
-                                *name_guard = String::new();
-                                // Add a tiny delay to let any previous serial connection close properly
-                                thread::sleep(Duration::from_millis(100));
-                                match serialport::new(&com_port, 115200)
-                                    .timeout(Duration::from_millis(10))
-                                    .open()
-                                {
-                                    Ok(p) => {
-                                        *port_guard = Some(p);
-                                        *name_guard = com_port;
-                                    }
-                                    Err(_) => {}
-                                }
-                            }
-                        });
+                OverlayCommand::SetArduinoFlashInProgress(in_progress) => {
+                    let mut hook_state = HOOK_STATE.lock();
+                    hook_state.arduino_flash_in_progress = in_progress;
+                    if in_progress {
+                        // Close the port immediately so avrdude can use it
+                        let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
+                        let mut port_guard = ARDUINO_PORT.lock();
+                        *port_guard = None;
+                        *name_guard = String::new();
                     }
                 }
 
@@ -16459,6 +16497,7 @@ mod fallback {
             keyboard_key_press_delay_ms: u32,
         },
         UpdateVisionPresets(Vec<VisionPreset>),
+        SetArduinoFlashInProgress(bool),
         SetMacrosMasterEnabled(bool),
         SetUiVisible(bool),
         SetTrayIconVisible(bool),

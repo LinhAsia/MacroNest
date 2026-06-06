@@ -1634,9 +1634,13 @@ impl CrosshairApp {
         *flash_result.lock() = None;
 
         let ui_lang = self.state.ui_language;
+        let overlay_tx = self.overlay_tx.clone();
 
         std::thread::spawn(move || {
             let run_flash = || -> anyhow::Result<()> {
+                // Tell the overlay thread to close any active serial port connection and pause reconnection attempts
+                let _ = overlay_tx.send(OverlayCommand::SetArduinoFlashInProgress(true));
+                
                 // 1. Scan ports before touch
                 let ports_before = serialport::available_ports().unwrap_or_default();
                 let before_names: std::collections::HashSet<String> = ports_before
@@ -1658,18 +1662,35 @@ impl CrosshairApp {
                 let start_time = std::time::Instant::now();
                 let mut found = false;
 
-                while start_time.elapsed().as_secs() < 6 {
+                // Wait up to 15 seconds for bootloader port to register (Case A: new port, Case B: same port reappeared)
+                while start_time.elapsed().as_secs() < 15 {
                     let current_ports = serialport::available_ports().unwrap_or_default();
-                    for p in &current_ports {
-                        if !before_names.contains(&p.port_name) {
-                            bootloader_port = p.port_name.clone();
+                    let current_names: std::collections::HashSet<String> = current_ports
+                        .iter()
+                        .map(|p| p.port_name.clone())
+                        .collect();
+
+                    // Case A: new port appeared
+                    for name in &current_names {
+                        if !before_names.contains(name) {
+                            bootloader_port = name.clone();
                             found = true;
                             break;
                         }
                     }
+
+                    // Case B: same port reappeared after a brief absence
+                    if !found && current_names.contains(&port) {
+                        bootloader_port = port.clone();
+                        found = true;
+                    }
+
                     if found {
+                        // Give Windows another 500ms to fully load the serial stack after registration
+                        std::thread::sleep(std::time::Duration::from_millis(500));
                         break;
                     }
+
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
 
@@ -1733,6 +1754,8 @@ impl CrosshairApp {
             };
 
             let res = run_flash();
+            // Tell the overlay thread that flash is finished and background connection manager can resume
+            let _ = overlay_tx.send(OverlayCommand::SetArduinoFlashInProgress(false));
             match res {
                 Ok(_) => {
                     *flash_result.lock() = Some(Ok(()));
