@@ -553,6 +553,13 @@ mod windows_overlay {
         HOOK_STATE.lock().arduino_flash_in_progress = false;
     }
 
+    pub fn arduino_connection_snapshot() -> (bool, String, bool) {
+        let flash_in_progress = HOOK_STATE.lock().arduino_flash_in_progress;
+        let current_port = CURRENT_ARDUINO_PORT_NAME.lock().clone();
+        let connected = ARDUINO_PORT.lock().is_some();
+        (connected, current_port, flash_in_progress)
+    }
+
     pub fn set_ui_context(ctx: egui::Context) {
         *UI_CONTEXT.lock() = Some(ctx);
     }

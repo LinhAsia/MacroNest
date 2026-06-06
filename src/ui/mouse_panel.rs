@@ -507,16 +507,24 @@ impl CrosshairApp {
 
         let selected_port_exists = !self.state.vision_settings.arduino_com_port.is_empty()
             && self.arduino_available_ports.contains(&self.state.vision_settings.arduino_com_port);
-        let is_connected = selected_port_exists && self.state.vision_settings.use_arduino_mouse;
+        let (arduino_port_open, arduino_open_port, overlay_flash_in_progress) =
+            crate::overlay::arduino_connection_snapshot();
+        let selected_port = self.state.vision_settings.arduino_com_port.as_str();
+        let is_connected = selected_port_exists
+            && self.state.vision_settings.use_arduino_mouse
+            && arduino_port_open
+            && arduino_open_port == selected_port;
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.label(RichText::new(arduino_panel_title).strong());
             ui.add_space(8.0);
-            if self.arduino_flash_running {
+            if self.arduino_flash_running || overlay_flash_in_progress {
                 ui.label(RichText::new(self.tr("Flashing - port released", "Flashing - port released")).color(Color32::from_rgb(255, 206, 96)));
             } else if selected_port_exists && !self.state.vision_settings.use_arduino_mouse {
                 ui.label(RichText::new(self.tr("Port selected - emulation off", "Port selected - emulation off")).color(Color32::from_rgb(255, 206, 96)));
+            } else if selected_port_exists && self.state.vision_settings.use_arduino_mouse && !is_connected {
+                ui.label(RichText::new(self.tr("Connecting...", "Connecting...")).color(Color32::from_rgb(255, 206, 96)));
             } else if is_connected {
                 ui.label(RichText::new(self.tr("Connected", "Đang kết nối")).color(Color32::from_rgb(126, 224, 182)));
             } else {
