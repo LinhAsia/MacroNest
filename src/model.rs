@@ -2012,6 +2012,9 @@ pub struct VisionSettings {
     pub use_interception: bool,
     pub use_arduino_mouse: bool,
     pub arduino_com_port: String,
+    pub arduino_vid: String,
+    pub arduino_pid: String,
+    pub use_arduino_spoof: bool,
 }
 
 impl Default for VisionSettings {
@@ -2023,6 +2026,9 @@ impl Default for VisionSettings {
             use_interception: false,
             use_arduino_mouse: false,
             arduino_com_port: String::new(),
+            arduino_vid: "0x2341".to_string(),
+            arduino_pid: "0x8036".to_string(),
+            use_arduino_spoof: false,
         }
     }
 }

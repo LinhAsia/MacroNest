@@ -487,32 +487,9 @@ impl CrosshairApp {
         }
 
         let label_arduino = self.tr("Use Arduino Leonardo Mouse Emulation", "Sử dụng giả lập chuột Arduino Leonardo");
-        let refresh_txt = self.tr("🔄 Refresh Ports", "🔄 Tải lại danh sách cổng");
+        let refresh_txt = self.tr("Refresh Ports", "Tải lại danh sách cổng");
         let select_port_txt = self.tr("Select Port", "Chọn cổng");
         let com_port_lbl = self.tr("COM Port:", "Cổng COM:");
-        let guide_txt = self.tr("Setup Guide & Arduino Firmware", "Hướng dẫn cài đặt & Firmware Arduino");
-        let setup_guide_1 = self.tr(
-            "To prevent detection by anti-cheats, you should spoof the Vendor ID (VID) and Product ID (PID) of your Arduino Leonardo board at the firmware level:",
-            "Để tránh bị các ứng dụng/game phát hiện, bạn nên giả lập (spoof) Vendor ID (VID) và Product ID (PID) của bo mạch Arduino Leonardo ở cấp độ firmware:"
-        );
-        let setup_guide_2 = self.tr(
-            "1. Open boards.txt in the Arduino hardware packages folder:\n   C:\\Users\\<YourUser>\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\<version>\\boards.txt",
-            "1. Mở tệp boards.txt trong thư mục cài đặt phần cứng Arduino:\n   C:\\Users\\<TênUser>\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\<version>\\boards.txt"
-        );
-        let setup_guide_3 = self.tr(
-            "2. Search for the 'leonardo.build.vid' and 'leonardo.build.pid' variables, and change them to values of a standard commercial mouse (e.g., Logitech VID: 0x046D, PID: 0xC077).",
-            "2. Tìm các biến 'leonardo.build.vid' và 'leonardo.build.pid', rồi thay đổi giá trị của chúng thành mã của một chuột thương mại tiêu chuẩn (ví dụ, Logitech VID: 0x046D, PID: 0xC077)."
-        );
-        let setup_guide_4 = self.tr(
-            "3. Change string descriptors 'leonardo.build.usb_product' and 'leonardo.build.usb_manufacturer' to match standard mouse identifiers.",
-            "3. Đổi tên nhận diện chuỗi 'leonardo.build.usb_product' và 'leonardo.build.usb_manufacturer' sang chuột thông thường."
-        );
-        let upload_sketch_lbl = self.tr(
-            "Upload the following sketch to your Arduino Leonardo via Arduino IDE:",
-            "Nạp chương trình (sketch) sau vào Arduino Leonardo bằng Arduino IDE:"
-        );
-        let copy_code_lbl = self.tr("📋 Copy Code", "📋 Sao chép mã");
-        let copy_feedback_lbl = self.tr("Sketch code copied to clipboard!", "Đã sao chép mã nguồn sketch vào clipboard!");
         let arduino_panel_title = self.tr("Arduino Leonardo Emulation", "Giả lập phần cứng Arduino Leonardo");
 
         if self.arduino_available_ports.is_empty() {
@@ -529,9 +506,9 @@ impl CrosshairApp {
             ui.label(RichText::new(arduino_panel_title).strong());
             ui.add_space(8.0);
             if is_connected {
-                ui.label(RichText::new(self.tr("✅ Connected", "✅ Đang kết nối")).color(Color32::from_rgb(126, 224, 182)));
+                ui.label(RichText::new(self.tr("Connected", "Đang kết nối")).color(Color32::from_rgb(126, 224, 182)));
             } else {
-                ui.label(RichText::new(self.tr("❌ Disconnected", "❌ Chưa kết nối")).color(Color32::from_rgb(255, 96, 96)));
+                ui.label(RichText::new(self.tr("Disconnected", "Chưa kết nối")).color(Color32::from_rgb(255, 96, 96)));
             }
         });
 
@@ -595,14 +572,14 @@ impl CrosshairApp {
                     });
                     ui.ctx().request_repaint();
                 } else {
-                    let download_btn_lbl = self.tr("📥 Download Flashing Tools & Firmware", "📥 Tải công cụ nạp & Firmware");
+                    let download_btn_lbl = self.tr("Download Flashing Tools & Firmware", "Tải công cụ nạp & Firmware");
                     if ui.button(download_btn_lbl).clicked() {
                         self.start_arduino_tools_download();
                     }
                 }
             } else {
                 ui.horizontal(|ui| {
-                    let flash_btn_lbl = self.tr("⚡ Auto-Flash Firmware", "⚡ Tự động nạp Firmware");
+                    let flash_btn_lbl = self.tr("Auto-Flash Firmware", "Tự động nạp Firmware");
                     let flash_btn = ui.add_enabled(
                         !self.arduino_flash_running && !self.state.vision_settings.arduino_com_port.is_empty(),
                         egui::Button::new(flash_btn_lbl)
@@ -612,7 +589,7 @@ impl CrosshairApp {
                     }
 
                     ui.add_space(8.0);
-                    let delete_btn_lbl = self.tr("🗑️ Delete Tools", "🗑️ Xóa công cụ nạp");
+                    let delete_btn_lbl = self.tr("Delete Tools", "Xóa công cụ nạp");
                     if ui.button(delete_btn_lbl).clicked() {
                         let _ = std::fs::remove_file(&self.paths.avrdude_exe);
                         let _ = std::fs::remove_file(&self.paths.avrdude_conf);
@@ -630,85 +607,73 @@ impl CrosshairApp {
 
             ui.add_space(6.0);
             
-            ui.collapsing(guide_txt, |ui| {
-                ui.label(setup_guide_1);
-                
+            let spoof_panel_title = self.tr("Anti-Cheat Bypass & USB ID Spoofing", "Vượt Anti-Cheat & Giả lập ID cổng USB");
+            ui.collapsing(spoof_panel_title, |ui| {
                 ui.add_space(4.0);
-                ui.label(RichText::new(setup_guide_2).small().weak());
-                ui.label(RichText::new(setup_guide_3).small().weak());
-                ui.label(RichText::new(setup_guide_4).small().weak());
-
-                ui.add_space(6.0);
-                ui.label(RichText::new(upload_sketch_lbl).strong());
                 
-                let sketch_code = r#"#include <Mouse.h>
-
-void setup() {
-  Serial.begin(115200);
-  while (!Serial) { ; }
-  Mouse.begin();
-}
-
-void loop() {
-  if (Serial.available() >= 6) {
-    if (Serial.read() == 0xAA) {
-      int cmd = Serial.read();
-      if (cmd == 1) { // Move Relative
-        int dx_high = Serial.read();
-        int dx_low = Serial.read();
-        int dy_high = Serial.read();
-        int dy_low = Serial.read();
-        int16_t dx = (int16_t)((dx_high << 8) | dx_low);
-        int16_t dy = (int16_t)((dy_high << 8) | dy_low);
-        
-        while (dx != 0 || dy != 0) {
-          int moveX = constrain(dx, -127, 127);
-          int moveY = constrain(dy, -127, 127);
-          Mouse.move(moveX, moveY, 0);
-          dx -= moveX;
-          dy -= moveY;
-        }
-      }
-      else if (cmd == 2) { // Button Press/Release
-        int btn = Serial.read();
-        int state = Serial.read();
-        Serial.read(); Serial.read(); // Unused
-        char mouseBtn = MOUSE_LEFT;
-        if (btn == 2) mouseBtn = MOUSE_RIGHT;
-        else if (btn == 3) mouseBtn = MOUSE_MIDDLE;
-        
-        if (state == 1) Mouse.press(mouseBtn);
-        else Mouse.release(mouseBtn);
-      }
-      else if (cmd == 3) { // Wheel Scroll
-        int val = Serial.read();
-        if (val & 0x80) val |= 0xFFFFFF00;
-        Serial.read(); Serial.read(); Serial.read(); // Unused
-        Mouse.move(0, 0, val);
-      }
-    }
-  }
-}"#;
-
-                ui.add_space(4.0);
+                let warning_text = self.tr(
+                    "Some anti-cheat systems (Vanguard, EAC, etc.) block default Arduino Leonardo identifiers (VID: 0x2341, PID: 0x8036).\nYou should spoof these IDs to look like a standard commercial USB mouse (e.g. Logitech G502).",
+                    "Một số hệ thống chống gian lận (Vanguard, EAC,...) chặn cổng kết nối mặc định của Arduino Leonardo (VID: 0x2341, PID: 0x8036).\nBạn nên giả lập các mã ID này giống với một chuột thương mại tiêu chuẩn (ví dụ: Logitech G502)."
+                );
+                ui.label(RichText::new(warning_text).small().weak());
+                
+                ui.add_space(8.0);
+                
+                let mut spoof_changed = false;
+                let enable_spoof_lbl = self.tr("Enable Spoofing", "Bật giả lập ID");
+                let vid_lbl = self.tr("Vendor ID (VID):", "Vendor ID (VID):");
+                let pid_lbl = self.tr("Product ID (PID):", "Product ID (PID):");
+                let presets_lbl = self.tr("Presets:", "Mẫu nhanh:");
+                
                 ui.horizontal(|ui| {
-                    if ui.button(copy_code_lbl).clicked() {
-                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                            let _ = clipboard.set_text(sketch_code.to_string());
-                            self.status = copy_feedback_lbl.to_owned();
-                        }
-                    }
+                    spoof_changed |= ui.checkbox(&mut self.state.vision_settings.use_arduino_spoof, enable_spoof_lbl).changed();
                 });
                 
-                ui.add_space(4.0);
-                let mut code_box = sketch_code;
-                ui.add(
-                    egui::TextEdit::multiline(&mut code_box)
-                        .font(egui::FontId::monospace(12.0))
-                        .desired_rows(15)
-                        .lock_focus(true)
-                        .interactive(false)
+                if self.state.vision_settings.use_arduino_spoof {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.label(vid_lbl);
+                        let r1 = ui.text_edit_singleline(&mut self.state.vision_settings.arduino_vid);
+                        if r1.changed() {
+                            spoof_changed = true;
+                        }
+                        
+                        ui.add_space(14.0);
+                        
+                        ui.label(pid_lbl);
+                        let r2 = ui.text_edit_singleline(&mut self.state.vision_settings.arduino_pid);
+                        if r2.changed() {
+                            spoof_changed = true;
+                        }
+                    });
+                    
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.label(presets_lbl);
+                        if ui.button("Logitech G502 (0x046D, 0xC07D)").clicked() {
+                            self.state.vision_settings.arduino_vid = "0x046D".to_string();
+                            self.state.vision_settings.arduino_pid = "0xC07D".to_string();
+                            spoof_changed = true;
+                        }
+                        ui.add_space(8.0);
+                        if ui.button("Razer DeathAdder (0x1532, 0x0037)").clicked() {
+                            self.state.vision_settings.arduino_vid = "0x1532".to_string();
+                            self.state.vision_settings.arduino_pid = "0x0037".to_string();
+                            spoof_changed = true;
+                        }
+                    });
+                }
+                
+                ui.add_space(6.0);
+                let note_text = self.tr(
+                    "Note: This automatically patches firmware.hex at the byte level during upload. The Arduino bootloader remains unaffected, so you can always re-flash safely.",
+                    "Lưu ý: Tính năng này tự động cập nhật firmware.hex ở cấp độ byte khi nạp. Bootloader của Arduino không bị ảnh hưởng, do đó bạn vẫn có thể nạp lại bình thường."
                 );
+                ui.label(RichText::new(note_text).small().weak());
+                
+                if spoof_changed {
+                    arduino_changed = true;
+                }
             });
         });
 
@@ -1604,7 +1569,13 @@ void loop() {
                 Self::powershell_quote(&paths.arduino_tools_zip.to_string_lossy()),
                 Self::powershell_quote(&paths.bin_dir.to_string_lossy()),
             );
-            let extract_status = std::process::Command::new("powershell")
+            let mut cmd = std::process::Command::new("powershell");
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            }
+            let extract_status = cmd
                 .args(["-NoProfile", "-NonInteractive", "-Command", &extract_script])
                 .status()?;
             if !extract_status.success() {
@@ -1632,6 +1603,10 @@ void loop() {
 
         self.arduino_flash_running = true;
         self.arduino_flash_status = self.tr("Resetting board (1200 baud touch)...", "Đang khôi phục mạch (chạm 1200 baud)...").to_owned();
+
+        let use_spoof = self.state.vision_settings.use_arduino_spoof;
+        let spoof_vid = self.state.vision_settings.arduino_vid.clone();
+        let spoof_pid = self.state.vision_settings.arduino_pid.clone();
 
         let paths = self.paths.clone();
         let flash_result = self.arduino_flash_result.clone();
@@ -1677,12 +1652,38 @@ void loop() {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
 
-                // 4. Execute avrdude to flash
+                // 4. Prepare the hex file to flash (optionally spoofed)
+                let hex_to_flash = if use_spoof {
+                    let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
+                    let original_hex = std::fs::read_to_string(&paths.arduino_firmware_hex)?;
+                    
+                    let parsed_vid = parse_hex_u16(&spoof_vid).unwrap_or(0x2341);
+                    let parsed_pid = parse_hex_u16(&spoof_pid).unwrap_or(0x8036);
+                    
+                    let patched_hex = patch_hex_descriptors(&original_hex, parsed_vid, parsed_pid)?;
+                    std::fs::write(&temp_hex_path, patched_hex)?;
+                    temp_hex_path
+                } else {
+                    paths.arduino_firmware_hex.clone()
+                };
+
+                // 5. Execute avrdude to flash
                 if !paths.avrdude_exe.exists() {
+                    if use_spoof {
+                        let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
+                        let _ = std::fs::remove_file(temp_hex_path);
+                    }
                     anyhow::bail!("avrdude.exe not found");
                 }
                 
-                let output = std::process::Command::new(&paths.avrdude_exe)
+                let mut cmd = std::process::Command::new(&paths.avrdude_exe);
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                }
+                
+                let output = cmd
                     .args([
                         "-C", &paths.avrdude_conf.to_string_lossy(),
                         "-v",
@@ -1691,9 +1692,16 @@ void loop() {
                         "-P", &bootloader_port,
                         "-b", "57600",
                         "-D",
-                        "-U", &format!("flash:w:{}:i", paths.arduino_firmware_hex.to_string_lossy()),
+                        "-U", &format!("flash:w:{}:i", hex_to_flash.to_string_lossy()),
                     ])
-                    .output()?;
+                    .output();
+
+                if use_spoof {
+                    let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
+                    let _ = std::fs::remove_file(temp_hex_path);
+                }
+
+                let output = output?;
 
                 if !output.status.success() {
                     let err_msg = String::from_utf8_lossy(&output.stderr);
@@ -1715,3 +1723,76 @@ void loop() {
         });
     }
 }
+
+fn parse_hex_u16(s: &str) -> Option<u16> {
+    let cleaned = s.trim().to_uppercase();
+    let cleaned = cleaned.strip_prefix("0X").unwrap_or(&cleaned);
+    u16::from_str_radix(cleaned, 16).ok()
+}
+
+fn patch_hex_descriptors(hex_content: &str, vid: u16, pid: u16) -> anyhow::Result<String> {
+    let vid_low = (vid & 0xFF) as u8;
+    let vid_high = ((vid >> 8) & 0xFF) as u8;
+    let pid_low = (pid & 0xFF) as u8;
+    let pid_high = ((pid >> 8) & 0xFF) as u8;
+    
+    let new_vid_pid_hex = format!("{:02X}{:02X}{:02X}{:02X}", vid_low, vid_high, pid_low, pid_high);
+    
+    let mut patched_lines = Vec::new();
+    let mut found = false;
+    
+    for line in hex_content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with(':') && trimmed.contains("12010002EF02014041233680") {
+            let line_len = trimmed.len();
+            if line_len < 11 {
+                patched_lines.push(trimmed.to_string());
+                continue;
+            }
+            
+            let prefix = &trimmed[0..9];
+            let data_str = &trimmed[9..line_len-2];
+            
+            if let Some(pattern_idx) = data_str.find("12010002EF02014041233680") {
+                let target_idx = pattern_idx + 16;
+                
+                let mut new_data_str = data_str.to_string();
+                new_data_str.replace_range(target_idx..target_idx+8, &new_vid_pid_hex);
+                
+                let mut sum: u32 = 0;
+                let mut i = 1;
+                while i < prefix.len() {
+                    if let Ok(b) = u8::from_str_radix(&prefix[i..i+2], 16) {
+                        sum += b as u32;
+                    }
+                    i += 2;
+                }
+                
+                let mut j = 0;
+                while j < new_data_str.len() {
+                    if let Ok(b) = u8::from_str_radix(&new_data_str[j..j+2], 16) {
+                        sum += b as u32;
+                    }
+                    j += 2;
+                }
+                
+                let checksum = ((!sum + 1) & 0xFF) as u8;
+                let new_line = format!("{}{}{:02X}", prefix, new_data_str, checksum);
+                
+                patched_lines.push(new_line);
+                found = true;
+            } else {
+                patched_lines.push(trimmed.to_string());
+            }
+        } else {
+            patched_lines.push(trimmed.to_string());
+        }
+    }
+    
+    if !found {
+        anyhow::bail!("Could not find standard USB Device Descriptor in firmware.hex to patch.");
+    }
+    
+    Ok(patched_lines.join("\r\n"))
+}
+
