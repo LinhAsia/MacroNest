@@ -558,6 +558,15 @@ impl CrosshairApp {
 
                     ui.label(com_port_lbl);
                 });
+                
+                if self.state.vision_settings.use_arduino_mouse {
+                    ui.add_space(4.0);
+                    let note_lbl = self.tr(
+                        "💡 Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.",
+                        "💡 Đảm bảo bạn đã nhấn 'Tự động nạp/flash Firmware' ít nhất một lần để nạp code vào mạch."
+                    );
+                    ui.label(RichText::new(note_lbl).small().weak().color(Color32::from_rgb(220, 180, 80)));
+                }
             });
 
             ui.add_space(8.0);
