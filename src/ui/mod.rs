@@ -9106,7 +9106,8 @@ impl eframe::App for CrosshairApp {
         }
 
         egui::CentralPanel::default()
-            .frame(
+            .frame(egui::Frame::none())
+            .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(ctx.style().visuals.panel_fill)
                     .corner_radius(egui::CornerRadius {
@@ -9126,44 +9127,45 @@ impl eframe::App for CrosshairApp {
                         blur: 24,
                         spread: 0,
                         color: egui::Color32::from_rgba_premultiplied(0, 0, 0, 80),
-                    }),
-            )
-            .show(ctx, |ui| {
-                if self.state.active_panel == AppPanel::Macros
-                    || self.state.active_panel == AppPanel::Modes
-                {
-                    self.render_macro_panel(ui);
-                    ui.separator();
-                    if self.capture_target.is_some() {
-                        ctx.request_repaint_after(Duration::from_millis(16));
-                    }
-                } else {
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            match self.state.active_panel {
-                                AppPanel::Crosshair => self.render_crosshair_panel(ui),
-                                AppPanel::WindowPresets => self.render_window_presets_panel(ui),
-                                AppPanel::Pin => self.render_pin_panel(ui),
-                                AppPanel::Mouse => self.render_mouse_panel(ui),
-                                AppPanel::Vision => self.render_vision_panel(ui, ctx),
-                                AppPanel::AudioSense => self.render_audiosense_panel(ui),
-                                AppPanel::Ocr => self.render_ocr_panel(ui),
-                                AppPanel::Geometry => self.render_geometry_panel(ui),
-                                AppPanel::Zoom => self.render_pin_panel(ui),
-                                AppPanel::Modes => unreachable!(),
-                                AppPanel::Macros => unreachable!(),
-                                AppPanel::Commands => self.render_commands_panel(ui),
-                                AppPanel::Sound => self.render_sound_panel(ui),
-                                AppPanel::Hud => self.render_hud_panel(ui),
-                                AppPanel::Media => self.render_media_panel(ui),
-                            }
+                    })
+                    .show(ui, |ui| {
+                        ui.set_min_size(ui.available_size());
+                        if self.state.active_panel == AppPanel::Macros
+                            || self.state.active_panel == AppPanel::Modes
+                        {
+                            self.render_macro_panel(ui);
                             ui.separator();
                             if self.capture_target.is_some() {
                                 ctx.request_repaint_after(Duration::from_millis(16));
                             }
-                        });
-                }
+                        } else {
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    match self.state.active_panel {
+                                        AppPanel::Crosshair => self.render_crosshair_panel(ui),
+                                        AppPanel::WindowPresets => self.render_window_presets_panel(ui),
+                                        AppPanel::Pin => self.render_pin_panel(ui),
+                                        AppPanel::Mouse => self.render_mouse_panel(ui),
+                                        AppPanel::Vision => self.render_vision_panel(ui, ctx),
+                                        AppPanel::AudioSense => self.render_audiosense_panel(ui),
+                                        AppPanel::Ocr => self.render_ocr_panel(ui),
+                                        AppPanel::Geometry => self.render_geometry_panel(ui),
+                                        AppPanel::Zoom => self.render_pin_panel(ui),
+                                        AppPanel::Modes => unreachable!(),
+                                        AppPanel::Macros => unreachable!(),
+                                        AppPanel::Commands => self.render_commands_panel(ui),
+                                        AppPanel::Sound => self.render_sound_panel(ui),
+                                        AppPanel::Hud => self.render_hud_panel(ui),
+                                        AppPanel::Media => self.render_media_panel(ui),
+                                    }
+                                    ui.separator();
+                                    if self.capture_target.is_some() {
+                                        ctx.request_repaint_after(Duration::from_millis(16));
+                                    }
+                                });
+                        }
+                    });
             });
 
         if self.settings_popup_open {
