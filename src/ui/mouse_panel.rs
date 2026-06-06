@@ -501,7 +501,11 @@ impl CrosshairApp {
         let com_port_lbl = self.tr("COM Port:", "Cổng COM:");
         let arduino_panel_title = self.tr("Arduino Leonardo Emulation", "Giả lập phần cứng Arduino Leonardo");
 
-        if self.arduino_available_ports.is_empty() {
+        let should_refresh_arduino_ports = self
+            .arduino_ports_last_refresh
+            .map(|last_refresh| last_refresh.elapsed() >= Duration::from_millis(1500))
+            .unwrap_or(true);
+        if !self.arduino_flash_running && should_refresh_arduino_ports {
             self.refresh_arduino_ports();
         }
 
@@ -1567,6 +1571,7 @@ impl CrosshairApp {
     }
 
     fn refresh_arduino_ports(&mut self) {
+        self.arduino_ports_last_refresh = Some(std::time::Instant::now());
         let Ok(ports) = serialport::available_ports() else {
             self.arduino_available_ports.clear();
             return;

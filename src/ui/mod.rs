@@ -763,6 +763,7 @@ pub struct CrosshairApp {
     ocr_lang_operation: Option<(String, OcrLanguageOperationKind, Instant)>,
     pub show_share_buttons: bool,
     arduino_available_ports: Vec<String>,
+    arduino_ports_last_refresh: Option<Instant>,
 }
 
 impl CrosshairApp {
@@ -971,6 +972,7 @@ impl CrosshairApp {
             ocr_lang_operation: None,
             show_share_buttons: false,
             arduino_available_ports: Vec::new(),
+            arduino_ports_last_refresh: None,
         };
         app.interception_installed = app.paths.interception_dll.exists();
         app.ensure_master_presets();
