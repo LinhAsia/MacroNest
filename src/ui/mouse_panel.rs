@@ -624,6 +624,7 @@ impl CrosshairApp {
                 let vid_lbl = self.tr("Vendor ID (VID):", "Vendor ID (VID):");
                 let pid_lbl = self.tr("Product ID (PID):", "Product ID (PID):");
                 let presets_lbl = self.tr("Presets:", "Mẫu nhanh:");
+                let reset_lbl = self.tr("Reset to Default (0x2341, 0x8036)", "Khôi phục mặc định (0x2341, 0x8036)");
                 
                 ui.horizontal(|ui| {
                     spoof_changed |= ui.checkbox(&mut self.state.vision_settings.use_arduino_spoof, enable_spoof_lbl).changed();
@@ -659,6 +660,12 @@ impl CrosshairApp {
                         if ui.button("Razer DeathAdder (0x1532, 0x0037)").clicked() {
                             self.state.vision_settings.arduino_vid = "0x1532".to_string();
                             self.state.vision_settings.arduino_pid = "0x0037".to_string();
+                            spoof_changed = true;
+                        }
+                        ui.add_space(8.0);
+                        if ui.button(reset_lbl).clicked() {
+                            self.state.vision_settings.arduino_vid = "0x2341".to_string();
+                            self.state.vision_settings.arduino_pid = "0x8036".to_string();
                             spoof_changed = true;
                         }
                     });
