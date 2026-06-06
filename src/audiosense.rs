@@ -49,14 +49,6 @@ const ANALYSIS_SAMPLE_RATE: u32 = 44_100;
 #[cfg(windows)]
 const PITCH_ANALYSIS_SAMPLES: usize = 8192;
 #[cfg(windows)]
-const PITCH_ACCEPT_CONFIDENCE: f32 = 0.56;
-#[cfg(windows)]
-const PITCH_SUSTAIN_CONFIDENCE: f32 = 0.42;
-#[cfg(windows)]
-const PITCH_DETECTION_FLOOR: f32 = 0.46;
-#[cfg(windows)]
-const PITCH_LEVEL_GATE: f32 = 0.004;
-#[cfg(windows)]
 const PITCH_HOLD_TIME: Duration = Duration::from_millis(360);
 #[cfg(windows)]
 const YIN_THRESHOLD: f32 = 0.16;
@@ -275,13 +267,16 @@ fn run_pitch_loop(
 
             if last_publish.elapsed() >= interval {
                 let analysis_window = pitch_samples.iter().copied().collect::<Vec<_>>();
+                let accept_confidence = (config.min_confidence as f32 / 1000.0).max(0.0).min(1.0);
+                let level_gate = (config.min_level as f32 / 1000.0).max(0.0);
                 if let Some((frequency, confidence)) =
-                    detect_pitch(&analysis_window, ANALYSIS_SAMPLE_RATE)
+                    detect_pitch(&analysis_window, ANALYSIS_SAMPLE_RATE, accept_confidence, level_gate)
                 {
                     let candidate_note = pitch_to_spn(frequency, config.show_sharps);
+                    let sustain_confidence = accept_confidence * 0.75;
                     let sustained_note =
-                        candidate_note == last_note && confidence >= PITCH_SUSTAIN_CONFIDENCE;
-                    if confidence >= PITCH_ACCEPT_CONFIDENCE || sustained_note {
+                        candidate_note == last_note && confidence >= sustain_confidence;
+                    if confidence >= accept_confidence || sustained_note {
                         last_note = candidate_note;
                         last_confidence = confidence;
                         last_detected_at = Instant::now();
@@ -363,7 +358,7 @@ fn rms_level(samples: &[f32]) -> f32 {
     (sum / samples.len() as f32).sqrt()
 }
 
-fn detect_pitch(samples: &[f32], sample_rate: u32) -> Option<(f32, f32)> {
+fn detect_pitch(samples: &[f32], sample_rate: u32, accept_confidence: f32, level_gate: f32) -> Option<(f32, f32)> {
     if samples.len() < 1024 {
         return None;
     }
@@ -381,7 +376,7 @@ fn detect_pitch(samples: &[f32], sample_rate: u32) -> Option<(f32, f32)> {
         })
         .collect::<Vec<_>>();
     let level = rms_level(&centered);
-    if level < PITCH_LEVEL_GATE {
+    if level < level_gate {
         return None;
     }
 
@@ -433,7 +428,8 @@ fn detect_pitch(samples: &[f32], sample_rate: u32) -> Option<(f32, f32)> {
     }
 
     let confidence = (1.0 - best_value).clamp(0.0, 1.0);
-    if confidence < PITCH_DETECTION_FLOOR {
+    let detection_floor = (accept_confidence - 0.10).max(0.0);
+    if confidence < detection_floor {
         return None;
     }
 

@@ -462,6 +462,27 @@ fn render_pitch_settings_ui(
 
     ui.add_space(4.0);
     ui.horizontal(|ui| {
+        ui.label(CrosshairApp::tr_lang(language, "Min Conf", "Tin cậy tối thiểu"));
+        changed |= ui
+            .add(
+                egui::DragValue::new(&mut settings.min_confidence)
+                    .range(0..=1000)
+                    .speed(5.0),
+            )
+            .changed();
+        ui.add_space(8.0);
+        ui.label(CrosshairApp::tr_lang(language, "Min Level", "Mức tối thiểu"));
+        changed |= ui
+            .add(
+                egui::DragValue::new(&mut settings.min_level)
+                    .range(0..=1000)
+                    .speed(5.0),
+            )
+            .changed();
+    });
+
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
         ui.label(format!(
             "{}: {}",
             CrosshairApp::tr_lang(language, "Current note", "Cao do hien tai"),

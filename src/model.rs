@@ -529,6 +529,14 @@ fn default_audio_sense_output_level_var() -> String {
     String::new()
 }
 
+fn default_audio_sense_min_confidence() -> u32 {
+    560
+}
+
+fn default_audio_sense_min_level() -> u32 {
+    4
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct AudioSenseMonitorSettings {
@@ -565,6 +573,10 @@ pub struct PitchAudioSenseSettings {
     pub output_confidence_var: String,
     #[serde(default = "default_audio_sense_output_level_var")]
     pub output_level_var: String,
+    #[serde(default = "default_audio_sense_min_confidence")]
+    pub min_confidence: u32,
+    #[serde(default = "default_audio_sense_min_level")]
+    pub min_level: u32,
 }
 
 impl Default for PitchAudioSenseSettings {
@@ -575,6 +587,8 @@ impl Default for PitchAudioSenseSettings {
             output_note_var: default_audio_sense_output_note_var(),
             output_confidence_var: default_audio_sense_output_confidence_var(),
             output_level_var: default_audio_sense_output_level_var(),
+            min_confidence: default_audio_sense_min_confidence(),
+            min_level: default_audio_sense_min_level(),
         }
     }
 }

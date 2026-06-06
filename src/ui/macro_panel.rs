@@ -20656,6 +20656,24 @@ impl CrosshairApp {
                         timer_names,
                         78.0,
                     );
+                    ui.label(Self::tr_lang(language, "Min Conf", "Tin cậy tối thiểu"));
+                    *live_sync |= ui
+                        .add(
+                            DragValue::new(&mut step.audio_sense_spec.pitch.min_confidence)
+                                .range(0..=1000)
+                                .speed(5.0),
+                        )
+                        .changed();
+                    ui.end_row();
+
+                    ui.label(Self::tr_lang(language, "Min Level", "Mức tối thiểu"));
+                    *live_sync |= ui
+                        .add(
+                            DragValue::new(&mut step.audio_sense_spec.pitch.min_level)
+                                .range(0..=1000)
+                                .speed(5.0),
+                        )
+                        .changed();
                     ui.label("");
                     ui.label("");
                 });
