@@ -45,7 +45,6 @@ impl CrosshairApp {
                                 &self.audio_sense_test_settings,
                             ),
                             output_note_var: String::new(),
-                            output_confidence_var: String::new(),
                             output_level_var: String::new(),
                             ..PitchAudioSenseSettings::default()
                         };
@@ -382,7 +381,6 @@ impl CrosshairApp {
         let config = PitchAudioSenseSettings {
             monitor: Self::audio_sense_test_monitor_settings(&self.audio_sense_test_settings),
             output_note_var: String::new(),
-            output_confidence_var: String::new(),
             output_level_var: String::new(),
             ..PitchAudioSenseSettings::default()
         };

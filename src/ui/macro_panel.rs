@@ -20636,17 +20636,6 @@ impl CrosshairApp {
                         timer_names,
                         78.0,
                     );
-                    ui.label(Self::tr_lang(language, "Conf", "Tin cay"));
-                    *live_sync |= Self::render_audio_sense_var_box(
-                        ui,
-                        language,
-                        ui.id().with((id_prefix, "pitch-conf-var")),
-                        &mut step.audio_sense_spec.pitch.output_confidence_var,
-                        timer_names,
-                        78.0,
-                    );
-                    ui.end_row();
-
                     ui.label(Self::tr_lang(language, "Level", "Muc"));
                     *live_sync |= Self::render_audio_sense_var_box(
                         ui,
@@ -20656,6 +20645,8 @@ impl CrosshairApp {
                         timer_names,
                         78.0,
                     );
+                    ui.end_row();
+
                     ui.label(Self::tr_lang(language, "Min Conf", "Tin cậy tối thiểu"));
                     *live_sync |= ui
                         .add(
@@ -20664,8 +20655,6 @@ impl CrosshairApp {
                                 .speed(5.0),
                         )
                         .changed();
-                    ui.end_row();
-
                     ui.label(Self::tr_lang(language, "Min Level", "Mức tối thiểu"));
                     *live_sync |= ui
                         .add(
@@ -20674,8 +20663,7 @@ impl CrosshairApp {
                                 .speed(5.0),
                         )
                         .changed();
-                    ui.label("");
-                    ui.label("");
+                    ui.end_row();
                 });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -20722,7 +20710,6 @@ impl CrosshairApp {
         let mut cleared_legacy_defaults = false;
         for var in [
             &mut step.audio_sense_spec.pitch.output_note_var,
-            &mut step.audio_sense_spec.pitch.output_confidence_var,
             &mut step.audio_sense_spec.pitch.output_level_var,
         ] {
             if matches!(
@@ -20789,15 +20776,6 @@ impl CrosshairApp {
                                         &mut step.audio_sense_spec.pitch.output_note_var,
                                         timer_names,
                                         64.0,
-                                    );
-                                    ui.label(Self::tr_lang(language, "Conf", "Tin cay"));
-                                    *live_sync |= Self::render_audio_sense_var_box(
-                                        ui,
-                                        language,
-                                        ui.id().with((id_prefix, "preset-conf-var")),
-                                        &mut step.audio_sense_spec.pitch.output_confidence_var,
-                                        timer_names,
-                                        62.0,
                                     );
                                     ui.label(Self::tr_lang(language, "Level", "Muc"));
                                     *live_sync |= Self::render_audio_sense_var_box(

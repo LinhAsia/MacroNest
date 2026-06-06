@@ -521,10 +521,6 @@ fn default_audio_sense_output_note_var() -> String {
     String::new()
 }
 
-fn default_audio_sense_output_confidence_var() -> String {
-    String::new()
-}
-
 fn default_audio_sense_output_level_var() -> String {
     String::new()
 }
@@ -569,8 +565,6 @@ pub struct PitchAudioSenseSettings {
     pub show_sharps: bool,
     #[serde(default = "default_audio_sense_output_note_var")]
     pub output_note_var: String,
-    #[serde(default = "default_audio_sense_output_confidence_var")]
-    pub output_confidence_var: String,
     #[serde(default = "default_audio_sense_output_level_var")]
     pub output_level_var: String,
     #[serde(default = "default_audio_sense_min_confidence")]
@@ -585,7 +579,6 @@ impl Default for PitchAudioSenseSettings {
             monitor: AudioSenseMonitorSettings::default(),
             show_sharps: true,
             output_note_var: default_audio_sense_output_note_var(),
-            output_confidence_var: default_audio_sense_output_confidence_var(),
             output_level_var: default_audio_sense_output_level_var(),
             min_confidence: default_audio_sense_min_confidence(),
             min_level: default_audio_sense_min_level(),

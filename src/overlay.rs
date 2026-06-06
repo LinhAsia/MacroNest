@@ -12878,12 +12878,6 @@ mod windows_overlay {
         if !settings.output_note_var.trim().is_empty() {
             set_text_variable_value(&settings.output_note_var, &snapshot.note);
         }
-        if !settings.output_confidence_var.trim().is_empty() {
-            set_variable_value(
-                &settings.output_confidence_var,
-                clamp_f64_to_i32((snapshot.confidence * 1000.0) as f64),
-            );
-        }
         if !settings.output_level_var.trim().is_empty() {
             set_variable_value(
                 &settings.output_level_var,
@@ -12979,19 +12973,6 @@ mod windows_overlay {
                         if !step.audio_sense_spec.pitch.output_note_var.trim().is_empty() {
                             preset.pitch.output_note_var =
                                 step.audio_sense_spec.pitch.output_note_var.clone();
-                        }
-                        if !step
-                            .audio_sense_spec
-                            .pitch
-                            .output_confidence_var
-                            .trim()
-                            .is_empty()
-                        {
-                            preset.pitch.output_confidence_var = step
-                                .audio_sense_spec
-                                .pitch
-                                .output_confidence_var
-                                .clone();
                         }
                         if !step.audio_sense_spec.pitch.output_level_var.trim().is_empty() {
                             preset.pitch.output_level_var =
