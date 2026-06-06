@@ -12874,12 +12874,10 @@ mod windows_overlay {
             }
         }
         if !settings.output_confidence_var.trim().is_empty() {
-            if snapshot.note != "--" && !snapshot.note.is_empty() {
-                set_variable_value(
-                    &settings.output_confidence_var,
-                    clamp_f64_to_i32((snapshot.confidence * 1000.0) as f64),
-                );
-            }
+            set_variable_value(
+                &settings.output_confidence_var,
+                clamp_f64_to_i32((snapshot.confidence * 1000.0) as f64),
+            );
         }
         if !settings.output_level_var.trim().is_empty() {
             set_variable_value(
