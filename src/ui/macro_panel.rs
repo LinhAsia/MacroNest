@@ -20585,7 +20585,7 @@ impl CrosshairApp {
             *live_sync |= ui
                 .add(
                     DragValue::new(&mut settings.updates_per_second)
-                        .range(1..=30)
+                        .range(1..=60)
                         .speed(0.2),
                 )
                 .changed();

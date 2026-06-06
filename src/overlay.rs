@@ -6587,7 +6587,7 @@ mod windows_overlay {
             }
 
             MacroAction::StartAudioSensePreset => {
-                start_audio_sense_from_step(step, preset_id, 0, false, true);
+                start_audio_sense_from_step(step, preset_id, 0, false, true, false);
             }
 
             MacroAction::ScanVisionOnce => {
@@ -7101,6 +7101,7 @@ mod windows_overlay {
                         absolute_index,
                         false,
                         true,
+                        false,
                     );
                 }
 
@@ -7620,6 +7621,7 @@ mod windows_overlay {
                         absolute_index,
                         true,
                         true,
+                        false,
                     );
                 }
 
@@ -12894,6 +12896,7 @@ mod windows_overlay {
         monitor_key: String,
         config: crate::model::PitchAudioSenseSettings,
         stop_when_ui_foreground: bool,
+        is_preview: bool,
     ) {
         let mut monitor = audiosense::PitchMonitor::new();
         if let Err(error) = monitor.start(config.clone()) {
@@ -12918,7 +12921,9 @@ mod windows_overlay {
             }
 
             HOOK_STATE.lock().active_audio_sense_snapshots.insert(monitor_key.clone(), snapshot.clone());
-            write_pitch_snapshot_vars(&config, &snapshot);
+            if !is_preview {
+                write_pitch_snapshot_vars(&config, &snapshot);
+            }
             audiosense::sleep_detection_interval(update_hz);
         }
 
@@ -12934,7 +12939,7 @@ mod windows_overlay {
         }
 
         set_audio_sense_active(&monitor_key, true);
-        thread::spawn(move || run_pitch_monitor_loop(monitor_key, preset.pitch, stop_when_ui_foreground));
+        thread::spawn(move || run_pitch_monitor_loop(monitor_key, preset.pitch, stop_when_ui_foreground, false));
         Ok(())
     }
 
@@ -12949,13 +12954,14 @@ mod windows_overlay {
         monitor_key: String,
         spec: AudioSenseSpec,
         stop_when_ui_foreground: bool,
+        is_preview: bool,
     ) {
         if audio_sense_is_active(&monitor_key) {
             return;
         }
 
         set_audio_sense_active(&monitor_key, true);
-        thread::spawn(move || run_pitch_monitor_loop(monitor_key, spec.pitch, stop_when_ui_foreground));
+        thread::spawn(move || run_pitch_monitor_loop(monitor_key, spec.pitch, stop_when_ui_foreground, is_preview));
     }
 
     fn start_audio_sense_from_step(
@@ -12964,6 +12970,7 @@ mod windows_overlay {
         step_index: usize,
         is_hold_stop: bool,
         stop_when_ui_foreground: bool,
+        is_preview: bool,
     ) {
         match step.action {
             MacroAction::StartAudioSensePreset => {
@@ -12998,6 +13005,7 @@ mod windows_overlay {
                                     monitor_key,
                                     preset.pitch,
                                     stop_when_ui_foreground,
+                                    is_preview,
                                 )
                             });
                         }
@@ -13009,7 +13017,7 @@ mod windows_overlay {
                         step_index,
                         is_hold_stop,
                     );
-                    start_custom_audio_sense(monitor_key, spec, stop_when_ui_foreground);
+                    start_custom_audio_sense(monitor_key, spec, stop_when_ui_foreground, is_preview);
                 }
             }
             _ => {}
@@ -16190,7 +16198,7 @@ mod windows_overlay {
         step_index: usize,
         is_hold_stop: bool,
     ) {
-        start_audio_sense_from_step(step, macro_preset_id, step_index, is_hold_stop, false);
+        start_audio_sense_from_step(step, macro_preset_id, step_index, is_hold_stop, false, true);
     }
 
     pub(crate) fn stop_audio_sense(
