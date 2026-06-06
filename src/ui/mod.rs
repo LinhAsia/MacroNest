@@ -731,6 +731,7 @@ pub struct CrosshairApp {
     arduino_flash_running: bool,
     arduino_restore_emulation_after_flash: bool,
     arduino_flash_result: Arc<parking_lot::Mutex<Option<Result<(), String>>>>,
+    arduino_flash_progress: Arc<parking_lot::Mutex<Option<String>>>,
     interception_installed: bool,
     copy_folder_feedback_until: Option<Instant>,
     macro_group_export_feedback_until: Option<Instant>,
@@ -937,6 +938,7 @@ impl CrosshairApp {
             arduino_flash_running: false,
             arduino_restore_emulation_after_flash: false,
             arduino_flash_result: Arc::new(parking_lot::Mutex::new(None)),
+            arduino_flash_progress: Arc::new(parking_lot::Mutex::new(None)),
             interception_installed: false, // will update below
             copy_folder_feedback_until: None,
             macro_group_export_feedback_until: None,

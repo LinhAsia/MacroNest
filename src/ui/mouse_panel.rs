@@ -470,12 +470,17 @@ impl CrosshairApp {
         }
 
         if self.arduino_flash_running {
+            let flash_progress = self.arduino_flash_progress.lock().clone();
+            if let Some(progress) = flash_progress {
+                self.arduino_flash_status = progress;
+            }
             let flash_result = {
                 let mut res_guard = self.arduino_flash_result.lock();
                 res_guard.take()
             };
             if let Some(res) = flash_result {
                 self.arduino_flash_running = false;
+                *self.arduino_flash_progress.lock() = None;
                 self.refresh_arduino_ports();
                 if self.arduino_restore_emulation_after_flash {
                     self.state.vision_settings.use_arduino_mouse = true;
@@ -1728,7 +1733,7 @@ impl CrosshairApp {
             self.sync_vision_settings();
         }
         self.arduino_flash_running = true;
-        self.arduino_flash_status = self.tr("Resetting board (1200 baud touch)...", "Đang khôi phục mạch (chạm 1200 baud)...").to_owned();
+        self.arduino_flash_status = format!("Preparing flash: releasing {port}...");
 
         let use_spoof = self.state.vision_settings.use_arduino_spoof;
         let spoof_vid = self.state.vision_settings.arduino_vid.clone();
@@ -1737,13 +1742,20 @@ impl CrosshairApp {
         let paths = self.paths.clone();
         let flash_result = self.arduino_flash_result.clone();
         *flash_result.lock() = None;
+        let flash_progress = self.arduino_flash_progress.clone();
+        *flash_progress.lock() = Some(format!("Preparing flash: releasing {port}..."));
 
         let ui_lang = self.state.ui_language;
 
         std::thread::spawn(move || {
             let run_flash = || -> anyhow::Result<()> {
+                let set_progress = |message: String| {
+                    *flash_progress.lock() = Some(message);
+                };
+
                 // Directly and synchronously close the Arduino serial port and set flash flag.
                 // This is reliable because it directly acquires the mutex — no async channel delay.
+                set_progress(format!("Releasing {port} for flashing..."));
                 crate::overlay::close_arduino_port_for_flash();
                 std::thread::sleep(std::time::Duration::from_millis(1500));
 
@@ -1755,6 +1767,7 @@ impl CrosshairApp {
                     .collect();
 
                 // 2. Perform 1200 baud touch to reset into bootloader mode
+                set_progress(format!("Resetting {port} into bootloader (1200 baud)..."));
                 touch_arduino_bootloader_port(
                     &port,
                     std::time::Duration::from_secs(8),
@@ -1767,6 +1780,7 @@ impl CrosshairApp {
 
                 // 3. Wait for bootloader COM port to re-appear
                 std::thread::sleep(std::time::Duration::from_millis(1500));
+                set_progress("Waiting for Arduino bootloader COM port...".to_owned());
 
                 let mut bootloader_port = port.clone();
                 let start_time = std::time::Instant::now();
@@ -1800,6 +1814,9 @@ impl CrosshairApp {
                     }
 
                     if found {
+                        set_progress(format!(
+                            "Bootloader detected on {bootloader_port}; waiting until ready..."
+                        ));
                         wait_for_serial_port_openable(
                             &bootloader_port,
                             57600,
@@ -1824,6 +1841,7 @@ impl CrosshairApp {
                 }
 
                 // 4. Prepare the hex file to flash (optionally spoofed)
+                set_progress("Preparing firmware image...".to_owned());
                 let hex_to_flash = if use_spoof {
                     let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
                     let original_hex = std::fs::read_to_string(&paths.arduino_firmware_hex)?;
@@ -1847,6 +1865,7 @@ impl CrosshairApp {
                     anyhow::bail!("avrdude.exe not found");
                 }
                 
+                set_progress(format!("Flashing firmware on {bootloader_port}..."));
                 let mut cmd = std::process::Command::new(&paths.avrdude_exe);
                 #[cfg(windows)]
                 {
@@ -1869,6 +1888,9 @@ impl CrosshairApp {
                 if let Ok(first_output) = &output {
                     let stderr = String::from_utf8_lossy(&first_output.stderr);
                     if !first_output.status.success() && stderr.contains("Access is denied") {
+                        set_progress(format!(
+                            "Bootloader busy on {bootloader_port}; retrying avrdude..."
+                        ));
                         std::thread::sleep(std::time::Duration::from_millis(1000));
                         wait_for_serial_port_openable(
                             &bootloader_port,
@@ -1913,6 +1935,7 @@ impl CrosshairApp {
                     anyhow::bail!("avrdude flash failed: {}", err_msg);
                 }
 
+                set_progress("Flash complete. Reconnecting Arduino emulation...".to_owned());
                 Ok(())
             };
 
