@@ -194,6 +194,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static CURRENT_ARDUINO_PORT_NAME: Lazy<Mutex<String>> =
         Lazy::new(|| Mutex::new(String::new()));
+    static LAST_ARDUINO_OPEN_ATTEMPT: Lazy<Mutex<Option<Instant>>> =
+        Lazy::new(|| Mutex::new(None));
 
     pub(crate) static HOOK_STATE: Lazy<Mutex<HookState>> =
         Lazy::new(|| Mutex::new(HookState::default()));
@@ -4026,6 +4028,32 @@ mod windows_overlay {
                     hook_state.use_interception = settings.use_interception;
                     hook_state.use_arduino_mouse = settings.use_arduino_mouse;
                     hook_state.arduino_com_port = settings.arduino_com_port.clone();
+
+                    // Pre-initialize Arduino serial port on a background thread
+                    let use_arduino = settings.use_arduino_mouse;
+                    let com_port = settings.arduino_com_port.clone();
+                    if use_arduino && !com_port.is_empty() {
+                        thread::spawn(move || {
+                            let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
+                            let mut port_guard = ARDUINO_PORT.lock();
+                            if *name_guard != com_port || port_guard.is_none() {
+                                *port_guard = None;
+                                *name_guard = String::new();
+                                // Add a tiny delay to let any previous serial connection close properly
+                                thread::sleep(Duration::from_millis(100));
+                                match serialport::new(&com_port, 115200)
+                                    .timeout(Duration::from_millis(10))
+                                    .open()
+                                {
+                                    Ok(p) => {
+                                        *port_guard = Some(p);
+                                        *name_guard = com_port;
+                                    }
+                                    Err(_) => {}
+                                }
+                            }
+                        });
+                    }
                 }
 
                 OverlayCommand::SetTrayIconVisible(visible) => {
@@ -10318,6 +10346,16 @@ mod windows_overlay {
         let mut port_guard = ARDUINO_PORT.lock();
         if *name_guard != com_port || port_guard.is_none() {
             *port_guard = None;
+            
+            // Check cooldown to prevent resetting Arduino Leonardo in an infinite loop
+            let mut last_attempt = LAST_ARDUINO_OPEN_ATTEMPT.lock();
+            if let Some(instant) = *last_attempt {
+                if instant.elapsed() < Duration::from_secs(3) {
+                    return Ok(()); // Cooldown active, skip opening to prevent infinite reset loop
+                }
+            }
+            *last_attempt = Some(Instant::now());
+
             match serialport::new(&com_port, 115200)
                 .timeout(Duration::from_millis(10))
                 .open()
@@ -10326,18 +10364,16 @@ mod windows_overlay {
                     *port_guard = Some(p);
                     *name_guard = com_port.clone();
                 }
-                Err(e) => {
-                    bail!("Failed to open serial port {}: {}", com_port, e);
+                Err(_) => {
+                    return Ok(()); // Fail silently to not abort macro execution
                 }
             }
         }
 
         if let Some(ref mut port) = *port_guard {
-            if let Err(e) = port.write_all(bytes) {
-                *port_guard = None;
-                bail!("Failed to write to serial port: {}", e);
+            if let Err(_) = port.write_all(bytes).and_then(|_| port.flush()) {
+                *port_guard = None; // Connection lost, will attempt reconnect after 3-second cooldown
             }
-            let _ = port.flush();
         }
 
         Ok(())
