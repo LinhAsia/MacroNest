@@ -1576,21 +1576,34 @@ impl CrosshairApp {
             self.arduino_available_ports.clear();
             return;
         };
+        let preferred_port = preferred_arduino_port(
+            &ports,
+            parse_hex_u16(&self.state.vision_settings.arduino_vid),
+            parse_hex_u16(&self.state.vision_settings.arduino_pid),
+        );
         self.arduino_available_ports = ports.into_iter().map(|p| p.port_name).collect();
         self.arduino_available_ports.sort();
 
         let current_port = self.state.vision_settings.arduino_com_port.clone();
         if current_port.is_empty() {
-            if self.arduino_available_ports.len() == 1 {
-                self.state.vision_settings.arduino_com_port = self.arduino_available_ports[0].clone();
+            if let Some(port) = preferred_port.or_else(|| {
+                (self.arduino_available_ports.len() == 1)
+                    .then(|| self.arduino_available_ports[0].clone())
+            }) {
+                self.state.vision_settings.arduino_com_port = port;
                 self.sync_vision_settings();
             }
             return;
         }
 
-        if !self.arduino_available_ports.contains(&current_port) && self.arduino_available_ports.len() == 1 {
-            self.state.vision_settings.arduino_com_port = self.arduino_available_ports[0].clone();
-            self.sync_vision_settings();
+        if !self.arduino_available_ports.contains(&current_port) {
+            if let Some(port) = preferred_port.or_else(|| {
+                (self.arduino_available_ports.len() == 1)
+                    .then(|| self.arduino_available_ports[0].clone())
+            }) {
+                self.state.vision_settings.arduino_com_port = port;
+                self.sync_vision_settings();
+            }
         }
     }
 
@@ -1881,6 +1894,61 @@ fn parse_hex_u16(s: &str) -> Option<u16> {
     let cleaned = s.trim().to_uppercase();
     let cleaned = cleaned.strip_prefix("0X").unwrap_or(&cleaned);
     u16::from_str_radix(cleaned, 16).ok()
+}
+
+fn preferred_arduino_port(
+    ports: &[serialport::SerialPortInfo],
+    configured_vid: Option<u16>,
+    configured_pid: Option<u16>,
+) -> Option<String> {
+    let mut scored_ports = ports
+        .iter()
+        .filter_map(|port| {
+            let score = arduino_port_score(port, configured_vid, configured_pid);
+            (score > 0).then(|| (score, port.port_name.clone()))
+        })
+        .collect::<Vec<_>>();
+    scored_ports.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    let best = scored_ports.first()?;
+    if scored_ports.get(1).is_some_and(|second| second.0 == best.0) {
+        return None;
+    }
+    Some(best.1.clone())
+}
+
+fn arduino_port_score(
+    port: &serialport::SerialPortInfo,
+    configured_vid: Option<u16>,
+    configured_pid: Option<u16>,
+) -> u32 {
+    let serialport::SerialPortType::UsbPort(info) = &port.port_type else {
+        return 0;
+    };
+
+    let mut score = 0;
+    if configured_vid == Some(info.vid) && configured_pid == Some(info.pid) {
+        score += 120;
+    }
+    if info.vid == 0x2341 && matches!(info.pid, 0x8036 | 0x0036 | 0x8037 | 0x0037) {
+        score += 120;
+    } else if info.vid == 0x2341 {
+        score += 60;
+    }
+
+    let text = format!(
+        "{} {} {}",
+        info.manufacturer.as_deref().unwrap_or_default(),
+        info.product.as_deref().unwrap_or_default(),
+        info.serial_number.as_deref().unwrap_or_default()
+    )
+    .to_ascii_lowercase();
+    for needle in ["arduino", "leonardo", "atmega32u4", "avr109", "bootloader"] {
+        if text.contains(needle) {
+            score += 50;
+        }
+    }
+
+    score
 }
 
 fn wait_for_serial_port_openable(
