@@ -962,6 +962,13 @@ mod windows_overlay {
                     let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
                     let mut port_guard = ARDUINO_PORT.lock();
 
+                    if HOOK_STATE.lock().arduino_flash_in_progress {
+                        *port_guard = None;
+                        *name_guard = String::new();
+                        thread::sleep(Duration::from_millis(500));
+                        continue;
+                    }
+
                     if *name_guard != com_port || port_guard.is_none() {
                         *port_guard = None;
                         *name_guard = String::new();
@@ -10388,10 +10395,17 @@ mod windows_overlay {
 
     fn write_arduino_data(bytes: &[u8]) -> Result<()> {
         use std::io::Write;
-        let (use_arduino, com_port) = {
+        let (use_arduino, com_port, flash_in_progress) = {
             let state = HOOK_STATE.lock();
-            (state.use_arduino_mouse, state.arduino_com_port.clone())
+            (
+                state.use_arduino_mouse,
+                state.arduino_com_port.clone(),
+                state.arduino_flash_in_progress,
+            )
         };
+        if flash_in_progress {
+            anyhow::bail!("Arduino flash is in progress");
+        }
         if !use_arduino || com_port.is_empty() {
             anyhow::bail!("Arduino emulation not enabled or port empty");
         }
