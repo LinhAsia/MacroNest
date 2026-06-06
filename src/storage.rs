@@ -30,6 +30,10 @@ pub struct AppPaths {
     pub opencv_dll: PathBuf,
     pub opencv_videoio_ffmpeg_dll: PathBuf,
     pub interception_dll: PathBuf,
+    pub arduino_tools_zip: PathBuf,
+    pub avrdude_exe: PathBuf,
+    pub avrdude_conf: PathBuf,
+    pub arduino_firmware_hex: PathBuf,
 }
 
 impl AppPaths {
@@ -62,6 +66,10 @@ impl AppPaths {
         let opencv_dll = bin_dir.join("opencv_world4100.dll");
         let opencv_videoio_ffmpeg_dll = bin_dir.join("opencv_videoio_ffmpeg4100_64.dll");
         let interception_dll = bin_dir.join("interception.dll");
+        let arduino_tools_zip = bin_dir.join("arduino_tools.zip");
+        let avrdude_exe = bin_dir.join("avrdude.exe");
+        let avrdude_conf = bin_dir.join("avrdude.conf");
+        let arduino_firmware_hex = bin_dir.join("firmware.hex");
 
         fs::create_dir_all(&root)?;
         fs::create_dir_all(&profiles_dir)?;
@@ -86,6 +94,10 @@ impl AppPaths {
             opencv_dll,
             opencv_videoio_ffmpeg_dll,
             interception_dll,
+            arduino_tools_zip,
+            avrdude_exe,
+            avrdude_conf,
+            arduino_firmware_hex,
         })
     }
 

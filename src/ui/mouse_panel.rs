@@ -448,6 +448,44 @@ impl CrosshairApp {
             self.persist_mouse_path_presets();
         }
 
+        // Poll background jobs
+        if let Some(ref job) = self.arduino_download_job {
+            if job.is_finished() {
+                let job = self.arduino_download_job.take();
+                if let Some(j) = job {
+                    match j.join() {
+                        Ok(Ok(())) => {
+                            self.arduino_tools_downloaded = true;
+                            self.status = self.tr("Arduino tools downloaded successfully!", "Tải công cụ Arduino thành công!").to_owned();
+                        }
+                        Ok(Err(e)) => {
+                            self.status = format!("Download failed: {e}");
+                        }
+                        Err(_) => {
+                            self.status = "Download thread panicked".to_owned();
+                        }
+                    }
+                }
+            }
+        }
+
+        if self.arduino_flash_running {
+            let mut res_guard = self.arduino_flash_result.lock();
+            if let Some(res) = res_guard.take() {
+                self.arduino_flash_running = false;
+                match res {
+                    Ok(()) => {
+                        self.arduino_flash_status = self.tr("Flash Success!", "Nạp thành công!").to_owned();
+                    }
+                    Err(e) => {
+                        self.arduino_flash_status = format!("Error: {e}");
+                    }
+                }
+            } else {
+                ui.ctx().request_repaint();
+            }
+        }
+
         let label_arduino = self.tr("Use Arduino Leonardo Mouse Emulation", "Sử dụng giả lập chuột Arduino Leonardo");
         let refresh_txt = self.tr("🔄 Refresh Ports", "🔄 Tải lại danh sách cổng");
         let select_port_txt = self.tr("Select Port", "Chọn cổng");
@@ -483,16 +521,36 @@ impl CrosshairApp {
             }
         }
 
+        let is_connected = !self.state.vision_settings.arduino_com_port.is_empty() 
+            && self.arduino_available_ports.contains(&self.state.vision_settings.arduino_com_port);
+
         ui.add_space(8.0);
-        ui.label(RichText::new(arduino_panel_title).strong());
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(arduino_panel_title).strong());
+            ui.add_space(8.0);
+            if is_connected {
+                ui.label(RichText::new(self.tr("✅ Connected", "✅ Đang kết nối")).color(Color32::from_rgb(126, 224, 182)));
+            } else {
+                ui.label(RichText::new(self.tr("❌ Disconnected", "❌ Chưa kết nối")).color(Color32::from_rgb(255, 96, 96)));
+            }
+        });
 
         let mut arduino_changed = false;
         Self::show_preset_card(ui, self.state.vision_settings.use_arduino_mouse, |ui| {
             ui.horizontal(|ui| {
-                let checkbox_res = ui.checkbox(
-                    &mut self.state.vision_settings.use_arduino_mouse,
-                    label_arduino,
+                let mut checkbox_res = ui.add_enabled(
+                    is_connected,
+                    egui::Checkbox::new(
+                        &mut self.state.vision_settings.use_arduino_mouse,
+                        label_arduino,
+                    )
                 );
+                if !is_connected {
+                    checkbox_res = checkbox_res.on_hover_text(self.tr(
+                        "Please plug in the Arduino board and select the correct COM port to enable emulation.",
+                        "Vui lòng cắm mạch Arduino và chọn đúng cổng COM để kích hoạt giả lập."
+                    ));
+                }
                 if checkbox_res.changed() {
                     arduino_changed = true;
                 }
@@ -524,6 +582,51 @@ impl CrosshairApp {
                     ui.label(com_port_lbl);
                 });
             });
+
+            ui.add_space(8.0);
+
+            // Flashing / Download section
+            if !self.arduino_tools_downloaded {
+                if self.arduino_download_job.is_some() {
+                    let progress = self.arduino_download_progress.load(std::sync::atomic::Ordering::SeqCst) as f32 / 1000.0;
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("Downloading tools...", "Đang tải công cụ..."));
+                        ui.add(egui::ProgressBar::new(progress).show_percentage());
+                    });
+                    ui.ctx().request_repaint();
+                } else {
+                    let download_btn_lbl = self.tr("📥 Download Flashing Tools & Firmware", "📥 Tải công cụ nạp & Firmware");
+                    if ui.button(download_btn_lbl).clicked() {
+                        self.start_arduino_tools_download();
+                    }
+                }
+            } else {
+                ui.horizontal(|ui| {
+                    let flash_btn_lbl = self.tr("⚡ Auto-Flash Firmware", "⚡ Tự động nạp Firmware");
+                    let flash_btn = ui.add_enabled(
+                        !self.arduino_flash_running && !self.state.vision_settings.arduino_com_port.is_empty(),
+                        egui::Button::new(flash_btn_lbl)
+                    );
+                    if flash_btn.clicked() {
+                        self.start_arduino_flash();
+                    }
+
+                    ui.add_space(8.0);
+                    let delete_btn_lbl = self.tr("🗑️ Delete Tools", "🗑️ Xóa công cụ nạp");
+                    if ui.button(delete_btn_lbl).clicked() {
+                        let _ = std::fs::remove_file(&self.paths.avrdude_exe);
+                        let _ = std::fs::remove_file(&self.paths.avrdude_conf);
+                        let _ = std::fs::remove_file(&self.paths.arduino_firmware_hex);
+                        self.arduino_tools_downloaded = false;
+                        self.arduino_flash_status.clear();
+                    }
+                    
+                    if !self.arduino_flash_status.is_empty() {
+                        ui.add_space(14.0);
+                        ui.label(RichText::new(&self.arduino_flash_status).strong());
+                    }
+                });
+            }
 
             ui.add_space(6.0);
             
@@ -1457,5 +1560,158 @@ void loop() {
         if unsafe { GetCursorPos(&mut point) }.is_ok() {
             self.finish_mouse_move_absolute_capture(ctx, target, point.x, point.y, None);
         }
+    }
+
+    pub(crate) fn start_arduino_tools_download(&mut self) {
+        if self.arduino_download_job.is_some() {
+            return;
+        }
+
+        let paths = self.paths.clone();
+        let progress = self.arduino_download_progress.clone();
+        progress.store(0, std::sync::atomic::Ordering::SeqCst);
+
+        let job = std::thread::spawn(move || -> anyhow::Result<()> {
+            let url =
+                "https://github.com/Baolinh0305/MacroNest/releases/download/tools/arduino_tools.zip";
+            let mut response = reqwest::blocking::get(url)?.error_for_status()?;
+            let total_size = response.content_length().unwrap_or(1000000);
+
+            // Ensure bin directory exists
+            std::fs::create_dir_all(&paths.bin_dir)?;
+
+            let mut file = std::fs::File::create(&paths.arduino_tools_zip)?;
+            let mut downloaded: u64 = 0;
+            let mut buffer = [0u8; 16384];
+
+            use std::io::{Read, Write};
+            loop {
+                let n = response.read(&mut buffer)?;
+                if n == 0 {
+                    break;
+                }
+                file.write_all(&buffer[..n])?;
+                downloaded += n as u64;
+                let p = (downloaded as f32 / total_size as f32 * 1000.0) as u32;
+                progress.store(p, std::sync::atomic::Ordering::SeqCst);
+            }
+
+            drop(file);
+
+            // Extract using PowerShell
+            let extract_script = format!(
+                "Expand-Archive -LiteralPath {} -DestinationPath {} -Force",
+                Self::powershell_quote(&paths.arduino_tools_zip.to_string_lossy()),
+                Self::powershell_quote(&paths.bin_dir.to_string_lossy()),
+            );
+            let extract_status = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &extract_script])
+                .status()?;
+            if !extract_status.success() {
+                anyhow::bail!("Failed to extract arduino_tools.zip");
+            }
+
+            let _ = std::fs::remove_file(&paths.arduino_tools_zip);
+
+            Ok(())
+        });
+
+        self.arduino_download_job = Some(job);
+    }
+
+    pub(crate) fn start_arduino_flash(&mut self) {
+        if self.arduino_flash_running {
+            return;
+        }
+
+        let port = self.state.vision_settings.arduino_com_port.clone();
+        if port.is_empty() {
+            self.arduino_flash_status = self.tr("Error: Select a COM Port first", "Lỗi: Hãy chọn cổng COM trước").to_owned();
+            return;
+        }
+
+        self.arduino_flash_running = true;
+        self.arduino_flash_status = self.tr("Resetting board (1200 baud touch)...", "Đang khôi phục mạch (chạm 1200 baud)...").to_owned();
+
+        let paths = self.paths.clone();
+        let flash_result = self.arduino_flash_result.clone();
+        *flash_result.lock() = None;
+
+        let ui_lang = self.state.ui_language;
+
+        std::thread::spawn(move || {
+            let run_flash = || -> anyhow::Result<()> {
+                // 1. Scan ports before touch
+                let ports_before = serialport::available_ports().unwrap_or_default();
+                let before_names: std::collections::HashSet<String> = ports_before
+                    .into_iter()
+                    .map(|p| p.port_name)
+                    .collect();
+
+                // 2. Perform 1200 baud touch to reset into bootloader mode
+                {
+                    let _ = serialport::new(&port, 1200)
+                        .timeout(std::time::Duration::from_millis(500))
+                        .open();
+                }
+
+                // 3. Wait for bootloader COM port to re-appear
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+
+                let mut bootloader_port = port.clone();
+                let start_time = std::time::Instant::now();
+                let mut found = false;
+
+                while start_time.elapsed().as_secs() < 6 {
+                    let current_ports = serialport::available_ports().unwrap_or_default();
+                    for p in &current_ports {
+                        if !before_names.contains(&p.port_name) {
+                            bootloader_port = p.port_name.clone();
+                            found = true;
+                            break;
+                        }
+                    }
+                    if found {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+
+                // 4. Execute avrdude to flash
+                if !paths.avrdude_exe.exists() {
+                    anyhow::bail!("avrdude.exe not found");
+                }
+                
+                let output = std::process::Command::new(&paths.avrdude_exe)
+                    .args([
+                        "-C", &paths.avrdude_conf.to_string_lossy(),
+                        "-v",
+                        "-p", "atmega32u4",
+                        "-c", "avr109",
+                        "-P", &bootloader_port,
+                        "-b", "57600",
+                        "-D",
+                        "-U", &format!("flash:w:{}:i", paths.arduino_firmware_hex.to_string_lossy()),
+                    ])
+                    .output()?;
+
+                if !output.status.success() {
+                    let err_msg = String::from_utf8_lossy(&output.stderr);
+                    anyhow::bail!("avrdude flash failed: {}", err_msg);
+                }
+
+                Ok(())
+            };
+
+            let res = run_flash();
+            match res {
+                Ok(_) => {
+                    *flash_result.lock() = Some(Ok(()));
+                }
+                Err(e) => {
+                    *flash_result.lock() = Some(Err(e.to_string()));
+                }
+            }
+        });
     }
 }
