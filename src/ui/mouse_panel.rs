@@ -556,6 +556,29 @@ impl CrosshairApp {
                     arduino_changed = true;
                 }
 
+                let connect_btn_label = if self.state.vision_settings.use_arduino_mouse {
+                    self.tr("Disconnect", "Disconnect")
+                } else {
+                    self.tr("Connect", "Connect")
+                };
+                let connect_btn = ui.add_enabled(
+                    selected_port_exists && !self.arduino_flash_running && !overlay_flash_in_progress,
+                    egui::Button::new(connect_btn_label),
+                );
+                let connect_btn = if selected_port_exists {
+                    connect_btn
+                } else {
+                    connect_btn.on_hover_text(self.tr(
+                        "Select an Arduino COM port first.",
+                        "Select an Arduino COM port first.",
+                    ))
+                };
+                if connect_btn.clicked() {
+                    self.state.vision_settings.use_arduino_mouse =
+                        !self.state.vision_settings.use_arduino_mouse;
+                    arduino_changed = true;
+                }
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(refresh_txt).clicked() {
                         self.refresh_arduino_ports();
