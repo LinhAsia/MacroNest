@@ -1640,7 +1640,9 @@ impl CrosshairApp {
                 // Directly and synchronously close the Arduino serial port and set flash flag.
                 // This is reliable because it directly acquires the mutex — no async channel delay.
                 crate::overlay::close_arduino_port_for_flash();
-                
+                wait_for_serial_port_openable(&port, 115200, std::time::Duration::from_secs(5))
+                    .map_err(|error| anyhow::anyhow!("Could not release {port} before flashing: {error}"))?;
+
                 // 1. Scan ports before touch
                 let ports_before = serialport::available_ports().unwrap_or_default();
                 let before_names: std::collections::HashSet<String> = ports_before
@@ -1649,11 +1651,10 @@ impl CrosshairApp {
                     .collect();
 
                 // 2. Perform 1200 baud touch to reset into bootloader mode
-                {
-                    let _ = serialport::new(&port, 1200)
-                        .timeout(std::time::Duration::from_millis(500))
-                        .open();
-                }
+                serialport::new(&port, 1200)
+                    .timeout(std::time::Duration::from_millis(500))
+                    .open()
+                    .map_err(|error| anyhow::anyhow!("Could not open {port} at 1200 baud to enter bootloader: {error}"))?;
 
                 // 3. Wait for bootloader COM port to re-appear
                 std::thread::sleep(std::time::Duration::from_millis(1500));
@@ -1661,6 +1662,7 @@ impl CrosshairApp {
                 let mut bootloader_port = port.clone();
                 let start_time = std::time::Instant::now();
                 let mut found = false;
+                let mut original_port_disappeared = false;
 
                 // Wait up to 15 seconds for bootloader port to register (Case A: new port, Case B: same port reappeared)
                 while start_time.elapsed().as_secs() < 15 {
@@ -1680,18 +1682,36 @@ impl CrosshairApp {
                     }
 
                     // Case B: same port reappeared after a brief absence
-                    if !found && current_names.contains(&port) {
+                    if !current_names.contains(&port) {
+                        original_port_disappeared = true;
+                    }
+                    if !found && original_port_disappeared && current_names.contains(&port) {
                         bootloader_port = port.clone();
                         found = true;
                     }
 
                     if found {
-                        // Give Windows another 500ms to fully load the serial stack after registration
-                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        wait_for_serial_port_openable(
+                            &bootloader_port,
+                            57600,
+                            std::time::Duration::from_secs(5),
+                        )
+                        .map_err(|error| {
+                            anyhow::anyhow!(
+                                "Bootloader port {bootloader_port} appeared but was not ready: {error}"
+                            )
+                        })?;
+                        std::thread::sleep(std::time::Duration::from_millis(300));
                         break;
                     }
 
                     std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+
+                if !found {
+                    anyhow::bail!(
+                        "Arduino bootloader port did not appear after resetting {port}. Try pressing reset twice quickly, then flash again."
+                    );
                 }
 
                 // 4. Prepare the hex file to flash (optionally spoofed)
@@ -1725,8 +1745,7 @@ impl CrosshairApp {
                     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
                 }
                 
-                let output = cmd
-                    .args([
+                let avrdude_args = [
                         "-C", &paths.avrdude_conf.to_string_lossy(),
                         "-v",
                         "-p", "atmega32u4",
@@ -1735,8 +1754,43 @@ impl CrosshairApp {
                         "-b", "57600",
                         "-D",
                         "-U", &format!("flash:w:{}:i", hex_to_flash.to_string_lossy()),
-                    ])
-                    .output();
+                    ];
+                let mut output = cmd.args(avrdude_args).output();
+
+                if let Ok(first_output) = &output {
+                    let stderr = String::from_utf8_lossy(&first_output.stderr);
+                    if !first_output.status.success() && stderr.contains("Access is denied") {
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
+                        wait_for_serial_port_openable(
+                            &bootloader_port,
+                            57600,
+                            std::time::Duration::from_secs(5),
+                        )
+                        .map_err(|error| {
+                            anyhow::anyhow!(
+                                "Bootloader port {bootloader_port} stayed busy before avrdude retry: {error}"
+                            )
+                        })?;
+
+                        let mut retry_cmd = std::process::Command::new(&paths.avrdude_exe);
+                        #[cfg(windows)]
+                        {
+                            use std::os::windows::process::CommandExt;
+                            retry_cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                        }
+                        let retry_args = [
+                            "-C", &paths.avrdude_conf.to_string_lossy(),
+                            "-v",
+                            "-p", "atmega32u4",
+                            "-c", "avr109",
+                            "-P", &bootloader_port,
+                            "-b", "57600",
+                            "-D",
+                            "-U", &format!("flash:w:{}:i", hex_to_flash.to_string_lossy()),
+                        ];
+                        output = retry_cmd.args(retry_args).output();
+                    }
+                }
 
                 if use_spoof {
                     let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
@@ -1772,6 +1826,32 @@ fn parse_hex_u16(s: &str) -> Option<u16> {
     let cleaned = s.trim().to_uppercase();
     let cleaned = cleaned.strip_prefix("0X").unwrap_or(&cleaned);
     u16::from_str_radix(cleaned, 16).ok()
+}
+
+fn wait_for_serial_port_openable(
+    port: &str,
+    baud_rate: u32,
+    timeout: std::time::Duration,
+) -> anyhow::Result<()> {
+    let start = std::time::Instant::now();
+    let mut last_error = None;
+    while start.elapsed() < timeout {
+        match serialport::new(port, baud_rate)
+            .timeout(std::time::Duration::from_millis(250))
+            .open()
+        {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                last_error = Some(error.to_string());
+                std::thread::sleep(std::time::Duration::from_millis(150));
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "{}",
+        last_error.unwrap_or_else(|| "serial port was not available".to_owned())
+    )
 }
 
 fn patch_hex_descriptors(hex_content: &str, vid: u16, pid: u16) -> anyhow::Result<String> {
