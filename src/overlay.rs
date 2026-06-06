@@ -10339,7 +10339,7 @@ mod windows_overlay {
             (state.use_arduino_mouse, state.arduino_com_port.clone())
         };
         if !use_arduino || com_port.is_empty() {
-            return Ok(());
+            anyhow::bail!("Arduino emulation not enabled or port empty");
         }
 
         let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
@@ -10351,7 +10351,7 @@ mod windows_overlay {
             let mut last_attempt = LAST_ARDUINO_OPEN_ATTEMPT.lock();
             if let Some(instant) = *last_attempt {
                 if instant.elapsed() < Duration::from_secs(3) {
-                    return Ok(()); // Cooldown active, skip opening to prevent infinite reset loop
+                    anyhow::bail!("Arduino reconnect cooldown active");
                 }
             }
             *last_attempt = Some(Instant::now());
@@ -10364,19 +10364,21 @@ mod windows_overlay {
                     *port_guard = Some(p);
                     *name_guard = com_port.clone();
                 }
-                Err(_) => {
-                    return Ok(()); // Fail silently to not abort macro execution
+                Err(e) => {
+                    anyhow::bail!("Failed to open serial port: {}", e);
                 }
             }
         }
 
         if let Some(ref mut port) = *port_guard {
-            if let Err(_) = port.write_all(bytes).and_then(|_| port.flush()) {
+            if let Err(e) = port.write_all(bytes).and_then(|_| port.flush()) {
                 *port_guard = None; // Connection lost, will attempt reconnect after 3-second cooldown
+                anyhow::bail!("Failed to write to serial port: {}", e);
             }
+            Ok(())
+        } else {
+            anyhow::bail!("Serial port not open")
         }
-
-        Ok(())
     }
 
     fn send_mouse_input(dw_flags: MOUSE_EVENT_FLAGS, mouse_data: u32) -> Result<()> {
@@ -10385,46 +10387,39 @@ mod windows_overlay {
             (state.use_arduino_mouse, state.arduino_com_port.clone())
         };
         if use_arduino && !com_port.is_empty() {
-            let mut sent_packet = false;
             let mut send_btn = |btn: u8, state: u8| -> Result<()> {
                 let packet = [0xAA, 2, btn, state, 0, 0];
-                write_arduino_data(&packet)?;
-                Ok(())
+                write_arduino_data(&packet)
             };
 
+            let mut arduino_success = true;
+
             if dw_flags.contains(MOUSEEVENTF_LEFTDOWN) {
-                send_btn(1, 1)?;
-                sent_packet = true;
+                if send_btn(1, 1).is_err() { arduino_success = false; }
             }
             if dw_flags.contains(MOUSEEVENTF_LEFTUP) {
-                send_btn(1, 0)?;
-                sent_packet = true;
+                if send_btn(1, 0).is_err() { arduino_success = false; }
             }
             if dw_flags.contains(MOUSEEVENTF_RIGHTDOWN) {
-                send_btn(2, 1)?;
-                sent_packet = true;
+                if send_btn(2, 1).is_err() { arduino_success = false; }
             }
             if dw_flags.contains(MOUSEEVENTF_RIGHTUP) {
-                send_btn(2, 0)?;
-                sent_packet = true;
+                if send_btn(2, 0).is_err() { arduino_success = false; }
             }
             if dw_flags.contains(MOUSEEVENTF_MIDDLEDOWN) {
-                send_btn(3, 1)?;
-                sent_packet = true;
+                if send_btn(3, 1).is_err() { arduino_success = false; }
             }
             if dw_flags.contains(MOUSEEVENTF_MIDDLEUP) {
-                send_btn(3, 0)?;
-                sent_packet = true;
+                if send_btn(3, 0).is_err() { arduino_success = false; }
             }
             if dw_flags.contains(MOUSEEVENTF_WHEEL) {
                 let val = (mouse_data as i32) / 120;
                 let val_byte = (val.clamp(-127, 127) as i8) as u8;
                 let packet = [0xAA, 3, val_byte, 0, 0, 0];
-                write_arduino_data(&packet)?;
-                sent_packet = true;
+                if write_arduino_data(&packet).is_err() { arduino_success = false; }
             }
 
-            if sent_packet {
+            if arduino_success {
                 return Ok(());
             }
         }
@@ -10696,8 +10691,9 @@ mod windows_overlay {
                 ((dy >> 8) & 0xFF) as u8,
                 (dy & 0xFF) as u8,
             ];
-            let _ = write_arduino_data(&packet);
-            return Ok(());
+            if write_arduino_data(&packet).is_ok() {
+                return Ok(());
+            }
         }
 
         let use_interception = {
@@ -10876,8 +10872,9 @@ mod windows_overlay {
                 ((dy >> 8) & 0xFF) as u8,
                 (dy & 0xFF) as u8,
             ];
-            let _ = write_arduino_data(&packet);
-            return Ok(());
+            if write_arduino_data(&packet).is_ok() {
+                return Ok(());
+            }
         }
 
         let use_interception = {
