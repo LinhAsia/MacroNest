@@ -20866,6 +20866,29 @@ impl CrosshairApp {
                                         }
                                         *live_sync = true;
                                     }
+
+                                    if is_active {
+                                        ui.ctx().request_repaint();
+                                        if let Some(snapshot) = crate::overlay::get_audio_sense_snapshot(
+                                            step.audio_sense_preset_id,
+                                            macro_preset_id,
+                                            step_index,
+                                            is_hold_stop,
+                                        ) {
+                                            ui.add_space(4.0);
+                                            let text = format!(
+                                                "Note: {} | Conf: {:.2} | Level: {:.2}",
+                                                snapshot.note,
+                                                snapshot.confidence,
+                                                snapshot.level
+                                            );
+                                            ui.label(
+                                                egui::RichText::new(text)
+                                                    .size(11.0)
+                                                    .color(ui.visuals().weak_text_color())
+                                            );
+                                        }
+                                    }
                                 }
                             }
                         });

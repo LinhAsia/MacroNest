@@ -576,6 +576,7 @@ mod windows_overlay {
         vision_presets: Vec<VisionPreset>,
         audio_sense_presets: Vec<AudioSensePreset>,
         active_audio_sense_keys: HashSet<String>,
+        active_audio_sense_snapshots: std::collections::HashMap<String, crate::audiosense::PitchSnapshot>,
         geometry_presets: Vec<crate::model::GeometryPreset>,
         active_geometry_preset_ids: HashSet<u32>,
         active_geometry_steps: HashMap<(u32, usize), crate::model::GeometrySpec>,
@@ -655,6 +656,7 @@ mod windows_overlay {
                 vision_presets: Vec::new(),
                 audio_sense_presets: Vec::new(),
                 active_audio_sense_keys: HashSet::new(),
+                active_audio_sense_snapshots: std::collections::HashMap::new(),
                 geometry_presets: Vec::new(),
                 active_geometry_preset_ids: HashSet::new(),
                 active_geometry_steps: HashMap::new(),
@@ -12846,11 +12848,14 @@ mod windows_overlay {
             hook_state.active_audio_sense_keys.insert(key.to_owned());
         } else {
             hook_state.active_audio_sense_keys.remove(key);
+            hook_state.active_audio_sense_snapshots.remove(key);
         }
     }
 
     fn stop_all_audio_sense() {
-        HOOK_STATE.lock().active_audio_sense_keys.clear();
+        let mut hook_state = HOOK_STATE.lock();
+        hook_state.active_audio_sense_keys.clear();
+        hook_state.active_audio_sense_snapshots.clear();
     }
 
     fn audio_sense_preset_by_id(spec: &str) -> Result<AudioSensePreset> {
@@ -12912,6 +12917,7 @@ mod windows_overlay {
                 break;
             }
 
+            HOOK_STATE.lock().active_audio_sense_snapshots.insert(monitor_key.clone(), snapshot.clone());
             write_pitch_snapshot_vars(&config, &snapshot);
             audiosense::sleep_detection_interval(update_hz);
         }
@@ -16201,6 +16207,20 @@ mod windows_overlay {
         set_audio_sense_active(&key, false);
     }
 
+    pub(crate) fn get_audio_sense_snapshot(
+        preset_id: Option<u32>,
+        macro_preset_id: u32,
+        step_index: usize,
+        is_hold_stop: bool,
+    ) -> Option<crate::audiosense::PitchSnapshot> {
+        let key = if let Some(pid) = preset_id {
+            audio_sense_monitor_key_for_preset(pid)
+        } else {
+            custom_audio_sense_monitor_key(macro_preset_id, step_index, is_hold_stop)
+        };
+        HOOK_STATE.lock().active_audio_sense_snapshots.get(&key).cloned()
+    }
+
     pub(crate) fn is_crosshair_active(profile_name: &str) -> bool {
         let name = profile_name.trim();
         if name.is_empty() {
@@ -16360,6 +16380,15 @@ mod fallback {
         _step_index: usize,
         _is_hold_stop: bool,
     ) {}
+
+    pub(crate) fn get_audio_sense_snapshot(
+        _preset_id: Option<u32>,
+        _macro_preset_id: u32,
+        _step_index: usize,
+        _is_hold_stop: bool,
+    ) -> Option<crate::audiosense::PitchSnapshot> {
+        None
+    }
 
     pub(crate) fn is_crosshair_active(_profile_name: &str) -> bool {
         false
