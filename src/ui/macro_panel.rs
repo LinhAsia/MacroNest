@@ -18859,7 +18859,10 @@ impl CrosshairApp {
 
         }
 
-        ui.add_space((macro_panel_scroll_height - 50.0).max(0.0));
+        if pending_macro_group_scroll_target.is_some() {
+            // Keep temporary room at the bottom only while centering a target group.
+            ui.add_space((macro_panel_scroll_height - 50.0).max(0.0));
+        }
 
         if !pending_macro_group_scroll_consumed {
 
