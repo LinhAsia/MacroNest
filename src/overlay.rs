@@ -10968,6 +10968,33 @@ mod windows_overlay {
         send_mouse_input(flags, mouse_data)
     }
 
+    fn send_arduino_relative_move_packet(dx: i32, dy: i32) -> Result<()> {
+        let packet = [
+            0xAA,
+            1,
+            ((dx >> 8) & 0xFF) as u8,
+            (dx & 0xFF) as u8,
+            ((dy >> 8) & 0xFF) as u8,
+            (dy & 0xFF) as u8,
+        ];
+        write_arduino_data(&packet)
+    }
+
+    fn send_arduino_relative_move_sequence(dx: i32, dy: i32) -> Result<()> {
+        let mut rem_x = dx;
+        let mut rem_y = dy;
+
+        while rem_x != 0 || rem_y != 0 {
+            let step_x = rem_x.clamp(-96, 96);
+            let step_y = rem_y.clamp(-96, 96);
+            send_arduino_relative_move_packet(step_x, step_y)?;
+            rem_x -= step_x;
+            rem_y -= step_y;
+        }
+
+        Ok(())
+    }
+
     fn send_mouse_move_absolute(x: i32, y: i32) -> Result<()> {
         let (use_arduino, transport, com_port) = {
             let state = HOOK_STATE.lock();
@@ -10989,15 +11016,7 @@ mod windows_overlay {
             }
             let dx = x - pos.x;
             let dy = y - pos.y;
-            let packet = [
-                0xAA,
-                1,
-                ((dx >> 8) & 0xFF) as u8,
-                (dx & 0xFF) as u8,
-                ((dy >> 8) & 0xFF) as u8,
-                (dy & 0xFF) as u8,
-            ];
-            if write_arduino_data(&packet).is_ok() {
+            if send_arduino_relative_move_sequence(dx, dy).is_ok() {
                 return Ok(());
             }
         }
@@ -11179,15 +11198,7 @@ mod windows_overlay {
                 ArduinoTransport::Hid => true,
             };
         if arduino_ready {
-            let packet = [
-                0xAA,
-                1,
-                ((dx >> 8) & 0xFF) as u8,
-                (dx & 0xFF) as u8,
-                ((dy >> 8) & 0xFF) as u8,
-                (dy & 0xFF) as u8,
-            ];
-            if write_arduino_data(&packet).is_ok() {
+            if send_arduino_relative_move_sequence(dx, dy).is_ok() {
                 return Ok(());
             }
         }
