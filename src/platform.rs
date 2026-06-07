@@ -10,6 +10,7 @@ mod windows_platform {
             Foundation::{CloseHandle, GetLastError, HANDLE, HWND},
             Graphics::Dwm::{
                 DWMNCRP_DISABLED, DWMNCRP_ENABLED, DWMWA_NCRENDERING_POLICY,
+                DWMWA_TRANSITIONS_FORCEDISABLED,
                 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND, DWMWCP_ROUND,
                 DwmSetWindowAttribute, DwmExtendFrameIntoClientArea,
             },
@@ -237,6 +238,27 @@ mod windows_platform {
         true
     }
 
+    pub fn set_native_window_transitions_disabled(frame: &Frame, disabled: bool) -> bool {
+        let Ok(window_handle) = frame.window_handle() else {
+            return false;
+        };
+        let hwnd = match window_handle.as_raw() {
+            RawWindowHandle::Win32(handle) => HWND(handle.hwnd.get() as *mut _),
+            _ => return false,
+        };
+
+        unsafe {
+            let disabled = i32::from(disabled);
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_TRANSITIONS_FORCEDISABLED,
+                &disabled as *const _ as *const _,
+                std::mem::size_of_val(&disabled) as u32,
+            );
+        }
+        true
+    }
+
     pub fn bring_native_window_to_front(frame: &Frame) {
         let Ok(window_handle) = frame.window_handle() else {
             return;
@@ -410,6 +432,10 @@ mod fallback {
     }
 
     pub fn set_native_window_shadow(_frame: &Frame, _enabled: bool) -> bool {
+        true
+    }
+
+    pub fn set_native_window_transitions_disabled(_frame: &Frame, _disabled: bool) -> bool {
         true
     }
 

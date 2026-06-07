@@ -716,6 +716,8 @@ pub struct CrosshairApp {
     command_ai_step_target: Option<(u32, u32, Option<usize>)>,
     last_applied_theme: Option<UiThemeMode>,
     native_shadow_applied: bool,
+    native_transitions_disabled_applied: bool,
+    startup_show_pending: bool,
     update_status: UpdateStatus,
     interception_status: String,
     opencv_download_job: Option<JoinHandle<Result<()>>>,
@@ -918,6 +920,8 @@ impl CrosshairApp {
             command_ai_step_target: None,
             last_applied_theme: None,
             native_shadow_applied: false,
+            native_transitions_disabled_applied: false,
+            startup_show_pending: true,
             update_status: UpdateStatus::Idle,
             interception_status: "Interception: Unavailable".to_owned(),
             opencv_download_job: None,
@@ -8190,6 +8194,11 @@ impl eframe::App for CrosshairApp {
                 self.native_shadow_applied = wants_native_shadow;
             }
         }
+        if !self.native_transitions_disabled_applied
+            && crate::platform::set_native_window_transitions_disabled(frame, true)
+        {
+            self.native_transitions_disabled_applied = true;
+        }
 
         while let Ok(command) = self.ui_rx.try_recv() {
             match command {
@@ -9336,6 +9345,14 @@ impl eframe::App for CrosshairApp {
                     self.render_variable_inspector(ui);
                 });
             self.variable_inspector_open = open;
+        }
+
+        if self.startup_show_pending && self.state.show_window {
+            self.startup_show_pending = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            ctx.request_repaint();
         }
 
         self.poll_capture_input(ctx);

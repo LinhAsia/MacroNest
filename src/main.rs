@@ -135,6 +135,7 @@ fn main() -> Result<()> {
         .with_title(app_title)
         .with_inner_size([1180.0, 780.0])
         .with_min_inner_size([1180.0, 780.0])
+        .with_visible(false)
         .with_decorations(false)
         .with_transparent(false)
         .with_icon(std::sync::Arc::new(app_icon::icon_data(128)?));
