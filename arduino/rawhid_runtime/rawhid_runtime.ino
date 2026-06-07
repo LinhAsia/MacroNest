@@ -51,6 +51,7 @@ void move_chunked(int16_t dx, int16_t dy) {
     }
 
     Mouse.move(step_x, step_y, 0);
+    delay(1);
     dx -= step_x;
     dy -= step_y;
   }
@@ -65,10 +66,12 @@ void handle_button_command(uint8_t button_id, uint8_t state) {
   if (state) {
     if ((g_buttons & mouse_button) == 0) {
       Mouse.press(mouse_button);
+      delay(1);
       g_buttons |= mouse_button;
     }
   } else if (g_buttons & mouse_button) {
     Mouse.release(mouse_button);
+    delay(1);
     g_buttons &= static_cast<uint8_t>(~mouse_button);
   }
 }
@@ -92,6 +95,7 @@ void handle_frame(const uint8_t* frame) {
   if (cmd == kCmdWheel) {
     const int8_t wheel = static_cast<int8_t>(frame[2]);
     Mouse.move(0, 0, wheel);
+    delay(1);
   }
 }
 

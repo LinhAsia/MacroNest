@@ -223,6 +223,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(String::new()));
     static LAST_ARDUINO_OPEN_ATTEMPT: Lazy<Mutex<Option<Instant>>> =
         Lazy::new(|| Mutex::new(None));
+    static LAST_ARDUINO_HID_WRITE_AT: Lazy<Mutex<Option<Instant>>> =
+        Lazy::new(|| Mutex::new(None));
 
     pub(crate) static HOOK_STATE: Lazy<Mutex<HookState>> =
         Lazy::new(|| Mutex::new(HookState::default()));
@@ -569,10 +571,12 @@ mod windows_overlay {
         let mut port_name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
         let mut hid_guard = ARDUINO_HID_DEVICE.lock();
         let mut hid_name_guard = CURRENT_ARDUINO_HID_NAME.lock();
+        let mut hid_write_guard = LAST_ARDUINO_HID_WRITE_AT.lock();
         *port_guard = None;
         *port_name_guard = String::new();
         *hid_guard = None;
         *hid_name_guard = String::new();
+        *hid_write_guard = None;
     }
 
     /// Directly close the Arduino runtime transport and mark flash in progress.
@@ -10609,11 +10613,21 @@ mod windows_overlay {
                 let target_pid = parse_hex_u16_runtime(&pid, 0x8036);
                 let mut hid_name_guard = CURRENT_ARDUINO_HID_NAME.lock();
                 let mut hid_guard = ARDUINO_HID_DEVICE.lock();
+                let mut hid_write_guard = LAST_ARDUINO_HID_WRITE_AT.lock();
 
                 if hid_guard.is_none() {
                     let runtime = open_arduino_hid_device(target_vid, target_pid)?;
                     *hid_name_guard = runtime.path.clone();
                     *hid_guard = Some(runtime);
+                    *hid_write_guard = None;
+                }
+
+                let min_gap = Duration::from_millis(8);
+                if let Some(last_write_at) = *hid_write_guard {
+                    let elapsed = last_write_at.elapsed();
+                    if elapsed < min_gap {
+                        thread::sleep(min_gap - elapsed);
+                    }
                 }
 
                 let mut report = [0u8; 65];
@@ -10640,8 +10654,10 @@ mod windows_overlay {
                     if !write_ok || bytes_written == 0 {
                         *hid_guard = None;
                         *hid_name_guard = String::new();
+                        *hid_write_guard = None;
                         anyhow::bail!("Failed to write RawHID report");
                     }
+                    *hid_write_guard = Some(Instant::now());
                     Ok(())
                 } else {
                     anyhow::bail!("HID device not open")
