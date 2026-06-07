@@ -758,6 +758,7 @@ pub struct CrosshairApp {
     startup_overlay_sync_step: u8,
     startup_state_persist_pending: bool,
     startup_cjk_font_check_pending: bool,
+    background_panel_preload_index: usize,
     panel_warmup_target: Option<AppPanel>,
     panel_warmup_frames_remaining: u8,
     warmed_panels: Vec<AppPanel>,
@@ -978,6 +979,7 @@ impl CrosshairApp {
             startup_overlay_sync_step: 0,
             startup_state_persist_pending: false,
             startup_cjk_font_check_pending: true,
+            background_panel_preload_index: 0,
             update_status: UpdateStatus::Idle,
             interception_status: "Interception: Unavailable".to_owned(),
             opencv_download_job: None,
@@ -1100,6 +1102,8 @@ impl CrosshairApp {
         self.startup_overlay_sync_step = 0;
         self.startup_state_persist_pending = pending_startup_persist;
         self.startup_cjk_font_check_pending = true;
+        self.background_panel_preload_index = 0;
+        self.warmed_panels.clear();
         self.last_applied_theme = None;
         self.apply_theme(ctx);
         self.begin_panel_warmup(self.state.active_panel);
@@ -1795,6 +1799,26 @@ impl CrosshairApp {
 
     fn active_panel_needs_audio_sense_devices(panel: AppPanel) -> bool {
         matches!(panel, AppPanel::AudioSense | AppPanel::Macros)
+    }
+
+    fn all_panels_for_background_preload() -> &'static [AppPanel] {
+        &[
+            AppPanel::Crosshair,
+            AppPanel::WindowPresets,
+            AppPanel::Pin,
+            AppPanel::Mouse,
+            AppPanel::Vision,
+            AppPanel::AudioSense,
+            AppPanel::Zoom,
+            AppPanel::Modes,
+            AppPanel::Macros,
+            AppPanel::Commands,
+            AppPanel::Sound,
+            AppPanel::Media,
+            AppPanel::Hud,
+            AppPanel::Ocr,
+            AppPanel::Geometry,
+        ]
     }
 
     fn panel_is_warmed(&self, panel: AppPanel) -> bool {
@@ -8381,6 +8405,22 @@ impl CrosshairApp {
             }
             self.startup_cjk_font_check_pending = false;
             ctx.request_repaint();
+            return;
+        }
+        let preload_panels = Self::all_panels_for_background_preload();
+        if self.background_panel_preload_index < preload_panels.len() {
+            let panel = preload_panels[self.background_panel_preload_index];
+            if !self.panel_is_warmed(panel) {
+                self.warmed_panels.push(panel);
+            }
+            if Self::active_panel_needs_open_windows(panel) {
+                self.ensure_open_windows_ready(false);
+            }
+            if Self::active_panel_needs_audio_sense_devices(panel) {
+                self.ensure_audio_sense_devices_ready(false);
+            }
+            self.background_panel_preload_index += 1;
+            ctx.request_repaint_after(Duration::from_millis(16));
         }
     }
 
@@ -8974,7 +9014,6 @@ impl eframe::App for CrosshairApp {
             if self.state.active_panel == AppPanel::Macros {
                 self.macro_panel_render_limit = 8;
             }
-            self.begin_panel_warmup(self.state.active_panel);
             if matches!(self.last_active_panel, AppPanel::Sound | AppPanel::Media)
                 && !matches!(self.state.active_panel, AppPanel::Sound | AppPanel::Media)
             {
