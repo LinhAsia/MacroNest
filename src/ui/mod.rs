@@ -8182,7 +8182,7 @@ impl CrosshairApp {
             egui::Order::Foreground,
             egui::Id::new("window-border"),
         ));
-        painter.rect_stroke(rect, 16.0, stroke, egui::StrokeKind::Inside);
+        painter.rect_stroke(rect, 16.0, stroke, egui::StrokeKind::Middle);
     }
 
     fn hide_to_tray(&mut self, ctx: &egui::Context) {
