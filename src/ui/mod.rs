@@ -274,7 +274,7 @@ pub fn app_state_needs_cjk_fallback(state: &AppState) -> bool {
         .unwrap_or(false)
 }
 
-pub fn configure_fonts(ctx: &egui::Context, load_cjk_fallback: bool, startup_minimal: bool) {
+pub fn configure_fonts(ctx: &egui::Context, load_cjk_fallback: bool) {
     let mut fonts = FontDefinitions {
         font_data: Default::default(),
         families: Default::default(),
@@ -314,12 +314,11 @@ pub fn configure_fonts(ctx: &egui::Context, load_cjk_fallback: bool, startup_min
         .entry(ui_family.clone())
         .or_default()
         .insert(0, UI_SANS_FONT.to_owned());
-    let proportional_family = fonts.families.entry(FontFamily::Proportional).or_default();
-    if startup_minimal {
-        proportional_family.insert(0, UI_SANS_FONT.to_owned());
-    } else {
-        proportional_family.insert(0, UI_SANS_SEMIBOLD_FONT.to_owned());
-    }
+    fonts
+        .families
+        .entry(FontFamily::Proportional)
+        .or_default()
+        .insert(0, UI_SANS_SEMIBOLD_FONT.to_owned());
     fonts
         .families
         .entry(FontFamily::Proportional)
@@ -8375,10 +8374,11 @@ impl CrosshairApp {
             return;
         }
         if self.startup_cjk_font_check_pending {
-            let load_cjk_fallback = app_state_needs_cjk_fallback(&self.state);
-            configure_fonts(ctx, load_cjk_fallback, false);
-            self.last_applied_theme = None;
-            self.apply_theme(ctx);
+            if app_state_needs_cjk_fallback(&self.state) {
+                configure_fonts(ctx, true);
+                self.last_applied_theme = None;
+                self.apply_theme(ctx);
+            }
             self.startup_cjk_font_check_pending = false;
             ctx.request_repaint();
         }
@@ -8455,9 +8455,6 @@ impl eframe::App for CrosshairApp {
                 UiCommand::Exit => {
                     self.quit_requested = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-                UiCommand::StartupIconLoaded(icon) => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(icon)));
                 }
                 UiCommand::StartupStateLoaded {
                     state,

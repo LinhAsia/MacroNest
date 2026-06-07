@@ -109,16 +109,6 @@ fn main() -> Result<()> {
             }
         });
     }
-    {
-        let icon_ui_tx = ui_tx.clone();
-        std::thread::spawn(move || {
-            if let Ok(icon) = app_icon::icon_data(128) {
-                let _ = icon_ui_tx.send(crate::overlay::UiCommand::StartupIconLoaded(
-                    std::sync::Arc::new(icon),
-                ));
-            }
-        });
-    }
     let overlay_handle_slot: Arc<Mutex<Option<overlay::OverlayHandle>>> = Arc::new(Mutex::new(None));
     let overlay_start_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
@@ -186,7 +176,8 @@ fn main() -> Result<()> {
         .with_min_inner_size([1180.0, 780.0])
         .with_visible(false)
         .with_decorations(false)
-        .with_transparent(true);
+        .with_transparent(true)
+        .with_icon(std::sync::Arc::new(app_icon::icon_data(128)?));
 
     #[cfg(windows)]
     {
@@ -216,7 +207,7 @@ fn main() -> Result<()> {
         app_title,
         native_options,
         Box::new(move |cc| {
-            ui::configure_fonts(&cc.egui_ctx, false, true);
+            ui::configure_fonts(&cc.egui_ctx, false);
             ui::configure_theme(&cc.egui_ctx, state.ui_theme);
             Ok(Box::new(CrosshairApp::new(
                 paths, state, overlay_tx, ui_tx, ui_rx, false,
@@ -248,7 +239,7 @@ fn run_popup_blob(kind: PopupBlobKind) -> Result<()> {
         app_title,
         native_options,
         Box::new(move |cc| {
-            ui::configure_fonts(&cc.egui_ctx, false, false);
+            ui::configure_fonts(&cc.egui_ctx, false);
             ui::configure_theme(&cc.egui_ctx, crate::model::UiThemeMode::Dark);
             Ok(Box::new(PopupBlobApp::new(
                 kind,
