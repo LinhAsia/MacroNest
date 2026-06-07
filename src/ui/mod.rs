@@ -8173,16 +8173,14 @@ impl CrosshairApp {
         } else {
             egui::Stroke::new(1.4, Color32::from_rgb(184, 198, 214))
         };
-        let mut rect = ctx
-            .content_rect()
-            .shrink((stroke.width * 0.5).max(1.0) + 0.5);
+        let mut rect = ctx.content_rect().shrink(0.5);
         rect.max.x -= 0.5;
         rect.max.y -= 0.5;
         let painter = ctx.layer_painter(egui::LayerId::new(
             egui::Order::Foreground,
             egui::Id::new("window-border"),
         ));
-        painter.rect_stroke(rect, 16.0, stroke, egui::StrokeKind::Middle);
+        painter.rect_stroke(rect, 16.0, stroke, egui::StrokeKind::Inside);
     }
 
     fn hide_to_tray(&mut self, ctx: &egui::Context) {
