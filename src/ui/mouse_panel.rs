@@ -1899,11 +1899,6 @@ impl CrosshairApp {
                     anyhow::bail!("avrdude.exe not found");
                 }
                 
-                if use_spoof {
-                    let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
-                    let _ = std::fs::remove_file(temp_hex_path);
-                }
-
                 let mut last_error: Option<String> = None;
                 let mut flashed = false;
 
@@ -1950,6 +1945,11 @@ impl CrosshairApp {
                         "avrdude flash failed: {}",
                         last_error.unwrap_or_else(|| "unknown avrdude error".to_owned())
                     );
+                }
+
+                if use_spoof {
+                    let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
+                    let _ = std::fs::remove_file(temp_hex_path);
                 }
 
                 set_progress("Flash complete. Reconnecting Arduino emulation...".to_owned());
