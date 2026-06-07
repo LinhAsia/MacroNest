@@ -9287,14 +9287,11 @@ impl eframe::App for CrosshairApp {
                         left: ctx.style().spacing.window_margin.left,
                         right: ctx.style().spacing.window_margin.right,
                         top: ctx.style().spacing.window_margin.top,
-                        bottom: 16,
+                        bottom: ctx.style().spacing.window_margin.bottom,
                     }),
             )
             .show(ctx, |ui| {
                 ui.set_min_size(ui.available_size());
-                let mut content_clip_rect = ui.max_rect();
-                content_clip_rect.max.y -= 16.0;
-                ui.set_clip_rect(ui.clip_rect().intersect(content_clip_rect));
                 if self.state.active_panel == AppPanel::Macros
                     || self.state.active_panel == AppPanel::Modes
                 {
