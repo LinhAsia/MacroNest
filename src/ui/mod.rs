@@ -810,6 +810,9 @@ pub struct CrosshairApp {
     pub show_share_buttons: bool,
     arduino_available_ports: Vec<String>,
     arduino_ports_last_refresh: Option<Instant>,
+    mouse_input_normal_open: bool,
+    mouse_input_arduino_open: bool,
+    mouse_input_interception_open: bool,
 }
 
 impl CrosshairApp {
@@ -1022,6 +1025,9 @@ impl CrosshairApp {
             show_share_buttons: false,
             arduino_available_ports: Vec::new(),
             arduino_ports_last_refresh: None,
+            mouse_input_normal_open: false,
+            mouse_input_arduino_open: false,
+            mouse_input_interception_open: false,
         };
         app.interception_installed = app.paths.interception_dll.exists();
         let mut pending_startup_persist = startup_state_dirty;
@@ -1201,6 +1207,12 @@ impl CrosshairApp {
             }
         }
         if self.migrate_legacy_audio_sense_state() {
+            changed = true;
+        }
+        if self.state.vision_settings.use_arduino_mouse
+            && self.state.vision_settings.use_interception
+        {
+            self.state.vision_settings.use_interception = false;
             changed = true;
         }
         changed

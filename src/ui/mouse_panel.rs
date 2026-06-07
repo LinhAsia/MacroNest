@@ -12,7 +12,71 @@ use std::time::Duration;
 #[cfg(windows)]
 use crate::ui::{GetCursorPos, POINT};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MouseInputBackendMode {
+    Normal,
+    Arduino,
+    Interception,
+}
+
 impl CrosshairApp {
+    fn selected_mouse_input_backend_mode(&self) -> MouseInputBackendMode {
+        if self.state.vision_settings.use_arduino_mouse || self.arduino_restore_emulation_after_flash
+        {
+            MouseInputBackendMode::Arduino
+        } else if self.state.vision_settings.use_interception {
+            MouseInputBackendMode::Interception
+        } else {
+            MouseInputBackendMode::Normal
+        }
+    }
+
+    fn set_mouse_input_backend_mode(&mut self, mode: MouseInputBackendMode) -> bool {
+        let use_arduino_mouse = matches!(mode, MouseInputBackendMode::Arduino);
+        let use_interception = matches!(mode, MouseInputBackendMode::Interception);
+        let changed = self.state.vision_settings.use_arduino_mouse != use_arduino_mouse
+            || self.state.vision_settings.use_interception != use_interception;
+        self.state.vision_settings.use_arduino_mouse = use_arduino_mouse;
+        self.state.vision_settings.use_interception = use_interception;
+        if mode != MouseInputBackendMode::Arduino {
+            self.arduino_restore_emulation_after_flash = false;
+        }
+        changed
+    }
+
+    fn render_mouse_input_mode_card_header(
+        &mut self,
+        ui: &mut egui::Ui,
+        title: &str,
+        active: bool,
+        open: &mut bool,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(title).strong());
+            if active {
+                ui.label(
+                    RichText::new(self.tr("Active", "Dang bat"))
+                        .small()
+                        .color(Color32::from_rgb(126, 224, 182)),
+                );
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if Self::sound_style_toggle_button(
+                    ui,
+                    if *open {
+                        Self::tr_lang(self.state.ui_language, "Hide", "An")
+                    } else {
+                        Self::tr_lang(self.state.ui_language, "Show", "Hien")
+                    },
+                )
+                .clicked()
+                {
+                    *open = !*open;
+                }
+            });
+        });
+    }
+
     pub(crate) fn render_mouse_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(2.0);
         let language = self.state.ui_language;
@@ -500,11 +564,9 @@ impl CrosshairApp {
             }
         }
 
-        let label_arduino = self.tr("Use Arduino Leonardo Mouse Emulation", "Sử dụng giả lập chuột Arduino Leonardo");
-        let refresh_txt = self.tr("Refresh Ports", "Tải lại danh sách cổng");
-        let select_port_txt = self.tr("Select Port", "Chọn cổng");
-        let com_port_lbl = self.tr("COM Port:", "Cổng COM:");
-        let arduino_panel_title = self.tr("Arduino Leonardo Emulation", "Giả lập phần cứng Arduino Leonardo");
+        let refresh_txt = self.tr("Refresh Ports", "Tai lai danh sach cong");
+        let select_port_txt = self.tr("Select Port", "Chon cong");
+        let com_port_lbl = self.tr("COM Port:", "Cong COM:");
         let runtime_lbl = "Runtime:";
 
         let should_refresh_arduino_ports = self
@@ -517,10 +579,12 @@ impl CrosshairApp {
 
         let transport = self.state.vision_settings.arduino_transport;
         let selected_port_exists = !self.state.vision_settings.arduino_com_port.is_empty()
-            && self.arduino_available_ports.contains(&self.state.vision_settings.arduino_com_port);
+            && self
+                .arduino_available_ports
+                .contains(&self.state.vision_settings.arduino_com_port);
         let (arduino_port_open, arduino_open_port, overlay_flash_in_progress) =
             crate::overlay::arduino_connection_snapshot();
-        let selected_port = self.state.vision_settings.arduino_com_port.as_str();
+        let selected_port = self.state.vision_settings.arduino_com_port.clone();
         let runtime_ready = match transport {
             ArduinoTransport::Serial => selected_port_exists,
             ArduinoTransport::Hid => true,
@@ -530,7 +594,7 @@ impl CrosshairApp {
                 if selected_port.is_empty() {
                     "none".to_owned()
                 } else {
-                    selected_port.to_owned()
+                    selected_port.clone()
                 }
             }
             ArduinoTransport::Hid => format!(
@@ -539,97 +603,178 @@ impl CrosshairApp {
                 self.state.vision_settings.arduino_pid
             ),
         };
-        let is_connected = self.state.vision_settings.use_arduino_mouse
+        let selected_mode = self.selected_mouse_input_backend_mode();
+        let is_connected = selected_mode == MouseInputBackendMode::Arduino
             && arduino_port_open
             && match transport {
-                ArduinoTransport::Serial => selected_port_exists && arduino_open_port == selected_port,
+                ArduinoTransport::Serial => {
+                    selected_port_exists && arduino_open_port == selected_port
+                }
                 ArduinoTransport::Hid => !arduino_open_port.is_empty(),
             };
-
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(arduino_panel_title).strong());
-            ui.add_space(8.0);
-            if self.arduino_flash_running || overlay_flash_in_progress {
-                ui.label(RichText::new(self.tr("Flashing - port released", "Flashing - port released")).color(Color32::from_rgb(255, 206, 96)));
-            } else if runtime_ready && !self.state.vision_settings.use_arduino_mouse {
-                let status = match transport {
-                    ArduinoTransport::Serial => self.tr("Port selected - emulation off", "Port selected - emulation off"),
-                    ArduinoTransport::Hid => "RawHID ready - emulation off",
-                };
-                ui.label(RichText::new(status).color(Color32::from_rgb(255, 206, 96)));
-            } else if runtime_ready && self.state.vision_settings.use_arduino_mouse && !is_connected {
-                ui.label(RichText::new(self.tr("Connecting...", "Connecting...")).color(Color32::from_rgb(255, 206, 96)));
-            } else if is_connected {
-                ui.label(RichText::new(self.tr("Connected", "Đang kết nối")).color(Color32::from_rgb(126, 224, 182)));
-            } else {
-                ui.label(RichText::new(self.tr("Disconnected", "Chưa kết nối")).color(Color32::from_rgb(255, 96, 96)));
-            }
-        });
-
         let selected_port_text = if selected_port.is_empty() {
-            "none"
+            "none".to_owned()
         } else {
-            selected_port
+            selected_port.clone()
         };
         let app_port_text = if arduino_open_port.is_empty() {
-            "none"
+            "none".to_owned()
         } else {
-            arduino_open_port.as_str()
+            arduino_open_port.clone()
         };
-        ui.label(
-            RichText::new(format!(
-                "Runtime: {} | Flash COM: {selected_port_text} | Target: {runtime_target_text} | Active endpoint: {app_port_text}",
-                match transport {
-                    ArduinoTransport::Serial => "Serial COM",
-                    ArduinoTransport::Hid => "RawHID",
-                }
-            ))
-            .small()
-            .weak(),
-        );
+
+        ui.add_space(10.0);
+        ui.label(RichText::new(self.tr("Mouse Input Backend", "Che do chuot")).strong());
+
+        let mut next_mode = selected_mode;
+        ui.horizontal(|ui| {
+            ui.selectable_value(
+                &mut next_mode,
+                MouseInputBackendMode::Normal,
+                self.tr("Normal", "Binh thuong"),
+            );
+            ui.selectable_value(
+                &mut next_mode,
+                MouseInputBackendMode::Arduino,
+                "Arduino",
+            );
+            ui.selectable_value(
+                &mut next_mode,
+                MouseInputBackendMode::Interception,
+                "Interception",
+            );
+        });
 
         let mut arduino_changed = false;
-        Self::show_preset_card(ui, self.state.vision_settings.use_arduino_mouse, |ui| {
-            ui.horizontal(|ui| {
-                let mut checkbox_res = ui.add_enabled(
-                    runtime_ready,
-                    egui::Checkbox::new(
-                        &mut self.state.vision_settings.use_arduino_mouse,
-                        label_arduino,
+        if next_mode != selected_mode {
+            if next_mode == MouseInputBackendMode::Interception && !self.interception_installed {
+                self.status = self
+                    .tr(
+                        "Please download and install the Interception Driver wrapper first!",
+                        "Hay tai va cai wrapper Interception Driver truoc!",
                     )
-                );
-                if !runtime_ready {
-                    checkbox_res = checkbox_res.on_hover_text(self.tr(
-                        "Please plug in the Arduino board and select the correct COM port to enable emulation.",
-                        "Vui lòng cắm mạch Arduino và chọn đúng cổng COM để kích hoạt giả lập."
-                    ));
-                }
-                if checkbox_res.changed() {
-                    arduino_changed = true;
-                }
+                    .to_owned();
+                next_mode = selected_mode;
+            } else {
+                arduino_changed |= self.set_mouse_input_backend_mode(next_mode);
+            }
+        }
 
-                let connect_btn_label = if self.state.vision_settings.use_arduino_mouse {
-                    self.tr("Disconnect", "Disconnect")
-                } else {
-                    self.tr("Connect", "Connect")
-                };
-                let connect_btn = ui.add_enabled(
-                    runtime_ready && !self.arduino_flash_running && !overlay_flash_in_progress,
-                    egui::Button::new(connect_btn_label),
+        ui.add_space(6.0);
+
+        let normal_title = self.tr("Normal Windows Input", "Chuot Windows mac dinh");
+        let normal_summary = self.tr(
+            "Uses the standard Windows mouse path with no extra driver or hardware.",
+            "Dung input chuot Windows mac dinh, khong can driver hay phan cung bo sung.",
+        );
+        let normal_hint = self.tr(
+            "This mode follows the default SendInput and SetCursorPos path.",
+            "Che do nay dung luong SendInput va SetCursorPos mac dinh.",
+        );
+        let mut normal_open = self.mouse_input_normal_open;
+        Self::show_preset_card(ui, next_mode == MouseInputBackendMode::Normal, |ui| {
+            self.render_mouse_input_mode_card_header(
+                ui,
+                normal_title,
+                next_mode == MouseInputBackendMode::Normal,
+                &mut normal_open,
+            );
+            if !normal_open {
+                return;
+            }
+            ui.add_space(6.0);
+            ui.label(RichText::new(normal_summary).small());
+            ui.label(RichText::new(normal_hint).small().weak());
+        });
+        self.mouse_input_normal_open = normal_open;
+
+        ui.add_space(6.0);
+
+        let interception_progress = self.interception_download_job.as_ref().map(|_| {
+            self.interception_download_progress
+                .load(std::sync::atomic::Ordering::SeqCst) as f32
+                / 1000.0
+        });
+        let interception_title = self.tr("Interception Driver", "Interception Driver");
+        let interception_summary = self.tr(
+            "Uses the Interception driver path for mouse movement and clicks in games.",
+            "Dung driver Interception de di chuot va click trong game.",
+        );
+        let mut interception_open = self.mouse_input_interception_open;
+        Self::show_preset_card(
+            ui,
+            next_mode == MouseInputBackendMode::Interception,
+            |ui| {
+                self.render_mouse_input_mode_card_header(
+                    ui,
+                    interception_title,
+                    next_mode == MouseInputBackendMode::Interception,
+                    &mut interception_open,
                 );
-                let connect_btn = if runtime_ready {
-                    connect_btn
+                if !interception_open {
+                    return;
+                }
+                ui.add_space(6.0);
+                let interception_status_color = if self.interception_status.contains("Active") {
+                    Color32::from_rgb(126, 224, 182)
+                } else if self.interception_status.contains("Fallback") {
+                    Color32::from_rgb(248, 214, 102)
                 } else {
-                    connect_btn.on_hover_text(self.tr(
-                        "Select an Arduino COM port first for Serial runtime.",
-                        "Select an Arduino COM port first for Serial runtime.",
-                    ))
+                    ui.visuals().weak_text_color()
                 };
-                if connect_btn.clicked() {
-                    self.state.vision_settings.use_arduino_mouse =
-                        !self.state.vision_settings.use_arduino_mouse;
-                    arduino_changed = true;
+                ui.label(RichText::new(interception_summary).small());
+                ui.label(
+                    RichText::new(&self.interception_status)
+                        .small()
+                        .color(interception_status_color),
+                );
+                ui.add_space(6.0);
+                self.render_interception_driver_entry(ui, language, interception_progress);
+            },
+        );
+        self.mouse_input_interception_open = interception_open;
+
+        ui.add_space(6.0);
+
+        let arduino_panel_title =
+            self.tr("Arduino Leonardo Emulation", "Gia lap phan cung Arduino Leonardo");
+        let mut arduino_open = self.mouse_input_arduino_open;
+        Self::show_preset_card(ui, next_mode == MouseInputBackendMode::Arduino, |ui| {
+            self.render_mouse_input_mode_card_header(
+                ui,
+                arduino_panel_title,
+                next_mode == MouseInputBackendMode::Arduino,
+                &mut arduino_open,
+            );
+            if !arduino_open {
+                return;
+            }
+
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if self.arduino_flash_running || overlay_flash_in_progress {
+                    ui.label(
+                        RichText::new("Flashing - port released")
+                            .color(Color32::from_rgb(255, 206, 96)),
+                    );
+                } else if runtime_ready
+                    && next_mode == MouseInputBackendMode::Arduino
+                    && !is_connected
+                {
+                    ui.label(
+                        RichText::new(self.tr("Connecting...", "Dang ket noi..."))
+                            .color(Color32::from_rgb(255, 206, 96)),
+                    );
+                } else if is_connected {
+                    ui.label(
+                        RichText::new(self.tr("Connected", "Dang ket noi"))
+                            .color(Color32::from_rgb(126, 224, 182)),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new(self.tr("Disconnected", "Chua ket noi"))
+                            .color(Color32::from_rgb(255, 96, 96)),
+                    );
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -683,53 +828,74 @@ impl CrosshairApp {
                                 }
                             }
                         });
-
                     ui.label(com_port_lbl);
                 });
-                
-                if self.state.vision_settings.use_arduino_mouse {
-                    ui.add_space(4.0);
-                    let note_lbl = match self.state.vision_settings.arduino_transport {
-                        ArduinoTransport::Serial => self.tr(
-                            "Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.",
-                            "Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.",
-                        ),
-                        ArduinoTransport::Hid => "RawHID runtime uses VID/PID for live control. Auto-Flash will program the RawHID firmware for the selected Runtime. The COM port is still only used to flash the board.",
-                    };
-                    ui.label(RichText::new(note_lbl).small().weak().color(Color32::from_rgb(220, 180, 80)));
-                }
             });
+
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(format!(
+                    "Runtime: {} | Flash COM: {selected_port_text} | Target: {runtime_target_text} | Active endpoint: {app_port_text}",
+                    match transport {
+                        ArduinoTransport::Serial => "Serial COM",
+                        ArduinoTransport::Hid => "RawHID",
+                    }
+                ))
+                .small()
+                .weak(),
+            );
+
+            ui.add_space(4.0);
+            let note_lbl = match self.state.vision_settings.arduino_transport {
+                ArduinoTransport::Serial => self.tr(
+                    "Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.",
+                    "Hay bam 'Auto-Flash Firmware' it nhat mot lan de nap board dang ket noi.",
+                ),
+                ArduinoTransport::Hid => "RawHID runtime uses VID/PID for live control. Auto-Flash will program the RawHID firmware for the selected Runtime. The COM port is still only used to flash the board.",
+            };
+            ui.label(
+                RichText::new(note_lbl)
+                    .small()
+                    .weak()
+                    .color(Color32::from_rgb(220, 180, 80)),
+            );
 
             ui.add_space(8.0);
 
-            // Flashing / Download section
             if !self.arduino_tools_downloaded {
                 if self.arduino_download_job.is_some() {
-                    let progress = self.arduino_download_progress.load(std::sync::atomic::Ordering::SeqCst) as f32 / 1000.0;
+                    let progress = self
+                        .arduino_download_progress
+                        .load(std::sync::atomic::Ordering::SeqCst) as f32
+                        / 1000.0;
                     ui.horizontal(|ui| {
-                        ui.label(self.tr("Downloading tools...", "Đang tải công cụ..."));
+                        ui.label(self.tr("Downloading tools...", "Dang tai cong cu..."));
                         ui.add(egui::ProgressBar::new(progress).show_percentage());
                     });
                     ui.ctx().request_repaint();
                 } else {
-                    let download_btn_lbl = self.tr("Download Flashing Tools & Firmware", "Tải công cụ nạp & Firmware");
+                    let download_btn_lbl = self.tr(
+                        "Download Flashing Tools & Firmware",
+                        "Tai cong cu nap va firmware",
+                    );
                     if ui.button(download_btn_lbl).clicked() {
                         self.start_arduino_tools_download();
                     }
                 }
             } else {
                 ui.horizontal(|ui| {
-                    let flash_btn_lbl = self.tr("Auto-Flash Firmware", "Tự động nạp Firmware");
+                    let flash_btn_lbl = self.tr("Auto-Flash Firmware", "Tu dong nap firmware");
                     let flash_btn = ui.add_enabled(
-                        !self.arduino_flash_running && !self.state.vision_settings.arduino_com_port.is_empty(),
-                        egui::Button::new(flash_btn_lbl)
+                        !self.arduino_flash_running
+                            && !self.state.vision_settings.arduino_com_port.is_empty(),
+                        egui::Button::new(flash_btn_lbl),
                     );
                     if flash_btn.clicked() {
                         self.start_arduino_flash();
                     }
 
                     ui.add_space(8.0);
-                    let delete_btn_lbl = self.tr("Delete Tools", "Xóa công cụ nạp");
+                    let delete_btn_lbl = self.tr("Delete Tools", "Xoa cong cu nap");
                     if ui.button(delete_btn_lbl).clicked() {
                         let _ = std::fs::remove_file(&self.paths.avrdude_exe);
                         let _ = std::fs::remove_file(&self.paths.avrdude_conf);
@@ -738,7 +904,7 @@ impl CrosshairApp {
                         self.arduino_tools_downloaded = false;
                         self.arduino_flash_status.clear();
                     }
-                    
+
                     if !self.arduino_flash_status.is_empty() {
                         ui.add_space(14.0);
                         ui.label(RichText::new(&self.arduino_flash_status).strong());
@@ -747,35 +913,52 @@ impl CrosshairApp {
             }
 
             ui.add_space(6.0);
-            
-            let spoof_panel_title = self.tr("Anti-Cheat Bypass & USB ID Spoofing", "Vượt Anti-Cheat & Giả lập ID cổng USB");
+
+            let spoof_panel_title = self.tr(
+                "Anti-Cheat Bypass & USB ID Spoofing",
+                "Vuot anti-cheat va gia lap ID cong USB",
+            );
             ui.collapsing(spoof_panel_title, |ui| {
                 ui.set_enabled(runtime_ready || selected_port_exists);
                 if !runtime_ready && !selected_port_exists {
-                    ui.colored_label(Color32::from_rgb(255, 96, 96), self.tr("Please plug in the Arduino and select COM port first.", "Vui lòng cắm mạch Arduino và chọn cổng COM trước."));
+                    ui.colored_label(
+                        Color32::from_rgb(255, 96, 96),
+                        self.tr(
+                            "Please plug in the Arduino and select COM port first.",
+                            "Hay cam Arduino va chon cong COM truoc.",
+                        ),
+                    );
                     ui.add_space(4.0);
                 }
                 ui.add_space(4.0);
-                
+
                 let warning_text = self.tr(
                     "Some anti-cheat systems (Vanguard, EAC, etc.) block default Arduino Leonardo identifiers (VID: 0x2341, PID: 0x8036).\nYou should spoof these IDs to look like a standard commercial USB mouse (e.g. Logitech G502).",
-                    "Một số hệ thống chống gian lận (Vanguard, EAC,...) chặn cổng kết nối mặc định của Arduino Leonardo (VID: 0x2341, PID: 0x8036).\nBạn nên giả lập các mã ID này giống với một chuột thương mại tiêu chuẩn (ví dụ: Logitech G502)."
+                    "Mot so he thong chong gian lan co the chan VID/PID mac dinh cua Arduino Leonardo, nen ban co the gia lap chung thanh chuot thuong mai.",
                 );
                 ui.label(RichText::new(warning_text).small().weak());
-                
+
                 ui.add_space(8.0);
-                
+
                 let mut spoof_changed = false;
-                let enable_spoof_lbl = self.tr("Enable Spoofing", "Bật giả lập ID");
+                let enable_spoof_lbl = self.tr("Enable Spoofing", "Bat gia lap ID");
                 let vid_lbl = self.tr("Vendor ID (VID):", "Vendor ID (VID):");
                 let pid_lbl = self.tr("Product ID (PID):", "Product ID (PID):");
-                let presets_lbl = self.tr("Presets:", "Mẫu nhanh:");
-                let reset_lbl = self.tr("Reset to Default (0x2341, 0x8036)", "Khôi phục mặc định (0x2341, 0x8036)");
-                
+                let presets_lbl = self.tr("Presets:", "Mau nhanh:");
+                let reset_lbl = self.tr(
+                    "Reset to Default (0x2341, 0x8036)",
+                    "Khoi phuc mac dinh (0x2341, 0x8036)",
+                );
+
                 ui.horizontal(|ui| {
-                    spoof_changed |= ui.checkbox(&mut self.state.vision_settings.use_arduino_spoof, enable_spoof_lbl).changed();
+                    spoof_changed |= ui
+                        .checkbox(
+                            &mut self.state.vision_settings.use_arduino_spoof,
+                            enable_spoof_lbl,
+                        )
+                        .changed();
                 });
-                
+
                 if self.state.vision_settings.use_arduino_spoof {
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
@@ -784,16 +967,16 @@ impl CrosshairApp {
                         if r1.changed() {
                             spoof_changed = true;
                         }
-                        
+
                         ui.add_space(14.0);
-                        
+
                         ui.label(pid_lbl);
                         let r2 = ui.text_edit_singleline(&mut self.state.vision_settings.arduino_pid);
                         if r2.changed() {
                             spoof_changed = true;
                         }
                     });
-                    
+
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.label(presets_lbl);
@@ -816,26 +999,26 @@ impl CrosshairApp {
                         }
                     });
                 }
-                
+
                 ui.add_space(6.0);
                 let note_text = self.tr(
                     "Note: This automatically patches firmware.hex at the byte level during upload. The Arduino bootloader remains unaffected, so you can always re-flash safely.",
-                    "Lưu ý: Tính năng này tự động cập nhật firmware.hex ở cấp độ byte khi nạp. Bootloader của Arduino không bị ảnh hưởng, do đó bạn vẫn có thể nạp lại bình thường."
+                    "Luu y: Qua trinh nay se patch firmware khi nap, nhung bootloader van an toan de nap lai sau nay.",
                 );
                 ui.label(RichText::new(note_text).small().weak());
-                
+
                 if spoof_changed {
                     arduino_changed = true;
                 }
             });
         });
+        self.mouse_input_arduino_open = arduino_open;
 
         if arduino_changed {
             self.sync_vision_settings();
             self.persist();
         }
     }
-
     pub(crate) fn render_mouse_path_preview(
         ui: &mut egui::Ui,
         language: UiLanguage,
@@ -2245,4 +2428,3 @@ fn patch_hex_descriptors(hex_content: &str, vid: u16, pid: u16) -> anyhow::Resul
 
     Ok(patched_lines.join("\r\n"))
 }
-

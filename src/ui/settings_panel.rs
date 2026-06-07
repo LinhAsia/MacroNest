@@ -284,58 +284,8 @@ impl CrosshairApp {
                         }
                     });
 
-                    ui.add_space(6.0);
-
-                    let mut interception_changed = false;
-                    ui.horizontal(|ui| {
-                        let res = ui.checkbox(
-                            &mut self.state.vision_settings.use_interception,
-                            Self::tr_lang(
-                                language,
-                                "Use Interception Driver (Mouse clicks/movement in games)",
-                                ""
-                            )
-                        );
-                        if res.changed() {
-                            if !self.interception_installed {
-                                // Block and revert
-                                self.state.vision_settings.use_interception = false;
-                                self.interception_status = "Interception: Unavailable".to_owned();
-                                self.status = Self::tr_lang(
-                                    language,
-                                    "Please download and install the Interception Driver wrapper first!",
-                                    ""
-                                ).to_owned();
-                            } else {
-                                self.interception_status = if self.state.vision_settings.use_interception {
-                                    "Interception: Active".to_owned()
-                                } else {
-                                    "Interception: Unavailable".to_owned()
-                                };
-                                interception_changed = true;
-                            }
-                        }
-                    });
-
-                    let interception_status_color = if self.interception_status.contains("Active") {
-                        Color32::from_rgb(126, 224, 182)
-                    } else if self.interception_status.contains("Fallback") {
-                        Color32::from_rgb(248, 214, 102)
-                    } else {
-                        ui.visuals().weak_text_color()
-                    };
-                    ui.label(
-                        RichText::new(&self.interception_status)
-                            .small()
-                            .color(interception_status_color),
-                    );
-
                     if delay_changed {
                         self.sync_macro_delay_settings();
-                        self.persist();
-                    }
-                    if interception_changed {
-                        self.sync_vision_settings();
                         self.persist();
                     }
                 }
@@ -350,11 +300,6 @@ impl CrosshairApp {
             .opencv_download_job
             .as_ref()
             .map(|_| self.opencv_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
-        let interception_progress = self
-            .interception_download_job
-            .as_ref()
-            .map(|_| self.interception_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
-
         Self::settings_card_frame(ui).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.vertical(|ui| {
@@ -386,18 +331,12 @@ impl CrosshairApp {
                         Self::start_opencv_download,
                         Self::delete_opencv_tool,
                     );
-
-                    ui.add_space(4.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-
-                    self.render_interception_driver_entry(ui, language, interception_progress);
                 }
             });
         });
     }
 
-    fn render_interception_driver_entry(
+    pub(crate) fn render_interception_driver_entry(
         &mut self,
         ui: &mut egui::Ui,
         language: UiLanguage,
