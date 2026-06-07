@@ -18863,10 +18863,7 @@ impl CrosshairApp {
 
         }
 
-        if pending_macro_group_scroll_target.is_some() {
-            // Keep temporary room at the bottom only while centering a target group.
-            ui.add_space((macro_panel_scroll_height - 50.0).max(0.0));
-        }
+        ui.add_space((macro_panel_scroll_height - 50.0).max(0.0));
 
         if let Some(group_scroll_rect) = pending_macro_group_scroll_rect {
             ui.scroll_to_rect(group_scroll_rect, Some(egui::Align::Center));
