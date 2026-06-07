@@ -3604,6 +3604,8 @@ impl CrosshairApp {
 
             .show_viewport(ui, |ui, viewport| {
 
+        let mut pending_macro_group_scroll_rect: Option<egui::Rect> = None;
+
         let mut release_folder_id = None;
 
         let mut delete_folder_id = None;
@@ -5023,6 +5025,8 @@ impl CrosshairApp {
 
                     let folder_enabled = true;
 
+                    let group_scroll_rect_top = ui.cursor().min.y;
+
                     Self::show_preset_card(ui, group.enabled && folder_enabled, |ui| {
 
                         ui.horizontal(|ui| {
@@ -5648,14 +5652,6 @@ impl CrosshairApp {
                             );
 
                         });
-
-                        if should_scroll_to_group {
-
-                            ui.scroll_to_cursor(Some(egui::Align::Center));
-
-                            pending_macro_group_scroll_consumed = true;
-
-                        }
 
                         if group.collapsed {
 
@@ -18327,6 +18323,14 @@ impl CrosshairApp {
 
                     }
 
+                    if should_scroll_to_group {
+                        let group_scroll_rect_bottom = ui.cursor().min.y;
+                        pending_macro_group_scroll_rect = Some(egui::Rect::from_min_max(
+                            egui::pos2(viewport.left(), group_scroll_rect_top),
+                            egui::pos2(viewport.right(), group_scroll_rect_bottom),
+                        ));
+                    }
+
                     if let Some(target) = next_capture_target {
 
                         let capture_status = match &target {
@@ -18862,6 +18866,11 @@ impl CrosshairApp {
         if pending_macro_group_scroll_target.is_some() {
             // Keep temporary room at the bottom only while centering a target group.
             ui.add_space((macro_panel_scroll_height - 50.0).max(0.0));
+        }
+
+        if let Some(group_scroll_rect) = pending_macro_group_scroll_rect {
+            ui.scroll_to_rect(group_scroll_rect, Some(egui::Align::Center));
+            pending_macro_group_scroll_consumed = true;
         }
 
         if !pending_macro_group_scroll_consumed {
