@@ -10596,7 +10596,7 @@ mod windows_overlay {
                 report[4] = bytes.get(3).copied().unwrap_or(0);
                 report[5] = bytes.get(4).copied().unwrap_or(0);
                 report[6] = bytes.get(5).copied().unwrap_or(0);
-                report[8] = 0x5A;
+                report[7] = 0x5A;
 
                 if let Some(device) = hid_guard.as_mut() {
                     if let Err(first_error) = device.write(&report) {
