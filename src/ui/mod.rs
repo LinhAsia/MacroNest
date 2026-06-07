@@ -917,7 +917,7 @@ impl CrosshairApp {
             command_ai_feedback: None,
             command_ai_step_target: None,
             last_applied_theme: None,
-            native_shadow_applied: true,
+            native_shadow_applied: false,
             update_status: UpdateStatus::Idle,
             interception_status: "Interception: Unavailable".to_owned(),
             opencv_download_job: None,

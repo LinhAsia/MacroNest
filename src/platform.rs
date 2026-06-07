@@ -217,11 +217,20 @@ mod windows_platform {
                 std::mem::size_of_val(&corner) as u32,
             );
 
-            let margins = MARGINS {
-                cxLeftWidth: -1,
-                cxRightWidth: -1,
-                cyTopHeight: -1,
-                cyBottomHeight: -1,
+            let margins = if enabled {
+                MARGINS {
+                    cxLeftWidth: -1,
+                    cxRightWidth: -1,
+                    cyTopHeight: -1,
+                    cyBottomHeight: -1,
+                }
+            } else {
+                MARGINS {
+                    cxLeftWidth: 0,
+                    cxRightWidth: 0,
+                    cyTopHeight: 0,
+                    cyBottomHeight: 0,
+                }
             };
             let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
         }
