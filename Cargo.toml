@@ -30,6 +30,7 @@ vi = "0.8"
 serialport = "4.6"
 
 [target.'cfg(windows)'.dependencies]
+hidapi = "2.6"
 libloading = "0.8"
 opencv = { version = "0.98.2", default-features = false, features = ["clang-runtime", "imgproc", "videoio"] }
 wasapi = "0.20"

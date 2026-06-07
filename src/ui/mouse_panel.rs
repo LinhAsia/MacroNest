@@ -505,6 +505,7 @@ impl CrosshairApp {
         let select_port_txt = self.tr("Select Port", "Chọn cổng");
         let com_port_lbl = self.tr("COM Port:", "Cổng COM:");
         let arduino_panel_title = self.tr("Arduino Leonardo Emulation", "Giả lập phần cứng Arduino Leonardo");
+        let runtime_lbl = "Runtime:";
 
         let should_refresh_arduino_ports = self
             .arduino_ports_last_refresh
@@ -514,15 +515,36 @@ impl CrosshairApp {
             self.refresh_arduino_ports();
         }
 
+        let transport = self.state.vision_settings.arduino_transport;
         let selected_port_exists = !self.state.vision_settings.arduino_com_port.is_empty()
             && self.arduino_available_ports.contains(&self.state.vision_settings.arduino_com_port);
         let (arduino_port_open, arduino_open_port, overlay_flash_in_progress) =
             crate::overlay::arduino_connection_snapshot();
         let selected_port = self.state.vision_settings.arduino_com_port.as_str();
-        let is_connected = selected_port_exists
-            && self.state.vision_settings.use_arduino_mouse
+        let runtime_ready = match transport {
+            ArduinoTransport::Serial => selected_port_exists,
+            ArduinoTransport::Hid => true,
+        };
+        let runtime_target_text = match transport {
+            ArduinoTransport::Serial => {
+                if selected_port.is_empty() {
+                    "none".to_owned()
+                } else {
+                    selected_port.to_owned()
+                }
+            }
+            ArduinoTransport::Hid => format!(
+                "{}:{}",
+                self.state.vision_settings.arduino_vid,
+                self.state.vision_settings.arduino_pid
+            ),
+        };
+        let is_connected = self.state.vision_settings.use_arduino_mouse
             && arduino_port_open
-            && arduino_open_port == selected_port;
+            && match transport {
+                ArduinoTransport::Serial => selected_port_exists && arduino_open_port == selected_port,
+                ArduinoTransport::Hid => !arduino_open_port.is_empty(),
+            };
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -530,9 +552,13 @@ impl CrosshairApp {
             ui.add_space(8.0);
             if self.arduino_flash_running || overlay_flash_in_progress {
                 ui.label(RichText::new(self.tr("Flashing - port released", "Flashing - port released")).color(Color32::from_rgb(255, 206, 96)));
-            } else if selected_port_exists && !self.state.vision_settings.use_arduino_mouse {
-                ui.label(RichText::new(self.tr("Port selected - emulation off", "Port selected - emulation off")).color(Color32::from_rgb(255, 206, 96)));
-            } else if selected_port_exists && self.state.vision_settings.use_arduino_mouse && !is_connected {
+            } else if runtime_ready && !self.state.vision_settings.use_arduino_mouse {
+                let status = match transport {
+                    ArduinoTransport::Serial => self.tr("Port selected - emulation off", "Port selected - emulation off"),
+                    ArduinoTransport::Hid => "RawHID ready - emulation off",
+                };
+                ui.label(RichText::new(status).color(Color32::from_rgb(255, 206, 96)));
+            } else if runtime_ready && self.state.vision_settings.use_arduino_mouse && !is_connected {
                 ui.label(RichText::new(self.tr("Connecting...", "Connecting...")).color(Color32::from_rgb(255, 206, 96)));
             } else if is_connected {
                 ui.label(RichText::new(self.tr("Connected", "Đang kết nối")).color(Color32::from_rgb(126, 224, 182)));
@@ -553,7 +579,11 @@ impl CrosshairApp {
         };
         ui.label(
             RichText::new(format!(
-                "Selected: {selected_port_text} | App port: {app_port_text}"
+                "Runtime: {} | Flash COM: {selected_port_text} | Target: {runtime_target_text} | Active endpoint: {app_port_text}",
+                match transport {
+                    ArduinoTransport::Serial => "Serial COM",
+                    ArduinoTransport::Hid => "RawHID",
+                }
             ))
             .small()
             .weak(),
@@ -563,13 +593,13 @@ impl CrosshairApp {
         Self::show_preset_card(ui, self.state.vision_settings.use_arduino_mouse, |ui| {
             ui.horizontal(|ui| {
                 let mut checkbox_res = ui.add_enabled(
-                    selected_port_exists,
+                    runtime_ready,
                     egui::Checkbox::new(
                         &mut self.state.vision_settings.use_arduino_mouse,
                         label_arduino,
                     )
                 );
-                if !selected_port_exists {
+                if !runtime_ready {
                     checkbox_res = checkbox_res.on_hover_text(self.tr(
                         "Please plug in the Arduino board and select the correct COM port to enable emulation.",
                         "Vui lòng cắm mạch Arduino và chọn đúng cổng COM để kích hoạt giả lập."
@@ -585,15 +615,15 @@ impl CrosshairApp {
                     self.tr("Connect", "Connect")
                 };
                 let connect_btn = ui.add_enabled(
-                    selected_port_exists && !self.arduino_flash_running && !overlay_flash_in_progress,
+                    runtime_ready && !self.arduino_flash_running && !overlay_flash_in_progress,
                     egui::Button::new(connect_btn_label),
                 );
-                let connect_btn = if selected_port_exists {
+                let connect_btn = if runtime_ready {
                     connect_btn
                 } else {
                     connect_btn.on_hover_text(self.tr(
-                        "Select an Arduino COM port first.",
-                        "Select an Arduino COM port first.",
+                        "Select an Arduino COM port first for Serial runtime.",
+                        "Select an Arduino COM port first for Serial runtime.",
                     ))
                 };
                 if connect_btn.clicked() {
@@ -606,6 +636,36 @@ impl CrosshairApp {
                     if ui.button(refresh_txt).clicked() {
                         self.refresh_arduino_ports();
                     }
+
+                    egui::ComboBox::from_id_salt("arduino_transport_combo")
+                        .width(110.0)
+                        .selected_text(match self.state.vision_settings.arduino_transport {
+                            ArduinoTransport::Serial => "Serial COM",
+                            ArduinoTransport::Hid => "RawHID",
+                        })
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_value(
+                                    &mut self.state.vision_settings.arduino_transport,
+                                    ArduinoTransport::Serial,
+                                    "Serial COM",
+                                )
+                                .changed()
+                            {
+                                arduino_changed = true;
+                            }
+                            if ui
+                                .selectable_value(
+                                    &mut self.state.vision_settings.arduino_transport,
+                                    ArduinoTransport::Hid,
+                                    "RawHID",
+                                )
+                                .changed()
+                            {
+                                arduino_changed = true;
+                            }
+                        });
+                    ui.label(runtime_lbl);
 
                     let current_port = &mut self.state.vision_settings.arduino_com_port;
                     egui::ComboBox::from_id_salt("arduino_com_port_combo")
@@ -629,10 +689,13 @@ impl CrosshairApp {
                 
                 if self.state.vision_settings.use_arduino_mouse {
                     ui.add_space(4.0);
-                    let note_lbl = self.tr(
-                        "💡 Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.",
-                        "💡 Đảm bảo bạn đã nhấn 'Tự động nạp/flash Firmware' ít nhất một lần để nạp code vào mạch."
-                    );
+                    let note_lbl = match self.state.vision_settings.arduino_transport {
+                        ArduinoTransport::Serial => self.tr(
+                            "Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.",
+                            "Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.",
+                        ),
+                        ArduinoTransport::Hid => "RawHID runtime uses VID/PID for live control. The COM port is still only used for Auto-Flash.",
+                    };
                     ui.label(RichText::new(note_lbl).small().weak().color(Color32::from_rgb(220, 180, 80)));
                 }
             });
@@ -686,8 +749,8 @@ impl CrosshairApp {
             
             let spoof_panel_title = self.tr("Anti-Cheat Bypass & USB ID Spoofing", "Vượt Anti-Cheat & Giả lập ID cổng USB");
             ui.collapsing(spoof_panel_title, |ui| {
-                ui.set_enabled(selected_port_exists);
-                if !selected_port_exists {
+                ui.set_enabled(runtime_ready || selected_port_exists);
+                if !runtime_ready && !selected_port_exists {
                     ui.colored_label(Color32::from_rgb(255, 96, 96), self.tr("Please plug in the Arduino and select COM port first.", "Vui lòng cắm mạch Arduino và chọn cổng COM trước."));
                     ui.add_space(4.0);
                 }

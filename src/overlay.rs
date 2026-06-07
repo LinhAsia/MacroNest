@@ -38,6 +38,7 @@ mod windows_overlay {
     use anyhow::{Context, Result, bail};
     use crossbeam_channel::{Receiver, Sender};
     use eframe::egui;
+    use hidapi::{HidApi, HidDevice};
     use once_cell::sync::Lazy;
     use opencv::{
         core::{self as cv, Mat, Size},
@@ -142,7 +143,7 @@ mod windows_overlay {
     use crate::{
         ai, audio, audiosense, hotkey, media,
         model::{
-            AudioSensePreset, AudioSenseSpec, AudioSettings, CommandPreset, CrosshairStyle,
+            ArduinoTransport, AudioSensePreset, AudioSenseSpec, AudioSettings, CommandPreset, CrosshairStyle,
             HotkeyBinding, HudPreset, GeometryShapeKind, GeometrySpec, IfConditionType, MacroAction,
             MacroGroup, MacroPreset, MacroStep, MacroTriggerMode, MousePathEvent,
             MousePathEventKind, MousePathPreset, MouseSensitivityPreset, PinOverlayStyle,
@@ -193,6 +194,10 @@ mod windows_overlay {
     static ARDUINO_PORT: Lazy<Mutex<Option<Box<dyn serialport::SerialPort>>>> =
         Lazy::new(|| Mutex::new(None));
     static CURRENT_ARDUINO_PORT_NAME: Lazy<Mutex<String>> =
+        Lazy::new(|| Mutex::new(String::new()));
+    static ARDUINO_HID_DEVICE: Lazy<Mutex<Option<HidDevice>>> =
+        Lazy::new(|| Mutex::new(None));
+    static CURRENT_ARDUINO_HID_NAME: Lazy<Mutex<String>> =
         Lazy::new(|| Mutex::new(String::new()));
     static LAST_ARDUINO_OPEN_ATTEMPT: Lazy<Mutex<Option<Instant>>> =
         Lazy::new(|| Mutex::new(None));
@@ -537,15 +542,23 @@ mod windows_overlay {
         }
     }
 
-    /// Directly close the Arduino serial port and mark flash in progress.
-    /// Called from the flash thread to guarantee the port is released
+    fn close_arduino_runtime_handles() {
+        let mut port_guard = ARDUINO_PORT.lock();
+        let mut port_name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
+        let mut hid_guard = ARDUINO_HID_DEVICE.lock();
+        let mut hid_name_guard = CURRENT_ARDUINO_HID_NAME.lock();
+        *port_guard = None;
+        *port_name_guard = String::new();
+        *hid_guard = None;
+        *hid_name_guard = String::new();
+    }
+
+    /// Directly close the Arduino runtime transport and mark flash in progress.
+    /// Called from the flash thread to guarantee the COM port is released
     /// before avrdude attempts to claim it, without relying on async channel timing.
     pub fn close_arduino_port_for_flash() {
         HOOK_STATE.lock().arduino_flash_in_progress = true;
-        let mut port_guard = ARDUINO_PORT.lock();
-        let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
-        *port_guard = None;
-        *name_guard = String::new();
+        close_arduino_runtime_handles();
     }
 
     /// Re-enable background Arduino connection after flash is complete.
@@ -555,9 +568,67 @@ mod windows_overlay {
 
     pub fn arduino_connection_snapshot() -> (bool, String, bool) {
         let flash_in_progress = HOOK_STATE.lock().arduino_flash_in_progress;
-        let current_port = CURRENT_ARDUINO_PORT_NAME.lock().clone();
-        let connected = ARDUINO_PORT.lock().is_some();
-        (connected, current_port, flash_in_progress)
+        let current_serial = CURRENT_ARDUINO_PORT_NAME.lock().clone();
+        let current_hid = CURRENT_ARDUINO_HID_NAME.lock().clone();
+        let serial_connected = ARDUINO_PORT.lock().is_some();
+        let hid_connected = ARDUINO_HID_DEVICE.lock().is_some();
+        if hid_connected {
+            (true, current_hid, flash_in_progress)
+        } else {
+            (serial_connected, current_serial, flash_in_progress)
+        }
+    }
+
+    fn parse_hex_u16_runtime(value: &str, fallback: u16) -> u16 {
+        let cleaned = value.trim().trim_start_matches("0x").trim_start_matches("0X");
+        u16::from_str_radix(cleaned, 16).unwrap_or(fallback)
+    }
+
+    fn open_arduino_hid_device(
+        vid: u16,
+        pid: u16,
+    ) -> Result<(HidDevice, String)> {
+        let api = HidApi::new().context("Failed to enumerate HID devices")?;
+        let mut fallback_path: Option<String> = None;
+
+        for device in api.device_list() {
+            if device.vendor_id() != vid || device.product_id() != pid {
+                continue;
+            }
+
+            let path = device.path().to_string_lossy().into_owned();
+            if fallback_path.is_none() {
+                fallback_path = Some(path.clone());
+            }
+
+            let usage_page = device.usage_page();
+            let interface_number = device.interface_number();
+            let is_vendor_hid = usage_page == 0xFF00 || usage_page == 0xFFC0;
+            let looks_like_standard_mouse = interface_number == 0;
+
+            if is_vendor_hid && !looks_like_standard_mouse {
+                let hid = device
+                    .open_device(&api)
+                    .with_context(|| format!("Failed to open HID path {path}"))?;
+                return Ok((hid, path));
+            }
+        }
+
+        if let Some(path) = fallback_path {
+            for device in api.device_list() {
+                if device.vendor_id() == vid
+                    && device.product_id() == pid
+                    && device.path().to_string_lossy() == path
+                {
+                    let hid = device
+                        .open_device(&api)
+                        .with_context(|| format!("Failed to open HID path {path}"))?;
+                    return Ok((hid, path));
+                }
+            }
+        }
+
+        bail!("No HID device found for VID 0x{vid:04X} PID 0x{pid:04X}")
     }
 
     pub fn set_ui_context(ctx: egui::Context) {
@@ -624,7 +695,10 @@ mod windows_overlay {
         interception_dll_path: PathBuf,
         use_interception: bool,
         use_arduino_mouse: bool,
+        arduino_transport: ArduinoTransport,
         arduino_com_port: String,
+        arduino_vid: String,
+        arduino_pid: String,
         arduino_flash_in_progress: bool,
         interception_runtime_status: InterceptionRuntimeStatus,
         mouse_sensitivity_restore_on_exit: bool,
@@ -707,7 +781,10 @@ mod windows_overlay {
                 interception_dll_path: PathBuf::new(),
                 use_interception: false,
                 use_arduino_mouse: false,
+                arduino_transport: ArduinoTransport::Serial,
                 arduino_com_port: String::new(),
+                arduino_vid: "0x2341".to_owned(),
+                arduino_pid: "0x8036".to_owned(),
                 arduino_flash_in_progress: false,
                 interception_runtime_status: InterceptionRuntimeStatus::Unavailable,
                 mouse_sensitivity_restore_on_exit: false,
@@ -956,51 +1033,86 @@ mod windows_overlay {
         thread::spawn(move || {
             let mut last_attempt = Instant::now() - Duration::from_secs(5);
             while conn_manager_running.load(Ordering::Relaxed) {
-                let (use_arduino, com_port, flash_in_progress) = {
+                let (use_arduino, transport, com_port, vid, pid, flash_in_progress) = {
                     let state = HOOK_STATE.lock();
                     (
                         state.use_arduino_mouse,
+                        state.arduino_transport,
                         state.arduino_com_port.clone(),
+                        state.arduino_vid.clone(),
+                        state.arduino_pid.clone(),
                         state.arduino_flash_in_progress,
                     )
                 };
 
-                if use_arduino && !com_port.is_empty() && !flash_in_progress {
-                    let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
-                    let mut port_guard = ARDUINO_PORT.lock();
+                if use_arduino && !flash_in_progress {
+                    match transport {
+                        ArduinoTransport::Serial if !com_port.is_empty() => {
+                            let mut hid_guard = ARDUINO_HID_DEVICE.lock();
+                            let mut hid_name_guard = CURRENT_ARDUINO_HID_NAME.lock();
+                            *hid_guard = None;
+                            *hid_name_guard = String::new();
+                            drop(hid_guard);
+                            drop(hid_name_guard);
 
-                    if HOOK_STATE.lock().arduino_flash_in_progress {
-                        *port_guard = None;
-                        *name_guard = String::new();
-                        thread::sleep(Duration::from_millis(500));
-                        continue;
-                    }
+                            let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
+                            let mut port_guard = ARDUINO_PORT.lock();
 
-                    if *name_guard != com_port || port_guard.is_none() {
-                        *port_guard = None;
-                        *name_guard = String::new();
-
-                        if last_attempt.elapsed() >= Duration::from_secs(3) {
-                            last_attempt = Instant::now();
-                            match serialport::new(&com_port, 115200)
-                                .timeout(Duration::from_millis(10))
-                                .open()
-                            {
-                                Ok(p) => {
-                                    *port_guard = Some(p);
-                                    *name_guard = com_port.clone();
-                                }
-                                Err(_) => {}
+                            if HOOK_STATE.lock().arduino_flash_in_progress {
+                                *port_guard = None;
+                                *name_guard = String::new();
+                                thread::sleep(Duration::from_millis(500));
+                                continue;
                             }
+
+                            if *name_guard != com_port || port_guard.is_none() {
+                                *port_guard = None;
+                                *name_guard = String::new();
+
+                                if last_attempt.elapsed() >= Duration::from_secs(3) {
+                                    last_attempt = Instant::now();
+                                    match serialport::new(&com_port, 115200)
+                                        .timeout(Duration::from_millis(10))
+                                        .open()
+                                    {
+                                        Ok(p) => {
+                                            *port_guard = Some(p);
+                                            *name_guard = com_port.clone();
+                                        }
+                                        Err(_) => {}
+                                    }
+                                }
+                            }
+                        }
+                        ArduinoTransport::Hid => {
+                            let mut port_guard = ARDUINO_PORT.lock();
+                            let mut port_name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
+                            *port_guard = None;
+                            *port_name_guard = String::new();
+                            drop(port_guard);
+                            drop(port_name_guard);
+
+                            let target_vid = parse_hex_u16_runtime(&vid, 0x2341);
+                            let target_pid = parse_hex_u16_runtime(&pid, 0x8036);
+                            let mut hid_guard = ARDUINO_HID_DEVICE.lock();
+                            let mut hid_name_guard = CURRENT_ARDUINO_HID_NAME.lock();
+
+                            if hid_guard.is_none() && last_attempt.elapsed() >= Duration::from_secs(3) {
+                                last_attempt = Instant::now();
+                                if let Ok((device, device_path)) =
+                                    open_arduino_hid_device(target_vid, target_pid)
+                                {
+                                    *hid_guard = Some(device);
+                                    *hid_name_guard = device_path;
+                                }
+                            }
+                        }
+                        ArduinoTransport::Serial => {
+                            close_arduino_runtime_handles();
                         }
                     }
                 } else {
-                    let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
-                    let mut port_guard = ARDUINO_PORT.lock();
-                    if port_guard.is_some() {
-                        *port_guard = None;
-                        *name_guard = String::new();
-                    }
+                    close_arduino_runtime_handles();
                 }
 
                 thread::sleep(Duration::from_millis(500));
@@ -4109,18 +4221,18 @@ mod windows_overlay {
                     let mut hook_state = HOOK_STATE.lock();
                     hook_state.use_interception = settings.use_interception;
                     hook_state.use_arduino_mouse = settings.use_arduino_mouse;
+                    hook_state.arduino_transport = settings.arduino_transport;
                     hook_state.arduino_com_port = settings.arduino_com_port.clone();
+                    hook_state.arduino_vid = settings.arduino_vid.clone();
+                    hook_state.arduino_pid = settings.arduino_pid.clone();
                 }
 
                 OverlayCommand::SetArduinoFlashInProgress(in_progress) => {
                     let mut hook_state = HOOK_STATE.lock();
                     hook_state.arduino_flash_in_progress = in_progress;
                     if in_progress {
-                        // Close the port immediately so avrdude can use it
-                        let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
-                        let mut port_guard = ARDUINO_PORT.lock();
-                        *port_guard = None;
-                        *name_guard = String::new();
+                        // Close all runtime transports immediately so avrdude can use the port.
+                        close_arduino_runtime_handles();
                     }
                 }
 
@@ -10402,66 +10514,122 @@ mod windows_overlay {
 
     fn write_arduino_data(bytes: &[u8]) -> Result<()> {
         use std::io::Write;
-        let (use_arduino, com_port, flash_in_progress) = {
+        let (use_arduino, transport, com_port, vid, pid, flash_in_progress) = {
             let state = HOOK_STATE.lock();
             (
                 state.use_arduino_mouse,
+                state.arduino_transport,
                 state.arduino_com_port.clone(),
+                state.arduino_vid.clone(),
+                state.arduino_pid.clone(),
                 state.arduino_flash_in_progress,
             )
         };
         if flash_in_progress {
             anyhow::bail!("Arduino flash is in progress");
         }
-        if !use_arduino || com_port.is_empty() {
-            anyhow::bail!("Arduino emulation not enabled or port empty");
+        if !use_arduino {
+            anyhow::bail!("Arduino emulation not enabled");
         }
 
-        let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
-        let mut port_guard = ARDUINO_PORT.lock();
-        if *name_guard != com_port || port_guard.is_none() {
-            *port_guard = None;
-            
-            // Check cooldown to prevent resetting Arduino Leonardo in an infinite loop
-            let mut last_attempt = LAST_ARDUINO_OPEN_ATTEMPT.lock();
-            if let Some(instant) = *last_attempt {
-                if instant.elapsed() < Duration::from_secs(3) {
-                    anyhow::bail!("Arduino reconnect cooldown active");
+        match transport {
+            ArduinoTransport::Serial => {
+                if com_port.is_empty() {
+                    anyhow::bail!("Arduino serial mode selected but COM port is empty");
                 }
-            }
-            *last_attempt = Some(Instant::now());
 
-            match serialport::new(&com_port, 115200)
-                .timeout(Duration::from_millis(10))
-                .open()
-            {
-                Ok(p) => {
-                    *port_guard = Some(p);
-                    *name_guard = com_port.clone();
-                }
-                Err(e) => {
-                    anyhow::bail!("Failed to open serial port: {}", e);
-                }
-            }
-        }
+                let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
+                let mut port_guard = ARDUINO_PORT.lock();
+                if *name_guard != com_port || port_guard.is_none() {
+                    *port_guard = None;
 
-        if let Some(ref mut port) = *port_guard {
-            if let Err(e) = port.write_all(bytes).and_then(|_| port.flush()) {
-                *port_guard = None; // Connection lost, will attempt reconnect after 3-second cooldown
-                anyhow::bail!("Failed to write to serial port: {}", e);
+                    // Check cooldown to prevent resetting Arduino Leonardo in an infinite loop
+                    let mut last_attempt = LAST_ARDUINO_OPEN_ATTEMPT.lock();
+                    if let Some(instant) = *last_attempt {
+                        if instant.elapsed() < Duration::from_secs(3) {
+                            anyhow::bail!("Arduino reconnect cooldown active");
+                        }
+                    }
+                    *last_attempt = Some(Instant::now());
+
+                    match serialport::new(&com_port, 115200)
+                        .timeout(Duration::from_millis(10))
+                        .open()
+                    {
+                        Ok(p) => {
+                            *port_guard = Some(p);
+                            *name_guard = com_port.clone();
+                        }
+                        Err(e) => {
+                            anyhow::bail!("Failed to open serial port: {}", e);
+                        }
+                    }
+                }
+
+                if let Some(ref mut port) = *port_guard {
+                    if let Err(e) = port.write_all(bytes).and_then(|_| port.flush()) {
+                        *port_guard = None;
+                        anyhow::bail!("Failed to write to serial port: {}", e);
+                    }
+                    Ok(())
+                } else {
+                    anyhow::bail!("Serial port not open")
+                }
             }
-            Ok(())
-        } else {
-            anyhow::bail!("Serial port not open")
+            ArduinoTransport::Hid => {
+                let target_vid = parse_hex_u16_runtime(&vid, 0x2341);
+                let target_pid = parse_hex_u16_runtime(&pid, 0x8036);
+                let mut hid_name_guard = CURRENT_ARDUINO_HID_NAME.lock();
+                let mut hid_guard = ARDUINO_HID_DEVICE.lock();
+
+                if hid_guard.is_none() {
+                    let (device, device_path) = open_arduino_hid_device(target_vid, target_pid)?;
+                    *hid_guard = Some(device);
+                    *hid_name_guard = device_path;
+                }
+
+                let mut report = [0u8; 65];
+                report[0] = 0;
+                report[1] = 0xA5;
+                report[2] = bytes.get(1).copied().unwrap_or(0);
+                report[3] = bytes.get(2).copied().unwrap_or(0);
+                report[4] = bytes.get(3).copied().unwrap_or(0);
+                report[5] = bytes.get(4).copied().unwrap_or(0);
+                report[6] = bytes.get(5).copied().unwrap_or(0);
+                report[8] = 0x5A;
+
+                if let Some(device) = hid_guard.as_mut() {
+                    if let Err(first_error) = device.write(&report) {
+                        let short_report = &report[..64];
+                        if device.write(short_report).is_err() {
+                            *hid_guard = None;
+                            *hid_name_guard = String::new();
+                            anyhow::bail!("Failed to write to HID device: {}", first_error);
+                        }
+                    }
+                    Ok(())
+                } else {
+                    anyhow::bail!("HID device not open")
+                }
+            }
         }
     }
 
     fn send_mouse_input(dw_flags: MOUSE_EVENT_FLAGS, mouse_data: u32) -> Result<()> {
-        let (use_arduino, com_port) = {
+        let (use_arduino, transport, com_port) = {
             let state = HOOK_STATE.lock();
-            (state.use_arduino_mouse, state.arduino_com_port.clone())
+            (
+                state.use_arduino_mouse,
+                state.arduino_transport,
+                state.arduino_com_port.clone(),
+            )
         };
-        if use_arduino && !com_port.is_empty() {
+        let arduino_ready = use_arduino
+            && match transport {
+                ArduinoTransport::Serial => !com_port.is_empty(),
+                ArduinoTransport::Hid => true,
+            };
+        if arduino_ready {
             let mut send_btn = |btn: u8, state: u8| -> Result<()> {
                 let packet = [0xAA, 2, btn, state, 0, 0];
                 write_arduino_data(&packet)
@@ -10747,11 +10915,20 @@ mod windows_overlay {
     }
 
     fn send_mouse_move_absolute(x: i32, y: i32) -> Result<()> {
-        let (use_arduino, com_port) = {
+        let (use_arduino, transport, com_port) = {
             let state = HOOK_STATE.lock();
-            (state.use_arduino_mouse, state.arduino_com_port.clone())
+            (
+                state.use_arduino_mouse,
+                state.arduino_transport,
+                state.arduino_com_port.clone(),
+            )
         };
-        if use_arduino && !com_port.is_empty() {
+        let arduino_ready = use_arduino
+            && match transport {
+                ArduinoTransport::Serial => !com_port.is_empty(),
+                ArduinoTransport::Hid => true,
+            };
+        if arduino_ready {
             let mut pos = POINT { x: 0, y: 0 };
             unsafe {
                 let _ = GetCursorPos(&mut pos);
@@ -10934,11 +11111,20 @@ mod windows_overlay {
     }
 
     fn send_mouse_move_relative(dx: i32, dy: i32) -> Result<()> {
-        let (use_arduino, com_port) = {
+        let (use_arduino, transport, com_port) = {
             let state = HOOK_STATE.lock();
-            (state.use_arduino_mouse, state.arduino_com_port.clone())
+            (
+                state.use_arduino_mouse,
+                state.arduino_transport,
+                state.arduino_com_port.clone(),
+            )
         };
-        if use_arduino && !com_port.is_empty() {
+        let arduino_ready = use_arduino
+            && match transport {
+                ArduinoTransport::Serial => !com_port.is_empty(),
+                ArduinoTransport::Hid => true,
+            };
+        if arduino_ready {
             let packet = [
                 0xAA,
                 1,
