@@ -20,6 +20,7 @@ mod window_list;
 
 use anyhow::Result;
 use crossbeam_channel::unbounded;
+use std::sync::{Arc, Mutex};
 
 use crate::{
     overlay::OverlayCommand,
@@ -82,17 +83,65 @@ fn main() -> Result<()> {
     }
     state.show_window = true;
     let (ui_tx, ui_rx) = unbounded();
-    let overlay = overlay::start(paths.clone(), state.active_style.clone(), ui_tx.clone())?;
+    let overlay_handle_slot: Arc<Mutex<Option<overlay::OverlayHandle>>> = Arc::new(Mutex::new(None));
+    let overlay_start_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+    {
+        let overlay_handle_slot = Arc::clone(&overlay_handle_slot);
+        let overlay_start_error = Arc::clone(&overlay_start_error);
+        let overlay_paths = paths.clone();
+        let overlay_initial_style = state.active_style.clone();
+        let overlay_ui_tx = ui_tx.clone();
+        std::thread::spawn(move || {
+            match overlay::start(overlay_paths, overlay_initial_style, overlay_ui_tx) {
+                Ok(handle) => {
+                    *overlay_handle_slot.lock().expect("overlay handle slot poisoned") = Some(handle);
+                }
+                Err(error) => {
+                    *overlay_start_error
+                        .lock()
+                        .expect("overlay start error slot poisoned") = Some(error.to_string());
+                }
+            }
+        });
+    }
 
     let (overlay_tx, overlay_rx) = unbounded::<OverlayCommand>();
-    std::thread::spawn(move || {
-        while let Ok(command) = overlay_rx.recv() {
-            overlay.send(command.clone());
-            if matches!(command, OverlayCommand::Exit) {
-                break;
+    {
+        let overlay_handle_slot = Arc::clone(&overlay_handle_slot);
+        let overlay_start_error = Arc::clone(&overlay_start_error);
+        std::thread::spawn(move || {
+            let mut pending_commands: Vec<OverlayCommand> = Vec::new();
+            loop {
+                match overlay_rx.recv_timeout(std::time::Duration::from_millis(10)) {
+                    Ok(command) => pending_commands.push(command),
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                }
+
+                let handle_guard = overlay_handle_slot.lock().expect("overlay handle slot poisoned");
+                if let Some(handle) = handle_guard.as_ref() {
+                    for command in pending_commands.drain(..) {
+                        let should_exit = matches!(command, OverlayCommand::Exit);
+                        handle.send(command);
+                        if should_exit {
+                            return;
+                        }
+                    }
+                    continue;
+                }
+
+                drop(handle_guard);
+                if overlay_start_error
+                    .lock()
+                    .expect("overlay start error slot poisoned")
+                    .is_some()
+                {
+                    return;
+                }
             }
-        }
-    });
+        });
+    }
 
     let app_title = "MacroNest v1.0";
     let mut viewport_builder = eframe::egui::ViewportBuilder::default()
