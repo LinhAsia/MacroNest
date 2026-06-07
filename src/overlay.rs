@@ -48,6 +48,7 @@ mod windows_overlay {
     use parking_lot::Mutex;
     use windows::{
         Win32::{
+            Devices::HumanInterfaceDevice::HidD_SetOutputReport,
             Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM},
             Storage::FileSystem::{
                 CreateFileA, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE,
@@ -10641,21 +10642,31 @@ mod windows_overlay {
                 report[7] = 0x5A;
 
                 if let Some(runtime) = hid_guard.as_mut() {
-                    let mut bytes_written = 0u32;
-                    let write_ok = unsafe {
-                        WriteFile(
+                    let report_ok = unsafe {
+                        HidD_SetOutputReport(
                             runtime.handle,
-                            Some(&report),
-                            Some(&mut bytes_written as *mut u32),
-                            None,
+                            report.as_ptr() as *mut c_void,
+                            report.len() as u32,
                         )
-                    }
-                    .is_ok();
-                    if !write_ok || bytes_written == 0 {
-                        *hid_guard = None;
-                        *hid_name_guard = String::new();
-                        *hid_write_guard = None;
-                        anyhow::bail!("Failed to write RawHID report");
+                    };
+
+                    if !report_ok {
+                        let mut bytes_written = 0u32;
+                        let write_ok = unsafe {
+                            WriteFile(
+                                runtime.handle,
+                                Some(&report),
+                                Some(&mut bytes_written as *mut u32),
+                                None,
+                            )
+                        }
+                        .is_ok();
+                        if !write_ok || bytes_written == 0 {
+                            *hid_guard = None;
+                            *hid_name_guard = String::new();
+                            *hid_write_guard = None;
+                            anyhow::bail!("Failed to write RawHID report");
+                        }
                     }
                     *hid_write_guard = Some(Instant::now());
                     Ok(())
