@@ -727,7 +727,7 @@ pub struct CrosshairApp {
     zoom_preview_cache: HashMap<u32, ZoomPreviewCache>,
     vision_preview_cache: HashMap<u32, VisionPreviewCache>,
     video_preview_cache: HashMap<u32, VideoPreviewCache>,
-    video_frame_tx: crossbeam_channel::Sender<crate::media::VideoFrameRequest>,
+    video_frame_tx: Option<crossbeam_channel::Sender<crate::media::VideoFrameRequest>>,
     video_preview_requested: HashMap<u32, (String, u64)>,
     window_preview_requested: HashMap<u32, Instant>,
     video_chroma_pick_preset_id: Option<u32>,
@@ -752,6 +752,9 @@ pub struct CrosshairApp {
     native_shadow_applied: bool,
     native_transitions_disabled_applied: bool,
     startup_show_pending: bool,
+    startup_overlay_sync_pending: bool,
+    startup_state_persist_pending: bool,
+    startup_cjk_font_check_pending: bool,
     update_status: UpdateStatus,
     interception_status: String,
     opencv_download_job: Option<JoinHandle<Result<()>>>,
@@ -820,6 +823,7 @@ impl CrosshairApp {
         overlay_tx: Sender<OverlayCommand>,
         ui_tx: Sender<UiCommand>,
         ui_rx: Receiver<UiCommand>,
+        startup_state_dirty: bool,
     ) -> Self {
         let save_name = state
             .selected_profile
@@ -828,7 +832,6 @@ impl CrosshairApp {
         let initial_active_panel = state.active_panel;
 
         let opencv_installed = paths.opencv_dll.exists();
-        let video_frame_tx = crate::media::start_video_preview_worker(ui_tx.clone());
         let mut app = Self {
             paths: paths.clone(),
             state,
@@ -931,7 +934,7 @@ impl CrosshairApp {
             zoom_preview_cache: HashMap::new(),
             vision_preview_cache: HashMap::new(),
             video_preview_cache: HashMap::new(),
-            video_frame_tx,
+            video_frame_tx: None,
             video_preview_requested: HashMap::new(),
             window_preview_requested: HashMap::new(),
             video_chroma_pick_preset_id: None,
@@ -956,6 +959,9 @@ impl CrosshairApp {
             native_shadow_applied: false,
             native_transitions_disabled_applied: false,
             startup_show_pending: true,
+            startup_overlay_sync_pending: true,
+            startup_state_persist_pending: false,
+            startup_cjk_font_check_pending: true,
             update_status: UpdateStatus::Idle,
             interception_status: "Interception: Unavailable".to_owned(),
             opencv_download_job: None,
@@ -1018,47 +1024,15 @@ impl CrosshairApp {
             arduino_ports_last_refresh: None,
         };
         app.interception_installed = app.paths.interception_dll.exists();
-        app.ensure_master_presets();
-        let mut startup_state_changed = false;
-        if app.state.groq_settings.details_open {
-            app.state.groq_settings.details_open = false;
-            startup_state_changed = true;
+        let mut pending_startup_persist = startup_state_dirty;
+        if app.apply_startup_state_adjustments() {
+            pending_startup_persist = true;
         }
-        for preset in &mut app.state.command_presets {
-            if !preset.collapsed {
-                preset.collapsed = true;
-                startup_state_changed = true;
-            }
-        }
-        if app.migrate_legacy_audio_sense_state() {
-            startup_state_changed = true;
-        }
-        if startup_state_changed {
-            app.persist();
-        }
-        app.sync_audio_sense_presets();
+        app.startup_state_persist_pending = pending_startup_persist;
         for preset in &app.state.audio_settings.video_presets {
             app.video_preview_cursor_ms
                 .insert(preset.id, preset.clip.start_ms);
         }
-        app.sync_crosshair();
-        app.sync_window_presets();
-        app.sync_mouse_sensitivity_presets();
-        app.sync_mouse_driver_settings();
-        app.sync_keyboard_arrow_mouse_settings();
-        app.sync_macro_delay_settings();
-        app.sync_profiles();
-        app.sync_macro_presets();
-        app.sync_audio_settings();
-        app.sync_vision_presets();
-        app.sync_ocr_presets();
-        app.sync_vision_settings();
-        app.sync_hud_presets();
-        app.sync_timer_presets();
-        app.sync_command_presets();
-        app.sync_macro_master_enabled();
-        app.sync_vietnamese_input_enabled();
-        app.sync_macro_master_hotkey();
         {
             let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
             for (name, val) in &app.state.global_constants {
@@ -1072,6 +1046,32 @@ impl CrosshairApp {
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateProfiles(self.state.profiles.clone()));
+    }
+
+    fn sync_startup_overlay_state(&self) {
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::Update(self.state.active_style.clone()));
+        self.sync_profiles();
+        self.sync_window_presets();
+        self.sync_mouse_sensitivity_presets();
+        self.sync_mouse_sensitivity_settings();
+        self.sync_mouse_driver_settings();
+        self.sync_keyboard_arrow_mouse_settings();
+        self.sync_macro_delay_settings();
+        self.sync_macro_presets();
+        self.sync_audio_settings();
+        self.sync_vision_presets();
+        self.sync_ocr_presets();
+        self.sync_vision_settings();
+        self.sync_hud_presets();
+        self.sync_timer_presets();
+        self.sync_command_presets();
+        self.sync_audio_sense_presets();
+        self.sync_geometry_presets();
+        self.sync_macro_master_enabled();
+        self.sync_vietnamese_input_enabled();
+        self.sync_macro_master_hotkey();
     }
 
     fn sync_macro_delay_settings(&self) {
@@ -1182,6 +1182,27 @@ impl CrosshairApp {
             }
         }
 
+        changed
+    }
+
+    fn apply_startup_state_adjustments(&mut self) -> bool {
+        let mut changed = false;
+        if self.ensure_master_presets_without_persist() {
+            changed = true;
+        }
+        if self.state.groq_settings.details_open {
+            self.state.groq_settings.details_open = false;
+            changed = true;
+        }
+        for preset in &mut self.state.command_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+        if self.migrate_legacy_audio_sense_state() {
+            changed = true;
+        }
         changed
     }
 
@@ -2153,6 +2174,17 @@ impl CrosshairApp {
         });
     }
 
+    fn ensure_video_preview_worker_ready(
+        &mut self,
+    ) -> crossbeam_channel::Sender<crate::media::VideoFrameRequest> {
+        if let Some(tx) = &self.video_frame_tx {
+            return tx.clone();
+        }
+        let tx = crate::media::start_video_preview_worker(self.ui_tx.clone());
+        self.video_frame_tx = Some(tx.clone());
+        tx
+    }
+
     fn ensure_video_preview_frame(
         &mut self,
         ctx: &egui::Context,
@@ -2183,7 +2215,8 @@ impl CrosshairApp {
         if !already_requested {
             self.video_preview_requested.insert(preset_id, (trimmed.to_owned(), rounded_start_ms));
             let is_playing = self.active_video_preview_preset_id == Some(preset_id);
-            let _ = self.video_frame_tx.send(crate::media::VideoFrameRequest {
+            let video_frame_tx = self.ensure_video_preview_worker_ready();
+            let _ = video_frame_tx.send(crate::media::VideoFrameRequest {
                 preset_id,
                 path: trimmed.to_owned(),
                 start_ms: rounded_start_ms,
@@ -5684,7 +5717,10 @@ impl CrosshairApp {
         }
     }
 
-    fn ensure_master_presets(&mut self) {
+    fn ensure_master_presets_without_persist(&mut self) -> bool {
+        let before_presets = self.state.master_presets.clone();
+        let before_selected = self.state.selected_master_preset_id;
+
         if self.state.master_presets.is_empty() {
             let id = self.state.next_master_preset_id.max(1);
             self.state.next_master_preset_id = id + 1;
@@ -5692,13 +5728,21 @@ impl CrosshairApp {
                 .master_presets
                 .push(self.capture_master_preset_snapshot(id, "Default".to_owned()));
             self.state.selected_master_preset_id = Some(id);
-            self.persist();
-            return;
+        } else {
+            self.reconcile_master_presets();
+            if self.state.selected_master_preset_id.is_none() {
+                self.state.selected_master_preset_id =
+                    self.state.master_presets.first().map(|preset| preset.id);
+            }
         }
-        self.reconcile_master_presets();
-        if self.state.selected_master_preset_id.is_none() {
-            self.state.selected_master_preset_id =
-                self.state.master_presets.first().map(|preset| preset.id);
+
+        self.state.master_presets != before_presets
+            || self.state.selected_master_preset_id != before_selected
+    }
+
+    fn ensure_master_presets(&mut self) {
+        if self.ensure_master_presets_without_persist() {
+            self.persist();
         }
     }
 
@@ -8174,6 +8218,33 @@ impl CrosshairApp {
         painter.rect_stroke(rect, 16.0, stroke, egui::StrokeKind::Inside);
     }
 
+    fn run_deferred_startup_tasks(&mut self, ctx: &egui::Context) {
+        if self.startup_show_pending {
+            return;
+        }
+        if self.startup_overlay_sync_pending {
+            self.sync_startup_overlay_state();
+            self.startup_overlay_sync_pending = false;
+            ctx.request_repaint();
+            return;
+        }
+        if self.startup_state_persist_pending {
+            self.persist();
+            self.startup_state_persist_pending = false;
+            ctx.request_repaint();
+            return;
+        }
+        if self.startup_cjk_font_check_pending {
+            if app_state_needs_cjk_fallback(&self.state) {
+                configure_fonts(ctx, true);
+                self.last_applied_theme = None;
+                self.apply_theme(ctx);
+            }
+            self.startup_cjk_font_check_pending = false;
+            ctx.request_repaint();
+        }
+    }
+
     fn hide_to_tray(&mut self, ctx: &egui::Context) {
         self.state.show_window = false;
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
@@ -8208,6 +8279,7 @@ impl eframe::App for CrosshairApp {
         {
             self.native_transitions_disabled_applied = true;
         }
+        self.run_deferred_startup_tasks(ctx);
 
         while let Ok(command) = self.ui_rx.try_recv() {
             match command {

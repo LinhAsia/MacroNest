@@ -80,45 +80,9 @@ fn main() -> Result<()> {
             state_changed = true;
         }
     }
-    if state_changed {
-        let _ = paths.save_state(&state);
-    }
     state.show_window = true;
     let (ui_tx, ui_rx) = unbounded();
     let overlay = overlay::start(paths.clone(), state.active_style.clone(), ui_tx.clone())?;
-    overlay.send(OverlayCommand::Update(state.active_style.clone()));
-    overlay.send(OverlayCommand::UpdateProfiles(state.profiles.clone()));
-    overlay.send(OverlayCommand::UpdateWindowPresets(
-        state.window_presets.clone(),
-    ));
-    overlay.send(OverlayCommand::UpdateWindowFocusPresets(
-        state.window_focus_presets.clone(),
-    ));
-    overlay.send(OverlayCommand::UpdateMouseSensitivityPresets(
-        state.mouse_sensitivity_presets.clone(),
-    ));
-    overlay.send(OverlayCommand::UpdateMouseSensitivitySettings {
-        restore_on_exit: state.mouse_sensitivity_restore_on_exit,
-        restore_speed: state.mouse_sensitivity_restore_speed,
-    });
-    overlay.send(OverlayCommand::UpdateKeyboardArrowMouseSettings {
-        enabled: state.keyboard_arrow_mouse_enabled,
-        step_px: state.keyboard_arrow_mouse_step_px,
-    });
-    overlay.send(OverlayCommand::UpdateVisionPresets(
-        state.vision_presets.clone(),
-    ));
-    overlay.send(OverlayCommand::UpdateAudioSensePresets(
-        state.audio_sense_presets.clone(),
-    ));
-    overlay.send(OverlayCommand::UpdateGeometryPresets(
-        state.geometry_presets.clone(),
-    ));
-    let macro_groups = ui::build_runtime_macro_groups(&state);
-    overlay.send(OverlayCommand::UpdateMacroPresets(macro_groups));
-    overlay.send(OverlayCommand::UpdateAudioSettings(
-        state.audio_settings.clone(),
-    ));
 
     let (overlay_tx, overlay_rx) = unbounded::<OverlayCommand>();
     std::thread::spawn(move || {
@@ -168,11 +132,10 @@ fn main() -> Result<()> {
         app_title,
         native_options,
         Box::new(move |cc| {
-            let load_cjk_fallback = ui::app_state_needs_cjk_fallback(&state);
-            ui::configure_fonts(&cc.egui_ctx, load_cjk_fallback);
+            ui::configure_fonts(&cc.egui_ctx, false);
             ui::configure_theme(&cc.egui_ctx, state.ui_theme);
             Ok(Box::new(CrosshairApp::new(
-                paths, state, overlay_tx, ui_tx, ui_rx,
+                paths, state, overlay_tx, ui_tx, ui_rx, state_changed,
             )))
         }),
     )
