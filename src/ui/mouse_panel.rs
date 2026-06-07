@@ -2156,64 +2156,64 @@ fn patch_hex_descriptors(hex_content: &str, vid: u16, pid: u16) -> anyhow::Resul
     let vid_high = ((vid >> 8) & 0xFF) as u8;
     let pid_low = (pid & 0xFF) as u8;
     let pid_high = ((pid >> 8) & 0xFF) as u8;
-    
-    let new_vid_pid_hex = format!("{:02X}{:02X}{:02X}{:02X}", vid_low, vid_high, pid_low, pid_high);
-    
+
+    let old_vid_pid_hex = "41233680";
+    let new_vid_pid_hex = format!(
+        "{:02X}{:02X}{:02X}{:02X}",
+        vid_low, vid_high, pid_low, pid_high
+    );
+
     let mut patched_lines = Vec::new();
     let mut found = false;
-    
+
     for line in hex_content.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with(':') && trimmed.contains("12010002EF02014041233680") {
-            let line_len = trimmed.len();
-            if line_len < 11 {
-                patched_lines.push(trimmed.to_string());
-                continue;
-            }
-            
-            let prefix = &trimmed[0..9];
-            let data_str = &trimmed[9..line_len-2];
-            
-            if let Some(pattern_idx) = data_str.find("12010002EF02014041233680") {
-                let target_idx = pattern_idx + 16;
-                
-                let mut new_data_str = data_str.to_string();
-                new_data_str.replace_range(target_idx..target_idx+8, &new_vid_pid_hex);
-                
-                let mut sum: u32 = 0;
-                let mut i = 1;
-                while i < prefix.len() {
-                    if let Ok(b) = u8::from_str_radix(&prefix[i..i+2], 16) {
-                        sum += b as u32;
-                    }
-                    i += 2;
-                }
-                
-                let mut j = 0;
-                while j < new_data_str.len() {
-                    if let Ok(b) = u8::from_str_radix(&new_data_str[j..j+2], 16) {
-                        sum += b as u32;
-                    }
-                    j += 2;
-                }
-                
-                let checksum = ((!sum + 1) & 0xFF) as u8;
-                let new_line = format!("{}{}{:02X}", prefix, new_data_str, checksum);
-                
-                patched_lines.push(new_line);
-                found = true;
-            } else {
-                patched_lines.push(trimmed.to_string());
-            }
-        } else {
+        if !trimmed.starts_with(':') {
             patched_lines.push(trimmed.to_string());
+            continue;
         }
+
+        let line_len = trimmed.len();
+        if line_len < 11 {
+            patched_lines.push(trimmed.to_string());
+            continue;
+        }
+
+        let prefix = &trimmed[0..9];
+        let data_str = &trimmed[9..line_len - 2];
+        if !data_str.contains(old_vid_pid_hex) {
+            patched_lines.push(trimmed.to_string());
+            continue;
+        }
+
+        let new_data_str = data_str.replace(old_vid_pid_hex, &new_vid_pid_hex);
+        let mut sum: u32 = 0;
+        let mut i = 1;
+        while i < prefix.len() {
+            if let Ok(b) = u8::from_str_radix(&prefix[i..i + 2], 16) {
+                sum += b as u32;
+            }
+            i += 2;
+        }
+
+        let mut j = 0;
+        while j < new_data_str.len() {
+            if let Ok(b) = u8::from_str_radix(&new_data_str[j..j + 2], 16) {
+                sum += b as u32;
+            }
+            j += 2;
+        }
+
+        let checksum = ((!sum + 1) & 0xFF) as u8;
+        let new_line = format!("{}{}{:02X}", prefix, new_data_str, checksum);
+        patched_lines.push(new_line);
+        found = true;
     }
-    
+
     if !found {
-        anyhow::bail!("Could not find standard USB Device Descriptor in firmware.hex to patch.");
+        anyhow::bail!("Could not find the default VID/PID bytes in firmware.hex to patch.");
     }
-    
+
     Ok(patched_lines.join("\r\n"))
 }
 
