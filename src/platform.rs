@@ -11,7 +11,7 @@ mod windows_platform {
             Graphics::Dwm::{
                 DWMNCRP_DISABLED, DWMNCRP_ENABLED, DWMWA_NCRENDERING_POLICY,
                 DWMWA_TRANSITIONS_FORCEDISABLED,
-                DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND, DWMWCP_ROUND,
+                DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
                 DwmSetWindowAttribute, DwmExtendFrameIntoClientArea,
             },
             System::Threading::{
@@ -210,7 +210,7 @@ mod windows_platform {
                 std::mem::size_of_val(&policy) as u32,
             );
 
-            let corner = DWMWCP_DONOTROUND;
+            let corner = DWMWCP_ROUND;
             let _ = DwmSetWindowAttribute(
                 hwnd,
                 DWMWA_WINDOW_CORNER_PREFERENCE,
