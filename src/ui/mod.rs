@@ -9226,11 +9226,13 @@ impl eframe::App for CrosshairApp {
             )
             .show(ctx, |ui| {
                 ui.set_min_size(ui.available_size());
+                let mut content_clip_rect = ui.max_rect();
+                content_clip_rect.max.y -= 16.0;
+                ui.set_clip_rect(ui.clip_rect().intersect(content_clip_rect));
                 if self.state.active_panel == AppPanel::Macros
                     || self.state.active_panel == AppPanel::Modes
                 {
                     self.render_macro_panel(ui);
-                    ui.separator();
                     if self.capture_target.is_some() {
                         ctx.request_repaint_after(Duration::from_millis(16));
                     }
@@ -9255,7 +9257,6 @@ impl eframe::App for CrosshairApp {
                                 AppPanel::Hud => self.render_hud_panel(ui),
                                 AppPanel::Media => self.render_media_panel(ui),
                             }
-                            ui.separator();
                             if self.capture_target.is_some() {
                                 ctx.request_repaint_after(Duration::from_millis(16));
                             }
