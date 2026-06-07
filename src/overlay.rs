@@ -10696,6 +10696,9 @@ mod windows_overlay {
                 let packet = [0xAA, 3, val_byte, 0, 0, 0];
                 if write_arduino_data(&packet).is_err() { arduino_success = false; }
             }
+            if dw_flags.contains(MOUSEEVENTF_XDOWN) || dw_flags.contains(MOUSEEVENTF_XUP) {
+                arduino_success = false;
+            }
 
             if arduino_success {
                 return Ok(());

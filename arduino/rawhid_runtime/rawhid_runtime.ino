@@ -1,4 +1,5 @@
-#include <HID-Project.h>
+#include <Mouse.h>
+#include "RawHID.h"
 
 namespace {
 constexpr uint8_t kMagic = 0xA5;
@@ -8,7 +9,6 @@ constexpr uint8_t kCmdButton = 0x02;
 constexpr uint8_t kCmdWheel = 0x03;
 constexpr uint8_t kBtnLeft = 0x01;
 constexpr uint8_t kBtnRight = 0x02;
-constexpr uint8_t kBtnMiddle = 0x04;
 constexpr size_t kFrameSize = 8;
 
 uint8_t g_rawhid_buffer[64];
@@ -16,26 +16,13 @@ uint8_t g_frame[kFrameSize];
 uint8_t g_frame_index = 0;
 uint8_t g_buttons = 0;
 
-uint8_t button_mask_from_id(uint8_t button_id) {
+uint8_t mouse_button_from_id(uint8_t button_id) {
   switch (button_id) {
     case 1:
-      return kBtnLeft;
-    case 2:
-      return kBtnRight;
-    case 3:
-      return kBtnMiddle;
-    default:
-      return 0;
-  }
-}
-
-uint8_t mouse_api_button_from_mask(uint8_t mask) {
-  switch (mask) {
-    case kBtnLeft:
       return MOUSE_LEFT;
-    case kBtnRight:
+    case 2:
       return MOUSE_RIGHT;
-    case kBtnMiddle:
+    case 3:
       return MOUSE_MIDDLE;
     default:
       return 0;
@@ -70,24 +57,19 @@ void move_chunked(int16_t dx, int16_t dy) {
 }
 
 void handle_button_command(uint8_t button_id, uint8_t state) {
-  const uint8_t mask = button_mask_from_id(button_id);
-  if (mask == 0) {
-    return;
-  }
-
-  const uint8_t mouse_button = mouse_api_button_from_mask(mask);
+  const uint8_t mouse_button = mouse_button_from_id(button_id);
   if (mouse_button == 0) {
     return;
   }
 
   if (state) {
-    if ((g_buttons & mask) == 0) {
+    if ((g_buttons & mouse_button) == 0) {
       Mouse.press(mouse_button);
-      g_buttons |= mask;
+      g_buttons |= mouse_button;
     }
-  } else if (g_buttons & mask) {
+  } else if (g_buttons & mouse_button) {
     Mouse.release(mouse_button);
-    g_buttons &= static_cast<uint8_t>(~mask);
+    g_buttons &= static_cast<uint8_t>(~mouse_button);
   }
 }
 
