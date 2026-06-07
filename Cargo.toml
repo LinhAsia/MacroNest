@@ -35,15 +35,19 @@ libloading = "0.8"
 opencv = { version = "0.98.2", default-features = false, features = ["clang-runtime", "imgproc", "videoio"] }
 wasapi = "0.20"
 windows = { version = "0.61", features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_HumanInterfaceDevice",
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
+    "Win32_Storage_FileSystem",
     "Win32_Storage_Xps",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_DataExchange",
+    "Win32_System_IO",
     "Win32_System_Memory",
     "Win32_System_Threading",
     "Win32_Security",

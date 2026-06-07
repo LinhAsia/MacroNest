@@ -22,7 +22,7 @@ mod windows_overlay {
     use super::{MacroRecordingEvent, MacroRecordingSession};
     use std::{
         collections::{HashMap, HashSet},
-        ffi::c_void,
+        ffi::{CString, c_void},
         mem::size_of,
         os::windows::process::CommandExt,
         path::PathBuf,
@@ -38,7 +38,7 @@ mod windows_overlay {
     use anyhow::{Context, Result, bail};
     use crossbeam_channel::{Receiver, Sender};
     use eframe::egui;
-    use hidapi::{HidApi, HidDevice};
+    use hidapi::HidApi;
     use once_cell::sync::Lazy;
     use opencv::{
         core::{self as cv, Mat, Size},
@@ -49,6 +49,10 @@ mod windows_overlay {
     use windows::{
         Win32::{
             Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM},
+            Storage::FileSystem::{
+                CreateFileA, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE,
+                OPEN_EXISTING, WriteFile,
+            },
             Graphics::{
                 Dwm::{
                     DWM_THUMBNAIL_PROPERTIES, DWM_TNP_OPACITY, DWM_TNP_RECTDESTINATION,
@@ -121,7 +125,7 @@ mod windows_overlay {
                 },
             },
         },
-        core::{PCWSTR, w},
+        core::{PCSTR, PCWSTR, w},
     };
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum InterceptionRuntimeStatus {
@@ -195,7 +199,25 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static CURRENT_ARDUINO_PORT_NAME: Lazy<Mutex<String>> =
         Lazy::new(|| Mutex::new(String::new()));
-    static ARDUINO_HID_DEVICE: Lazy<Mutex<Option<HidDevice>>> =
+
+    struct ArduinoRawHidRuntime {
+        handle: windows::Win32::Foundation::HANDLE,
+        path: String,
+    }
+
+    unsafe impl Send for ArduinoRawHidRuntime {}
+
+    impl Drop for ArduinoRawHidRuntime {
+        fn drop(&mut self) {
+            if !self.handle.is_invalid() {
+                unsafe {
+                    let _ = windows::Win32::Foundation::CloseHandle(self.handle);
+                }
+            }
+        }
+    }
+
+    static ARDUINO_HID_DEVICE: Lazy<Mutex<Option<ArduinoRawHidRuntime>>> =
         Lazy::new(|| Mutex::new(None));
     static CURRENT_ARDUINO_HID_NAME: Lazy<Mutex<String>> =
         Lazy::new(|| Mutex::new(String::new()));
@@ -584,12 +606,10 @@ mod windows_overlay {
         u16::from_str_radix(cleaned, 16).unwrap_or(fallback)
     }
 
-    fn open_arduino_hid_device(
-        vid: u16,
-        pid: u16,
-    ) -> Result<(HidDevice, String)> {
+    fn open_arduino_hid_device(vid: u16, pid: u16) -> Result<ArduinoRawHidRuntime> {
         let api = HidApi::new().context("Failed to enumerate HID devices")?;
         let mut fallback_path: Option<String> = None;
+        let mut selected_path: Option<String> = None;
 
         for device in api.device_list() {
             if device.vendor_id() != vid || device.product_id() != pid {
@@ -607,28 +627,36 @@ mod windows_overlay {
             let looks_like_standard_mouse = interface_number == 0;
 
             if is_vendor_hid && !looks_like_standard_mouse {
-                let hid = device
-                    .open_device(&api)
-                    .with_context(|| format!("Failed to open HID path {path}"))?;
-                return Ok((hid, path));
+                selected_path = Some(path);
+                break;
             }
         }
 
-        if let Some(path) = fallback_path {
-            for device in api.device_list() {
-                if device.vendor_id() == vid
-                    && device.product_id() == pid
-                    && device.path().to_string_lossy() == path
-                {
-                    let hid = device
-                        .open_device(&api)
-                        .with_context(|| format!("Failed to open HID path {path}"))?;
-                    return Ok((hid, path));
-                }
-            }
-        }
+        let path = if let Some(path) = selected_path {
+            path
+        } else if let Some(path) = fallback_path {
+            path
+        } else {
+            bail!("No HID device found for VID 0x{vid:04X} PID 0x{pid:04X}");
+        };
 
-        bail!("No HID device found for VID 0x{vid:04X} PID 0x{pid:04X}")
+        let c_path = CString::new(path.clone()).context("Invalid HID device path")?;
+        let handle = unsafe {
+            CreateFileA(
+                PCSTR(c_path.as_ptr() as *const u8),
+                (windows::Win32::Storage::FileSystem::FILE_GENERIC_READ
+                    | windows::Win32::Storage::FileSystem::FILE_GENERIC_WRITE)
+                    .0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                None,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                None,
+            )
+        }
+        .with_context(|| format!("Failed to open HID path {path}"))?;
+
+        Ok(ArduinoRawHidRuntime { handle, path })
     }
 
     pub fn set_ui_context(ctx: egui::Context) {
@@ -1099,11 +1127,11 @@ mod windows_overlay {
 
                             if hid_guard.is_none() && last_attempt.elapsed() >= Duration::from_secs(3) {
                                 last_attempt = Instant::now();
-                                if let Ok((device, device_path)) =
+                                if let Ok(runtime) =
                                     open_arduino_hid_device(target_vid, target_pid)
                                 {
-                                    *hid_guard = Some(device);
-                                    *hid_name_guard = device_path;
+                                    *hid_name_guard = runtime.path.clone();
+                                    *hid_guard = Some(runtime);
                                 }
                             }
                         }
@@ -10583,9 +10611,9 @@ mod windows_overlay {
                 let mut hid_guard = ARDUINO_HID_DEVICE.lock();
 
                 if hid_guard.is_none() {
-                    let (device, device_path) = open_arduino_hid_device(target_vid, target_pid)?;
-                    *hid_guard = Some(device);
-                    *hid_name_guard = device_path;
+                    let runtime = open_arduino_hid_device(target_vid, target_pid)?;
+                    *hid_name_guard = runtime.path.clone();
+                    *hid_guard = Some(runtime);
                 }
 
                 let mut report = [0u8; 65];
@@ -10598,14 +10626,21 @@ mod windows_overlay {
                 report[6] = bytes.get(5).copied().unwrap_or(0);
                 report[7] = 0x5A;
 
-                if let Some(device) = hid_guard.as_mut() {
-                    if let Err(first_error) = device.write(&report) {
-                        let short_report = &report[..64];
-                        if device.write(short_report).is_err() {
-                            *hid_guard = None;
-                            *hid_name_guard = String::new();
-                            anyhow::bail!("Failed to write to HID device: {}", first_error);
-                        }
+                if let Some(runtime) = hid_guard.as_mut() {
+                    let mut bytes_written = 0u32;
+                    let write_ok = unsafe {
+                        WriteFile(
+                            runtime.handle,
+                            Some(&report),
+                            Some(&mut bytes_written as *mut u32),
+                            None,
+                        )
+                    }
+                    .is_ok();
+                    if !write_ok || bytes_written == 0 {
+                        *hid_guard = None;
+                        *hid_name_guard = String::new();
+                        anyhow::bail!("Failed to write RawHID report");
                     }
                     Ok(())
                 } else {
@@ -16845,4 +16880,3 @@ mod fallback {
 
 #[cfg(not(windows))]
 pub use fallback::*;
-
