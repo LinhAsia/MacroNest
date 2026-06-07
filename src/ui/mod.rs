@@ -752,9 +752,14 @@ pub struct CrosshairApp {
     native_shadow_applied: bool,
     native_transitions_disabled_applied: bool,
     startup_show_pending: bool,
+    startup_shell_frames_remaining: u8,
     startup_overlay_sync_pending: bool,
+    startup_overlay_sync_step: u8,
     startup_state_persist_pending: bool,
     startup_cjk_font_check_pending: bool,
+    panel_warmup_target: Option<AppPanel>,
+    panel_warmup_frames_remaining: u8,
+    warmed_panels: Vec<AppPanel>,
     update_status: UpdateStatus,
     interception_status: String,
     opencv_download_job: Option<JoinHandle<Result<()>>>,
@@ -962,7 +967,9 @@ impl CrosshairApp {
             native_shadow_applied: false,
             native_transitions_disabled_applied: false,
             startup_show_pending: true,
+            startup_shell_frames_remaining: 1,
             startup_overlay_sync_pending: true,
+            startup_overlay_sync_step: 0,
             startup_state_persist_pending: false,
             startup_cjk_font_check_pending: true,
             update_status: UpdateStatus::Idle,
@@ -1028,6 +1035,9 @@ impl CrosshairApp {
             mouse_input_normal_open: false,
             mouse_input_arduino_open: false,
             mouse_input_interception_open: false,
+            panel_warmup_target: Some(initial_active_panel),
+            panel_warmup_frames_remaining: 1,
+            warmed_panels: Vec::new(),
         };
         app.interception_installed = app.paths.interception_dll.exists();
         let mut pending_startup_persist = startup_state_dirty;
@@ -1054,30 +1064,37 @@ impl CrosshairApp {
             .send(OverlayCommand::UpdateProfiles(self.state.profiles.clone()));
     }
 
-    fn sync_startup_overlay_state(&self) {
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::Update(self.state.active_style.clone()));
-        self.sync_profiles();
-        self.sync_window_presets();
-        self.sync_mouse_sensitivity_presets();
-        self.sync_mouse_sensitivity_settings();
-        self.sync_mouse_driver_settings();
-        self.sync_keyboard_arrow_mouse_settings();
-        self.sync_macro_delay_settings();
-        self.sync_macro_presets();
-        self.sync_audio_settings();
-        self.sync_vision_presets();
-        self.sync_ocr_presets();
-        self.sync_vision_settings();
-        self.sync_hud_presets();
-        self.sync_timer_presets();
-        self.sync_command_presets();
-        self.sync_audio_sense_presets();
-        self.sync_geometry_presets();
-        self.sync_macro_master_enabled();
-        self.sync_vietnamese_input_enabled();
-        self.sync_macro_master_hotkey();
+    fn run_next_startup_overlay_sync_step(&mut self) -> bool {
+        match self.startup_overlay_sync_step {
+            0 => {
+                let _ = self
+                    .overlay_tx
+                    .send(OverlayCommand::Update(self.state.active_style.clone()));
+            }
+            1 => self.sync_profiles(),
+            2 => self.sync_window_presets(),
+            3 => self.sync_mouse_sensitivity_presets(),
+            4 => self.sync_mouse_sensitivity_settings(),
+            5 => self.sync_mouse_driver_settings(),
+            6 => self.sync_keyboard_arrow_mouse_settings(),
+            7 => self.sync_macro_delay_settings(),
+            8 => self.sync_macro_presets(),
+            9 => self.sync_audio_settings(),
+            10 => self.sync_vision_presets(),
+            11 => self.sync_ocr_presets(),
+            12 => self.sync_vision_settings(),
+            13 => self.sync_hud_presets(),
+            14 => self.sync_timer_presets(),
+            15 => self.sync_command_presets(),
+            16 => self.sync_audio_sense_presets(),
+            17 => self.sync_geometry_presets(),
+            18 => self.sync_macro_master_enabled(),
+            19 => self.sync_vietnamese_input_enabled(),
+            20 => self.sync_macro_master_hotkey(),
+            _ => return true,
+        }
+        self.startup_overlay_sync_step = self.startup_overlay_sync_step.saturating_add(1);
+        false
     }
 
     fn sync_macro_delay_settings(&self) {
@@ -1732,6 +1749,64 @@ impl CrosshairApp {
 
     fn active_panel_needs_audio_sense_devices(panel: AppPanel) -> bool {
         matches!(panel, AppPanel::AudioSense | AppPanel::Macros)
+    }
+
+    fn panel_is_warmed(&self, panel: AppPanel) -> bool {
+        self.warmed_panels.contains(&panel)
+    }
+
+    fn begin_panel_warmup(&mut self, panel: AppPanel) {
+        if self.panel_is_warmed(panel) {
+            return;
+        }
+        if self.panel_warmup_target == Some(panel) && self.panel_warmup_frames_remaining > 0 {
+            return;
+        }
+        self.panel_warmup_target = Some(panel);
+        self.panel_warmup_frames_remaining = 1;
+    }
+
+    fn panel_loading_shell_active(&self, panel: AppPanel) -> bool {
+        self.startup_shell_frames_remaining > 0
+            || (self.panel_warmup_target == Some(panel) && self.panel_warmup_frames_remaining > 0)
+    }
+
+    fn finish_panel_warmup_if_ready(&mut self, panel: AppPanel) {
+        if self.panel_warmup_target != Some(panel) || self.panel_warmup_frames_remaining == 0 {
+            return;
+        }
+        self.panel_warmup_frames_remaining -= 1;
+        if self.panel_warmup_frames_remaining == 0 {
+            self.panel_warmup_target = None;
+            if !self.panel_is_warmed(panel) {
+                self.warmed_panels.push(panel);
+            }
+        }
+    }
+
+    fn render_panel_loading_shell(&self, ui: &mut egui::Ui, panel: AppPanel) {
+        let title = self.panel_label(panel);
+        let subtitle = self.tr(
+            "Preparing this panel...",
+            "Dang chuan bi panel nay...",
+        );
+        let detail = self.tr(
+            "The window is ready. Content will finish loading in the next moments.",
+            "Cua so da hien. Noi dung se tiep tuc hoan thien ngay sau do.",
+        );
+        ui.with_layout(
+            egui::Layout::top_down_justified(egui::Align::Center),
+            |ui| {
+                ui.add_space((ui.available_height() * 0.18).max(24.0));
+                ui.spinner();
+                ui.add_space(14.0);
+                ui.label(RichText::new(title).heading().strong());
+                ui.add_space(6.0);
+                ui.label(RichText::new(subtitle).strong());
+                ui.add_space(4.0);
+                ui.label(RichText::new(detail).small().weak());
+            },
+        );
     }
 
     fn schedule_open_windows_refresh(&mut self, status: Option<String>) {
@@ -8234,9 +8309,15 @@ impl CrosshairApp {
         if self.startup_show_pending {
             return;
         }
+        if self.startup_shell_frames_remaining > 0 {
+            self.startup_shell_frames_remaining -= 1;
+            ctx.request_repaint();
+            return;
+        }
         if self.startup_overlay_sync_pending {
-            self.sync_startup_overlay_state();
-            self.startup_overlay_sync_pending = false;
+            if self.run_next_startup_overlay_sync_step() {
+                self.startup_overlay_sync_pending = false;
+            }
             ctx.request_repaint();
             return;
         }
@@ -8834,6 +8915,7 @@ impl eframe::App for CrosshairApp {
             if Self::active_panel_needs_audio_sense_devices(self.state.active_panel) {
                 self.ensure_audio_sense_devices_ready(true);
             }
+            self.begin_panel_warmup(self.state.active_panel);
             if matches!(self.last_active_panel, AppPanel::Sound | AppPanel::Media)
                 && !matches!(self.state.active_panel, AppPanel::Sound | AppPanel::Media)
             {
@@ -9304,9 +9386,11 @@ impl eframe::App for CrosshairApp {
             )
             .show(ctx, |ui| {
                 ui.set_min_size(ui.available_size());
-                if self.state.active_panel == AppPanel::Macros
-                    || self.state.active_panel == AppPanel::Modes
-                {
+                let active_panel = self.state.active_panel;
+                let panel_shell_active = self.panel_loading_shell_active(active_panel);
+                if panel_shell_active {
+                    self.render_panel_loading_shell(ui, active_panel);
+                } else if active_panel == AppPanel::Macros || active_panel == AppPanel::Modes {
                     self.render_macro_panel(ui);
                     if self.capture_target.is_some() {
                         ctx.request_repaint_after(Duration::from_millis(16));
@@ -9315,7 +9399,7 @@ impl eframe::App for CrosshairApp {
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            match self.state.active_panel {
+                            match active_panel {
                                 AppPanel::Crosshair => self.render_crosshair_panel(ui),
                                 AppPanel::WindowPresets => self.render_window_presets_panel(ui),
                                 AppPanel::Pin => self.render_pin_panel(ui),
@@ -9336,6 +9420,10 @@ impl eframe::App for CrosshairApp {
                                 ctx.request_repaint_after(Duration::from_millis(16));
                             }
                         });
+                }
+                self.finish_panel_warmup_if_ready(active_panel);
+                if panel_shell_active {
+                    ctx.request_repaint();
                 }
             });
 
