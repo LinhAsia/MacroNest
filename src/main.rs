@@ -216,7 +216,7 @@ fn main() -> Result<()> {
         app_title,
         native_options,
         Box::new(move |cc| {
-            ui::configure_fonts(&cc.egui_ctx, false);
+            ui::configure_fonts(&cc.egui_ctx, false, true);
             ui::configure_theme(&cc.egui_ctx, state.ui_theme);
             Ok(Box::new(CrosshairApp::new(
                 paths, state, overlay_tx, ui_tx, ui_rx, false,
@@ -248,7 +248,7 @@ fn run_popup_blob(kind: PopupBlobKind) -> Result<()> {
         app_title,
         native_options,
         Box::new(move |cc| {
-            ui::configure_fonts(&cc.egui_ctx, false);
+            ui::configure_fonts(&cc.egui_ctx, false, false);
             ui::configure_theme(&cc.egui_ctx, crate::model::UiThemeMode::Dark);
             Ok(Box::new(PopupBlobApp::new(
                 kind,
