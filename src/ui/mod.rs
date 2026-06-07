@@ -249,6 +249,8 @@ pub(crate) struct VideoPreviewCache {
 pub(crate) const MATERIAL_ICONS_FONT: &str = "material_icons";
 const UI_SANS_FONT: &str = "ui_sans";
 const UI_SANS_SEMIBOLD_FONT: &str = "ui_sans_semibold";
+const OPEN_WINDOWS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const AUDIO_SENSE_DEVICES_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
 fn text_has_cjk(text: &str) -> bool {
     text.chars().any(|ch| {
@@ -604,6 +606,8 @@ pub struct CrosshairApp {
     export_code_buffer: String,
     custom_assets: Vec<String>,
     open_windows: Vec<String>,
+    open_windows_loaded_once: bool,
+    open_windows_loading: bool,
     quit_requested: bool,
     capture_target: Option<CaptureRequest>,
     startup_clip_duration_ms: Option<u64>,
@@ -676,6 +680,7 @@ pub struct CrosshairApp {
     center_window_next_frame: bool,
     enforce_square_window_frames: u8,
     last_window_refresh_at: Instant,
+    last_audio_sense_devices_refresh_at: Instant,
     last_active_panel: AppPanel,
     macro_drag_select_anchor: Option<(u32, u32, usize)>,
     last_selected_macro_step: Option<(u32, u32, usize)>,
@@ -749,6 +754,8 @@ pub struct CrosshairApp {
     geometry_preset_preview_target: Option<u32>,
     geometry_preview_sent: Option<GeometrySpec>,
     audio_sense_devices: Vec<String>,
+    audio_sense_devices_loaded_once: bool,
+    audio_sense_devices_loading: bool,
     pitch_monitor: audiosense::PitchMonitor,
     audio_sense_test_settings: crate::model::AudioSenseMonitorSettings,
     audio_sense_test_active: bool,
@@ -779,17 +786,10 @@ impl CrosshairApp {
         ui_tx: Sender<UiCommand>,
         ui_rx: Receiver<UiCommand>,
     ) -> Self {
-        let custom_assets = paths.list_crosshair_assets().unwrap_or_default();
-        let open_windows = window_list::list_open_windows()
-            .into_iter()
-            .map(|item| item.selector)
-            .collect();
         let save_name = state
             .selected_profile
             .clone()
             .unwrap_or_else(|| "Default".to_owned());
-        let startup_clip_duration_ms = audio_duration(&state.audio_settings.startup);
-        let exit_clip_duration_ms = audio_duration(&state.audio_settings.exit);
         let initial_active_panel = state.active_panel;
 
         let opencv_installed = paths.opencv_dll.exists();
@@ -804,12 +804,14 @@ impl CrosshairApp {
             save_name,
             import_code_buffer: String::new(),
             export_code_buffer: String::new(),
-            custom_assets,
-            open_windows,
+            custom_assets: Vec::new(),
+            open_windows: Vec::new(),
+            open_windows_loaded_once: false,
+            open_windows_loading: false,
             quit_requested: false,
             capture_target: None,
-            startup_clip_duration_ms,
-            exit_clip_duration_ms,
+            startup_clip_duration_ms: None,
+            exit_clip_duration_ms: None,
             startup_sound_played: false,
             show_startup_audio_editor: false,
             show_exit_audio_editor: false,
@@ -878,6 +880,7 @@ impl CrosshairApp {
             center_window_next_frame: true,
             enforce_square_window_frames: 0,
             last_window_refresh_at: Instant::now(),
+            last_audio_sense_devices_refresh_at: Instant::now(),
             last_active_panel: initial_active_panel,
             macro_drag_select_anchor: None,
             last_selected_macro_step: None,
@@ -960,7 +963,9 @@ impl CrosshairApp {
             geometry_preview_target: None,
             geometry_preset_preview_target: None,
             geometry_preview_sent: None,
-            audio_sense_devices: audiosense::list_capture_devices().unwrap_or_default(),
+            audio_sense_devices: Vec::new(),
+            audio_sense_devices_loaded_once: false,
+            audio_sense_devices_loading: false,
             pitch_monitor: audiosense::PitchMonitor::new(),
             audio_sense_test_settings: crate::model::AudioSenseMonitorSettings::default(),
             audio_sense_test_active: false,
@@ -996,17 +1001,7 @@ impl CrosshairApp {
             app.persist();
         }
         app.sync_audio_sense_presets();
-        for preset in &app.state.audio_settings.presets {
-            if let Some(duration) = audio_duration(&preset.clip) {
-                app.sound_preset_clip_duration_ms
-                    .insert(preset.id, Some(duration));
-            }
-        }
         for preset in &app.state.audio_settings.video_presets {
-            if let Some(duration) = video_duration(&preset.clip) {
-                app.video_preset_clip_duration_ms
-                    .insert(preset.id, Some(duration));
-            }
             app.video_preview_cursor_ms
                 .insert(preset.id, preset.clip.start_ms);
         }
@@ -1648,20 +1643,80 @@ impl CrosshairApp {
     }
 
     fn reload_open_windows(&mut self) {
-        self.open_windows = window_list::list_open_windows()
-            .into_iter()
-            .map(|item| item.selector)
-            .collect();
-        self.last_window_refresh_at = Instant::now();
-        self.status = "Reloaded open window list.".to_owned();
+        self.schedule_open_windows_refresh(Some("Reloaded open window list.".to_owned()));
     }
 
     fn refresh_open_windows_now(&mut self) {
-        self.open_windows = window_list::list_open_windows()
-            .into_iter()
-            .map(|item| item.selector)
-            .collect();
-        self.last_window_refresh_at = Instant::now();
+        self.schedule_open_windows_refresh(None);
+    }
+
+    fn active_panel_needs_open_windows(panel: AppPanel) -> bool {
+        matches!(
+            panel,
+            AppPanel::WindowPresets
+                | AppPanel::Pin
+                | AppPanel::Macros
+                | AppPanel::Vision
+                | AppPanel::Commands
+        )
+    }
+
+    fn active_panel_needs_audio_sense_devices(panel: AppPanel) -> bool {
+        matches!(panel, AppPanel::AudioSense | AppPanel::Macros)
+    }
+
+    fn schedule_open_windows_refresh(&mut self, status: Option<String>) {
+        if self.open_windows_loading {
+            return;
+        }
+        self.open_windows_loading = true;
+        let ui_tx = self.ui_tx.clone();
+        std::thread::spawn(move || {
+            let windows = window_list::list_open_windows()
+                .into_iter()
+                .map(|item| item.selector)
+                .collect();
+            let _ = ui_tx.send(UiCommand::OpenWindowsLoaded { windows, status });
+        });
+    }
+
+    fn ensure_open_windows_ready(&mut self, force: bool) {
+        if self.open_windows_loading {
+            return;
+        }
+        if !force
+            && self.open_windows_loaded_once
+            && self.last_window_refresh_at.elapsed() < OPEN_WINDOWS_REFRESH_INTERVAL
+        {
+            return;
+        }
+        self.schedule_open_windows_refresh(None);
+    }
+
+    fn schedule_audio_sense_devices_refresh(&mut self) {
+        if self.audio_sense_devices_loading {
+            return;
+        }
+        self.audio_sense_devices_loading = true;
+        let ui_tx = self.ui_tx.clone();
+        std::thread::spawn(move || {
+            let devices = audiosense::list_capture_devices().unwrap_or_default();
+            let _ = ui_tx.send(UiCommand::AudioSenseDevicesLoaded { devices });
+        });
+    }
+
+    fn ensure_audio_sense_devices_ready(&mut self, force: bool) {
+        if self.audio_sense_devices_loading {
+            return;
+        }
+        if !force
+            && self.audio_sense_devices_loaded_once
+            && self.last_audio_sense_devices_refresh_at.elapsed()
+                < AUDIO_SENSE_DEVICES_REFRESH_INTERVAL
+        {
+            return;
+        }
+        self.schedule_audio_sense_devices_refresh();
     }
 
     #[cfg(windows)]
@@ -8543,6 +8598,23 @@ impl eframe::App for CrosshairApp {
                     }
                     ctx.request_repaint();
                 }
+                UiCommand::OpenWindowsLoaded { windows, status } => {
+                    self.open_windows = windows;
+                    self.open_windows_loaded_once = true;
+                    self.open_windows_loading = false;
+                    self.last_window_refresh_at = Instant::now();
+                    if let Some(status) = status {
+                        self.status = status;
+                    }
+                    ctx.request_repaint();
+                }
+                UiCommand::AudioSenseDevicesLoaded { devices } => {
+                    self.audio_sense_devices = devices;
+                    self.audio_sense_devices_loaded_once = true;
+                    self.audio_sense_devices_loading = false;
+                    self.last_audio_sense_devices_refresh_at = Instant::now();
+                    ctx.request_repaint();
+                }
                 UiCommand::VideoPlaybackFinished(preset_id) => {
                     if self.active_video_overlay_preset_id == Some(preset_id) {
                         self.active_video_overlay_preset_id = None;
@@ -8657,11 +8729,11 @@ impl eframe::App for CrosshairApp {
         }
 
         if self.state.active_panel != self.last_active_panel {
-            if matches!(
-                self.state.active_panel,
-                AppPanel::WindowPresets | AppPanel::Pin | AppPanel::Macros | AppPanel::Vision
-            ) {
-                self.refresh_open_windows_now();
+            if Self::active_panel_needs_open_windows(self.state.active_panel) {
+                self.ensure_open_windows_ready(true);
+            }
+            if Self::active_panel_needs_audio_sense_devices(self.state.active_panel) {
+                self.ensure_audio_sense_devices_ready(true);
             }
             if matches!(self.last_active_panel, AppPanel::Sound | AppPanel::Media)
                 && !matches!(self.state.active_panel, AppPanel::Sound | AppPanel::Media)
@@ -8742,18 +8814,16 @@ impl eframe::App for CrosshairApp {
 
         if viewport_focused
             && self.state.show_window
-            && self.last_window_refresh_at.elapsed() >= Duration::from_millis(250)
-            && matches!(
-                self.state.active_panel,
-                AppPanel::WindowPresets
-                    | AppPanel::Pin
-                    | AppPanel::Macros
-                    | AppPanel::Vision
-                    | AppPanel::Mouse
-                    | AppPanel::Sound
-            )
+            && Self::active_panel_needs_open_windows(self.state.active_panel)
         {
-            self.refresh_open_windows_now();
+            self.ensure_open_windows_ready(false);
+        }
+
+        if viewport_focused
+            && self.state.show_window
+            && Self::active_panel_needs_audio_sense_devices(self.state.active_panel)
+        {
+            self.ensure_audio_sense_devices_ready(false);
         }
 
         if !self.state.show_window {

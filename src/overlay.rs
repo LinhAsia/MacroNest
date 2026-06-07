@@ -528,6 +528,13 @@ mod windows_overlay {
             waveform: Vec<f32>,
             duration_ms: Option<u64>,
         },
+        OpenWindowsLoaded {
+            windows: Vec<String>,
+            status: Option<String>,
+        },
+        AudioSenseDevicesLoaded {
+            devices: Vec<String>,
+        },
         VideoFrameLoaded {
             preset_id: u32,
             path: String,
@@ -16814,6 +16821,13 @@ mod fallback {
         VisionPointCaptureCancelled(String),
         MacroRealtimeStepRemoved(u32, u32),
         CustomCommandResult { preset_id: u32, output: String },
+        OpenWindowsLoaded {
+            windows: Vec<String>,
+            status: Option<String>,
+        },
+        AudioSenseDevicesLoaded {
+            devices: Vec<String>,
+        },
         VideoPlaybackFinished(u32),
     }
 
