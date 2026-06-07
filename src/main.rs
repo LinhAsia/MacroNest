@@ -136,7 +136,7 @@ fn main() -> Result<()> {
         .with_inner_size([1180.0, 780.0])
         .with_min_inner_size([1180.0, 780.0])
         .with_decorations(false)
-        .with_transparent(true)
+        .with_transparent(false)
         .with_icon(std::sync::Arc::new(app_icon::icon_data(128)?));
 
     #[cfg(windows)]

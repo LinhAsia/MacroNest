@@ -8174,8 +8174,8 @@ impl CrosshairApp {
 }
 
 impl eframe::App for CrosshairApp {
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        visuals.panel_fill.to_normalized_gamma_f32()
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
