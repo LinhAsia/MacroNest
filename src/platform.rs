@@ -9,7 +9,7 @@ mod windows_platform {
         Win32::{
             Foundation::{CloseHandle, GetLastError, HANDLE, HWND},
             Graphics::Dwm::{
-                DWMNCRP_DISABLED, DWMNCRP_ENABLED, DWMWA_NCRENDERING_POLICY,
+                DWMNCRP_ENABLED, DWMNCRP_USEWINDOWSTYLE, DWMWA_NCRENDERING_POLICY,
                 DWMWA_TRANSITIONS_FORCEDISABLED,
                 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
                 DwmSetWindowAttribute, DwmExtendFrameIntoClientArea,
@@ -201,7 +201,7 @@ mod windows_platform {
             let policy = if enabled {
                 DWMNCRP_ENABLED
             } else {
-                DWMNCRP_DISABLED
+                DWMNCRP_USEWINDOWSTYLE
             };
             let _ = DwmSetWindowAttribute(
                 hwnd,
