@@ -719,6 +719,7 @@ pub struct CrosshairApp {
     last_selected_macro_step: Option<(u32, u32, usize)>,
     active_macro_folder_view: Option<u32>,
     macro_folders_panel_open: bool,
+    macro_panel_render_limit: usize,
     crosshair_panel_collapsed: bool,
     startup_splash: StartupSplashState,
     settings_popup_open: bool,
@@ -931,6 +932,11 @@ impl CrosshairApp {
             last_selected_macro_step: None,
             active_macro_folder_view: None,
             macro_folders_panel_open: false,
+            macro_panel_render_limit: if initial_active_panel == AppPanel::Macros {
+                8
+            } else {
+                usize::MAX
+            },
             crosshair_panel_collapsed: true,
             startup_splash: StartupSplashState {
                 started_at: None,
@@ -8914,6 +8920,9 @@ impl eframe::App for CrosshairApp {
             }
             if Self::active_panel_needs_audio_sense_devices(self.state.active_panel) {
                 self.ensure_audio_sense_devices_ready(true);
+            }
+            if self.state.active_panel == AppPanel::Macros {
+                self.macro_panel_render_limit = 8;
             }
             self.begin_panel_warmup(self.state.active_panel);
             if matches!(self.last_active_panel, AppPanel::Sound | AppPanel::Media)

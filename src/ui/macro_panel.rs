@@ -4664,6 +4664,10 @@ impl CrosshairApp {
 
         }
 
+        let total_render_items = render_items.len();
+        let lazy_render_limit = self.macro_panel_render_limit.min(total_render_items);
+        let lazy_render_active = lazy_render_limit < total_render_items;
+
         let mut toggle_collapsed_folder_id: Option<u32> = None;
 
         let mut add_group_to_folder_id: Option<u32> = None;
@@ -4756,7 +4760,7 @@ impl CrosshairApp {
             .map(|preset| (preset.id, preset.name.clone()))
             .collect();
 
-        for item in render_items {
+        for item in render_items.into_iter().take(lazy_render_limit) {
 
             match item {
 
@@ -18861,6 +18865,25 @@ impl CrosshairApp {
 
             self.persist();
 
+        }
+
+        if lazy_render_active {
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    RichText::new(Self::tr_lang(
+                        language,
+                        "Loading more macro groups...",
+                        "Dang tai them macro group...",
+                    ))
+                    .small()
+                    .weak(),
+                );
+            });
+            self.macro_panel_render_limit =
+                (self.macro_panel_render_limit + 24).min(total_render_items);
+            ui.ctx().request_repaint();
         }
 
         ui.add_space((macro_panel_scroll_height - 50.0).max(0.0));
