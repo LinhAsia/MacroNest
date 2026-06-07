@@ -758,6 +758,7 @@ pub struct CrosshairApp {
     last_applied_theme: Option<UiThemeMode>,
     native_shadow_applied: bool,
     native_transitions_disabled_applied: bool,
+    native_round_region_signature: Option<(i32, i32, bool)>,
     startup_show_pending: bool,
     update_status: UpdateStatus,
     interception_status: String,
@@ -962,6 +963,7 @@ impl CrosshairApp {
             last_applied_theme: None,
             native_shadow_applied: false,
             native_transitions_disabled_applied: false,
+            native_round_region_signature: None,
             startup_show_pending: true,
             update_status: UpdateStatus::Idle,
             interception_status: "Interception: Unavailable".to_owned(),
@@ -8215,6 +8217,28 @@ impl eframe::App for CrosshairApp {
             && crate::platform::set_native_window_transitions_disabled(frame, true)
         {
             self.native_transitions_disabled_applied = true;
+        }
+        let is_maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+        let content_size = ctx.content_rect().size();
+        let target_region = (
+            content_size.x.round().max(0.0) as i32,
+            content_size.y.round().max(0.0) as i32,
+            is_maximized,
+        );
+        if self.native_round_region_signature != Some(target_region) {
+            let updated = if is_maximized {
+                crate::platform::set_native_window_round_region(frame, 0, 0, 0)
+            } else {
+                crate::platform::set_native_window_round_region(
+                    frame,
+                    target_region.0,
+                    target_region.1,
+                    16,
+                )
+            };
+            if updated {
+                self.native_round_region_signature = Some(target_region);
+            }
         }
 
         while let Ok(command) = self.ui_rx.try_recv() {

@@ -14,6 +14,7 @@ mod windows_platform {
                 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
                 DwmSetWindowAttribute, DwmExtendFrameIntoClientArea,
             },
+            Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn},
             System::Threading::{
                 CreateMutexW, GetCurrentProcess, HIGH_PRIORITY_CLASS, SetPriorityClass,
             },
@@ -259,6 +260,40 @@ mod windows_platform {
         true
     }
 
+    pub fn set_native_window_round_region(
+        frame: &Frame,
+        width: i32,
+        height: i32,
+        radius: i32,
+    ) -> bool {
+        let Ok(window_handle) = frame.window_handle() else {
+            return false;
+        };
+        let hwnd = match window_handle.as_raw() {
+            RawWindowHandle::Win32(handle) => HWND(handle.hwnd.get() as *mut _),
+            _ => return false,
+        };
+
+        unsafe {
+            if width <= 0 || height <= 0 || radius <= 0 {
+                return SetWindowRgn(hwnd, None, true) != 0;
+            }
+
+            let region =
+                CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2);
+            if region.0.is_null() {
+                return false;
+            }
+
+            if SetWindowRgn(hwnd, Some(region), true) == 0 {
+                let _ = DeleteObject(HGDIOBJ(region.0));
+                return false;
+            }
+        }
+
+        true
+    }
+
     pub fn bring_native_window_to_front(frame: &Frame) {
         let Ok(window_handle) = frame.window_handle() else {
             return;
@@ -436,6 +471,15 @@ mod fallback {
     }
 
     pub fn set_native_window_transitions_disabled(_frame: &Frame, _disabled: bool) -> bool {
+        true
+    }
+
+    pub fn set_native_window_round_region(
+        _frame: &Frame,
+        _width: i32,
+        _height: i32,
+        _radius: i32,
+    ) -> bool {
         true
     }
 
