@@ -453,6 +453,11 @@ mod windows_overlay {
     pub enum UiCommand {
         ShowWindow,
         Exit,
+        StartupStateLoaded {
+            state: crate::model::AppState,
+            startup_state_dirty: bool,
+        },
+        StartupStateLoadFailed(String),
         SyncMacroGroups(Vec<MacroGroup>, String),
         SyncCrosshairProfiles(Vec<ProfileRecord>, String),
         SetMacrosMasterEnabled(bool, String),

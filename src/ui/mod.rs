@@ -1070,6 +1070,46 @@ impl CrosshairApp {
             .send(OverlayCommand::UpdateProfiles(self.state.profiles.clone()));
     }
 
+    fn apply_loaded_startup_state(
+        &mut self,
+        ctx: &egui::Context,
+        mut state: AppState,
+        startup_state_dirty: bool,
+    ) {
+        state.show_window = true;
+        state.active_panel = self.state.active_panel;
+        self.state = state;
+        self.interception_installed = self.paths.interception_dll.exists();
+        self.video_preview_cursor_ms.clear();
+        for preset in &self.state.audio_settings.video_presets {
+            self.video_preview_cursor_ms
+                .insert(preset.id, preset.clip.start_ms);
+        }
+        {
+            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
+            vars.clear();
+            for (name, val) in &self.state.global_constants {
+                vars.insert(name.clone(), *val);
+            }
+        }
+        let mut pending_startup_persist = startup_state_dirty;
+        if self.apply_startup_state_adjustments() {
+            pending_startup_persist = true;
+        }
+        self.startup_overlay_sync_pending = true;
+        self.startup_overlay_sync_step = 0;
+        self.startup_state_persist_pending = pending_startup_persist;
+        self.startup_cjk_font_check_pending = true;
+        self.last_applied_theme = None;
+        self.apply_theme(ctx);
+        self.begin_panel_warmup(self.state.active_panel);
+        if self.state.active_panel == AppPanel::Macros {
+            self.macro_panel_render_limit = 8;
+        }
+        self.status = self.tr("Loaded app state.", "Da tai app state.").to_owned();
+        ctx.request_repaint();
+    }
+
     fn run_next_startup_overlay_sync_step(&mut self) -> bool {
         match self.startup_overlay_sync_step {
             0 => {
@@ -8415,6 +8455,16 @@ impl eframe::App for CrosshairApp {
                 UiCommand::Exit => {
                     self.quit_requested = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                UiCommand::StartupStateLoaded {
+                    state,
+                    startup_state_dirty,
+                } => {
+                    self.apply_loaded_startup_state(ctx, state, startup_state_dirty);
+                }
+                UiCommand::StartupStateLoadFailed(error) => {
+                    self.status = format!("Failed to load app state: {error}");
+                    ctx.request_repaint();
                 }
                 UiCommand::SyncMacroGroups(groups, status) => {
                     self.state.macro_groups = groups;

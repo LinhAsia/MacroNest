@@ -23,6 +23,7 @@ use crossbeam_channel::unbounded;
 use std::sync::{Arc, Mutex};
 
 use crate::{
+    model::AppState,
     overlay::OverlayCommand,
     storage::AppPaths,
     ui::{CrosshairApp, PopupBlobApp, PopupBlobKind},
@@ -30,6 +31,28 @@ use crate::{
 
 #[cfg(not(windows))]
 compile_error!("This application currently supports Windows only.");
+
+fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool)> {
+    let (mut state, _) = paths.load_state()?;
+    let mut state_changed = false;
+    for preset in &mut state.vision_presets {
+        if preset.is_pixel_counter && !preset.use_color_matching {
+            preset.use_color_matching = true;
+            state_changed = true;
+        }
+    }
+    for preset in &mut state.geometry_presets {
+        let old_len = preset.objects.len();
+        preset
+            .objects
+            .retain(|obj| obj.name != "Point 1" && obj.name != "Point 2" && obj.name != "Point 3");
+        if preset.objects.len() != old_len {
+            state_changed = true;
+        }
+    }
+    state.show_window = true;
+    Ok((state, state_changed))
+}
 
 fn main() -> Result<()> {
     let args = std::env::args().collect::<Vec<_>>();
@@ -66,23 +89,26 @@ fn main() -> Result<()> {
 
     app_icon::ensure_ico_file(&paths.icon_file, 64)?;
     app_icon::ensure_disabled_ico_file(&paths.icon_file_disabled, 64)?;
-    let (mut state, _) = paths.load_state()?;
-    let mut state_changed = false;
-    for preset in &mut state.vision_presets {
-        if preset.is_pixel_counter && !preset.use_color_matching {
-            preset.use_color_matching = true;
-            state_changed = true;
-        }
-    }
-    for preset in &mut state.geometry_presets {
-        let old_len = preset.objects.len();
-        preset.objects.retain(|obj| obj.name != "Point 1" && obj.name != "Point 2" && obj.name != "Point 3");
-        if preset.objects.len() != old_len {
-            state_changed = true;
-        }
-    }
+    let mut state = AppState::default();
     state.show_window = true;
     let (ui_tx, ui_rx) = unbounded();
+    {
+        let loader_paths = paths.clone();
+        let loader_ui_tx = ui_tx.clone();
+        std::thread::spawn(move || match load_startup_state(&loader_paths) {
+            Ok((loaded_state, startup_state_dirty)) => {
+                let _ = loader_ui_tx.send(crate::overlay::UiCommand::StartupStateLoaded {
+                    state: loaded_state,
+                    startup_state_dirty,
+                });
+            }
+            Err(error) => {
+                let _ = loader_ui_tx.send(crate::overlay::UiCommand::StartupStateLoadFailed(
+                    error.to_string(),
+                ));
+            }
+        });
+    }
     let overlay_handle_slot: Arc<Mutex<Option<overlay::OverlayHandle>>> = Arc::new(Mutex::new(None));
     let overlay_start_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
@@ -184,7 +210,7 @@ fn main() -> Result<()> {
             ui::configure_fonts(&cc.egui_ctx, false);
             ui::configure_theme(&cc.egui_ctx, state.ui_theme);
             Ok(Box::new(CrosshairApp::new(
-                paths, state, overlay_tx, ui_tx, ui_rx, state_changed,
+                paths, state, overlay_tx, ui_tx, ui_rx, false,
             )))
         }),
     )
