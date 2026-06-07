@@ -417,13 +417,6 @@ pub(crate) fn configure_theme(ctx: &egui::Context, theme: UiThemeMode) {
     }));
 }
 
-fn theme_clear_color(theme: UiThemeMode) -> Color32 {
-    match theme {
-        UiThemeMode::Dark => Color32::from_rgb(18, 22, 29),
-        UiThemeMode::Light => Color32::from_rgb(248, 248, 248),
-    }
-}
-
 pub fn build_runtime_macro_groups(state: &AppState) -> Vec<MacroGroup> {
     let mut macro_groups = state.macro_groups.clone();
     for group in &mut macro_groups {
@@ -8195,7 +8188,7 @@ impl CrosshairApp {
 
 impl eframe::App for CrosshairApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        theme_clear_color(self.state.ui_theme).to_normalized_gamma_f32()
+        [0.0, 0.0, 0.0, 0.0]
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
