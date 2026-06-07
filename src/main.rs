@@ -133,7 +133,7 @@ fn main() -> Result<()> {
     let app_title = "MacroNest v1.0";
     let mut viewport_builder = eframe::egui::ViewportBuilder::default()
         .with_title(app_title)
-        .with_inner_size([1260.0, 780.0])
+        .with_inner_size([1180.0, 780.0])
         .with_min_inner_size([1180.0, 780.0])
         .with_decorations(false)
         .with_transparent(true)
@@ -150,7 +150,7 @@ fn main() -> Result<()> {
             let scr_h = GetSystemMetrics(SM_CYSCREEN) as f32;
             let dpi = GetDpiForSystem() as f32;
             let scale = if dpi > 0.0 { dpi / 96.0 } else { 1.0 };
-            let win_w = 1260.0;
+            let win_w = 1180.0;
             let win_h = 780.0;
             let x = ((scr_w / scale) - win_w) / 2.0;
             let y = (((scr_h / scale) - win_h) / 2.0).max(10.0);

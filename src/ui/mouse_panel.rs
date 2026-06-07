@@ -1097,7 +1097,6 @@ impl CrosshairApp {
             .or(Some(Self::desired_window_size()));
         self.mouse_path_draw_capture_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
         self.mouse_path_draw_capture_preset_id = Some(preset_id);
-        self.center_window_next_frame = false;
         self.enforce_square_window_frames = 0;
         self.status = Self::tr_lang(
             self.state.ui_language,
@@ -1170,7 +1169,6 @@ impl CrosshairApp {
             .map(|rect| rect.size())
             .or(Some(Self::desired_window_size()));
         self.mouse_move_absolute_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
-        self.center_window_next_frame = false;
         self.enforce_square_window_frames = 0;
         self.status = Self::tr_lang(
             self.state.ui_language,

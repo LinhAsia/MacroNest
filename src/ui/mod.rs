@@ -677,7 +677,6 @@ pub struct CrosshairApp {
     confirm_release_folder_id: Option<u32>,
     confirm_delete_macro_group_id: Option<u32>,
     pending_macro_infinite_loop_enable: Option<(u32, u32)>,
-    center_window_next_frame: bool,
     enforce_square_window_frames: u8,
     last_window_refresh_at: Instant,
     last_audio_sense_devices_refresh_at: Instant,
@@ -877,7 +876,6 @@ impl CrosshairApp {
             confirm_release_folder_id: None,
             confirm_delete_macro_group_id: None,
             pending_macro_infinite_loop_enable: None,
-            center_window_next_frame: true,
             enforce_square_window_frames: 0,
             last_window_refresh_at: Instant::now(),
             last_audio_sense_devices_refresh_at: Instant::now(),
@@ -8211,7 +8209,6 @@ impl eframe::App for CrosshairApp {
                     } else {
                         self.native_shadow_applied = true;
                     }
-                    self.center_window_next_frame = false;
                     self.state.show_window = true;
                     self.enforce_square_window_frames = 0;
                     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(target_size));
@@ -8828,15 +8825,6 @@ impl eframe::App for CrosshairApp {
 
         if !self.state.show_window {
             return;
-        }
-
-        if self.center_window_next_frame && self.state.show_window {
-            let target_size = Self::desired_window_size();
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(target_size));
-            let target_pos =
-                Self::centered_outer_position_for_size(target_size, ctx.pixels_per_point());
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(target_pos));
-            self.center_window_next_frame = false;
         }
 
         if self.enforce_square_window_frames > 0 && self.state.show_window {

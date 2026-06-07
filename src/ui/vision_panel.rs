@@ -1341,7 +1341,6 @@ impl CrosshairApp {
             .or(Some(Self::desired_window_size()));
         self.vision_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
         self.enforce_square_window_frames = 0;
-        self.center_window_next_frame = false;
         self.vision_capture_active = true;
         self.vision_capture_anchor = None;
         self.vision_capture_current = None;
