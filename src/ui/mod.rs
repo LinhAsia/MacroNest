@@ -8174,6 +8174,19 @@ impl CrosshairApp {
         painter.rect_stroke(rect, 16.0, stroke, egui::StrokeKind::Inside);
     }
 
+    fn render_custom_window_background(&self, ctx: &egui::Context) {
+        let corner_radius = if ctx.input(|input| input.viewport().maximized.unwrap_or(false)) {
+            0.0
+        } else {
+            16.0
+        };
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Background,
+            egui::Id::new("window-background"),
+        ));
+        painter.rect_filled(ctx.content_rect(), corner_radius, ctx.style().visuals.panel_fill);
+    }
+
     fn hide_to_tray(&mut self, ctx: &egui::Context) {
         self.state.show_window = false;
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
@@ -8895,6 +8908,8 @@ impl eframe::App for CrosshairApp {
             return;
         }
 
+        self.render_custom_window_background(ctx);
+
         egui::TopBottomPanel::top("top")
             .frame(
                 Frame::new()
@@ -9204,24 +9219,12 @@ impl eframe::App for CrosshairApp {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
-                    .fill(ctx.style().visuals.panel_fill)
-                    .corner_radius(egui::CornerRadius {
-                        nw: 0,
-                        ne: 0,
-                        se: 16,
-                        sw: 16,
-                    })
+                    .fill(Color32::TRANSPARENT)
                     .inner_margin(egui::Margin {
                         left: ctx.style().spacing.window_margin.left,
                         right: ctx.style().spacing.window_margin.right,
                         top: ctx.style().spacing.window_margin.top,
                         bottom: 16,
-                    })
-                    .shadow(egui::Shadow {
-                        offset: [0, 8],
-                        blur: 24,
-                        spread: 0,
-                        color: egui::Color32::from_rgba_premultiplied(0, 0, 0, 80),
                     }),
             )
             .show(ctx, |ui| {
