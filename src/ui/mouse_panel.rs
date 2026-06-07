@@ -1849,66 +1849,18 @@ impl CrosshairApp {
                 })?;
 
                 // 3. Wait for bootloader COM port to re-appear
-                std::thread::sleep(std::time::Duration::from_millis(1500));
+                std::thread::sleep(std::time::Duration::from_millis(400));
                 set_progress("Waiting for Arduino bootloader COM port...".to_owned());
 
-                let mut bootloader_port = port.clone();
-                let start_time = std::time::Instant::now();
-                let mut found = false;
-                let mut original_port_disappeared = false;
-
-                // Wait up to 15 seconds for bootloader port to register (Case A: new port, Case B: same port reappeared)
-                while start_time.elapsed().as_secs() < 15 {
-                    let current_ports = serialport::available_ports().unwrap_or_default();
-                    let current_names: std::collections::HashSet<String> = current_ports
-                        .iter()
-                        .map(|p| p.port_name.clone())
-                        .collect();
-
-                    // Case A: new port appeared
-                    for name in &current_names {
-                        if !before_names.contains(name) {
-                            bootloader_port = name.clone();
-                            found = true;
-                            break;
-                        }
-                    }
-
-                    // Case B: same port reappeared after a brief absence
-                    if !current_names.contains(&port) {
-                        original_port_disappeared = true;
-                    }
-                    if !found && original_port_disappeared && current_names.contains(&port) {
-                        bootloader_port = port.clone();
-                        found = true;
-                    }
-
-                    if found {
-                        set_progress(format!(
-                            "Bootloader detected on {bootloader_port}; waiting until ready..."
-                        ));
-                        wait_for_serial_port_openable(
-                            &bootloader_port,
-                            57600,
-                            std::time::Duration::from_secs(5),
-                        )
-                        .map_err(|error| {
-                            anyhow::anyhow!(
-                                "Bootloader port {bootloader_port} appeared but was not ready: {error}"
-                            )
-                        })?;
-                        std::thread::sleep(std::time::Duration::from_millis(300));
-                        break;
-                    }
-
-                    std::thread::sleep(std::time::Duration::from_millis(200));
-                }
-
-                if !found {
-                    anyhow::bail!(
-                        "Arduino bootloader port did not appear after resetting {port}. Try pressing reset twice quickly, then flash again."
-                    );
-                }
+                let mut bootloader_port = detect_bootloader_port(
+                    &port,
+                    &before_names,
+                    std::time::Duration::from_secs(15),
+                )?;
+                set_progress(format!(
+                    "Bootloader detected on {bootloader_port}; starting avrdude..."
+                ));
+                std::thread::sleep(std::time::Duration::from_millis(120));
 
                 // 4. Prepare the hex file to flash (optionally spoofed)
                 set_progress("Preparing firmware image...".to_owned());
@@ -1947,74 +1899,57 @@ impl CrosshairApp {
                     anyhow::bail!("avrdude.exe not found");
                 }
                 
-                set_progress(format!("Flashing firmware on {bootloader_port}..."));
-                let mut cmd = std::process::Command::new(&paths.avrdude_exe);
-                #[cfg(windows)]
-                {
-                    use std::os::windows::process::CommandExt;
-                    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-                }
-                
-                let avrdude_args = [
-                        "-C", &paths.avrdude_conf.to_string_lossy(),
-                        "-v",
-                        "-p", "atmega32u4",
-                        "-c", "avr109",
-                        "-P", &bootloader_port,
-                        "-b", "57600",
-                        "-D",
-                        "-U", &format!("flash:w:{}:i", hex_to_flash.to_string_lossy()),
-                    ];
-                let mut output = cmd.args(avrdude_args).output();
-
-                if let Ok(first_output) = &output {
-                    let stderr = String::from_utf8_lossy(&first_output.stderr);
-                    if !first_output.status.success() && stderr.contains("Access is denied") {
-                        set_progress(format!(
-                            "Bootloader busy on {bootloader_port}; retrying avrdude..."
-                        ));
-                        std::thread::sleep(std::time::Duration::from_millis(1000));
-                        wait_for_serial_port_openable(
-                            &bootloader_port,
-                            57600,
-                            std::time::Duration::from_secs(5),
-                        )
-                        .map_err(|error| {
-                            anyhow::anyhow!(
-                                "Bootloader port {bootloader_port} stayed busy before avrdude retry: {error}"
-                            )
-                        })?;
-
-                        let mut retry_cmd = std::process::Command::new(&paths.avrdude_exe);
-                        #[cfg(windows)]
-                        {
-                            use std::os::windows::process::CommandExt;
-                            retry_cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-                        }
-                        let retry_args = [
-                            "-C", &paths.avrdude_conf.to_string_lossy(),
-                            "-v",
-                            "-p", "atmega32u4",
-                            "-c", "avr109",
-                            "-P", &bootloader_port,
-                            "-b", "57600",
-                            "-D",
-                            "-U", &format!("flash:w:{}:i", hex_to_flash.to_string_lossy()),
-                        ];
-                        output = retry_cmd.args(retry_args).output();
-                    }
-                }
-
                 if use_spoof {
                     let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
                     let _ = std::fs::remove_file(temp_hex_path);
                 }
 
-                let output = output?;
+                let mut last_error: Option<String> = None;
+                let mut flashed = false;
 
-                if !output.status.success() {
-                    let err_msg = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("avrdude flash failed: {}", err_msg);
+                for attempt in 1..=3 {
+                    set_progress(format!(
+                        "Flashing firmware on {bootloader_port} (attempt {attempt}/3)..."
+                    ));
+                    let output = run_avrdude_flash(&paths, &bootloader_port, &hex_to_flash)?;
+
+                    if output.status.success() {
+                        flashed = true;
+                        break;
+                    }
+
+                    let err_msg = String::from_utf8_lossy(&output.stderr).to_string();
+                    last_error = Some(err_msg.clone());
+
+                    if attempt == 3 || !is_retryable_avrdude_error(&err_msg) {
+                        anyhow::bail!("avrdude flash failed: {}", err_msg);
+                    }
+
+                    set_progress(format!(
+                        "Flash attempt {attempt} failed; resetting into bootloader and retrying..."
+                    ));
+                    std::thread::sleep(std::time::Duration::from_millis(700));
+
+                    wait_for_serial_port_present(&port, std::time::Duration::from_secs(10))?;
+                    let ports_before_retry = serialport::available_ports().unwrap_or_default();
+                    let before_names_retry: std::collections::HashSet<String> = ports_before_retry
+                        .into_iter()
+                        .map(|p| p.port_name)
+                        .collect();
+                    touch_arduino_bootloader_port(&port, std::time::Duration::from_secs(8))?;
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                    bootloader_port = detect_bootloader_port(
+                        &port,
+                        &before_names_retry,
+                        std::time::Duration::from_secs(15),
+                    )?;
+                }
+
+                if !flashed {
+                    anyhow::bail!(
+                        "avrdude flash failed: {}",
+                        last_error.unwrap_or_else(|| "unknown avrdude error".to_owned())
+                    );
                 }
 
                 set_progress("Flash complete. Reconnecting Arduino emulation...".to_owned());
@@ -2121,6 +2056,102 @@ fn wait_for_serial_port_openable(
         "{}",
         last_error.unwrap_or_else(|| "serial port was not available".to_owned())
     )
+}
+
+fn wait_for_serial_port_present(
+    port: &str,
+    timeout: std::time::Duration,
+) -> anyhow::Result<()> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        let ports = serialport::available_ports().unwrap_or_default();
+        if ports.iter().any(|info| info.port_name == port) {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+
+    anyhow::bail!("serial port {port} did not reappear in time")
+}
+
+fn detect_bootloader_port(
+    runtime_port: &str,
+    before_names: &std::collections::HashSet<String>,
+    timeout: std::time::Duration,
+) -> anyhow::Result<String> {
+    let start_time = std::time::Instant::now();
+    let mut original_port_disappeared = false;
+
+    while start_time.elapsed() < timeout {
+        let current_ports = serialport::available_ports().unwrap_or_default();
+        let current_names: std::collections::HashSet<String> = current_ports
+            .iter()
+            .map(|p| p.port_name.clone())
+            .collect();
+
+        for name in &current_names {
+            if !before_names.contains(name) {
+                return Ok(name.clone());
+            }
+        }
+
+        if !current_names.contains(runtime_port) {
+            original_port_disappeared = true;
+        }
+
+        if original_port_disappeared && current_names.contains(runtime_port) {
+            return Ok(runtime_port.to_owned());
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    anyhow::bail!(
+        "Arduino bootloader port did not appear after resetting {runtime_port}. Try pressing reset twice quickly, then flash again."
+    )
+}
+
+fn run_avrdude_flash(
+    paths: &crate::storage::AppPaths,
+    bootloader_port: &str,
+    hex_to_flash: &std::path::Path,
+) -> anyhow::Result<std::process::Output> {
+    let mut cmd = std::process::Command::new(&paths.avrdude_exe);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+
+    let flash_arg = format!("flash:w:{}:i", hex_to_flash.to_string_lossy());
+    let args = [
+        "-C",
+        &paths.avrdude_conf.to_string_lossy(),
+        "-v",
+        "-p",
+        "atmega32u4",
+        "-c",
+        "avr109",
+        "-P",
+        bootloader_port,
+        "-b",
+        "57600",
+        "-D",
+        "-U",
+        &flash_arg,
+    ];
+
+    Ok(cmd.args(args).output()?)
+}
+
+fn is_retryable_avrdude_error(stderr: &str) -> bool {
+    let text = stderr.to_ascii_lowercase();
+    text.contains("access is denied")
+        || text.contains("unable to read")
+        || text.contains("read signature")
+        || text.contains("butterfly_send")
+        || text.contains("i/o operation has been aborted")
+        || text.contains("the system cannot find the file specified")
 }
 
 fn touch_arduino_bootloader_port(
