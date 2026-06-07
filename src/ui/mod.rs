@@ -383,6 +383,47 @@ pub fn configure_fonts(ctx: &egui::Context, load_cjk_fallback: bool) {
     });
 }
 
+fn visuals_for_theme(theme: UiThemeMode) -> egui::Visuals {
+    match theme {
+        UiThemeMode::Dark => {
+            let mut visuals = egui::Visuals::dark();
+            visuals.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(220, 228, 238);
+            visuals.widgets.inactive.fg_stroke.color = Color32::from_rgb(228, 234, 242);
+            visuals.widgets.hovered.fg_stroke.color = Color32::from_rgb(240, 246, 252);
+            visuals.widgets.active.fg_stroke.color = Color32::from_rgb(248, 250, 252);
+            visuals.widgets.open.fg_stroke.color = Color32::from_rgb(240, 246, 252);
+            visuals
+        }
+        UiThemeMode::Light => {
+            let mut visuals = egui::Visuals::light();
+            visuals.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(32, 40, 54);
+            visuals.widgets.inactive.fg_stroke.color = Color32::from_rgb(28, 36, 48);
+            visuals.widgets.hovered.fg_stroke.color = Color32::from_rgb(18, 26, 40);
+            visuals.widgets.active.fg_stroke.color = Color32::from_rgb(16, 24, 38);
+            visuals.widgets.open.fg_stroke.color = Color32::from_rgb(18, 26, 40);
+            visuals.hyperlink_color = Color32::from_rgb(26, 92, 164);
+            visuals.panel_fill = Color32::from_rgb(248, 248, 248);
+            visuals.window_fill = Color32::from_rgb(248, 248, 248);
+            visuals
+        }
+    }
+}
+
+pub(crate) fn configure_theme(ctx: &egui::Context, theme: UiThemeMode) {
+    ctx.set_visuals(visuals_for_theme(theme));
+    ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(match theme {
+        UiThemeMode::Dark => egui::SystemTheme::Dark,
+        UiThemeMode::Light => egui::SystemTheme::Light,
+    }));
+}
+
+fn theme_clear_color(theme: UiThemeMode) -> Color32 {
+    match theme {
+        UiThemeMode::Dark => Color32::from_rgb(18, 22, 29),
+        UiThemeMode::Light => Color32::from_rgb(248, 248, 248),
+    }
+}
+
 pub fn build_runtime_macro_groups(state: &AppState) -> Vec<MacroGroup> {
     let mut macro_groups = state.macro_groups.clone();
     for group in &mut macro_groups {
@@ -2505,31 +2546,7 @@ impl CrosshairApp {
             return;
         }
 
-        match self.state.ui_theme {
-            UiThemeMode::Dark => {
-                let mut visuals = egui::Visuals::dark();
-                visuals.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(220, 228, 238);
-                visuals.widgets.inactive.fg_stroke.color = Color32::from_rgb(228, 234, 242);
-                visuals.widgets.hovered.fg_stroke.color = Color32::from_rgb(240, 246, 252);
-                visuals.widgets.active.fg_stroke.color = Color32::from_rgb(248, 250, 252);
-                visuals.widgets.open.fg_stroke.color = Color32::from_rgb(240, 246, 252);
-                ctx.set_visuals(visuals);
-                ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Dark));
-            }
-            UiThemeMode::Light => {
-                let mut visuals = egui::Visuals::light();
-                visuals.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(32, 40, 54);
-                visuals.widgets.inactive.fg_stroke.color = Color32::from_rgb(28, 36, 48);
-                visuals.widgets.hovered.fg_stroke.color = Color32::from_rgb(18, 26, 40);
-                visuals.widgets.active.fg_stroke.color = Color32::from_rgb(16, 24, 38);
-                visuals.widgets.open.fg_stroke.color = Color32::from_rgb(18, 26, 40);
-                visuals.hyperlink_color = Color32::from_rgb(26, 92, 164);
-                visuals.panel_fill = Color32::from_rgb(248, 248, 248);
-                visuals.window_fill = Color32::from_rgb(248, 248, 248);
-                ctx.set_visuals(visuals);
-                ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(egui::SystemTheme::Light));
-            }
-        }
+        configure_theme(ctx, self.state.ui_theme);
 
         self.last_applied_theme = Some(self.state.ui_theme);
     }
@@ -8178,8 +8195,8 @@ impl CrosshairApp {
 }
 
 impl eframe::App for CrosshairApp {
-    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
-        visuals.panel_fill.to_normalized_gamma_f32()
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        theme_clear_color(self.state.ui_theme).to_normalized_gamma_f32()
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
