@@ -8168,20 +8168,21 @@ impl CrosshairApp {
     }
 
     fn render_custom_window_border(&self, ctx: &egui::Context) {
-        let mut rect = ctx.content_rect().shrink(0.5);
-        rect.max.x -= 1.0;
-        rect.max.y -= 1.0;
-
         let stroke = if self.state.ui_theme == UiThemeMode::Dark {
             egui::Stroke::new(1.4, Color32::from_rgb(64, 84, 108))
         } else {
             egui::Stroke::new(1.4, Color32::from_rgb(184, 198, 214))
         };
+        let mut rect = ctx
+            .content_rect()
+            .shrink((stroke.width * 0.5).max(1.0) + 0.5);
+        rect.max.x -= 0.5;
+        rect.max.y -= 0.5;
         let painter = ctx.layer_painter(egui::LayerId::new(
             egui::Order::Foreground,
             egui::Id::new("window-border"),
         ));
-        painter.rect_stroke(rect, 16.0, stroke, egui::StrokeKind::Outside);
+        painter.rect_stroke(rect, 16.0, stroke, egui::StrokeKind::Inside);
     }
 
     fn hide_to_tray(&mut self, ctx: &egui::Context) {
