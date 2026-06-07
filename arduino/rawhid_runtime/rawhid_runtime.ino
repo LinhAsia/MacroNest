@@ -9,7 +9,7 @@ constexpr uint8_t kCmdButton = 0x02;
 constexpr uint8_t kCmdWheel = 0x03;
 constexpr uint8_t kBtnLeft = 0x01;
 constexpr uint8_t kBtnRight = 0x02;
-constexpr size_t kFrameSize = 8;
+constexpr size_t kFrameSize = 7;
 
 uint8_t g_rawhid_buffer[64];
 uint8_t g_frame[kFrameSize];
