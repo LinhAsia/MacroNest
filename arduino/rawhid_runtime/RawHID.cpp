@@ -79,9 +79,27 @@ bool RawHID_::setup(USBSetup& setup) {
     }
     if (request == HID_SET_REPORT && setup.wValueH == HID_REPORT_TYPE_OUTPUT) {
       const int length = setup.wLength;
-      if (!dataAvailable && length <= dataLength) {
-        USB_RecvControl(data + dataLength - length, length);
-        dataAvailable = length;
+      if (!dataAvailable && length > 0 && length <= dataLength + 1) {
+        uint8_t buffer[RAWHID_RX_SIZE + 1] = {0};
+        USB_RecvControl(buffer, length);
+
+        int payload_offset = 0;
+        int payload_length = length;
+
+        // Windows HID writes often include a leading report-id byte even when
+        // the descriptor has no explicit report ids. Accept both 64-byte and
+        // 65-byte output reports so the runtime does not silently drop packets.
+        if (length == dataLength + 1) {
+          payload_offset = 1;
+          payload_length = dataLength;
+        }
+
+        if (payload_length > 0 && payload_length <= dataLength) {
+          memcpy(data, buffer + payload_offset, payload_length);
+          dataAvailable = payload_length;
+        } else {
+          dataAvailable = 0;
+        }
         return true;
       }
     }
