@@ -694,7 +694,7 @@ impl CrosshairApp {
                             "Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.",
                             "Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.",
                         ),
-                        ArduinoTransport::Hid => "RawHID runtime uses VID/PID for live control. The COM port is still only used for Auto-Flash.",
+                        ArduinoTransport::Hid => "RawHID runtime uses VID/PID for live control. Auto-Flash will program the RawHID firmware for the selected Runtime. The COM port is still only used to flash the board.",
                     };
                     ui.label(RichText::new(note_lbl).small().weak().color(Color32::from_rgb(220, 180, 80)));
                 }
@@ -734,6 +734,7 @@ impl CrosshairApp {
                         let _ = std::fs::remove_file(&self.paths.avrdude_exe);
                         let _ = std::fs::remove_file(&self.paths.avrdude_conf);
                         let _ = std::fs::remove_file(&self.paths.arduino_firmware_hex);
+                        let _ = std::fs::remove_file(&self.paths.arduino_rawhid_firmware_hex);
                         self.arduino_tools_downloaded = false;
                         self.arduino_flash_status.clear();
                     }
@@ -1784,6 +1785,11 @@ impl CrosshairApp {
             return;
         }
 
+        if let Err(error) = self.paths.ensure_arduino_runtime_files() {
+            self.arduino_flash_status = format!("Error: {error}");
+            return;
+        }
+
         let port = self.state.vision_settings.arduino_com_port.clone();
         if port.is_empty() {
             self.arduino_flash_status = self.tr("Error: Select a COM Port first", "Lỗi: Hãy chọn cổng COM trước").to_owned();
@@ -1801,6 +1807,7 @@ impl CrosshairApp {
         let use_spoof = self.state.vision_settings.use_arduino_spoof;
         let spoof_vid = self.state.vision_settings.arduino_vid.clone();
         let spoof_pid = self.state.vision_settings.arduino_pid.clone();
+        let runtime_transport = self.state.vision_settings.arduino_transport;
 
         let paths = self.paths.clone();
         let flash_result = self.arduino_flash_result.clone();
@@ -1905,9 +1912,21 @@ impl CrosshairApp {
 
                 // 4. Prepare the hex file to flash (optionally spoofed)
                 set_progress("Preparing firmware image...".to_owned());
+                let base_firmware_hex = match runtime_transport {
+                    ArduinoTransport::Serial => paths.arduino_firmware_hex.clone(),
+                    ArduinoTransport::Hid => paths.arduino_rawhid_firmware_hex.clone(),
+                };
+
+                if !base_firmware_hex.exists() {
+                    anyhow::bail!(
+                        "Firmware image not found for the selected runtime: {}",
+                        base_firmware_hex.display()
+                    );
+                }
+
                 let hex_to_flash = if use_spoof {
                     let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
-                    let original_hex = std::fs::read_to_string(&paths.arduino_firmware_hex)?;
+                    let original_hex = std::fs::read_to_string(&base_firmware_hex)?;
                     
                     let parsed_vid = parse_hex_u16(&spoof_vid).unwrap_or(0x2341);
                     let parsed_pid = parse_hex_u16(&spoof_pid).unwrap_or(0x8036);
@@ -1916,7 +1935,7 @@ impl CrosshairApp {
                     std::fs::write(&temp_hex_path, patched_hex)?;
                     temp_hex_path
                 } else {
-                    paths.arduino_firmware_hex.clone()
+                    base_firmware_hex
                 };
 
                 // 5. Execute avrdude to flash

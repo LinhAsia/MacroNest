@@ -8,6 +8,9 @@ use directories::ProjectDirs;
 
 use crate::model::{AppState, ProfileRecord, VietnameseInputMode, VisionPreset};
 
+const BUNDLED_ARDUINO_RAWHID_FIRMWARE: &[u8] =
+    include_bytes!("../assets/firmware-rawhid.hex");
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StateLoadStatus {
     Loaded,
@@ -34,6 +37,7 @@ pub struct AppPaths {
     pub avrdude_exe: PathBuf,
     pub avrdude_conf: PathBuf,
     pub arduino_firmware_hex: PathBuf,
+    pub arduino_rawhid_firmware_hex: PathBuf,
 }
 
 impl AppPaths {
@@ -70,6 +74,7 @@ impl AppPaths {
         let avrdude_exe = bin_dir.join("avrdude.exe");
         let avrdude_conf = bin_dir.join("avrdude.conf");
         let arduino_firmware_hex = bin_dir.join("firmware.hex");
+        let arduino_rawhid_firmware_hex = bin_dir.join("firmware_rawhid.hex");
 
         fs::create_dir_all(&root)?;
         fs::create_dir_all(&profiles_dir)?;
@@ -77,6 +82,10 @@ impl AppPaths {
         fs::create_dir_all(&vision_dir)?;
         fs::create_dir_all(&bin_dir)?;
         ensure_opencv_videoio_ffmpeg_plugin(&opencv_videoio_ffmpeg_dll);
+        ensure_bundled_file(
+            &arduino_rawhid_firmware_hex,
+            BUNDLED_ARDUINO_RAWHID_FIRMWARE,
+        )?;
 
         Ok(Self {
             root,
@@ -98,7 +107,15 @@ impl AppPaths {
             avrdude_exe,
             avrdude_conf,
             arduino_firmware_hex,
+            arduino_rawhid_firmware_hex,
         })
+    }
+
+    pub fn ensure_arduino_runtime_files(&self) -> Result<()> {
+        ensure_bundled_file(
+            &self.arduino_rawhid_firmware_hex,
+            BUNDLED_ARDUINO_RAWHID_FIRMWARE,
+        )
     }
 
     pub fn vision_template_file_for(&self, preset_id: u32) -> PathBuf {
@@ -613,6 +630,22 @@ fn ensure_opencv_videoio_ffmpeg_plugin(target_path: &Path) {
         let _ = fs::create_dir_all(parent);
     }
     let _ = fs::copy(source_path, target_path);
+}
+
+fn ensure_bundled_file(target_path: &Path, bytes: &[u8]) -> Result<()> {
+    let needs_write = match fs::read(target_path) {
+        Ok(existing) => existing != bytes,
+        Err(_) => true,
+    };
+
+    if needs_write {
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(target_path, bytes)?;
+    }
+
+    Ok(())
 }
 
 fn find_local_opencv_videoio_ffmpeg_plugin() -> Option<PathBuf> {
