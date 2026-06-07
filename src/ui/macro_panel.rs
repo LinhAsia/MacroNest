@@ -18870,7 +18870,11 @@ impl CrosshairApp {
 
         if let Some(group_scroll_rect) = pending_macro_group_scroll_rect {
             ui.scroll_to_rect(group_scroll_rect, Some(egui::Align::Center));
-            pending_macro_group_scroll_consumed = true;
+            let centered = (group_scroll_rect.center().y - viewport.center().y).abs() <= 6.0;
+            pending_macro_group_scroll_consumed = centered;
+            if !centered {
+                ui.ctx().request_repaint();
+            }
         }
 
         if !pending_macro_group_scroll_consumed {
