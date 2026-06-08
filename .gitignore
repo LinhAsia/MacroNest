@@ -10,3 +10,9 @@
 *.d
 .DS_Store
 Thumbs.db
+
+# Logs and temp files
+*.log
+*.xml
+keys.txt
+apply_*_bugfix.py
