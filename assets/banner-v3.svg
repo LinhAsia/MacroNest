@@ -47,7 +47,7 @@
   </style>
 
   <!-- Banner Background (rounded rect using the icon's gradient background) -->
-  <rect width="700" height="150" rx="24" fill="url(#bg)"/>
+  <rect width="700" height="150" rx="42" fill="url(#bg)"/>
 
   <!-- Futuristic HUD corner elements -->
   <path d="M 25 45 L 25 25 L 45 25" class="hud-line" />
