@@ -24,7 +24,27 @@
 | **🖱️ Mouse & Hardware** | • **Interception & Arduino**: Driver bypass and hardware-level macros for anti-cheat avoidance<br>• **Mouse Path**: Record, replay, and manage custom cursor movement trajectories<br>• Configure cursor sensitivity and speed presets<br>• *Variable Synergy: Reads target coordinates from variables for auto-aim/clicks.* | *Automatically adjust DPI or replay mouse paths during automation cycles.* |
 | **🌐 Supported Languages** | • Full interface support for English and Vietnamese | *Context-aware localization.* |
 
-## 🚀 Install
+## 🚀 Getting Started
 
-1.  Download `MacroNest.exe` from **Releases**.
-2.  Run the application.
+### System Requirements
+
+| | Minimum |
+| :--- | :--- |
+| **OS** | Windows 10 / 11 (64-bit) |
+| **Runtime** | No installation required (portable `.exe`) |
+| **Privileges** | Standard user. Admin elevation is requested automatically when needed (e.g. Interception driver). |
+
+### Quick Install
+
+1. Download **`MacroNest.exe`** from the [Latest Release](https://github.com/NBaoLinh/MacroNest/releases/latest).
+2. Run the executable. No installer needed.
+
+### Optional Dependencies
+
+These are **not required** to run the app. They can be downloaded directly from within the Settings page:
+
+| Dependency | Required For | How to Get |
+| :--- | :--- | :--- |
+| **OpenCV DLL** | Vision (Image Search / Template Matching) | Auto-download from Settings |
+| **Interception Driver** | Hardware-level key/mouse interception | Auto-download from Settings |
+| **Arduino Firmware** | Hardware macro input via Arduino board | Auto-download from Settings |
