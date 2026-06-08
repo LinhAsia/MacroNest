@@ -40,7 +40,8 @@ impl CrosshairApp {
                             "Gán 1 nếu tìm thấy từ khóa (hoặc nếu quét OCR thành công khi không đặt từ tìm), ngược lại là 0",
                         ));
                         let found_resp = ui.add(
-                            egui::TextEdit::singleline(&mut step.ocr_success_var).hint_text("var_ok"),
+                            egui::TextEdit::singleline(&mut step.ocr_success_var)
+                                .hint_text("found_var"),
                         );
                         Self::apply_vietnamese_input_if_changed(
                             &found_resp,
@@ -58,7 +59,10 @@ impl CrosshairApp {
                             "Gán tọa độ X tuyệt đối ở chính giữa từ tìm thấy",
                         ));
                         let pos_x_resp =
-                            ui.add(egui::TextEdit::singleline(&mut step.ocr_pos_var_x).hint_text("var_x"));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut step.ocr_pos_var_x)
+                                    .hint_text("result_x_var"),
+                            );
                         Self::apply_vietnamese_input_if_changed(
                             &pos_x_resp,
                             vietnamese_input_enabled,
@@ -75,7 +79,10 @@ impl CrosshairApp {
                             "Gán tọa độ Y tuyệt đối ở chính giữa từ tìm thấy",
                         ));
                         let pos_y_resp =
-                            ui.add(egui::TextEdit::singleline(&mut step.ocr_pos_var_y).hint_text("var_y"));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut step.ocr_pos_var_y)
+                                    .hint_text("result_y_var"),
+                            );
                         Self::apply_vietnamese_input_if_changed(
                             &pos_y_resp,
                             vietnamese_input_enabled,
@@ -93,7 +100,8 @@ impl CrosshairApp {
                             "Stores all OCR text into this variable regardless of Target Text filter",
                         ));
                         let text_var_resp = ui.add(
-                            egui::TextEdit::singleline(&mut step.ocr_text_var).hint_text("var_text"),
+                            egui::TextEdit::singleline(&mut step.ocr_text_var)
+                                .hint_text("text_var"),
                         );
                         Self::apply_vietnamese_input_if_changed(
                             &text_var_resp,

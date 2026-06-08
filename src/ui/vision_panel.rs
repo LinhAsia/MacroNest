@@ -806,7 +806,7 @@ impl CrosshairApp {
                                     } else {
                                         Color32::from_rgba_unmultiplied(100, 100, 100, 150)
                                     };
-                                    let hint_text = format!("pixel_count_{}", preset.id);
+                                    let hint_text = format!("count_var (e.g. pixel_count_{})", preset.id);
                                     let text_edit = egui::TextEdit::singleline(&mut preset.pixel_counter_variable_name)
                                         .desired_width(120.0)
                                         .hint_text(RichText::new(hint_text).color(hint_color).weak());
