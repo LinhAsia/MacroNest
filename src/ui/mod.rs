@@ -1120,7 +1120,6 @@ impl CrosshairApp {
         if self.state.active_panel == AppPanel::Macros {
             self.macro_panel_render_limit = 8;
         }
-        self.status = self.tr("Loaded app state.", "Da tai app state.").to_owned();
         ctx.request_repaint();
     }
 
@@ -1847,8 +1846,8 @@ impl CrosshairApp {
     }
 
     fn panel_loading_shell_active(&self, panel: AppPanel) -> bool {
+        let _ = panel;
         self.startup_shell_frames_remaining > 0
-            || (self.panel_warmup_target == Some(panel) && self.panel_warmup_frames_remaining > 0)
     }
 
     fn finish_panel_warmup_if_ready(&mut self, panel: AppPanel) {
