@@ -15548,30 +15548,38 @@ mod windows_overlay {
         }
 
         let rects_to_fix = occupied_label_rects.clone();
+        let font_name = "Segoe UI"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let mut label_font_cache: HashMap<(i32, i32), HGDIOBJ> = HashMap::new();
         for text in &geometry_texts {
-            let font_name = "Segoe UI"
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect::<Vec<_>>();
             let label_bg = [1_u8, 2_u8, 3_u8];
+            let font_height = text.font_size.max(10);
             let rotation_tenths = (-(text.rotation_deg) * 10.0).round() as i32;
-            let font = CreateFontW(
-                -(text.font_size.max(10)),
-                0,
-                rotation_tenths,
-                rotation_tenths,
-                FW_MEDIUM.0 as i32,
-                0,
-                0,
-                0,
-                DEFAULT_CHARSET,
-                OUT_DEFAULT_PRECIS,
-                CLIP_DEFAULT_PRECIS,
-                ANTIALIASED_QUALITY,
-                FF_DONTCARE.0 as u32,
-                PCWSTR(font_name.as_ptr()),
-            );
-            let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
+            let font_key = (font_height, rotation_tenths);
+            let font = *label_font_cache.entry(font_key).or_insert_with(|| {
+                HGDIOBJ(
+                    CreateFontW(
+                        -font_height,
+                        0,
+                        rotation_tenths,
+                        rotation_tenths,
+                        FW_MEDIUM.0 as i32,
+                        0,
+                        0,
+                        0,
+                        DEFAULT_CHARSET,
+                        OUT_DEFAULT_PRECIS,
+                        CLIP_DEFAULT_PRECIS,
+                        ANTIALIASED_QUALITY,
+                        FF_DONTCARE.0 as u32,
+                        PCWSTR(font_name.as_ptr()),
+                    )
+                    .0,
+                )
+            });
+            let old_font = SelectObject(mem_dc, font);
             let _ = SetBkMode(mem_dc, TRANSPARENT);
             let _ = SetTextColor(
                 mem_dc,
@@ -15671,7 +15679,10 @@ mod windows_overlay {
                 }
             }
             let _ = SelectObject(mem_dc, old_font);
-            let _ = DeleteObject(HGDIOBJ(font.0));
+        }
+
+        for font in label_font_cache.into_values() {
+            let _ = DeleteObject(font);
         }
 
         for rect in rects_to_fix {
