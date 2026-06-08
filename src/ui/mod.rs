@@ -9514,7 +9514,9 @@ impl eframe::App for CrosshairApp {
             .show(ctx, |ui| {
                 ui.set_min_size(ui.available_size());
                 let active_panel = self.state.active_panel;
-                let panel_shell_active = self.panel_loading_shell_active(active_panel);
+                let panel_shell_active = self.panel_loading_shell_active(active_panel)
+                    && active_panel != AppPanel::Macros
+                    && active_panel != AppPanel::Modes;
                 if panel_shell_active {
                     self.render_panel_loading_shell(ui, active_panel);
                 } else if active_panel == AppPanel::Macros || active_panel == AppPanel::Modes {
