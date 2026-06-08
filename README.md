@@ -2,7 +2,7 @@
   <img src="assets/banner-v2.svg" alt="MacroNest Banner" width="100%" />
 </p>
 
-<p align="center">
+<p align="left">
   <a href="https://github.com/NBaoLinh/MacroNest/stargazers">
     <img src="assets/star-button.svg" alt="Star MacroNest" height="40" />
   </a>
