@@ -10,6 +10,7 @@ use tiny_skia::Pixmap;
 
 fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=assets/app-icon.svg");
     println!("cargo:rerun-if-changed=assets/app-icon-disabled.svg");
     let build_tag = normalize_version_tag(&env::var("CARGO_PKG_VERSION").unwrap_or_default());
@@ -42,14 +43,60 @@ fn embed_windows_icon() -> Result<()> {
     let ico_path = out_dir.join("macronest-app.ico");
     let rc_path = out_dir.join("macronest-app.rc");
     let res_path = out_dir.join("macronest-app.res");
+    let package_name = env::var("CARGO_PKG_NAME").unwrap_or_else(|_| "MacroNest".to_owned());
+    let company_name = "NBaoLinh".to_owned();
+    let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "1.1.0".to_owned());
+    let version_parts = parse_version_components(&version);
+    let file_version = format!(
+        "{},{},{},{}",
+        version_parts.0, version_parts.1, version_parts.2, version_parts.3
+    );
+    let version_string = format!(
+        "{}.{}.{}.{}",
+        version_parts.0, version_parts.1, version_parts.2, version_parts.3
+    );
 
     render_svg_icon_to_ico(&manifest_dir.join("assets/app-icon.svg"), &ico_path, 256)?;
 
     fs::write(
         &rc_path,
         format!(
-            "1 ICON \"{}\"\n",
-            ico_path.display().to_string().replace('\\', "/")
+            r#"
+1 ICON "{icon_path}"
+1 VERSIONINFO
+FILEVERSION {file_version}
+PRODUCTVERSION {file_version}
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "{company_name}"
+            VALUE "FileDescription", "{package_name}"
+            VALUE "FileVersion", "{version_string}"
+            VALUE "InternalName", "{package_name}"
+            VALUE "LegalCopyright", "Copyright (c) 2026 {company_name}"
+            VALUE "OriginalFilename", "{package_name}.exe"
+            VALUE "ProductName", "{package_name}"
+            VALUE "ProductVersion", "{version_string}"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END
+"#,
+            icon_path = ico_path.display().to_string().replace('\\', "/"),
+            file_version = file_version,
+            version_string = version_string,
+            company_name = company_name,
+            package_name = package_name,
         ),
     )
     .with_context(|| format!("Failed to write resource file {}", rc_path.display()))?;
@@ -57,6 +104,17 @@ fn embed_windows_icon() -> Result<()> {
     compile_resource(&rc_path, &res_path)?;
     println!("cargo:rustc-link-arg={}", res_path.display());
     Ok(())
+}
+
+fn parse_version_components(version: &str) -> (u16, u16, u16, u16) {
+    let mut parts = version
+        .split('.')
+        .map(|part| part.parse::<u16>().unwrap_or(0))
+        .collect::<Vec<_>>();
+    while parts.len() < 4 {
+        parts.push(0);
+    }
+    (parts[0], parts[1], parts[2], parts[3])
 }
 
 #[cfg(windows)]
