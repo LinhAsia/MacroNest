@@ -1068,6 +1068,7 @@ impl CrosshairApp {
                 vars.insert(name.clone(), *val);
             }
         }
+        app.preload_primary_sound_preset_audio();
         app
     }
 
@@ -1100,6 +1101,7 @@ impl CrosshairApp {
         self.sync_command_presets();
         self.sync_audio_sense_presets();
         self.sync_geometry_presets();
+        self.preload_primary_sound_preset_audio();
         self.sync_macro_master_enabled();
         self.sync_vietnamese_input_enabled();
         self.sync_macro_master_hotkey();
@@ -1161,6 +1163,22 @@ impl CrosshairApp {
         let _ = self.overlay_tx.send(OverlayCommand::UpdateAudioSettings(
             self.state.audio_settings.clone(),
         ));
+    }
+
+    fn preload_primary_sound_preset_audio(&self) {
+        let Some(path) = self
+            .state
+            .audio_settings
+            .presets
+            .iter()
+            .find_map(|preset| {
+                let path = preset.clip.file_path.trim();
+                (!path.is_empty()).then(|| path.to_owned())
+            })
+        else {
+            return;
+        };
+        let _ = audio::preload_preview_audio(&path);
     }
 
     fn sync_vision_settings(&self) {
