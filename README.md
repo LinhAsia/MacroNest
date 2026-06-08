@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/NBaoLinh/MacroNest/stargazers">
-    <img src="https://img.shields.io/github/stars/NBaoLinh/MacroNest.svg?style=social" alt="GitHub Stars" />
+    <img src="assets/star-button.svg" alt="Star MacroNest" height="40" />
   </a>
 </p>
 
