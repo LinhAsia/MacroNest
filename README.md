@@ -2,6 +2,12 @@
   <img src="assets/banner-v2.svg" alt="MacroNest Banner" width="100%" />
 </p>
 
+<p align="center">
+  <a href="https://github.com/NBaoLinh/MacroNest/stargazers">
+    <img src="https://img.shields.io/github/stars/NBaoLinh/MacroNest.svg?style=social" alt="GitHub Stars" />
+  </a>
+</p>
+
 ## Features
 
 *   ⌨️ **Macros**: Central engine to automate your workflow. **All features listed below can be easily triggered and orchestrated through macros.** Supports key sequences, mouse actions, and loops.
