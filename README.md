@@ -1,4 +1,6 @@
-# 🎯 MacroNest
+<p align="center">
+  <img src="assets/banner.svg" alt="MacroNest Banner" width="550" />
+</p>
 
 ## Features
 
