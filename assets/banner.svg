@@ -5,23 +5,33 @@
       <stop offset="0%" stop-color="#052e16"/>
       <stop offset="100%" stop-color="#22c55e"/>
     </linearGradient>
+    
     <!-- Glow Gradient for crosshair details -->
     <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#ffffff"/>
       <stop offset="100%" stop-color="#dcfce7"/>
     </linearGradient>
+    
     <!-- Text Nest Gradient to make it look premium (from light-greenish mint to crisp white/light mint) -->
     <linearGradient id="text-nest" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#e2fbe9"/>
+      <stop offset="100%" stop-color="#a7f3d0"/>
     </linearGradient>
+
+    <!-- Stencil mask for the text to create a high-tech/futuristic look -->
+    <mask id="stencil-mask">
+      <rect width="700" height="150" fill="#ffffff"/>
+      <!-- Cut a horizontal gap in the middle of the text -->
+      <rect x="0" y="76" width="700" height="5" fill="#000000"/>
+    </mask>
   </defs>
+  
   <style>
     .title-text {
       font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Inter', Roboto, sans-serif;
-      font-weight: 800;
-      font-size: 80px;
-      letter-spacing: -2px;
+      font-weight: 900;
+      font-size: 76px;
+      letter-spacing: 4px;
     }
     .part-macr {
       fill: #ffffff;
@@ -30,26 +40,40 @@
       fill: url(#text-nest);
       opacity: 0.95;
     }
+    .hud-line {
+      stroke: #ffffff;
+      stroke-width: 2;
+      fill: none;
+      opacity: 0.3;
+    }
   </style>
 
   <!-- Banner Background (rounded rect using the icon's gradient background) -->
   <rect width="700" height="150" rx="24" fill="url(#bg)"/>
 
+  <!-- Futuristic HUD corner elements -->
+  <path d="M 25 45 L 25 25 L 45 25" class="hud-line" />
+  <path d="M 675 45 L 675 25 L 655 25" class="hud-line" />
+  <path d="M 25 105 L 25 125 L 45 125" class="hud-line" />
+  <path d="M 675 105 L 675 125 L 655 125" class="hud-line" />
+
   <!-- Centered content group -->
-  <g transform="translate(124, 0)">
-    <!-- "Macr" Text -->
-    <text x="0" y="105" class="title-text part-macr">Macr</text>
+  <g transform="translate(92, 0)">
+    <!-- Tech Stencil Text Group -->
+    <g mask="url(#stencil-mask)">
+      <!-- "MACR" Text -->
+      <text x="0" y="105" class="title-text part-macr">MACR</text>
+      <!-- "NEST" Text -->
+      <text x="312" y="105" class="title-text part-nest">NEST</text>
+    </g>
     
-    <!-- White Crosshair (representing the 'o') -->
+    <!-- White Crosshair (representing the 'O') -->
     <!-- Positioned centered vertically and aligned with the text baseline -->
-    <svg x="180" y="36" width="82" height="82" viewBox="0 0 128 128">
+    <svg x="214" y="34" width="84" height="84" viewBox="0 0 128 128">
       <circle cx="64" cy="64" r="28" fill="none" stroke="#dcfce7" stroke-width="8"/>
       <circle cx="64" cy="64" r="9" fill="#ffffff"/>
       <path d="M64 20 v26 M64 82 v26 M20 64 h26 M82 64 h26" stroke="url(#glow)" stroke-width="10" stroke-linecap="round"/>
       <circle cx="64" cy="64" r="38" fill="none" stroke="url(#glow)" stroke-width="4" opacity="0.9"/>
     </svg>
-    
-    <!-- "Nest" Text -->
-    <text x="272" y="105" class="title-text part-nest">Nest</text>
   </g>
 </svg>
