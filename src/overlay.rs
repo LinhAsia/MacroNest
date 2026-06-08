@@ -315,6 +315,7 @@ mod windows_overlay {
 
     static OVERLAY_COMMAND_TX: Lazy<Mutex<Option<Sender<OverlayCommand>>>> =
         Lazy::new(|| Mutex::new(None));
+    static SEARCH_AREA_OVERLAY_REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
     static UI_CONTEXT: Lazy<Mutex<Option<egui::Context>>> = Lazy::new(|| Mutex::new(None));
     static CONTROLLER_HWND: AtomicIsize = AtomicIsize::new(0);
     static CACHED_APP_UI_HWND: AtomicIsize = AtomicIsize::new(0);
@@ -1065,6 +1066,7 @@ mod windows_overlay {
     ) -> Result<OverlayHandle> {
         let (tx, rx) = crossbeam_channel::unbounded();
         *OVERLAY_COMMAND_TX.lock() = Some(tx.clone());
+        SEARCH_AREA_OVERLAY_REFRESH_PENDING.store(false, Ordering::Release);
         let running = Arc::new(AtomicBool::new(true));
         let worker_running = running.clone();
         let poll_running = running.clone();
@@ -1762,6 +1764,7 @@ mod windows_overlay {
                 hook_state.active_hold_macros.clear();
                 hook_state.held_mouse_buttons.clear();
                 *OVERLAY_COMMAND_TX.lock() = None;
+                SEARCH_AREA_OVERLAY_REFRESH_PENDING.store(false, Ordering::Release);
                 let ptr = GetWindowLongPtrW(hwnd, WINDOW_LONG_PTR_INDEX(GWLP_USERDATA.0));
                 if ptr != 0 {
                     let _runtime = Box::from_raw(ptr as *mut Runtime);
@@ -4133,6 +4136,7 @@ mod windows_overlay {
                 }
 
                 OverlayCommand::RefreshSearchAreaOverlay => {
+                    SEARCH_AREA_OVERLAY_REFRESH_PENDING.store(false, Ordering::Release);
                     let _ = refresh_search_area_overlay(runtime);
                 }
 
@@ -5726,9 +5730,22 @@ mod windows_overlay {
     }
 
     fn send_overlay_command(command: OverlayCommand) {
+        let is_refresh = matches!(&command, OverlayCommand::RefreshSearchAreaOverlay);
+        if is_refresh
+            && SEARCH_AREA_OVERLAY_REFRESH_PENDING.swap(true, Ordering::AcqRel)
+        {
+            return;
+        }
+
         if let Some(tx) = OVERLAY_COMMAND_TX.lock().clone() {
-            let _ = tx.send(command);
-            wake_command_queue();
+            if tx.send(command).is_ok() {
+                wake_command_queue();
+                return;
+            }
+        }
+
+        if is_refresh {
+            SEARCH_AREA_OVERLAY_REFRESH_PENDING.store(false, Ordering::Release);
         }
     }
 
