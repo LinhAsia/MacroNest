@@ -191,9 +191,12 @@ fn main() -> Result<()> {
         });
     }
 
-    let app_title = "MacroNest v1.0";
+    let app_title = format!(
+        "MacroNest v{}",
+        option_env!("MACRONEST_BUILD_TAG").unwrap_or(env!("CARGO_PKG_VERSION"))
+    );
     let mut viewport_builder = eframe::egui::ViewportBuilder::default()
-        .with_title(app_title)
+        .with_title(&app_title)
         .with_inner_size([1180.0, 780.0])
         .with_min_inner_size([1180.0, 780.0])
         .with_visible(false)
@@ -225,7 +228,7 @@ fn main() -> Result<()> {
     };
 
     eframe::run_native(
-        app_title,
+        &app_title,
         native_options,
         Box::new(move |cc| {
             ui::configure_fonts(&cc.egui_ctx, false);
@@ -241,10 +244,13 @@ fn main() -> Result<()> {
 }
 
 fn run_popup_blob(kind: PopupBlobKind) -> Result<()> {
-    let app_title = "MacroNest v1.0";
+    let app_title = format!(
+        "MacroNest v{}",
+        option_env!("MACRONEST_BUILD_TAG").unwrap_or(env!("CARGO_PKG_VERSION"))
+    );
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title(app_title)
+            .with_title(&app_title)
             .with_inner_size([560.0, 260.0])
             .with_min_inner_size([560.0, 260.0])
             .with_max_inner_size([560.0, 260.0])
@@ -257,7 +263,7 @@ fn run_popup_blob(kind: PopupBlobKind) -> Result<()> {
     };
 
     eframe::run_native(
-        app_title,
+        &app_title,
         native_options,
         Box::new(move |cc| {
             ui::configure_fonts(&cc.egui_ctx, false);

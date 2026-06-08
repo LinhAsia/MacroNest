@@ -12,6 +12,10 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=assets/app-icon.svg");
     println!("cargo:rerun-if-changed=assets/app-icon-disabled.svg");
+    let build_tag = normalize_version_tag(&env::var("CARGO_PKG_VERSION").unwrap_or_default());
+    if !build_tag.is_empty() {
+        println!("cargo:rustc-env=MACRONEST_BUILD_TAG={build_tag}");
+    }
 
     #[cfg(windows)]
     {
@@ -21,6 +25,14 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn normalize_version_tag(version: &str) -> String {
+    let mut parts: Vec<&str> = version.split('.').collect();
+    while parts.last() == Some(&"0") {
+        parts.pop();
+    }
+    parts.join(".")
 }
 
 #[cfg(windows)]

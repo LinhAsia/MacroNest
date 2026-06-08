@@ -3375,7 +3375,7 @@ impl CrosshairApp {
     }
 
     fn app_version_label(&self) -> &'static str {
-        option_env!("MACRONEST_BUILD_TAG").unwrap_or("1.0")
+        option_env!("MACRONEST_BUILD_TAG").unwrap_or(env!("CARGO_PKG_VERSION"))
     }
 
     fn app_brand_subtitle(&self) -> &'static str {
