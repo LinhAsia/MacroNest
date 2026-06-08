@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 190 40" width="190" height="40">
   <defs>
-    <!-- Dark slate gradient for button background -->
+    <!-- Oklch-based gradient for button background -->
     <linearGradient id="btn-bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#18181b"/>
-      <stop offset="100%" stop-color="#27272a"/>
+      <stop offset="0%" stop-color="oklch(22% 0.02 255)"/>
+      <stop offset="100%" stop-color="oklch(30% 0.03 262)"/>
     </linearGradient>
   </defs>
 
@@ -13,10 +13,10 @@
       font-weight: 800;
       font-size: 13px;
       letter-spacing: 1.5px;
-      fill: #ffffff;
+      fill: oklch(98% 0.01 255);
     }
     .download-icon {
-      stroke: #4ade80;
+      stroke: oklch(81% 0.17 152);
       stroke-width: 3;
       stroke-linecap: round;
       stroke-linejoin: round;
@@ -25,7 +25,7 @@
   </style>
 
   <!-- Button Background -->
-  <rect width="190" height="40" rx="12" fill="url(#btn-bg)" stroke="#3f3f46" stroke-width="1.5"/>
+  <rect width="190" height="40" rx="12" fill="url(#btn-bg)" stroke="oklch(42% 0.03 255)" stroke-width="1.5"/>
 
   <!-- Download Icon (centered at cx=26, cy=20) -->
   <g class="download-icon">

@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 190 40" width="190" height="40">
   <defs>
-    <!-- Dark slate gradient for button background -->
+    <!-- Oklch-based gradient for button background -->
     <linearGradient id="btn-bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#18181b"/>
-      <stop offset="100%" stop-color="#27272a"/>
+      <stop offset="0%" stop-color="oklch(22% 0.02 255)"/>
+      <stop offset="100%" stop-color="oklch(30% 0.03 262)"/>
     </linearGradient>
     
-    <!-- Gold/Yellow Gradient for the star -->
+    <!-- Oklch gold gradient for the star -->
     <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ffdf00"/>
-      <stop offset="100%" stop-color="#d4af37"/>
+      <stop offset="0%" stop-color="oklch(89% 0.19 96)"/>
+      <stop offset="100%" stop-color="oklch(74% 0.16 82)"/>
     </linearGradient>
   </defs>
 
@@ -19,18 +19,18 @@
       font-weight: 800;
       font-size: 13px;
       letter-spacing: 1.5px;
-      fill: #ffffff;
+      fill: oklch(98% 0.01 255);
     }
     .star-icon {
       fill: url(#gold);
-      stroke: #ffffff;
+      stroke: oklch(100% 0 0);
       stroke-width: 1;
       stroke-linejoin: round;
     }
   </style>
 
   <!-- Button Background -->
-  <rect width="190" height="40" rx="12" fill="url(#btn-bg)" stroke="#3f3f46" stroke-width="1.5"/>
+  <rect width="190" height="40" rx="12" fill="url(#btn-bg)" stroke="oklch(42% 0.03 255)" stroke-width="1.5"/>
 
   <!-- Golden Star Icon -->
   <path d="M 26 9 L 29.3 16 L 36.8 17 L 31.2 22 L 32.7 29.5 L 26 25.8 L 19.3 29.5 L 20.8 22 L 15.2 17 L 22.7 16 Z" class="star-icon" />
