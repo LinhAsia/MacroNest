@@ -753,12 +753,17 @@ pub struct CrosshairApp {
     native_shadow_applied: bool,
     native_transitions_disabled_applied: bool,
     startup_show_pending: bool,
+    startup_gate_release_pending: bool,
+    startup_gate_frames_remaining: u8,
     startup_shell_frames_remaining: u8,
     startup_overlay_sync_pending: bool,
     startup_overlay_sync_step: u8,
     startup_state_persist_pending: bool,
+    startup_base_fonts_pending: bool,
     startup_cjk_font_check_pending: bool,
     background_panel_preload_index: usize,
+    pending_startup_icon: Option<std::sync::Arc<eframe::egui::IconData>>,
+    startup_gate: Option<std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>>,
     panel_warmup_target: Option<AppPanel>,
     panel_warmup_frames_remaining: u8,
     warmed_panels: Vec<AppPanel>,
@@ -834,6 +839,7 @@ impl CrosshairApp {
         ui_tx: Sender<UiCommand>,
         ui_rx: Receiver<UiCommand>,
         startup_state_dirty: bool,
+        startup_gate: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
     ) -> Self {
         let save_name = state
             .selected_profile
@@ -974,12 +980,17 @@ impl CrosshairApp {
             native_shadow_applied: false,
             native_transitions_disabled_applied: false,
             startup_show_pending: true,
+            startup_gate_release_pending: false,
+            startup_gate_frames_remaining: 1,
             startup_shell_frames_remaining: 1,
             startup_overlay_sync_pending: true,
             startup_overlay_sync_step: 0,
             startup_state_persist_pending: false,
+            startup_base_fonts_pending: true,
             startup_cjk_font_check_pending: true,
             background_panel_preload_index: 0,
+            pending_startup_icon: None,
+            startup_gate: Some(startup_gate),
             update_status: UpdateStatus::Idle,
             interception_status: "Interception: Unavailable".to_owned(),
             opencv_download_job: None,
@@ -1101,11 +1112,15 @@ impl CrosshairApp {
         self.startup_overlay_sync_pending = true;
         self.startup_overlay_sync_step = 0;
         self.startup_state_persist_pending = pending_startup_persist;
+        self.startup_base_fonts_pending = true;
         self.startup_cjk_font_check_pending = true;
         self.background_panel_preload_index = 0;
+        self.pending_startup_icon = None;
+        self.startup_gate = None;
+        self.startup_gate_release_pending = false;
+        self.startup_gate_frames_remaining = 0;
         self.warmed_panels.clear();
         self.last_applied_theme = None;
-        self.apply_theme(ctx);
         self.begin_panel_warmup(self.state.active_panel);
         if self.state.active_panel == AppPanel::Macros {
             self.macro_panel_render_limit = 8;
@@ -8379,8 +8394,37 @@ impl CrosshairApp {
         if self.startup_show_pending {
             return;
         }
+        if self.startup_gate_release_pending {
+            if self.startup_gate_frames_remaining > 0 {
+                self.startup_gate_frames_remaining -= 1;
+                ctx.request_repaint();
+                return;
+            }
+            if let Some(startup_gate) = self.startup_gate.take() {
+                let (gate_lock, gate_ready) = &*startup_gate;
+                let mut gate_open = gate_lock.lock().expect("startup gate poisoned");
+                *gate_open = true;
+                gate_ready.notify_all();
+            }
+            self.startup_gate_release_pending = false;
+            ctx.request_repaint();
+            return;
+        }
         if self.startup_shell_frames_remaining > 0 {
             self.startup_shell_frames_remaining -= 1;
+            ctx.request_repaint();
+            return;
+        }
+        if self.startup_base_fonts_pending {
+            configure_fonts(ctx, false);
+            self.last_applied_theme = None;
+            self.apply_theme(ctx);
+            self.startup_base_fonts_pending = false;
+            ctx.request_repaint();
+            return;
+        }
+        if let Some(icon) = self.pending_startup_icon.take() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(icon)));
             ctx.request_repaint();
             return;
         }
@@ -8446,7 +8490,9 @@ impl eframe::App for CrosshairApp {
             self.state.active_panel = AppPanel::Pin;
         }
         crate::overlay::set_ui_context(ctx.clone());
-        self.apply_theme(ctx);
+        if !self.startup_base_fonts_pending {
+            self.apply_theme(ctx);
+        }
         let wants_native_shadow = false;
         if self.native_shadow_applied != wants_native_shadow {
             if crate::platform::set_native_window_shadow(frame, wants_native_shadow) {
@@ -8495,6 +8541,13 @@ impl eframe::App for CrosshairApp {
                 UiCommand::Exit => {
                     self.quit_requested = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                UiCommand::StartupIconLoaded(icon) => {
+                    if self.startup_show_pending {
+                        self.pending_startup_icon = Some(icon);
+                    } else {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(icon)));
+                    }
                 }
                 UiCommand::StartupStateLoaded {
                     state,
@@ -9620,9 +9673,8 @@ impl eframe::App for CrosshairApp {
 
         if self.startup_show_pending && self.state.show_window {
             self.startup_show_pending = false;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            self.startup_gate_release_pending = true;
+            self.startup_gate_frames_remaining = 1;
             ctx.request_repaint();
         }
 

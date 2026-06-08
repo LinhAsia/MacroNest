@@ -45,15 +45,6 @@ impl AppPaths {
         let dirs = ProjectDirs::from("com", "", "MacroNest")
             .context("Failed to locate the application data folder")?;
         let root = dirs.data_local_dir().to_path_buf();
-
-        // Migrate from old Crosshair/Crosshair directory to new single MacroNest directory
-        if let Some(old_dirs) = ProjectDirs::from("com", "Crosshair", "Crosshair") {
-            let old_root = old_dirs.data_local_dir().to_path_buf();
-            if old_root.exists() && !root.exists() {
-                let _ = fs::create_dir_all(root.parent().unwrap());
-                let _ = fs::rename(&old_root, &root);
-            }
-        }
         let state_file = root.join("state.json");
         let profiles_dir = root.join("profiles");
         let asset_dir = root.join("custom-crosshairs");
@@ -75,17 +66,6 @@ impl AppPaths {
         let avrdude_conf = bin_dir.join("avrdude.conf");
         let arduino_firmware_hex = bin_dir.join("firmware.hex");
         let arduino_rawhid_firmware_hex = bin_dir.join("firmware_rawhid.hex");
-
-        fs::create_dir_all(&root)?;
-        fs::create_dir_all(&profiles_dir)?;
-        fs::create_dir_all(&asset_dir)?;
-        fs::create_dir_all(&vision_dir)?;
-        fs::create_dir_all(&bin_dir)?;
-        ensure_opencv_videoio_ffmpeg_plugin(&opencv_videoio_ffmpeg_dll);
-        ensure_bundled_file(
-            &arduino_rawhid_firmware_hex,
-            BUNDLED_ARDUINO_RAWHID_FIRMWARE,
-        )?;
 
         Ok(Self {
             root,
@@ -109,6 +89,29 @@ impl AppPaths {
             arduino_firmware_hex,
             arduino_rawhid_firmware_hex,
         })
+    }
+
+    pub fn prepare_startup_runtime(&self) -> Result<()> {
+        if let Some(old_dirs) = ProjectDirs::from("com", "Crosshair", "Crosshair") {
+            let old_root = old_dirs.data_local_dir().to_path_buf();
+            if old_root.exists() && !self.root.exists() {
+                let _ = fs::create_dir_all(self.root.parent().unwrap());
+                let _ = fs::rename(&old_root, &self.root);
+            }
+        }
+
+        fs::create_dir_all(&self.root)?;
+        fs::create_dir_all(&self.profiles_dir)?;
+        fs::create_dir_all(&self.asset_dir)?;
+        fs::create_dir_all(&self.vision_dir)?;
+        fs::create_dir_all(&self.bin_dir)?;
+        ensure_opencv_videoio_ffmpeg_plugin(&self.opencv_videoio_ffmpeg_dll);
+        ensure_bundled_file(
+            &self.arduino_rawhid_firmware_hex,
+            BUNDLED_ARDUINO_RAWHID_FIRMWARE,
+        )?;
+
+        Ok(())
     }
 
     pub fn ensure_arduino_runtime_files(&self) -> Result<()> {

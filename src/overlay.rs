@@ -453,6 +453,7 @@ mod windows_overlay {
     pub enum UiCommand {
         ShowWindow,
         Exit,
+        StartupIconLoaded(std::sync::Arc<eframe::egui::IconData>),
         StartupStateLoaded {
             state: crate::model::AppState,
             startup_state_dirty: bool,
@@ -16822,6 +16823,7 @@ mod fallback {
     pub enum UiCommand {
         ShowWindow,
         Exit,
+        StartupIconLoaded(std::sync::Arc<eframe::egui::IconData>),
         VisionFinished(String),
         VisionPointCaptureCancelled(String),
         MacroRealtimeStepRemoved(u32, u32),
