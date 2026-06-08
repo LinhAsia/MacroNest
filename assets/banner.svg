@@ -17,13 +17,6 @@
       <stop offset="0%" stop-color="#ffffff"/>
       <stop offset="100%" stop-color="#a7f3d0"/>
     </linearGradient>
-
-    <!-- Stencil mask for the text to create a high-tech/futuristic look -->
-    <mask id="stencil-mask">
-      <rect width="700" height="150" fill="#ffffff"/>
-      <!-- Cut a horizontal gap in the middle of the text -->
-      <rect x="0" y="76" width="700" height="5" fill="#000000"/>
-    </mask>
   </defs>
   
   <style>
@@ -46,6 +39,11 @@
       fill: none;
       opacity: 0.3;
     }
+    .axis-line {
+      stroke: url(#glow);
+      stroke-width: 2;
+      opacity: 0.25;
+    }
   </style>
 
   <!-- Banner Background (rounded rect using the icon's gradient background) -->
@@ -57,19 +55,20 @@
   <path d="M 25 105 L 25 125 L 45 125" class="hud-line" />
   <path d="M 675 105 L 675 125 L 655 125" class="hud-line" />
 
+  <!-- Horizontal Axis Guide Line (behind the text) -->
+  <line x1="100" y1="76" x2="600" y2="76" class="axis-line" />
+
   <!-- Centered content group -->
-  <g transform="translate(92, 0)">
-    <!-- Tech Stencil Text Group -->
-    <g mask="url(#stencil-mask)">
-      <!-- "MACR" Text -->
-      <text x="0" y="105" class="title-text part-macr">MACR</text>
-      <!-- "NEST" Text -->
-      <text x="312" y="105" class="title-text part-nest">NEST</text>
-    </g>
+  <g transform="translate(82, 0)">
+    <!-- Tech Text Group (no mask to avoid spiky artifacts on diagonal letters) -->
+    <!-- "MACR" Text -->
+    <text x="0" y="105" class="title-text part-macr">MACR</text>
+    <!-- "NEST" Text -->
+    <text x="321" y="105" class="title-text part-nest">NEST</text>
     
     <!-- White Crosshair (representing the 'O') -->
     <!-- Positioned centered vertically and aligned with the text baseline -->
-    <svg x="214" y="34" width="84" height="84" viewBox="0 0 128 128">
+    <svg x="230" y="26" width="100" height="100" viewBox="0 0 128 128">
       <circle cx="64" cy="64" r="28" fill="none" stroke="#dcfce7" stroke-width="8"/>
       <circle cx="64" cy="64" r="9" fill="#ffffff"/>
       <path d="M64 20 v26 M64 82 v26 M20 64 h26 M82 64 h26" stroke="url(#glow)" stroke-width="10" stroke-linecap="round"/>
