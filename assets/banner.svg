@@ -1,52 +1,55 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 150" width="700" height="150">
   <defs>
-    <linearGradient id="icon-bg" x1="0" y1="0" x2="1" y2="1">
+    <!-- Background Gradient matching the app icon background -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#052e16"/>
       <stop offset="100%" stop-color="#22c55e"/>
     </linearGradient>
-    <linearGradient id="icon-glow" x1="0" y1="0" x2="1" y2="1">
+    <!-- Glow Gradient for crosshair details -->
+    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#ffffff"/>
       <stop offset="100%" stop-color="#dcfce7"/>
     </linearGradient>
-    <linearGradient id="text-green" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#4ade80"/>
-      <stop offset="100%" stop-color="#15803d"/>
+    <!-- Text Nest Gradient to make it look premium (from light-greenish mint to crisp white/light mint) -->
+    <linearGradient id="text-nest" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e2fbe9"/>
     </linearGradient>
   </defs>
   <style>
     .title-text {
       font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Inter', Roboto, sans-serif;
       font-weight: 800;
-      font-size: 76px;
+      font-size: 80px;
       letter-spacing: -2px;
     }
     .part-macr {
       fill: #ffffff;
     }
     .part-nest {
-      fill: url(#text-green);
-    }
-    @media (prefers-color-scheme: light) {
-      .part-macr {
-        fill: #0f172a;
-      }
+      fill: url(#text-nest);
+      opacity: 0.95;
     }
   </style>
-  
-  <g transform="translate(30, 0)">
+
+  <!-- Banner Background (rounded rect using the icon's gradient background) -->
+  <rect width="700" height="150" rx="24" fill="url(#bg)"/>
+
+  <!-- Centered content group -->
+  <g transform="translate(124, 0)">
     <!-- "Macr" Text -->
-    <text x="0" y="102" class="title-text part-macr">Macr</text>
+    <text x="0" y="105" class="title-text part-macr">Macr</text>
     
-    <!-- Nested App Icon (representing the 'o') -->
-    <svg x="180" y="32" width="78" height="78" viewBox="0 0 128 128">
-      <rect x="6" y="6" width="116" height="116" rx="28" fill="url(#icon-bg)"/>
+    <!-- White Crosshair (representing the 'o') -->
+    <!-- Positioned centered vertically and aligned with the text baseline -->
+    <svg x="180" y="36" width="82" height="82" viewBox="0 0 128 128">
       <circle cx="64" cy="64" r="28" fill="none" stroke="#dcfce7" stroke-width="8"/>
       <circle cx="64" cy="64" r="9" fill="#ffffff"/>
-      <path d="M64 20 v26 M64 82 v26 M20 64 h26 M82 64 h26" stroke="url(#icon-glow)" stroke-width="10" stroke-linecap="round"/>
-      <circle cx="64" cy="64" r="38" fill="none" stroke="url(#icon-glow)" stroke-width="4" opacity="0.9"/>
+      <path d="M64 20 v26 M64 82 v26 M20 64 h26 M82 64 h26" stroke="url(#glow)" stroke-width="10" stroke-linecap="round"/>
+      <circle cx="64" cy="64" r="38" fill="none" stroke="url(#glow)" stroke-width="4" opacity="0.9"/>
     </svg>
     
     <!-- "Nest" Text -->
-    <text x="270" y="102" class="title-text part-nest">Nest</text>
+    <text x="272" y="105" class="title-text part-nest">Nest</text>
   </g>
 </svg>
