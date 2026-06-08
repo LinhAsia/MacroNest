@@ -9006,12 +9006,13 @@ impl eframe::App for CrosshairApp {
 
         if self.state.active_panel != self.last_active_panel {
             if Self::active_panel_needs_open_windows(self.state.active_panel) {
-                self.ensure_open_windows_ready(true);
+                self.ensure_open_windows_ready(false);
             }
             if Self::active_panel_needs_audio_sense_devices(self.state.active_panel) {
-                self.ensure_audio_sense_devices_ready(true);
+                self.ensure_audio_sense_devices_ready(false);
             }
-            if self.state.active_panel == AppPanel::Macros {
+            if self.state.active_panel == AppPanel::Macros && !self.panel_is_warmed(AppPanel::Macros)
+            {
                 self.macro_panel_render_limit = 8;
             }
             if matches!(self.last_active_panel, AppPanel::Sound | AppPanel::Media)
