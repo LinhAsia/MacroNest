@@ -21,7 +21,7 @@ use resvg::usvg;
 use crate::{
     ai, audio, audiosense, hotkey,
     model::{
-        AppPanel, AppState, AudioClipSettings, AudioSensePreset, AudioSensePresetKind, CaptureRequest,
+        AppPanel, AppState, AudioClipSettings, AudioSensePresetKind, CaptureRequest,
         CapturedInput, CommandPreset, CrosshairStyle, GeometrySpec, HotkeyBinding, MacroAction,
         MacroFolder, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode,
         MasterMacroGroupState, MasterMacroPresetState, MasterPreset,
@@ -841,7 +841,7 @@ impl CrosshairApp {
         let save_name = state
             .selected_profile
             .clone()
-            .unwrap_or_else(|| "Default".to_owned());
+            .unwrap_or_default();
         let initial_active_panel = state.active_panel;
 
         let opencv_installed = paths.opencv_dll.exists();
@@ -1214,9 +1214,10 @@ impl CrosshairApp {
         }
 
         if self.state.audio_sense_presets.is_empty() {
-            self.state.audio_sense_presets.push(AudioSensePreset::new_pitch(1));
-            self.state.next_audio_sense_preset_id = 2;
-            changed = true;
+            if self.state.next_audio_sense_preset_id != 1 {
+                self.state.next_audio_sense_preset_id = 1;
+                changed = true;
+            }
         } else {
             let next_id = self
                 .state
@@ -8490,7 +8491,12 @@ impl eframe::App for CrosshairApp {
                 UiCommand::SyncCrosshairProfiles(profiles, status) => {
                     self.state.profiles = profiles;
                     if self.state.profiles.is_empty() {
-                        self.state.profiles.push(ProfileRecord::default());
+                        self.state.selected_profile = None;
+                        self.state.active_style = CrosshairStyle {
+                            enabled: false,
+                            ..CrosshairStyle::default()
+                        };
+                        self.save_name.clear();
                     }
                     self.persist();
                     self.status = status;

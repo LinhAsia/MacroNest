@@ -296,10 +296,19 @@ impl CrosshairApp {
     pub(crate) fn render_downloaded_tools_settings(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
         let opencv_path = self.paths.opencv_dll.clone();
+        let arduino_path = self.paths.avrdude_exe.clone();
         let opencv_progress = self
             .opencv_download_job
             .as_ref()
             .map(|_| self.opencv_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
+        let interception_progress = self
+            .interception_download_job
+            .as_ref()
+            .map(|_| self.interception_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
+        let arduino_progress = self
+            .arduino_download_job
+            .as_ref()
+            .map(|_| self.arduino_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
         Self::settings_card_frame(ui).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.vertical(|ui| {
@@ -330,6 +339,23 @@ impl CrosshairApp {
                         Self::tr_lang(language, "OpenCV DLL deleted.", ""),
                         Self::start_opencv_download,
                         Self::delete_opencv_tool,
+                    );
+                    ui.add_space(10.0);
+                    self.render_interception_driver_entry(ui, language, interception_progress);
+                    ui.add_space(10.0);
+                    self.render_downloaded_tool_entry(
+                        ui,
+                        language,
+                        "Arduino Tools",
+                        &arduino_path,
+                        self.arduino_tools_downloaded,
+                        arduino_progress,
+                        1_000_000,
+                        Self::tr_lang(language, "Download Arduino Tools", ""),
+                        Self::tr_lang(language, "Arduino flashing tools and firmware files.", ""),
+                        Self::tr_lang(language, "Arduino tools deleted.", ""),
+                        Self::start_arduino_tools_download,
+                        Self::delete_arduino_tools,
                     );
                 }
             });
@@ -1032,13 +1058,8 @@ impl CrosshairApp {
             .map(|path| path.to_path_buf())
             .unwrap_or_else(|| self.paths.bin_dir.clone());
         let job = std::thread::spawn(move || -> Result<()> {
-            let cmd = std::env::var("ComSpec")
-                .unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".to_owned());
-            let cmd_args = format!(
-                "/K cd /d \"{}\" && install-interception.exe /install",
-                installer_dir.display()
-            );
-            crate::platform::launch_process_as_admin(Path::new(&cmd), Some(&cmd_args))?;
+            let installer = installer_dir.join("install-interception.exe");
+            crate::platform::launch_hidden_process_as_admin(&installer, Some("/install"))?;
             let deadline = Instant::now() + Duration::from_secs(60);
             while Instant::now() < deadline {
                 if crate::platform::is_interception_driver_installed() {
@@ -1070,13 +1091,8 @@ impl CrosshairApp {
             .map(|path| path.to_path_buf())
             .unwrap_or_else(|| self.paths.bin_dir.clone());
         let job = std::thread::spawn(move || -> Result<()> {
-            let cmd = std::env::var("ComSpec")
-                .unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".to_owned());
-            let cmd_args = format!(
-                "/K cd /d \"{}\" && install-interception.exe /uninstall",
-                installer_dir.display()
-            );
-            crate::platform::launch_process_as_admin(Path::new(&cmd), Some(&cmd_args))?;
+            let installer = installer_dir.join("install-interception.exe");
+            crate::platform::launch_hidden_process_as_admin(&installer, Some("/uninstall"))?;
             let deadline = Instant::now() + Duration::from_secs(60);
             while Instant::now() < deadline {
                 if !crate::platform::is_interception_driver_installed() {

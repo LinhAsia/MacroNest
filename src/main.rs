@@ -195,6 +195,7 @@ fn main() -> Result<()> {
         "MacroNest v{}",
         option_env!("MACRONEST_BUILD_TAG").unwrap_or(env!("CARGO_PKG_VERSION"))
     );
+    let app_icon = app_icon::icon_data(128).ok().map(Arc::new);
     let mut viewport_builder = eframe::egui::ViewportBuilder::default()
         .with_title(&app_title)
         .with_inner_size([1180.0, 780.0])
@@ -202,6 +203,9 @@ fn main() -> Result<()> {
         .with_visible(false)
         .with_decorations(false)
         .with_transparent(true);
+    if let Some(icon) = app_icon {
+        viewport_builder = viewport_builder.with_icon(icon);
+    }
 
     #[cfg(windows)]
     {
@@ -248,8 +252,10 @@ fn run_popup_blob(kind: PopupBlobKind) -> Result<()> {
         "MacroNest v{}",
         option_env!("MACRONEST_BUILD_TAG").unwrap_or(env!("CARGO_PKG_VERSION"))
     );
+    let app_icon = app_icon::icon_data(128).ok().map(Arc::new);
     let native_options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
+        viewport: {
+            let mut viewport = eframe::egui::ViewportBuilder::default()
             .with_title(&app_title)
             .with_inner_size([560.0, 260.0])
             .with_min_inner_size([560.0, 260.0])
@@ -258,7 +264,12 @@ fn run_popup_blob(kind: PopupBlobKind) -> Result<()> {
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top()
-            .with_active(true),
+            .with_active(true);
+            if let Some(icon) = app_icon {
+                viewport = viewport.with_icon(icon);
+            }
+            viewport
+        },
         ..Default::default()
     };
 

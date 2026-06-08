@@ -67,7 +67,7 @@ impl CrosshairApp {
                             .state
                             .selected_profile
                             .clone()
-                            .unwrap_or_else(|| "Default".to_owned());
+                            .unwrap_or_else(|| Self::tr_lang(self.state.ui_language, "No preset", "Chưa có preset").to_owned());
                         ui.label("Selected preset");
                         egui::ComboBox::from_id_salt("saved-crosshair-profiles")
                             .width(260.0)

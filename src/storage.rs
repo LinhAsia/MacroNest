@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 
-use crate::model::{AppState, ProfileRecord, VietnameseInputMode, VisionPreset};
+use crate::model::{AppState, CrosshairStyle, ProfileRecord, VietnameseInputMode, VisionPreset};
 
 const BUNDLED_ARDUINO_RAWHID_FIRMWARE: &[u8] =
     include_bytes!("../assets/firmware-rawhid.hex");
@@ -174,17 +174,25 @@ impl AppPaths {
 
         state.profiles = disk_profiles;
 
-        if state.selected_profile.is_none() {
-            state.selected_profile = state.profiles.first().map(|p| p.name.clone());
-        }
-        if let Some(selected_name) = state.selected_profile.as_deref() {
-            if let Some(profile) = state
-                .profiles
-                .iter()
-                .find(|profile| profile.name == selected_name)
-            {
-                state.active_style = profile.style.clone();
-                state.active_style.enabled = profile.enabled;
+        if state.profiles.is_empty() {
+            state.selected_profile = None;
+            state.active_style = CrosshairStyle {
+                enabled: false,
+                ..CrosshairStyle::default()
+            };
+        } else {
+            if state.selected_profile.is_none() {
+                state.selected_profile = state.profiles.first().map(|p| p.name.clone());
+            }
+            if let Some(selected_name) = state.selected_profile.as_deref() {
+                if let Some(profile) = state
+                    .profiles
+                    .iter()
+                    .find(|profile| profile.name == selected_name)
+                {
+                    state.active_style = profile.style.clone();
+                    state.active_style.enabled = profile.enabled;
+                }
             }
         }
         if matches!(state.vietnamese_input_mode, VietnameseInputMode::Off) {

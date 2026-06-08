@@ -897,12 +897,7 @@ impl CrosshairApp {
                     ui.add_space(8.0);
                     let delete_btn_lbl = self.tr("Delete Tools", "Xoa cong cu nap");
                     if ui.button(delete_btn_lbl).clicked() {
-                        let _ = std::fs::remove_file(&self.paths.avrdude_exe);
-                        let _ = std::fs::remove_file(&self.paths.avrdude_conf);
-                        let _ = std::fs::remove_file(&self.paths.arduino_firmware_hex);
-                        let _ = std::fs::remove_file(&self.paths.arduino_rawhid_firmware_hex);
-                        self.arduino_tools_downloaded = false;
-                        self.arduino_flash_status.clear();
+                        self.delete_arduino_tools();
                     }
 
                     if !self.arduino_flash_status.is_empty() {
@@ -1959,6 +1954,15 @@ impl CrosshairApp {
         });
 
         self.arduino_download_job = Some(job);
+    }
+
+    pub(crate) fn delete_arduino_tools(&mut self) {
+        let _ = std::fs::remove_file(&self.paths.avrdude_exe);
+        let _ = std::fs::remove_file(&self.paths.avrdude_conf);
+        let _ = std::fs::remove_file(&self.paths.arduino_firmware_hex);
+        let _ = std::fs::remove_file(&self.paths.arduino_rawhid_firmware_hex);
+        self.arduino_tools_downloaded = false;
+        self.arduino_flash_status.clear();
     }
 
     pub(crate) fn start_arduino_flash(&mut self) {
