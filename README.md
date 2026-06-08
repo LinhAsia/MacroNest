@@ -1,11 +1,7 @@
-<p align="center">
-  <img src="assets/banner-v2.svg" alt="MacroNest Banner" width="100%" />
-</p>
-
 <p align="left">
-  <a href="https://github.com/NBaoLinh/MacroNest/stargazers">
-    <img src="assets/star-button.svg" alt="Star MacroNest" height="40" />
-  </a>
+  <img src="assets/banner-v2.svg" alt="MacroNest Banner" width="100%" />
+  <a href="https://github.com/NBaoLinh/MacroNest/stargazers"><img src="assets/star-button-v2.svg" alt="Star MacroNest" height="38" /></a>
+  <a href="https://github.com/NBaoLinh/MacroNest/releases/latest"><img src="assets/download-button-v2.svg" alt="Download MacroNest" height="38" /></a>
 </p>
 
 ## Features
