@@ -454,11 +454,6 @@ mod windows_overlay {
         ShowWindow,
         Exit,
         StartupIconLoaded(std::sync::Arc<eframe::egui::IconData>),
-        StartupStateLoaded {
-            state: crate::model::AppState,
-            startup_state_dirty: bool,
-        },
-        StartupStateLoadFailed(String),
         SyncMacroGroups(Vec<MacroGroup>, String),
         SyncCrosshairProfiles(Vec<ProfileRecord>, String),
         SetMacrosMasterEnabled(bool, String),

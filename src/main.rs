@@ -104,34 +104,21 @@ fn main() -> Result<()> {
     apply_process_startup_tuning(&paths);
 
     {
-        let icon_paths = paths.clone();
+        let background_paths = paths.clone();
         std::thread::spawn(move || {
-            let _ = app_icon::ensure_ico_file(&icon_paths.icon_file, 64);
-            let _ = app_icon::ensure_disabled_ico_file(&icon_paths.icon_file_disabled, 64);
+            let _ = background_paths.ensure_dirs_and_assets();
+            let _ = app_icon::ensure_ico_file(&background_paths.icon_file, 64);
+            let _ = app_icon::ensure_disabled_ico_file(&background_paths.icon_file_disabled, 64);
         });
     }
 
-    let mut state = AppState::default();
-    state.show_window = true;
+    let (state, startup_state_dirty) = match load_startup_state(&paths) {
+        Ok(res) => res,
+        Err(_) => (AppState::default(), false),
+    };
+
     let (ui_tx, ui_rx) = unbounded();
     let startup_gate: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
-    {
-        let loader_paths = paths.clone();
-        let loader_ui_tx = ui_tx.clone();
-        std::thread::spawn(move || match load_startup_state(&loader_paths) {
-            Ok((loaded_state, startup_state_dirty)) => {
-                let _ = loader_ui_tx.send(crate::overlay::UiCommand::StartupStateLoaded {
-                    state: loaded_state,
-                    startup_state_dirty,
-                });
-            }
-            Err(error) => {
-                let _ = loader_ui_tx.send(crate::overlay::UiCommand::StartupStateLoadFailed(
-                    error.to_string(),
-                ));
-            }
-        });
-    }
     {
         let icon_ui_tx = ui_tx.clone();
         let icon_gate = Arc::clone(&startup_gate);
@@ -244,7 +231,7 @@ fn main() -> Result<()> {
             ui::configure_fonts(&cc.egui_ctx, false);
             ui::configure_theme(&cc.egui_ctx, state.ui_theme);
             Ok(Box::new(CrosshairApp::new(
-                paths, state, overlay_tx, ui_tx, ui_rx, false, startup_gate,
+                paths, state, overlay_tx, ui_tx, ui_rx, startup_state_dirty, startup_gate,
             )))
         }),
     )

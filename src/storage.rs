@@ -78,14 +78,6 @@ impl AppPaths {
 
         fs::create_dir_all(&root)?;
         fs::create_dir_all(&profiles_dir)?;
-        fs::create_dir_all(&asset_dir)?;
-        fs::create_dir_all(&vision_dir)?;
-        fs::create_dir_all(&bin_dir)?;
-        ensure_opencv_videoio_ffmpeg_plugin(&opencv_videoio_ffmpeg_dll);
-        ensure_bundled_file(
-            &arduino_rawhid_firmware_hex,
-            BUNDLED_ARDUINO_RAWHID_FIRMWARE,
-        )?;
 
         Ok(Self {
             root,
@@ -109,6 +101,18 @@ impl AppPaths {
             arduino_firmware_hex,
             arduino_rawhid_firmware_hex,
         })
+    }
+
+    pub fn ensure_dirs_and_assets(&self) -> Result<()> {
+        fs::create_dir_all(&self.asset_dir)?;
+        fs::create_dir_all(&self.vision_dir)?;
+        fs::create_dir_all(&self.bin_dir)?;
+        ensure_opencv_videoio_ffmpeg_plugin(&self.opencv_videoio_ffmpeg_dll);
+        ensure_bundled_file(
+            &self.arduino_rawhid_firmware_hex,
+            BUNDLED_ARDUINO_RAWHID_FIRMWARE,
+        )?;
+        Ok(())
     }
 
     pub fn ensure_arduino_runtime_files(&self) -> Result<()> {
