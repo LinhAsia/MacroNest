@@ -757,7 +757,6 @@ pub struct CrosshairApp {
     startup_gate_frames_remaining: u8,
     startup_shell_frames_remaining: u8,
     startup_overlay_sync_pending: bool,
-    startup_overlay_sync_step: u8,
     startup_state_persist_pending: bool,
     startup_cjk_font_check_pending: bool,
     background_panel_preload_index: usize,
@@ -980,9 +979,8 @@ impl CrosshairApp {
             startup_show_pending: true,
             startup_gate_release_pending: false,
             startup_gate_frames_remaining: 1,
-            startup_shell_frames_remaining: 1,
+            startup_shell_frames_remaining: 0,
             startup_overlay_sync_pending: true,
-            startup_overlay_sync_step: 0,
             startup_state_persist_pending: false,
             startup_cjk_font_check_pending: true,
             background_panel_preload_index: 0,
@@ -1106,7 +1104,6 @@ impl CrosshairApp {
             pending_startup_persist = true;
         }
         self.startup_overlay_sync_pending = true;
-        self.startup_overlay_sync_step = 0;
         self.startup_state_persist_pending = pending_startup_persist;
         self.startup_cjk_font_check_pending = true;
         self.background_panel_preload_index = 0;
@@ -1123,37 +1120,31 @@ impl CrosshairApp {
         ctx.request_repaint();
     }
 
-    fn run_next_startup_overlay_sync_step(&mut self) -> bool {
-        match self.startup_overlay_sync_step {
-            0 => {
-                let _ = self
-                    .overlay_tx
-                    .send(OverlayCommand::Update(self.state.active_style.clone()));
-            }
-            1 => self.sync_profiles(),
-            2 => self.sync_window_presets(),
-            3 => self.sync_mouse_sensitivity_presets(),
-            4 => self.sync_mouse_sensitivity_settings(),
-            5 => self.sync_mouse_driver_settings(),
-            6 => self.sync_keyboard_arrow_mouse_settings(),
-            7 => self.sync_macro_delay_settings(),
-            8 => self.sync_macro_presets(),
-            9 => self.sync_audio_settings(),
-            10 => self.sync_vision_presets(),
-            11 => self.sync_ocr_presets(),
-            12 => self.sync_vision_settings(),
-            13 => self.sync_hud_presets(),
-            14 => self.sync_timer_presets(),
-            15 => self.sync_command_presets(),
-            16 => self.sync_audio_sense_presets(),
-            17 => self.sync_geometry_presets(),
-            18 => self.sync_macro_master_enabled(),
-            19 => self.sync_vietnamese_input_enabled(),
-            20 => self.sync_macro_master_hotkey(),
-            _ => return true,
-        }
-        self.startup_overlay_sync_step = self.startup_overlay_sync_step.saturating_add(1);
-        false
+    fn run_all_startup_overlay_sync(&mut self) {
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::Update(self.state.active_style.clone()));
+        self.sync_profiles();
+        self.sync_window_presets();
+        self.sync_mouse_sensitivity_presets();
+        self.sync_mouse_sensitivity_settings();
+        self.sync_mouse_driver_settings();
+        self.sync_keyboard_arrow_mouse_settings();
+        self.sync_macro_delay_settings();
+        self.sync_macro_presets();
+        self.sync_audio_settings();
+        self.sync_vision_presets();
+        self.sync_ocr_presets();
+        self.sync_vision_settings();
+        self.sync_hud_presets();
+        self.sync_timer_presets();
+        self.sync_command_presets();
+        self.sync_audio_sense_presets();
+        self.sync_geometry_presets();
+        self.sync_macro_master_enabled();
+        self.sync_vietnamese_input_enabled();
+        self.sync_macro_master_hotkey();
+        self.startup_overlay_sync_pending = false;
     }
 
     fn sync_macro_delay_settings(&self) {
@@ -8401,8 +8392,6 @@ impl CrosshairApp {
                 gate_ready.notify_all();
             }
             self.startup_gate_release_pending = false;
-            ctx.request_repaint();
-            return;
         }
         if self.startup_shell_frames_remaining > 0 {
             self.startup_shell_frames_remaining -= 1;
@@ -8410,17 +8399,11 @@ impl CrosshairApp {
             return;
         }
         if self.startup_overlay_sync_pending {
-            if self.run_next_startup_overlay_sync_step() {
-                self.startup_overlay_sync_pending = false;
-            }
-            ctx.request_repaint();
-            return;
+            self.run_all_startup_overlay_sync();
         }
         if self.startup_state_persist_pending {
             self.persist();
             self.startup_state_persist_pending = false;
-            ctx.request_repaint();
-            return;
         }
         if self.startup_cjk_font_check_pending {
             if app_state_needs_cjk_fallback(&self.state) {
@@ -8429,8 +8412,6 @@ impl CrosshairApp {
                 self.apply_theme(ctx);
             }
             self.startup_cjk_font_check_pending = false;
-            ctx.request_repaint();
-            return;
         }
         let preload_panels = Self::all_panels_for_background_preload();
         if self.background_panel_preload_index < preload_panels.len() {

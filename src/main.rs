@@ -81,6 +81,8 @@ fn main() -> Result<()> {
         return run_popup_blob(PopupBlobKind::AlreadyRunning);
     }
 
+    platform::set_high_priority();
+
     let skip_admin = args.iter().any(|arg| arg == "--no-admin");
     if !skip_admin && platform::relaunch_as_admin_if_needed()? {
         return Ok(());
@@ -99,20 +101,20 @@ fn main() -> Result<()> {
     }
 
     let paths = AppPaths::discover()?;
-    app_icon::ensure_ico_file(&paths.icon_file, 64)?;
-    app_icon::ensure_disabled_ico_file(&paths.icon_file_disabled, 64)?;
+    apply_process_startup_tuning(&paths);
+
+    {
+        let icon_paths = paths.clone();
+        std::thread::spawn(move || {
+            let _ = app_icon::ensure_ico_file(&icon_paths.icon_file, 64);
+            let _ = app_icon::ensure_disabled_ico_file(&icon_paths.icon_file_disabled, 64);
+        });
+    }
+
     let mut state = AppState::default();
     state.show_window = true;
     let (ui_tx, ui_rx) = unbounded();
     let startup_gate: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
-    {
-        let tuning_paths = paths.clone();
-        let tuning_gate = Arc::clone(&startup_gate);
-        std::thread::spawn(move || {
-            wait_for_startup_gate(&tuning_gate);
-            apply_process_startup_tuning(&tuning_paths);
-        });
-    }
     {
         let loader_paths = paths.clone();
         let loader_ui_tx = ui_tx.clone();
