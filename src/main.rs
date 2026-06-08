@@ -20,7 +20,7 @@ mod window_list;
 
 use anyhow::Result;
 use crossbeam_channel::unbounded;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 use crate::{
     model::AppState,
@@ -54,6 +54,27 @@ fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool)> {
     Ok((state, state_changed))
 }
 
+fn wait_for_startup_gate(startup_gate: &Arc<(Mutex<bool>, Condvar)>) {
+    let (gate_lock, gate_ready) = &**startup_gate;
+    let mut gate_open = gate_lock.lock().expect("startup gate poisoned");
+    while !*gate_open {
+        gate_open = gate_ready
+            .wait(gate_open)
+            .expect("startup gate wait poisoned");
+    }
+}
+
+fn apply_process_startup_tuning(paths: &AppPaths) {
+    platform::set_high_priority();
+
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::System::LibraryLoader::SetDllDirectoryW;
+        use windows::core::HSTRING;
+        let _ = SetDllDirectoryW(&HSTRING::from(paths.bin_dir.as_os_str()));
+    }
+}
+
 fn main() -> Result<()> {
     let args = std::env::args().collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--already-running-popup") {
@@ -69,7 +90,6 @@ fn main() -> Result<()> {
         Some(guard) => guard,
         None => return Ok(()),
     };
-    platform::set_high_priority();
 
     #[cfg(windows)]
     unsafe {
@@ -79,19 +99,20 @@ fn main() -> Result<()> {
     }
 
     let paths = AppPaths::discover()?;
-
-    #[cfg(windows)]
-    unsafe {
-        use windows::Win32::System::LibraryLoader::SetDllDirectoryW;
-        use windows::core::HSTRING;
-        let _ = SetDllDirectoryW(&HSTRING::from(paths.bin_dir.as_os_str()));
-    }
-
     app_icon::ensure_ico_file(&paths.icon_file, 64)?;
     app_icon::ensure_disabled_ico_file(&paths.icon_file_disabled, 64)?;
     let mut state = AppState::default();
     state.show_window = true;
     let (ui_tx, ui_rx) = unbounded();
+    let startup_gate: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+    {
+        let tuning_paths = paths.clone();
+        let tuning_gate = Arc::clone(&startup_gate);
+        std::thread::spawn(move || {
+            wait_for_startup_gate(&tuning_gate);
+            apply_process_startup_tuning(&tuning_paths);
+        });
+    }
     {
         let loader_paths = paths.clone();
         let loader_ui_tx = ui_tx.clone();
@@ -105,6 +126,18 @@ fn main() -> Result<()> {
             Err(error) => {
                 let _ = loader_ui_tx.send(crate::overlay::UiCommand::StartupStateLoadFailed(
                     error.to_string(),
+                ));
+            }
+        });
+    }
+    {
+        let icon_ui_tx = ui_tx.clone();
+        let icon_gate = Arc::clone(&startup_gate);
+        std::thread::spawn(move || {
+            wait_for_startup_gate(&icon_gate);
+            if let Ok(icon) = app_icon::icon_data(128) {
+                let _ = icon_ui_tx.send(crate::overlay::UiCommand::StartupIconLoaded(
+                    std::sync::Arc::new(icon),
                 ));
             }
         });
@@ -176,8 +209,7 @@ fn main() -> Result<()> {
         .with_min_inner_size([1180.0, 780.0])
         .with_visible(false)
         .with_decorations(false)
-        .with_transparent(true)
-        .with_icon(std::sync::Arc::new(app_icon::icon_data(128)?));
+        .with_transparent(true);
 
     #[cfg(windows)]
     {
@@ -210,7 +242,7 @@ fn main() -> Result<()> {
             ui::configure_fonts(&cc.egui_ctx, false);
             ui::configure_theme(&cc.egui_ctx, state.ui_theme);
             Ok(Box::new(CrosshairApp::new(
-                paths, state, overlay_tx, ui_tx, ui_rx, false,
+                paths, state, overlay_tx, ui_tx, ui_rx, false, startup_gate,
             )))
         }),
     )
