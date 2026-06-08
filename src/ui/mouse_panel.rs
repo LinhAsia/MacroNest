@@ -1909,7 +1909,7 @@ impl CrosshairApp {
 
         let job = std::thread::spawn(move || -> anyhow::Result<()> {
             let url =
-                "https://github.com/Baolinh0305/MacroNest/releases/download/tools/arduino_tools.zip";
+                "https://github.com/NBaoLinh/MacroNest/releases/download/tools/arduino_tools.zip";
             let mut response = reqwest::blocking::get(url)?.error_for_status()?;
             let total_size = response.content_length().unwrap_or(1000000);
 
