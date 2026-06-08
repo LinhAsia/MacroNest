@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.svg?v=3" alt="MacroNest Banner" width="550" />
+  <img src="assets/banner-v2.svg" alt="MacroNest Banner" width="550" />
 </p>
 
 ## Features
