@@ -2471,14 +2471,15 @@ impl CrosshairApp {
                     } else {
                         Color32::from_rgb(156, 162, 172)
                     };
-                    if ui
-                        .add_sized(
+                    if Self::with_emphasized_button_hover(ui, |ui| {
+                        ui.add_sized(
                             [120.0, 28.0],
                             Button::new(RichText::new(master_label).color(Color32::WHITE))
                                 .fill(master_fill)
                                 .stroke(egui::Stroke::new(1.0, master_stroke))
                                 .corner_radius(6.0),
                         )
+                    })
                         .clicked()
                     {
                         self.state.macros_master_enabled = !self.state.macros_master_enabled;
@@ -2500,8 +2501,8 @@ impl CrosshairApp {
                     } else {
                         Self::material_icon_text(0xe312, 18.0)
                     };
-                    if ui
-                        .add_sized(
+                    if Self::with_emphasized_button_hover(ui, |ui| {
+                        ui.add_sized(
                             if macro_hotkey_capture_active {
                                 [104.0, 28.0]
                             } else {
@@ -2523,6 +2524,7 @@ impl CrosshairApp {
                                 ))
                                 .corner_radius(6.0),
                         )
+                    })
                         .on_hover_text(Self::tr_lang(
                             language,
                             "Capture macro hotkey",
@@ -2546,11 +2548,12 @@ impl CrosshairApp {
                     }
                     if let Some(binding) = macro_hotkey_preview.as_ref() {
                         let label = hotkey::format_binding(Some(binding));
-                        if ui
-                            .add(
+                        if Self::with_emphasized_button_hover(ui, |ui| {
+                            ui.add(
                                 Button::new(RichText::new(label).monospace())
                                     .min_size(vec2(0.0, 28.0)),
                             )
+                        })
                             .on_hover_text(Self::tr_lang(
                                 language,
                                 "Click to remove this hotkey",
@@ -2564,8 +2567,8 @@ impl CrosshairApp {
                         }
                     }
                 });
-            if ui
-                .add_sized(
+            if Self::with_emphasized_button_hover(ui, |ui| {
+                ui.add_sized(
                     [28.0, 28.0],
                     Button::new(Self::material_icon_text(0xe145, 18.0))
                         .fill(ui.visuals().faint_bg_color)
@@ -2574,6 +2577,7 @@ impl CrosshairApp {
                             ui.visuals().widgets.noninteractive.bg_stroke.color,
                         )),
                 )
+            })
                 .on_hover_text(Self::tr_lang(
                     language,
                     "Add macro group",
@@ -2599,13 +2603,14 @@ impl CrosshairApp {
             } else {
                 ui.visuals().widgets.noninteractive.bg_stroke.color
             };
-            if ui
-                .add_sized(
+            if Self::with_emphasized_button_hover(ui, |ui| {
+                ui.add_sized(
                     [28.0, 28.0],
                     Button::new(Self::material_icon_text(share_icon, 18.0))
                         .fill(share_fill)
                         .stroke(egui::Stroke::new(1.0, share_stroke)),
                 )
+            })
                 .on_hover_text(Self::tr_lang(
                     language,
                     "Toggle Import/Export buttons",
@@ -2631,14 +2636,15 @@ impl CrosshairApp {
             } else {
                 ui.visuals().widgets.noninteractive.bg_stroke.color
             };
-            if ui
-                .add_enabled(
+            if Self::with_emphasized_button_hover(ui, |ui| {
+                ui.add_enabled(
                     paste_enabled,
                     Button::new(Self::material_icon_text(0xe14f, 18.0))
                         .min_size(egui::vec2(28.0, 28.0))
                         .fill(paste_fill)
                         .stroke(egui::Stroke::new(1.0, paste_stroke)),
                 )
+            })
                 .on_hover_text(Self::tr_lang(
                     language,
                     "Paste macro groups",
@@ -2659,14 +2665,15 @@ impl CrosshairApp {
             } else {
                 ui.visuals().widgets.noninteractive.bg_stroke.color
             };
-            if ui
-                .add_enabled(
+            if Self::with_emphasized_button_hover(ui, |ui| {
+                ui.add_enabled(
                     copy_enabled,
                     Button::new(Self::material_icon_text(0xe14d, 18.0))
                         .min_size(egui::vec2(28.0, 28.0))
                         .fill(copy_fill)
                         .stroke(egui::Stroke::new(1.0, copy_stroke)),
                 )
+            })
                 .on_hover_text(Self::tr_lang(
                     language,
                     "Copy selected macro groups",
@@ -2687,14 +2694,15 @@ impl CrosshairApp {
             } else {
                 ui.visuals().widgets.noninteractive.bg_stroke.color
             };
-            if ui
-                .add_enabled(
+            if Self::with_emphasized_button_hover(ui, |ui| {
+                ui.add_enabled(
                     cut_enabled,
                     Button::new(Self::material_icon_text(0xe14e, 18.0))
                         .min_size(egui::vec2(28.0, 28.0))
                         .fill(cut_fill)
                         .stroke(egui::Stroke::new(1.0, cut_stroke)),
                 )
+            })
                 .on_hover_text(Self::tr_lang(
                     language,
                     "Cut selected macro groups",
@@ -2715,14 +2723,15 @@ impl CrosshairApp {
             } else {
                 ui.visuals().widgets.noninteractive.bg_stroke.color
             };
-            if ui
-                .add_enabled(
+            if Self::with_emphasized_button_hover(ui, |ui| {
+                ui.add_enabled(
                     trash_enabled,
                     Button::new(Self::material_icon_text(0xe872, 18.0))
                         .min_size(egui::vec2(28.0, 28.0))
                         .fill(trash_fill)
                         .stroke(egui::Stroke::new(1.0, trash_stroke)),
                 )
+            })
                 .on_hover_text(Self::tr_lang(
                     language,
                     "Delete selected macro groups",
@@ -2736,8 +2745,8 @@ impl CrosshairApp {
                 self.macro_groups_favorite_filter,
                 MacroGroupFavoriteFilter::Star
             );
-            if ui
-                .add_sized(
+            if Self::with_emphasized_button_hover(ui, |ui| {
+                ui.add_sized(
                     [28.0, 28.0],
                     Button::new(Self::material_icon_text(0xe838, 18.0))
                         .fill(if star_filter_active {
@@ -2754,6 +2763,7 @@ impl CrosshairApp {
                             },
                         )),
                 )
+            })
                 .on_hover_text(Self::tr_lang(
                     language,
                     "Show star macros only",
@@ -3749,8 +3759,8 @@ impl CrosshairApp {
                             } else {
                                 Color32::from_rgb(102, 110, 122)
                             };
-                            if ui
-                                .add_sized(
+                            if Self::with_emphasized_button_hover(ui, |ui| {
+                                ui.add_sized(
                                     [28.0, 21.0],
                                     Button::new(Self::material_icon_text(star_icon, 15.0).color(
                                         if group.favorite {
@@ -3762,6 +3772,7 @@ impl CrosshairApp {
                                     .fill(star_fill)
                                     .stroke(egui::Stroke::new(1.0, star_stroke)),
                                 )
+                            })
                                 .on_hover_text(Self::tr_lang(language, "Star group", "Nhom sao"))
                                 .clicked()
                             {
@@ -3868,8 +3879,8 @@ impl CrosshairApp {
                                     } else {
                                         ui.visuals().widgets.noninteractive.bg_stroke.color
                                     };
-                                    if ui
-                                        .add_sized(
+                                    if Self::with_emphasized_button_hover(ui, |ui| {
+                                        ui.add_sized(
                                             [36.0, 24.0],
                                             Button::new(Self::material_icon_text(
                                                 enabled_icon,
@@ -3878,6 +3889,7 @@ impl CrosshairApp {
                                             .fill(enabled_fill)
                                             .stroke(egui::Stroke::new(1.0, enabled_stroke)),
                                         )
+                                    })
                                         .on_hover_text(Self::tr_lang(
                                             language,
                                             if folder_enabled { "Enable / disable group" } else { "Folder containing this group is disabled" }, "",

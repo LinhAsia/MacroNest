@@ -5016,22 +5016,30 @@ impl CrosshairApp {
     }
 
     fn sized_button(ui: &mut egui::Ui, width: f32, label: &str) -> egui::Response {
-        ui.add_sized([width, 24.0], Button::new(label))
+        Self::with_emphasized_button_hover(ui, |ui| {
+            ui.add_sized([width, 24.0], Button::new(label))
+        })
     }
 
     fn sound_style_toggle_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-        ui.add_sized([84.0, 24.0], Button::new(label))
+        Self::with_emphasized_button_hover(ui, |ui| {
+            ui.add_sized([84.0, 24.0], Button::new(label))
+        })
     }
 
     fn sound_style_remove_button(ui: &mut egui::Ui) -> egui::Response {
-        ui.add_sized(
-            [36.0, 24.0],
-            Button::new(Self::material_icon_text(0xe872, 18.0)),
-        )
+        Self::with_emphasized_button_hover(ui, |ui| {
+            ui.add_sized(
+                [36.0, 24.0],
+                Button::new(Self::material_icon_text(0xe872, 18.0)),
+            )
+        })
     }
 
     fn sound_style_icon_button(ui: &mut egui::Ui, icon: RichText) -> egui::Response {
-        ui.add_sized([36.0, 24.0], Button::new(icon))
+        Self::with_emphasized_button_hover(ui, |ui| {
+            ui.add_sized([36.0, 24.0], Button::new(icon))
+        })
     }
 
     fn is_copy_feedback_active(until: Option<Instant>) -> bool {
@@ -5088,12 +5096,66 @@ impl CrosshairApp {
         } else {
             ui.visuals().widgets.noninteractive.bg_stroke.color
         };
-        ui.add_sized(
-            [36.0, 24.0],
-            Button::new(Self::material_icon_text(icon, 18.0))
-                .fill(fill)
-                .stroke(egui::Stroke::new(1.0, stroke)),
-        )
+        Self::with_emphasized_button_hover(ui, |ui| {
+            ui.add_sized(
+                [36.0, 24.0],
+                Button::new(Self::material_icon_text(icon, 18.0))
+                    .fill(fill)
+                    .stroke(egui::Stroke::new(1.0, stroke)),
+            )
+        })
+    }
+
+    fn with_emphasized_button_hover<R>(
+        ui: &mut egui::Ui,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> R {
+        let dark_mode = ui.visuals().dark_mode;
+        let hovered_fill = if dark_mode {
+            Color32::from_rgba_premultiplied(86, 106, 136, 210)
+        } else {
+            Color32::from_rgba_premultiplied(210, 222, 238, 250)
+        };
+        let hovered_stroke = if dark_mode {
+            Color32::from_rgb(156, 196, 244)
+        } else {
+            Color32::from_rgb(74, 118, 168)
+        };
+        let active_fill = if dark_mode {
+            Color32::from_rgba_premultiplied(104, 126, 160, 228)
+        } else {
+            Color32::from_rgba_premultiplied(190, 208, 230, 255)
+        };
+        let active_stroke = if dark_mode {
+            Color32::from_rgb(184, 216, 255)
+        } else {
+            Color32::from_rgb(54, 96, 146)
+        };
+        let text_color = if dark_mode {
+            Color32::from_rgb(244, 247, 252)
+        } else {
+            Color32::from_rgb(24, 34, 48)
+        };
+        let previous_hovered = ui.visuals().widgets.hovered;
+        let previous_active = ui.visuals().widgets.active;
+        {
+            let visuals = ui.visuals_mut();
+            visuals.widgets.hovered.bg_fill = hovered_fill;
+            visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, hovered_stroke);
+            visuals.widgets.hovered.fg_stroke.color = text_color;
+            visuals.widgets.hovered.expansion = previous_hovered.expansion.max(1.0);
+            visuals.widgets.active.bg_fill = active_fill;
+            visuals.widgets.active.bg_stroke = Stroke::new(1.0, active_stroke);
+            visuals.widgets.active.fg_stroke.color = text_color;
+            visuals.widgets.active.expansion = previous_active.expansion.max(1.0);
+        }
+        let result = add_contents(ui);
+        {
+            let visuals = ui.visuals_mut();
+            visuals.widgets.hovered = previous_hovered;
+            visuals.widgets.active = previous_active;
+        }
+        result
     }
 
     fn window_anchor_label(anchor: WindowAnchor) -> &'static str {
