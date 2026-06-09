@@ -23,6 +23,7 @@ enum MouseInputBackendMode {
 struct MousePathTimelineOutcome {
     changed: bool,
     preview_selection: Option<Vec<MousePathEvent>>,
+    preview_from_ms: Option<u64>,
     trim_range: Option<(u64, u64)>,
     split_at_ms: Option<u64>,
     merge_source_id: Option<u32>,
@@ -390,7 +391,7 @@ impl CrosshairApp {
             .iter()
             .map(|preset| (preset.id, preset.name.clone()))
             .collect();
-        let mut preview_mouse_path_selection: Option<(u32, Vec<MousePathEvent>)> = None;
+        let mut preview_mouse_path_selection: Option<(u32, Vec<MousePathEvent>, Option<u64>)> = None;
         let mut trim_mouse_path_request: Option<(u32, u64, u64)> = None;
         let mut split_mouse_path_request: Option<(u32, u64)> = None;
         let mut merge_mouse_path_request: Option<(u32, u32)> = None;
@@ -518,7 +519,8 @@ impl CrosshairApp {
                     &mut mouse_path_timeline_zoom,
                 );
                 if let Some(events) = timeline_outcome.preview_selection {
-                    preview_mouse_path_selection = Some((preset.id, events));
+                    preview_mouse_path_selection =
+                        Some((preset.id, events, timeline_outcome.preview_from_ms));
                 }
                 if let Some((start_ms, end_ms)) = timeline_outcome.trim_range {
                     trim_mouse_path_request = Some((preset.id, start_ms, end_ms));
@@ -533,11 +535,15 @@ impl CrosshairApp {
         }
         self.trim_timeline_zoom = mouse_path_timeline_zoom;
 
-        if let Some((preset_id, events)) = preview_mouse_path_selection {
+        if let Some((preset_id, events, preview_from_ms)) = preview_mouse_path_selection {
             self.mouse_path_step_preview_preset_id = Some(preset_id);
             let _ = self
                 .overlay_tx
-                .send(OverlayCommand::PreviewMousePath(Some((preset_id, events))));
+                .send(OverlayCommand::PreviewMousePath(Some((
+                    preset_id,
+                    events,
+                    preview_from_ms,
+                ))));
             crate::overlay::wake_command_queue();
         }
         if let Some((preset_id, start_ms, end_ms)) = trim_mouse_path_request {
@@ -1269,6 +1275,7 @@ impl CrosshairApp {
             .unwrap_or(0.0);
         let mut next_scroll_offset = stored_scroll_offset;
         let mut hovered_timeline = false;
+        let mut hovered_time_ms = None;
 
         egui::ScrollArea::horizontal()
             .id_salt((preset_id, "mouse-path-timeline-scroll"))
@@ -1363,6 +1370,12 @@ impl CrosshairApp {
                 );
 
                 hovered_timeline = response.hovered();
+                if hovered_timeline {
+                    if let Some(pointer) = response.hover_pos() {
+                        let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                        hovered_time_ms = Some((ratio * total_ms_f32).round() as u64);
+                    }
+                }
                 if (response.clicked() || response.dragged())
                     && let Some(pointer) = response.interact_pointer_pos()
                 {
@@ -1382,11 +1395,11 @@ impl CrosshairApp {
                 }
 
                 if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::Q)) {
-                    trim_start_ms = playhead_ms.min(trim_end_ms);
+                    trim_start_ms = hovered_time_ms.unwrap_or(playhead_ms).min(trim_end_ms);
                     outcome.changed = true;
                 }
                 if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::W)) {
-                    trim_end_ms = playhead_ms.max(trim_start_ms);
+                    trim_end_ms = hovered_time_ms.unwrap_or(playhead_ms).max(trim_start_ms);
                     outcome.changed = true;
                 }
                 if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::A)) {
@@ -1402,10 +1415,12 @@ impl CrosshairApp {
                 if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::Space)) {
                     outcome.preview_selection =
                         Some(Self::slice_mouse_path_events(events, trim_start_ms, trim_end_ms));
+                    outcome.preview_from_ms = Some(playhead_ms);
                 }
                 if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::S)) {
                     outcome.preview_selection =
                         Some(Self::slice_mouse_path_events(events, trim_start_ms, trim_end_ms));
+                    outcome.preview_from_ms = Some(trim_start_ms);
                 }
 
                 next_scroll_offset = viewport.left().max(0.0);
@@ -1451,6 +1466,7 @@ impl CrosshairApp {
             {
                 outcome.preview_selection =
                     Some(Self::slice_mouse_path_events(events, trim_start_ms, trim_end_ms));
+                outcome.preview_from_ms = Some(playhead_ms);
             }
             if ui
                 .button(Self::tr_lang(language, "Trim to selection", "Cat theo doan chon"))

@@ -395,7 +395,7 @@ mod windows_overlay {
         UpdateWindowExpandControls(WindowExpandControls),
         UpdatePinPresets(Vec<PinPreset>),
         UpdateMousePathPresets(Vec<MousePathPreset>),
-        PreviewMousePath(Option<(u32, Vec<MousePathEvent>)>),
+        PreviewMousePath(Option<(u32, Vec<MousePathEvent>, Option<u64>)>),
         UpdateMouseSensitivityPresets(Vec<MouseSensitivityPreset>),
         UpdateMouseSensitivitySettings {
             restore_on_exit: bool,
@@ -937,7 +937,11 @@ mod windows_overlay {
     }
 
     struct MousePathPreviewSession {
+        events: Vec<MousePathEvent>,
         points: Vec<POINT>,
+        playback_started_at: Option<Instant>,
+        playback_from_ms: u64,
+        playback_marker: Option<POINT>,
         dirty: bool,
     }
 
@@ -4023,15 +4027,19 @@ mod windows_overlay {
 
                 OverlayCommand::PreviewMousePath(preview) => {
                     let mut preview_guard = MOUSE_PATH_PREVIEW.lock();
-                    *preview_guard = preview.map(|(_, events)| MousePathPreviewSession {
+                    *preview_guard = preview.map(|(_, events, playback_from_ms)| MousePathPreviewSession {
                         points: events
-                            .into_iter()
+                            .iter()
                             .filter(|event| matches!(event.kind, MousePathEventKind::Move))
                             .map(|event| POINT {
                                 x: event.x,
                                 y: event.y,
                             })
                             .collect(),
+                        events,
+                        playback_started_at: Some(Instant::now()),
+                        playback_from_ms: playback_from_ms.unwrap_or(0),
+                        playback_marker: None,
                         dirty: true,
                     });
                     drop(preview_guard);
@@ -4529,7 +4537,7 @@ mod windows_overlay {
     }
 
     fn refresh_mouse_record_trail(runtime: &mut Runtime) -> Result<()> {
-        let points = {
+        let (points, marker) = {
             let mut recording_guard = MOUSE_RECORDING.lock();
             if let Some(session) = recording_guard.as_mut() {
                 if !session.dirty {
@@ -4537,7 +4545,8 @@ mod windows_overlay {
                 }
 
                 session.dirty = false;
-                session
+                (
+                    session
                     .events
                     .iter()
                     .filter(|event| matches!(event.kind, MousePathEventKind::Move))
@@ -4545,7 +4554,9 @@ mod windows_overlay {
                         x: event.x,
                         y: event.y,
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
+                    None,
+                )
             } else {
                 drop(recording_guard);
                 let mut preview_guard = MOUSE_PATH_PREVIEW.lock();
@@ -4555,12 +4566,37 @@ mod windows_overlay {
                     }
                     return Ok(());
                 };
+                if let Some(started_at) = session.playback_started_at {
+                    let elapsed_ms = started_at.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                    let target_ms = session.playback_from_ms.saturating_add(elapsed_ms);
+                    let mut accumulated_ms = 0u64;
+                    let mut marker = None;
+                    let mut visible_points = Vec::new();
+                    for event in &session.events {
+                        accumulated_ms = accumulated_ms.saturating_add(event.delay_ms);
+                        if matches!(event.kind, MousePathEventKind::Move) {
+                            let point = POINT { x: event.x, y: event.y };
+                            visible_points.push(point);
+                            if accumulated_ms >= target_ms && marker.is_none() {
+                                marker = Some(point);
+                                break;
+                            }
+                        }
+                    }
+                    if marker.is_none() {
+                        marker = visible_points.last().copied();
+                        session.playback_started_at = None;
+                    }
+                    session.playback_marker = marker;
+                    session.points = visible_points;
+                    session.dirty = true;
+                }
                 if !session.dirty {
                     return Ok(());
                 }
 
                 session.dirty = false;
-                session.points.clone()
+                (session.points.clone(), session.playback_marker)
             }
         };
         if points.len() < 2 {
@@ -4571,7 +4607,7 @@ mod windows_overlay {
             return Ok(());
         }
 
-        unsafe { paint_mouse_trail(runtime.mouse_trail_hwnd, &points) }
+        unsafe { paint_mouse_trail(runtime.mouse_trail_hwnd, &points, marker) }
     }
 
     fn refresh_search_area_overlay(runtime: &mut Runtime) -> Result<()> {
@@ -14888,7 +14924,7 @@ mod windows_overlay {
         Ok(())
     }
 
-    unsafe fn paint_mouse_trail(hwnd: HWND, points: &[POINT]) -> Result<()> {
+    unsafe fn paint_mouse_trail(hwnd: HWND, points: &[POINT], marker: Option<POINT>) -> Result<()> {
         let screen_width = GetSystemMetrics(SM_CXSCREEN).max(1);
         let screen_height = GetSystemMetrics(SM_CYSCREEN).max(1);
         let _ = SetWindowPos(
@@ -15097,6 +15133,28 @@ mod windows_overlay {
                 end_stroke,
                 10,
             );
+            if let Some(marker) = marker {
+                fill_ellipse_rgba(
+                    pixels,
+                    width_usize,
+                    height_usize,
+                    marker.x - 6,
+                    marker.y - 6,
+                    12,
+                    12,
+                    [255, 232, 96, 235],
+                );
+                draw_ellipse_outline_rgba(
+                    pixels,
+                    width_usize,
+                    height_usize,
+                    marker.x - 10,
+                    marker.y - 10,
+                    20,
+                    20,
+                    [255, 255, 255, 255],
+                );
+            }
             let _ = SelectObject(mem_dc, old_font);
             let _ = DeleteObject(HGDIOBJ(font.0));
         }

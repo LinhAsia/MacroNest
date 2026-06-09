@@ -11530,7 +11530,7 @@ impl CrosshairApp {
                             .overlay_tx
                             .send(OverlayCommand::PreviewMousePath(
                                 path_preset_id.map(|active_id| {
-                                    (active_id, preview_events.unwrap_or_default())
+                                    (active_id, preview_events.unwrap_or_default(), None)
                                 }),
                             ));
                         crate::overlay::wake_command_queue();
