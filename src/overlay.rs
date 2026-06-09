@@ -3373,9 +3373,7 @@ mod windows_overlay {
 
         drop(hook_state);
         if matched_any_press && matched_blocking_macro {
-            for key_name in consume_pending_press_trigger_keys(binding) {
-                increment_press_trigger_suppression(&key_name);
-            }
+            increment_press_trigger_suppression(&binding.key);
         }
 
         for action in window_actions {
@@ -5556,12 +5554,10 @@ mod windows_overlay {
     ) -> Result<()> {
         SUPPRESSED_MACRO_HOTKEYS.lock().insert(hotkey_id);
         STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
-        let trigger_key_for_cleanup = trigger_key.clone();
         HOOK_STATE
             .lock()
             .stop_ignore_keys
             .insert(preset.id, trigger_key);
-        increment_press_trigger_suppression(&trigger_key_for_cleanup);
         thread::spawn(move || {
             let cleanup_steps = collect_macro_release_steps(&preset.steps);
             let mut press_locked_keys: Vec<String> = Vec::new();
@@ -5595,7 +5591,6 @@ mod windows_overlay {
             stop_vision_following_ids(&image_search_preset_ids);
             hide_toolbox_for_owner(preset.id);
             HOOK_STATE.lock().stop_ignore_keys.remove(&preset.id);
-            decrement_press_trigger_suppression(&trigger_key_for_cleanup);
             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
             SUPPRESSED_MACRO_HOTKEYS.lock().remove(&hotkey_id);
         });
