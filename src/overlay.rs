@@ -2407,6 +2407,7 @@ mod windows_overlay {
                 variable_override.as_deref(),
                 None,
                 None,
+                None,
             ) {
                 Ok(_) => {}
 
@@ -6871,6 +6872,7 @@ mod windows_overlay {
                         Some(&step.if_variable_name),
                         Some(&step.vision_pos_var_x),
                         Some(&step.vision_pos_var_y),
+                        Some(&step.vision_found_var),
                     ) {
                         Ok(outcome) => outcome,
                         Err(error) => {
@@ -7386,6 +7388,7 @@ mod windows_overlay {
                             Some(&step.if_variable_name),
                             Some(&step.vision_pos_var_x),
                             Some(&step.vision_pos_var_y),
+                            Some(&step.vision_found_var),
                         ) {
                             Ok(outcome) => outcome,
                             Err(error) => {
@@ -7906,6 +7909,7 @@ mod windows_overlay {
                             Some(&step.if_variable_name),
                             Some(&step.vision_pos_var_x),
                             Some(&step.vision_pos_var_y),
+                            Some(&step.vision_found_var),
                         ) {
                             Ok(outcome) => outcome,
                             Err(error) => {
@@ -8538,7 +8542,7 @@ mod windows_overlay {
                     };
                     if let Some(preset) = preset {
                         if let Ok(outcome) =
-                            run_vision_once_with_options(&preset, false, false, None, None, None)
+                            run_vision_once_with_options(&preset, false, false, None, None, None, None)
                         {
                             return outcome.matched;
                         }
@@ -12884,7 +12888,13 @@ mod windows_overlay {
         variable_override: Option<&str>,
         pos_var_x: Option<&str>,
         pos_var_y: Option<&str>,
+        found_var: Option<&str>,
     ) -> Result<VisionRunOutcome> {
+        let set_found_var = |matched: bool| {
+            if let Some(var_name) = found_var.filter(|s| !s.trim().is_empty()) {
+                set_variable_value(var_name.trim(), if matched { 1 } else { 0 });
+            }
+        };
         if preset.is_pixel_counter {
             let target_colors = image_search_target_colors(preset);
             if target_colors.is_empty() {
@@ -12931,9 +12941,10 @@ mod windows_overlay {
                 let mut vars = RUNTIME_VARIABLES.lock();
                 vars.insert(var_name.clone(), count);
             }
+            set_found_var(count > 0);
 
             return Ok(VisionRunOutcome {
-                matched: true,
+                matched: count > 0,
                 status: format!("Saved pixel count {count} to variable '{var_name}'"),
             });
         }
@@ -13059,6 +13070,7 @@ mod windows_overlay {
                     .map(|color| format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b))
                     .collect::<Vec<_>>()
                     .join(", ");
+                set_found_var(false);
                 return Ok(VisionRunOutcome {
                     matched: false,
                     status: format!(
@@ -13078,6 +13090,7 @@ mod windows_overlay {
             if let Some(var_y) = pos_var_y.filter(|s| !s.trim().is_empty()) {
                 set_variable_value(var_y, moved_y);
             }
+            set_found_var(true);
 
             if move_cursor {
                 settle_image_search_mouse_move(
@@ -13244,6 +13257,7 @@ mod windows_overlay {
             (None, Some(opencv)) => opencv,
             (None, None) => {
                 if configured_region.is_some() {
+                    set_found_var(false);
                     return Ok(VisionRunOutcome {
                         matched: false,
                         status: "No match found inside the selected search area.".to_owned(),
@@ -13251,12 +13265,14 @@ mod windows_overlay {
                 }
 
                 if used_roi_capture {
+                    set_found_var(false);
                     return Ok(VisionRunOutcome {
                         matched: false,
                         status: "No match found near the captured area.".to_owned(),
                     });
                 }
 
+                set_found_var(false);
                 return Ok(VisionRunOutcome {
                     matched: false,
                     status: "No match found on screen.".to_owned(),
@@ -13269,6 +13285,7 @@ mod windows_overlay {
         let moved_y = center_y + preset.move_offset_y;
         let required_confidence = preset.confidence_threshold.clamp(0.35, 0.99);
         if hit.confidence < required_confidence {
+            set_found_var(false);
             return Ok(VisionRunOutcome {
                 matched: false,
                 status: format!(
@@ -13285,6 +13302,7 @@ mod windows_overlay {
         if let Some(var_y) = pos_var_y.filter(|s| !s.trim().is_empty()) {
             set_variable_value(var_y, moved_y);
         }
+        set_found_var(true);
 
         if move_cursor {
             settle_image_search_mouse_move(
@@ -13310,7 +13328,7 @@ mod windows_overlay {
     }
 
     fn run_vision_once(preset: &VisionPreset) -> Result<String> {
-        run_vision_once_with_options(preset, true, preset.click_after_move, None, None, None)
+        run_vision_once_with_options(preset, true, preset.click_after_move, None, None, None, None)
             .map(|outcome| outcome.status)
     }
 
@@ -13622,6 +13640,7 @@ mod windows_overlay {
                 move_cursor,
                 false,
                 variable_override,
+                None,
                 None,
                 None,
             ) {

@@ -5755,7 +5755,15 @@ impl CrosshairApp {
                                                                       .spacing([8.0, 6.0])
                                                                       .show(ui, |ui| {
                                                                           if !is_pixel {
-                                                                              let resp_label = ui.label("Pos X:");
+                                                                              ui.label("Found:");
+                                                                              let prev_override = ui.visuals().override_text_color;
+                                                                              ui.visuals_mut().override_text_color = None;
+                                                                              let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_found_var).hint_text("found_var"));
+                                                                              ui.visuals_mut().override_text_color = prev_override;
+                                                                              Self::apply_vietnamese_input_if_changed(&resp, self.state.vietnamese_input_enabled, self.state.vietnamese_input_mode, &mut step.vision_found_var);
+                                                                              live_sync |= resp.changed();
+                                                                              ui.end_row();
+                                                                              ui.label("Pos X:");
                                                                               let prev_override = ui.visuals().override_text_color;
                                                                               ui.visuals_mut().override_text_color = None;
                                                                               let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_x).hint_text("result_x_var"));
@@ -5763,7 +5771,7 @@ impl CrosshairApp {
                                                                               Self::apply_vietnamese_input_if_changed(&resp, self.state.vietnamese_input_enabled, self.state.vietnamese_input_mode, &mut step.vision_pos_var_x);
                                                                               live_sync |= resp.changed();
                                                                               ui.end_row();
-                                                                              let resp_label = ui.label("Pos Y:");
+                                                                              ui.label("Pos Y:");
                                                                               let prev_override = ui.visuals().override_text_color;
                                                                               ui.visuals_mut().override_text_color = None;
                                                                               let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_y).hint_text("result_y_var"));
@@ -5772,7 +5780,15 @@ impl CrosshairApp {
                                                                               live_sync |= resp.changed();
                                                                               ui.end_row();
                                                                           } else {
-                                                                              let resp_label = ui.label(Self::tr_lang(language, "Count Var:", "Biến kết quả:"));
+                                                                              ui.label("Found:");
+                                                                              let prev_override = ui.visuals().override_text_color;
+                                                                              ui.visuals_mut().override_text_color = None;
+                                                                              let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_found_var).hint_text("found_var"));
+                                                                              ui.visuals_mut().override_text_color = prev_override;
+                                                                              Self::apply_vietnamese_input_if_changed(&resp, self.state.vietnamese_input_enabled, self.state.vietnamese_input_mode, &mut step.vision_found_var);
+                                                                              live_sync |= resp.changed();
+                                                                              ui.end_row();
+                                                                              ui.label(Self::tr_lang(language, "Count Var:", "Biến kết quả:"));
                                                                               let prev_override = ui.visuals().override_text_color;
                                                                               ui.visuals_mut().override_text_color = None;
                                                                               let resp = ui.add(egui::TextEdit::singleline(&mut step.if_variable_name).hint_text("count_var"));
@@ -8913,7 +8929,15 @@ impl CrosshairApp {
                                                                           .spacing([8.0, 6.0])
                                                                           .show(ui, |ui| {
                                                                               if !is_pixel {
-                                                                                  let resp_label = ui.label("Pos X:");
+                                                                                  ui.label("Found:");
+                                                                                  let prev_override = ui.visuals().override_text_color;
+                                                                                  ui.visuals_mut().override_text_color = None;
+                                                                                  let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_found_var).hint_text("found_var"));
+                                                                                  ui.visuals_mut().override_text_color = prev_override;
+                                                                                  Self::apply_vietnamese_input_if_changed(&resp, self.state.vietnamese_input_enabled, self.state.vietnamese_input_mode, &mut step.vision_found_var);
+                                                                                  live_sync |= resp.changed();
+                                                                                  ui.end_row();
+                                                                                  ui.label("Pos X:");
                                                                                   let prev_override = ui.visuals().override_text_color;
                                                                                   ui.visuals_mut().override_text_color = None;
                                                                                   let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_x).hint_text("result_x_var"));
@@ -8921,7 +8945,7 @@ impl CrosshairApp {
                                                                                   Self::apply_vietnamese_input_if_changed(&resp, self.state.vietnamese_input_enabled, self.state.vietnamese_input_mode, &mut step.vision_pos_var_x);
                                                                                   live_sync |= resp.changed();
                                                                                   ui.end_row();
-                                                                                  let resp_label = ui.label("Pos Y:");
+                                                                                  ui.label("Pos Y:");
                                                                                   let prev_override = ui.visuals().override_text_color;
                                                                                   ui.visuals_mut().override_text_color = None;
                                                                                   let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_y).hint_text("result_y_var"));
@@ -8930,7 +8954,15 @@ impl CrosshairApp {
                                                                                   live_sync |= resp.changed();
                                                                                   ui.end_row();
                                                                               } else {
-                                                                                  let resp_label = ui.label(Self::tr_lang(language, "Count Var:", "Biến kết quả:"));
+                                                                                  ui.label("Found:");
+                                                                                  let prev_override = ui.visuals().override_text_color;
+                                                                                  ui.visuals_mut().override_text_color = None;
+                                                                                  let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_found_var).hint_text("found_var"));
+                                                                                  ui.visuals_mut().override_text_color = prev_override;
+                                                                                  Self::apply_vietnamese_input_if_changed(&resp, self.state.vietnamese_input_enabled, self.state.vietnamese_input_mode, &mut step.vision_found_var);
+                                                                                  live_sync |= resp.changed();
+                                                                                  ui.end_row();
+                                                                                  ui.label(Self::tr_lang(language, "Count Var:", "Biến kết quả:"));
                                                                                   let prev_override = ui.visuals().override_text_color;
                                                                                   ui.visuals_mut().override_text_color = None;
                                                                                   let resp = ui.add(egui::TextEdit::singleline(&mut step.if_variable_name).hint_text("count_var"));
@@ -10267,7 +10299,15 @@ impl CrosshairApp {
                                                                           .spacing([8.0, 6.0])
                                                                           .show(ui, |ui| {
                                                                               if !is_pixel {
-                                                                                  let resp_label = ui.label("Pos X:");
+                                                                                  ui.label("Found:");
+                                                                                  let prev_override = ui.visuals().override_text_color;
+                                                                                  ui.visuals_mut().override_text_color = None;
+                                                                                  let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_found_var).hint_text("found_var"));
+                                                                                  ui.visuals_mut().override_text_color = prev_override;
+                                                                                  Self::apply_vietnamese_input_if_changed(&resp, self.state.vietnamese_input_enabled, self.state.vietnamese_input_mode, &mut step.vision_found_var);
+                                                                                  live_sync |= resp.changed();
+                                                                                  ui.end_row();
+                                                                                  ui.label("Pos X:");
                                                                                   let prev_override = ui.visuals().override_text_color;
                                                                                   ui.visuals_mut().override_text_color = None;
                                                                                   let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_x).hint_text("result_x_var"));
@@ -10275,7 +10315,7 @@ impl CrosshairApp {
                                                                                   Self::apply_vietnamese_input_if_changed(&resp, self.state.vietnamese_input_enabled, self.state.vietnamese_input_mode, &mut step.vision_pos_var_x);
                                                                                   live_sync |= resp.changed();
                                                                                   ui.end_row();
-                                                                                  let resp_label = ui.label("Pos Y:");
+                                                                                  ui.label("Pos Y:");
                                                                                   let prev_override = ui.visuals().override_text_color;
                                                                                   ui.visuals_mut().override_text_color = None;
                                                                                   let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_y).hint_text("result_y_var"));
@@ -10284,7 +10324,15 @@ impl CrosshairApp {
                                                                                   live_sync |= resp.changed();
                                                                                   ui.end_row();
                                                                               } else {
-                                                                                  let resp_label = ui.label(Self::tr_lang(language, "Count Var:", "Biến kết quả:"));
+                                                                                  ui.label("Found:");
+                                                                                  let prev_override = ui.visuals().override_text_color;
+                                                                                  ui.visuals_mut().override_text_color = None;
+                                                                                  let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_found_var).hint_text("found_var"));
+                                                                                  ui.visuals_mut().override_text_color = prev_override;
+                                                                                  Self::apply_vietnamese_input_if_changed(&resp, self.state.vietnamese_input_enabled, self.state.vietnamese_input_mode, &mut step.vision_found_var);
+                                                                                  live_sync |= resp.changed();
+                                                                                  ui.end_row();
+                                                                                  ui.label(Self::tr_lang(language, "Count Var:", "Biến kết quả:"));
                                                                                   let prev_override = ui.visuals().override_text_color;
                                                                                   ui.visuals_mut().override_text_color = None;
                                                                                   let resp = ui.add(egui::TextEdit::singleline(&mut step.if_variable_name).hint_text("count_var"));
@@ -11880,6 +11928,7 @@ impl CrosshairApp {
             Self::extract_vars_from_expression(&step.key, vars);
         }
         for output_var in [
+            step.vision_found_var.trim(),
             step.vision_pos_var_x.trim(),
             step.vision_pos_var_y.trim(),
             step.ocr_success_var.trim(),

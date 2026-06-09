@@ -1028,6 +1028,8 @@ pub struct MacroStep {
     #[serde(default)]
     pub vision_pos_var_y: String,
     #[serde(default)]
+    pub vision_found_var: String,
+    #[serde(default)]
     pub audio_sense_preset_id: Option<u32>,
     #[serde(default)]
     pub audio_sense_spec: AudioSenseSpec,
@@ -1118,6 +1120,7 @@ impl Default for MacroStep {
             ocr_text_var: String::new(),
             vision_pos_var_x: String::new(),
             vision_pos_var_y: String::new(),
+            vision_found_var: String::new(),
             audio_sense_preset_id: None,
             audio_sense_spec: AudioSenseSpec::default(),
             audio_sense_collapsed: true,
