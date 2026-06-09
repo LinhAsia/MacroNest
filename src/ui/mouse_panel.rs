@@ -1656,7 +1656,6 @@ impl CrosshairApp {
             .data_mut(|data| data.insert_temp(trim_end_id, trim_end_ms));
         ui.ctx()
             .data_mut(|data| data.insert_temp(playhead_id, playhead_ms));
-        outcome.selected_merge_source = selected_merge_source;
 
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
@@ -1741,6 +1740,8 @@ impl CrosshairApp {
                 outcome.merge_source_id = Some(selected_merge_source);
             }
         });
+
+        outcome.selected_merge_source = selected_merge_source;
 
         outcome
     }
