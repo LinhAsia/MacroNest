@@ -2646,7 +2646,6 @@ mod windows_overlay {
     fn macro_record_scan_keys() -> Vec<u32> {
         let mut keys = Vec::new();
         keys.extend(0x08..=0x0D);
-        keys.extend([0x01, 0x02, 0x04, 0x05, 0x06]);
         keys.extend(0x10..=0x14);
         keys.extend(0x1B..=0x28);
         keys.extend(0x2C..=0x2E);
