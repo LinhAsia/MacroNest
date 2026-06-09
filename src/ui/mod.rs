@@ -5112,24 +5112,24 @@ impl CrosshairApp {
     ) -> R {
         let dark_mode = ui.visuals().dark_mode;
         let hovered_fill = if dark_mode {
-            Color32::from_rgba_premultiplied(86, 106, 136, 210)
+            Color32::from_rgba_premultiplied(70, 80, 92, 210)
         } else {
-            Color32::from_rgba_premultiplied(210, 222, 238, 250)
+            Color32::from_rgba_premultiplied(228, 234, 241, 245)
         };
         let hovered_stroke = if dark_mode {
-            Color32::from_rgb(156, 196, 244)
+            Color32::from_rgb(126, 224, 182)
         } else {
-            Color32::from_rgb(74, 118, 168)
+            Color32::from_rgb(58, 166, 118)
         };
         let active_fill = if dark_mode {
-            Color32::from_rgba_premultiplied(104, 126, 160, 228)
+            Color32::from_rgba_premultiplied(74, 92, 104, 228)
         } else {
-            Color32::from_rgba_premultiplied(190, 208, 230, 255)
+            Color32::from_rgba_premultiplied(216, 228, 236, 255)
         };
         let active_stroke = if dark_mode {
-            Color32::from_rgb(184, 216, 255)
+            Color32::from_rgb(152, 236, 198)
         } else {
-            Color32::from_rgb(54, 96, 146)
+            Color32::from_rgb(46, 148, 104)
         };
         let text_color = if dark_mode {
             Color32::from_rgb(244, 247, 252)
@@ -5141,13 +5141,13 @@ impl CrosshairApp {
         {
             let visuals = ui.visuals_mut();
             visuals.widgets.hovered.bg_fill = hovered_fill;
-            visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, hovered_stroke);
+            visuals.widgets.hovered.bg_stroke = Stroke::new(1.5, hovered_stroke);
             visuals.widgets.hovered.fg_stroke.color = text_color;
-            visuals.widgets.hovered.expansion = previous_hovered.expansion.max(1.0);
+            visuals.widgets.hovered.expansion = previous_hovered.expansion.max(1.25);
             visuals.widgets.active.bg_fill = active_fill;
-            visuals.widgets.active.bg_stroke = Stroke::new(1.0, active_stroke);
+            visuals.widgets.active.bg_stroke = Stroke::new(1.5, active_stroke);
             visuals.widgets.active.fg_stroke.color = text_color;
-            visuals.widgets.active.expansion = previous_active.expansion.max(1.0);
+            visuals.widgets.active.expansion = previous_active.expansion.max(1.25);
         }
         let result = add_contents(ui);
         {
