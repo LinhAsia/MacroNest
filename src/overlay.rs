@@ -6616,6 +6616,28 @@ mod windows_overlay {
         Ok(())
     }
 
+    fn start_mouse_path_preset_playback(
+        spec: &str,
+        step: &MacroStep,
+        preset_id: Option<u32>,
+        stop_immediately_on_retrigger: bool,
+    ) {
+        if step.wait_for_completion {
+            let _ = play_mouse_path_preset(spec, step, preset_id, stop_immediately_on_retrigger);
+            return;
+        }
+
+        let spec = spec.trim().to_owned();
+        let step = step.clone();
+        thread::spawn(move || {
+            if let Err(error) =
+                play_mouse_path_preset(&spec, &step, preset_id, stop_immediately_on_retrigger)
+            {
+                eprintln!("Mouse path playback failed: {error}");
+            }
+        });
+    }
+
     fn apply_mouse_sensitivity_preset_by_id(spec: &str) -> Result<()> {
         let preset_id = parse_mouse_sensitivity_preset_id(spec)
             .context("Mouse sensitivity preset id is invalid")?;
@@ -6829,7 +6851,7 @@ mod windows_overlay {
             }
 
             MacroAction::PlayMousePathPreset => {
-                let _ = play_mouse_path_preset(&step.key, step, Some(preset_id), false);
+                start_mouse_path_preset_playback(&step.key, step, Some(preset_id), false);
             }
 
             MacroAction::EnableZoomPreset => {
@@ -7325,7 +7347,7 @@ mod windows_overlay {
                 }
 
                 MacroAction::PlayMousePathPreset => {
-                    let _ = play_mouse_path_preset(
+                    start_mouse_path_preset_playback(
                         &step.key,
                         step,
                         Some(preset_id),
@@ -7846,7 +7868,7 @@ mod windows_overlay {
                 }
 
                 MacroAction::PlayMousePathPreset => {
-                    let _ = play_mouse_path_preset(
+                    start_mouse_path_preset_playback(
                         &step.key,
                         step,
                         Some(preset_id),

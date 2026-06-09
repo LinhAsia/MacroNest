@@ -5003,7 +5003,7 @@ impl CrosshairApp {
                                             .height(420.0)
                                             .selected_text(Self::macro_action_selected_widget_text(step.action, language))
                                             .show_ui(ui, |ui| {
-                                                ui.set_min_width(560.0);
+                                                ui.set_min_width(520.0);
                                                 live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(
                                                     language,
                                                     "Toggle self enabled on run",
@@ -5642,6 +5642,25 @@ impl CrosshairApp {
                                                             )
                                                             .to_owned();
                                                         }
+                                                    }
+                                                    let wait_label = Self::tr_lang(
+                                                        language,
+                                                        "Wait for completion",
+                                                        "Doi chay xong",
+                                                    );
+                                                    if ui
+                                                        .checkbox(
+                                                            &mut step.wait_for_completion,
+                                                            wait_label,
+                                                        )
+                                                        .on_hover_text(Self::tr_lang(
+                                                            language,
+                                                            "Wait until this Mouse Path finishes before the macro continues to the next step.",
+                                                            "Doi Mouse Path nay chay xong roi macro moi chuyen sang step tiep theo.",
+                                                        ))
+                                                        .changed()
+                                                    {
+                                                        live_sync = true;
                                                     }
                                                 } else if matches!(
                                                     step.action,
@@ -8050,7 +8069,7 @@ impl CrosshairApp {
                                                 .height(420.0)
                                                 .selected_text(Self::macro_action_selected_widget_text(step.action, language))
                                                 .show_ui(ui, |ui| {
-                                                    ui.set_min_width(560.0);
+                                                    ui.set_min_width(520.0);
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(
                                                         language,
                                                         "Toggle self enabled on run",
@@ -8826,6 +8845,25 @@ impl CrosshairApp {
                                                                 step_index,
                                                                 selected_id,
                                                             ));
+                                                    }
+                                                    let wait_label = Self::tr_lang(
+                                                        language,
+                                                        "Wait for completion",
+                                                        "Doi chay xong",
+                                                    );
+                                                    if ui
+                                                        .checkbox(
+                                                            &mut step.wait_for_completion,
+                                                            wait_label,
+                                                        )
+                                                        .on_hover_text(Self::tr_lang(
+                                                            language,
+                                                            "Wait until this Mouse Path finishes before the macro continues to the next step.",
+                                                            "Doi Mouse Path nay chay xong roi macro moi chuyen sang step tiep theo.",
+                                                        ))
+                                                        .changed()
+                                                    {
+                                                        live_sync = true;
                                                     }
                                                 } else if matches!(
                                                     step.action,
