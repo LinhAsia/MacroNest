@@ -25,6 +25,7 @@ struct MousePathTimelineOutcome {
     preview_selection: Option<Vec<MousePathEvent>>,
     preview_from_ms: Option<u64>,
     sync_preview: bool,
+    selected_merge_source: u32,
     trim_range: Option<(u64, u64)>,
     split_at_ms: Option<u64>,
     merge_source_id: Option<u32>,
@@ -528,7 +529,17 @@ impl CrosshairApp {
                     &mouse_path_options,
                     &mut mouse_path_timeline_zoom,
                     preset_hovered,
+                    self.mouse_path_merge_selection
+                        .get(&preset.id)
+                        .copied()
+                        .unwrap_or(0),
                 );
+                if timeline_outcome.selected_merge_source == 0 {
+                    self.mouse_path_merge_selection.remove(&preset.id);
+                } else {
+                    self.mouse_path_merge_selection
+                        .insert(preset.id, timeline_outcome.selected_merge_source);
+                }
                 if let Some(events) = timeline_outcome.preview_selection {
                     preview_mouse_path_selection =
                         Some((preset.id, events, timeline_outcome.preview_from_ms));
@@ -599,6 +610,7 @@ impl CrosshairApp {
         }
         if let Some((preset_id, split_at_ms)) = split_mouse_path_request {
             if self.split_mouse_path_preset(preset_id, split_at_ms) {
+                self.mouse_path_merge_selection.remove(&preset_id);
                 if let Some(preset) = self
                     .state
                     .mouse_path_presets
@@ -612,12 +624,15 @@ impl CrosshairApp {
         }
         if let Some((target_id, source_id)) = merge_mouse_path_request {
             if self.merge_mouse_path_presets(target_id, source_id) {
+                self.mouse_path_merge_selection.remove(&target_id);
+                self.mouse_path_merge_selection.remove(&source_id);
                 live_sync = true;
             }
         }
 
         if let Some(rem_id) = remove_id {
             self.mouse_path_timeline_initialized.remove(&rem_id);
+            self.mouse_path_merge_selection.remove(&rem_id);
             Self::clear_mouse_path_timeline_state(ui.ctx(), rem_id);
             if self.mouse_path_step_preview_preset_id == Some(rem_id) {
                 self.mouse_path_step_preview_preset_id = None;
@@ -1276,7 +1291,7 @@ impl CrosshairApp {
         playhead_ms.saturating_sub(trim_start_ms)
     }
 
-    fn reset_mouse_path_timeline_state(
+    pub(crate) fn reset_mouse_path_timeline_state(
         ctx: &egui::Context,
         preset_id: u32,
         events: &[MousePathEvent],
@@ -1398,6 +1413,7 @@ impl CrosshairApp {
         preset_options: &[(u32, String)],
         timeline_zoom: &mut f32,
         preset_hovered: bool,
+        initial_merge_source: u32,
     ) -> MousePathTimelineOutcome {
         let mut outcome = MousePathTimelineOutcome::default();
         if events.is_empty() {
@@ -1412,7 +1428,6 @@ impl CrosshairApp {
         let trim_end_id = egui::Id::new((preset_id, "mouse-path-trim-end"));
         let playhead_id = egui::Id::new((preset_id, "mouse-path-playhead"));
         let zoom_scroll_offset_id = egui::Id::new((preset_id, "mouse-path-scroll"));
-        let merge_source_id = egui::Id::new((preset_id, "mouse-path-merge-source"));
         let trim_hotkey_adjusting_id = egui::Id::new((preset_id, "mouse-path-trim-hotkey-adjusting"));
 
         let mut trim_start_ms = ui
@@ -1430,10 +1445,7 @@ impl CrosshairApp {
             .data(|data| data.get_temp::<u64>(playhead_id))
             .unwrap_or(trim_start_ms)
             .clamp(trim_start_ms, trim_end_ms);
-        let mut selected_merge_source = ui
-            .ctx()
-            .data(|data| data.get_temp::<u32>(merge_source_id))
-            .unwrap_or(0);
+        let mut selected_merge_source = initial_merge_source;
 
         ui.horizontal(|ui| {
             ui.label(Self::material_icon_text(0xe14e, 14.0));
@@ -1644,8 +1656,7 @@ impl CrosshairApp {
             .data_mut(|data| data.insert_temp(trim_end_id, trim_end_ms));
         ui.ctx()
             .data_mut(|data| data.insert_temp(playhead_id, playhead_ms));
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(merge_source_id, selected_merge_source));
+        outcome.selected_merge_source = selected_merge_source;
 
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {

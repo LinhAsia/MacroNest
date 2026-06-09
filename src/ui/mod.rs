@@ -679,6 +679,7 @@ pub struct CrosshairApp {
     mouse_path_draw_capture_restore_outer_pos: Option<egui::Pos2>,
     mouse_path_step_preview_preset_id: Option<u32>,
     mouse_path_timeline_initialized: HashSet<u32>,
+    mouse_path_merge_selection: HashMap<u32, u32>,
     macro_step_copy_feedback_target: Option<(u32, u32, usize)>,
     macro_step_copy_feedback_until: Option<Instant>,
     macro_selected_steps_copy_feedback_target: Option<(u32, u32)>,
@@ -895,6 +896,7 @@ impl CrosshairApp {
             mouse_path_draw_capture_restore_outer_pos: None,
             mouse_path_step_preview_preset_id: None,
             mouse_path_timeline_initialized: HashSet::new(),
+            mouse_path_merge_selection: HashMap::new(),
             macro_step_copy_feedback_target: None,
             macro_step_copy_feedback_until: None,
             macro_selected_steps_copy_feedback_target: None,
@@ -8812,6 +8814,7 @@ impl eframe::App for CrosshairApp {
                     ctx.request_repaint();
                 }
                 UiCommand::MousePathRecordingFinished(preset_id, events, status) => {
+                    let mut updated_events = None;
                     if let Some(preset) = self
                         .state
                         .mouse_path_presets
@@ -8819,6 +8822,12 @@ impl eframe::App for CrosshairApp {
                         .find(|preset| preset.id == preset_id)
                     {
                         preset.events = events;
+                        updated_events = Some(preset.events.clone());
+                    }
+                    if let Some(events) = updated_events.as_deref() {
+                        self.mouse_path_timeline_initialized.insert(preset_id);
+                        self.mouse_path_merge_selection.remove(&preset_id);
+                        Self::reset_mouse_path_timeline_state(ctx, preset_id, events);
                     }
                     self.active_mouse_record_preset_id = None;
                     self.persist_mouse_path_presets();
