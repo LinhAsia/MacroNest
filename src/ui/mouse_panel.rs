@@ -1720,10 +1720,13 @@ impl CrosshairApp {
                             continue;
                         }
                         if ui
-                            .selectable_label(selected_merge_source == *other_id, other_name)
-                            .clicked()
+                            .selectable_value(
+                                &mut selected_merge_source,
+                                *other_id,
+                                other_name.clone(),
+                            )
+                            .changed()
                         {
-                            selected_merge_source = *other_id;
                             ui.ctx().request_repaint();
                         }
                     }

@@ -4576,24 +4576,23 @@ mod windows_overlay {
                     let target_ms = session.playback_from_ms.saturating_add(elapsed_ms);
                     let mut accumulated_ms = 0u64;
                     let mut marker = None;
-                    let mut visible_points = Vec::new();
+                    let mut all_points = Vec::new();
                     for event in &session.events {
                         accumulated_ms = accumulated_ms.saturating_add(event.delay_ms);
                         if matches!(event.kind, MousePathEventKind::Move) {
                             let point = POINT { x: event.x, y: event.y };
-                            visible_points.push(point);
+                            all_points.push(point);
                             if accumulated_ms >= target_ms && marker.is_none() {
                                 marker = Some(point);
-                                break;
                             }
                         }
                     }
                     if marker.is_none() {
-                        marker = visible_points.last().copied();
+                        marker = all_points.last().copied();
                         session.playback_started_at = None;
                     }
                     session.playback_marker = marker;
-                    session.points = visible_points;
+                    session.points = all_points;
                     session.dirty = true;
                 }
                 if !session.dirty {
@@ -4802,7 +4801,7 @@ mod windows_overlay {
             || MACRO_RECORDING.lock().is_some()
             || MOUSE_PATH_PREVIEW.lock().is_some();
         if recording_active {
-            return 33;
+            return 16;
         }
 
         if is_ui_in_foreground() {
