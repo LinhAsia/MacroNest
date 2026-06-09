@@ -508,8 +508,14 @@ impl CrosshairApp {
                         ui.end_row();
                     });
                 ui.add_space(6.0);
-                Self::render_mouse_path_preview(ui, language, &preset.events, 240.0);
+                let preview_events = Self::preview_mouse_path_events(
+                    ui.ctx(),
+                    preset.id,
+                    &preset.events,
+                );
+                Self::render_mouse_path_preview(ui, language, &preview_events, 240.0);
                 ui.add_space(8.0);
+                let preset_hovered = ui.rect_contains_pointer(ui.min_rect());
                 let timeline_outcome = Self::render_mouse_path_timeline_editor(
                     ui,
                     language,
@@ -517,6 +523,7 @@ impl CrosshairApp {
                     &preset.events,
                     &mouse_path_options,
                     &mut mouse_path_timeline_zoom,
+                    preset_hovered,
                 );
                 if let Some(events) = timeline_outcome.preview_selection {
                     preview_mouse_path_selection =
@@ -536,14 +543,15 @@ impl CrosshairApp {
         self.trim_timeline_zoom = mouse_path_timeline_zoom;
 
         if let Some((preset_id, events, preview_from_ms)) = preview_mouse_path_selection {
-            self.mouse_path_step_preview_preset_id = Some(preset_id);
-            let _ = self
-                .overlay_tx
-                .send(OverlayCommand::PreviewMousePath(Some((
-                    preset_id,
-                    events,
-                    preview_from_ms,
-                ))));
+            let has_move = events
+                .iter()
+                .any(|event| matches!(event.kind, MousePathEventKind::Move));
+            self.mouse_path_step_preview_preset_id = has_move.then_some(preset_id);
+            let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(if has_move {
+                Some((preset_id, events, preview_from_ms))
+            } else {
+                None
+            }));
             crate::overlay::wake_command_queue();
         }
         if let Some((preset_id, start_ms, end_ms)) = trim_mouse_path_request {
@@ -554,11 +562,30 @@ impl CrosshairApp {
                 .find(|preset| preset.id == preset_id)
             {
                 preset.events = Self::slice_mouse_path_events(&preset.events, start_ms, end_ms);
+                Self::reset_mouse_path_timeline_state(ui.ctx(), preset_id, &preset.events);
+                if self.mouse_path_step_preview_preset_id == Some(preset_id)
+                    && !preset
+                        .events
+                        .iter()
+                        .any(|event| matches!(event.kind, MousePathEventKind::Move))
+                {
+                    self.mouse_path_step_preview_preset_id = None;
+                    let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
+                    crate::overlay::wake_command_queue();
+                }
                 live_sync = true;
             }
         }
         if let Some((preset_id, split_at_ms)) = split_mouse_path_request {
             if self.split_mouse_path_preset(preset_id, split_at_ms) {
+                if let Some(preset) = self
+                    .state
+                    .mouse_path_presets
+                    .iter()
+                    .find(|preset| preset.id == preset_id)
+                {
+                    Self::reset_mouse_path_timeline_state(ui.ctx(), preset_id, &preset.events);
+                }
                 live_sync = true;
             }
         }
@@ -1183,6 +1210,61 @@ impl CrosshairApp {
             .fold(0u64, |total, event| total.saturating_add(event.delay_ms))
     }
 
+    fn preview_mouse_path_events(
+        ctx: &egui::Context,
+        preset_id: u32,
+        events: &[MousePathEvent],
+    ) -> Vec<MousePathEvent> {
+        let total_ms = Self::mouse_path_total_duration_ms(events).max(1);
+        let trim_start_id = egui::Id::new((preset_id, "mouse-path-trim-start"));
+        let trim_end_id = egui::Id::new((preset_id, "mouse-path-trim-end"));
+        let trim_start_ms = ctx
+            .data(|data| data.get_temp::<u64>(trim_start_id))
+            .unwrap_or(0)
+            .min(total_ms);
+        let trim_end_ms = ctx
+            .data(|data| data.get_temp::<u64>(trim_end_id))
+            .unwrap_or(total_ms)
+            .clamp(trim_start_ms, total_ms);
+        Self::slice_mouse_path_events(events, trim_start_ms, trim_end_ms)
+    }
+
+    fn reset_mouse_path_timeline_state(
+        ctx: &egui::Context,
+        preset_id: u32,
+        events: &[MousePathEvent],
+    ) {
+        let total_ms = Self::mouse_path_total_duration_ms(events).max(1);
+        ctx.data_mut(|data| {
+            data.insert_temp(egui::Id::new((preset_id, "mouse-path-trim-start")), 0u64);
+            data.insert_temp(egui::Id::new((preset_id, "mouse-path-trim-end")), total_ms);
+            data.insert_temp(egui::Id::new((preset_id, "mouse-path-playhead")), 0u64);
+            data.insert_temp(egui::Id::new((preset_id, "mouse-path-scroll")), 0.0f32);
+            data.remove::<bool>(egui::Id::new((
+                preset_id,
+                "mouse-path-trim-hotkey-adjusting",
+            )));
+        });
+    }
+
+    fn interpolate_mouse_path_event(
+        start: &MousePathEvent,
+        end: &MousePathEvent,
+        start_ms: u64,
+        end_ms: u64,
+        target_ms: u64,
+    ) -> MousePathEvent {
+        let span_ms = end_ms.saturating_sub(start_ms).max(1);
+        let offset_ms = target_ms.saturating_sub(start_ms).min(span_ms);
+        let ratio = offset_ms as f32 / span_ms as f32;
+        MousePathEvent {
+            kind: MousePathEventKind::Move,
+            x: start.x + ((end.x - start.x) as f32 * ratio).round() as i32,
+            y: start.y + ((end.y - start.y) as f32 * ratio).round() as i32,
+            delay_ms: 0,
+        }
+    }
+
     fn slice_mouse_path_events(
         events: &[MousePathEvent],
         start_ms: u64,
@@ -1192,11 +1274,48 @@ impl CrosshairApp {
             return Vec::new();
         }
         let mut elapsed_ms = 0u64;
+        let mut previous_event: Option<(&MousePathEvent, u64)> = None;
         let mut previous_kept_at = None;
         let mut sliced = Vec::new();
         for event in events {
+            let current_ms = elapsed_ms.saturating_add(event.delay_ms);
+            if let Some((prev_event, prev_ms)) = previous_event
+                && matches!(prev_event.kind, MousePathEventKind::Move)
+                && matches!(event.kind, MousePathEventKind::Move)
+                && prev_ms < current_ms
+            {
+                if start_ms > prev_ms && start_ms < current_ms {
+                    let mut boundary = Self::interpolate_mouse_path_event(
+                        prev_event,
+                        event,
+                        prev_ms,
+                        current_ms,
+                        start_ms,
+                    );
+                    boundary.delay_ms = previous_kept_at
+                        .map(|kept_ms| start_ms.saturating_sub(kept_ms))
+                        .unwrap_or(0);
+                    previous_kept_at = Some(start_ms);
+                    sliced.push(boundary);
+                }
+                if end_ms > prev_ms && end_ms < current_ms {
+                    let mut boundary = Self::interpolate_mouse_path_event(
+                        prev_event,
+                        event,
+                        prev_ms,
+                        current_ms,
+                        end_ms,
+                    );
+                    boundary.delay_ms = previous_kept_at
+                        .map(|kept_ms| end_ms.saturating_sub(kept_ms))
+                        .unwrap_or(0);
+                    sliced.push(boundary);
+                    break;
+                }
+            }
             elapsed_ms = elapsed_ms.saturating_add(event.delay_ms);
             if elapsed_ms < start_ms || elapsed_ms > end_ms {
+                previous_event = Some((event, elapsed_ms));
                 continue;
             }
             let mut next_event = event.clone();
@@ -1205,6 +1324,7 @@ impl CrosshairApp {
                 .unwrap_or(0);
             previous_kept_at = Some(elapsed_ms);
             sliced.push(next_event);
+            previous_event = Some((event, elapsed_ms));
         }
         sliced
     }
@@ -1216,6 +1336,7 @@ impl CrosshairApp {
         events: &[MousePathEvent],
         preset_options: &[(u32, String)],
         timeline_zoom: &mut f32,
+        preset_hovered: bool,
     ) -> MousePathTimelineOutcome {
         let mut outcome = MousePathTimelineOutcome::default();
         if events.is_empty() {
@@ -1231,6 +1352,7 @@ impl CrosshairApp {
         let playhead_id = egui::Id::new((preset_id, "mouse-path-playhead"));
         let zoom_scroll_offset_id = egui::Id::new((preset_id, "mouse-path-scroll"));
         let merge_source_id = egui::Id::new((preset_id, "mouse-path-merge-source"));
+        let trim_hotkey_adjusting_id = egui::Id::new((preset_id, "mouse-path-trim-hotkey-adjusting"));
 
         let mut trim_start_ms = ui
             .ctx()
@@ -1275,7 +1397,7 @@ impl CrosshairApp {
             .unwrap_or(0.0);
         let mut next_scroll_offset = stored_scroll_offset;
         let mut hovered_timeline = false;
-        let mut hovered_time_ms = None;
+        let mut pointer_time_ms = None;
 
         egui::ScrollArea::horizontal()
             .id_salt((preset_id, "mouse-path-timeline-scroll"))
@@ -1369,12 +1491,11 @@ impl CrosshairApp {
                     egui::Stroke::new(2.0, Color32::WHITE),
                 );
 
-                hovered_timeline = response.hovered();
-                if hovered_timeline {
-                    if let Some(pointer) = response.hover_pos() {
-                        let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-                        hovered_time_ms = Some((ratio * total_ms_f32).round() as u64);
-                    }
+                let hovered_pointer_pos = response.hover_pos();
+                hovered_timeline = response.hovered() || hovered_pointer_pos.is_some();
+                if let Some(pointer) = hovered_pointer_pos {
+                    let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                    pointer_time_ms = Some((ratio * total_ms_f32).round() as u64);
                 }
                 if (response.clicked() || response.dragged())
                     && let Some(pointer) = response.interact_pointer_pos()
@@ -1394,13 +1515,35 @@ impl CrosshairApp {
                     outcome.changed = true;
                 }
 
-                if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::Q)) {
-                    trim_start_ms = hovered_time_ms.unwrap_or(playhead_ms).min(trim_end_ms);
-                    outcome.changed = true;
+                let move_left =
+                    hovered_timeline && ui.input(|input| input.key_down(egui::Key::Q));
+                let move_right =
+                    hovered_timeline && ui.input(|input| input.key_down(egui::Key::W));
+                if let Some(pointer_time_ms) = pointer_time_ms {
+                    if move_left {
+                        trim_start_ms = pointer_time_ms.min(trim_end_ms.saturating_sub(1));
+                        outcome.changed = true;
+                        ui.ctx().request_repaint();
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(trim_hotkey_adjusting_id, true));
+                    }
+                    if move_right {
+                        trim_end_ms = pointer_time_ms.max(trim_start_ms.saturating_add(1));
+                        outcome.changed = true;
+                        ui.ctx().request_repaint();
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(trim_hotkey_adjusting_id, true));
+                    }
                 }
-                if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::W)) {
-                    trim_end_ms = hovered_time_ms.unwrap_or(playhead_ms).max(trim_start_ms);
-                    outcome.changed = true;
+                if !move_left
+                    && !move_right
+                    && ui
+                        .ctx()
+                        .data(|data| data.get_temp::<bool>(trim_hotkey_adjusting_id))
+                        .unwrap_or(false)
+                {
+                    ui.ctx()
+                        .data_mut(|data| data.remove::<bool>(trim_hotkey_adjusting_id));
                 }
                 if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::A)) {
                     playhead_ms = playhead_ms.saturating_sub((total_ms / 100).max(1));
@@ -1412,12 +1555,13 @@ impl CrosshairApp {
                     playhead_ms = playhead_ms.clamp(trim_start_ms, trim_end_ms);
                     outcome.changed = true;
                 }
-                if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::Space)) {
+                let preview_hotkeys_active = preset_hovered || hovered_timeline;
+                if preview_hotkeys_active && ui.input(|input| input.key_pressed(egui::Key::Space)) {
                     outcome.preview_selection =
                         Some(Self::slice_mouse_path_events(events, trim_start_ms, trim_end_ms));
                     outcome.preview_from_ms = Some(playhead_ms);
                 }
-                if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::S)) {
+                if preview_hotkeys_active && ui.input(|input| input.key_pressed(egui::Key::S)) {
                     outcome.preview_selection =
                         Some(Self::slice_mouse_path_events(events, trim_start_ms, trim_end_ms));
                     outcome.preview_from_ms = Some(trim_start_ms);
