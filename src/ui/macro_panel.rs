@@ -5000,6 +5000,7 @@ impl CrosshairApp {
                                             ))
                                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                             .width(168.0)
+                                            .height(420.0)
                                             .selected_text(Self::macro_action_selected_widget_text(step.action, language))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(560.0);
@@ -8046,6 +8047,7 @@ impl CrosshairApp {
                                             let action_combo = egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "action"))
                                                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                                 .width(146.0)
+                                                .height(420.0)
                                                 .selected_text(Self::macro_action_selected_widget_text(step.action, language))
                                                 .show_ui(ui, |ui| {
                                                     ui.set_min_width(560.0);
