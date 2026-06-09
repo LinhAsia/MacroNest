@@ -2596,7 +2596,12 @@ mod windows_overlay {
             *guard = Some(MouseRecordingSession {
                 preset_id: session.preset_id,
                 last_event_at: Instant::now(),
-                events: Vec::new(),
+                events: vec![MousePathEvent {
+                    kind: MousePathEventKind::Move,
+                    x: point.x,
+                    y: point.y,
+                    delay_ms: 0,
+                }],
                 dirty: true,
                 movement_only: true,
             });
@@ -4599,7 +4604,7 @@ mod windows_overlay {
                 (session.points.clone(), session.playback_marker)
             }
         };
-        if points.len() < 2 {
+        if points.is_empty() {
             unsafe {
                 let _ = ShowWindow(runtime.mouse_trail_hwnd, SW_HIDE);
             }
