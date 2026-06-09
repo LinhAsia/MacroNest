@@ -11495,7 +11495,7 @@ impl CrosshairApp {
                     if cancel_mouse_path_draw_capture {
                         self.cancel_mouse_path_draw_capture(ui.ctx());
                     }
-                    if let Some(path_preset_id) = preview_mouse_path_step_request {
+                    if let Some(path_preset_id) = preview_mouse_path_step_request.take() {
                         self.mouse_path_step_preview_preset_id = path_preset_id;
                         let preview_events = path_preset_id.and_then(|active_id| {
                             self.state
@@ -11514,7 +11514,7 @@ impl CrosshairApp {
                         crate::overlay::wake_command_queue();
                     }
                     if let Some((group_id, preset_id, step_index, selected_id)) =
-                        add_mouse_path_preset_request
+                        add_mouse_path_preset_request.take()
                     {
                         let path_preset_id = self.add_mouse_path_preset_from(selected_id);
                         if let Some(group) = self
@@ -11553,7 +11553,7 @@ impl CrosshairApp {
                         );
                     }
                     if let Some((group_id, preset_id, step_index, selected_id)) =
-                        begin_mouse_path_draw_capture_request
+                        begin_mouse_path_draw_capture_request.take()
                     {
                         let mut created_new_path_preset = false;
                         let path_preset_id = if let Some(path_preset_id) = selected_id {
