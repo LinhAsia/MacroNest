@@ -2471,7 +2471,7 @@ impl CrosshairApp {
                     } else {
                         Color32::from_rgb(156, 162, 172)
                     };
-                    if Self::with_emphasized_button_hover(ui, |ui| {
+                    if Self::with_emphasized_button_hover_radius(ui, 6, |ui| {
                         ui.add_sized(
                             [120.0, 28.0],
                             Button::new(RichText::new(master_label).color(Color32::WHITE))
@@ -2501,7 +2501,7 @@ impl CrosshairApp {
                     } else {
                         Self::material_icon_text(0xe312, 18.0)
                     };
-                    if Self::with_emphasized_button_hover(ui, |ui| {
+                    if Self::with_emphasized_button_hover_radius(ui, 6, |ui| {
                         ui.add_sized(
                             if macro_hotkey_capture_active {
                                 [104.0, 28.0]

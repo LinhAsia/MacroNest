@@ -3598,6 +3598,16 @@ impl CrosshairApp {
         response
     }
 
+    fn add_with_show_hover_radius(
+        ui: &mut egui::Ui,
+        radius: u8,
+        widget: impl egui::Widget,
+    ) -> egui::Response {
+        let response = ui.add(widget);
+        Self::paint_show_hover_outline_radius(ui, &response, radius);
+        response
+    }
+
     fn add_sized_with_show_hover(
         ui: &mut egui::Ui,
         size: impl Into<egui::Vec2>,
@@ -3608,12 +3618,39 @@ impl CrosshairApp {
         response
     }
 
+    fn add_sized_with_show_hover_radius(
+        ui: &mut egui::Ui,
+        size: impl Into<egui::Vec2>,
+        radius: u8,
+        widget: impl egui::Widget,
+    ) -> egui::Response {
+        let response = ui.add_sized(size, widget);
+        Self::paint_show_hover_outline_radius(ui, &response, radius);
+        response
+    }
+
     fn paint_show_hover_outline(ui: &mut egui::Ui, response: &egui::Response) {
         if response.hovered() {
             let hovered = ui.visuals().widgets.hovered;
             ui.painter().rect_stroke(
                 response.rect,
                 hovered.corner_radius,
+                hovered.bg_stroke,
+                StrokeKind::Inside,
+            );
+        }
+    }
+
+    fn paint_show_hover_outline_radius(
+        ui: &mut egui::Ui,
+        response: &egui::Response,
+        radius: u8,
+    ) {
+        if response.hovered() {
+            let hovered = ui.visuals().widgets.hovered;
+            ui.painter().rect_stroke(
+                response.rect,
+                egui::CornerRadius::same(radius),
                 hovered.bg_stroke,
                 StrokeKind::Inside,
             );
@@ -5143,14 +5180,18 @@ impl CrosshairApp {
     ) -> egui::Response {
         let response = add_contents(ui);
         if response.hovered() {
-            let hovered = ui.visuals().widgets.hovered;
-            ui.painter().rect_stroke(
-                response.rect,
-                hovered.corner_radius,
-                hovered.bg_stroke,
-                StrokeKind::Inside,
-            );
+            Self::paint_show_hover_outline(ui, &response);
         }
+        response
+    }
+
+    fn with_emphasized_button_hover_radius(
+        ui: &mut egui::Ui,
+        radius: u8,
+        add_contents: impl FnOnce(&mut egui::Ui) -> egui::Response,
+    ) -> egui::Response {
+        let response = add_contents(ui);
+        Self::paint_show_hover_outline_radius(ui, &response, radius);
         response
     }
 
@@ -9238,9 +9279,10 @@ impl eframe::App for CrosshairApp {
                         };
 
                             let exit_response = Self::hover_if(
-                                Self::add_sized_with_show_hover(
+                                Self::add_sized_with_show_hover_radius(
                                     ui,
                                     [38.0, 30.0],
+                                    8,
                                     self.titlebar_button(
                                         Self::material_icon_text(0xe5cd, 18.0),
                                         false,
@@ -9254,9 +9296,10 @@ impl eframe::App for CrosshairApp {
                                 let _ = self.overlay_tx.send(OverlayCommand::Exit);
                             }
                             let hide_response = Self::hover_if(
-                                Self::add_sized_with_show_hover(
+                                Self::add_sized_with_show_hover_radius(
                                     ui,
                                     [38.0, 30.0],
+                                    8,
                                     self.titlebar_button(
                                         Self::material_icon_text(0xe8a4, 18.0),
                                         false,
@@ -9270,9 +9313,10 @@ impl eframe::App for CrosshairApp {
                                 self.hide_to_tray(ctx);
                             }
                             let maximize_response = Self::hover_if(
-                                Self::add_sized_with_show_hover(
+                                Self::add_sized_with_show_hover_radius(
                                     ui,
                                     [38.0, 30.0],
+                                    8,
                                     self.titlebar_button(
                                         if maximized {
                                             Self::material_icon_text(0xe5cf, 18.0)
@@ -9290,9 +9334,10 @@ impl eframe::App for CrosshairApp {
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
                             }
                             let minimize_response = Self::hover_if(
-                                Self::add_sized_with_show_hover(
+                                Self::add_sized_with_show_hover_radius(
                                     ui,
                                     [38.0, 30.0],
+                                    8,
                                     self.titlebar_button(
                                         Self::material_icon_text(0xe15b, 18.0),
                                         false,
@@ -9306,9 +9351,10 @@ impl eframe::App for CrosshairApp {
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                             }
                             let theme_response = Self::hover_if(
-                                Self::add_sized_with_show_hover(
+                                Self::add_sized_with_show_hover_radius(
                                     ui,
                                     [38.0, 30.0],
+                                    8,
                                     self.titlebar_button(self.theme_button_text(), false, false),
                                 ),
                                 show_icon_tooltips,
@@ -9318,9 +9364,10 @@ impl eframe::App for CrosshairApp {
                                 self.toggle_theme_mode();
                             }
                             let language_response = Self::hover_if(
-                                Self::add_sized_with_show_hover(
+                                Self::add_sized_with_show_hover_radius(
                                     ui,
                                     [38.0, 30.0],
+                                    8,
                                     self.titlebar_button(self.language_button_text(), false, false),
                                 ),
                                 show_icon_tooltips,
@@ -9334,9 +9381,10 @@ impl eframe::App for CrosshairApp {
                                 self.state.vietnamese_input_enabled,
                             );
                             let vietnamese_input_response = Self::hover_if(
-                                Self::add_sized_with_show_hover(
+                                Self::add_sized_with_show_hover_radius(
                                     ui,
                                     [38.0, 30.0],
+                                    8,
                                     if let Some(texture) = vietnamese_input_texture.as_ref() {
                                         let image = Image::new((texture.id(), vec2(20.0, 20.0)));
                                         let (fill, stroke) = if self.state.ui_theme
@@ -9373,9 +9421,10 @@ impl eframe::App for CrosshairApp {
                                 self.toggle_vietnamese_input_enabled();
                             }
                             let settings_response = Self::hover_if(
-                                Self::add_sized_with_show_hover(
+                                Self::add_sized_with_show_hover_radius(
                                     ui,
                                     [38.0, 30.0],
+                                    8,
                                     self.titlebar_button(
                                         Self::material_icon_text(0xe8b8, 18.0),
                                         false,
@@ -9468,15 +9517,18 @@ impl eframe::App for CrosshairApp {
                         let selected = self.state.active_panel == panel;
                         let emphasized = panel == AppPanel::Macros;
                         let text = RichText::new(self.panel_label(panel));
-                        let response =
-                            Self::add_with_show_hover(ui, self.top_tab_button(text, selected, emphasized));
+                        let response = Self::add_with_show_hover_radius(
+                            ui,
+                            10,
+                            self.top_tab_button(text, selected, emphasized),
+                        );
                         if response.clicked() {
                             self.state.active_panel = panel;
                         }
                     }
                     if self.active_audio_editor.is_some() {
                         let text = RichText::new(self.panel_label(AppPanel::Media));
-                        let response = Self::add_with_show_hover(ui, self.top_tab_button(
+                        let response = Self::add_with_show_hover_radius(ui, 10, self.top_tab_button(
                             text,
                             self.state.active_panel == AppPanel::Media,
                             false,
@@ -9486,7 +9538,7 @@ impl eframe::App for CrosshairApp {
                         }
                     }
                     let text = RichText::new(self.panel_label(AppPanel::Hud));
-                    let response = Self::add_with_show_hover(ui, self.top_tab_button(
+                    let response = Self::add_with_show_hover_radius(ui, 10, self.top_tab_button(
                         text,
                         self.state.active_panel == AppPanel::Hud,
                         false,
