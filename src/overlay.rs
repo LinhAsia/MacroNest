@@ -2751,6 +2751,7 @@ mod windows_overlay {
         // This avoids calling the heavy is_click_inside_ui() for every single pixel of WM_MOUSEMOVE!
 
         let kind = match message {
+            WM_MOUSEMOVE => Some(crate::model::MacroAction::MouseMoveAbsolute),
             WM_LBUTTONDOWN => Some(crate::model::MacroAction::MouseLeftClick),
             WM_RBUTTONDOWN => Some(crate::model::MacroAction::MouseRightClick),
             WM_MBUTTONDOWN => Some(crate::model::MacroAction::MouseMiddleClick),
@@ -2802,18 +2803,6 @@ mod windows_overlay {
             x: info.pt.x,
             y: info.pt.y,
         });
-        if let Some(tx) = &HOOK_STATE.lock().ui_tx {
-            let mut step = crate::model::MacroStep::default();
-            step.action = action;
-            step.delay_ms = delay_ms;
-            step.x = info.pt.x;
-            step.y = info.pt.y;
-            let _ = tx.send(UiCommand::MacroRealtimeStepAdded(
-                session.group_id,
-                session.preset_id,
-                step,
-            ));
-        }
     }
 
     fn toggle_macro_recording(group_id: u32, preset_id: u32, preset_name: String) {

@@ -19,6 +19,15 @@ enum MouseInputBackendMode {
     Interception,
 }
 
+#[derive(Clone, Default)]
+struct MousePathTimelineOutcome {
+    changed: bool,
+    preview_selection: Option<Vec<MousePathEvent>>,
+    trim_range: Option<(u64, u64)>,
+    split_at_ms: Option<u64>,
+    merge_source_id: Option<u32>,
+}
+
 impl CrosshairApp {
     fn selected_mouse_input_backend_mode(&self) -> MouseInputBackendMode {
         if self.state.vision_settings.use_arduino_mouse || self.arduino_restore_emulation_after_flash
@@ -374,6 +383,17 @@ impl CrosshairApp {
         let mut next_capture_target = None;
         let mut live_sync = false;
         let mut cancel_active_capture = false;
+        let mut mouse_path_timeline_zoom = self.trim_timeline_zoom;
+        let mouse_path_options: Vec<(u32, String)> = self
+            .state
+            .mouse_path_presets
+            .iter()
+            .map(|preset| (preset.id, preset.name.clone()))
+            .collect();
+        let mut preview_mouse_path_selection: Option<(u32, Vec<MousePathEvent>)> = None;
+        let mut trim_mouse_path_request: Option<(u32, u64, u64)> = None;
+        let mut split_mouse_path_request: Option<(u32, u64)> = None;
+        let mut merge_mouse_path_request: Option<(u32, u32)> = None;
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -488,7 +508,58 @@ impl CrosshairApp {
                     });
                 ui.add_space(6.0);
                 Self::render_mouse_path_preview(ui, language, &preset.events, 240.0);
+                ui.add_space(8.0);
+                let timeline_outcome = Self::render_mouse_path_timeline_editor(
+                    ui,
+                    language,
+                    preset.id,
+                    &preset.events,
+                    &mouse_path_options,
+                    &mut mouse_path_timeline_zoom,
+                );
+                if let Some(events) = timeline_outcome.preview_selection {
+                    preview_mouse_path_selection = Some((preset.id, events));
+                }
+                if let Some((start_ms, end_ms)) = timeline_outcome.trim_range {
+                    trim_mouse_path_request = Some((preset.id, start_ms, end_ms));
+                }
+                if let Some(split_at_ms) = timeline_outcome.split_at_ms {
+                    split_mouse_path_request = Some((preset.id, split_at_ms));
+                }
+                if let Some(source_id) = timeline_outcome.merge_source_id {
+                    merge_mouse_path_request = Some((preset.id, source_id));
+                }
             });
+        }
+        self.trim_timeline_zoom = mouse_path_timeline_zoom;
+
+        if let Some((preset_id, events)) = preview_mouse_path_selection {
+            self.mouse_path_step_preview_preset_id = Some(preset_id);
+            let _ = self
+                .overlay_tx
+                .send(OverlayCommand::PreviewMousePath(Some((preset_id, events))));
+            crate::overlay::wake_command_queue();
+        }
+        if let Some((preset_id, start_ms, end_ms)) = trim_mouse_path_request {
+            if let Some(preset) = self
+                .state
+                .mouse_path_presets
+                .iter_mut()
+                .find(|preset| preset.id == preset_id)
+            {
+                preset.events = Self::slice_mouse_path_events(&preset.events, start_ms, end_ms);
+                live_sync = true;
+            }
+        }
+        if let Some((preset_id, split_at_ms)) = split_mouse_path_request {
+            if self.split_mouse_path_preset(preset_id, split_at_ms) {
+                live_sync = true;
+            }
+        }
+        if let Some((target_id, source_id)) = merge_mouse_path_request {
+            if self.merge_mouse_path_presets(target_id, source_id) {
+                live_sync = true;
+            }
         }
 
         if let Some(rem_id) = remove_id {
@@ -1100,6 +1171,339 @@ impl CrosshairApp {
         }
     }
 
+    fn mouse_path_total_duration_ms(events: &[MousePathEvent]) -> u64 {
+        events
+            .iter()
+            .fold(0u64, |total, event| total.saturating_add(event.delay_ms))
+    }
+
+    fn slice_mouse_path_events(
+        events: &[MousePathEvent],
+        start_ms: u64,
+        end_ms: u64,
+    ) -> Vec<MousePathEvent> {
+        if events.is_empty() || start_ms >= end_ms {
+            return Vec::new();
+        }
+        let mut elapsed_ms = 0u64;
+        let mut previous_kept_at = None;
+        let mut sliced = Vec::new();
+        for event in events {
+            elapsed_ms = elapsed_ms.saturating_add(event.delay_ms);
+            if elapsed_ms < start_ms || elapsed_ms > end_ms {
+                continue;
+            }
+            let mut next_event = event.clone();
+            next_event.delay_ms = previous_kept_at
+                .map(|prev| elapsed_ms.saturating_sub(prev))
+                .unwrap_or(0);
+            previous_kept_at = Some(elapsed_ms);
+            sliced.push(next_event);
+        }
+        sliced
+    }
+
+    fn render_mouse_path_timeline_editor(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        preset_id: u32,
+        events: &[MousePathEvent],
+        preset_options: &[(u32, String)],
+        timeline_zoom: &mut f32,
+    ) -> MousePathTimelineOutcome {
+        let mut outcome = MousePathTimelineOutcome::default();
+        if events.is_empty() {
+            return outcome;
+        }
+
+        let total_ms = Self::mouse_path_total_duration_ms(events).max(1);
+        let total_ms_f32 = total_ms as f32;
+        *timeline_zoom = (*timeline_zoom).clamp(1.0, 8.0);
+
+        let trim_start_id = egui::Id::new((preset_id, "mouse-path-trim-start"));
+        let trim_end_id = egui::Id::new((preset_id, "mouse-path-trim-end"));
+        let playhead_id = egui::Id::new((preset_id, "mouse-path-playhead"));
+        let zoom_scroll_offset_id = egui::Id::new((preset_id, "mouse-path-scroll"));
+        let merge_source_id = egui::Id::new((preset_id, "mouse-path-merge-source"));
+
+        let mut trim_start_ms = ui
+            .ctx()
+            .data(|data| data.get_temp::<u64>(trim_start_id))
+            .unwrap_or(0)
+            .min(total_ms);
+        let mut trim_end_ms = ui
+            .ctx()
+            .data(|data| data.get_temp::<u64>(trim_end_id))
+            .unwrap_or(total_ms)
+            .clamp(trim_start_ms, total_ms);
+        let mut playhead_ms = ui
+            .ctx()
+            .data(|data| data.get_temp::<u64>(playhead_id))
+            .unwrap_or(trim_start_ms)
+            .clamp(trim_start_ms, trim_end_ms);
+        let mut selected_merge_source = ui
+            .ctx()
+            .data(|data| data.get_temp::<u32>(merge_source_id))
+            .unwrap_or(0);
+
+        ui.horizontal(|ui| {
+            ui.label(Self::material_icon_text(0xe14e, 14.0));
+            ui.label(
+                RichText::new(Self::tr_lang(language, "Timeline", "Timeline"))
+                    .size(13.0)
+                    .strong(),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(format!("{:.1}x", *timeline_zoom))
+                    .size(12.0)
+                    .color(ui.visuals().weak_text_color()),
+            );
+        });
+
+        let viewport_width = (ui.available_width() - 24.0).max(296.0);
+        let timeline_size = vec2((viewport_width * *timeline_zoom).max(viewport_width), 88.0);
+        let stored_scroll_offset = ui
+            .ctx()
+            .data(|data| data.get_temp::<f32>(zoom_scroll_offset_id))
+            .unwrap_or(0.0);
+        let mut next_scroll_offset = stored_scroll_offset;
+        let mut hovered_timeline = false;
+
+        egui::ScrollArea::horizontal()
+            .id_salt((preset_id, "mouse-path-timeline-scroll"))
+            .max_height(timeline_size.y + 8.0)
+            .show_viewport(ui, |ui, viewport| {
+                let (rect, response) =
+                    ui.allocate_exact_size(timeline_size, Sense::click_and_drag());
+                let painter = ui.painter_at(rect);
+                painter.rect_filled(rect, 18.0, Color32::from_rgb(28, 31, 34));
+                painter.rect_stroke(
+                    rect,
+                    18.0,
+                    egui::Stroke::new(1.0, Color32::from_rgb(88, 104, 118)),
+                    egui::StrokeKind::Outside,
+                );
+
+                let mut elapsed_ms = 0u64;
+                let mut last_move_pos = None;
+                for event in events {
+                    elapsed_ms = elapsed_ms.saturating_add(event.delay_ms);
+                    let t = elapsed_ms as f32 / total_ms_f32;
+                    let x = rect.left() + rect.width() * t.clamp(0.0, 1.0);
+                    let y = match event.kind {
+                        MousePathEventKind::Move => rect.center().y,
+                        MousePathEventKind::LeftDown | MousePathEventKind::LeftUp => {
+                            rect.top() + 18.0
+                        }
+                        MousePathEventKind::RightDown | MousePathEventKind::RightUp => {
+                            rect.top() + 34.0
+                        }
+                        MousePathEventKind::MiddleDown | MousePathEventKind::MiddleUp => {
+                            rect.top() + 50.0
+                        }
+                        MousePathEventKind::WheelUp | MousePathEventKind::WheelDown => {
+                            rect.bottom() - 18.0
+                        }
+                    };
+                    let color = match event.kind {
+                        MousePathEventKind::Move => Color32::from_rgb(88, 194, 255),
+                        MousePathEventKind::LeftDown | MousePathEventKind::LeftUp => {
+                            Color32::from_rgb(255, 208, 92)
+                        }
+                        MousePathEventKind::RightDown | MousePathEventKind::RightUp => {
+                            Color32::from_rgb(255, 124, 124)
+                        }
+                        MousePathEventKind::MiddleDown | MousePathEventKind::MiddleUp => {
+                            Color32::from_rgb(162, 132, 255)
+                        }
+                        MousePathEventKind::WheelUp | MousePathEventKind::WheelDown => {
+                            Color32::from_rgb(126, 224, 182)
+                        }
+                    };
+                    let pos = egui::pos2(x, y);
+                    if matches!(event.kind, MousePathEventKind::Move) {
+                        if let Some(prev) = last_move_pos {
+                            painter.line_segment([prev, pos], egui::Stroke::new(2.0, color));
+                        }
+                        last_move_pos = Some(pos);
+                    } else {
+                        painter.circle_filled(pos, 4.0, color);
+                    }
+                }
+
+                let start_x =
+                    rect.left() + rect.width() * (trim_start_ms as f32 / total_ms_f32).clamp(0.0, 1.0);
+                let end_x =
+                    rect.left() + rect.width() * (trim_end_ms as f32 / total_ms_f32).clamp(0.0, 1.0);
+                let playhead_x =
+                    rect.left() + rect.width() * (playhead_ms as f32 / total_ms_f32).clamp(0.0, 1.0);
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(start_x, rect.top()),
+                        egui::pos2(end_x.max(start_x + 2.0), rect.bottom()),
+                    ),
+                    18.0,
+                    Color32::from_rgba_premultiplied(72, 198, 120, 48),
+                );
+                painter.line_segment(
+                    [egui::pos2(start_x, rect.top()), egui::pos2(start_x, rect.bottom())],
+                    egui::Stroke::new(2.0, Color32::from_rgb(255, 232, 96)),
+                );
+                painter.line_segment(
+                    [egui::pos2(end_x, rect.top()), egui::pos2(end_x, rect.bottom())],
+                    egui::Stroke::new(2.0, Color32::from_rgb(255, 232, 96)),
+                );
+                painter.line_segment(
+                    [
+                        egui::pos2(playhead_x, rect.top() + 6.0),
+                        egui::pos2(playhead_x, rect.bottom() - 6.0),
+                    ],
+                    egui::Stroke::new(2.0, Color32::WHITE),
+                );
+
+                hovered_timeline = response.hovered();
+                if (response.clicked() || response.dragged())
+                    && let Some(pointer) = response.interact_pointer_pos()
+                {
+                    let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                    playhead_ms = (ratio * total_ms_f32).round() as u64;
+                    playhead_ms = playhead_ms.clamp(trim_start_ms, trim_end_ms);
+                    outcome.changed = true;
+                }
+
+                if hovered_timeline
+                    && ui.input(|input| input.modifiers.ctrl && input.raw_scroll_delta.y != 0.0)
+                {
+                    let delta = ui.input(|input| input.raw_scroll_delta.y);
+                    let factor = if delta > 0.0 { 1.1 } else { 1.0 / 1.1 };
+                    *timeline_zoom = (*timeline_zoom * factor).clamp(1.0, 8.0);
+                    outcome.changed = true;
+                }
+
+                if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::Q)) {
+                    trim_start_ms = playhead_ms.min(trim_end_ms);
+                    outcome.changed = true;
+                }
+                if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::W)) {
+                    trim_end_ms = playhead_ms.max(trim_start_ms);
+                    outcome.changed = true;
+                }
+                if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::A)) {
+                    playhead_ms = playhead_ms.saturating_sub((total_ms / 100).max(1));
+                    playhead_ms = playhead_ms.clamp(trim_start_ms, trim_end_ms);
+                    outcome.changed = true;
+                }
+                if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::D)) {
+                    playhead_ms = playhead_ms.saturating_add((total_ms / 100).max(1));
+                    playhead_ms = playhead_ms.clamp(trim_start_ms, trim_end_ms);
+                    outcome.changed = true;
+                }
+                if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::Space)) {
+                    outcome.preview_selection =
+                        Some(Self::slice_mouse_path_events(events, trim_start_ms, trim_end_ms));
+                }
+                if hovered_timeline && ui.input(|input| input.key_pressed(egui::Key::S)) {
+                    outcome.preview_selection =
+                        Some(Self::slice_mouse_path_events(events, trim_start_ms, trim_end_ms));
+                }
+
+                next_scroll_offset = viewport.left().max(0.0);
+            });
+
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(zoom_scroll_offset_id, next_scroll_offset));
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(trim_start_id, trim_start_ms));
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(trim_end_id, trim_end_ms));
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(playhead_id, playhead_ms));
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(merge_source_id, selected_merge_source));
+
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!(
+                "{} {}",
+                Self::tr_lang(language, "Start", "Start"),
+                Self::format_ms(trim_start_ms)
+            ));
+            ui.separator();
+            ui.label(format!(
+                "{} {}",
+                Self::tr_lang(language, "End", "End"),
+                Self::format_ms(trim_end_ms)
+            ));
+            ui.separator();
+            ui.label(format!(
+                "{} {}",
+                Self::tr_lang(language, "Playhead", "Playhead"),
+                Self::format_ms(playhead_ms)
+            ));
+        });
+
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .button(Self::tr_lang(language, "Preview selection", "Preview doan chon"))
+                .clicked()
+            {
+                outcome.preview_selection =
+                    Some(Self::slice_mouse_path_events(events, trim_start_ms, trim_end_ms));
+            }
+            if ui
+                .button(Self::tr_lang(language, "Trim to selection", "Cat theo doan chon"))
+                .clicked()
+            {
+                outcome.trim_range = Some((trim_start_ms, trim_end_ms));
+            }
+            if ui
+                .button(Self::tr_lang(language, "Split at playhead", "Tach tai playhead"))
+                .clicked()
+            {
+                outcome.split_at_ms = Some(playhead_ms);
+            }
+        });
+
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(Self::tr_lang(language, "Merge from", "Gop tu"));
+            let selected_label = preset_options
+                .iter()
+                .find(|(id, _)| *id == selected_merge_source)
+                .map(|(_, name)| name.clone())
+                .unwrap_or_else(|| Self::tr_lang(language, "Select preset", "Chon preset").to_owned());
+            egui::ComboBox::from_id_salt((preset_id, "mouse-path-merge-select"))
+                .width(170.0)
+                .selected_text(selected_label)
+                .show_ui(ui, |ui| {
+                    for (other_id, other_name) in preset_options {
+                        if *other_id == preset_id {
+                            continue;
+                        }
+                        if ui
+                            .selectable_label(selected_merge_source == *other_id, other_name)
+                            .clicked()
+                        {
+                            selected_merge_source = *other_id;
+                        }
+                    }
+                });
+            if ui
+                .add_enabled(
+                    selected_merge_source != 0 && selected_merge_source != preset_id,
+                    Button::new(Self::tr_lang(language, "Merge into this", "Gop vao preset nay")),
+                )
+                .clicked()
+            {
+                outcome.merge_source_id = Some(selected_merge_source);
+            }
+        });
+
+        outcome
+    }
+
     pub(crate) fn render_mouse_move_absolute_capture_overlay(
         &mut self,
         ctx: &egui::Context,
@@ -1144,6 +1548,35 @@ impl CrosshairApp {
 
     pub(crate) fn add_mouse_path_preset(&mut self) -> u32 {
         self.add_mouse_path_preset_from(None)
+    }
+
+    pub(crate) fn add_mouse_path_preset_with_events(
+        &mut self,
+        name: String,
+        events: Vec<MousePathEvent>,
+        replay_relative_motion: bool,
+    ) -> u32 {
+        let mut id = 1;
+        while self.state.mouse_path_presets.iter().any(|p| p.id == id) {
+            id += 1;
+        }
+        self.state.next_mouse_path_preset_id = (self
+            .state
+            .mouse_path_presets
+            .iter()
+            .map(|p| p.id)
+            .max()
+            .unwrap_or(0)
+            + 1)
+        .max(id + 1);
+        let mut new_preset = MousePathPreset::new(id);
+        new_preset.name = name;
+        new_preset.collapsed = false;
+        new_preset.replay_relative_motion = replay_relative_motion;
+        new_preset.events = events;
+        self.state.mouse_path_presets.push(new_preset);
+        self.sync_mouse_path_presets();
+        id
     }
 
     pub(crate) fn add_mouse_path_preset_from(&mut self, source_preset_id: Option<u32>) -> u32 {
@@ -1201,6 +1634,102 @@ impl CrosshairApp {
             }
         }
         changed
+    }
+
+    pub(crate) fn remap_mouse_path_step_references(
+        &mut self,
+        old_preset_id: u32,
+        new_preset_id: u32,
+    ) -> bool {
+        let old_key = old_preset_id.to_string();
+        let new_key = new_preset_id.to_string();
+        let mut changed = false;
+        for group in &mut self.state.macro_groups {
+            for preset in &mut group.presets {
+                for step in &mut preset.steps {
+                    if step.action == MacroAction::PlayMousePathPreset
+                        && step.key.trim() == old_key
+                    {
+                        step.key = new_key.clone();
+                        changed = true;
+                    }
+                }
+                if preset.hold_stop_step.action == MacroAction::PlayMousePathPreset
+                    && preset.hold_stop_step.key.trim() == old_key
+                {
+                    preset.hold_stop_step.key = new_key.clone();
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    pub(crate) fn split_mouse_path_preset(&mut self, preset_id: u32, split_at_ms: u64) -> bool {
+        let Some(index) = self
+            .state
+            .mouse_path_presets
+            .iter()
+            .position(|preset| preset.id == preset_id)
+        else {
+            return false;
+        };
+        let preset = self.state.mouse_path_presets[index].clone();
+        let total_ms = Self::mouse_path_total_duration_ms(&preset.events);
+        if split_at_ms == 0 || split_at_ms >= total_ms {
+            return false;
+        }
+        let left_events = Self::slice_mouse_path_events(&preset.events, 0, split_at_ms);
+        let right_events = Self::slice_mouse_path_events(&preset.events, split_at_ms, total_ms);
+        if left_events.is_empty() || right_events.is_empty() {
+            return false;
+        }
+        self.state.mouse_path_presets[index].events = left_events;
+        let new_name = format!("{} Part 2", preset.name);
+        self.add_mouse_path_preset_with_events(
+            new_name,
+            right_events,
+            preset.replay_relative_motion,
+        );
+        true
+    }
+
+    pub(crate) fn merge_mouse_path_presets(&mut self, target_id: u32, source_id: u32) -> bool {
+        if target_id == source_id {
+            return false;
+        }
+        let Some(target_index) = self
+            .state
+            .mouse_path_presets
+            .iter()
+            .position(|preset| preset.id == target_id)
+        else {
+            return false;
+        };
+        let Some(source_index) = self
+            .state
+            .mouse_path_presets
+            .iter()
+            .position(|preset| preset.id == source_id)
+        else {
+            return false;
+        };
+        let source_events = self.state.mouse_path_presets[source_index].events.clone();
+        if source_events.is_empty() {
+            return false;
+        }
+        self.state.mouse_path_presets[target_index]
+            .events
+            .extend(source_events);
+        self.state.mouse_path_presets.remove(source_index);
+        let refs_changed = self.remap_mouse_path_step_references(source_id, target_id);
+        if self.mouse_path_step_preview_preset_id == Some(source_id) {
+            self.mouse_path_step_preview_preset_id = Some(target_id);
+        }
+        if refs_changed {
+            self.persist_macro_presets();
+        }
+        true
     }
 
     pub(crate) fn sync_mouse_path_presets(&self) {

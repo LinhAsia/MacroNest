@@ -26,7 +26,7 @@ use crate::{
         MacroFolder, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode,
         MasterMacroGroupState, MasterMacroPresetState, MasterPreset,
         MasterWindowFocusPresetState, MasterWindowPresetState, MasterZoomPresetState,
-        MousePathEventKind, ProfileRecord, RgbaColor, SoundLibraryItem, TimerPreset, UiLanguage,
+        MousePathEvent, MousePathEventKind, ProfileRecord, RgbaColor, SoundLibraryItem, TimerPreset, UiLanguage,
         UiThemeMode, VideoClipSettings, VietnameseInputMode, WindowAnchor, WindowExpandDirection,
         WindowPreset,
     },
@@ -5079,6 +5079,106 @@ impl CrosshairApp {
         }
     }
 
+    fn macro_recording_action_to_mouse_path_event(
+        action: MacroAction,
+        x: i32,
+        y: i32,
+        delay_ms: u64,
+    ) -> Option<MousePathEvent> {
+        let kind = match action {
+            MacroAction::MouseMoveAbsolute => MousePathEventKind::Move,
+            MacroAction::MouseLeftDown | MacroAction::MouseLeftClick => {
+                MousePathEventKind::LeftDown
+            }
+            MacroAction::MouseLeftUp => MousePathEventKind::LeftUp,
+            MacroAction::MouseRightDown | MacroAction::MouseRightClick => {
+                MousePathEventKind::RightDown
+            }
+            MacroAction::MouseRightUp => MousePathEventKind::RightUp,
+            MacroAction::MouseMiddleDown | MacroAction::MouseMiddleClick => {
+                MousePathEventKind::MiddleDown
+            }
+            MacroAction::MouseMiddleUp => MousePathEventKind::MiddleUp,
+            MacroAction::MouseWheelUp => MousePathEventKind::WheelUp,
+            MacroAction::MouseWheelDown => MousePathEventKind::WheelDown,
+            _ => return None,
+        };
+        Some(MousePathEvent {
+            kind,
+            x,
+            y,
+            delay_ms,
+        })
+    }
+
+    fn build_macro_steps_from_recording(
+        &mut self,
+        preset_name: &str,
+        events: &[crate::overlay::MacroRecordingEvent],
+    ) -> Vec<MacroStep> {
+        let mut built_steps = Vec::new();
+        let mut elapsed_ms = 0u64;
+        let mut last_emitted_at = 0u64;
+        let mut first_mouse_at = None;
+        let mut first_mouse_insert_index = None;
+        let mut mouse_path_events = Vec::new();
+
+        for event in events {
+            elapsed_ms = elapsed_ms.saturating_add(event.delay_ms);
+            if let Some(path_event) = Self::macro_recording_action_to_mouse_path_event(
+                event.action,
+                event.x,
+                event.y,
+                event.delay_ms,
+            ) {
+                if first_mouse_at.is_none() {
+                    first_mouse_at = Some(elapsed_ms);
+                    first_mouse_insert_index = Some(built_steps.len());
+                }
+                mouse_path_events.push(path_event);
+                continue;
+            }
+
+            let mut step = MacroStep::default();
+            step.action = event.action;
+            step.delay_ms = elapsed_ms.saturating_sub(last_emitted_at);
+            step.x = event.x;
+            step.y = event.y;
+            if let Some(key) = &event.key {
+                step.key = key.clone();
+            }
+            built_steps.push(step);
+            last_emitted_at = elapsed_ms;
+        }
+
+        if !mouse_path_events.is_empty() {
+            let path_name = format!("{preset_name} Recorded Path");
+            let path_preset_id =
+                self.add_mouse_path_preset_with_events(path_name, mouse_path_events, false);
+            let mut path_step = MacroStep::default();
+            path_step.action = MacroAction::PlayMousePathPreset;
+            path_step.key = path_preset_id.to_string();
+            path_step.delay_ms = first_mouse_at
+                .unwrap_or_default()
+                .saturating_sub(if let Some(insert_index) = first_mouse_insert_index {
+                    if insert_index == 0 {
+                        0
+                    } else {
+                        built_steps[..insert_index]
+                            .iter()
+                            .fold(0u64, |acc, step| acc.saturating_add(step.delay_ms))
+                    }
+                } else {
+                    0
+                });
+            path_step.wait_for_completion = false;
+            let insert_index = first_mouse_insert_index.unwrap_or(built_steps.len());
+            built_steps.insert(insert_index, path_step);
+        }
+
+        built_steps
+    }
+
     fn sized_button(ui: &mut egui::Ui, width: f32, label: &str) -> egui::Response {
         Self::with_emphasized_button_hover(ui, |ui| {
             ui.add_sized([width, 24.0], Button::new(label))
@@ -8650,7 +8750,7 @@ impl eframe::App for CrosshairApp {
                     }
                     ctx.request_repaint();
                 }
-                UiCommand::MacroRecordingFinished(group_id, preset_id, _events, status) => {
+                UiCommand::MacroRecordingFinished(group_id, preset_id, events, status) => {
                     if let Some(group) = self
                         .state
                         .macro_groups
@@ -8658,25 +8758,49 @@ impl eframe::App for CrosshairApp {
                         .find(|g| g.id == group_id)
                     {
                         if let Some(preset) = group.presets.iter_mut().find(|p| p.id == preset_id) {
-                            if let Some(record_hotkey) = &preset.record_hotkey {
+                            let record_hotkey = preset.record_hotkey.clone();
+                            let _ = preset;
+                            let mut filtered_events = events;
+                            if let Some(record_hotkey) = &record_hotkey {
                                 let hotkey_keys: Vec<String> =
                                     crate::hotkey::binding_key_names(record_hotkey)
                                         .into_iter()
                                         .map(|k| k.trim().to_ascii_lowercase())
                                         .collect();
-                                while let Some(last) = preset.steps.last() {
-                                    if last.action == MacroAction::KeyPress {
-                                        let k = last.key.trim().to_ascii_lowercase();
-                                        if hotkey_keys.contains(&k) {
-                                            preset.steps.pop();
-                                            continue;
-                                        }
+                                while let Some(last) = filtered_events.last() {
+                                    if last.action == MacroAction::KeyPress
+                                        && last
+                                            .key
+                                            .as_ref()
+                                            .is_some_and(|k| {
+                                                hotkey_keys
+                                                    .contains(&k.trim().to_ascii_lowercase())
+                                            })
+                                    {
+                                        filtered_events.pop();
+                                        continue;
                                     }
                                     break;
                                 }
                             }
-                            if preset.steps.is_empty() {
-                                preset.steps.push(MacroStep::default());
+                            let path_name = format!("Macro {}-{} Path", group_id, preset_id);
+                            let rebuilt_steps =
+                                self.build_macro_steps_from_recording(&path_name, &filtered_events);
+                            if let Some(group) = self
+                                .state
+                                .macro_groups
+                                .iter_mut()
+                                .find(|g| g.id == group_id)
+                            {
+                                if let Some(preset) =
+                                    group.presets.iter_mut().find(|p| p.id == preset_id)
+                                {
+                                    preset.steps = if rebuilt_steps.is_empty() {
+                                        vec![MacroStep::default()]
+                                    } else {
+                                        rebuilt_steps
+                                    };
+                                }
                             }
                         }
                     }
