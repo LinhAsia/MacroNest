@@ -5106,56 +5106,21 @@ impl CrosshairApp {
         })
     }
 
-    fn with_emphasized_button_hover<R>(
+    fn with_emphasized_button_hover(
         ui: &mut egui::Ui,
-        add_contents: impl FnOnce(&mut egui::Ui) -> R,
-    ) -> R {
-        let dark_mode = ui.visuals().dark_mode;
-        let hovered_fill = if dark_mode {
-            Color32::from_rgba_premultiplied(70, 80, 92, 210)
-        } else {
-            Color32::from_rgba_premultiplied(228, 234, 241, 245)
-        };
-        let hovered_stroke = if dark_mode {
-            Color32::from_rgb(126, 224, 182)
-        } else {
-            Color32::from_rgb(58, 166, 118)
-        };
-        let active_fill = if dark_mode {
-            Color32::from_rgba_premultiplied(74, 92, 104, 228)
-        } else {
-            Color32::from_rgba_premultiplied(216, 228, 236, 255)
-        };
-        let active_stroke = if dark_mode {
-            Color32::from_rgb(152, 236, 198)
-        } else {
-            Color32::from_rgb(46, 148, 104)
-        };
-        let text_color = if dark_mode {
-            Color32::from_rgb(244, 247, 252)
-        } else {
-            Color32::from_rgb(24, 34, 48)
-        };
-        let previous_hovered = ui.visuals().widgets.hovered;
-        let previous_active = ui.visuals().widgets.active;
-        {
-            let visuals = ui.visuals_mut();
-            visuals.widgets.hovered.bg_fill = hovered_fill;
-            visuals.widgets.hovered.bg_stroke = Stroke::new(1.5, hovered_stroke);
-            visuals.widgets.hovered.fg_stroke.color = text_color;
-            visuals.widgets.hovered.expansion = previous_hovered.expansion.max(1.25);
-            visuals.widgets.active.bg_fill = active_fill;
-            visuals.widgets.active.bg_stroke = Stroke::new(1.5, active_stroke);
-            visuals.widgets.active.fg_stroke.color = text_color;
-            visuals.widgets.active.expansion = previous_active.expansion.max(1.25);
+        add_contents: impl FnOnce(&mut egui::Ui) -> egui::Response,
+    ) -> egui::Response {
+        let response = add_contents(ui);
+        if response.hovered() {
+            let hovered = ui.visuals().widgets.hovered;
+            ui.painter().rect_stroke(
+                response.rect,
+                hovered.corner_radius,
+                hovered.bg_stroke,
+                StrokeKind::Inside,
+            );
         }
-        let result = add_contents(ui);
-        {
-            let visuals = ui.visuals_mut();
-            visuals.widgets.hovered = previous_hovered;
-            visuals.widgets.active = previous_active;
-        }
-        result
+        response
     }
 
     fn window_anchor_label(anchor: WindowAnchor) -> &'static str {
