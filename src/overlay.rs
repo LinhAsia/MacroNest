@@ -2779,16 +2779,6 @@ mod windows_overlay {
         let Some(action) = kind else {
             return;
         };
-        if UI_WINDOW_VISIBLE.load(Ordering::Relaxed) {
-            let left = UI_WINDOW_RECT_LEFT.load(Ordering::Relaxed);
-            let top = UI_WINDOW_RECT_TOP.load(Ordering::Relaxed);
-            let right = UI_WINDOW_RECT_RIGHT.load(Ordering::Relaxed);
-            let bottom = UI_WINDOW_RECT_BOTTOM.load(Ordering::Relaxed);
-            if info.pt.x >= left && info.pt.x <= right && info.pt.y >= top && info.pt.y <= bottom {
-                return;
-            }
-        }
-
         let now = std::time::Instant::now();
         let delay_ms = now
             .saturating_duration_since(session.last_event_at)
