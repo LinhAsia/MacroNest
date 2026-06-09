@@ -5002,6 +5002,7 @@ impl CrosshairApp {
                                             .width(168.0)
                                             .selected_text(Self::macro_action_selected_widget_text(step.action, language))
                                             .show_ui(ui, |ui| {
+                                                ui.set_min_width(560.0);
                                                 live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(
                                                     language,
                                                     "Toggle self enabled on run",
@@ -5090,6 +5091,15 @@ impl CrosshairApp {
                                                              &mut live_sync,
                                                              action_hover_id,
                                                          );
+                                                        Self::render_if_action_group_option(
+                                                            ui,
+                                                            language,
+                                                            (group.id, preset.id, "hold-stop-if-group"),
+                                                            &mut step.action,
+                                                            &mut live_sync,
+                                                            action_hover_id,
+                                                        );
+                                                        ui.end_row();
                                                         Self::render_geometry_action_group_option(
                                                             ui,
                                                             language,
@@ -5102,14 +5112,6 @@ impl CrosshairApp {
                                                             ui,
                                                             language,
                                                             (group.id, preset.id, "hold-stop-audiosense-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        Self::render_if_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "hold-stop-if-group"),
                                                             &mut step.action,
                                                             &mut live_sync,
                                                             action_hover_id,
@@ -8046,6 +8048,7 @@ impl CrosshairApp {
                                                 .width(146.0)
                                                 .selected_text(Self::macro_action_selected_widget_text(step.action, language))
                                                 .show_ui(ui, |ui| {
+                                                    ui.set_min_width(560.0);
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(
                                                         language,
                                                         "Toggle self enabled on run",
@@ -8135,6 +8138,15 @@ impl CrosshairApp {
                                                                 &mut live_sync,
                                                                 action_hover_id,
                                                             );
+                                                            Self::render_if_action_group_option(
+                                                                ui,
+                                                                language,
+                                                                (group.id, preset.id, step_index, "if-group"),
+                                                                &mut step.action,
+                                                                &mut live_sync,
+                                                                action_hover_id,
+                                                            );
+                                                            ui.end_row();
                                                             Self::render_geometry_action_group_option(
                                                                 ui,
                                                                 language,
@@ -8147,14 +8159,6 @@ impl CrosshairApp {
                                                                 ui,
                                                                 language,
                                                                 (group.id, preset.id, step_index, "audiosense-group"),
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            Self::render_if_action_group_option(
-                                                                ui,
-                                                                language,
-                                                                (group.id, preset.id, step_index, "if-group"),
                                                                 &mut step.action,
                                                                 &mut live_sync,
                                                                 action_hover_id,
