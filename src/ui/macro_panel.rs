@@ -3004,6 +3004,7 @@ impl CrosshairApp {
         let mut begin_mouse_move_absolute_capture_target = None;
         let mut begin_mouse_path_draw_capture_request = None;
         let mut add_mouse_path_preset_request: Option<(u32, u32, usize, Option<u32>)> = None;
+        let mut add_hold_stop_mouse_path_preset_request: Option<(u32, u32, Option<u32>)> = None;
         let mut preview_mouse_path_step_request: Option<Option<u32>> = None;
         let mut cancel_mouse_move_absolute_capture = false;
         let mut cancel_mouse_path_draw_capture = false;
@@ -5592,7 +5593,18 @@ impl CrosshairApp {
                                                         );
                                                     });
                                                 } else if step.action == MacroAction::PlayMousePathPreset {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
+                                                    let parsed_selected_id = step.key.trim().parse::<u32>().ok();
+                                                    let selected_id = parsed_selected_id.and_then(|id| {
+                                                        self.state
+                                                            .mouse_path_presets
+                                                            .iter()
+                                                            .find(|preset| preset.id == id)
+                                                            .map(|preset| preset.id)
+                                                    });
+                                                    if parsed_selected_id.is_some() && selected_id.is_none() {
+                                                        step.key.clear();
+                                                        live_sync = true;
+                                                    }
                                                     let selected_label = selected_id
                                                         .and_then(|id| {
                                                             self.state
@@ -5616,6 +5628,26 @@ impl CrosshairApp {
                                                                     step.key = preset_option.id.to_string();
                                                                     live_sync = true;
                                                                 }
+                                                            }
+                                                            ui.separator();
+                                                            if ui
+                                                                .selectable_label(
+                                                                    false,
+                                                                    Self::tr_lang(
+                                                                        language,
+                                                                        "+ Add preset",
+                                                                        "+ Them preset",
+                                                                    ),
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                add_hold_stop_mouse_path_preset_request =
+                                                                    Some((
+                                                                        group.id,
+                                                                        preset.id,
+                                                                        selected_id,
+                                                                    ));
+                                                                ui.close();
                                                             }
                                                         });
                                                     if ui
@@ -8661,7 +8693,18 @@ impl CrosshairApp {
                                                         );
                                                     });
                                                 } else if step.action == MacroAction::PlayMousePathPreset {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
+                                                    let parsed_selected_id = step.key.trim().parse::<u32>().ok();
+                                                    let selected_id = parsed_selected_id.and_then(|id| {
+                                                        self.state
+                                                            .mouse_path_presets
+                                                            .iter()
+                                                            .find(|preset| preset.id == id)
+                                                            .map(|preset| preset.id)
+                                                    });
+                                                    if parsed_selected_id.is_some() && selected_id.is_none() {
+                                                        step.key.clear();
+                                                        live_sync = true;
+                                                    }
                                                     let selected_label = selected_id
                                                         .and_then(|id| {
                                                             self.state
@@ -8686,6 +8729,26 @@ impl CrosshairApp {
                                                                     step.key = preset_option.id.to_string();
                                                                     live_sync = true;
                                                                 }
+                                                            }
+                                                            ui.separator();
+                                                            if ui
+                                                                .selectable_label(
+                                                                    false,
+                                                                    Self::tr_lang(
+                                                                        language,
+                                                                        "+ Add preset",
+                                                                        "+ Them preset",
+                                                                    ),
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                add_mouse_path_preset_request = Some((
+                                                                    group.id,
+                                                                    preset.id,
+                                                                    step_index,
+                                                                    selected_id,
+                                                                ));
+                                                                ui.close();
                                                             }
                                                         });
                                                     let draw_capture_active = selected_id
@@ -8744,8 +8807,8 @@ impl CrosshairApp {
                                                     } else {
                                                         Self::tr_lang(
                                                             language,
-                                                            "Select a Mouse Path preset first, then press Draw.",
-                                                            "Hay chon Mouse Path truoc, roi bam Draw.",
+                                                            "Press Draw to create a new Mouse Path preset and record into it.",
+                                                            "Bam Draw de tao Mouse Path preset moi va ghi vao do.",
                                                         )
                                                     };
                                                     let draw_response = ui
@@ -8804,47 +8867,6 @@ impl CrosshairApp {
                                                             )
                                                             .to_owned();
                                                         }
-                                                    }
-                                                    let add_feedback_active = self
-                                                        .mouse_path_add_feedback_target
-                                                        == Some((group.id, preset.id, step_index))
-                                                        && self
-                                                            .mouse_path_add_feedback_until
-                                                            .is_some_and(|until| {
-                                                                std::time::Instant::now() < until
-                                                            });
-                                                    if add_feedback_active {
-                                                        ui.ctx().request_repaint_after(
-                                                            std::time::Duration::from_millis(100),
-                                                        );
-                                                    }
-                                                    let add_preset_response = ui
-                                                        .button(Self::tr_lang(
-                                                            language,
-                                                            if add_feedback_active {
-                                                                "Added"
-                                                            } else {
-                                                                "Add preset"
-                                                            },
-                                                            if add_feedback_active {
-                                                                "Added"
-                                                            } else {
-                                                                "Them preset"
-                                                            },
-                                                        ))
-                                                        .on_hover_text(Self::tr_lang(
-                                                            language,
-                                                            "Create a new Mouse Path preset in the Mouse tab, copy the current path into it when available, and assign it to this step.",
-                                                            "Tao mot Mouse Path preset moi trong tab Mouse, copy duong hien tai vao do neu co, roi gan cho step nay.",
-                                                        ));
-                                                    if add_preset_response.clicked() {
-                                                        add_mouse_path_preset_request =
-                                                            Some((
-                                                                group.id,
-                                                                preset.id,
-                                                                step_index,
-                                                                selected_id,
-                                                            ));
                                                     }
                                                     let wait_label = Self::tr_lang(
                                                         language,
@@ -11516,7 +11538,8 @@ impl CrosshairApp {
                     if let Some((group_id, preset_id, step_index, selected_id)) =
                         add_mouse_path_preset_request.take()
                     {
-                        let path_preset_id = self.add_mouse_path_preset_from(selected_id);
+                        let _ = selected_id;
+                        let path_preset_id = self.add_mouse_path_preset();
                         if let Some(group) = self
                             .state
                             .macro_groups
@@ -11533,12 +11556,28 @@ impl CrosshairApp {
                                 }
                             }
                         }
-                        self.mouse_path_add_feedback_target =
-                            Some((group_id, preset_id, step_index));
-                        self.mouse_path_add_feedback_until = Some(
-                            std::time::Instant::now()
-                                + std::time::Duration::from_secs(1),
-                        );
+                        self.persist_mouse_path_presets();
+                        self.persist_macro_presets();
+                    }
+                    if let Some((group_id, preset_id, selected_id)) =
+                        add_hold_stop_mouse_path_preset_request.take()
+                    {
+                        let _ = selected_id;
+                        let path_preset_id = self.add_mouse_path_preset();
+                        if let Some(group) = self
+                            .state
+                            .macro_groups
+                            .iter_mut()
+                            .find(|group| group.id == group_id)
+                        {
+                            if let Some(preset) = group
+                                .presets
+                                .iter_mut()
+                                .find(|preset| preset.id == preset_id)
+                            {
+                                preset.hold_stop_step.key = path_preset_id.to_string();
+                            }
+                        }
                         self.persist_mouse_path_presets();
                         self.persist_macro_presets();
                     }
@@ -11558,10 +11597,6 @@ impl CrosshairApp {
                         let mut created_new_path_preset = false;
                         let path_preset_id = if let Some(path_preset_id) = selected_id {
                             path_preset_id
-                        } else if let Some(existing_id) =
-                            self.state.mouse_path_presets.first().map(|preset| preset.id)
-                        {
-                            existing_id
                         } else {
                             self.add_mouse_path_preset();
                             created_new_path_preset = true;

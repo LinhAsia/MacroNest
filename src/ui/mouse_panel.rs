@@ -497,9 +497,19 @@ impl CrosshairApp {
                 let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
                 crate::overlay::wake_command_queue();
             }
+            if self.mouse_path_draw_capture_preset_id == Some(rem_id) {
+                self.mouse_path_draw_capture_preset_id = None;
+                self.restore_mouse_path_draw_capture_window(ui.ctx());
+            }
+            if self.active_mouse_record_preset_id == Some(rem_id) {
+                self.active_mouse_record_preset_id = None;
+            }
             self.state
                 .mouse_path_presets
                 .retain(|preset| preset.id != rem_id);
+            if self.clear_mouse_path_step_references(rem_id) {
+                self.persist_macro_presets();
+            }
             live_sync = true;
         }
         if let Some((target, status)) = next_capture_target {
@@ -1167,6 +1177,30 @@ impl CrosshairApp {
         self.sync_mouse_path_presets();
         self.status = format!("Added mouse path preset {id}.");
         id
+    }
+
+    pub(crate) fn clear_mouse_path_step_references(&mut self, removed_preset_id: u32) -> bool {
+        let removed_key = removed_preset_id.to_string();
+        let mut changed = false;
+        for group in &mut self.state.macro_groups {
+            for preset in &mut group.presets {
+                for step in &mut preset.steps {
+                    if step.action == MacroAction::PlayMousePathPreset
+                        && step.key.trim() == removed_key
+                    {
+                        step.key.clear();
+                        changed = true;
+                    }
+                }
+                if preset.hold_stop_step.action == MacroAction::PlayMousePathPreset
+                    && preset.hold_stop_step.key.trim() == removed_key
+                {
+                    preset.hold_stop_step.key.clear();
+                    changed = true;
+                }
+            }
+        }
+        changed
     }
 
     pub(crate) fn sync_mouse_path_presets(&self) {
