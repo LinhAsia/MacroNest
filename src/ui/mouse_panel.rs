@@ -409,6 +409,9 @@ impl CrosshairApp {
             let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
             ui.add_space(6.0);
             let preset = &mut self.state.mouse_path_presets[index];
+            if self.mouse_path_timeline_initialized.insert(preset.id) {
+                Self::reset_mouse_path_timeline_state(ui.ctx(), preset.id, &preset.events);
+            }
             Self::show_preset_card(ui, false, |ui| {
                 ui.horizontal(|ui| {
                     let name_width = Self::preset_header_name_width(ui);
@@ -614,6 +617,8 @@ impl CrosshairApp {
         }
 
         if let Some(rem_id) = remove_id {
+            self.mouse_path_timeline_initialized.remove(&rem_id);
+            Self::clear_mouse_path_timeline_state(ui.ctx(), rem_id);
             if self.mouse_path_step_preview_preset_id == Some(rem_id) {
                 self.mouse_path_step_preview_preset_id = None;
                 let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
@@ -1289,6 +1294,20 @@ impl CrosshairApp {
         });
     }
 
+    fn clear_mouse_path_timeline_state(ctx: &egui::Context, preset_id: u32) {
+        ctx.data_mut(|data| {
+            data.remove::<u64>(egui::Id::new((preset_id, "mouse-path-trim-start")));
+            data.remove::<u64>(egui::Id::new((preset_id, "mouse-path-trim-end")));
+            data.remove::<u64>(egui::Id::new((preset_id, "mouse-path-playhead")));
+            data.remove::<f32>(egui::Id::new((preset_id, "mouse-path-scroll")));
+            data.remove::<u32>(egui::Id::new((preset_id, "mouse-path-merge-source")));
+            data.remove::<bool>(egui::Id::new((
+                preset_id,
+                "mouse-path-trim-hotkey-adjusting",
+            )));
+        });
+    }
+
     fn interpolate_mouse_path_event(
         start: &MousePathEvent,
         end: &MousePathEvent,
@@ -1694,6 +1713,7 @@ impl CrosshairApp {
                             .clicked()
                         {
                             selected_merge_source = *other_id;
+                            ui.ctx().request_repaint();
                         }
                     }
                 });

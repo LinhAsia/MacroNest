@@ -678,6 +678,7 @@ pub struct CrosshairApp {
     mouse_path_draw_capture_restore_inner_size: Option<egui::Vec2>,
     mouse_path_draw_capture_restore_outer_pos: Option<egui::Pos2>,
     mouse_path_step_preview_preset_id: Option<u32>,
+    mouse_path_timeline_initialized: HashSet<u32>,
     macro_step_copy_feedback_target: Option<(u32, u32, usize)>,
     macro_step_copy_feedback_until: Option<Instant>,
     macro_selected_steps_copy_feedback_target: Option<(u32, u32)>,
@@ -893,6 +894,7 @@ impl CrosshairApp {
             mouse_path_draw_capture_restore_inner_size: None,
             mouse_path_draw_capture_restore_outer_pos: None,
             mouse_path_step_preview_preset_id: None,
+            mouse_path_timeline_initialized: HashSet::new(),
             macro_step_copy_feedback_target: None,
             macro_step_copy_feedback_until: None,
             macro_selected_steps_copy_feedback_target: None,
@@ -8823,8 +8825,8 @@ impl eframe::App for CrosshairApp {
                     self.status = status;
                     if self.mouse_path_draw_capture_preset_id == Some(preset_id) {
                         self.mouse_path_draw_capture_preset_id = None;
-                        self.restore_mouse_path_draw_capture_window(ctx);
                     }
+                    self.restore_mouse_path_draw_capture_window(ctx);
                     ctx.request_repaint();
                 }
                 UiCommand::MousePathDrawCaptureCancelled(status) => {
