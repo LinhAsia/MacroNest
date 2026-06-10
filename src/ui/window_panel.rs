@@ -2608,10 +2608,6 @@ impl CrosshairApp {
                                     layout.collapsed = !layout.collapsed;
                                     live_sync = true;
                                 }
-                                
-                                if ui.button(Self::tr_lang(language, "Apply", "Áp dụng")).clicked() {
-                                    let _ = self.overlay_tx.send(OverlayCommand::ApplyWindowLayout(layout.clone()));
-                                }
                             },
                         );
                         ui.end_row();
@@ -3025,7 +3021,7 @@ impl CrosshairApp {
                     });
                 
                 let last_sel_id = ui.make_persistent_id("last_selected_layout_cell");
-                let last_selected: Option<(u32, usize, usize)> = ui.data_mut(|d| d.get_temp(last_sel_id));
+                let last_selected: Option<(u32, usize, usize)> = ui.data_mut(|d| d.get_temp::<Option<(u32, usize, usize)>>(last_sel_id)).flatten();
                 let current_selected = self.selected_layout_cell;
                 let selection_changed = current_selected != last_selected;
                 if selection_changed {
