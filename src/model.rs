@@ -391,6 +391,80 @@ impl Default for WindowFocusPreset {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct WindowLayoutCell {
+    pub row: usize,
+    pub col: usize,
+    pub row_span: usize,
+    pub col_span: usize,
+    pub target_window_title: Option<String>,
+    pub extra_target_window_titles: Vec<String>,
+    pub match_duplicate_window_titles: bool,
+}
+
+impl Default for WindowLayoutCell {
+    fn default() -> Self {
+        Self {
+            row: 0,
+            col: 0,
+            row_span: 1,
+            col_span: 1,
+            target_window_title: None,
+            extra_target_window_titles: Vec::new(),
+            match_duplicate_window_titles: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WindowLayout {
+    pub id: u32,
+    pub name: String,
+    pub enabled: bool,
+    pub collapsed: bool,
+    pub rows: usize,
+    pub cols: usize,
+    pub row_ratios: Vec<f32>,
+    pub col_ratios: Vec<f32>,
+    pub cells: Vec<WindowLayoutCell>,
+    pub focus_on_apply: bool,
+    pub hotkey: Option<HotkeyBinding>,
+    pub trigger_keys: String,
+}
+
+impl WindowLayout {
+    pub fn new(id: u32) -> Self {
+        Self {
+            id,
+            name: format!("Layout {id}"),
+            enabled: true,
+            collapsed: true,
+            rows: 2,
+            cols: 2,
+            row_ratios: vec![0.5, 0.5],
+            col_ratios: vec![0.5, 0.5],
+            cells: vec![
+                WindowLayoutCell { row: 0, col: 0, ..Default::default() },
+                WindowLayoutCell { row: 0, col: 1, ..Default::default() },
+                WindowLayoutCell { row: 1, col: 0, ..Default::default() },
+                WindowLayoutCell { row: 1, col: 1, ..Default::default() },
+            ],
+            focus_on_apply: true,
+            hotkey: None,
+            trigger_keys: String::new(),
+        }
+    }
+}
+
+impl Default for WindowLayout {
+    fn default() -> Self {
+        Self::new(1)
+    }
+}
+
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum WindowAnchor {
     #[default]
@@ -1285,6 +1359,7 @@ pub enum MacroTriggerMode {
 pub enum CaptureRequest {
     WindowPresetHotkey(u32),
     WindowFocusPresetHotkey(u32),
+    WindowLayoutHotkey(u32),
     WindowPresetAnimateHotkey(u32),
     WindowPresetTitlebarHotkey(u32),
     WindowExpandHotkey(WindowExpandDirection),
@@ -2436,6 +2511,10 @@ pub struct AppState {
     pub ui_theme: UiThemeMode,
     pub window_presets: Vec<WindowPreset>,
     pub next_preset_id: u32,
+    #[serde(default)]
+    pub window_layouts: Vec<WindowLayout>,
+    #[serde(default)]
+    pub next_window_layout_id: u32,
     pub window_expand_controls: WindowExpandControls,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub window_focus_presets: Vec<WindowFocusPreset>,
@@ -2541,6 +2620,8 @@ impl Default for AppState {
             ui_theme: UiThemeMode::Dark,
             window_presets: Vec::new(),
             next_preset_id: 1,
+            window_layouts: Vec::new(),
+            next_window_layout_id: 1,
             window_expand_controls: WindowExpandControls::default(),
             window_focus_presets: Vec::new(),
             next_window_focus_preset_id: 1,

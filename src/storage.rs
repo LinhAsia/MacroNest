@@ -214,6 +214,19 @@ impl AppPaths {
         for preset in &mut state.window_presets {
             preset.collapsed = true;
         }
+        let next_layout_id = state
+            .window_layouts
+            .iter()
+            .map(|layout| layout.id)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        if state.next_window_layout_id < next_layout_id {
+            state.next_window_layout_id = next_layout_id;
+        }
+        for layout in &mut state.window_layouts {
+            layout.collapsed = true;
+        }
         state.window_expand_controls.enabled = false;
         state.window_focus_presets.clear();
         state.next_window_focus_preset_id = 1;

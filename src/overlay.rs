@@ -391,6 +391,8 @@ mod windows_overlay {
         },
         UpdateWindowPresets(Vec<WindowPreset>),
         UpdateWindowFocusPresets(Vec<WindowFocusPreset>),
+        UpdateWindowLayouts(Vec<crate::model::WindowLayout>),
+        ApplyWindowLayout(crate::model::WindowLayout),
         #[allow(dead_code)]
         UpdateWindowExpandControls(WindowExpandControls),
         UpdatePinPresets(Vec<PinPreset>),
@@ -709,6 +711,7 @@ mod windows_overlay {
         ui_tx: Option<Sender<UiCommand>>,
         window_presets: Vec<WindowPreset>,
         window_focus_presets: Vec<WindowFocusPreset>,
+        window_layouts: Vec<crate::model::WindowLayout>,
         window_expand_controls: WindowExpandControls,
         pin_presets: Vec<PinPreset>,
         mouse_path_presets: Vec<MousePathPreset>,
@@ -796,6 +799,7 @@ mod windows_overlay {
                 ui_tx: None,
                 window_presets: Vec::new(),
                 window_focus_presets: Vec::new(),
+                window_layouts: Vec::new(),
                 window_expand_controls: WindowExpandControls::default(),
                 pin_presets: Vec::new(),
                 mouse_path_presets: Vec::new(),
@@ -898,6 +902,7 @@ mod windows_overlay {
         style: CrosshairStyle,
         window_presets: Vec<WindowPreset>,
         window_focus_presets: Vec<WindowFocusPreset>,
+        window_layouts: Vec<crate::model::WindowLayout>,
         pin_presets: Vec<PinPreset>,
         mouse_path_presets: Vec<MousePathPreset>,
         macro_groups: Vec<MacroGroup>,
@@ -1063,6 +1068,7 @@ mod windows_overlay {
         Focus(WindowFocusPreset),
         Animate(WindowPreset),
         RestoreTitleBar(WindowPreset),
+        ApplyLayout(crate::model::WindowLayout),
     }
 
     pub fn start(
@@ -1362,6 +1368,7 @@ mod windows_overlay {
                 style: initial_style,
                 window_presets: Vec::new(),
                 window_focus_presets: Vec::new(),
+                window_layouts: Vec::new(),
                 pin_presets: Vec::new(),
                 mouse_path_presets: Vec::new(),
                 macro_groups: Vec::new(),
@@ -1586,6 +1593,13 @@ mod windows_overlay {
 
                             WindowHotkeyAction::RestoreTitleBar(preset) => {
                                 let _ = restore_window_title_bar_for_preset(preset);
+                            }
+
+                            WindowHotkeyAction::ApplyLayout(layout) => {
+                                let layout = layout.clone();
+                                thread::spawn(move || {
+                                    let _ = window_preset::apply_window_layout(&layout);
+                                });
                             }
                         }
                     } else if let Some(preset) = runtime.registered_macro_hotkeys.get(&hotkey_id) {
@@ -3239,6 +3253,19 @@ mod windows_overlay {
             }
         }
 
+        for layout in &hook_state.window_layouts {
+            if !layout.enabled {
+                continue;
+            }
+
+            if preset_trigger_matches(layout.hotkey.as_ref(), &layout.trigger_keys, binding)
+                && !is_repeat
+            {
+                matched_any_window = true;
+                window_actions.push(WindowHotkeyAction::ApplyLayout(layout.clone()));
+            }
+        }
+
         let mut pin_toggle_id = None;
         for preset in &hook_state.pin_presets {
             if !preset.enabled {
@@ -3285,6 +3312,12 @@ mod windows_overlay {
 
                     WindowHotkeyAction::RestoreTitleBar(preset) => {
                         let _ = restore_window_title_bar_for_preset(&preset);
+                    }
+
+                    WindowHotkeyAction::ApplyLayout(layout) => {
+                        thread::spawn(move || {
+                            let _ = window_preset::apply_window_layout(&layout);
+                        });
                     }
                 }
             }
@@ -3385,6 +3418,12 @@ mod windows_overlay {
 
                 WindowHotkeyAction::RestoreTitleBar(preset) => {
                     let _ = restore_window_title_bar_for_preset(&preset);
+                }
+
+                WindowHotkeyAction::ApplyLayout(layout) => {
+                    thread::spawn(move || {
+                        let _ = window_preset::apply_window_layout(&layout);
+                    });
                 }
             }
         }
@@ -4003,6 +4042,15 @@ mod windows_overlay {
                 OverlayCommand::UpdateWindowPresets(presets) => {
                     runtime.window_presets = presets;
                     let _ = sync_window_hotkeys(hwnd, runtime);
+                }
+
+                OverlayCommand::UpdateWindowLayouts(layouts) => {
+                    runtime.window_layouts = layouts;
+                    let _ = sync_window_hotkeys(hwnd, runtime);
+                }
+
+                OverlayCommand::ApplyWindowLayout(layout) => {
+                    let _ = window_preset::apply_window_layout(&layout);
                 }
 
                 OverlayCommand::UpdateWindowFocusPresets(presets) => {
@@ -5521,9 +5569,30 @@ mod windows_overlay {
         }
 
         runtime.registered_window_hotkeys.clear();
+
+        let mut next_hotkey_id: i32 = 0x10000;
+
+        for preset in &runtime.window_layouts {
+            if !preset.enabled {
+                continue;
+            }
+            if let Some(hk) = &preset.hotkey {
+                if let Some((mods, vk)) = crate::hotkey::to_windows_registration(hk) {
+                    let id = next_hotkey_id;
+                    next_hotkey_id += 1;
+                    if unsafe { RegisterHotKey(Some(hwnd), id, mods, vk) }.is_ok() {
+                        runtime
+                            .registered_window_hotkeys
+                            .insert(id, WindowHotkeyAction::ApplyLayout(preset.clone()));
+                    }
+                }
+            }
+        }
+
         let mut hook_state = HOOK_STATE.lock();
         hook_state.window_presets = runtime.window_presets.clone();
         hook_state.window_focus_presets = runtime.window_focus_presets.clone();
+        hook_state.window_layouts = runtime.window_layouts.clone();
         hook_state.pin_presets = runtime.pin_presets.clone();
         Ok(())
     }
@@ -17009,7 +17078,7 @@ mod fallback {
     use crate::{
         model::{
             AudioSettings, CrosshairStyle, MacroGroup, ProfileRecord, RgbaColor, VisionPreset,
-            WindowExpandControls, WindowFocusPreset, WindowPreset,
+            WindowExpandControls, WindowFocusPreset, WindowLayout, WindowPreset,
         },
         storage::AppPaths,
     };
@@ -17023,6 +17092,8 @@ mod fallback {
         },
         UpdateWindowPresets(Vec<WindowPreset>),
         UpdateWindowFocusPresets(Vec<WindowFocusPreset>),
+        UpdateWindowLayouts(Vec<WindowLayout>),
+        ApplyWindowLayout(WindowLayout),
         UpdateWindowExpandControls(WindowExpandControls),
         UpdateMacroPresets(Vec<MacroGroup>),
         UpdateAudioSettings(AudioSettings),

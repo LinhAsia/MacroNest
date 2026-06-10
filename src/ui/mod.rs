@@ -822,6 +822,8 @@ pub struct CrosshairApp {
     mouse_input_normal_open: bool,
     mouse_input_arduino_open: bool,
     mouse_input_interception_open: bool,
+    window_layout_tab: usize,
+    selected_layout_cell: Option<(u32, usize, usize)>,
 }
 
 impl CrosshairApp {
@@ -1048,6 +1050,8 @@ impl CrosshairApp {
             mouse_input_normal_open: false,
             mouse_input_arduino_open: false,
             mouse_input_interception_open: false,
+            window_layout_tab: 0,
+            selected_layout_cell: None,
             panel_warmup_target: Some(initial_active_panel),
             panel_warmup_frames_remaining: 1,
             warmed_panels: Vec::new(),
@@ -7270,6 +7274,7 @@ impl CrosshairApp {
             CaptureRequest::MacroPresetReleaseWaitKey(_, _) => true,
             CaptureRequest::WindowPresetHotkey(_) => true,
             CaptureRequest::WindowFocusPresetHotkey(_) => true,
+            CaptureRequest::WindowLayoutHotkey(_) => true,
             CaptureRequest::PinPresetHotkey(_) => true,
             CaptureRequest::MouseSensitivityPresetHotkey(_) => true,
             CaptureRequest::VisionPresetHotkey(_) => true,
@@ -7294,6 +7299,7 @@ impl CrosshairApp {
                 | CaptureRequest::CommandPresetHotkey(_)
                 | CaptureRequest::WindowPresetHotkey(_)
                 | CaptureRequest::WindowFocusPresetHotkey(_)
+                | CaptureRequest::WindowLayoutHotkey(_)
                 | CaptureRequest::WindowPresetAnimateHotkey(_)
                 | CaptureRequest::WindowPresetTitlebarHotkey(_)
                 | CaptureRequest::WindowExpandHotkey(_)
@@ -7569,6 +7575,31 @@ impl CrosshairApp {
                         preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
                 }
                 self.sync_window_presets();
+            }
+            (
+                CaptureRequest::WindowLayoutHotkey(layout_id),
+                CapturedInput::Binding(binding),
+            ) => {
+                if let Some(layout) = self
+                    .state
+                    .window_layouts
+                    .iter_mut()
+                    .find(|l| l.id == layout_id)
+                {
+                    let changed = Self::preset_trigger_add_binding(
+                        &mut layout.hotkey,
+                        &mut layout.trigger_keys,
+                        binding,
+                    );
+                    self.status = if changed {
+                        format!("Captured layout hotkey for {}.", layout.name)
+                    } else {
+                        format!("Layout hotkey already exists for {}.", layout.name)
+                    };
+                    layout.enabled =
+                        layout.hotkey.is_some() || !layout.trigger_keys.trim().is_empty();
+                }
+                self.sync_window_layouts();
             }
             (
                 CaptureRequest::WindowPresetAnimateHotkey(preset_id),
@@ -8171,6 +8202,7 @@ impl CrosshairApp {
                     | CaptureRequest::CommandPresetHotkey(_)
                     | CaptureRequest::WindowPresetHotkey(_)
                     | CaptureRequest::WindowFocusPresetHotkey(_)
+                    | CaptureRequest::WindowLayoutHotkey(_)
                     | CaptureRequest::PinPresetHotkey(_)
                     | CaptureRequest::MouseSensitivityPresetHotkey(_)
             )

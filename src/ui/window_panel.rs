@@ -14,6 +14,25 @@ impl CrosshairApp {
         ui.add_space(2.0);
         let language = self.state.ui_language;
         ui.horizontal(|ui| {
+            ui.selectable_value(
+                &mut self.window_layout_tab,
+                0,
+                Self::tr_lang(language, "Resize Presets", "Kích thước"),
+            );
+            ui.selectable_value(
+                &mut self.window_layout_tab,
+                1,
+                Self::tr_lang(language, "Layout Presets", "Bố cục"),
+            );
+        });
+        ui.add_space(8.0);
+
+        if self.window_layout_tab == 1 {
+            self.render_layout_panel(ui);
+            return;
+        }
+
+        ui.horizontal(|ui| {
             if ui
                 .button(self.tr("+ Add resize preset", "+ Thêm preset kích thước"))
                 .clicked()
@@ -2140,6 +2159,585 @@ impl CrosshairApp {
         let _ = self.overlay_tx.send(OverlayCommand::UpdateMousePathPresets(
             self.state.mouse_path_presets.clone(),
         ));
+    }
+
+    pub(crate) fn persist_window_layouts(&mut self) {
+        self.sync_window_layouts();
+        self.persist();
+    }
+
+    pub(crate) fn sync_window_layouts(&self) {
+        let _ = self.overlay_tx.send(OverlayCommand::UpdateWindowLayouts(
+            self.state.window_layouts.clone(),
+        ));
+    }
+
+    pub(crate) fn add_window_layout(&mut self) {
+        let mut id = 1;
+        while self.state.window_layouts.iter().any(|l| l.id == id) {
+            id += 1;
+        }
+        self.state.next_window_layout_id = (self
+            .state
+            .window_layouts
+            .iter()
+            .map(|l| l.id)
+            .max()
+            .unwrap_or(0)
+            + 1)
+        .max(id + 1);
+        self.state.window_layouts.push(WindowLayout::new(id));
+        self.sync_window_layouts();
+        self.persist();
+        self.status = format!("Added layout {id}.");
+    }
+
+    fn sanitize_layout(layout: &mut WindowLayout) {
+        let rows = layout.rows.max(1);
+        let cols = layout.cols.max(1);
+
+        layout.rows = rows;
+        layout.cols = cols;
+
+        if layout.row_ratios.len() < rows {
+            layout.row_ratios.resize(rows, 1.0);
+        } else if layout.row_ratios.len() > rows {
+            layout.row_ratios.truncate(rows);
+        }
+        for val in &mut layout.row_ratios {
+            if *val <= 0.0 {
+                *val = 0.1;
+            }
+        }
+
+        if layout.col_ratios.len() < cols {
+            layout.col_ratios.resize(cols, 1.0);
+        } else if layout.col_ratios.len() > cols {
+            layout.col_ratios.truncate(cols);
+        }
+        for val in &mut layout.col_ratios {
+            if *val <= 0.0 {
+                *val = 0.1;
+            }
+        }
+
+        layout.cells.retain(|cell| cell.row < rows && cell.col < cols);
+        for cell in &mut layout.cells {
+            cell.row_span = cell.row_span.max(1).min(rows - cell.row);
+            cell.col_span = cell.col_span.max(1).min(cols - cell.col);
+        }
+
+        layout.cells.sort_by_key(|c| (c.row, c.col));
+
+        let mut covered = vec![vec![false; cols]; rows];
+        let mut sanitized_cells = Vec::new();
+
+        for mut cell in layout.cells.drain(..) {
+            if cell.row >= rows || cell.col >= cols {
+                continue;
+            }
+            if covered[cell.row][cell.col] {
+                continue;
+            }
+            let mut max_row_span = rows - cell.row;
+            let mut max_col_span = cols - cell.col;
+
+            for c in cell.col..(cell.col + cell.col_span).min(cols) {
+                if covered[cell.row][c] {
+                    max_col_span = c - cell.col;
+                    break;
+                }
+            }
+            cell.col_span = cell.col_span.min(max_col_span).max(1);
+
+            'outer: for r in cell.row..(cell.row + cell.row_span).min(rows) {
+                for c in cell.col..(cell.col + cell.col_span) {
+                    if covered[r][c] {
+                        max_row_span = r - cell.row;
+                        break 'outer;
+                    }
+                }
+            }
+            cell.row_span = cell.row_span.min(max_row_span).max(1);
+
+            for r in cell.row..(cell.row + cell.row_span) {
+                for c in cell.col..(cell.col + cell.col_span) {
+                    covered[r][c] = true;
+                }
+            }
+            sanitized_cells.push(cell);
+        }
+
+        for r in 0..rows {
+            for c in 0..cols {
+                if !covered[r][c] {
+                    sanitized_cells.push(WindowLayoutCell {
+                        row: r,
+                        col: c,
+                        row_span: 1,
+                        col_span: 1,
+                        ..Default::default()
+                    });
+                    covered[r][c] = true;
+                }
+            }
+        }
+
+        layout.cells = sanitized_cells;
+    }
+
+    pub(crate) fn render_layout_panel(&mut self, ui: &mut egui::Ui) {
+        let language = self.state.ui_language;
+
+        ui.horizontal(|ui| {
+            if ui
+                .button(self.tr("+ Add layout preset", "+ Thêm preset bố cục"))
+                .clicked()
+            {
+                self.add_window_layout();
+            }
+        });
+
+        ui.add_space(8.0);
+
+        let mut remove_id = None;
+        let mut live_sync = false;
+
+        ui.label(RichText::new(Self::tr_lang(language, "Layouts", "Bố cục")).strong());
+        
+        let layouts_count = self.state.window_layouts.len();
+        for index in 0..layouts_count {
+            let mut next_capture_target = None;
+            let mut cancel_active_capture = false;
+            let active_capture_target = self.capture_target.clone();
+            let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
+            ui.add_space(6.0);
+            
+            let layout = &mut self.state.window_layouts[index];
+            Self::sanitize_layout(layout);
+            
+            let capture_target = CaptureRequest::WindowLayoutHotkey(layout.id);
+            let id_source = layout.id;
+            
+            Self::show_preset_card(ui, layout.enabled, |ui| {
+                egui::Grid::new((id_source, "window-layout-header"))
+                    .num_columns(2)
+                    .spacing([14.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let name_width = Self::preset_header_name_width(ui);
+                            let response = ui.add_sized(
+                                [name_width, 21.0],
+                                TextEdit::singleline(&mut layout.name),
+                            );
+                            Self::apply_vietnamese_input_if_changed(
+                                &response,
+                                self.state.vietnamese_input_enabled,
+                                self.state.vietnamese_input_mode,
+                                &mut layout.name,
+                            );
+                            live_sync |= response.changed();
+
+                            live_sync |= Self::render_preset_trigger_chips(
+                                ui,
+                                language,
+                                &mut layout.hotkey,
+                                &mut layout.trigger_keys,
+                                active_capture_target.as_ref(),
+                                &capture_target,
+                                pending_combo_keys.as_ref(),
+                            );
+                            layout.enabled = layout.hotkey.is_some()
+                                || !layout.trigger_keys.trim().is_empty();
+                        });
+                        
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                let capture_active =
+                                    active_capture_target.as_ref() == Some(&capture_target);
+                                let capture_time = ui.ctx().input(|input| input.time) as f32;
+                                let pulse = if capture_active {
+                                    0.5 + 0.5 * (capture_time * 6.0).sin().abs()
+                                } else {
+                                    0.0
+                                };
+                                let has_keys = layout.hotkey.is_some()
+                                    || !layout.trigger_keys.trim().is_empty();
+                                let fill = if capture_active {
+                                    Color32::from_rgba_premultiplied(
+                                        (88.0 + pulse * 28.0) as u8,
+                                        (84.0 + pulse * 28.0) as u8,
+                                        (44.0 + pulse * 10.0) as u8,
+                                        255,
+                                    )
+                                } else if has_keys {
+                                    Color32::from_rgba_premultiplied(72, 156, 116, 120)
+                                } else {
+                                    ui.visuals().faint_bg_color
+                                };
+                                let stroke = if capture_active {
+                                    Color32::from_rgb(255, 232, 96)
+                                } else if has_keys {
+                                    Color32::from_rgb(126, 224, 182)
+                                } else {
+                                    ui.visuals().widgets.noninteractive.bg_stroke.color
+                                };
+
+                                let hover_text = if capture_active {
+                                    Self::tr_lang(
+                                        language,
+                                        "Capturing... Press any key.",
+                                        "Đang ghi... Nhấn một phím bất kỳ.",
+                                    )
+                                    .to_string()
+                                } else if has_keys {
+                                    let bindings_labels: Vec<String> =
+                                        Self::preset_trigger_bindings(
+                                            &layout.hotkey,
+                                            &layout.trigger_keys,
+                                        )
+                                        .iter()
+                                        .map(|b| hotkey::format_binding(Some(b)))
+                                        .collect();
+                                    format!(
+                                        "{} {}\n{}",
+                                        Self::tr_lang(language, "Hotkey:", "Phím tắt:"),
+                                        bindings_labels.join(", "),
+                                        Self::tr_lang(
+                                            language,
+                                            "Left click: rebind | Right click: clear",
+                                            "Chuột trái: đổi phím | Chuột phải: xóa phím"
+                                        )
+                                    )
+                                } else {
+                                    Self::tr_lang(
+                                        language,
+                                        "Left click: bind hotkey",
+                                        "Chuột trái: gán phím tắt",
+                                    )
+                                    .to_string()
+                                };
+
+                                let btn_text = if capture_active {
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Capturing...",
+                                        "Đang bắt...",
+                                    ))
+                                    .strong()
+                                    .color(Color32::from_rgb(255, 232, 96))
+                                } else {
+                                    Self::material_icon_text(0xe312, 18.0)
+                                };
+                                let btn_width = if capture_active { 84.0 } else { 36.0 };
+                                let btn_response = ui
+                                    .add_sized(
+                                        [btn_width, 24.0],
+                                        Button::new(btn_text)
+                                            .fill(fill)
+                                            .stroke(egui::Stroke::new(1.0, stroke)),
+                                    )
+                                    .on_hover_text(hover_text);
+
+                                if btn_response.clicked() {
+                                    if capture_active {
+                                        cancel_active_capture = true;
+                                    } else {
+                                        next_capture_target = Some((
+                                            capture_target.clone(),
+                                            format!(
+                                                "Capturing preset hotkey for {}.",
+                                                layout.name
+                                            ),
+                                        ));
+                                    }
+                                }
+                                if btn_response.secondary_clicked() {
+                                    layout.hotkey = None;
+                                    layout.trigger_keys.clear();
+                                    layout.enabled = false;
+                                    live_sync = true;
+                                }
+
+                                if Self::sound_style_remove_button(ui).clicked() {
+                                    remove_id = Some(layout.id);
+                                }
+                                
+                                if Self::sound_style_toggle_button(
+                                    ui,
+                                    if layout.collapsed {
+                                        Self::tr_lang(language, "Show", "Hiện")
+                                    } else {
+                                        Self::tr_lang(language, "Hide", "Ẩn")
+                                    },
+                                )
+                                .clicked()
+                                {
+                                    layout.collapsed = !layout.collapsed;
+                                    live_sync = true;
+                                }
+                                
+                                if ui.button(Self::tr_lang(language, "Apply", "Áp dụng")).clicked() {
+                                    let _ = self.overlay_tx.send(OverlayCommand::ApplyWindowLayout(layout.clone()));
+                                }
+                            },
+                        );
+                        ui.end_row();
+                    });
+                
+                if layout.collapsed {
+                    return;
+                }
+                
+                egui::Grid::new((id_source, "window-layout-settings-grid"))
+                    .num_columns(2)
+                    .spacing([14.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label(Self::tr_lang(language, "Focus on apply", "Focus khi áp dụng"));
+                        live_sync |= ui.checkbox(&mut layout.focus_on_apply, "").changed();
+                        ui.end_row();
+                        
+                        ui.label(Self::tr_lang(language, "Grid size", "Kích thước lưới"));
+                        ui.horizontal(|ui| {
+                            ui.label(Self::tr_lang(language, "Rows", "Hàng"));
+                            let mut rows = layout.rows;
+                            if ui.add(DragValue::new(&mut rows).range(1..=6)).changed() {
+                                layout.rows = rows;
+                                Self::sanitize_layout(layout);
+                                live_sync = true;
+                            }
+                            ui.label(Self::tr_lang(language, "Cols", "Cột"));
+                            let mut cols = layout.cols;
+                            if ui.add(DragValue::new(&mut cols).range(1..=6)).changed() {
+                                layout.cols = cols;
+                                Self::sanitize_layout(layout);
+                                live_sync = true;
+                            }
+                        });
+                        ui.end_row();
+                        
+                        ui.label(Self::tr_lang(language, "Row ratios", "Tỷ lệ hàng"));
+                        ui.horizontal(|ui| {
+                            for r in 0..layout.rows {
+                                if r < layout.row_ratios.len() {
+                                    let mut val = layout.row_ratios[r];
+                                    if ui.add(DragValue::new(&mut val).range(0.05..=10.0).speed(0.05).prefix(&format!("R{}: ", r + 1))).changed() {
+                                        layout.row_ratios[r] = val;
+                                        live_sync = true;
+                                    }
+                                }
+                            }
+                        });
+                        ui.end_row();
+                        
+                        ui.label(Self::tr_lang(language, "Col ratios", "Tỷ lệ cột"));
+                        ui.horizontal(|ui| {
+                            for c in 0..layout.cols {
+                                if c < layout.col_ratios.len() {
+                                    let mut val = layout.col_ratios[c];
+                                    if ui.add(DragValue::new(&mut val).range(0.05..=10.0).speed(0.05).prefix(&format!("C{}: ", c + 1))).changed() {
+                                        layout.col_ratios[c] = val;
+                                        live_sync = true;
+                                    }
+                                }
+                            }
+                        });
+                        ui.end_row();
+                        
+                        ui.label(Self::tr_lang(language, "Visual Grid", "Xem trước lưới"));
+                        ui.vertical(|ui| {
+                            let r_sum: f32 = layout.row_ratios.iter().sum();
+                            let c_sum: f32 = layout.col_ratios.iter().sum();
+                            
+                            let mut row_starts = vec![0.0];
+                            let mut acc = 0.0f32;
+                            for r in &layout.row_ratios {
+                                acc += r / r_sum;
+                                row_starts.push(acc);
+                            }
+                            
+                            let mut col_starts = vec![0.0];
+                            let mut acc = 0.0f32;
+                            for c in &layout.col_ratios {
+                                acc += c / c_sum;
+                                col_starts.push(acc);
+                            }
+                            
+                            let preview_w = 320.0;
+                            let preview_h = 160.0;
+                            
+                            let (rect, _response) = ui.allocate_exact_size(vec2(preview_w, preview_h), egui::Sense::hover());
+                            
+                            ui.painter().rect_filled(
+                                rect,
+                                4.0,
+                                ui.visuals().extreme_bg_color
+                            );
+                            
+                            let cells_to_draw = layout.cells.clone();
+                            for cell in &cells_to_draw {
+                                if cell.row >= layout.rows || cell.col >= layout.cols {
+                                    continue;
+                                }
+                                
+                                let end_row = (cell.row + cell.row_span).min(layout.rows);
+                                let end_col = (cell.col + cell.col_span).min(layout.cols);
+                                
+                                let x1 = rect.min.x + col_starts[cell.col] * preview_w;
+                                let y1 = rect.min.y + row_starts[cell.row] * preview_h;
+                                let x2 = rect.min.x + col_starts[end_col] * preview_w;
+                                let y2 = rect.min.y + row_starts[end_row] * preview_h;
+                                
+                                let cell_rect = egui::Rect::from_min_max(
+                                    egui::pos2(x1, y1),
+                                    egui::pos2(x2, y2)
+                                ).shrink(2.0);
+                                
+                                let is_selected = self.selected_layout_cell == Some((layout.id, cell.row, cell.col));
+                                
+                                let cell_id = ui.make_persistent_id((layout.id, "cell", cell.row, cell.col));
+                                let cell_resp = ui.interact(cell_rect, cell_id, egui::Sense::click());
+                                
+                                if cell_resp.clicked() {
+                                    self.selected_layout_cell = Some((layout.id, cell.row, cell.col));
+                                }
+                                
+                                let fill_color = if is_selected {
+                                    Color32::from_rgba_premultiplied(0, 120, 215, 80)
+                                } else if cell_resp.hovered() {
+                                    Color32::from_rgba_premultiplied(128, 128, 128, 40)
+                                } else {
+                                    Color32::from_rgba_premultiplied(128, 128, 128, 20)
+                                };
+                                
+                                let border_color = if is_selected {
+                                    Color32::from_rgb(0, 120, 215)
+                                } else {
+                                    ui.visuals().widgets.noninteractive.bg_stroke.color
+                                };
+                                
+                                let stroke_width = if is_selected { 2.0 } else { 1.0 };
+                                
+                                ui.painter().rect(
+                                    cell_rect,
+                                    2.0,
+                                    fill_color,
+                                    egui::Stroke::new(stroke_width, border_color),
+                                    egui::StrokeKind::Inside,
+                                );
+                                
+                                let label_text = if let Some(title) = &cell.target_window_title {
+                                    Self::truncate_window_title(title, 12)
+                                } else {
+                                    format!("{},{}", cell.row, cell.col)
+                                };
+                                
+                                let text_color = if is_selected {
+                                    ui.visuals().widgets.active.text_color()
+                                } else {
+                                    ui.visuals().widgets.noninteractive.text_color()
+                                };
+                                
+                                ui.painter().text(
+                                    cell_rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    label_text,
+                                    egui::FontId::proportional(11.0),
+                                    text_color
+                                );
+                            }
+                        });
+                        ui.end_row();
+                    });
+                
+                if let Some((sel_layout_id, sel_row, sel_col)) = self.selected_layout_cell {
+                    if sel_layout_id == layout.id {
+                        if let Some(cell_idx) = layout.cells.iter().position(|c| c.row == sel_row && c.col == sel_col) {
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("Cell ({}, {}) Settings", sel_row, sel_col)).strong());
+                            });
+                            
+                            let mut cell_modified = false;
+                            
+                            let mut row_span = layout.cells[cell_idx].row_span;
+                            let mut col_span = layout.cells[cell_idx].col_span;
+                            let mut target_window_title = layout.cells[cell_idx].target_window_title.clone();
+                            let mut extra_target_window_titles = layout.cells[cell_idx].extra_target_window_titles.clone();
+                            let mut match_duplicate_window_titles = layout.cells[cell_idx].match_duplicate_window_titles;
+                            
+                            egui::Grid::new((layout.id, "cell-settings-grid", sel_row, sel_col))
+                                .num_columns(2)
+                                .spacing([14.0, 8.0])
+                                .show(ui, |ui| {
+                                    ui.label(Self::tr_lang(language, "Span", "Hợp nhất"));
+                                    ui.horizontal(|ui| {
+                                        ui.label(Self::tr_lang(language, "Row span", "Hợp dòng"));
+                                        let max_row_span = layout.rows - sel_row;
+                                        if ui.add(DragValue::new(&mut row_span).range(1..=max_row_span)).changed() {
+                                            cell_modified = true;
+                                        }
+                                        ui.label(Self::tr_lang(language, "Col span", "Hợp cột"));
+                                        let max_col_span = layout.cols - sel_col;
+                                        if ui.add(DragValue::new(&mut col_span).range(1..=max_col_span)).changed() {
+                                            cell_modified = true;
+                                        }
+                                    });
+                                    ui.end_row();
+                                    
+                                    ui.label(Self::tr_lang(language, "Target Window", "Cửa sổ mục tiêu"));
+                                    let dropdown_changed = Self::render_multi_window_targets_with_duplicate_mode(
+                                        ui,
+                                        language,
+                                        (layout.id, "cell-target-picker", sel_row, sel_col),
+                                        Self::tr_lang(language, "Focus", "Cửa sổ đang focus"),
+                                        &mut target_window_title,
+                                        &mut extra_target_window_titles,
+                                        &mut match_duplicate_window_titles,
+                                        &self.open_windows,
+                                    );
+                                    if dropdown_changed {
+                                        cell_modified = true;
+                                    }
+                                    ui.end_row();
+                                });
+                            
+                            if cell_modified {
+                                layout.cells[cell_idx].row_span = row_span;
+                                layout.cells[cell_idx].col_span = col_span;
+                                layout.cells[cell_idx].target_window_title = target_window_title;
+                                layout.cells[cell_idx].extra_target_window_titles = extra_target_window_titles;
+                                layout.cells[cell_idx].match_duplicate_window_titles = match_duplicate_window_titles;
+                                
+                                Self::sanitize_layout(layout);
+                                live_sync = true;
+                            }
+                        }
+                    }
+                }
+            });
+            
+            if let Some((target, status)) = next_capture_target.take() {
+                self.begin_capture(target, status);
+            }
+            if cancel_active_capture {
+                self.cancel_capture();
+            }
+        }
+        
+        if live_sync {
+            self.persist_window_layouts();
+        }
+        if let Some(id) = remove_id {
+            self.state.window_layouts.retain(|l| l.id != id);
+            self.persist_window_layouts();
+            if let Some((sel_layout_id, _, _)) = self.selected_layout_cell {
+                if sel_layout_id == id {
+                    self.selected_layout_cell = None;
+                }
+            }
+        }
     }
 
     pub(crate) fn sync_hud_preview(&mut self, preset: Option<&HudPreset>) {
