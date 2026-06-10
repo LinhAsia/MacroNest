@@ -1384,11 +1384,12 @@ impl CrosshairApp {
         });
 
         ui.add_space(8.0);
-
-        ui.add_space(8.0);
         ui.label(
-            RichText::new(Self::tr_lang(language, "Sound Presets", "Preset âm thanh")).strong(),
+            RichText::new(Self::tr_lang(language, "Sound Presets", "Preset âm thanh"))
+                .strong()
+                .size(14.0),
         );
+        ui.add_space(4.0);
 
         let mut remove_sound_preset = None;
         for index in 0..self.state.audio_settings.presets.len() {
@@ -1508,10 +1509,13 @@ impl CrosshairApp {
             changed = true;
         }
 
-        ui.add_space(10.0);
-        ui.separator();
         ui.add_space(8.0);
-        ui.label(RichText::new(Self::tr_lang(language, "Video Presets", "Preset video")).strong());
+        ui.label(
+            RichText::new(Self::tr_lang(language, "Video Presets", "Preset video"))
+                .strong()
+                .size(14.0),
+        );
+        ui.add_space(4.0);
 
         let mut remove_video_preset = None;
         let mut preview_video_request: Option<(u32, u64, VideoClipSettings)> = None;

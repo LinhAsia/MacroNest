@@ -164,8 +164,12 @@ impl CrosshairApp {
         });
 
         ui.add_space(8.0);
-
-        ui.label(RichText::new(Self::tr_lang(language, "Sensitivity", "Độ nhạy")).strong());
+        ui.label(
+            RichText::new(Self::tr_lang(language, "Sensitivity", "Độ nhạy"))
+                .strong()
+                .size(14.0),
+        );
+        ui.add_space(4.0);
 
         for index in 0..self.state.mouse_sensitivity_presets.len() {
             let active_capture_target = self.capture_target.clone();

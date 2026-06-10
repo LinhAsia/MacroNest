@@ -45,7 +45,12 @@ impl CrosshairApp {
         });
 
         ui.add_space(8.0);
-        ui.label(RichText::new(self.tr("Text Presets", "Thiết lập Văn bản")).strong());
+        ui.label(
+            RichText::new(self.tr("Text Presets", "Thiết lập Văn bản"))
+                .strong()
+                .size(14.0),
+        );
+        ui.add_space(4.0);
 
         let mut remove_id = None;
         let mut changed = false;
@@ -205,9 +210,13 @@ impl CrosshairApp {
             self.persist_hud_presets();
         }
 
-        ui.add_space(14.0);
-
-        ui.label(RichText::new(self.tr("Timer Presets", "Thiết lập Hẹn giờ")).strong());
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new(self.tr("Timer Presets", "Thiết lập Hẹn giờ"))
+                .strong()
+                .size(14.0),
+        );
+        ui.add_space(4.0);
 
         for index in 0..self.state.timer_presets.len() {
             ui.add_space(6.0);

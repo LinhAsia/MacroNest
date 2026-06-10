@@ -13,24 +13,6 @@ impl CrosshairApp {
     pub(crate) fn render_window_presets_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(2.0);
         let language = self.state.ui_language;
-        ui.horizontal(|ui| {
-            ui.selectable_value(
-                &mut self.window_layout_tab,
-                0,
-                Self::tr_lang(language, "Resize Presets", "Kích thước"),
-            );
-            ui.selectable_value(
-                &mut self.window_layout_tab,
-                1,
-                Self::tr_lang(language, "Layout Presets", "Bố cục"),
-            );
-        });
-        ui.add_space(8.0);
-
-        if self.window_layout_tab == 1 {
-            self.render_layout_panel(ui);
-            return;
-        }
 
         ui.horizontal(|ui| {
             if ui
@@ -40,13 +22,24 @@ impl CrosshairApp {
                 self.add_window_preset();
                 self.persist();
             }
+            if ui
+                .button(self.tr("+ Add layout preset", "+ Thêm preset bố cục"))
+                .clicked()
+            {
+                self.add_window_layout();
+            }
         });
 
         ui.add_space(8.0);
 
         let mut remove_id = None;
         let mut live_sync = false;
-        ui.label(RichText::new(Self::tr_lang(language, "Resize", "Kích thước")).strong());
+        ui.label(
+            RichText::new(Self::tr_lang(language, "Resize Presets", "Kích thước"))
+                .strong()
+                .size(14.0),
+        );
+        ui.add_space(4.0);
         for index in 0..self.state.window_presets.len() {
             let mut next_capture_target = None;
             let mut cancel_active_capture = false;
@@ -364,6 +357,9 @@ impl CrosshairApp {
             self.state.window_presets.retain(|preset| preset.id != id);
             self.persist_window_presets();
         }
+
+        ui.add_space(10.0);
+        self.render_layout_panel(ui);
     }
 
     pub(crate) fn render_zoom_panel(&mut self, ui: &mut egui::Ui) {
@@ -2289,21 +2285,16 @@ impl CrosshairApp {
     pub(crate) fn render_layout_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
 
-        ui.horizontal(|ui| {
-            if ui
-                .button(self.tr("+ Add layout preset", "+ Thêm preset bố cục"))
-                .clicked()
-            {
-                self.add_window_layout();
-            }
-        });
-
-        ui.add_space(8.0);
-
         let mut remove_id = None;
         let mut live_sync = false;
 
-        ui.label(RichText::new(Self::tr_lang(language, "Layouts", "Bố cục")).strong());
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new(Self::tr_lang(language, "Layout Presets", "Bố cục"))
+                .strong()
+                .size(14.0),
+        );
+        ui.add_space(4.0);
         
         let layouts_count = self.state.window_layouts.len();
         for index in 0..layouts_count {
