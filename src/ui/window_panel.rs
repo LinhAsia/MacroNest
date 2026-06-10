@@ -2275,6 +2275,21 @@ impl CrosshairApp {
         }
 
         layout.cells = sanitized_cells;
+
+        // Simplify to 1x1 if there is only one cell that covers the entire grid
+        if layout.cells.len() == 1 {
+            let cell = &layout.cells[0];
+            if cell.row == 0 && cell.col == 0 && cell.row_span == rows && cell.col_span == cols {
+                if rows > 1 || cols > 1 {
+                    layout.rows = 1;
+                    layout.cols = 1;
+                    layout.row_ratios = vec![1.0];
+                    layout.col_ratios = vec![1.0];
+                    layout.cells[0].row_span = 1;
+                    layout.cells[0].col_span = 1;
+                }
+            }
+        }
     }
 
     fn get_monitor_work_size() -> (f32, f32) {
@@ -2901,8 +2916,8 @@ impl CrosshairApp {
                                                 ui.painter(),
                                                 egui::pos2(cell_rect.center().x, cell_rect.min.y),
                                                 egui::pos2(cell_rect.center().x, cell_rect.max.y),
-                                                egui::Stroke::new(1.5, Color32::from_rgb(255, 140, 0)),
-                                                6.0,
+                                                egui::Stroke::new(2.5, Color32::from_rgb(255, 69, 0)),
+                                                8.0,
                                                 4.0,
                                             );
                                             
@@ -2919,8 +2934,8 @@ impl CrosshairApp {
                                                 ui.painter(),
                                                 egui::pos2(cell_rect.min.x, cell_rect.center().y),
                                                 egui::pos2(cell_rect.max.x, cell_rect.center().y),
-                                                egui::Stroke::new(1.5, Color32::from_rgb(255, 140, 0)),
-                                                6.0,
+                                                egui::Stroke::new(2.5, Color32::from_rgb(255, 69, 0)),
+                                                8.0,
                                                 4.0,
                                             );
                                             
@@ -3009,13 +3024,25 @@ impl CrosshairApp {
                         ui.end_row();
                     });
                 
+                let last_sel_id = ui.make_persistent_id("last_selected_layout_cell");
+                let last_selected: Option<(u32, usize, usize)> = ui.data_mut(|d| d.get_temp(last_sel_id));
+                let current_selected = self.selected_layout_cell;
+                let selection_changed = current_selected != last_selected;
+                if selection_changed {
+                    ui.data_mut(|d| d.insert_temp(last_sel_id, current_selected));
+                }
+
                 if let Some((sel_layout_id, sel_row, sel_col)) = self.selected_layout_cell {
                     if sel_layout_id == layout.id {
                         if let Some(cell_idx) = layout.cells.iter().position(|c| c.row == sel_row && c.col == sel_col) {
                             ui.add_space(8.0);
-                            ui.horizontal(|ui| {
+                            let header_resp = ui.horizontal(|ui| {
                                 ui.label(RichText::new(format!("Cell ({}, {}) Settings", sel_row, sel_col)).strong());
-                            });
+                            }).response;
+
+                            if selection_changed {
+                                header_resp.scroll_to_me(Some(egui::Align::Center));
+                            }
                             
                             let mut cell_modified = false;
                             
