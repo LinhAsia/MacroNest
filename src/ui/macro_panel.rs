@@ -2846,8 +2846,8 @@ impl CrosshairApp {
                         }
                     }
                     let edit_icon = 0xe3c9; // edit icon (but chi cheo)
-                    if ui
-                        .add_sized(
+                    if Self::with_emphasized_button_hover(ui, |ui| {
+                        ui.add_sized(
                             [28.0, 28.0],
                             Button::new(Self::material_icon_text(edit_icon, 18.0)) // variable edit icon
                                 .fill(if self.variable_inspector_open {
@@ -2865,6 +2865,7 @@ impl CrosshairApp {
                                 ))
                                 .corner_radius(6.0),
                         )
+                    })
                         .on_hover_text(Self::tr_lang(
                             language,
                             "Global & Local Variables Manager (Real-time)",
@@ -2875,8 +2876,8 @@ impl CrosshairApp {
                         self.variable_inspector_open = !self.variable_inspector_open;
                     }
                 });
-            if ui
-                .add_sized(
+            if Self::with_emphasized_button_hover(ui, |ui| {
+                ui.add_sized(
                     [28.0, 28.0],
                     Button::new(Self::folder_icon_text(self.macro_folders_panel_open, 18.0))
                         .fill(if self.macro_folders_panel_open {
@@ -2893,6 +2894,7 @@ impl CrosshairApp {
                             },
                         )),
                 )
+            })
                 .on_hover_text(Self::tr_lang(
                     language,
                     "Show / hide macro folders",
