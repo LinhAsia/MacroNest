@@ -29,9 +29,30 @@ use super::{
 };
 
 pub(super) fn apply_window_preset_by_id(spec: &str) -> Result<()> {
+    let spec = spec.trim();
+    if let Some(layout_spec) = spec.strip_prefix("layout:") {
+        let layout_spec = layout_spec.trim();
+        let layout = {
+            let hook_state = HOOK_STATE.lock();
+            hook_state
+                .window_layouts
+                .iter()
+                .find(|l| l.id.to_string() == layout_spec)
+                .cloned()
+                .or_else(|| {
+                    hook_state
+                        .window_layouts
+                        .iter()
+                        .find(|l| l.name.trim().eq_ignore_ascii_case(layout_spec))
+                        .cloned()
+                })
+        }
+        .context("Window layout was not found")?;
+        return apply_window_layout(&layout);
+    }
+
     let preset = {
         let hook_state = HOOK_STATE.lock();
-        let spec = spec.trim();
         hook_state
             .window_presets
             .iter()
@@ -377,6 +398,15 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
             used: &'a HashSet<isize>,
             result: Option<HWND>,
         }
+        fn clean_title_suffix(t: &str) -> &str {
+            if let Some(prefix) = t.strip_suffix(')')
+                && let Some((base, _)) = prefix.rsplit_once(" (0x")
+            {
+                base.trim()
+            } else {
+                t.trim()
+            }
+        }
         unsafe extern "system" fn find_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
             let p = &mut *(lparam.0 as *mut FindPayload<'_>);
             if !IsWindowVisible(hwnd).as_bool() {
@@ -391,10 +421,12 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
                 return true.into();
             }
             let win_title = String::from_utf16_lossy(&buf[..len as usize]);
+            let clean_p_title = clean_title_suffix(p.title);
+            let clean_win_title = clean_title_suffix(&win_title);
             let matches = if p.match_dup {
-                win_title.to_lowercase().contains(&p.title.to_lowercase())
+                clean_win_title.to_lowercase().contains(&clean_p_title.to_lowercase())
             } else {
-                win_title.trim().eq_ignore_ascii_case(p.title.trim())
+                clean_win_title.eq_ignore_ascii_case(clean_p_title)
             };
             if matches {
                 p.result = Some(hwnd);

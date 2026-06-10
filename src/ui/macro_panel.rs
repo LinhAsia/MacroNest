@@ -160,6 +160,108 @@ impl CrosshairApp {
         }
     }
 
+    fn render_window_control_step_comboboxes(
+        window_presets: &[WindowPreset],
+        window_layouts: &[WindowLayout],
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_salt: egui::Id,
+        step_key: &mut String,
+        live_sync: &mut bool,
+        width: f32,
+    ) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let is_layout = step_key.trim().starts_with("layout:");
+            let mut current_mode = if is_layout { 1 } else { 0 };
+
+            let mode_text = if current_mode == 1 {
+                Self::tr_lang(language, "Layout Preset", "Bố cục").to_owned()
+            } else {
+                Self::tr_lang(language, "Resize", "Resize").to_owned()
+            };
+
+            // ComboBox for Mode selection
+            let mode_id_salt = id_salt.with("mode");
+            egui::ComboBox::from_id_salt(mode_id_salt)
+                .width(width * 0.45)
+                .selected_text(mode_text)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(current_mode == 0, Self::tr_lang(language, "Resize", "Resize")).clicked() {
+                        if current_mode != 0 {
+                            // Change to Resize mode. Default to first window preset or empty
+                            *step_key = window_presets.first().map(|p| p.id.to_string()).unwrap_or_default();
+                            *live_sync = true;
+                        }
+                    }
+                    if ui.selectable_label(current_mode == 1, Self::tr_lang(language, "Layout Preset", "Bố cục")).clicked() {
+                        if current_mode != 1 {
+                            // Change to Layout mode. Default to layout:first_layout_id or empty layout:
+                            *step_key = window_layouts.first().map(|l| format!("layout:{}", l.id)).unwrap_or_else(|| "layout:".to_string());
+                            *live_sync = true;
+                        }
+                    }
+                });
+
+            // ComboBox for Preset selection
+            let preset_id_salt = id_salt.with("preset");
+            if current_mode == 1 {
+                // Layout preset
+                let layout_id_str = step_key.trim().strip_prefix("layout:").unwrap_or("").trim();
+                let selected_id = layout_id_str.parse::<u32>().ok();
+                let selected_label = selected_id
+                    .and_then(|id| {
+                        window_layouts
+                            .iter()
+                            .find(|l| l.id == id)
+                            .map(|l| l.name.clone())
+                    })
+                    .unwrap_or_else(|| Self::tr_lang(language, "Select layout", "Chọn bố cục").to_owned());
+
+                egui::ComboBox::from_id_salt(preset_id_salt)
+                    .width(width * 0.55)
+                    .selected_text(selected_label)
+                    .show_ui(ui, |ui| {
+                        for layout_option in window_layouts {
+                            if ui
+                                .selectable_label(selected_id == Some(layout_option.id), &layout_option.name)
+                                .clicked()
+                            {
+                                *step_key = format!("layout:{}", layout_option.id);
+                                *live_sync = true;
+                            }
+                        }
+                    });
+            } else {
+                // Resize (Window preset)
+                let selected_id = step_key.trim().parse::<u32>().ok();
+                let selected_label = selected_id
+                    .and_then(|id| {
+                        window_presets
+                            .iter()
+                            .find(|preset| preset.id == id)
+                            .map(|preset| preset.name.clone())
+                    })
+                    .unwrap_or_else(|| Self::tr_lang(language, "Select window", "Chọn cửa sổ").to_owned());
+
+                egui::ComboBox::from_id_salt(preset_id_salt)
+                    .width(width * 0.55)
+                    .selected_text(selected_label)
+                    .show_ui(ui, |ui| {
+                        for preset_option in window_presets {
+                            if ui
+                                .selectable_label(selected_id == Some(preset_option.id), &preset_option.name)
+                                .clicked()
+                            {
+                                *step_key = preset_option.id.to_string();
+                                *live_sync = true;
+                            }
+                        }
+                    });
+            }
+        });
+    }
+
     fn clear_macro_action_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let active_mouse_click_popup_key_id =
@@ -2327,6 +2429,8 @@ impl CrosshairApp {
 
     pub(crate) fn render_macro_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
+        let window_presets = self.state.window_presets.clone();
+        let window_layouts = self.state.window_layouts.clone();
         if self.sanitize_legacy_macro_ocr_target_texts() {
             self.sync_macro_presets();
             self.persist();
@@ -5154,32 +5258,17 @@ impl CrosshairApp {
                                                 Self::macro_action_supports_capture(step.action);
                                             if action_uses_key {
                                                 if step.action == MacroAction::ApplyWindowPreset {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .window_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            Self::tr_lang(language, "Select window", "Chọn cửa sổ").to_owned()
-                                                        });
-                                                    egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-window-preset"))
-                                                        .width(160.0)
-                                                        .selected_text(selected_label)
-                                                        .show_ui(ui, |ui| {
-                                                            for preset_option in &self.state.window_presets {
-                                                                if ui
-                                                                    .selectable_label(selected_id == Some(preset_option.id), &preset_option.name)
-                                                                    .clicked()
-                                                                {
-                                                                    step.key = preset_option.id.to_string();
-                                                                    live_sync = true;
-                                                                }
-                                                            }
-                                                        });
+                                                    let id_salt = ui.make_persistent_id((group.id, preset.id, "hold-stop-window-preset"));
+                                                    Self::render_window_control_step_comboboxes(
+                                                        &window_presets,
+                                                        &window_layouts,
+                                                        ui,
+                                                        language,
+                                                        id_salt,
+                                                        &mut step.key,
+                                                        &mut live_sync,
+                                                        160.0,
+                                                    );
                                                 } else if step.action == MacroAction::FocusWindowPreset {
                                                     let mut selected_window = if step.key.trim().is_empty() {
                                                         None
@@ -8253,34 +8342,18 @@ impl CrosshairApp {
                                                 Self::macro_action_supports_capture(step.action);
                                             if action_uses_key {
                                                  if step.action == MacroAction::ApplyWindowPreset {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .window_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select window", "Chọn cửa sổ").to_owned());
-                                                    egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "window-preset-step"))
-                                                        .width(146.0)
-                                                        .selected_text(selected_label)
-                                                        .show_ui(ui, |ui| {
-                                                            for preset_option in &self.state.window_presets {
-                                                                if ui
-                                                                    .selectable_label(
-                                                                        selected_id == Some(preset_option.id),
-                                                                        &preset_option.name,
-                                                                    )
-                                                                    .clicked()
-                                                                {
-                                                                    step.key = preset_option.id.to_string();
-                                                                    live_sync = true;
-                                                                }
-                                                            }
-                                                        });
-                                                } else if step.action == MacroAction::FocusWindowPreset {
+                                                     let id_salt = ui.make_persistent_id((group.id, preset.id, step_index, "window-preset-step"));
+                                                     Self::render_window_control_step_comboboxes(
+                                                         &window_presets,
+                                                         &window_layouts,
+                                                         ui,
+                                                         language,
+                                                         id_salt,
+                                                         &mut step.key,
+                                                         &mut live_sync,
+                                                         146.0,
+                                                     );
+                                                 } else if step.action == MacroAction::FocusWindowPreset {
                                                     let mut selected_window = if step.key.trim().is_empty() {
                                                         None
                                                     } else {

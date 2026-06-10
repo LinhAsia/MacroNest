@@ -4114,7 +4114,7 @@ impl CrosshairApp {
             MacroAction::KeyUp => "KeyUp",
             MacroAction::Wait => "Wait",
             MacroAction::TypeText => "TypeText",
-            MacroAction::ApplyWindowPreset => "ResizeWindow",
+            MacroAction::ApplyWindowPreset => "Window Control",
             MacroAction::FocusWindowPreset => "FocusWindow",
             MacroAction::TriggerMacroPreset => "TriggerMacro",
             MacroAction::TriggerCommandPreset => "TriggerCommand",
@@ -4194,7 +4194,7 @@ impl CrosshairApp {
                 }
                 MacroAction::TypeText => "Nhập chuỗi văn bản từ ô nhập liệu.",
                 MacroAction::ApplyWindowPreset => {
-                    "Thay đổi kích thước và vị trí cửa sổ bằng preset đã chọn."
+                    "Thay đổi kích thước hoặc áp dụng bố cục cửa sổ."
                 }
                 MacroAction::FocusWindowPreset => {
                     "Đưa cửa sổ lên phía trước bằng preset focus đã chọn."
@@ -4316,7 +4316,7 @@ impl CrosshairApp {
                 MacroAction::Wait => "Wait for the number of milliseconds in Delay, then continue.",
                 MacroAction::TypeText => "Type the whole text from the Input field.",
                 MacroAction::ApplyWindowPreset => {
-                    "Resize and reposition window using the selected preset."
+                    "Resize or apply window layout preset."
                 }
                 MacroAction::FocusWindowPreset => {
                     "Bring one window forward with the selected focus preset."
@@ -4525,7 +4525,7 @@ impl CrosshairApp {
                 MacroAction::KeyUp => "Nhả",
                 MacroAction::Wait => "Chờ",
                 MacroAction::TypeText => "Chữ",
-                MacroAction::ApplyWindowPreset => "Resize cửa sổ",
+                MacroAction::ApplyWindowPreset => "Điều khiển cửa sổ",
                 MacroAction::FocusWindowPreset => "Cửa sổ",
                 MacroAction::TriggerMacroPreset => "Macro",
                 MacroAction::TriggerCommandPreset => "Câu lệnh",
@@ -4595,7 +4595,7 @@ impl CrosshairApp {
                 MacroAction::KeyUp => "KEY Up",
                 MacroAction::Wait => "Wait",
                 MacroAction::TypeText => "Text",
-                MacroAction::ApplyWindowPreset => "Resize",
+                MacroAction::ApplyWindowPreset => "Window Control",
                 MacroAction::FocusWindowPreset => "Focus",
                 MacroAction::TriggerMacroPreset => "Macro",
                 MacroAction::TriggerCommandPreset => "Cmd",
@@ -4668,7 +4668,7 @@ impl CrosshairApp {
                 MacroAction::KeyUp => "KEY Up",
                 MacroAction::Wait => "Wait",
                 MacroAction::TypeText => "Text",
-                MacroAction::ApplyWindowPreset => "Resize",
+                MacroAction::ApplyWindowPreset => "Window Control",
                 MacroAction::FocusWindowPreset => "Focus",
                 MacroAction::TriggerMacroPreset => "Macro",
                 MacroAction::TriggerCommandPreset => "Cmd",
@@ -7314,46 +7314,8 @@ impl CrosshairApp {
         )
     }
 
-    fn capture_request_registers_on_press(&self, target: &CaptureRequest) -> bool {
-        match target {
-            CaptureRequest::MacroPresetHoldStopInput(group_id, preset_id) => self
-                .state
-                .macro_groups
-                .iter()
-                .find(|group| group.id == *group_id)
-                .and_then(|group| group.presets.iter().find(|preset| preset.id == *preset_id))
-                .is_some_and(|preset| {
-                    matches!(
-                        preset.hold_stop_step.action,
-                        MacroAction::LockKeys | MacroAction::UnlockKeys
-                    ) || (preset.hold_stop_step.action == MacroAction::StopIfKeyPressed
-                        && preset.hold_stop_step.get_break_loop_mode() == "StopKey")
-                }),
-            CaptureRequest::MacroStepInput {
-                group_id,
-                preset_id,
-                step_index,
-                extra_cond_index,
-            } => {
-                if extra_cond_index.is_some() {
-                    return false;
-                }
-                self.state
-                    .macro_groups
-                    .iter()
-                    .find(|group| group.id == *group_id)
-                    .and_then(|group| {
-                        group.presets.iter().find(|preset| preset.id == *preset_id)
-                    })
-                    .and_then(|preset| preset.steps.get(*step_index))
-                    .is_some_and(|step| {
-                        matches!(step.action, MacroAction::LockKeys | MacroAction::UnlockKeys)
-                            || (step.action == MacroAction::StopIfKeyPressed
-                                && step.get_break_loop_mode() == "StopKey")
-                    })
-            }
-            _ => false,
-        }
+    fn capture_request_registers_on_press(&self, _target: &CaptureRequest) -> bool {
+        true
     }
 
     fn split_key_list(value: &str) -> Vec<String> {
