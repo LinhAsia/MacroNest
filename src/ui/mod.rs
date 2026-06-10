@@ -824,6 +824,7 @@ pub struct CrosshairApp {
     mouse_input_interception_open: bool,
     window_layout_tab: usize,
     selected_layout_cell: Option<(u32, usize, usize)>,
+    drag_start_layout_cell: Option<(u32, usize, usize)>,
 }
 
 impl CrosshairApp {
@@ -1052,6 +1053,7 @@ impl CrosshairApp {
             mouse_input_interception_open: false,
             window_layout_tab: 0,
             selected_layout_cell: None,
+            drag_start_layout_cell: None,
             panel_warmup_target: Some(initial_active_panel),
             panel_warmup_frames_remaining: 1,
             warmed_panels: Vec::new(),

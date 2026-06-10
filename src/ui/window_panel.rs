@@ -2194,10 +2194,8 @@ impl CrosshairApp {
         layout.rows = rows;
         layout.cols = cols;
 
-        if layout.row_ratios.len() < rows {
-            layout.row_ratios.resize(rows, 1.0);
-        } else if layout.row_ratios.len() > rows {
-            layout.row_ratios.truncate(rows);
+        if layout.row_ratios.len() != rows {
+            layout.row_ratios = vec![1.0; rows];
         }
         for val in &mut layout.row_ratios {
             if *val <= 0.0 {
@@ -2205,10 +2203,8 @@ impl CrosshairApp {
             }
         }
 
-        if layout.col_ratios.len() < cols {
-            layout.col_ratios.resize(cols, 1.0);
-        } else if layout.col_ratios.len() > cols {
-            layout.col_ratios.truncate(cols);
+        if layout.col_ratios.len() != cols {
+            layout.col_ratios = vec![1.0; cols];
         }
         for val in &mut layout.col_ratios {
             if *val <= 0.0 {
@@ -2559,12 +2555,37 @@ impl CrosshairApp {
                             
                             let (rect, _response) = ui.allocate_exact_size(vec2(preview_w, preview_h), egui::Sense::hover());
                             
+                            let mut hovered_row_col = None;
+                            for cell in &layout.cells {
+                                if cell.row >= layout.rows || cell.col >= layout.cols {
+                                    continue;
+                                }
+                                let end_row = (cell.row + cell.row_span).min(layout.rows);
+                                let end_col = (cell.col + cell.col_span).min(layout.cols);
+                                
+                                let x1 = rect.min.x + col_starts[cell.col] * preview_w;
+                                let y1 = rect.min.y + row_starts[cell.row] * preview_h;
+                                let x2 = rect.min.x + col_starts[end_col] * preview_w;
+                                let y2 = rect.min.y + row_starts[end_row] * preview_h;
+                                
+                                let cell_rect = egui::Rect::from_min_max(
+                                    egui::pos2(x1, y1),
+                                    egui::pos2(x2, y2)
+                                ).shrink(2.0);
+                                
+                                if ui.rect_contains_pointer(cell_rect) {
+                                    hovered_row_col = Some((cell.row, cell.col));
+                                    break;
+                                }
+                            }
+                            
                             ui.painter().rect_filled(
                                 rect,
                                 4.0,
                                 ui.visuals().extreme_bg_color
                             );
                             
+                            let mut merge_action = None;
                             let cells_to_draw = layout.cells.clone();
                             for cell in &cells_to_draw {
                                 if cell.row >= layout.rows || cell.col >= layout.cols {
@@ -2586,15 +2607,61 @@ impl CrosshairApp {
                                 
                                 let is_selected = self.selected_layout_cell == Some((layout.id, cell.row, cell.col));
                                 
+                                let is_in_drag_merge_range = if let Some((start_layout_id, start_row, start_col)) = self.drag_start_layout_cell {
+                                    if start_layout_id == layout.id {
+                                        if let Some((hover_row, hover_col)) = hovered_row_col {
+                                            let cell_a_opt = layout.cells.iter().find(|c| c.row == start_row && c.col == start_col);
+                                            let cell_b_opt = layout.cells.iter().find(|c| c.row == hover_row && c.col == hover_col);
+                                            if let (Some(cell_a), Some(cell_b)) = (cell_a_opt, cell_b_opt) {
+                                                let r1 = cell_a.row.min(cell_b.row);
+                                                let c1 = cell_a.col.min(cell_b.col);
+                                                let r2 = (cell_a.row + cell_a.row_span - 1).max(cell_b.row + cell_b.row_span - 1);
+                                                let c2 = (cell_a.col + cell_a.col_span - 1).max(cell_b.col + cell_b.col_span - 1);
+                                                
+                                                cell.row >= r1 && cell.col >= c1 && (cell.row + cell.row_span - 1) <= r2 && (cell.col + cell.col_span - 1) <= c2
+                                            } else {
+                                                false
+                                            }
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
+                                
                                 let cell_id = ui.make_persistent_id((layout.id, "cell", cell.row, cell.col));
-                                let cell_resp = ui.interact(cell_rect, cell_id, egui::Sense::click());
+                                let cell_resp = ui.interact(cell_rect, cell_id, egui::Sense::click_and_drag());
+                                
+                                if cell_resp.drag_started() {
+                                    self.drag_start_layout_cell = Some((layout.id, cell.row, cell.col));
+                                }
+                                
+                                if cell_resp.drag_stopped() {
+                                    if let Some((start_layout_id, start_row, start_col)) = self.drag_start_layout_cell {
+                                        if start_layout_id == layout.id {
+                                            merge_action = Some((start_row, start_col));
+                                        }
+                                    }
+                                    self.drag_start_layout_cell = None;
+                                }
                                 
                                 if cell_resp.clicked() {
-                                    self.selected_layout_cell = Some((layout.id, cell.row, cell.col));
+                                    if self.selected_layout_cell == Some((layout.id, cell.row, cell.col)) {
+                                        self.selected_layout_cell = None;
+                                    } else {
+                                        self.selected_layout_cell = Some((layout.id, cell.row, cell.col));
+                                    }
                                 }
+                                
+                                cell_resp.surrender_focus();
                                 
                                 let fill_color = if is_selected {
                                     Color32::from_rgba_premultiplied(0, 120, 215, 80)
+                                } else if is_in_drag_merge_range {
+                                    Color32::from_rgba_premultiplied(0, 120, 215, 40)
                                 } else if cell_resp.hovered() {
                                     Color32::from_rgba_premultiplied(128, 128, 128, 40)
                                 } else {
@@ -2603,11 +2670,13 @@ impl CrosshairApp {
                                 
                                 let border_color = if is_selected {
                                     Color32::from_rgb(0, 120, 215)
+                                } else if is_in_drag_merge_range {
+                                    Color32::from_rgb(0, 150, 255)
                                 } else {
                                     ui.visuals().widgets.noninteractive.bg_stroke.color
                                 };
                                 
-                                let stroke_width = if is_selected { 2.0 } else { 1.0 };
+                                let stroke_width = if is_selected || is_in_drag_merge_range { 2.0 } else { 1.0 };
                                 
                                 ui.painter().rect(
                                     cell_rect,
@@ -2636,6 +2705,40 @@ impl CrosshairApp {
                                     egui::FontId::proportional(11.0),
                                     text_color
                                 );
+                            }
+                            
+                            if let Some((start_row, start_col)) = merge_action {
+                                if let Some((end_row, end_col)) = hovered_row_col {
+                                    if (start_row, start_col) != (end_row, end_col) {
+                                        let cell_a_opt = layout.cells.iter().find(|c| c.row == start_row && c.col == start_col).cloned();
+                                        let cell_b_opt = layout.cells.iter().find(|c| c.row == end_row && c.col == end_col).cloned();
+                                        if let (Some(cell_a), Some(cell_b)) = (cell_a_opt, cell_b_opt) {
+                                            let r1 = cell_a.row.min(cell_b.row);
+                                            let c1 = cell_a.col.min(cell_b.col);
+                                            let r2 = (cell_a.row + cell_a.row_span - 1).max(cell_b.row + cell_b.row_span - 1);
+                                            let c2 = (cell_a.col + cell_a.col_span - 1).max(cell_b.col + cell_b.col_span - 1);
+                                            
+                                            let new_cell = WindowLayoutCell {
+                                                row: r1,
+                                                col: c1,
+                                                row_span: r2 - r1 + 1,
+                                                col_span: c2 - c1 + 1,
+                                                target_window_title: cell_a.target_window_title.clone().or(cell_b.target_window_title.clone()),
+                                                extra_target_window_titles: if !cell_a.extra_target_window_titles.is_empty() {
+                                                    cell_a.extra_target_window_titles.clone()
+                                                } else {
+                                                    cell_b.extra_target_window_titles.clone()
+                                                },
+                                                match_duplicate_window_titles: cell_a.match_duplicate_window_titles || cell_b.match_duplicate_window_titles,
+                                            };
+                                            
+                                            layout.cells.insert(0, new_cell);
+                                            Self::sanitize_layout(layout);
+                                            live_sync = true;
+                                            self.selected_layout_cell = Some((layout.id, r1, c1));
+                                        }
+                                    }
+                                }
                             }
                         });
                         ui.end_row();
