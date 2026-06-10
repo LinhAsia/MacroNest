@@ -3547,7 +3547,18 @@ impl CrosshairApp {
             ));
         }
         let total_render_items = render_items.len();
-        let lazy_render_limit = self.macro_panel_render_limit.min(total_render_items);
+        let mut lazy_render_limit = self.macro_panel_render_limit.min(total_render_items);
+        if let Some(target_id) = pending_macro_group_scroll_target {
+            if let Some(pos) = render_items.iter().position(|item| match item {
+                RenderItem::MacroGroup(index) => self.state.macro_groups[*index].id == target_id,
+                _ => false,
+            }) {
+                if pos >= lazy_render_limit {
+                    lazy_render_limit = (pos + 1).min(total_render_items);
+                    self.macro_panel_render_limit = lazy_render_limit;
+                }
+            }
+        }
         let lazy_render_active = lazy_render_limit < total_render_items;
         let mut toggle_collapsed_folder_id: Option<u32> = None;
         let mut add_group_to_folder_id: Option<u32> = None;
@@ -11185,7 +11196,7 @@ impl CrosshairApp {
                                  if has_hover_support {
                                      if is_row_hovered {
                                          if !hover_regions.is_empty() {
-                                             hovered_region = Some(hover_regions);
+                                             hovered_region = Some((hover_regions, (preset.id, step_index)));
                                          }
                                      }
                                  }
@@ -11217,52 +11228,16 @@ impl CrosshairApp {
                             }
                             {
                                 let mut hook_state = crate::overlay::HOOK_STATE.lock();
-                                if let Some(regions) = hovered_region {
+                                if let Some((regions, source)) = hovered_region {
                                     if !regions.is_empty() {
                                         hook_state.vision_capture_preview_regions = regions;
+                                        hook_state.vision_preview_source = Some(source);
                                     }
                                 } else {
-                                    if !hook_state.vision_capture_preview_regions.is_empty() {
-                                        let mut matches_any_step = false;
-                                        for s in &preset.steps {
-                                            if !s.enabled {
-                                                continue;
-                                            }
-                                            let matches_this = match s.action {
-                                                MacroAction::OcrSearch => {
-                                                    hook_state.vision_capture_preview_regions.iter().any(|r| r.left == s.x && r.top == s.y)
-                                                }
-                                                MacroAction::StartVisionSearch | MacroAction::ScanVisionOnce | MacroAction::StopVision => {
-                                                    if let Some(p) = self.state.vision_presets.iter().find(|p| p.id.to_string() == s.key.trim()) {
-                                                        hook_state.vision_capture_preview_regions.iter().any(|r| r.left == p.search_region_screen_x.unwrap_or(0))
-                                                    } else {
-                                                        false
-                                                    }
-                                                }
-                                                MacroAction::EnablePinPreset | MacroAction::DisablePin => {
-                                                    if let Some(p) = s.key.trim().parse::<u32>().ok().and_then(|pid| self.state.pin_presets.iter().find(|p| p.id == pid)) {
-                                                        hook_state.vision_capture_preview_regions.iter().any(|r| r.left == p.x || r.left == p.source_x)
-                                                    } else {
-                                                        false
-                                                    }
-                                                }
-                                                MacroAction::ApplyWindowPreset => {
-                                                    if let Some(p) = s.key.trim().parse::<u32>().ok().and_then(|pid| self.state.window_presets.iter().find(|p| p.id == pid)) {
-                                                        hook_state.vision_capture_preview_regions.iter().any(|r| r.width == p.width.max(10))
-                                                    } else {
-                                                        false
-                                                    }
-                                                }
-                                                _ => false,
-                                            };
-                                            if matches_this {
-                                                matches_any_step = true;
-                                                break;
-                                            }
-                                        }
-                                        if matches_any_step {
-                                            hook_state.vision_capture_preview_regions.clear();
-                                        }
+                                    let matches_this_preset = hook_state.vision_preview_source.map_or(false, |(pid, _)| pid == preset.id);
+                                    if matches_this_preset {
+                                        hook_state.vision_capture_preview_regions.clear();
+                                        hook_state.vision_preview_source = None;
                                     }
                                 }
                             }
@@ -11987,22 +11962,13 @@ impl CrosshairApp {
         ui.add_space((macro_panel_scroll_height - 50.0).max(0.0));
         if let Some(group_scroll_rect) = pending_macro_group_scroll_rect {
             ui.scroll_to_rect(group_scroll_rect, Some(egui::Align::Center));
-            let centered = (group_scroll_rect.center().y - viewport.center().y).abs() <= 6.0;
-            let user_is_scrolling = ui.input(|i| i.raw_scroll_delta.y != 0.0);
-            scroll_frames += 1;
-            ui.ctx().data_mut(|data| data.insert_temp(scroll_frames_key, scroll_frames));
-            
-            let scroll_timed_out = scroll_frames >= 3 || user_is_scrolling;
-            pending_macro_group_scroll_consumed = centered || scroll_timed_out;
-            
-            if pending_macro_group_scroll_consumed {
-                ui.ctx().data_mut(|data| {
-                    data.remove_temp::<u32>(scroll_target_key);
-                    data.remove_temp::<usize>(scroll_frames_key);
-                });
-            } else {
-                ui.ctx().request_repaint();
-            }
+            pending_macro_group_scroll_consumed = true;
+            ui.ctx().data_mut(|data| {
+                data.remove_temp::<u32>(scroll_target_key);
+                data.remove_temp::<usize>(scroll_frames_key);
+            });
+        } else if pending_macro_group_scroll_target.is_some() {
+            pending_macro_group_scroll_consumed = true;
         }
         if !pending_macro_group_scroll_consumed {
             if self.pending_macro_group_scroll_target.is_none() {
