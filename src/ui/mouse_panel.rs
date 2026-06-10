@@ -93,300 +93,18 @@ impl CrosshairApp {
         ui.add_space(2.0);
         let language = self.state.ui_language;
 
+        // --- Declarations ---
+
+        ui.add_space(2.0);
+        let language = self.state.ui_language;
+
         let mut remove_mouse_sensitivity_id = None;
         let mut next_mouse_sensitivity_capture_target = None;
         let mut cancel_active_capture_sensitivity = false;
         let mut mouse_sensitivity_live_sync = false;
 
-        ui.horizontal(|ui| {
-            if ui
-                .button(self.tr("+ Add sensitivity preset", "+ Thêm preset độ nhạy"))
-                .clicked()
-            {
-                self.add_mouse_sensitivity_preset();
-                self.persist_mouse_sensitivity_presets();
-            }
-
-            if ui
-                .button(self.tr("+ Add path preset", "+ Thêm preset đường chuột"))
-                .clicked()
-            {
-                self.add_mouse_path_preset();
-                self.persist_mouse_path_presets();
-            }
-
-            if let Some(active_id) = self.active_mouse_record_preset_id {
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new(match language {
-                        UiLanguage::Vietnamese => format!("Đang ghi preset #{active_id}"),
-                        _ => format!("Recording preset #{active_id}"),
-                    })
-                    .strong()
-                    .color(Color32::from_rgb(255, 96, 96)),
-                );
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if let Some(current) = Self::current_mouse_speed() {
-                    ui.label(
-                        RichText::new(format!(
-                            "{} {}",
-                            Self::tr_lang(language, "Current sensitivity:", "Độ nhạy hiện tại:"),
-                            current
-                        ))
-                        .strong()
-                        .color(Color32::from_rgb(96, 172, 224)),
-                    );
-                    ui.add_space(14.0);
-                }
-
-                mouse_sensitivity_live_sync |= ui
-                    .add(
-                        DragValue::new(&mut self.state.mouse_sensitivity_restore_speed)
-                            .range(1..=20),
-                    )
-                    .changed();
-                ui.label(Self::tr_lang(language, "Speed", "Tốc độ"));
-
-                mouse_sensitivity_live_sync |= ui
-                    .checkbox(&mut self.state.mouse_sensitivity_restore_on_exit, "")
-                    .changed();
-                ui.label(
-                    RichText::new(Self::tr_lang(
-                        language,
-                        "Restore sensitivity on exit",
-                        "Khôi phục độ nhạy khi tắt app",
-                    ))
-                    .strong(),
-                );
-            });
-        });
-
-        ui.add_space(16.0);
-        ui.label(
-            RichText::new(Self::tr_lang(language, "Sensitivity", "Độ nhạy"))
-                .strong()
-                .size(14.0),
-        );
-        ui.add_space(4.0);
-
-        for index in 0..self.state.mouse_sensitivity_presets.len() {
-            let active_capture_target = self.capture_target.clone();
-            let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
-            ui.add_space(6.0);
-            let preset = &mut self.state.mouse_sensitivity_presets[index];
-            preset.target_window_title = None;
-            preset.extra_target_window_titles.clear();
-            preset.enabled = preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
-            Self::show_preset_card(ui, preset.enabled, |ui| {
-                ui.horizontal(|ui| {
-                    let mut disabled_by_button = false;
-                    let name_width = Self::preset_header_name_width(ui);
-                    let response =
-                        ui.add_sized([name_width, 21.0], TextEdit::singleline(&mut preset.name));
-                    Self::apply_vietnamese_input_if_changed(
-                        &response,
-                        self.state.vietnamese_input_enabled,
-                        self.state.vietnamese_input_mode,
-                        &mut preset.name,
-                    );
-                    mouse_sensitivity_live_sync |= response.changed();
-
-                    let capture_target = CaptureRequest::MouseSensitivityPresetHotkey(preset.id);
-                    mouse_sensitivity_live_sync |= Self::render_preset_trigger_chips(
-                        ui,
-                        language,
-                        &mut preset.hotkey,
-                        &mut preset.trigger_keys,
-                        active_capture_target.as_ref(),
-                        &capture_target,
-                        pending_combo_keys.as_ref(),
-                    );
-                    preset.enabled =
-                        preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
-
-                    if Self::sound_style_toggle_button(
-                        ui,
-                        Self::tr_lang(language, "Apply", "Áp dụng"),
-                    )
-                    .clicked()
-                    {
-                        let _ = self
-                            .overlay_tx
-                            .send(OverlayCommand::ApplyMouseSensitivityPreset(preset.id));
-                    }
-                    if Self::sound_style_toggle_button(
-                        ui,
-                        Self::tr_lang(language, "Restore", "Khôi phục"),
-                    )
-                    .clicked()
-                    {
-                        let _ = self
-                            .overlay_tx
-                            .send(OverlayCommand::RestoreMouseSensitivity);
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let capture_active =
-                            active_capture_target.as_ref() == Some(&capture_target);
-                        let capture_time = ui.ctx().input(|input| input.time) as f32;
-                        let pulse = if capture_active {
-                            0.5 + 0.5 * (capture_time * 6.0).sin().abs()
-                        } else {
-                            0.0
-                        };
-                        let has_keys =
-                            preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
-                        let fill = if capture_active {
-                            Color32::from_rgba_premultiplied(
-                                (88.0 + pulse * 28.0) as u8,
-                                (84.0 + pulse * 28.0) as u8,
-                                (44.0 + pulse * 10.0) as u8,
-                                255,
-                            )
-                        } else if has_keys {
-                            Color32::from_rgba_premultiplied(72, 156, 116, 120)
-                        } else {
-                            ui.visuals().faint_bg_color
-                        };
-                        let stroke = if capture_active {
-                            Color32::from_rgb(255, 232, 96)
-                        } else if has_keys {
-                            Color32::from_rgb(126, 224, 182)
-                        } else {
-                            ui.visuals().widgets.noninteractive.bg_stroke.color
-                        };
-
-                        let hover_text = if capture_active {
-                            Self::tr_lang(
-                                language,
-                                "Capturing... Press any key.",
-                                "Đang ghi... Nhấn một phím bất kỳ.",
-                            )
-                            .to_string()
-                        } else if has_keys {
-                            let bindings_labels: Vec<String> =
-                                Self::preset_trigger_bindings(&preset.hotkey, &preset.trigger_keys)
-                                    .iter()
-                                    .map(|b| hotkey::format_binding(Some(b)))
-                                    .collect();
-                            format!(
-                                "{} {}\n{}",
-                                Self::tr_lang(language, "Hotkey:", "Phím tắt:"),
-                                bindings_labels.join(", "),
-                                Self::tr_lang(
-                                    language,
-                                    "Left click: rebind | Right click: clear",
-                                    "Chuột trái: đổi phím | Chuột phải: xóa phím"
-                                )
-                            )
-                        } else {
-                            Self::tr_lang(
-                                language,
-                                "Left click: bind hotkey",
-                                "Chuột trái: gán phím tắt",
-                            )
-                            .to_string()
-                        };
-
-                        let btn_text = if capture_active {
-                            RichText::new(Self::tr_lang(language, "Capturing...", "Đang bắt..."))
-                                .strong()
-                                .color(Color32::from_rgb(255, 232, 96))
-                        } else {
-                            Self::material_icon_text(0xe312, 18.0)
-                        };
-                        let btn_width = if capture_active { 84.0 } else { 36.0 };
-                        let btn_response = ui
-                            .add_sized(
-                                [btn_width, 24.0],
-                                Button::new(btn_text)
-                                    .fill(fill)
-                                    .stroke(egui::Stroke::new(1.0, stroke)),
-                            )
-                            .on_hover_text(hover_text);
-
-                        if btn_response.clicked() {
-                            if capture_active {
-                                cancel_active_capture_sensitivity = true;
-                            } else {
-                                next_mouse_sensitivity_capture_target = Some((
-                                    capture_target,
-                                    match language {
-                                        UiLanguage::Vietnamese => {
-                                            format!("Đang bật phím tắt cho {}.", preset.name)
-                                        }
-                                        _ => format!("Capturing hotkey for {}.", preset.name),
-                                    },
-                                ));
-                            }
-                        }
-                        if btn_response.secondary_clicked() {
-                            preset.hotkey = None;
-                            preset.trigger_keys.clear();
-                            preset.enabled = false;
-                            disabled_by_button = true;
-                            mouse_sensitivity_live_sync = true;
-                        }
-
-                        if Self::sound_style_remove_button(ui).clicked() {
-                            remove_mouse_sensitivity_id = Some(preset.id);
-                        }
-                        if Self::sound_style_toggle_button(
-                            ui,
-                            if preset.collapsed {
-                                Self::tr_lang(language, "Show", "Hiện")
-                            } else {
-                                Self::tr_lang(language, "Hide", "Hide")
-                            },
-                        )
-                        .clicked()
-                        {
-                            preset.collapsed = !preset.collapsed;
-                            mouse_sensitivity_live_sync = true;
-                        }
-                    });
-                    if disabled_by_button {
-                        let _ = self
-                            .overlay_tx
-                            .send(OverlayCommand::RestoreMouseSensitivity);
-                    }
-                });
-                if preset.collapsed {
-                    return;
-                }
-                egui::Grid::new((preset.id, "mouse-sensitivity-grid"))
-                    .num_columns(2)
-                    .spacing([14.0, 8.0])
-                    .show(ui, |ui| {
-                        ui.label(Self::tr_lang(language, "Speed", "Tốc độ chuột"));
-                        mouse_sensitivity_live_sync |= ui
-                            .add(Slider::new(&mut preset.speed, 1..=20).show_value(true))
-                            .changed();
-                        ui.end_row();
-                    });
-            });
-        }
-
-        if let Some(remove_mouse_sensitivity_id) = remove_mouse_sensitivity_id {
-            self.state
-                .mouse_sensitivity_presets
-                .retain(|preset| preset.id != remove_mouse_sensitivity_id);
-            mouse_sensitivity_live_sync = true;
-        }
-        if let Some((target, status)) = next_mouse_sensitivity_capture_target {
-            self.begin_capture(target, status);
-        }
-        if mouse_sensitivity_live_sync {
-            self.persist_mouse_sensitivity_presets();
-            self.sync_mouse_sensitivity_settings();
-            self.persist();
-        }
-        if cancel_active_capture_sensitivity {
-            self.cancel_capture();
-        }
-
-        let mut remove_id = None;
+        
+let mut remove_id = None;
         let mut next_capture_target = None;
         let mut live_sync = false;
         let mut cancel_active_capture = false;
@@ -402,273 +120,9 @@ impl CrosshairApp {
         let mut split_mouse_path_request: Option<(u32, u64)> = None;
         let mut merge_mouse_path_request: Option<(u32, u32)> = None;
 
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(Self::tr_lang(language, "Mouse Path", "Đường dẫn chuột")).strong(),
-            );
-        });
-
-        for index in 0..self.state.mouse_path_presets.len() {
-            let active_capture_target = self.capture_target.clone();
-            let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
-            ui.add_space(6.0);
-            let preset = &mut self.state.mouse_path_presets[index];
-            if self.mouse_path_timeline_initialized.insert(preset.id) {
-                Self::reset_mouse_path_timeline_state(ui.ctx(), preset.id, &preset.events);
-            }
-            Self::show_preset_card(ui, false, |ui| {
-                ui.horizontal(|ui| {
-                    let name_width = Self::preset_header_name_width(ui);
-                    let response =
-                        ui.add_sized([name_width, 21.0], TextEdit::singleline(&mut preset.name));
-                    Self::apply_vietnamese_input_if_changed(
-                        &response,
-                        self.state.vietnamese_input_enabled,
-                        self.state.vietnamese_input_mode,
-                        &mut preset.name,
-                    );
-                    live_sync |= response.changed();
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if Self::sound_style_remove_button(ui).clicked() {
-                            remove_id = Some(preset.id);
-                        }
-                        if Self::sound_style_toggle_button(
-                            ui,
-                            if preset.collapsed {
-                                Self::tr_lang(language, "Show", "Hiện")
-                            } else {
-                                Self::tr_lang(language, "Hide", "Hide")
-                            },
-                        )
-                        .clicked()
-                        {
-                            preset.collapsed = !preset.collapsed;
-                            live_sync = true;
-                        }
-                    });
-                });
-                if preset.collapsed {
-                    return;
-                }
-                egui::Grid::new((preset.id, "mouse-path-grid"))
-                    .num_columns(2)
-                    .spacing([14.0, 8.0])
-                    .show(ui, |ui| {
-                        ui.label(Self::tr_lang(language, "Record Hotkey", "Record Hotkey"));
-                        ui.horizontal_wrapped(|ui| {
-                            let capture_target = CaptureRequest::MousePathRecordHotkey(preset.id);
-                            let (begin_capture, cancel_capture) =
-                                Self::render_hotkey_capture_control(
-                                    ui,
-                                    language,
-                                    &mut preset.record_hotkey,
-                                    &capture_target,
-                                    active_capture_target.as_ref(),
-                                    pending_combo_keys.as_ref(),
-                                    &mut live_sync,
-                                );
-                            if begin_capture {
-                                next_capture_target = Some((
-                                    capture_target,
-                                    match language {
-                                        UiLanguage::Vietnamese => {
-                                            format!("Đang bật phím tắt ghi cho {}.", preset.name)
-                                        }
-                                        _ => {
-                                            format!("Capturing record hotkey for {}.", preset.name)
-                                        }
-                                    },
-                                ));
-                            }
-                            if cancel_capture {
-                                cancel_active_capture = true;
-                            }
-                        });
-                        ui.end_row();
-
-                        if self.active_mouse_record_preset_id == Some(preset.id) {
-                            ui.label("");
-                            ui.label(
-                                RichText::new(Self::tr_lang(
-                                    language,
-                                    "Recording via hotkey...",
-                                    "Đang ghi bằng phím tắt...",
-                                ))
-                                .color(Color32::from_rgb(255, 96, 96))
-                                .strong(),
-                            );
-                            ui.end_row();
-                        }
-
-                        ui.label("");
-                        ui.horizontal_wrapped(|ui| {
-                            live_sync |= ui
-                                .checkbox(
-                                    &mut preset.replay_relative_motion,
-                                    Self::tr_lang(
-                                        language,
-                                        "Relative motion",
-                                        "Di chuyển tương đối",
-                                    ),
-                                )
-                                .changed();
-                        });
-                        ui.end_row();
-                    });
-                ui.add_space(6.0);
-                let preview_events = Self::preview_mouse_path_events(
-                    ui.ctx(),
-                    preset.id,
-                    &preset.events,
-                );
-                Self::render_mouse_path_preview(ui, language, &preview_events, 240.0);
-                ui.add_space(8.0);
-                let preset_hovered = ui.rect_contains_pointer(ui.min_rect());
-                let timeline_outcome = Self::render_mouse_path_timeline_editor(
-                    ui,
-                    language,
-                    preset.id,
-                    &preset.events,
-                    &mouse_path_options,
-                    &mut mouse_path_timeline_zoom,
-                    preset_hovered,
-                    self.mouse_path_merge_selection
-                        .get(&preset.id)
-                        .copied()
-                        .unwrap_or(0),
-                );
-                if timeline_outcome.selected_merge_source == 0 {
-                    self.mouse_path_merge_selection.remove(&preset.id);
-                } else {
-                    self.mouse_path_merge_selection
-                        .insert(preset.id, timeline_outcome.selected_merge_source);
-                }
-                if let Some(events) = timeline_outcome.preview_selection {
-                    preview_mouse_path_selection =
-                        Some((preset.id, events, timeline_outcome.preview_from_ms));
-                }
-                if timeline_outcome.sync_preview
-                    && self.mouse_path_step_preview_preset_id == Some(preset.id)
-                {
-                    let preview_events =
-                        Self::preview_mouse_path_events(ui.ctx(), preset.id, &preset.events);
-                    let preview_from_ms =
-                        Self::mouse_path_preview_from_ms(ui.ctx(), preset.id, &preset.events);
-                    preview_mouse_path_selection =
-                        Some((preset.id, preview_events, Some(preview_from_ms)));
-                }
-                if let Some((start_ms, end_ms)) = timeline_outcome.trim_range {
-                    trim_mouse_path_request = Some((preset.id, start_ms, end_ms));
-                }
-                if let Some(split_at_ms) = timeline_outcome.split_at_ms {
-                    split_mouse_path_request = Some((preset.id, split_at_ms));
-                }
-                if let Some(source_id) = timeline_outcome.merge_source_id {
-                    merge_mouse_path_request = Some((preset.id, source_id));
-                }
-            });
-        }
-        self.trim_timeline_zoom = mouse_path_timeline_zoom;
-
-        if let Some((preset_id, events, preview_from_ms)) = preview_mouse_path_selection {
-            let has_move = events
-                .iter()
-                .any(|event| matches!(event.kind, MousePathEventKind::Move));
-            self.mouse_path_step_preview_preset_id = has_move.then_some(preset_id);
-            let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(if has_move {
-                Some((preset_id, events, preview_from_ms))
-            } else {
-                None
-            }));
-            crate::overlay::wake_command_queue();
-        }
-        if let Some((preset_id, start_ms, end_ms)) = trim_mouse_path_request {
-            if let Some(preset) = self
-                .state
-                .mouse_path_presets
-                .iter_mut()
-                .find(|preset| preset.id == preset_id)
-            {
-                preset.events = Self::slice_mouse_path_events(&preset.events, start_ms, end_ms);
-                Self::reset_mouse_path_timeline_state(ui.ctx(), preset_id, &preset.events);
-                if self.mouse_path_step_preview_preset_id == Some(preset_id) {
-                    let has_move = preset
-                        .events
-                        .iter()
-                        .any(|event| matches!(event.kind, MousePathEventKind::Move));
-                    if has_move {
-                        let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(Some((
-                            preset_id,
-                            preset.events.clone(),
-                            Some(0),
-                        ))));
-                    } else {
-                        self.mouse_path_step_preview_preset_id = None;
-                        let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
-                    }
-                    crate::overlay::wake_command_queue();
-                }
-                live_sync = true;
-            }
-        }
-        if let Some((preset_id, split_at_ms)) = split_mouse_path_request {
-            if self.split_mouse_path_preset(preset_id, split_at_ms) {
-                self.mouse_path_merge_selection.remove(&preset_id);
-                if let Some(preset) = self
-                    .state
-                    .mouse_path_presets
-                    .iter()
-                    .find(|preset| preset.id == preset_id)
-                {
-                    Self::reset_mouse_path_timeline_state(ui.ctx(), preset_id, &preset.events);
-                }
-                live_sync = true;
-            }
-        }
-        if let Some((target_id, source_id)) = merge_mouse_path_request {
-            if self.merge_mouse_path_presets(target_id, source_id) {
-                self.mouse_path_merge_selection.remove(&target_id);
-                self.mouse_path_merge_selection.remove(&source_id);
-                live_sync = true;
-            }
-        }
-
-        if let Some(rem_id) = remove_id {
-            self.mouse_path_timeline_initialized.remove(&rem_id);
-            self.mouse_path_merge_selection.remove(&rem_id);
-            Self::clear_mouse_path_timeline_state(ui.ctx(), rem_id);
-            if self.mouse_path_step_preview_preset_id == Some(rem_id) {
-                self.mouse_path_step_preview_preset_id = None;
-                let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
-                crate::overlay::wake_command_queue();
-            }
-            if self.mouse_path_draw_capture_preset_id == Some(rem_id) {
-                self.mouse_path_draw_capture_preset_id = None;
-                self.restore_mouse_path_draw_capture_window(ui.ctx());
-            }
-            if self.active_mouse_record_preset_id == Some(rem_id) {
-                self.active_mouse_record_preset_id = None;
-            }
-            self.state
-                .mouse_path_presets
-                .retain(|preset| preset.id != rem_id);
-            if self.clear_mouse_path_step_references(rem_id) {
-                self.persist_macro_presets();
-            }
-            live_sync = true;
-        }
-        if let Some((target, status)) = next_capture_target {
-            self.begin_capture(target, status);
-        }
-        if cancel_active_capture {
-            self.cancel_capture();
-        }
-        if live_sync {
-            self.persist_mouse_path_presets();
-        }
-
-        // Poll background jobs
+        
+        // --- Poll Background Jobs & Setup Backend Variables ---
+// Poll background jobs
         if let Some(ref job) = self.arduino_download_job {
             if job.is_finished() {
                 let job = self.arduino_download_job.take();
@@ -779,7 +233,9 @@ impl CrosshairApp {
             arduino_open_port.clone()
         };
 
-        ui.add_space(10.0);
+        
+        // --- Mouse Input Backend (Sticky at the top) ---
+ui.add_space(10.0);
         ui.label(RichText::new(self.tr("Mouse Input Backend", "Che do chuot")).strong());
 
         let mut next_mode = selected_mode;
@@ -1165,11 +621,585 @@ impl CrosshairApp {
         });
         self.mouse_input_arduino_open = arduino_open;
 
-        if arduino_changed {
+        
+        // --- Separator ---
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(8.0);
+
+        // --- Scrollable Presets Section ---
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                // Sensitivity Presets
+ui.horizontal(|ui| {
+            if ui
+                .button(self.tr("+ Add sensitivity preset", "+ Thêm preset độ nhạy"))
+                .clicked()
+            {
+                self.add_mouse_sensitivity_preset();
+                self.persist_mouse_sensitivity_presets();
+            }
+
+            if ui
+                .button(self.tr("+ Add path preset", "+ Thêm preset đường chuột"))
+                .clicked()
+            {
+                self.add_mouse_path_preset();
+                self.persist_mouse_path_presets();
+            }
+
+            if let Some(active_id) = self.active_mouse_record_preset_id {
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(match language {
+                        UiLanguage::Vietnamese => format!("Đang ghi preset #{active_id}"),
+                        _ => format!("Recording preset #{active_id}"),
+                    })
+                    .strong()
+                    .color(Color32::from_rgb(255, 96, 96)),
+                );
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some(current) = Self::current_mouse_speed() {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} {}",
+                            Self::tr_lang(language, "Current sensitivity:", "Độ nhạy hiện tại:"),
+                            current
+                        ))
+                        .strong()
+                        .color(Color32::from_rgb(96, 172, 224)),
+                    );
+                    ui.add_space(14.0);
+                }
+
+                mouse_sensitivity_live_sync |= ui
+                    .add(
+                        DragValue::new(&mut self.state.mouse_sensitivity_restore_speed)
+                            .range(1..=20),
+                    )
+                    .changed();
+                ui.label(Self::tr_lang(language, "Speed", "Tốc độ"));
+
+                mouse_sensitivity_live_sync |= ui
+                    .checkbox(&mut self.state.mouse_sensitivity_restore_on_exit, "")
+                    .changed();
+                ui.label(
+                    RichText::new(Self::tr_lang(
+                        language,
+                        "Restore sensitivity on exit",
+                        "Khôi phục độ nhạy khi tắt app",
+                    ))
+                    .strong(),
+                );
+            });
+        });
+
+        ui.add_space(16.0);
+        ui.label(
+            RichText::new(Self::tr_lang(language, "Sensitivity", "Độ nhạy"))
+                .strong()
+                .size(14.0),
+        );
+        ui.add_space(4.0);
+
+        for index in 0..self.state.mouse_sensitivity_presets.len() {
+            let active_capture_target = self.capture_target.clone();
+            let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
+            ui.add_space(6.0);
+            let preset = &mut self.state.mouse_sensitivity_presets[index];
+            preset.target_window_title = None;
+            preset.extra_target_window_titles.clear();
+            preset.enabled = preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
+            Self::show_preset_card(ui, preset.enabled, |ui| {
+                ui.horizontal(|ui| {
+                    let mut disabled_by_button = false;
+                    let name_width = Self::preset_header_name_width(ui);
+                    let response =
+                        ui.add_sized([name_width, 21.0], TextEdit::singleline(&mut preset.name));
+                    Self::apply_vietnamese_input_if_changed(
+                        &response,
+                        self.state.vietnamese_input_enabled,
+                        self.state.vietnamese_input_mode,
+                        &mut preset.name,
+                    );
+                    mouse_sensitivity_live_sync |= response.changed();
+
+                    let capture_target = CaptureRequest::MouseSensitivityPresetHotkey(preset.id);
+                    mouse_sensitivity_live_sync |= Self::render_preset_trigger_chips(
+                        ui,
+                        language,
+                        &mut preset.hotkey,
+                        &mut preset.trigger_keys,
+                        active_capture_target.as_ref(),
+                        &capture_target,
+                        pending_combo_keys.as_ref(),
+                    );
+                    preset.enabled =
+                        preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
+
+                    if Self::sound_style_toggle_button(
+                        ui,
+                        Self::tr_lang(language, "Apply", "Áp dụng"),
+                    )
+                    .clicked()
+                    {
+                        let _ = self
+                            .overlay_tx
+                            .send(OverlayCommand::ApplyMouseSensitivityPreset(preset.id));
+                    }
+                    if Self::sound_style_toggle_button(
+                        ui,
+                        Self::tr_lang(language, "Restore", "Khôi phục"),
+                    )
+                    .clicked()
+                    {
+                        let _ = self
+                            .overlay_tx
+                            .send(OverlayCommand::RestoreMouseSensitivity);
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let capture_active =
+                            active_capture_target.as_ref() == Some(&capture_target);
+                        let capture_time = ui.ctx().input(|input| input.time) as f32;
+                        let pulse = if capture_active {
+                            0.5 + 0.5 * (capture_time * 6.0).sin().abs()
+                        } else {
+                            0.0
+                        };
+                        let has_keys =
+                            preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
+                        let fill = if capture_active {
+                            Color32::from_rgba_premultiplied(
+                                (88.0 + pulse * 28.0) as u8,
+                                (84.0 + pulse * 28.0) as u8,
+                                (44.0 + pulse * 10.0) as u8,
+                                255,
+                            )
+                        } else if has_keys {
+                            Color32::from_rgba_premultiplied(72, 156, 116, 120)
+                        } else {
+                            ui.visuals().faint_bg_color
+                        };
+                        let stroke = if capture_active {
+                            Color32::from_rgb(255, 232, 96)
+                        } else if has_keys {
+                            Color32::from_rgb(126, 224, 182)
+                        } else {
+                            ui.visuals().widgets.noninteractive.bg_stroke.color
+                        };
+
+                        let hover_text = if capture_active {
+                            Self::tr_lang(
+                                language,
+                                "Capturing... Press any key.",
+                                "Đang ghi... Nhấn một phím bất kỳ.",
+                            )
+                            .to_string()
+                        } else if has_keys {
+                            let bindings_labels: Vec<String> =
+                                Self::preset_trigger_bindings(&preset.hotkey, &preset.trigger_keys)
+                                    .iter()
+                                    .map(|b| hotkey::format_binding(Some(b)))
+                                    .collect();
+                            format!(
+                                "{} {}\n{}",
+                                Self::tr_lang(language, "Hotkey:", "Phím tắt:"),
+                                bindings_labels.join(", "),
+                                Self::tr_lang(
+                                    language,
+                                    "Left click: rebind | Right click: clear",
+                                    "Chuột trái: đổi phím | Chuột phải: xóa phím"
+                                )
+                            )
+                        } else {
+                            Self::tr_lang(
+                                language,
+                                "Left click: bind hotkey",
+                                "Chuột trái: gán phím tắt",
+                            )
+                            .to_string()
+                        };
+
+                        let btn_text = if capture_active {
+                            RichText::new(Self::tr_lang(language, "Capturing...", "Đang bắt..."))
+                                .strong()
+                                .color(Color32::from_rgb(255, 232, 96))
+                        } else {
+                            Self::material_icon_text(0xe312, 18.0)
+                        };
+                        let btn_width = if capture_active { 84.0 } else { 36.0 };
+                        let btn_response = ui
+                            .add_sized(
+                                [btn_width, 24.0],
+                                Button::new(btn_text)
+                                    .fill(fill)
+                                    .stroke(egui::Stroke::new(1.0, stroke)),
+                            )
+                            .on_hover_text(hover_text);
+
+                        if btn_response.clicked() {
+                            if capture_active {
+                                cancel_active_capture_sensitivity = true;
+                            } else {
+                                next_mouse_sensitivity_capture_target = Some((
+                                    capture_target,
+                                    match language {
+                                        UiLanguage::Vietnamese => {
+                                            format!("Đang bật phím tắt cho {}.", preset.name)
+                                        }
+                                        _ => format!("Capturing hotkey for {}.", preset.name),
+                                    },
+                                ));
+                            }
+                        }
+                        if btn_response.secondary_clicked() {
+                            preset.hotkey = None;
+                            preset.trigger_keys.clear();
+                            preset.enabled = false;
+                            disabled_by_button = true;
+                            mouse_sensitivity_live_sync = true;
+                        }
+
+                        if Self::sound_style_remove_button(ui).clicked() {
+                            remove_mouse_sensitivity_id = Some(preset.id);
+                        }
+                        if Self::sound_style_toggle_button(
+                            ui,
+                            if preset.collapsed {
+                                Self::tr_lang(language, "Show", "Hiện")
+                            } else {
+                                Self::tr_lang(language, "Hide", "Hide")
+                            },
+                        )
+                        .clicked()
+                        {
+                            preset.collapsed = !preset.collapsed;
+                            mouse_sensitivity_live_sync = true;
+                        }
+                    });
+                    if disabled_by_button {
+                        let _ = self
+                            .overlay_tx
+                            .send(OverlayCommand::RestoreMouseSensitivity);
+                    }
+                });
+                if preset.collapsed {
+                    return;
+                }
+                egui::Grid::new((preset.id, "mouse-sensitivity-grid"))
+                    .num_columns(2)
+                    .spacing([14.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label(Self::tr_lang(language, "Speed", "Tốc độ chuột"));
+                        mouse_sensitivity_live_sync |= ui
+                            .add(Slider::new(&mut preset.speed, 1..=20).show_value(true))
+                            .changed();
+                        ui.end_row();
+                    });
+            });
+        }
+
+        
+                // Mouse Path Presets
+ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(Self::tr_lang(language, "Mouse Path", "Đường dẫn chuột")).strong(),
+            );
+        });
+
+        for index in 0..self.state.mouse_path_presets.len() {
+            let active_capture_target = self.capture_target.clone();
+            let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
+            ui.add_space(6.0);
+            let preset = &mut self.state.mouse_path_presets[index];
+            if self.mouse_path_timeline_initialized.insert(preset.id) {
+                Self::reset_mouse_path_timeline_state(ui.ctx(), preset.id, &preset.events);
+            }
+            Self::show_preset_card(ui, false, |ui| {
+                ui.horizontal(|ui| {
+                    let name_width = Self::preset_header_name_width(ui);
+                    let response =
+                        ui.add_sized([name_width, 21.0], TextEdit::singleline(&mut preset.name));
+                    Self::apply_vietnamese_input_if_changed(
+                        &response,
+                        self.state.vietnamese_input_enabled,
+                        self.state.vietnamese_input_mode,
+                        &mut preset.name,
+                    );
+                    live_sync |= response.changed();
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if Self::sound_style_remove_button(ui).clicked() {
+                            remove_id = Some(preset.id);
+                        }
+                        if Self::sound_style_toggle_button(
+                            ui,
+                            if preset.collapsed {
+                                Self::tr_lang(language, "Show", "Hiện")
+                            } else {
+                                Self::tr_lang(language, "Hide", "Hide")
+                            },
+                        )
+                        .clicked()
+                        {
+                            preset.collapsed = !preset.collapsed;
+                            live_sync = true;
+                        }
+                    });
+                });
+                if preset.collapsed {
+                    return;
+                }
+                egui::Grid::new((preset.id, "mouse-path-grid"))
+                    .num_columns(2)
+                    .spacing([14.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label(Self::tr_lang(language, "Record Hotkey", "Record Hotkey"));
+                        ui.horizontal_wrapped(|ui| {
+                            let capture_target = CaptureRequest::MousePathRecordHotkey(preset.id);
+                            let (begin_capture, cancel_capture) =
+                                Self::render_hotkey_capture_control(
+                                    ui,
+                                    language,
+                                    &mut preset.record_hotkey,
+                                    &capture_target,
+                                    active_capture_target.as_ref(),
+                                    pending_combo_keys.as_ref(),
+                                    &mut live_sync,
+                                );
+                            if begin_capture {
+                                next_capture_target = Some((
+                                    capture_target,
+                                    match language {
+                                        UiLanguage::Vietnamese => {
+                                            format!("Đang bật phím tắt ghi cho {}.", preset.name)
+                                        }
+                                        _ => {
+                                            format!("Capturing record hotkey for {}.", preset.name)
+                                        }
+                                    },
+                                ));
+                            }
+                            if cancel_capture {
+                                cancel_active_capture = true;
+                            }
+                        });
+                        ui.end_row();
+
+                        if self.active_mouse_record_preset_id == Some(preset.id) {
+                            ui.label("");
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Recording via hotkey...",
+                                    "Đang ghi bằng phím tắt...",
+                                ))
+                                .color(Color32::from_rgb(255, 96, 96))
+                                .strong(),
+                            );
+                            ui.end_row();
+                        }
+
+                        ui.label("");
+                        ui.horizontal_wrapped(|ui| {
+                            live_sync |= ui
+                                .checkbox(
+                                    &mut preset.replay_relative_motion,
+                                    Self::tr_lang(
+                                        language,
+                                        "Relative motion",
+                                        "Di chuyển tương đối",
+                                    ),
+                                )
+                                .changed();
+                        });
+                        ui.end_row();
+                    });
+                ui.add_space(6.0);
+                let preview_events = Self::preview_mouse_path_events(
+                    ui.ctx(),
+                    preset.id,
+                    &preset.events,
+                );
+                Self::render_mouse_path_preview(ui, language, &preview_events, 240.0);
+                ui.add_space(8.0);
+                let preset_hovered = ui.rect_contains_pointer(ui.min_rect());
+                let timeline_outcome = Self::render_mouse_path_timeline_editor(
+                    ui,
+                    language,
+                    preset.id,
+                    &preset.events,
+                    &mouse_path_options,
+                    &mut mouse_path_timeline_zoom,
+                    preset_hovered,
+                    self.mouse_path_merge_selection
+                        .get(&preset.id)
+                        .copied()
+                        .unwrap_or(0),
+                );
+                if timeline_outcome.selected_merge_source == 0 {
+                    self.mouse_path_merge_selection.remove(&preset.id);
+                } else {
+                    self.mouse_path_merge_selection
+                        .insert(preset.id, timeline_outcome.selected_merge_source);
+                }
+                if let Some(events) = timeline_outcome.preview_selection {
+                    preview_mouse_path_selection =
+                        Some((preset.id, events, timeline_outcome.preview_from_ms));
+                }
+                if timeline_outcome.sync_preview
+                    && self.mouse_path_step_preview_preset_id == Some(preset.id)
+                {
+                    let preview_events =
+                        Self::preview_mouse_path_events(ui.ctx(), preset.id, &preset.events);
+                    let preview_from_ms =
+                        Self::mouse_path_preview_from_ms(ui.ctx(), preset.id, &preset.events);
+                    preview_mouse_path_selection =
+                        Some((preset.id, preview_events, Some(preview_from_ms)));
+                }
+                if let Some((start_ms, end_ms)) = timeline_outcome.trim_range {
+                    trim_mouse_path_request = Some((preset.id, start_ms, end_ms));
+                }
+                if let Some(split_at_ms) = timeline_outcome.split_at_ms {
+                    split_mouse_path_request = Some((preset.id, split_at_ms));
+                }
+                if let Some(source_id) = timeline_outcome.merge_source_id {
+                    merge_mouse_path_request = Some((preset.id, source_id));
+                }
+            });
+        }
+        
+            });
+
+        // --- Post UI Side-Effects ---
+if let Some(remove_mouse_sensitivity_id) = remove_mouse_sensitivity_id {
+            self.state
+                .mouse_sensitivity_presets
+                .retain(|preset| preset.id != remove_mouse_sensitivity_id);
+            mouse_sensitivity_live_sync = true;
+        }
+        if let Some((target, status)) = next_mouse_sensitivity_capture_target {
+            self.begin_capture(target, status);
+        }
+        if mouse_sensitivity_live_sync {
+            self.persist_mouse_sensitivity_presets();
+            self.sync_mouse_sensitivity_settings();
+            self.persist();
+        }
+        if cancel_active_capture_sensitivity {
+            self.cancel_capture();
+        }
+
+        
+self.trim_timeline_zoom = mouse_path_timeline_zoom;
+
+        if let Some((preset_id, events, preview_from_ms)) = preview_mouse_path_selection {
+            let has_move = events
+                .iter()
+                .any(|event| matches!(event.kind, MousePathEventKind::Move));
+            self.mouse_path_step_preview_preset_id = has_move.then_some(preset_id);
+            let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(if has_move {
+                Some((preset_id, events, preview_from_ms))
+            } else {
+                None
+            }));
+            crate::overlay::wake_command_queue();
+        }
+        if let Some((preset_id, start_ms, end_ms)) = trim_mouse_path_request {
+            if let Some(preset) = self
+                .state
+                .mouse_path_presets
+                .iter_mut()
+                .find(|preset| preset.id == preset_id)
+            {
+                preset.events = Self::slice_mouse_path_events(&preset.events, start_ms, end_ms);
+                Self::reset_mouse_path_timeline_state(ui.ctx(), preset_id, &preset.events);
+                if self.mouse_path_step_preview_preset_id == Some(preset_id) {
+                    let has_move = preset
+                        .events
+                        .iter()
+                        .any(|event| matches!(event.kind, MousePathEventKind::Move));
+                    if has_move {
+                        let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(Some((
+                            preset_id,
+                            preset.events.clone(),
+                            Some(0),
+                        ))));
+                    } else {
+                        self.mouse_path_step_preview_preset_id = None;
+                        let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
+                    }
+                    crate::overlay::wake_command_queue();
+                }
+                live_sync = true;
+            }
+        }
+        if let Some((preset_id, split_at_ms)) = split_mouse_path_request {
+            if self.split_mouse_path_preset(preset_id, split_at_ms) {
+                self.mouse_path_merge_selection.remove(&preset_id);
+                if let Some(preset) = self
+                    .state
+                    .mouse_path_presets
+                    .iter()
+                    .find(|preset| preset.id == preset_id)
+                {
+                    Self::reset_mouse_path_timeline_state(ui.ctx(), preset_id, &preset.events);
+                }
+                live_sync = true;
+            }
+        }
+        if let Some((target_id, source_id)) = merge_mouse_path_request {
+            if self.merge_mouse_path_presets(target_id, source_id) {
+                self.mouse_path_merge_selection.remove(&target_id);
+                self.mouse_path_merge_selection.remove(&source_id);
+                live_sync = true;
+            }
+        }
+
+        if let Some(rem_id) = remove_id {
+            self.mouse_path_timeline_initialized.remove(&rem_id);
+            self.mouse_path_merge_selection.remove(&rem_id);
+            Self::clear_mouse_path_timeline_state(ui.ctx(), rem_id);
+            if self.mouse_path_step_preview_preset_id == Some(rem_id) {
+                self.mouse_path_step_preview_preset_id = None;
+                let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
+                crate::overlay::wake_command_queue();
+            }
+            if self.mouse_path_draw_capture_preset_id == Some(rem_id) {
+                self.mouse_path_draw_capture_preset_id = None;
+                self.restore_mouse_path_draw_capture_window(ui.ctx());
+            }
+            if self.active_mouse_record_preset_id == Some(rem_id) {
+                self.active_mouse_record_preset_id = None;
+            }
+            self.state
+                .mouse_path_presets
+                .retain(|preset| preset.id != rem_id);
+            if self.clear_mouse_path_step_references(rem_id) {
+                self.persist_macro_presets();
+            }
+            live_sync = true;
+        }
+        if let Some((target, status)) = next_capture_target {
+            self.begin_capture(target, status);
+        }
+        if cancel_active_capture {
+            self.cancel_capture();
+        }
+        if live_sync {
+            self.persist_mouse_path_presets();
+        }
+
+        
+if arduino_changed {
             self.sync_vision_settings();
             self.persist();
         }
-    }
+    
+}
     pub(crate) fn render_mouse_path_preview(
         ui: &mut egui::Ui,
         language: UiLanguage,

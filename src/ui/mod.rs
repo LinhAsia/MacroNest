@@ -9757,8 +9757,12 @@ impl eframe::App for CrosshairApp {
                     && active_panel != AppPanel::Modes;
                 if panel_shell_active {
                     self.render_panel_loading_shell(ui, active_panel);
-                } else if active_panel == AppPanel::Macros || active_panel == AppPanel::Modes {
-                    self.render_macro_panel(ui);
+                } else if active_panel == AppPanel::Macros || active_panel == AppPanel::Modes || active_panel == AppPanel::Mouse {
+                    if active_panel == AppPanel::Mouse {
+                        self.render_mouse_panel(ui);
+                    } else {
+                        self.render_macro_panel(ui);
+                    }
                     if self.capture_target.is_some() {
                         ctx.request_repaint_after(Duration::from_millis(16));
                     }
@@ -9770,7 +9774,7 @@ impl eframe::App for CrosshairApp {
                                 AppPanel::Crosshair => self.render_crosshair_panel(ui),
                                 AppPanel::WindowPresets => self.render_window_presets_panel(ui),
                                 AppPanel::Pin => self.render_pin_panel(ui),
-                                AppPanel::Mouse => self.render_mouse_panel(ui),
+                                AppPanel::Mouse => unreachable!(),
                                 AppPanel::Vision => self.render_vision_panel(ui, ctx),
                                 AppPanel::AudioSense => self.render_audiosense_panel(ui),
                                 AppPanel::Ocr => self.render_ocr_panel(ui),
@@ -9782,7 +9786,7 @@ impl eframe::App for CrosshairApp {
                                 AppPanel::Sound => self.render_sound_panel(ui),
                                 AppPanel::Hud => self.render_hud_panel(ui),
                                 AppPanel::Media => self.render_media_panel(ui),
-                            }
+                            };
                             if self.capture_target.is_some() {
                                 ctx.request_repaint_after(Duration::from_millis(16));
                             }
