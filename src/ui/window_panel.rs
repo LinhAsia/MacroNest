@@ -2304,6 +2304,109 @@ impl CrosshairApp {
         }
     }
 
+    fn split_cell_vertical(layout: &mut WindowLayout, cell_idx: usize) {
+        let cell = &layout.cells[cell_idx];
+        let col = cell.col;
+        let col_span = cell.col_span;
+        
+        if col_span > 1 {
+            let half = col_span / 2;
+            let mut cell_b = layout.cells[cell_idx].clone();
+            layout.cells[cell_idx].col_span = half;
+            cell_b.col = col + half;
+            cell_b.col_span = col_span - half;
+            layout.cells.push(cell_b);
+        } else {
+            let split_col = col;
+            layout.cols += 1;
+            
+            let orig_ratio = layout.col_ratios[split_col];
+            layout.col_ratios[split_col] = orig_ratio / 2.0;
+            layout.col_ratios.insert(split_col + 1, orig_ratio / 2.0);
+            
+            let mut cell_b = layout.cells[cell_idx].clone();
+            for (idx, c) in layout.cells.iter_mut().enumerate() {
+                if idx == cell_idx {
+                    c.col_span = 1;
+                } else if c.col > split_col {
+                    c.col += 1;
+                } else if c.col <= split_col && c.col + c.col_span > split_col {
+                    c.col_span += 1;
+                }
+            }
+            cell_b.col = split_col + 1;
+            cell_b.col_span = 1;
+            layout.cells.push(cell_b);
+        }
+    }
+
+    fn split_cell_horizontal(layout: &mut WindowLayout, cell_idx: usize) {
+        let cell = &layout.cells[cell_idx];
+        let row = cell.row;
+        let row_span = cell.row_span;
+        
+        if row_span > 1 {
+            let half = row_span / 2;
+            let mut cell_b = layout.cells[cell_idx].clone();
+            layout.cells[cell_idx].row_span = half;
+            cell_b.row = row + half;
+            cell_b.row_span = row_span - half;
+            layout.cells.push(cell_b);
+        } else {
+            let split_row = row;
+            layout.rows += 1;
+            
+            let orig_ratio = layout.row_ratios[split_row];
+            layout.row_ratios[split_row] = orig_ratio / 2.0;
+            layout.row_ratios.insert(split_row + 1, orig_ratio / 2.0);
+            
+            let mut cell_b = layout.cells[cell_idx].clone();
+            for (idx, c) in layout.cells.iter_mut().enumerate() {
+                if idx == cell_idx {
+                    c.row_span = 1;
+                } else if c.row > split_row {
+                    c.row += 1;
+                } else if c.row <= split_row && c.row + c.row_span > split_row {
+                    c.row_span += 1;
+                }
+            }
+            cell_b.row = split_row + 1;
+            cell_b.row_span = 1;
+            layout.cells.push(cell_b);
+        }
+    }
+
+    fn draw_dashed_line(
+        painter: &egui::Painter,
+        from: egui::Pos2,
+        to: egui::Pos2,
+        stroke: egui::Stroke,
+        dash_length: f32,
+        gap_length: f32,
+    ) {
+        let dx = to.x - from.x;
+        let dy = to.y - from.y;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len <= 0.0 {
+            return;
+        }
+        let dir_x = dx / len;
+        let dir_y = dy / len;
+        
+        let mut dist = 0.0;
+        while dist < len {
+            let chunk_end = (dist + dash_length).min(len);
+            painter.line_segment(
+                [
+                    egui::pos2(from.x + dir_x * dist, from.y + dir_y * dist),
+                    egui::pos2(from.x + dir_x * chunk_end, from.y + dir_y * chunk_end),
+                ],
+                stroke,
+            );
+            dist += dash_length + gap_length;
+        }
+    }
+
     pub(crate) fn render_layout_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
 
@@ -2577,7 +2680,7 @@ impl CrosshairApp {
                                 col_starts.push(acc);
                             }
                             
-                            let preview_w = (ui.available_width() - 24.0).clamp(320.0, 560.0);
+                            let preview_w = (ui.available_width() - 24.0).clamp(320.0, 800.0);
                             let preview_h = preview_w * 0.5;
                             
                             let (rect, _response) = ui.allocate_exact_size(vec2(preview_w, preview_h), egui::Sense::hover());
@@ -2785,8 +2888,53 @@ impl CrosshairApp {
                                     2.0,
                                     fill_color,
                                     egui::Stroke::new(stroke_width, border_color),
-                                    egui::StrokeKind::Inside,
+                                    egui::StrokeKind::Outside,
                                 );
+
+                                if !split_hovered_or_dragged && cell_resp.hovered() {
+                                    if let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
+                                        let norm_dx = (pointer_pos.x - cell_rect.center().x) / cell_rect.width();
+                                        let norm_dy = (pointer_pos.y - cell_rect.center().y) / cell_rect.height();
+                                        
+                                        if norm_dx.abs() > norm_dy.abs() {
+                                            Self::draw_dashed_line(
+                                                ui.painter(),
+                                                egui::pos2(cell_rect.center().x, cell_rect.min.y),
+                                                egui::pos2(cell_rect.center().x, cell_rect.max.y),
+                                                egui::Stroke::new(1.5, Color32::from_rgb(255, 140, 0)),
+                                                6.0,
+                                                4.0,
+                                            );
+                                            
+                                            if cell_resp.secondary_clicked() {
+                                                if let Some(cell_idx) = layout.cells.iter().position(|c| c.row == cell.row && c.col == cell.col) {
+                                                    Self::split_cell_vertical(layout, cell_idx);
+                                                    Self::sanitize_layout(layout);
+                                                    self.selected_layout_cell = None;
+                                                    live_sync = true;
+                                                }
+                                            }
+                                        } else {
+                                            Self::draw_dashed_line(
+                                                ui.painter(),
+                                                egui::pos2(cell_rect.min.x, cell_rect.center().y),
+                                                egui::pos2(cell_rect.max.x, cell_rect.center().y),
+                                                egui::Stroke::new(1.5, Color32::from_rgb(255, 140, 0)),
+                                                6.0,
+                                                4.0,
+                                            );
+                                            
+                                            if cell_resp.secondary_clicked() {
+                                                if let Some(cell_idx) = layout.cells.iter().position(|c| c.row == cell.row && c.col == cell.col) {
+                                                    Self::split_cell_horizontal(layout, cell_idx);
+                                                    Self::sanitize_layout(layout);
+                                                    self.selected_layout_cell = None;
+                                                    live_sync = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 
                                 let label_text = if let Some(title) = &cell.target_window_title {
                                     Self::truncate_window_title(title, 12)
