@@ -752,6 +752,7 @@ mod windows_overlay {
         vision_capture_is_region_mode: bool,
         vision_capture_anchor: Option<(i32, i32)>,
         pub(crate) vision_capture_preview_regions: Vec<VisionRegion>,
+        pub(crate) vision_preview_source: Option<(u32, usize)>,
         mouse_path_draw_capture: Option<MousePathDrawCaptureSession>,
         hud_presets: Vec<HudPreset>,
         ocr_presets: Vec<crate::model::OcrPreset>,
@@ -838,6 +839,7 @@ mod windows_overlay {
                 vision_capture_is_region_mode: false,
                 vision_capture_anchor: None,
                 vision_capture_preview_regions: Vec::new(),
+                vision_preview_source: None,
                 mouse_path_draw_capture: None,
                 hud_presets: Vec::new(),
                 ocr_presets: Vec::new(),
@@ -2119,6 +2121,7 @@ mod windows_overlay {
                         let mut hook_state = HOOK_STATE.lock();
                         hook_state.vision_capture_anchor = None;
                         hook_state.vision_capture_preview_regions = Vec::new();
+                        hook_state.vision_preview_source = None;
                         let ui_tx = hook_state.ui_tx.clone();
                         drop(hook_state);
                         if let Some(ui_tx) = ui_tx {
@@ -4301,6 +4304,7 @@ mod windows_overlay {
                     if !blocked {
                         hook_state.vision_capture_anchor = None;
                         hook_state.vision_capture_preview_regions = Vec::new();
+                        hook_state.vision_preview_source = None;
                     }
                 }
 
@@ -5578,6 +5582,7 @@ mod windows_overlay {
             .stop_ignore_keys
             .insert(preset.id, trigger_key);
         thread::spawn(move || {
+            MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().clear());
             let cleanup_steps = collect_macro_release_steps(&preset.steps);
             let mut press_locked_keys: Vec<String> = Vec::new();
             let mut press_locked_mouse_masks: Vec<MouseMoveLockMask> = Vec::new();
@@ -14536,6 +14541,55 @@ mod windows_overlay {
         })
     }
 
+    thread_local! {
+        pub static MACRO_TARGETED_WINDOWS: std::cell::RefCell<HashSet<isize>> = std::cell::RefCell::new(HashSet::new());
+    }
+
+    unsafe fn find_window_by_selector_excluding_targeted(
+        title: &str,
+        match_duplicate_window_titles: bool,
+        exclude: Option<HWND>,
+        targeted: &HashSet<isize>,
+    ) -> Option<HWND> {
+        let mut found = None;
+        let mut payload = (title, match_duplicate_window_titles, exclude, targeted, &mut found);
+        let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
+            Some(find_window_by_selector_excluding_targeted_proc),
+            LPARAM((&mut payload) as *mut _ as isize),
+        );
+        found
+    }
+
+    unsafe extern "system" fn find_window_by_selector_excluding_targeted_proc(
+        hwnd: HWND,
+        lparam: LPARAM,
+    ) -> windows::core::BOOL {
+        let (target, match_duplicate_window_titles, exclude, targeted, found) =
+            &mut *(lparam.0 as *mut (&str, bool, Option<HWND>, &HashSet<isize>, &mut Option<HWND>));
+        if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() {
+            return true.into();
+        }
+
+        if exclude.is_some_and(|excluded| excluded == hwnd) {
+            return true.into();
+        }
+
+        if targeted.contains(&(hwnd.0 as isize)) {
+            return true.into();
+        }
+
+        if window_matches_selector_with_duplicate_titles(
+            hwnd,
+            target,
+            *match_duplicate_window_titles,
+        ) {
+            **found = Some(hwnd);
+            return false.into();
+        }
+
+        true.into()
+    }
+
     fn resolve_window_target(
         target_title: Option<&str>,
         extra_target_titles: &[String],
@@ -14544,6 +14598,73 @@ mod windows_overlay {
     ) -> HWND {
         unsafe {
             let foreground = GetForegroundWindow();
+            let targeted = MACRO_TARGETED_WINDOWS.with(|set| set.borrow().clone());
+
+            // 1. Try to find a matching window that is NOT yet targeted in this macro execution
+            if !foreground.0.is_null()
+                && !targeted.contains(&(foreground.0 as isize))
+                && window_matches_any_selector(
+                    foreground,
+                    target_title,
+                    extra_target_titles,
+                    match_duplicate_window_titles,
+                )
+            {
+                if prefer_other_if_foreground_matches {
+                    if let Some(target) = target_title
+                        && let Some(hwnd) = find_window_by_selector_excluding_targeted(
+                            target,
+                            match_duplicate_window_titles,
+                            Some(foreground),
+                            &targeted,
+                        )
+                    {
+                        MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
+                        return hwnd;
+                    }
+
+                    for title in extra_target_titles {
+                        if let Some(hwnd) = find_window_by_selector_excluding_targeted(
+                            title,
+                            match_duplicate_window_titles,
+                            Some(foreground),
+                            &targeted,
+                        ) {
+                            MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
+                            return hwnd;
+                        }
+                    }
+                }
+
+                MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(foreground.0 as isize));
+                return foreground;
+            }
+
+            if let Some(title) = target_title
+                && let Some(hwnd) = find_window_by_selector_excluding_targeted(
+                    title,
+                    match_duplicate_window_titles,
+                    None,
+                    &targeted,
+                )
+            {
+                MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
+                return hwnd;
+            }
+
+            for title in extra_target_titles {
+                if let Some(hwnd) = find_window_by_selector_excluding_targeted(
+                    title,
+                    match_duplicate_window_titles,
+                    None,
+                    &targeted,
+                ) {
+                    MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
+                    return hwnd;
+                }
+            }
+
+            // 2. Fallback: If no untargeted matching window is found, search using the original logic
             if !foreground.0.is_null()
                 && window_matches_any_selector(
                     foreground,
@@ -14560,6 +14681,7 @@ mod windows_overlay {
                             Some(foreground),
                         )
                     {
+                        MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
                         return hwnd;
                     }
 
@@ -14569,11 +14691,13 @@ mod windows_overlay {
                             match_duplicate_window_titles,
                             Some(foreground),
                         ) {
+                            MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
                             return hwnd;
                         }
                     }
                 }
 
+                MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(foreground.0 as isize));
                 return foreground;
             }
 
@@ -14581,6 +14705,7 @@ mod windows_overlay {
                 && let Some(hwnd) =
                     find_window_by_selector_excluding(title, match_duplicate_window_titles, None)
             {
+                MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
                 return hwnd;
             }
 
@@ -14588,10 +14713,14 @@ mod windows_overlay {
                 if let Some(hwnd) =
                     find_window_by_selector_excluding(title, match_duplicate_window_titles, None)
                 {
+                    MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
                     return hwnd;
                 }
             }
 
+            if !foreground.0.is_null() {
+                MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(foreground.0 as isize));
+            }
             foreground
         }
     }
@@ -16726,6 +16855,7 @@ mod windows_overlay {
         if let Some(preset) = preset {
             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
             thread::spawn(move || {
+                MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().clear());
                 let cleanup_steps = collect_macro_release_steps(&preset.steps);
                 let mut press_locked_keys: Vec<String> = Vec::new();
                 let mut press_locked_mouse_masks: Vec<MouseMoveLockMask> = Vec::new();
