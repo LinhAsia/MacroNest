@@ -163,7 +163,7 @@ impl CrosshairApp {
             });
         });
 
-        ui.add_space(8.0);
+        ui.add_space(16.0);
         ui.label(
             RichText::new(Self::tr_lang(language, "Sensitivity", "Độ nhạy"))
                 .strong()

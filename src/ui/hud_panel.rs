@@ -44,7 +44,7 @@ impl CrosshairApp {
             }
         });
 
-        ui.add_space(8.0);
+        ui.add_space(16.0);
         ui.label(
             RichText::new(self.tr("Text Presets", "Thiết lập Văn bản"))
                 .strong()
@@ -210,7 +210,7 @@ impl CrosshairApp {
             self.persist_hud_presets();
         }
 
-        ui.add_space(8.0);
+        ui.add_space(16.0);
         ui.label(
             RichText::new(self.tr("Timer Presets", "Thiết lập Hẹn giờ"))
                 .strong()

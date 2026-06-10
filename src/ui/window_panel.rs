@@ -30,7 +30,7 @@ impl CrosshairApp {
             }
         });
 
-        ui.add_space(8.0);
+        ui.add_space(16.0);
 
         let mut remove_id = None;
         let mut live_sync = false;
@@ -358,7 +358,6 @@ impl CrosshairApp {
             self.persist_window_presets();
         }
 
-        ui.add_space(10.0);
         self.render_layout_panel(ui);
     }
 
@@ -2288,7 +2287,7 @@ impl CrosshairApp {
         let mut remove_id = None;
         let mut live_sync = false;
 
-        ui.add_space(8.0);
+        ui.add_space(16.0);
         ui.label(
             RichText::new(Self::tr_lang(language, "Layout Presets", "Bố cục"))
                 .strong()
