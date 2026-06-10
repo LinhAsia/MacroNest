@@ -2277,6 +2277,33 @@ impl CrosshairApp {
         layout.cells = sanitized_cells;
     }
 
+    fn get_monitor_work_size() -> (f32, f32) {
+        #[cfg(windows)]
+        unsafe {
+            use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST, MonitorFromPoint};
+            use windows::Win32::Foundation::POINT;
+            use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+            use std::mem::size_of;
+            
+            let mut pt = POINT::default();
+            let _ = GetCursorPos(&mut pt);
+            let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+            let mut mi = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if GetMonitorInfoW(monitor, &mut mi).as_bool() {
+                ((mi.rcWork.right - mi.rcWork.left) as f32, (mi.rcWork.bottom - mi.rcWork.top) as f32)
+            } else {
+                (1920.0, 1080.0)
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            (1920.0, 1080.0)
+        }
+    }
+
     pub(crate) fn render_layout_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
 
@@ -2550,32 +2577,102 @@ impl CrosshairApp {
                                 col_starts.push(acc);
                             }
                             
-                            let preview_w = 320.0;
-                            let preview_h = 160.0;
+                            let preview_w = (ui.available_width() - 24.0).clamp(320.0, 560.0);
+                            let preview_h = preview_w * 0.5;
                             
                             let (rect, _response) = ui.allocate_exact_size(vec2(preview_w, preview_h), egui::Sense::hover());
                             
-                            let mut hovered_row_col = None;
-                            for cell in &layout.cells {
-                                if cell.row >= layout.rows || cell.col >= layout.cols {
-                                    continue;
+                            let mut split_hovered_or_dragged = false;
+                            let mut active_col_splits = Vec::new();
+                            let mut active_row_splits = Vec::new();
+                            
+                            // Check / interact with column splits (vertical lines)
+                            for c in 1..layout.cols {
+                                let split_x = rect.min.x + col_starts[c] * preview_w;
+                                let split_rect = egui::Rect::from_min_max(
+                                    egui::pos2(split_x - 5.0, rect.min.y),
+                                    egui::pos2(split_x + 5.0, rect.max.y),
+                                );
+                                let split_id = ui.make_persistent_id((layout.id, "col_split", c));
+                                let split_resp = ui.interact(split_rect, split_id, egui::Sense::drag());
+                                
+                                if split_resp.hovered() || split_resp.dragged() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                                    split_hovered_or_dragged = true;
+                                    active_col_splits.push(split_x);
                                 }
-                                let end_row = (cell.row + cell.row_span).min(layout.rows);
-                                let end_col = (cell.col + cell.col_span).min(layout.cols);
                                 
-                                let x1 = rect.min.x + col_starts[cell.col] * preview_w;
-                                let y1 = rect.min.y + row_starts[cell.row] * preview_h;
-                                let x2 = rect.min.x + col_starts[end_col] * preview_w;
-                                let y2 = rect.min.y + row_starts[end_row] * preview_h;
+                                if split_resp.dragged() {
+                                    let delta = split_resp.drag_delta().x;
+                                    if delta != 0.0 {
+                                        let c_sum: f32 = layout.col_ratios.iter().sum();
+                                        let d_frac = delta / preview_w;
+                                        let new_prev_ratio = layout.col_ratios[c-1] + d_frac * c_sum;
+                                        let new_next_ratio = layout.col_ratios[c] - d_frac * c_sum;
+                                        if new_prev_ratio >= 0.05 && new_next_ratio >= 0.05 {
+                                            layout.col_ratios[c-1] = new_prev_ratio;
+                                            layout.col_ratios[c] = new_next_ratio;
+                                            live_sync = true;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Check / interact with row splits (horizontal lines)
+                            for r in 1..layout.rows {
+                                let split_y = rect.min.y + row_starts[r] * preview_h;
+                                let split_rect = egui::Rect::from_min_max(
+                                    egui::pos2(rect.min.x, split_y - 5.0),
+                                    egui::pos2(rect.max.x, split_y + 5.0),
+                                );
+                                let split_id = ui.make_persistent_id((layout.id, "row_split", r));
+                                let split_resp = ui.interact(split_rect, split_id, egui::Sense::drag());
                                 
-                                let cell_rect = egui::Rect::from_min_max(
-                                    egui::pos2(x1, y1),
-                                    egui::pos2(x2, y2)
-                                ).shrink(2.0);
+                                if split_resp.hovered() || split_resp.dragged() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                                    split_hovered_or_dragged = true;
+                                    active_row_splits.push(split_y);
+                                }
                                 
-                                if ui.rect_contains_pointer(cell_rect) {
-                                    hovered_row_col = Some((cell.row, cell.col));
-                                    break;
+                                if split_resp.dragged() {
+                                    let delta = split_resp.drag_delta().y;
+                                    if delta != 0.0 {
+                                        let r_sum: f32 = layout.row_ratios.iter().sum();
+                                        let d_frac = delta / preview_h;
+                                        let new_prev_ratio = layout.row_ratios[r-1] + d_frac * r_sum;
+                                        let new_next_ratio = layout.row_ratios[r] - d_frac * r_sum;
+                                        if new_prev_ratio >= 0.05 && new_next_ratio >= 0.05 {
+                                            layout.row_ratios[r-1] = new_prev_ratio;
+                                            layout.row_ratios[r] = new_next_ratio;
+                                            live_sync = true;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            let mut hovered_row_col = None;
+                            if !split_hovered_or_dragged {
+                                for cell in &layout.cells {
+                                    if cell.row >= layout.rows || cell.col >= layout.cols {
+                                        continue;
+                                    }
+                                    let end_row = (cell.row + cell.row_span).min(layout.rows);
+                                    let end_col = (cell.col + cell.col_span).min(layout.cols);
+                                    
+                                    let x1 = rect.min.x + col_starts[cell.col] * preview_w;
+                                    let y1 = rect.min.y + row_starts[cell.row] * preview_h;
+                                    let x2 = rect.min.x + col_starts[end_col] * preview_w;
+                                    let y2 = rect.min.y + row_starts[end_row] * preview_h;
+                                    
+                                    let cell_rect = egui::Rect::from_min_max(
+                                        egui::pos2(x1, y1),
+                                        egui::pos2(x2, y2)
+                                    ).shrink(2.0);
+                                    
+                                    if ui.rect_contains_pointer(cell_rect) {
+                                        hovered_row_col = Some((cell.row, cell.col));
+                                        break;
+                                    }
                                 }
                             }
                             
@@ -2633,7 +2730,12 @@ impl CrosshairApp {
                                 };
                                 
                                 let cell_id = ui.make_persistent_id((layout.id, "cell", cell.row, cell.col));
-                                let cell_resp = ui.interact(cell_rect, cell_id, egui::Sense::click_and_drag());
+                                let cell_sense = if split_hovered_or_dragged {
+                                    egui::Sense::hover()
+                                } else {
+                                    egui::Sense::click_and_drag()
+                                };
+                                let cell_resp = ui.interact(cell_rect, cell_id, cell_sense);
                                 
                                 if cell_resp.drag_started() {
                                     self.drag_start_layout_cell = Some((layout.id, cell.row, cell.col));
@@ -2704,6 +2806,21 @@ impl CrosshairApp {
                                     label_text,
                                     egui::FontId::proportional(11.0),
                                     text_color
+                                );
+                            }
+                            
+                            // Draw highlight line segments for columns
+                            for split_x in active_col_splits {
+                                ui.painter().line_segment(
+                                    [egui::pos2(split_x, rect.min.y), egui::pos2(split_x, rect.max.y)],
+                                    egui::Stroke::new(2.0, ui.visuals().widgets.active.fg_stroke.color),
+                                );
+                            }
+                            // Draw highlight line segments for rows
+                            for split_y in active_row_splits {
+                                ui.painter().line_segment(
+                                    [egui::pos2(rect.min.x, split_y), egui::pos2(rect.max.x, split_y)],
+                                    egui::Stroke::new(2.0, ui.visuals().widgets.active.fg_stroke.color),
                                 );
                             }
                             
@@ -2793,6 +2910,33 @@ impl CrosshairApp {
                                     if dropdown_changed {
                                         cell_modified = true;
                                     }
+                                    ui.end_row();
+
+                                    // Render cell estimated resolution info
+                                    ui.label(Self::tr_lang(language, "Resolution", "Độ phân giải"));
+                                    let (mon_w, mon_h) = Self::get_monitor_work_size();
+                                    
+                                    let r_sum: f32 = layout.row_ratios.iter().sum();
+                                    let c_sum: f32 = layout.col_ratios.iter().sum();
+                                    let mut row_starts = vec![0.0];
+                                    let mut acc = 0.0f32;
+                                    for r in &layout.row_ratios {
+                                        acc += r / r_sum;
+                                        row_starts.push(acc);
+                                    }
+                                    let mut col_starts = vec![0.0];
+                                    let mut acc = 0.0f32;
+                                    for c in &layout.col_ratios {
+                                        acc += c / c_sum;
+                                        col_starts.push(acc);
+                                    }
+
+                                    let cell_w_frac = col_starts[col_starts.len().min(sel_col + layout.cells[cell_idx].col_span)] - col_starts[sel_col];
+                                    let cell_h_frac = row_starts[row_starts.len().min(sel_row + layout.cells[cell_idx].row_span)] - row_starts[sel_row];
+                                    let cell_w = (cell_w_frac * mon_w).round() as i32;
+                                    let cell_h = (cell_h_frac * mon_h).round() as i32;
+                                    let info_text = format!("{} x {} ({:.0}% x {:.0}%)", cell_w, cell_h, cell_w_frac * 100.0, cell_h_frac * 100.0);
+                                    ui.label(RichText::new(info_text).strong());
                                     ui.end_row();
                                 });
                             
