@@ -335,7 +335,7 @@ mod windows_overlay {
         std::sync::atomic::AtomicIsize::new(0);
     pub static FOREGROUND_WINDOW_TITLE: Lazy<Mutex<Option<String>>> =
         Lazy::new(|| Mutex::new(None));
-    pub static RUNTIME_VARIABLES: Lazy<Mutex<std::collections::HashMap<String, i32>>> =
+    pub static RUNTIME_VARIABLES: Lazy<Mutex<std::collections::HashMap<String, f64>>> =
         Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
     pub static TEXT_VARIABLES: Lazy<Mutex<std::collections::HashMap<String, String>>> =
         Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
@@ -361,8 +361,12 @@ mod windows_overlay {
                     if let Some(text_val) = resolve_text_variable_value(var_trimmed) {
                         result.push_str(&text_val);
                     } else {
-                        let val = evaluate_math_expression(var_trimmed);
-                        result.push_str(&val.to_string());
+                        let val = evaluate_math_expression_f64(var_trimmed);
+                        if val.fract() == 0.0 {
+                            result.push_str(&(val as i64).to_string());
+                        } else {
+                            result.push_str(&val.to_string());
+                        }
                     }
                 } else {
                     result.push('{');
@@ -7333,7 +7337,7 @@ mod windows_overlay {
                                     }
                                     _ => 0,
                                 };
-                                set_variable_value(&target_var, value);
+                                set_variable_value(&target_var, value as f64);
                                 TEXT_VARIABLES.lock().remove(&target_var);
                             }
                         }
@@ -7852,7 +7856,7 @@ mod windows_overlay {
                                     }
                                     _ => 0,
                                 };
-                                set_variable_value(&target_var, value);
+                                set_variable_value(&target_var, value as f64);
                                 TEXT_VARIABLES.lock().remove(&target_var);
                             }
                         }
@@ -8526,24 +8530,25 @@ mod windows_overlay {
                     let right_str = interpolate_variables(right_expr.trim());
 
                     if is_math_expression_or_numeric(&left_str) && is_math_expression_or_numeric(&right_str) {
-                        let evaluate_operand = |expr: &str, fallback: i32| -> i32 {
+                        let evaluate_operand = |expr: &str, fallback: f64| -> f64 {
                             if expr.trim().is_empty() {
                                 fallback
                             } else {
-                                evaluate_interpolated_math_expression(expr)
+                                let interpolated = interpolate_variables(expr);
+                                evaluate_math_expression_f64(&interpolated)
                             }
                         };
-                        let compare_values = |value: i32, operator: &str, comp: i32| match operator {
+                        let compare_values = |value: f64, operator: &str, comp: f64| match operator {
                             ">" => value > comp,
                             "<" => value < comp,
-                            "=" | "==" => value == comp,
+                            "=" | "==" => (value - comp).abs() < 1e-9,
                             ">=" => value >= comp,
                             "<=" => value <= comp,
-                            "!=" => value != comp,
+                            "!=" => (value - comp).abs() >= 1e-9,
                             _ => false,
                         };
-                        let cond_left = evaluate_operand(variable_name, compare_value);
-                        let cond_right = evaluate_operand(right_expr, compare_value);
+                        let cond_left = evaluate_operand(variable_name, compare_value as f64);
+                        let cond_right = evaluate_operand(right_expr, compare_value as f64);
                         compare_values(cond_left, operator, cond_right)
                     } else {
                         match operator.trim() {
@@ -8935,7 +8940,7 @@ mod windows_overlay {
                 }
 
                 let mut vars = RUNTIME_VARIABLES.lock();
-                vars.insert(obj_name_raw.to_string(), parsed_val);
+                vars.insert(obj_name_raw.to_string(), parsed_val as f64);
                 return Some(parsed_val);
             }
         }
@@ -9046,7 +9051,7 @@ mod windows_overlay {
         let expr_trimmed = expr_raw.trim().to_string();
         if !expr_trimmed.contains('{') {
             if let Ok(val) = expr_trimmed.parse::<f64>() {
-                set_variable_value(target_trimmed, clamp_f64_to_i32(val));
+                set_variable_value(target_trimmed, val);
                 TEXT_VARIABLES.lock().remove(target_trimmed);
             } else {
                 set_text_variable_value(target_trimmed, &expr_trimmed);
@@ -9055,7 +9060,7 @@ mod windows_overlay {
         } else {
             let interpolated = interpolate_variables(&expr_trimmed);
             if let Ok(val) = interpolated.parse::<f64>() {
-                set_variable_value(target_trimmed, clamp_f64_to_i32(val));
+                set_variable_value(target_trimmed, val);
                 TEXT_VARIABLES.lock().remove(target_trimmed);
             } else {
                 let has_math_op = interpolated
@@ -9085,7 +9090,7 @@ mod windows_overlay {
                     || lower == "pi"
                     || lower.contains(".tonumber");
                 if has_math_op || has_math_func {
-                    let val = evaluate_math_expression(&interpolated);
+                    let val = evaluate_math_expression_f64(&interpolated);
                     set_variable_value(target_trimmed, val);
                     TEXT_VARIABLES.lock().remove(target_trimmed);
                 } else {
@@ -9096,7 +9101,7 @@ mod windows_overlay {
         }
     }
 
-    fn set_variable_value(target_var: &str, value: i32) {
+    fn set_variable_value(target_var: &str, value: f64) {
         let target_trimmed = target_var.trim();
         if target_trimmed.is_empty() {
             return;
@@ -9136,13 +9141,14 @@ mod windows_overlay {
                     let mut minute = ((current_ms % 3600000) / 60000) as i32;
                     let mut second = ((current_ms % 60000) / 1000) as i32;
                     let mut millisecond = (current_ms % 1000) as i32;
+                    let value_i = clamp_f64_to_i32(value);
                     match prop_name.as_str() {
-                        "hour" | "h" => hour = value.max(0),
-                        "minute" | "m" => minute = value.clamp(0, 59),
-                        "second" | "s" => second = value.clamp(0, 59),
-                        "millisecond" | "ms" => millisecond = value.clamp(0, 999),
+                        "hour" | "h" => hour = value_i.max(0),
+                        "minute" | "m" => minute = value_i.clamp(0, 59),
+                        "second" | "s" => second = value_i.clamp(0, 59),
+                        "millisecond" | "ms" => millisecond = value_i.clamp(0, 999),
                         "raw" | "total_ms" => {
-                            let new_ms = value.max(0) as u64;
+                            let new_ms = value_i.max(0) as u64;
                             hour = (new_ms / 3600000) as i32;
                             minute = ((new_ms % 3600000) / 60000) as i32;
                             second = ((new_ms % 60000) / 1000) as i32;
@@ -9150,7 +9156,7 @@ mod windows_overlay {
                         }
 
                         "total_sec" => {
-                            let new_ms = (value.max(0) as u64) * 1000;
+                            let new_ms = (value_i.max(0) as u64) * 1000;
                             hour = (new_ms / 3600000) as i32;
                             minute = ((new_ms % 3600000) / 60000) as i32;
                             second = ((new_ms % 60000) / 1000) as i32;
@@ -9321,16 +9327,20 @@ mod windows_overlay {
                 let numeric_var = step.ocr_numeric_var.trim();
                 if !numeric_var.is_empty() {
                     let mut number_str = String::new();
+                    let mut has_dot = false;
                     for c in full_text.chars() {
                         if c.is_ascii_digit() {
                             number_str.push(c);
+                        } else if c == '.' && !has_dot {
+                            number_str.push(c);
+                            has_dot = true;
                         } else if !number_str.is_empty() {
                             break;
                         }
                     }
 
                     if !number_str.is_empty() {
-                        if let Ok(val) = number_str.parse::<i32>() {
+                        if let Ok(val) = number_str.parse::<f64>() {
                             set_variable_value(numeric_var, val);
                         }
                     }
@@ -9351,11 +9361,11 @@ mod windows_overlay {
                         let pos_x_var = step.ocr_pos_var_x.trim();
                         let pos_y_var = step.ocr_pos_var_y.trim();
                         if !pos_x_var.is_empty() {
-                            set_variable_value(pos_x_var, abs_x);
+                            set_variable_value(pos_x_var, abs_x as f64);
                         }
 
                         if !pos_y_var.is_empty() {
-                            set_variable_value(pos_y_var, abs_y);
+                            set_variable_value(pos_y_var, abs_y as f64);
                         }
                     }
                 } else {
@@ -9368,7 +9378,7 @@ mod windows_overlay {
 
         let success_var = step.ocr_success_var.trim();
         if !success_var.is_empty() {
-            set_variable_value(success_var, success);
+            set_variable_value(success_var, success as f64);
         }
     }
 
@@ -9614,7 +9624,7 @@ mod windows_overlay {
             } else if let Some(obj_val) = get_object_property_value(normalized) {
                 obj_val as f64
             } else {
-                *RUNTIME_VARIABLES.lock().get(normalized).unwrap_or(&0) as f64
+                *RUNTIME_VARIABLES.lock().get(normalized).unwrap_or(&0.0)
             }
         };
         let mut values = Vec::new();
@@ -9680,8 +9690,11 @@ mod windows_overlay {
     #[cfg(test)]
     mod tests {
         use super::*;
+        static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
         #[test]
         fn test_evaluate_math_expression() {
+            let _guard = TEST_MUTEX.lock().unwrap();
             assert_eq!(evaluate_math_expression(""), 0);
             assert_eq!(evaluate_math_expression("   "), 0);
             assert_eq!(evaluate_math_expression("42"), 42);
@@ -9740,8 +9753,8 @@ mod windows_overlay {
 
             {
                 let mut vars = RUNTIME_VARIABLES.lock();
-                vars.insert("x".to_string(), 10);
-                vars.insert("player_mana".to_string(), 100);
+                vars.insert("x".to_string(), 10.0);
+                vars.insert("player_mana".to_string(), 100.0);
             }
 
             assert_eq!(evaluate_math_expression("x + 1"), 11);
@@ -9800,12 +9813,13 @@ mod windows_overlay {
 
         #[test]
         fn test_interpolate_variables() {
+            let _guard = TEST_MUTEX.lock().unwrap();
             // Variable resolution in interpolate_variables
 
             {
                 let mut vars = RUNTIME_VARIABLES.lock();
-                vars.insert("A".to_string(), 520);
-                vars.insert("B".to_string(), 10);
+                vars.insert("A".to_string(), 520.0);
+                vars.insert("B".to_string(), 10.0);
             }
 
             assert_eq!(interpolate_variables("test {A}"), "test 520");
@@ -9816,12 +9830,13 @@ mod windows_overlay {
 
         #[test]
         fn test_evaluate_interpolated_math_expression() {
+            let _guard = TEST_MUTEX.lock().unwrap();
             {
                 let mut vars = RUNTIME_VARIABLES.lock();
-                vars.insert("x".to_string(), 1660);
-                vars.insert("x1".to_string(), 1555);
-                vars.insert("y".to_string(), 555);
-                vars.insert("y1".to_string(), 520);
+                vars.insert("x".to_string(), 1660.0);
+                vars.insert("x1".to_string(), 1555.0);
+                vars.insert("y".to_string(), 555.0);
+                vars.insert("y1".to_string(), 520.0);
             }
 
             assert_eq!(evaluate_interpolated_math_expression("{x-x1}"), 105);
@@ -9835,6 +9850,7 @@ mod windows_overlay {
 
         #[test]
         fn test_tonumber_property() {
+            let _guard = TEST_MUTEX.lock().unwrap();
             {
                 let mut text_vars = TEXT_VARIABLES.lock();
                 text_vars.insert("A".to_string(), "hello123".to_string());
@@ -9851,8 +9867,8 @@ mod windows_overlay {
 
             {
                 let vars = RUNTIME_VARIABLES.lock();
-                assert_eq!(*vars.get("A").unwrap_or(&0), 123);
-                assert_eq!(*vars.get("B").unwrap_or(&0), 12345);
+                assert_eq!(*vars.get("A").unwrap_or(&0.0), 123.0);
+                assert_eq!(*vars.get("B").unwrap_or(&0.0), 12345.0);
             }
 
             {
@@ -9907,8 +9923,9 @@ mod windows_overlay {
 
         #[test]
         fn test_numeric_variable_overrides_stale_text_variable() {
+            let _guard = TEST_MUTEX.lock().unwrap();
             set_text_variable_value("u", "better prompt");
-            set_variable_value("u", 1);
+            set_variable_value("u", 1.0);
             {
                 let text_vars = TEXT_VARIABLES.lock();
                 assert!(!text_vars.contains_key("u"));
@@ -9923,7 +9940,8 @@ mod windows_overlay {
 
         #[test]
         fn test_text_variable_overrides_stale_numeric_variable() {
-            set_variable_value("u", 1);
+            let _guard = TEST_MUTEX.lock().unwrap();
+            set_variable_value("u", 1.0);
             set_text_variable_value("u", "better prompt");
             {
                 let vars = RUNTIME_VARIABLES.lock();
@@ -13006,7 +13024,7 @@ mod windows_overlay {
     ) -> Result<VisionRunOutcome> {
         let set_found_var = |matched: bool| {
             if let Some(var_name) = found_var.filter(|s| !s.trim().is_empty()) {
-                set_variable_value(var_name.trim(), if matched { 1 } else { 0 });
+                set_variable_value(var_name.trim(), if matched { 1.0 } else { 0.0 });
             }
         };
         if preset.is_pixel_counter {
@@ -13053,7 +13071,7 @@ mod windows_overlay {
             };
             {
                 let mut vars = RUNTIME_VARIABLES.lock();
-                vars.insert(var_name.clone(), count);
+                vars.insert(var_name.clone(), count as f64);
             }
             set_found_var(count > 0);
 
@@ -13198,11 +13216,11 @@ mod windows_overlay {
             let moved_x = center_x + preset.move_offset_x;
             let moved_y = center_y + preset.move_offset_y;
             if let Some(var_x) = pos_var_x.filter(|s| !s.trim().is_empty()) {
-                set_variable_value(var_x, moved_x);
+                set_variable_value(var_x, moved_x as f64);
             }
 
             if let Some(var_y) = pos_var_y.filter(|s| !s.trim().is_empty()) {
-                set_variable_value(var_y, moved_y);
+                set_variable_value(var_y, moved_y as f64);
             }
             set_found_var(true);
 
@@ -13410,11 +13428,11 @@ mod windows_overlay {
         }
 
         if let Some(var_x) = pos_var_x.filter(|s| !s.trim().is_empty()) {
-            set_variable_value(var_x, moved_x);
+            set_variable_value(var_x, moved_x as f64);
         }
 
         if let Some(var_y) = pos_var_y.filter(|s| !s.trim().is_empty()) {
-            set_variable_value(var_y, moved_y);
+            set_variable_value(var_y, moved_y as f64);
         }
         set_found_var(true);
 
@@ -13541,7 +13559,7 @@ mod windows_overlay {
         if !settings.output_level_var.trim().is_empty() {
             set_variable_value(
                 &settings.output_level_var,
-                clamp_f64_to_i32((snapshot.level * 1000.0) as f64),
+                (snapshot.level * 1000.0) as f64,
             );
         }
     }

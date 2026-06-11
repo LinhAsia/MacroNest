@@ -1071,7 +1071,7 @@ impl CrosshairApp {
         {
             let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
             for (name, val) in &app.state.global_constants {
-                vars.insert(name.clone(), *val);
+                vars.insert(name.clone(), *val as f64);
             }
         }
         app.preload_primary_sound_preset_audio();

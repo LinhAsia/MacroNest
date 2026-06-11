@@ -12396,7 +12396,7 @@ impl CrosshairApp {
                                     {
                                         self.state.global_constants[pos].1 = new_val;
                                         let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                        vars.insert(name_to_up, new_val);
+                                        vars.insert(name_to_up, new_val as f64);
                                         self.persist();
                                     }
                                 }
@@ -12452,10 +12452,10 @@ impl CrosshairApp {
                             .any(|(n, _)| n == &name_trimmed)
                         {
                             self.state
-                                .global_constants
-                                .push((name_trimmed.clone(), parsed_val));
+                                    .global_constants
+                                    .push((name_trimmed.clone(), parsed_val));
                             let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                            vars.insert(name_trimmed, parsed_val);
+                            vars.insert(name_trimmed, parsed_val as f64);
                             name_buf.clear();
                             val_buf.clear();
                             self.persist();
@@ -12505,7 +12505,7 @@ impl CrosshairApp {
                                     );
                                     let runtime_val = {
                                         let vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                        vars.get(name).copied().unwrap_or(0)
+                                        vars.get(name).copied().unwrap_or(0.0)
                                     };
                                     let id_editing = ui.id().with(("var-edit", name));
                                     let mut val_str = ui
@@ -12522,7 +12522,7 @@ impl CrosshairApp {
                                         });
                                     }
                                     if response.lost_focus() || response.clicked_elsewhere() {
-                                        if let Ok(new_val) = val_str.trim().parse::<i32>() {
+                                        if let Ok(new_val) = val_str.trim().parse::<f64>() {
                                             to_update = Some((name.clone(), new_val));
                                         }
                                         ui.memory_mut(|mem| {
@@ -12584,7 +12584,7 @@ impl CrosshairApp {
                 if ui.button(Self::tr_lang(language, "Set", "Set")).clicked() {
                     let name_trimmed = name_buf.trim().to_string();
                     if !name_trimmed.is_empty() {
-                        let parsed_val = val_buf.trim().parse::<i32>().unwrap_or(0);
+                        let parsed_val = val_buf.trim().parse::<f64>().unwrap_or(0.0);
                         let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
                         vars.insert(name_trimmed, parsed_val);
                         name_buf.clear();
