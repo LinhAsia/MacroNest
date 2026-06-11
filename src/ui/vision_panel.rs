@@ -1441,7 +1441,7 @@ impl CrosshairApp {
         target: VisionCaptureTarget,
         mode: VisionCaptureMode,
     ) {
-        if self.vision_capture_active || self.pending_freeze_frame_capture.is_some() {
+        if self.vision_capture_active {
             return;
         }
         let viewport = ctx.input(|input| input.viewport().clone());
@@ -1452,13 +1452,72 @@ impl CrosshairApp {
         self.vision_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
         self.enforce_square_window_frames = 0;
 
-        self.pending_freeze_frame_capture = Some(crate::ui::FreezeFrameCaptureRequest::Vision { target, mode });
-
+        // Hide window
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
         crate::overlay::wake_command_queue();
 
-        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        // Sleep to let OS process window hide
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Capture virtual screen bounds
+        let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+        if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                [capture.width, capture.height],
+                &capture.rgba,
+            );
+            let texture = ctx.load_texture(
+                "screen-freeze-frame",
+                color_image,
+                egui::TextureOptions::NEAREST,
+            );
+            self.captured_freeze_texture = Some(texture);
+            self.captured_freeze_frame = Some(capture);
+            self.captured_freeze_pos = egui::pos2(left as f32, top as f32);
+        }
+
+        // Resize window to virtual screen dimensions
+        let ppp = ctx.pixels_per_point().max(0.5);
+        let pos = egui::pos2(left as f32 / ppp, top as f32 / ppp);
+        let size = egui::vec2(width as f32 / ppp, height as f32 / ppp);
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+
+        // Setup vision capture state
+        self.vision_capture_target = Some(target);
+        self.vision_capture_mode = Some(mode);
+        self.vision_capture_active = true;
+        self.vision_capture_anchor = None;
+        self.vision_capture_current = None;
+        self.vision_capture_screen_region_preview = None;
+        self.status = match mode {
+            VisionCaptureMode::Template => {
+                "Drag on screen to pick an image template. Press Esc to cancel.".to_owned()
+            }
+            VisionCaptureMode::SearchRegion => {
+                "Drag on screen to pick the image search area. Press Esc to cancel.".to_owned()
+            }
+            VisionCaptureMode::ColorSample => {
+                "Click a pixel on screen to pick a target color. Press Esc to cancel.".to_owned()
+            }
+            VisionCaptureMode::ColorPriorityAnchor => {
+                "Click a point on screen to set the color priority anchor. Press Esc to cancel.".to_owned()
+            }
+            VisionCaptureMode::SinglePixel => {
+                "Click a pixel on screen to pick the search coordinate. Press Esc to cancel.".to_owned()
+            }
+        };
+        let is_region_mode = matches!(
+            mode,
+            VisionCaptureMode::Template | VisionCaptureMode::SearchRegion
+        );
+        self.set_image_search_capture_mouse_blocked(true, is_region_mode);
+
+        ctx.request_repaint();
     }
 
     pub(crate) fn handle_image_search_capture_mouse_down(
