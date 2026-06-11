@@ -13833,28 +13833,49 @@ impl CrosshairApp {
             
             if code_mode {
                 ui.add_space(4.0);
+                
+                let svg_code_collapsed_id = ui.make_persistent_id((id_prefix, "svg-code-collapsed"));
+                let mut svg_code_collapsed = ui.data(|d| d.get_temp::<bool>(svg_code_collapsed_id)).unwrap_or(true);
+                
                 ui.horizontal(|ui| {
-                    ui.label(Self::tr_lang(language, "SVG Code:", "Code SVG:"));
-                    let mut temp_path = step.svg_image_spec.path.clone();
-                    let response = ui.add(
-                        egui::TextEdit::multiline(&mut temp_path)
-                            .hint_text("<svg>...</svg>")
-                            .font(egui::TextStyle::Monospace)
-                            .desired_rows(4)
-                            .desired_width(450.0)
-                    );
-                    if response.changed() {
-                        step.svg_image_spec.path = temp_path;
-                        *live_sync = true;
-                        preview_dirty = true;
+                    let collapse_icon = if svg_code_collapsed { 0xe5cc } else { 0xe5cf }; // right or down arrow
+                    let collapse_btn = egui::Button::new(Self::material_icon_text(collapse_icon, 12.0));
+                    if ui.add_sized([18.0, 18.0], collapse_btn).clicked() {
+                        svg_code_collapsed = !svg_code_collapsed;
+                        ui.data_mut(|d| d.insert_temp(svg_code_collapsed_id, svg_code_collapsed));
                     }
-                    Self::apply_vietnamese_input_if_changed(
-                        &response,
-                        vietnamese_input_enabled,
-                        vietnamese_input_mode,
-                        &mut step.svg_image_spec.path,
-                    );
+                    
+                    ui.label(Self::tr_lang(language, "SVG Code:", "Code SVG:"));
+                    
+                    if svg_code_collapsed {
+                        ui.weak(Self::tr_lang(language, "(click arrow to expand)", "(click mũi tên để mở rộng)"));
+                    }
                 });
+
+                if !svg_code_collapsed {
+                    ui.horizontal(|ui| {
+                        ui.add_space(20.0);
+                        let mut temp_path = step.svg_image_spec.path.clone();
+                        let response = ui.add(
+                            egui::TextEdit::multiline(&mut temp_path)
+                                .hint_text("<svg>...</svg>")
+                                .font(egui::TextStyle::Monospace)
+                                .desired_rows(6)
+                                .desired_width(450.0)
+                        );
+                        if response.changed() {
+                            step.svg_image_spec.path = temp_path;
+                            *live_sync = true;
+                            preview_dirty = true;
+                        }
+                        Self::apply_vietnamese_input_if_changed(
+                            &response,
+                            vietnamese_input_enabled,
+                            vietnamese_input_mode,
+                            &mut step.svg_image_spec.path,
+                        );
+                    });
+                }
             }
             
             if !step.svg_image_collapsed {

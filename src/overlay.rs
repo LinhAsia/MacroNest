@@ -4193,7 +4193,58 @@ mod windows_overlay {
                 }
 
                 OverlayCommand::PreviewSvgImageSpec(spec) => {
-                    HOOK_STATE.lock().preview_svg_image_spec = spec;
+                    if let Some(ref s) = spec {
+                        let target_w = geometry_eval_i32(&s.width_expr, 0).max(0) as u32;
+                        let target_h = geometry_eval_i32(&s.height_expr, 0).max(0) as u32;
+                        let opacity = if s.opacity_expr.trim().is_empty() {
+                            s.opacity
+                        } else {
+                            let v = geometry_eval_i32(&s.opacity_expr, 100);
+                            (v as f32 / 100.0).clamp(0.0, 1.0)
+                        };
+                        let path_str = s.path.clone();
+                        let trimmed = path_str.trim();
+                        let is_code = trimmed.starts_with('<') || trimmed.contains("<svg");
+
+                        let mut rendered_img = None;
+                        if is_code {
+                            if let Ok(rendered) = crate::render::render_svg_image(&path_str, target_w, target_h, opacity) {
+                                rendered_img = Some(rendered);
+                            }
+                        } else {
+                            let resolved = {
+                                use std::path::Path;
+                                let p = Path::new(&path_str);
+                                if p.exists() {
+                                    Some(p.to_path_buf())
+                                } else {
+                                    let assets_path = Path::new("assets").join(&path_str);
+                                    if assets_path.exists() {
+                                        Some(assets_path)
+                                    } else {
+                                        None
+                                    }
+                                }
+                            };
+                            if let Some(path) = resolved {
+                                if let Ok(rendered) = crate::render::render_svg_image(&path.to_string_lossy(), target_w, target_h, opacity) {
+                                    rendered_img = Some(rendered);
+                                }
+                            }
+                        }
+
+                        let mut hook_state = HOOK_STATE.lock();
+                        if let Some(img) = rendered_img {
+                            hook_state.rendered_svg_image_steps.insert((u32::MAX, usize::MAX), img);
+                        } else {
+                            hook_state.rendered_svg_image_steps.remove(&(u32::MAX, usize::MAX));
+                        }
+                        hook_state.preview_svg_image_spec = Some(s.clone());
+                    } else {
+                        let mut hook_state = HOOK_STATE.lock();
+                        hook_state.rendered_svg_image_steps.remove(&(u32::MAX, usize::MAX));
+                        hook_state.preview_svg_image_spec = None;
+                    }
                     let _ = refresh_search_area_overlay(runtime);
                 }
 
