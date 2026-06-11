@@ -812,6 +812,9 @@ pub struct CrosshairApp {
     /// Which DrawGeometry macro step is currently being previewed on overlay (group_id, preset_id, step_index, is_hold_stop)
     draw_geometry_step_preview_target: Option<(u32, u32, usize, bool)>,
     draw_geometry_step_preview_sent: Option<crate::model::GeometrySpec>,
+    /// Which DrawSvgImage macro step is currently being previewed on overlay (group_id, preset_id, step_index, is_hold_stop)
+    draw_svg_image_step_preview_target: Option<(u32, u32, usize, bool)>,
+    draw_svg_image_step_preview_sent: Option<crate::model::SvgImageSpec>,
     variable_inspector_open: bool,
     ocr_lang_pack_open: bool,
     ocr_lang_settings_focus: Option<String>,
@@ -1041,6 +1044,8 @@ impl CrosshairApp {
             macro_step_geometry_color_pick_target: None,
             draw_geometry_step_preview_target: None,
             draw_geometry_step_preview_sent: None,
+            draw_svg_image_step_preview_target: None,
+            draw_svg_image_step_preview_sent: None,
             variable_inspector_open: false,
             ocr_lang_pack_open: false,
             ocr_lang_settings_focus: None,
@@ -4177,6 +4182,7 @@ impl CrosshairApp {
             MacroAction::SetVariable => "SetVariable",
             MacroAction::OcrSearch => "OcrSearch",
             MacroAction::DrawGeometry => "DrawGeometry",
+            MacroAction::DrawSvgImage => "DrawSvgImage",
             MacroAction::ShowGeometryPreset => "ShowGeometry",
             MacroAction::HideGeometryPreset => "HideGeometry",
             MacroAction::JumpToStep => "JumpToStep",
@@ -4301,6 +4307,9 @@ impl CrosshairApp {
                 }
                 MacroAction::DrawGeometry => {
                     "Vẽ một hình hình học lên overlay màn hình bằng tọa độ hoặc biểu thức."
+                }
+                MacroAction::DrawSvgImage => {
+                    "Vẽ một hình ảnh (SVG, PNG, JPG, BMP) lên overlay màn hình."
                 }
                 MacroAction::ShowGeometryPreset => {
                     "Hiện một preset hình học đã lưu từ tab Geometry."
@@ -4429,6 +4438,9 @@ impl CrosshairApp {
                 MacroAction::DrawGeometry => {
                     "Draw one geometry shape on the screen overlay using coordinates or expressions."
                 }
+                MacroAction::DrawSvgImage => {
+                    "Draw an image (SVG, PNG, JPG, BMP) on the screen overlay using coordinates or expressions."
+                }
                 MacroAction::ShowGeometryPreset => {
                     "Show one saved geometry preset from the Geometry tab."
                 }
@@ -4513,6 +4525,7 @@ impl CrosshairApp {
             MacroAction::SetVariable => 0xe150,
             MacroAction::OcrSearch => 0xe8b6,
             MacroAction::DrawGeometry => 0xe85b,
+            MacroAction::DrawSvgImage => 0xe3f4,
             MacroAction::ShowGeometryPreset => 0xe8f4,
             MacroAction::HideGeometryPreset => 0xe8f5,
             MacroAction::JumpToStep => 0xe5c8,
@@ -4592,6 +4605,7 @@ impl CrosshairApp {
                 MacroAction::IfEnd => "Hết Nếu",
                 MacroAction::SetVariable => "Gán biến",
                 MacroAction::DrawGeometry => "Vẽ hình",
+                MacroAction::DrawSvgImage => "Vẽ ảnh",
                 MacroAction::ShowGeometryPreset => "Hiện hình",
                 MacroAction::HideGeometryPreset => "Ẩn hình",
                 MacroAction::OcrSearch => "Quét OCR",
@@ -4666,6 +4680,7 @@ impl CrosshairApp {
                 MacroAction::IfEnd => "IfEnd",
                 MacroAction::SetVariable => "SetVar",
                 MacroAction::DrawGeometry => "DrawGeo",
+                MacroAction::DrawSvgImage => "DrawImg",
                 MacroAction::ShowGeometryPreset => "ShowGeo",
                 MacroAction::HideGeometryPreset => "HideGeo",
                 MacroAction::OcrSearch => "OcrSearch",
@@ -4739,6 +4754,7 @@ impl CrosshairApp {
                 MacroAction::IfEnd => "IfEnd",
                 MacroAction::SetVariable => "SetVar",
                 MacroAction::DrawGeometry => "DrawGeo",
+                MacroAction::DrawSvgImage => "DrawImg",
                 MacroAction::ShowGeometryPreset => "ShowGeo",
                 MacroAction::HideGeometryPreset => "HideGeo",
                 MacroAction::OcrSearch => "OCR",
@@ -9309,6 +9325,43 @@ impl eframe::App for CrosshairApp {
                 let _ = self
                     .overlay_tx
                     .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(preview_spec));
+            }
+        }
+
+        let keep_macro_svg_image_preview = viewport_focused && self.state.active_panel == AppPanel::Macros;
+        if !keep_macro_svg_image_preview && self.draw_svg_image_step_preview_target.is_some() {
+            self.draw_svg_image_step_preview_target = None;
+            self.draw_svg_image_step_preview_sent = None;
+            let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(None));
+        } else if let Some((group_id, preset_id, step_index, is_hold_stop)) = self.draw_svg_image_step_preview_target {
+            let preview_spec = self.state.macro_groups.iter()
+                .find(|g| g.id == group_id)
+                .and_then(|g| g.presets.iter().find(|p| p.id == preset_id))
+                .and_then(|p| {
+                    if is_hold_stop {
+                        Some(&p.hold_stop_step)
+                    } else {
+                        p.steps.get(step_index)
+                    }
+                })
+                .and_then(|step| {
+                    if step.action == crate::model::MacroAction::DrawSvgImage {
+                        Some(step.svg_image_spec.clone())
+                    } else {
+                        None
+                    }
+                });
+
+            if preview_spec.is_none() {
+                self.draw_svg_image_step_preview_target = None;
+                self.draw_svg_image_step_preview_sent = None;
+            }
+
+            if self.draw_svg_image_step_preview_sent != preview_spec {
+                self.draw_svg_image_step_preview_sent = preview_spec.clone();
+                let _ = self
+                    .overlay_tx
+                    .send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(preview_spec));
             }
         }
 

@@ -4053,6 +4053,9 @@ impl CrosshairApp {
                                                     if step.action == MacroAction::DrawGeometry {
                                                         step.geometry_collapsed = true;
                                                     }
+                                                    if step.action == MacroAction::DrawSvgImage {
+                                                        step.svg_image_collapsed = true;
+                                                    }
                                                     if step.action == MacroAction::StartAudioSensePreset {
                                                         step.audio_sense_collapsed = true;
                                                     }
@@ -4062,6 +4065,13 @@ impl CrosshairApp {
                                                 if preview_group_id == group.id {
                                                     self.draw_geometry_step_preview_target = None;
                                                     let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+                                                }
+                                            }
+                                            if let Some((preview_group_id, _, _, _)) = self.draw_svg_image_step_preview_target {
+                                                if preview_group_id == group.id {
+                                                    self.draw_svg_image_step_preview_target = None;
+                                                    self.draw_svg_image_step_preview_sent = None;
+                                                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(None));
                                                 }
                                             }
                                         }
@@ -4850,6 +4860,9 @@ impl CrosshairApp {
                                                         if step.action == MacroAction::DrawGeometry {
                                                             step.geometry_collapsed = true;
                                                         }
+                                                        if step.action == MacroAction::DrawSvgImage {
+                                                            step.svg_image_collapsed = true;
+                                                        }
                                                         if step.action == MacroAction::StartAudioSensePreset {
                                                             step.audio_sense_collapsed = true;
                                                         }
@@ -4858,6 +4871,13 @@ impl CrosshairApp {
                                                         if preview_preset_id == preset.id {
                                                             self.draw_geometry_step_preview_target = None;
                                                             let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+                                                        }
+                                                    }
+                                                    if let Some((_, preview_preset_id, _, _)) = self.draw_svg_image_step_preview_target {
+                                                        if preview_preset_id == preset.id {
+                                                            self.draw_svg_image_step_preview_target = None;
+                                                            self.draw_svg_image_step_preview_sent = None;
+                                                            let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(None));
                                                         }
                                                     }
                                                 }
@@ -5156,7 +5176,8 @@ impl CrosshairApp {
                                                     .num_columns(8)
                                                     .spacing([6.0, 6.0])
                                                     .show(ui, |ui| {
-                                                        for (index, action) in [
+                                                        let mut grid_col = 0;
+                                                        for action in [
                                                             MacroAction::KeyPress,
                                                             MacroAction::KeyDown,
                                                             MacroAction::KeyUp,
@@ -5179,16 +5200,14 @@ impl CrosshairApp {
                                                             MacroAction::HideHud,
                                                             MacroAction::LockKeys,
                                                             MacroAction::UnlockKeys,
-                                                             MacroAction::EnableMacroPreset,
-                                                             MacroAction::DisableMacroPreset,
-                                                                 MacroAction::EnableStep,
-                                                                 MacroAction::DisableStep,
-                                                              MacroAction::SetVariable,
-                                                              MacroAction::OcrSearch,
-                                                              MacroAction::JumpToStep,
+                                                            MacroAction::EnableMacroPreset,
+                                                            MacroAction::DisableMacroPreset,
+                                                                MacroAction::EnableStep,
+                                                                MacroAction::DisableStep,
+                                                             MacroAction::SetVariable,
+                                                             MacroAction::OcrSearch,
+                                                             MacroAction::JumpToStep,
                                                         ]
-                                                        .into_iter()
-                                                        .enumerate()
                                                         {
                                                             Self::render_macro_action_option(
                                                                 ui,
@@ -5199,7 +5218,8 @@ impl CrosshairApp {
                                                                 action_hover_id,
                                                                 false,
                                                             );
-                                                            if (index + 1) % 8 == 0 {
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 {
                                                                 ui.end_row();
                                                             }
                                                         }
@@ -5211,6 +5231,8 @@ impl CrosshairApp {
                                                             &mut live_sync,
                                                             action_hover_id,
                                                         );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
                                                         Self::render_image_search_action_group_option(
                                                             ui,
                                                             language,
@@ -5219,6 +5241,8 @@ impl CrosshairApp {
                                                             &mut live_sync,
                                                             action_hover_id,
                                                         );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
                                                         Self::render_timer_action_group_option(
                                                              ui,
                                                              language,
@@ -5227,6 +5251,8 @@ impl CrosshairApp {
                                                              &mut live_sync,
                                                              action_hover_id,
                                                          );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
                                                         Self::render_if_action_group_option(
                                                             ui,
                                                             language,
@@ -5235,7 +5261,8 @@ impl CrosshairApp {
                                                             &mut live_sync,
                                                             action_hover_id,
                                                         );
-                                                        ui.end_row();
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
                                                         Self::render_geometry_action_group_option(
                                                             ui,
                                                             language,
@@ -5244,6 +5271,8 @@ impl CrosshairApp {
                                                             &mut live_sync,
                                                             action_hover_id,
                                                         );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
                                                         Self::render_audio_sense_action_group_option(
                                                             ui,
                                                             language,
@@ -5252,7 +5281,9 @@ impl CrosshairApp {
                                                             &mut live_sync,
                                                             action_hover_id,
                                                         );
-                                });
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
+                                                    });
                             });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
                                             let action_supports_capture =
@@ -7066,12 +7097,30 @@ impl CrosshairApp {
                                             } else if matches!(
                                                 step.action,
                                                 MacroAction::DrawGeometry
+                                                    | MacroAction::DrawSvgImage
                                                     | MacroAction::ShowGeometryPreset
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
-                                                if matches!(
+                                                if step.action == MacroAction::DrawSvgImage {
+                                                    Self::render_svg_image_macro_step_editor(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, "hold-stop-svg-image-step"),
+                                                        group.id,
+                                                        preset.id,
+                                                        0,
+                                                        true,
+                                                        &mut self.draw_svg_image_step_preview_target,
+                                                        &self.overlay_tx,
+                                                        step,
+                                                        &mut live_sync,
+                                                        self.state.vietnamese_input_enabled,
+                                                        self.state.vietnamese_input_mode,
+                                                        &timer_names,
+                                                    );
+                                                } else if matches!(
                                                     step.action,
                                                     MacroAction::DrawGeometry
                                                         | MacroAction::ShowGeometryPreset
@@ -8241,7 +8290,8 @@ impl CrosshairApp {
                                                         .num_columns(8)
                                                         .spacing([6.0, 6.0])
                                                         .show(ui, |ui| {
-                                                        for (index, action) in [
+                                                            let mut grid_col = 0;
+                                                            for action in [
                                                                 MacroAction::KeyPress,
                                                                 MacroAction::KeyDown,
                                                                 MacroAction::KeyUp,
@@ -8260,21 +8310,18 @@ impl CrosshairApp {
                                                                 MacroAction::LoopStart,
                                                                 MacroAction::LoopEnd,
                                                                 MacroAction::StopIfKeyPressed,
-                                                            MacroAction::ShowHud,
+                                                                MacroAction::ShowHud,
                                                                 MacroAction::HideHud,
                                                                 MacroAction::LockKeys,
                                                                 MacroAction::UnlockKeys,
-                                                                 MacroAction::EnableMacroPreset,
-                                                                 MacroAction::DisableMacroPreset,
-                                                                 MacroAction::EnableStep,
-                                                                 MacroAction::DisableStep,
-                                                                 MacroAction::SetVariable,
-                                                                 MacroAction::OcrSearch,
-                                                                 MacroAction::JumpToStep,
-                                                            ]
-                                                            .into_iter()
-                                                            .enumerate()
-                                                            {
+                                                                MacroAction::EnableMacroPreset,
+                                                                MacroAction::DisableMacroPreset,
+                                                                MacroAction::EnableStep,
+                                                                MacroAction::DisableStep,
+                                                                MacroAction::SetVariable,
+                                                                MacroAction::OcrSearch,
+                                                                MacroAction::JumpToStep,
+                                                            ] {
                                                                 Self::render_macro_action_option(
                                                                     ui,
                                                                     language,
@@ -8284,7 +8331,8 @@ impl CrosshairApp {
                                                                     action_hover_id,
                                                                     false,
                                                                 );
-                                                                if (index + 1) % 8 == 0 {
+                                                                grid_col += 1;
+                                                                if grid_col % 8 == 0 {
                                                                     ui.end_row();
                                                                 }
                                                             }
@@ -8296,6 +8344,8 @@ impl CrosshairApp {
                                                                 &mut live_sync,
                                                                 action_hover_id,
                                                             );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
                                                             Self::render_image_search_action_group_option(
                                                                 ui,
                                                                 language,
@@ -8304,6 +8354,8 @@ impl CrosshairApp {
                                                                 &mut live_sync,
                                                                 action_hover_id,
                                                             );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
                                                             Self::render_timer_action_group_option(
                                                                 ui,
                                                                 language,
@@ -8312,6 +8364,8 @@ impl CrosshairApp {
                                                                 &mut live_sync,
                                                                 action_hover_id,
                                                             );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
                                                             Self::render_if_action_group_option(
                                                                 ui,
                                                                 language,
@@ -8320,7 +8374,8 @@ impl CrosshairApp {
                                                                 &mut live_sync,
                                                                 action_hover_id,
                                                             );
-                                                            ui.end_row();
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
                                                             Self::render_geometry_action_group_option(
                                                                 ui,
                                                                 language,
@@ -10800,12 +10855,30 @@ impl CrosshairApp {
                                 } else if matches!(
                                                 step.action,
                                                 MacroAction::DrawGeometry
+                                                    | MacroAction::DrawSvgImage
                                                     | MacroAction::ShowGeometryPreset
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
-                                                if matches!(
+                                                if step.action == MacroAction::DrawSvgImage {
+                                                    Self::render_svg_image_macro_step_editor(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, step_index, "normal-svg-image-step"),
+                                                        group.id,
+                                                        preset.id,
+                                                        step_index,
+                                                        false,
+                                                        &mut self.draw_svg_image_step_preview_target,
+                                                        &self.overlay_tx,
+                                                        step,
+                                                        &mut live_sync,
+                                                        self.state.vietnamese_input_enabled,
+                                                        self.state.vietnamese_input_mode,
+                                                        &timer_names,
+                                                    );
+                                                } else if matches!(
                                                     step.action,
                                                     MacroAction::DrawGeometry
                                                         | MacroAction::ShowGeometryPreset
@@ -10856,6 +10929,7 @@ impl CrosshairApp {
                                             } else if matches!(
                                                 step.action,
                                                 MacroAction::DrawGeometry
+                                                    | MacroAction::DrawSvgImage
                                                     | MacroAction::EnableCrosshairProfile
                                                     | MacroAction::EnablePinPreset
                                                     | MacroAction::PlayVideoPreset
@@ -12184,6 +12258,19 @@ impl CrosshairApp {
                 Self::extract_braced_vars(expr, vars);
             }
         }
+        if matches!(step.action, MacroAction::DrawSvgImage) {
+            for expr in [
+                &step.svg_image_spec.path,
+                &step.svg_image_spec.x_expr,
+                &step.svg_image_spec.y_expr,
+                &step.svg_image_spec.width_expr,
+                &step.svg_image_spec.height_expr,
+                &step.svg_image_spec.opacity_expr,
+                &step.svg_image_spec.rotation_expr,
+            ] {
+                Self::extract_braced_vars(expr, vars);
+            }
+        }
     }
 
     fn is_builtin_expression_identifier(token: &str) -> bool {
@@ -12815,6 +12902,7 @@ impl CrosshairApp {
     fn geometry_macro_actions() -> &'static [MacroAction] {
         &[
             MacroAction::DrawGeometry,
+            MacroAction::DrawSvgImage,
             MacroAction::ShowGeometryPreset,
             MacroAction::HideGeometryPreset,
         ]
@@ -12894,7 +12982,7 @@ impl CrosshairApp {
                         ui.ctx()
                             .data_mut(|data| data.insert_temp(popup_rect_id, rect));
                         egui::Grid::new((id_source, "geometry-action-grid"))
-                            .num_columns(3)
+                            .num_columns(2)
                             .spacing([6.0, 6.0])
                             .show(ui, |ui| {
                                 for action in Self::geometry_macro_actions().iter().copied() {
@@ -13207,17 +13295,24 @@ impl CrosshairApp {
         step_index: usize,
         is_hold_stop: bool,
         hud_presets: &[HudPreset],
-        draw_geometry_step_preview_target: &mut Option<(u32, u32, usize, bool)>,
+        preview_target: &mut Option<(u32, u32, usize, bool)>,
         overlay_tx: &crossbeam_channel::Sender<crate::overlay::OverlayCommand>,
         button_size: [f32; 2],
         icon_size: f32,
     ) {
         let is_active = match step.action {
             MacroAction::DrawGeometry => {
-                let preview_active = *draw_geometry_step_preview_target
+                let preview_active = *preview_target
                     == Some((group_id, macro_preset_id, step_index, is_hold_stop));
                 let running_active =
                     crate::overlay::is_geometry_active(macro_preset_id, step_index);
+                preview_active || running_active
+            }
+            MacroAction::DrawSvgImage => {
+                let preview_active = *preview_target
+                    == Some((group_id, macro_preset_id, step_index, is_hold_stop));
+                let running_active =
+                    crate::overlay::is_svg_image_active(macro_preset_id, step_index);
                 preview_active || running_active
             }
             MacroAction::EnableCrosshairProfile => crate::overlay::is_crosshair_active(&step.key),
@@ -13246,14 +13341,24 @@ impl CrosshairApp {
             if is_active {
                 match step.action {
                     MacroAction::DrawGeometry => {
-                        let preview_active = *draw_geometry_step_preview_target
+                        let preview_active = *preview_target
                             == Some((group_id, macro_preset_id, step_index, is_hold_stop));
                         if preview_active {
-                            *draw_geometry_step_preview_target = None;
+                            *preview_target = None;
                             let _ = overlay_tx
                                 .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
                         }
                         crate::overlay::stop_geometry(macro_preset_id, step_index);
+                    }
+                    MacroAction::DrawSvgImage => {
+                        let preview_active = *preview_target
+                            == Some((group_id, macro_preset_id, step_index, is_hold_stop));
+                        if preview_active {
+                            *preview_target = None;
+                            let _ = overlay_tx
+                                .send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(None));
+                        }
+                        crate::overlay::stop_svg_image(macro_preset_id, step_index);
                     }
                     MacroAction::EnableCrosshairProfile => {
                         crate::overlay::disable_crosshair_profile(&step.key);
@@ -13272,11 +13377,19 @@ impl CrosshairApp {
             } else {
                 match step.action {
                     MacroAction::DrawGeometry => {
-                        *draw_geometry_step_preview_target =
+                        *preview_target =
                             Some((group_id, macro_preset_id, step_index, is_hold_stop));
                         let _ =
                             overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(
                                 Some(step.geometry_spec.clone()),
+                            ));
+                    }
+                    MacroAction::DrawSvgImage => {
+                        *preview_target =
+                            Some((group_id, macro_preset_id, step_index, is_hold_stop));
+                        let _ =
+                            overlay_tx.send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(
+                                Some(step.svg_image_spec.clone()),
                             ));
                     }
                     MacroAction::EnableCrosshairProfile => {
@@ -13552,6 +13665,296 @@ impl CrosshairApp {
                 _ => {}
             });
         });
+    }
+
+    fn render_svg_image_macro_step_editor(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_prefix: impl std::hash::Hash + Copy,
+        group_id: u32,
+        macro_preset_id: u32,
+        step_index: usize,
+        is_hold_stop: bool,
+        draw_svg_image_step_preview_target: &mut Option<(u32, u32, usize, bool)>,
+        overlay_tx: &crossbeam_channel::Sender<crate::overlay::OverlayCommand>,
+        step: &mut MacroStep,
+        live_sync: &mut bool,
+        vietnamese_input_enabled: bool,
+        vietnamese_input_mode: VietnameseInputMode,
+        timer_names: &[String],
+    ) {
+        step.svg_image_spec.visible = true;
+        let current_preview_target = (group_id, macro_preset_id, step_index, is_hold_stop);
+        let mut preview_dirty = false;
+        
+        ui.horizontal(|ui| {
+            ui.label(Self::tr_lang(language, "Image file", "File anh"));
+            let path_id = ui.make_persistent_id((id_prefix, "svg-path"));
+            let response = Self::render_variable_text_edit(
+                ui,
+                &mut step.svg_image_spec.path,
+                path_id,
+                160.0,
+                300.0,
+                18.0,
+                18.0,
+                "path/to/image.svg",
+                false,
+            );
+            *live_sync |= response.changed();
+            preview_dirty |= response.changed();
+            
+            Self::apply_vietnamese_input_if_changed(
+                &response,
+                vietnamese_input_enabled,
+                vietnamese_input_mode,
+                &mut step.svg_image_spec.path,
+            );
+            
+            if ui.button(Self::tr_lang(language, "Browse...", "Chon file...")).clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Image", &["svg", "png", "jpg", "jpeg", "bmp", "webp"])
+                    .pick_file()
+                {
+                    step.svg_image_spec.path = path.to_string_lossy().to_string();
+                    *live_sync = true;
+                    preview_dirty = true;
+                }
+            }
+            
+            ui.add_space(4.0);
+            
+            let mut is_permanent = step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
+            let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Vinh vien"));
+            if cb_response.changed() {
+                if is_permanent {
+                    step.duration_expr = "0".to_string();
+                } else {
+                    step.duration_expr = "1500".to_string();
+                }
+                *live_sync = true;
+            }
+            if !is_permanent {
+                ui.add_space(2.0);
+                let duration_id = ui.make_persistent_id((group_id, macro_preset_id, step_index, is_hold_stop, "svg-duration"));
+                let response = Self::render_variable_text_edit(
+                    ui,
+                    &mut step.duration_expr,
+                    duration_id,
+                    56.0,
+                    120.0,
+                    18.0,
+                    18.0,
+                    "0",
+                    false,
+                );
+                ui.weak("ms");
+                Self::apply_vietnamese_input_if_changed(
+                    &response,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    &mut step.duration_expr,
+                );
+                *live_sync |= response.changed();
+                Self::render_variable_suggestions(
+                    ui,
+                    &response,
+                    &mut step.duration_expr,
+                    timer_names,
+                    language,
+                );
+            }
+            
+            ui.add_space(6.0);
+            
+            let collapse_icon = if step.svg_image_collapsed { 0xe5cc } else { 0xe5cf };
+            let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
+            if ui
+                .add_sized([18.0, 18.0], collapse_btn)
+                .on_hover_text(if step.svg_image_collapsed { "Expand" } else { "Collapse" })
+                .clicked()
+            {
+                step.svg_image_collapsed = !step.svg_image_collapsed;
+                *live_sync = true;
+                if step.svg_image_collapsed {
+                    if *draw_svg_image_step_preview_target == Some(current_preview_target) {
+                        *draw_svg_image_step_preview_target = None;
+                        let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(None));
+                    }
+                }
+            }
+            
+            Self::render_overlay_eye_button(
+                ui,
+                language,
+                step,
+                group_id,
+                macro_preset_id,
+                step_index,
+                is_hold_stop,
+                &[],
+                draw_svg_image_step_preview_target,
+                overlay_tx,
+                [18.0, 18.0],
+                12.0,
+            );
+        });
+        
+        if !step.svg_image_collapsed {
+            ui.add_space(4.0);
+            
+            egui::Grid::new((id_prefix, "svg-fields-grid"))
+                .num_columns(4)
+                .spacing([8.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label(Self::tr_lang(language, "X position", "Toa do X"));
+                    let x_id = ui.make_persistent_id((id_prefix, "svg-x"));
+                    let response_x = Self::render_variable_text_edit(
+                        ui,
+                        &mut step.svg_image_spec.x_expr,
+                        x_id,
+                        80.0,
+                        150.0,
+                        18.0,
+                        18.0,
+                        "960",
+                        false,
+                    );
+                    *live_sync |= response_x.changed();
+                    preview_dirty |= response_x.changed();
+                    Self::apply_vietnamese_input_if_changed(
+                        &response_x,
+                        vietnamese_input_enabled,
+                        vietnamese_input_mode,
+                        &mut step.svg_image_spec.x_expr,
+                    );
+                    Self::render_variable_suggestions(ui, &response_x, &mut step.svg_image_spec.x_expr, timer_names, language);
+                    
+                    ui.label(Self::tr_lang(language, "Y position", "Toa do Y"));
+                    let y_id = ui.make_persistent_id((id_prefix, "svg-y"));
+                    let response_y = Self::render_variable_text_edit(
+                        ui,
+                        &mut step.svg_image_spec.y_expr,
+                        y_id,
+                        80.0,
+                        150.0,
+                        18.0,
+                        18.0,
+                        "540",
+                        false,
+                    );
+                    *live_sync |= response_y.changed();
+                    preview_dirty |= response_y.changed();
+                    Self::apply_vietnamese_input_if_changed(
+                        &response_y,
+                        vietnamese_input_enabled,
+                        vietnamese_input_mode,
+                        &mut step.svg_image_spec.y_expr,
+                    );
+                    Self::render_variable_suggestions(ui, &response_y, &mut step.svg_image_spec.y_expr, timer_names, language);
+                    ui.end_row();
+                    
+                    ui.label(Self::tr_lang(language, "Width (0=auto)", "Chieu rong (0=auto)"));
+                    let w_id = ui.make_persistent_id((id_prefix, "svg-w"));
+                    let response_w = Self::render_variable_text_edit(
+                        ui,
+                        &mut step.svg_image_spec.width_expr,
+                        w_id,
+                        80.0,
+                        150.0,
+                        18.0,
+                        18.0,
+                        "200",
+                        false,
+                    );
+                    *live_sync |= response_w.changed();
+                    preview_dirty |= response_w.changed();
+                    Self::apply_vietnamese_input_if_changed(
+                        &response_w,
+                        vietnamese_input_enabled,
+                        vietnamese_input_mode,
+                        &mut step.svg_image_spec.width_expr,
+                    );
+                    Self::render_variable_suggestions(ui, &response_w, &mut step.svg_image_spec.width_expr, timer_names, language);
+                    
+                    ui.label(Self::tr_lang(language, "Height (0=auto)", "Chieu cao (0=auto)"));
+                    let h_id = ui.make_persistent_id((id_prefix, "svg-h"));
+                    let response_h = Self::render_variable_text_edit(
+                        ui,
+                        &mut step.svg_image_spec.height_expr,
+                        h_id,
+                        80.0,
+                        150.0,
+                        18.0,
+                        18.0,
+                        "0",
+                        false,
+                    );
+                    *live_sync |= response_h.changed();
+                    preview_dirty |= response_h.changed();
+                    Self::apply_vietnamese_input_if_changed(
+                        &response_h,
+                        vietnamese_input_enabled,
+                        vietnamese_input_mode,
+                        &mut step.svg_image_spec.height_expr,
+                    );
+                    Self::render_variable_suggestions(ui, &response_h, &mut step.svg_image_spec.height_expr, timer_names, language);
+                    ui.end_row();
+                    
+                    ui.label(Self::tr_lang(language, "Opacity (0.0-1.0)", "Do mo (0.0-1.0)"));
+                    let op_id = ui.make_persistent_id((id_prefix, "svg-op"));
+                    let response_op = Self::render_variable_text_edit(
+                        ui,
+                        &mut step.svg_image_spec.opacity_expr,
+                        op_id,
+                        80.0,
+                        150.0,
+                        18.0,
+                        18.0,
+                        "1.0",
+                        false,
+                    );
+                    *live_sync |= response_op.changed();
+                    preview_dirty |= response_op.changed();
+                    Self::apply_vietnamese_input_if_changed(
+                        &response_op,
+                        vietnamese_input_enabled,
+                        vietnamese_input_mode,
+                        &mut step.svg_image_spec.opacity_expr,
+                    );
+                    Self::render_variable_suggestions(ui, &response_op, &mut step.svg_image_spec.opacity_expr, timer_names, language);
+                    
+                    ui.label(Self::tr_lang(language, "Rotate (deg)", "Goc xoay (do)"));
+                    let rot_id = ui.make_persistent_id((id_prefix, "svg-rot"));
+                    let response_rot = Self::render_variable_text_edit(
+                        ui,
+                        &mut step.svg_image_spec.rotation_expr,
+                        rot_id,
+                        80.0,
+                        150.0,
+                        18.0,
+                        18.0,
+                        "0",
+                        false,
+                    );
+                    *live_sync |= response_rot.changed();
+                    preview_dirty |= response_rot.changed();
+                    Self::apply_vietnamese_input_if_changed(
+                        &response_rot,
+                        vietnamese_input_enabled,
+                        vietnamese_input_mode,
+                        &mut step.svg_image_spec.rotation_expr,
+                    );
+                    Self::render_variable_suggestions(ui, &response_rot, &mut step.svg_image_spec.rotation_expr, timer_names, language);
+                    ui.end_row();
+                });
+        }
+        
+        if preview_dirty && *draw_svg_image_step_preview_target == Some(current_preview_target) {
+            let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(
+                Some(step.svg_image_spec.clone()),
+            ));
+        }
     }
 
     fn render_audio_sense_monitor_settings_inline(

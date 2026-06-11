@@ -14,6 +14,12 @@ pub struct RenderedCrosshair {
     pub rgba: Vec<u8>,
 }
 
+pub struct RenderedSvgImage {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
 pub fn render_crosshair(
     style: &CrosshairStyle,
     custom_asset: Option<&Path>,
@@ -202,4 +208,94 @@ fn apply_global_alpha(rgba: &mut [u8], alpha: f32) {
     for pixel in rgba.chunks_exact_mut(4) {
         pixel[3] = (pixel[3] as f32 * factor).round() as u8;
     }
+}
+
+/// Render an SVG or raster image file to an RGBA pixel buffer.
+///
+/// `target_width` / `target_height`: desired output dimensions in pixels.
+/// Pass `0` for one axis to derive it from the other while maintaining aspect ratio.
+/// Pass `0` for both to use the intrinsic size (capped at 2048).
+/// `opacity`: global alpha multiplier applied after rasterization [0.0, 1.0].
+pub fn render_svg_image(path: &Path, target_width: u32, target_height: u32, opacity: f32) -> Result<RenderedSvgImage> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    let pixmap = if ext == "svg" {
+        render_svg_to_pixmap(path, target_width, target_height)?
+    } else {
+        render_raster_to_pixmap(path, target_width, target_height)?
+    };
+
+    let mut rgba = pixmap.data().to_vec();
+    if (opacity - 1.0).abs() > f32::EPSILON {
+        apply_global_alpha(&mut rgba, opacity);
+    }
+
+    Ok(RenderedSvgImage {
+        width: pixmap.width(),
+        height: pixmap.height(),
+        rgba,
+    })
+}
+
+fn resolve_dimensions(intrinsic_w: u32, intrinsic_h: u32, target_w: u32, target_h: u32) -> (u32, u32) {
+    const MAX: u32 = 2048;
+    match (target_w, target_h) {
+        (0, 0) => (intrinsic_w.min(MAX), intrinsic_h.min(MAX)),
+        (w, 0) => {
+            let h = if intrinsic_w > 0 {
+                ((w as f32 / intrinsic_w as f32) * intrinsic_h as f32).round().max(1.0) as u32
+            } else {
+                w
+            };
+            (w, h)
+        }
+        (0, h) => {
+            let w = if intrinsic_h > 0 {
+                ((h as f32 / intrinsic_h as f32) * intrinsic_w as f32).round().max(1.0) as u32
+            } else {
+                h
+            };
+            (w, h)
+        }
+        (w, h) => (w, h),
+    }
+}
+
+fn render_svg_to_pixmap(path: &Path, target_width: u32, target_height: u32) -> Result<Pixmap> {
+    let options = resvg::usvg::Options::default();
+    let bytes = fs::read(path).with_context(|| format!("Failed to read SVG {}", path.display()))?;
+    let tree = resvg::usvg::Tree::from_data(&bytes, &options)
+        .with_context(|| format!("Invalid SVG {}", path.display()))?;
+    let size = tree.size();
+    let (out_w, out_h) = resolve_dimensions(
+        size.width().round() as u32,
+        size.height().round() as u32,
+        target_width,
+        target_height,
+    );
+    let scale_x = out_w as f32 / size.width();
+    let scale_y = out_h as f32 / size.height();
+    let mut pixmap = Pixmap::new(out_w.max(1), out_h.max(1)).context("Failed to create SVG pixmap")?;
+    let transform = Transform::from_scale(scale_x, scale_y);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    Ok(pixmap)
+}
+
+fn render_raster_to_pixmap(path: &Path, target_width: u32, target_height: u32) -> Result<Pixmap> {
+    let image = ImageReader::open(path)
+        .with_context(|| format!("Failed to open image {}", path.display()))?
+        .decode()
+        .with_context(|| format!("Failed to decode image {}", path.display()))?;
+    let (iw, ih) = image.dimensions();
+    let (out_w, out_h) = resolve_dimensions(iw, ih, target_width, target_height);
+    let resized = image.resize_exact(out_w.max(1), out_h.max(1), FilterType::CatmullRom);
+    let rgba = resized.to_rgba8();
+    let (w, h) = resized.dimensions();
+    let mut pixmap = Pixmap::new(w, h).context("Failed to create raster pixmap")?;
+    pixmap.data_mut().copy_from_slice(rgba.as_raw());
+    Ok(pixmap)
 }
