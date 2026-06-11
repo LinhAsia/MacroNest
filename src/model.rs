@@ -830,6 +830,10 @@ impl GeometryObject {
     pub fn new(id: u32, shape: GeometryShapeKind) -> Self {
         let mut spec = GeometrySpec::default();
         spec.shape = shape;
+        if shape == GeometryShapeKind::Svg {
+            spec.text = String::new();
+            spec.opacity_expr = "100".to_owned();
+        }
         Self {
             id,
             name: format!("{shape:?} {id}"),
