@@ -254,6 +254,13 @@ mod windows_impl {
         let clean_candidate = clean_invisible_chars(candidate);
         let target_base = selector_base_title(&clean_target);
         let candidate_base = selector_base_title(&clean_candidate);
+        
+        let is_target_anti = target_base.contains(" - Antigravity IDE - ") || target_base.ends_with(" - Antigravity IDE");
+        let is_cand_anti = candidate_base.contains(" - Antigravity IDE - ") || candidate_base.ends_with(" - Antigravity IDE");
+        if is_target_anti && is_cand_anti {
+            return true;
+        }
+
         for suffix in BROWSER_SUFFIXES {
             if target_base.ends_with(suffix) && candidate_base.ends_with(suffix) {
                 return true;

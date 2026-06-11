@@ -3694,6 +3694,10 @@ impl CrosshairApp {
         let clean = Self::clean_invisible_chars(title);
         let base = Self::selector_base_title(&clean);
 
+        if base.contains(" - Antigravity IDE - ") || base.ends_with(" - Antigravity IDE") {
+            return "Antigravity IDE".to_owned();
+        }
+
         const BROWSER_SUFFIXES: &[&str] = &[
             " - Microsoft Edge",
             " - Google Chrome",
