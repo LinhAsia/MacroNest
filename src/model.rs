@@ -432,6 +432,8 @@ pub struct WindowLayout {
     pub focus_on_apply: bool,
     pub hotkey: Option<HotkeyBinding>,
     pub trigger_keys: String,
+    pub block_taskbar: bool,
+    pub remove_title_bar: bool,
 }
 
 impl WindowLayout {
@@ -454,6 +456,8 @@ impl WindowLayout {
             focus_on_apply: true,
             hotkey: None,
             trigger_keys: String::new(),
+            block_taskbar: false,
+            remove_title_bar: false,
         }
     }
 }

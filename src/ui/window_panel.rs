@@ -2292,7 +2292,7 @@ impl CrosshairApp {
         }
     }
 
-    fn get_monitor_work_size() -> (f32, f32) {
+    fn get_monitor_work_size(block_taskbar: bool) -> (f32, f32) {
         #[cfg(windows)]
         unsafe {
             use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST, MonitorFromPoint};
@@ -2308,13 +2308,15 @@ impl CrosshairApp {
                 ..Default::default()
             };
             if GetMonitorInfoW(monitor, &mut mi).as_bool() {
-                ((mi.rcWork.right - mi.rcWork.left) as f32, (mi.rcWork.bottom - mi.rcWork.top) as f32)
+                let rect = if block_taskbar { mi.rcWork } else { mi.rcMonitor };
+                ((rect.right - rect.left) as f32, (rect.bottom - rect.top) as f32)
             } else {
                 (1920.0, 1080.0)
             }
         }
         #[cfg(not(windows))]
         {
+            let _ = block_taskbar;
             (1920.0, 1080.0)
         }
     }
@@ -2625,6 +2627,14 @@ impl CrosshairApp {
                         live_sync |= ui.checkbox(&mut layout.focus_on_apply, "").changed();
                         ui.end_row();
                         
+                        ui.label(Self::tr_lang(language, "Block taskbar", "Tránh taskbar"));
+                        live_sync |= ui.checkbox(&mut layout.block_taskbar, "").changed();
+                        ui.end_row();
+                        
+                        ui.label(Self::tr_lang(language, "Remove title bar", "Xóa thanh tiêu đề"));
+                        live_sync |= ui.checkbox(&mut layout.remove_title_bar, "").changed();
+                        ui.end_row();
+                        
                         ui.label(Self::tr_lang(language, "Grid size", "Kích thước lưới"));
                         ui.horizontal(|ui| {
                             ui.label(Self::tr_lang(language, "Rows", "Hàng"));
@@ -2691,8 +2701,10 @@ impl CrosshairApp {
                                 col_starts.push(acc);
                             }
                             
+                            let (mon_w, mon_h) = Self::get_monitor_work_size(layout.block_taskbar);
+                            let aspect = if mon_h > 0.0 { mon_w / mon_h } else { 2.0 };
                             let preview_w = (ui.available_width() - 24.0).clamp(320.0, 800.0);
-                            let preview_h = preview_w * 0.5;
+                            let preview_h = preview_w / aspect;
                             
                             let (rect, _response) = ui.allocate_exact_size(vec2(preview_w, preview_h), egui::Sense::hover());
                             
@@ -3085,7 +3097,7 @@ impl CrosshairApp {
 
                                     // Render cell estimated resolution info
                                     ui.label(Self::tr_lang(language, "Resolution", "Độ phân giải"));
-                                    let (mon_w, mon_h) = Self::get_monitor_work_size();
+                                    let (mon_w, mon_h) = Self::get_monitor_work_size(layout.block_taskbar);
                                     
                                     let r_sum: f32 = layout.row_ratios.iter().sum();
                                     let c_sum: f32 = layout.col_ratios.iter().sum();

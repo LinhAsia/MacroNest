@@ -334,7 +334,11 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
             ..Default::default()
         };
         if GetMonitorInfoW(monitor, &mut mi).as_bool() {
-            mi.rcWork
+            if layout.block_taskbar {
+                mi.rcWork
+            } else {
+                mi.rcMonitor
+            }
         } else {
             RECT { left: 0, top: 0, right: 1920, bottom: 1080 }
         }
@@ -478,6 +482,11 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
 
         unsafe {
             let _ = ShowWindow(hwnd, SW_RESTORE);
+            if layout.remove_title_bar {
+                let _ = remove_window_title_bar(hwnd);
+            } else {
+                let _ = restore_window_title_bar(hwnd);
+            }
             let mut wr = RECT::default();
             let _ = GetWindowRect(hwnd, &mut wr);
             let mut fr = RECT::default();
