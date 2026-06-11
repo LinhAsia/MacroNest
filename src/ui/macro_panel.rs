@@ -2491,6 +2491,10 @@ impl CrosshairApp {
                 suggestion_names,
             );
             mem.data.insert_temp(
+                egui::Id::new("macro_timer_suggestion_names"),
+                timer_names.clone(),
+            );
+            mem.data.insert_temp(
                 egui::Id::new("macro_variable_writable_suggestion_names"),
                 writable_suggestion_names,
             );
@@ -7264,9 +7268,10 @@ impl CrosshairApp {
                                             if action_supports_capture
                                                 && !matches!(
                                                     step.action,
-                                                    MacroAction::LockKeys | MacroAction::UnlockKeys
+                                                    MacroAction::LockKeys
+                                                        | MacroAction::UnlockKeys
+                                                        | MacroAction::StopIfKeyPressed
                                                 )
-                                                && !(step.action == MacroAction::StopIfKeyPressed && step.get_break_loop_mode() == "StopKey")
                                             {
                                                 let hold_stop_capture_target =
                                                     CaptureRequest::MacroPresetHoldStopInput(group.id, preset.id);
@@ -10948,9 +10953,10 @@ impl CrosshairApp {
                                             } else if action_supports_capture
                                                 && !matches!(
                                                     step.action,
-                                                    MacroAction::LockKeys | MacroAction::UnlockKeys
+                                                    MacroAction::LockKeys
+                                                        | MacroAction::UnlockKeys
+                                                        | MacroAction::StopIfKeyPressed
                                                 )
-                                                && !(step.action == MacroAction::StopIfKeyPressed && step.get_break_loop_mode() == "StopKey")
                                             {
                                                 let step_capture_target = CaptureRequest::MacroStepInput {
                                                     group_id: group.id,
@@ -12105,7 +12111,7 @@ impl CrosshairApp {
         });
     }
 
-    fn collect_all_macro_referenced_variables(&self) -> Vec<String> {
+    pub(crate) fn collect_all_macro_referenced_variables(&self) -> Vec<String> {
         let mut vars = std::collections::HashSet::new();
         for group in &self.state.macro_groups {
             for preset in &group.presets {
@@ -14155,7 +14161,7 @@ impl CrosshairApp {
         }
     }
 
-    fn render_variable_suggestions(
+    pub(crate) fn render_variable_suggestions(
         ui: &mut egui::Ui,
         response: &egui::Response,
         text: &mut String,
@@ -14182,6 +14188,11 @@ impl CrosshairApp {
         timer_names: &[String],
         require_wrap_open: bool,
     ) {
+        let temp_timer_names = ui.memory(|mem| {
+            mem.data
+                .get_temp::<Vec<String>>(egui::Id::new("macro_timer_suggestion_names"))
+        });
+        let timer_names = temp_timer_names.as_deref().unwrap_or(timer_names);
         let suggestion_names = ui
             .memory(|mem| {
                 mem.data

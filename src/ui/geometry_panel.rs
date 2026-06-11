@@ -17,6 +17,48 @@ impl CrosshairApp {
         let mut clear_preview_target = false;
         let mut begin_mouse_move_absolute_capture_target = None;
 
+        // Initialize autocomplete suggestions for geometry panel
+        let timer_names: Vec<String> = self.state.timer_presets.iter().map(|p| p.name.clone()).collect();
+        let mut suggestion_names = std::collections::HashSet::new();
+        for preset in &self.state.timer_presets {
+            suggestion_names.insert(preset.name.clone());
+        }
+        for (idx, _name) in timer_names.iter().enumerate() {
+            suggestion_names.insert(format!("Timer{}", idx + 1));
+        }
+        for name in self.collect_all_macro_referenced_variables() {
+            if !name.contains('.') {
+                suggestion_names.insert(name);
+            }
+        }
+        {
+            let vars = crate::overlay::RUNTIME_VARIABLES.lock();
+            for name in vars.keys() {
+                if !name.contains('.') {
+                    suggestion_names.insert(name.clone());
+                }
+            }
+        }
+        let mut suggestion_names: Vec<String> = suggestion_names.into_iter().collect();
+        suggestion_names.sort();
+        let mut all_vars = suggestion_names.clone();
+        for (const_name, _) in &self.state.global_constants {
+            if !all_vars.contains(const_name) {
+                all_vars.push(const_name.clone());
+            }
+        }
+        all_vars.sort();
+
+        ui.memory_mut(|mem| {
+            mem.data.insert_temp(
+                egui::Id::new("macro_variable_suggestion_names"),
+                suggestion_names,
+            );
+            mem.data.insert_temp(
+                egui::Id::new("macro_timer_suggestion_names"),
+                timer_names,
+            );
+        });
 
         ui.add_space(2.0);
         ui.horizontal(|ui| {
@@ -414,6 +456,13 @@ impl CrosshairApp {
                             vietnamese_input_mode,
                             x_val,
                         );
+                        Self::render_variable_suggestions(
+                            ui,
+                            &response_x,
+                            x_val,
+                            &[],
+                            language,
+                        );
 
                         ui.add_sized([16.0, 18.0], egui::Label::new("Y"));
                         let y_id = ui.make_persistent_id((preset_id, object_id, idx, "poly-y"));
@@ -434,6 +483,13 @@ impl CrosshairApp {
                             vietnamese_input_enabled,
                             vietnamese_input_mode,
                             y_val,
+                        );
+                        Self::render_variable_suggestions(
+                            ui,
+                            &response_y,
+                            y_val,
+                            &[],
+                            language,
                         );
 
                         if ui
@@ -495,6 +551,7 @@ impl CrosshairApp {
                 .show(ui, |ui| {
                     changed |= Self::geometry_expr_row(
                         ui,
+                        language,
                         preset_id,
                         object_id,
                         "thickness",
@@ -507,6 +564,7 @@ impl CrosshairApp {
                     );
                     changed |= Self::geometry_expr_row(
                         ui,
+                        language,
                         preset_id,
                         object_id,
                         "opacity",
@@ -523,6 +581,7 @@ impl CrosshairApp {
 
                     changed |= Self::geometry_expr_row(
                         ui,
+                        language,
                         preset_id,
                         object_id,
                         "rotation",
@@ -578,6 +637,7 @@ impl CrosshairApp {
                         );
                         changed |= Self::geometry_expr_row(
                             ui,
+                            language,
                             preset_id,
                             object_id,
                             "fill_opacity",
@@ -1356,6 +1416,7 @@ impl CrosshairApp {
 
     fn geometry_expr_row(
         ui: &mut egui::Ui,
+        language: UiLanguage,
         preset_id: u32,
         object_id: u32,
         row_id: &str,
@@ -1388,6 +1449,13 @@ impl CrosshairApp {
             vietnamese_input_enabled,
             vietnamese_input_mode,
             expr,
+        );
+        Self::render_variable_suggestions(
+            ui,
+            &response,
+            expr,
+            &[],
+            language,
         );
         ui.end_row();
         changed
@@ -1440,6 +1508,13 @@ impl CrosshairApp {
                 vietnamese_input_mode,
                 expr_a,
             );
+            Self::render_variable_suggestions(
+                ui,
+                &response_a,
+                expr_a,
+                &[],
+                language,
+            );
         } else {
             ui.label("");
             ui.label("");
@@ -1467,6 +1542,13 @@ impl CrosshairApp {
                     vietnamese_input_enabled,
                     vietnamese_input_mode,
                     expr_b,
+                );
+                Self::render_variable_suggestions(
+                    ui,
+                    &response_b,
+                    expr_b,
+                    &[],
+                    language,
                 );
 
                 if pair_index != 255 {
@@ -1583,6 +1665,13 @@ impl CrosshairApp {
                     vietnamese_input_enabled,
                     vietnamese_input_mode,
                     expr,
+                );
+                Self::render_variable_suggestions(
+                    ui,
+                    &expr_response,
+                    expr,
+                    &[],
+                    language,
                 );
                 expr_response.on_hover_text(Self::tr_lang(language, "Optional color expression. Example: {A} or #BAD1C4", "Biểu thức màu tuỳ chọn. Ví dụ: {A} hoặc #BAD1C4"));
             }
