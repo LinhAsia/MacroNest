@@ -920,18 +920,112 @@ impl CrosshairApp {
             return true;
         }
 
-        ctx.request_repaint_after(Duration::from_millis(120));
+        ctx.request_repaint_after(Duration::from_millis(16));
         egui::CentralPanel::default()
             .frame(
                 Frame::new()
                     .fill(Color32::TRANSPARENT)
                     .stroke(egui::Stroke::NONE)
-                    .inner_margin(Margin::same(8)),
+                    .inner_margin(Margin::same(0)),
             )
             .show(ctx, |ui| {
+                let max_rect = ui.max_rect();
+
+                if let Some(ref texture) = self.captured_freeze_texture {
+                    ui.painter().image(
+                        texture.id(),
+                        max_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                }
+
                 let capture_mode = self
                     .vision_capture_mode
                     .unwrap_or(VisionCaptureMode::Template);
+
+                let is_region_mode = matches!(
+                    capture_mode,
+                    VisionCaptureMode::Template | VisionCaptureMode::SearchRegion
+                );
+                let dim_color = if is_region_mode {
+                    Color32::from_black_alpha(140)
+                } else {
+                    Color32::from_black_alpha(40)
+                };
+
+                let ppp = ctx.pixels_per_point().max(0.5);
+                let (left, top, _, _) = crate::window_list::virtual_screen_bounds();
+
+                let mut selection_rect_logical = None;
+                if is_region_mode && let Some((x, y, w, h)) = self.vision_capture_screen_region_preview {
+                    let rx = (x - left) as f32 / ppp;
+                    let ry = (y - top) as f32 / ppp;
+                    let rw = w as f32 / ppp;
+                    let rh = h as f32 / ppp;
+                    selection_rect_logical = Some(egui::Rect::from_min_size(egui::pos2(rx, ry), egui::vec2(rw, rh)));
+                }
+
+                if let Some(sel_rect) = selection_rect_logical {
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_max(max_rect.left_top(), egui::pos2(max_rect.right(), sel_rect.min.y)),
+                        0.0,
+                        dim_color,
+                    );
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_max(egui::pos2(max_rect.left(), sel_rect.max.y), max_rect.right_bottom()),
+                        0.0,
+                        dim_color,
+                    );
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_max(egui::pos2(max_rect.left(), sel_rect.min.y), egui::pos2(sel_rect.min.x, sel_rect.max.y)),
+                        0.0,
+                        dim_color,
+                    );
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_max(egui::pos2(sel_rect.max.x, sel_rect.min.y), egui::pos2(max_rect.right(), sel_rect.max.y)),
+                        0.0,
+                        dim_color,
+                    );
+
+                    ui.painter().rect_stroke(
+                        sel_rect,
+                        0.0,
+                        egui::Stroke::new(1.5, Color32::from_rgb(0, 160, 255)),
+                        egui::StrokeKind::Outside,
+                    );
+                } else {
+                    ui.painter().rect_filled(max_rect, 0.0, dim_color);
+                }
+
+                let status_text = &self.status;
+                if !status_text.is_empty() {
+                    let text_width = ui.painter().layout_no_wrap(status_text.clone(), egui::FontId::proportional(14.0), Color32::WHITE).size().x;
+                    let padding = 24.0;
+                    let top_bar_rect = egui::Rect::from_center_size(
+                        egui::pos2(max_rect.center().x, max_rect.top() + 40.0),
+                        egui::vec2(text_width + padding * 2.0, 36.0),
+                    );
+                    ui.painter().rect_filled(
+                        top_bar_rect,
+                        18.0,
+                        Color32::from_rgb(12, 18, 28),
+                    );
+                    ui.painter().rect_stroke(
+                        top_bar_rect,
+                        18.0,
+                        egui::Stroke::new(1.0, Color32::from_rgb(110, 156, 210)),
+                        egui::StrokeKind::Outside,
+                    );
+                    ui.painter().text(
+                        top_bar_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        status_text,
+                        egui::FontId::proportional(14.0),
+                        Color32::WHITE,
+                    );
+                }
+
                 let pointer = self.precise_image_search_capture_pointer(ctx);
                 let screen_point = Self::current_screen_cursor_pos();
                 if pointer.is_some() {
@@ -948,13 +1042,12 @@ impl CrosshairApp {
                     };
                     self.render_image_search_cursor_preview_panel(
                         ui.painter(),
-                        ui.max_rect(),
+                        max_rect,
                         pointer,
                         sampled_color,
                         screen_point,
                     );
                 }
-                self.refresh_capture_info_window(ctx);
             });
         true
     }
@@ -1133,9 +1226,28 @@ impl CrosshairApp {
         let half = sample_size / 2;
         let left = screen_x - half;
         let top = screen_y - half;
-        let capture =
-            window_list::capture_virtual_screen_region(left, top, sample_size, sample_size)?;
-        let (width, height, rgba) = (capture.width, capture.height, capture.rgba);
+        let (width, height, rgba) = if let Some(ref frame) = self.captured_freeze_frame {
+            let mut buf = vec![0u8; (sample_size * sample_size * 4) as usize];
+            for dy in 0..sample_size {
+                let sy = top + dy;
+                let ry = sy - frame.screen_y;
+                for dx in 0..sample_size {
+                    let sx = left + dx;
+                    let rx = sx - frame.screen_x;
+                    let dst_idx = ((dy * sample_size + dx) * 4) as usize;
+                    if rx >= 0 && rx < frame.width as i32 && ry >= 0 && ry < frame.height as i32 {
+                        let src_idx = ((ry as usize * frame.width) + rx as usize) * 4;
+                        if src_idx + 3 < frame.rgba.len() {
+                            buf[dst_idx..dst_idx+4].copy_from_slice(&frame.rgba[src_idx..src_idx+4]);
+                        }
+                    }
+                }
+            }
+            (sample_size as usize, sample_size as usize, buf)
+        } else {
+            let capture = window_list::capture_virtual_screen_region(left, top, sample_size, sample_size)?;
+            (capture.width, capture.height, capture.rgba)
+        };
         if rgba.len() < 4 {
             return None;
         }
@@ -1329,11 +1441,9 @@ impl CrosshairApp {
         target: VisionCaptureTarget,
         mode: VisionCaptureMode,
     ) {
-        if self.vision_capture_active {
+        if self.vision_capture_active || self.pending_freeze_frame_capture.is_some() {
             return;
         }
-        self.vision_capture_target = Some(target);
-        self.vision_capture_mode = Some(mode);
         let viewport = ctx.input(|input| input.viewport().clone());
         self.vision_restore_inner_size = viewport
             .inner_rect
@@ -1341,37 +1451,14 @@ impl CrosshairApp {
             .or(Some(Self::desired_window_size()));
         self.vision_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
         self.enforce_square_window_frames = 0;
-        self.vision_capture_active = true;
-        self.vision_capture_anchor = None;
-        self.vision_capture_current = None;
-        self.vision_capture_screen_region_preview = None;
-        self.status = match mode {
-            VisionCaptureMode::Template => {
-                "Drag on screen to pick an image template. Press Esc to cancel.".to_owned()
-            }
-            VisionCaptureMode::SearchRegion => {
-                "Drag on screen to pick the image search area. Press Esc to cancel.".to_owned()
-            }
-            VisionCaptureMode::ColorSample => {
-                "Click a pixel on screen to pick a target color. Press Esc to cancel.".to_owned()
-            }
-            VisionCaptureMode::ColorPriorityAnchor => {
-                "Click a point on screen to set the color priority anchor. Press Esc to cancel."
-                    .to_owned()
-            }
-            VisionCaptureMode::SinglePixel => {
-                "Click a pixel on screen to pick the search coordinate. Press Esc to cancel.".to_owned()
-            }
-        };
-        let is_region_mode = matches!(
-            mode,
-            VisionCaptureMode::Template | VisionCaptureMode::SearchRegion
-        );
-        self.set_image_search_capture_mouse_blocked(true, is_region_mode);
+
+        self.pending_freeze_frame_capture = Some(crate::ui::FreezeFrameCaptureRequest::Vision { target, mode });
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
         crate::overlay::wake_command_queue();
-        self.show_capture_info_window(ctx);
-        ctx.request_repaint();
+
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 
     pub(crate) fn handle_image_search_capture_mouse_down(
@@ -2031,6 +2118,8 @@ impl CrosshairApp {
         self.vision_capture_current = None;
         self.vision_capture_screen_region_preview = None;
         self.vision_color_pick_preview_color = None;
+        self.captured_freeze_texture = None;
+        self.captured_freeze_frame = None;
         self.set_image_search_capture_mouse_blocked(false, false);
     }
 
@@ -2246,26 +2335,41 @@ impl CrosshairApp {
         screen_x: i32,
         screen_y: i32,
     ) {
-        self.clear_image_search_capture_state();
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
-        std::thread::sleep(Duration::from_millis(70));
         let color = if priority_anchor {
             None
         } else {
-            window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1).and_then(|f| {
-                (f.rgba.len() >= 4).then(|| RgbaColor {
-                    r: f.rgba[0],
-                    g: f.rgba[1],
-                    b: f.rgba[2],
-                    a: 255,
+            if let Some(ref frame) = self.captured_freeze_frame {
+                let rx = screen_x - frame.screen_x;
+                let ry = screen_y - frame.screen_y;
+                if rx >= 0 && rx < frame.width as i32 && ry >= 0 && ry < frame.height as i32 {
+                    let index = ((ry as usize * frame.width) + rx as usize) * 4;
+                    if index + 3 < frame.rgba.len() {
+                        Some(RgbaColor {
+                            r: frame.rgba[index],
+                            g: frame.rgba[index + 1],
+                            b: frame.rgba[index + 2],
+                            a: 255,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1).and_then(|f| {
+                    (f.rgba.len() >= 4).then(|| RgbaColor {
+                        r: f.rgba[0],
+                        g: f.rgba[1],
+                        b: f.rgba[2],
+                        a: 255,
+                    })
                 })
-            })
+            }
         };
+
+        self.clear_image_search_capture_state();
         self.restore_image_search_capture_window(ctx);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
 
         self.finish_image_search_point_capture_command(
             ctx,
@@ -2289,33 +2393,45 @@ impl CrosshairApp {
             return;
         };
 
-        self.clear_image_search_capture_state();
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
-        std::thread::sleep(Duration::from_millis(70));
-        let capture = window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1);
-        self.restore_image_search_capture_window(ctx);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
+        let color = if let Some(ref frame) = self.captured_freeze_frame {
+            let rx = screen_x - frame.screen_x;
+            let ry = screen_y - frame.screen_y;
+            if rx >= 0 && rx < frame.width as i32 && ry >= 0 && ry < frame.height as i32 {
+                let index = ((ry as usize * frame.width) + rx as usize) * 4;
+                if index + 3 < frame.rgba.len() {
+                    Some(RgbaColor {
+                        r: frame.rgba[index],
+                        g: frame.rgba[index + 1],
+                        b: frame.rgba[index + 2],
+                        a: 255,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            let capture = window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1);
+            capture.and_then(|f| {
+                (f.rgba.len() >= 4).then(|| RgbaColor {
+                    r: f.rgba[0],
+                    g: f.rgba[1],
+                    b: f.rgba[2],
+                    a: 255,
+                })
+            })
+        };
 
-        let Some(capture) = capture else {
+        self.clear_image_search_capture_state();
+        self.restore_image_search_capture_window(ctx);
+
+        let Some(color) = color else {
             self.status = "Failed to sample the selected screen color.".to_owned();
             ctx.request_repaint();
             return;
         };
-        if capture.rgba.len() < 4 {
-            self.status = "Failed to read the selected screen color.".to_owned();
-            ctx.request_repaint();
-            return;
-        }
 
-        let color = RgbaColor {
-            r: capture.rgba[0],
-            g: capture.rgba[1],
-            b: capture.rgba[2],
-            a: 255,
-        };
         let status = self.apply_image_search_color_pick(target, color);
         self.persist();
         self.status = status;
@@ -2388,12 +2504,38 @@ impl CrosshairApp {
         self.clear_image_search_capture_state();
 
         if template_mode {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-            let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
-            std::thread::sleep(Duration::from_millis(35));
-            let capture =
-                window_list::capture_virtual_screen_region(screen_x, screen_y, width, height);
-            self.restore_image_search_capture_window(ctx);
+            let capture = if let Some(ref frame) = self.captured_freeze_frame {
+                let rx = screen_x - frame.screen_x;
+                let ry = screen_y - frame.screen_y;
+                let mut cropped_rgba = vec![0u8; (width * height * 4) as usize];
+                for dy in 0..height {
+                    let sy = ry + dy;
+                    if sy >= 0 && sy < frame.height as i32 {
+                        let src_start = ((sy as usize * frame.width) + rx.max(0) as usize) * 4;
+                        let dst_start = (dy as usize * width as usize) * 4;
+                        let copy_len = (width as usize * 4).min(frame.width * 4 - src_start % (frame.width * 4));
+                        if src_start + copy_len <= frame.rgba.len() && dst_start + copy_len <= cropped_rgba.len() {
+                            cropped_rgba[dst_start..dst_start+copy_len].copy_from_slice(&frame.rgba[src_start..src_start+copy_len]);
+                        }
+                    }
+                }
+                self.restore_image_search_capture_window(ctx);
+                Some(window_list::ScreenCaptureFrame {
+                    screen_x,
+                    screen_y,
+                    width: width as usize,
+                    height: height as usize,
+                    rgba: cropped_rgba,
+                })
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
+                std::thread::sleep(Duration::from_millis(35));
+                let capture =
+                    window_list::capture_virtual_screen_region(screen_x, screen_y, width, height);
+                self.restore_image_search_capture_window(ctx);
+                capture
+            };
 
             let Some(capture) = capture else {
                 self.status = "Failed to capture the selected screen area.".to_owned();

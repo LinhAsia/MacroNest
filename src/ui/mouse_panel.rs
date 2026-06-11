@@ -1793,31 +1793,71 @@ if arduino_changed {
             return true;
         }
 
-        ctx.request_repaint_after(std::time::Duration::from_millis(120));
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
         egui::CentralPanel::default()
             .frame(
                 Frame::new()
                     .fill(Color32::TRANSPARENT)
                     .stroke(egui::Stroke::NONE)
-                    .inner_margin(Margin::same(8)),
+                    .inner_margin(Margin::same(0)),
             )
             .show(ctx, |ui| {
-                let rect = ui.max_rect();
-                let painter = ui.painter();
-                let pointer = self.precise_image_search_capture_pointer(ctx);
-                if pointer.is_some() {
-                    if let Some((x, y)) = Self::current_screen_cursor_pos() {
-                        let sampled_color = self.update_image_search_cursor_preview(ctx, x, y, 17);
-                        self.render_image_search_cursor_preview_panel(
-                            painter,
-                            rect,
-                            pointer,
-                            sampled_color,
-                            Some((x, y)),
-                        );
-                    }
+                let max_rect = ui.max_rect();
+
+                if let Some(ref texture) = self.captured_freeze_texture {
+                    ui.painter().image(
+                        texture.id(),
+                        max_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
                 }
-                self.refresh_capture_info_window(ctx);
+
+                let dim_color = Color32::from_black_alpha(40);
+                ui.painter().rect_filled(max_rect, 0.0, dim_color);
+
+                let status_text = &self.status;
+                if !status_text.is_empty() {
+                    let text_width = ui.painter().layout_no_wrap(status_text.clone(), egui::FontId::proportional(14.0), Color32::WHITE).size().x;
+                    let padding = 24.0;
+                    let top_bar_rect = egui::Rect::from_center_size(
+                        egui::pos2(max_rect.center().x, max_rect.top() + 40.0),
+                        egui::vec2(text_width + padding * 2.0, 36.0),
+                    );
+                    ui.painter().rect_filled(
+                        top_bar_rect,
+                        18.0,
+                        Color32::from_rgb(12, 18, 28),
+                    );
+                    ui.painter().rect_stroke(
+                        top_bar_rect,
+                        18.0,
+                        egui::Stroke::new(1.0, Color32::from_rgb(110, 156, 210)),
+                        egui::StrokeKind::Outside,
+                    );
+                    ui.painter().text(
+                        top_bar_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        status_text,
+                        egui::FontId::proportional(14.0),
+                        Color32::WHITE,
+                    );
+                }
+
+                let pointer = self.precise_image_search_capture_pointer(ctx);
+                let screen_point = Self::current_screen_cursor_pos();
+                if pointer.is_some() {
+                    let sampled_color = screen_point.and_then(|(screen_x, screen_y)| {
+                        self.update_image_search_cursor_preview(ctx, screen_x, screen_y, 17)
+                    });
+                    self.render_image_search_cursor_preview_panel(
+                        ui.painter(),
+                        max_rect,
+                        pointer,
+                        sampled_color,
+                        screen_point,
+                    );
+                }
             });
         true
     }
@@ -2174,12 +2214,9 @@ if arduino_changed {
         ctx: &egui::Context,
         target: MouseMoveAbsoluteCaptureTarget,
     ) {
-        if self.mouse_move_absolute_capture_target.is_some() {
+        if self.mouse_move_absolute_capture_target.is_some() || self.pending_freeze_frame_capture.is_some() {
             return;
         }
-        let uses_blocked_click = Self::mouse_move_absolute_capture_uses_blocked_click(target);
-        self.mouse_move_absolute_capture_target = Some(target);
-        self.mouse_move_absolute_capture_wait_for_mouse_release = !uses_blocked_click;
         let viewport = ctx.input(|input| input.viewport().clone());
         self.mouse_move_absolute_restore_inner_size = viewport
             .inner_rect
@@ -2187,19 +2224,14 @@ if arduino_changed {
             .or(Some(Self::desired_window_size()));
         self.mouse_move_absolute_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
         self.enforce_square_window_frames = 0;
-        self.status = Self::tr_lang(
-            self.state.ui_language,
-            "Click anywhere on screen to capture X/Y. Press Esc to cancel.",
-            "Bấm vào bất kỳ vị trí nào trên màn hình để lấy X/Y. Nhấn Esc để hủy.",
-        )
-        .to_owned();
-        if uses_blocked_click {
-            self.set_image_search_capture_mouse_blocked(true, false);
-            let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
-            crate::overlay::wake_command_queue();
-        }
-        self.show_capture_info_window(ctx);
-        ctx.request_repaint_after(Duration::from_millis(33));
+
+        self.pending_freeze_frame_capture = Some(crate::ui::FreezeFrameCaptureRequest::Mouse { target });
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
+        crate::overlay::wake_command_queue();
+
+        ctx.request_repaint_after(Duration::from_millis(100));
     }
 
     pub(crate) fn cancel_mouse_move_absolute_capture(&mut self, ctx: &egui::Context) {
@@ -2628,8 +2660,35 @@ if arduino_changed {
         screen_y: i32,
         used_blocked_click: bool,
     ) -> Option<RgbaColor> {
-        // Chụp màn hình vùng 1x1 tại tọa độ (screen_x, screen_y) trước khi khôi phục cửa sổ và nhả chặn chuột.
-        let capture = window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1);
+        let color = if let Some(ref frame) = self.captured_freeze_frame {
+            let rx = screen_x - frame.screen_x;
+            let ry = screen_y - frame.screen_y;
+            if rx >= 0 && rx < frame.width as i32 && ry >= 0 && ry < frame.height as i32 {
+                let index = ((ry as usize * frame.width) + rx as usize) * 4;
+                if index + 3 < frame.rgba.len() {
+                    Some(RgbaColor {
+                        r: frame.rgba[index],
+                        g: frame.rgba[index + 1],
+                        b: frame.rgba[index + 2],
+                        a: 255,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            let capture = window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1);
+            capture.and_then(|frame| {
+                (frame.rgba.len() >= 4).then(|| RgbaColor {
+                    r: frame.rgba[0],
+                    g: frame.rgba[1],
+                    b: frame.rgba[2],
+                    a: 255,
+                })
+            })
+        };
 
         if used_blocked_click {
             self.set_image_search_capture_mouse_blocked(false, false);
@@ -2638,14 +2697,7 @@ if arduino_changed {
         self.mouse_move_absolute_capture_wait_for_mouse_release = false;
         self.restore_mouse_move_absolute_capture_window(ctx);
 
-        capture.and_then(|frame| {
-            (frame.rgba.len() >= 4).then(|| RgbaColor {
-                r: frame.rgba[0],
-                g: frame.rgba[1],
-                b: frame.rgba[2],
-                a: 255,
-            })
-        })
+        color
     }
 
     pub(crate) fn restore_mouse_move_absolute_viewport(&mut self, ctx: &egui::Context) {
@@ -2658,6 +2710,8 @@ if arduino_changed {
     }
 
     pub(crate) fn restore_mouse_move_absolute_capture_window(&mut self, ctx: &egui::Context) {
+        self.captured_freeze_texture = None;
+        self.captured_freeze_frame = None;
         self.restore_mouse_move_absolute_viewport(ctx);
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));

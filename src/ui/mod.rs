@@ -628,6 +628,17 @@ pub(crate) enum OcrLanguageOperationKind {
     Remove,
 }
 
+#[derive(Clone)]
+pub(crate) enum FreezeFrameCaptureRequest {
+    Vision {
+        target: VisionCaptureTarget,
+        mode: VisionCaptureMode,
+    },
+    Mouse {
+        target: MouseMoveAbsoluteCaptureTarget,
+    },
+}
+
 pub struct CrosshairApp {
     pub paths: AppPaths,
     pub state: AppState,
@@ -683,7 +694,11 @@ pub struct CrosshairApp {
     macro_step_copy_feedback_target: Option<(u32, u32, usize)>,
     macro_step_copy_feedback_until: Option<Instant>,
     macro_selected_steps_copy_feedback_target: Option<(u32, u32)>,
-    macro_selected_steps_copy_feedback_until: Option<Instant>,
+    macro_selected_steps_copy_feedback_until: Option<std::time::Instant>,
+    pub(crate) pending_freeze_frame_capture: Option<FreezeFrameCaptureRequest>,
+    pub(crate) captured_freeze_frame: Option<crate::window_list::ScreenCaptureFrame>,
+    pub(crate) captured_freeze_texture: Option<egui::TextureHandle>,
+    pub(crate) captured_freeze_pos: egui::Pos2,
     vision_capture_active: bool,
     vision_capture_target: Option<VisionCaptureTarget>,
     vision_capture_mode: Option<VisionCaptureMode>,
@@ -905,6 +920,10 @@ impl CrosshairApp {
             macro_step_copy_feedback_until: None,
             macro_selected_steps_copy_feedback_target: None,
             macro_selected_steps_copy_feedback_until: None,
+            pending_freeze_frame_capture: None,
+            captured_freeze_frame: None,
+            captured_freeze_texture: None,
+            captured_freeze_pos: egui::Pos2::ZERO,
             vision_capture_active: false,
             vision_capture_target: None,
             vision_capture_mode: None,
@@ -8633,6 +8652,82 @@ impl eframe::App for CrosshairApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if let Some(req) = self.pending_freeze_frame_capture.take() {
+            let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+            if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                    [capture.width, capture.height],
+                    &capture.rgba,
+                );
+                let texture = ctx.load_texture(
+                    "screen-freeze-frame",
+                    color_image,
+                    egui::TextureOptions::NEAREST,
+                );
+                self.captured_freeze_texture = Some(texture);
+                self.captured_freeze_frame = Some(capture);
+                self.captured_freeze_pos = egui::pos2(left as f32, top as f32);
+            }
+
+            let ppp = ctx.pixels_per_point().max(0.5);
+            let pos = egui::pos2(left as f32 / ppp, top as f32 / ppp);
+            let size = egui::vec2(width as f32 / ppp, height as f32 / ppp);
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+
+            match req {
+                FreezeFrameCaptureRequest::Vision { target, mode } => {
+                    self.vision_capture_target = Some(target);
+                    self.vision_capture_mode = Some(mode);
+                    self.vision_capture_active = true;
+                    self.vision_capture_anchor = None;
+                    self.vision_capture_current = None;
+                    self.vision_capture_screen_region_preview = None;
+                    self.status = match mode {
+                        VisionCaptureMode::Template => {
+                            "Drag on screen to pick an image template. Press Esc to cancel.".to_owned()
+                        }
+                        VisionCaptureMode::SearchRegion => {
+                            "Drag on screen to pick the image search area. Press Esc to cancel.".to_owned()
+                        }
+                        VisionCaptureMode::ColorSample => {
+                            "Click a pixel on screen to pick a target color. Press Esc to cancel.".to_owned()
+                        }
+                        VisionCaptureMode::ColorPriorityAnchor => {
+                            "Click a point on screen to set the color priority anchor. Press Esc to cancel.".to_owned()
+                        }
+                        VisionCaptureMode::SinglePixel => {
+                            "Click a pixel on screen to pick the search coordinate. Press Esc to cancel.".to_owned()
+                        }
+                    };
+                    let is_region_mode = matches!(
+                        mode,
+                        VisionCaptureMode::Template | VisionCaptureMode::SearchRegion
+                    );
+                    self.set_image_search_capture_mouse_blocked(true, is_region_mode);
+                }
+                FreezeFrameCaptureRequest::Mouse { target } => {
+                    let uses_blocked_click = Self::mouse_move_absolute_capture_uses_blocked_click(target);
+                    self.mouse_move_absolute_capture_target = Some(target);
+                    self.mouse_move_absolute_capture_wait_for_mouse_release = !uses_blocked_click;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Click anywhere on screen to capture X/Y. Press Esc to cancel.",
+                        "Bấm vào bất kỳ vị trí nào trên màn hình để lấy X/Y. Nhấn Esc để hủy.",
+                    ).to_owned();
+                    if uses_blocked_click {
+                        self.set_image_search_capture_mouse_blocked(true, false);
+                    }
+                }
+            }
+
+            ctx.request_repaint();
+            return;
+        }
+
         if matches!(self.state.active_panel, AppPanel::Zoom | AppPanel::Modes) {
             self.state.active_panel = AppPanel::Pin;
         }
