@@ -1321,39 +1321,30 @@ impl CrosshairApp {
         if spec.shape == GeometryShapeKind::Svg {
             ui.add_space(4.0);
 
-            let svg_code_collapsed_id = ui.make_persistent_id((preset_id, object_id, "svg-code-collapsed"));
-            let mut svg_code_collapsed = ui.data(|d| d.get_temp::<bool>(svg_code_collapsed_id)).unwrap_or(true);
-
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = Self::GEOMETRY_GRID_SPACING_X;
                 let btn_text = Self::tr_lang(language, "Code", "Mã");
-                let collapse_btn = egui::Button::new(btn_text).frame(false);
-                let btn_response = ui.add_sized([Self::GEOMETRY_LABEL_COL_WIDTH, 18.0], collapse_btn);
-                if btn_response.clicked() {
-                    svg_code_collapsed = !svg_code_collapsed;
-                    ui.data_mut(|d| d.insert_temp(svg_code_collapsed_id, svg_code_collapsed));
-                }
-                if !svg_code_collapsed {
-                    let id = ui.make_persistent_id((preset_id, object_id, "svg-text-edit"));
-                    let text_edit_response = Self::render_plain_text_edit(
-                        ui,
-                        &mut spec.text,
-                        id,
-                        450.0,
-                        450.0,
-                        18.0,
-                        72.0,
-                        "<svg>...</svg>",
-                        true,
-                    );
-                    changed |= text_edit_response.changed();
-                    Self::apply_vietnamese_input_if_changed(
-                        &text_edit_response,
-                        vietnamese_input_enabled,
-                        vietnamese_input_mode,
-                        &mut spec.text,
-                    );
-                }
+                ui.add_sized([Self::GEOMETRY_LABEL_COL_WIDTH, 18.0], egui::Label::new(btn_text));
+
+                let id = ui.make_persistent_id((preset_id, object_id, "svg-text-edit"));
+                let text_edit_response = Self::render_plain_text_edit(
+                    ui,
+                    &mut spec.text,
+                    id,
+                    450.0,
+                    450.0,
+                    18.0,
+                    72.0,
+                    "<svg>...</svg>",
+                    true,
+                );
+                changed |= text_edit_response.changed();
+                Self::apply_vietnamese_input_if_changed(
+                    &text_edit_response,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    &mut spec.text,
+                );
             });
         }
 
