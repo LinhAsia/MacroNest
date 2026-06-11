@@ -372,6 +372,15 @@ impl CrosshairApp {
         group_id_override: Option<u32>,
     ) -> bool {
         let mut changed = false;
+        // Migrate legacy defaults when shape is SVG
+        if spec.shape == GeometryShapeKind::Svg {
+            if spec.opacity_expr == "1" {
+                spec.opacity_expr = "100".to_owned();
+            }
+            if spec.text == "Label" {
+                spec.text = String::new();
+            }
+        }
         if matches!(spec.shape, GeometryShapeKind::Polyline | GeometryShapeKind::Polygon) {
             let mut points: Vec<(String, String)> = spec.points_expr
                 .split(';')
@@ -1311,28 +1320,24 @@ impl CrosshairApp {
 
         if spec.shape == GeometryShapeKind::Svg {
             ui.add_space(4.0);
-            
+
             let svg_code_collapsed_id = ui.make_persistent_id((preset_id, object_id, "svg-code-collapsed"));
             let mut svg_code_collapsed = ui.data(|d| d.get_temp::<bool>(svg_code_collapsed_id)).unwrap_or(true);
-            
+
             ui.horizontal(|ui| {
-                let collapse_icon = if svg_code_collapsed { 0xe5cc } else { 0xe5cf }; // right or down arrow
+                let collapse_icon = if svg_code_collapsed { 0xe5cc } else { 0xe5cf };
                 let collapse_btn = egui::Button::new(Self::material_icon_text(collapse_icon, 12.0));
                 if ui.add_sized([18.0, 18.0], collapse_btn).clicked() {
                     svg_code_collapsed = !svg_code_collapsed;
                     ui.data_mut(|d| d.insert_temp(svg_code_collapsed_id, svg_code_collapsed));
                 }
-            });
-
-            if !svg_code_collapsed {
-                ui.horizontal(|ui| {
-                    ui.add_space(20.0);
+                if !svg_code_collapsed {
                     let response = ui.add(
                         egui::TextEdit::multiline(&mut spec.text)
                             .hint_text("<svg>...</svg>")
                             .font(egui::TextStyle::Monospace)
                             .desired_rows(4)
-                            .desired_width(450.0)
+                            .desired_width(450.0),
                     );
                     changed |= response.changed();
                     Self::apply_vietnamese_input_if_changed(
@@ -1341,8 +1346,8 @@ impl CrosshairApp {
                         vietnamese_input_mode,
                         &mut spec.text,
                     );
-                });
-            }
+                }
+            });
         }
 
         changed
