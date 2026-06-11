@@ -8354,6 +8354,8 @@ impl CrosshairApp {
                                                                 &mut live_sync,
                                                                 action_hover_id,
                                                             );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
                                                             Self::render_audio_sense_action_group_option(
                                                                 ui,
                                                                 language,
@@ -8362,6 +8364,8 @@ impl CrosshairApp {
                                                                 &mut live_sync,
                                                                 action_hover_id,
                                                             );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
                                                         });
                                                 });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
@@ -14906,7 +14910,7 @@ impl CrosshairApp {
         )
     }
 
-    fn render_plain_text_edit(
+    pub(crate) fn render_plain_text_edit(
         ui: &mut egui::Ui,
         text: &mut String,
         id: egui::Id,
