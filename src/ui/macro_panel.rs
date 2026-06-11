@@ -14772,7 +14772,7 @@ impl CrosshairApp {
             egui::vec2(animated_width, current_interact_height),
             egui::Sense::hover(),
         );
-        let top_y = if is_multiline {
+        let top_y = if animated_height > normal_height + 0.1 {
             rect.min.y
         } else {
             rect.min.y + (rect.height() - animated_height) / 2.0
