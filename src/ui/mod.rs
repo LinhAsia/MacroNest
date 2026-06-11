@@ -4179,6 +4179,7 @@ impl CrosshairApp {
             MacroAction::DrawGeometry => "DrawGeometry",
             MacroAction::ShowGeometryPreset => "ShowGeometry",
             MacroAction::HideGeometryPreset => "HideGeometry",
+            MacroAction::JumpToStep => "JumpToStep",
             _ => "Legacy (Deprecated)",
         }
     }
@@ -4307,6 +4308,9 @@ impl CrosshairApp {
                 MacroAction::HideGeometryPreset => {
                     "Ẩn preset hình học (hoặc xóa toàn bộ hình học)."
                 }
+                MacroAction::JumpToStep => {
+                    "Nhảy đến bước chỉ định (bắt đầu từ 1 hoặc dùng biểu thức)."
+                }
                 _ => "Tính năng cũ (Không dùng)",
             },
             _ => match action {
@@ -4431,6 +4435,9 @@ impl CrosshairApp {
                 MacroAction::HideGeometryPreset => {
                     "Hide geometry preset (or clear all geometry overlay)."
                 }
+                MacroAction::JumpToStep => {
+                    "Jump to a specified step (1-indexed or math expression)."
+                }
                 _ => "Legacy (Deprecated)",
             },
         }
@@ -4508,6 +4515,7 @@ impl CrosshairApp {
             MacroAction::DrawGeometry => 0xe85b,
             MacroAction::ShowGeometryPreset => 0xe8f4,
             MacroAction::HideGeometryPreset => 0xe8f5,
+            MacroAction::JumpToStep => 0xe5c8,
             _ => 0xe8b5,
         };
         char::from_u32(codepoint).unwrap_or('?')
@@ -4587,6 +4595,7 @@ impl CrosshairApp {
                 MacroAction::ShowGeometryPreset => "Hiện hình",
                 MacroAction::HideGeometryPreset => "Ẩn hình",
                 MacroAction::OcrSearch => "Quét OCR",
+                MacroAction::JumpToStep => "Nhảy bước",
                 _ => "Cũ (Bỏ)",
             }),
             UiLanguage::English => match action {
@@ -4660,6 +4669,7 @@ impl CrosshairApp {
                 MacroAction::ShowGeometryPreset => "ShowGeo",
                 MacroAction::HideGeometryPreset => "HideGeo",
                 MacroAction::OcrSearch => "OcrSearch",
+                MacroAction::JumpToStep => "Jump",
                 _ => "Legacy",
             },
             UiLanguage::Icon => match action {
@@ -4732,6 +4742,7 @@ impl CrosshairApp {
                 MacroAction::ShowGeometryPreset => "ShowGeo",
                 MacroAction::HideGeometryPreset => "HideGeo",
                 MacroAction::OcrSearch => "OCR",
+                MacroAction::JumpToStep => "Jump",
                 _ => "Legacy",
             },
         }
@@ -4888,6 +4899,7 @@ impl CrosshairApp {
                 | MacroAction::LockMouse
                 | MacroAction::UnlockMouse
                 | MacroAction::Wait
+                | MacroAction::JumpToStep
         )
     }
 

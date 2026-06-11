@@ -565,6 +565,7 @@ pub enum MacroAction {
     DrawGeometry,
     ShowGeometryPreset,
     HideGeometryPreset,
+    JumpToStep,
     #[serde(other)]
     Legacy,
 }

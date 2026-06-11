@@ -5185,6 +5185,7 @@ impl CrosshairApp {
                                                                  MacroAction::DisableStep,
                                                               MacroAction::SetVariable,
                                                               MacroAction::OcrSearch,
+                                                              MacroAction::JumpToStep,
                                                         ]
                                                         .into_iter()
                                                         .enumerate()
@@ -8269,6 +8270,7 @@ impl CrosshairApp {
                                                                  MacroAction::DisableStep,
                                                                  MacroAction::SetVariable,
                                                                  MacroAction::OcrSearch,
+                                                                 MacroAction::JumpToStep,
                                                             ]
                                                             .into_iter()
                                                             .enumerate()
@@ -10350,6 +10352,33 @@ impl CrosshairApp {
                                                                     ).on_hover_text(Self::tr_lang(language, "Current runtime value", "Giá trị chạy hiện tại"));
                                                                 }
                                                             });
+                                                        });
+                                                    });
+                                                } else if step.action == MacroAction::JumpToStep {
+                                                    ui.scope(|ui| {
+                                                        ui.spacing_mut().item_spacing.x = 2.0;
+                                                        ui.spacing_mut().interact_size.y = 18.0;
+                                                        ui.spacing_mut().button_padding.y = 0.0;
+                                                        ui.horizontal(|ui| {
+                                                            let key_id = ui.id().with((step_index, "jump-to-step"));
+                                                            let response = Self::render_variable_text_edit(
+                                                                ui,
+                                                                &mut step.key,
+                                                                key_id,
+                                                                146.0,
+                                                                260.0,
+                                                                  21.0, 21.0,
+                                                                &Self::tr_lang(language, "Step number or expression", "Số thứ tự bước hoặc biểu thức"),
+                                                                false,
+                                                            );
+                                                            Self::apply_vietnamese_input_if_changed(
+                                                                &response,
+                                                                self.state.vietnamese_input_enabled,
+                                                                self.state.vietnamese_input_mode,
+                                                                &mut step.key,
+                                                            );
+                                                            live_sync |= response.changed();
+                                                            Self::render_variable_suggestions(ui, &response, &mut step.key, &timer_names, language);
                                                         });
                                                     });
                                                 } else if matches!(step.action, MacroAction::StartVisionSearch

@@ -967,6 +967,7 @@ mod windows_overlay {
         Continue,
         BreakLoop,
         StopExecution,
+        JumpTo(usize),
     }
 
     #[derive(Clone)]
@@ -7155,7 +7156,7 @@ mod windows_overlay {
         bypass_enabled: bool,
     ) -> MacroRunFlow {
         let mut index = 0usize;
-        while index < steps.len() {
+        'outer: while index < steps.len() {
             if !bypass_enabled && !is_macro_preset_enabled(preset_id) {
                 return MacroRunFlow::StopExecution;
             }
@@ -7228,6 +7229,14 @@ mod windows_overlay {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
                                 MacroRunFlow::Continue => {}
+                                MacroRunFlow::JumpTo(target) => {
+                                    if let Some(pos) = step_indices.iter().position(|&x| x == target) {
+                                        index = pos;
+                                        continue 'outer;
+                                    } else {
+                                        return MacroRunFlow::JumpTo(target);
+                                    }
+                                }
                             }
 
                             if loop_end_delay_ms > 0
@@ -7263,6 +7272,14 @@ mod windows_overlay {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
                                 MacroRunFlow::Continue => {}
+                                MacroRunFlow::JumpTo(target) => {
+                                    if let Some(pos) = step_indices.iter().position(|&x| x == target) {
+                                        index = pos;
+                                        continue 'outer;
+                                    } else {
+                                        return MacroRunFlow::JumpTo(target);
+                                    }
+                                }
                             }
 
                             if loop_end_delay_ms > 0
@@ -7342,6 +7359,30 @@ mod windows_overlay {
                             }
                         }
                         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+                    }
+                }
+
+                MacroAction::JumpToStep => {
+                    let interpolated = interpolate_variables(&step.key);
+                    let target_val = if let Ok(val) = interpolated.trim().parse::<f64>() {
+                        val
+                    } else {
+                        evaluate_math_expression_f64(&interpolated)
+                    };
+                    if target_val.is_nan() || target_val.is_infinite() {
+                        return MacroRunFlow::StopExecution;
+                    }
+                    let target_idx = (target_val.round() as isize) - 1;
+                    if target_idx >= 0 {
+                        let target_abs = target_idx as usize;
+                        if let Some(pos) = step_indices.iter().position(|&x| x == target_abs) {
+                            index = pos;
+                            continue 'outer;
+                        } else {
+                            return MacroRunFlow::JumpTo(target_abs);
+                        }
+                    } else {
+                        return MacroRunFlow::StopExecution;
                     }
                 }
 
@@ -7669,7 +7710,7 @@ mod windows_overlay {
         bypass_enabled: bool,
     ) -> MacroRunFlow {
         let mut index = 0usize;
-        while index < steps.len() {
+        'outer_hold: while index < steps.len() {
             if !bypass_enabled && !is_macro_preset_enabled(preset_id) {
                 return MacroRunFlow::StopExecution;
             }
@@ -7746,6 +7787,14 @@ mod windows_overlay {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
                                 MacroRunFlow::Continue => {}
+                                MacroRunFlow::JumpTo(target) => {
+                                    if let Some(pos) = step_indices.iter().position(|&x| x == target) {
+                                        index = pos;
+                                        continue 'outer_hold;
+                                    } else {
+                                        return MacroRunFlow::JumpTo(target);
+                                    }
+                                }
                             }
 
                             if loop_end_delay_ms > 0
@@ -7781,6 +7830,14 @@ mod windows_overlay {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
                                 MacroRunFlow::Continue => {}
+                                MacroRunFlow::JumpTo(target) => {
+                                    if let Some(pos) = step_indices.iter().position(|&x| x == target) {
+                                        index = pos;
+                                        continue 'outer_hold;
+                                    } else {
+                                        return MacroRunFlow::JumpTo(target);
+                                    }
+                                }
                             }
 
                             if loop_end_delay_ms > 0
@@ -7861,6 +7918,30 @@ mod windows_overlay {
                             }
                         }
                         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+                    }
+                }
+
+                MacroAction::JumpToStep => {
+                    let interpolated = interpolate_variables(&step.key);
+                    let target_val = if let Ok(val) = interpolated.trim().parse::<f64>() {
+                        val
+                    } else {
+                        evaluate_math_expression_f64(&interpolated)
+                    };
+                    if target_val.is_nan() || target_val.is_infinite() {
+                        return MacroRunFlow::StopExecution;
+                    }
+                    let target_idx = (target_val.round() as isize) - 1;
+                    if target_idx >= 0 {
+                        let target_abs = target_idx as usize;
+                        if let Some(pos) = step_indices.iter().position(|&x| x == target_abs) {
+                            index = pos;
+                            continue 'outer_hold;
+                        } else {
+                            return MacroRunFlow::JumpTo(target_abs);
+                        }
+                    } else {
+                        return MacroRunFlow::StopExecution;
                     }
                 }
 
@@ -9963,6 +10044,139 @@ mod windows_overlay {
                 let mut text_vars = TEXT_VARIABLES.lock();
                 text_vars.clear();
             }
+        }
+
+        #[test]
+        fn test_jump_to_step() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let steps = vec![
+                MacroStep {
+                    action: MacroAction::SetVariable,
+                    if_variable_name: "a".to_string(),
+                    set_variable_source: crate::model::SetVariableSource::Expression,
+                    key: "1".to_string(),
+                    ..Default::default()
+                },
+                MacroStep {
+                    action: MacroAction::JumpToStep,
+                    key: "4".to_string(),
+                    ..Default::default()
+                },
+                MacroStep {
+                    action: MacroAction::SetVariable,
+                    if_variable_name: "a".to_string(),
+                    set_variable_source: crate::model::SetVariableSource::Expression,
+                    key: "2".to_string(),
+                    ..Default::default()
+                },
+                MacroStep {
+                    action: MacroAction::SetVariable,
+                    if_variable_name: "a".to_string(),
+                    set_variable_source: crate::model::SetVariableSource::Expression,
+                    key: "3".to_string(),
+                    ..Default::default()
+                },
+            ];
+            let step_indices = vec![0, 1, 2, 3];
+            let mut locked_keys = vec![];
+            let mut locked_mouse = vec![];
+            
+            // Clear variables first
+            RUNTIME_VARIABLES.lock().clear();
+
+            let result = execute_macro_sequence(
+                1,
+                &steps,
+                &step_indices,
+                &mut locked_keys,
+                &mut locked_mouse,
+                false,
+                None,
+                &[],
+                false,
+                true, // bypass_enabled = true so we don't check master enable
+            );
+
+            assert_eq!(result, MacroRunFlow::Continue);
+            // Variable "a" should be 3, because step at index 2 (SetVariable to 2) was skipped!
+            let val = RUNTIME_VARIABLES.lock().get("a").copied();
+            assert_eq!(val, Some(3.0));
+            
+            RUNTIME_VARIABLES.lock().clear();
+        }
+
+        #[test]
+        fn test_jump_to_step_loop_propagation() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            
+            // We have a loop body, and inside it a JumpToStep back to the start of the macro (index 0).
+            // Since index 0 is outside the loop body, it must propagate out.
+            // We'll set a counter variable "count" to prevent infinite loop, and check that it actually executed step 0 twice.
+            let steps = vec![
+                // Step 1 (index 0)
+                MacroStep {
+                    action: MacroAction::SetVariable,
+                    if_variable_name: "count".to_string(),
+                    set_variable_source: crate::model::SetVariableSource::Expression,
+                    key: "{count + 1}".to_string(),
+                    ..Default::default()
+                },
+                // Step 2 (index 1): LoopStart
+                MacroStep {
+                    action: MacroAction::LoopStart,
+                    key: "1".to_string(), // loop 1 time
+                    ..Default::default()
+                },
+                // Step 3 (index 2): If count < 2, jump to Step 1
+                MacroStep {
+                    action: MacroAction::IfStart,
+                    if_condition_type: IfConditionType::Variable,
+                    if_variable_name: "count".to_string(),
+                    if_operator: "<".to_string(),
+                    key: "2".to_string(),
+                    ..Default::default()
+                },
+                MacroStep {
+                    action: MacroAction::JumpToStep,
+                    key: "1".to_string(),
+                    ..Default::default()
+                },
+                MacroStep {
+                    action: MacroAction::IfEnd,
+                    ..Default::default()
+                },
+                // Step 6 (index 5): LoopEnd
+                MacroStep {
+                    action: MacroAction::LoopEnd,
+                    ..Default::default()
+                },
+            ];
+            let step_indices = vec![0, 1, 2, 3, 4, 5];
+            let mut locked_keys = vec![];
+            let mut locked_mouse = vec![];
+            
+            RUNTIME_VARIABLES.lock().clear();
+            RUNTIME_VARIABLES.lock().insert("count".to_string(), 0.0);
+
+            let result = execute_macro_sequence(
+                1,
+                &steps,
+                &step_indices,
+                &mut locked_keys,
+                &mut locked_mouse,
+                false,
+                None,
+                &[],
+                false,
+                true,
+            );
+
+            assert_eq!(result, MacroRunFlow::Continue);
+            // Count should be 2, because step 0 executed twice.
+            let val = RUNTIME_VARIABLES.lock().get("count").copied();
+            assert_eq!(val, Some(2.0));
+
+            RUNTIME_VARIABLES.lock().clear();
         }
     }
 
@@ -16947,6 +17161,8 @@ mod windows_overlay {
                 .cloned()
         };
         if let Some(preset) = preset {
+            let hotkey_id = preset.id as i32;
+            SUPPRESSED_MACRO_HOTKEYS.lock().insert(hotkey_id);
             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
             thread::spawn(move || {
                 MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().clear());
@@ -16969,6 +17185,7 @@ mod windows_overlay {
                 for step in cleanup_steps {
                     let _ = send_key_event(&step);
                 }
+                SUPPRESSED_MACRO_HOTKEYS.lock().remove(&hotkey_id);
             });
         }
     }
