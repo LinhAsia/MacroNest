@@ -1332,9 +1332,12 @@ impl CrosshairApp {
                     ui.data_mut(|d| d.insert_temp(svg_code_collapsed_id, svg_code_collapsed));
                 }
                 if !svg_code_collapsed {
+                    let hint = egui::RichText::new("<svg>...</svg>")
+                        .color(ui.visuals().weak_text_color())
+                        .font(egui::TextStyle::Monospace.resolve(ui.style()));
                     let response = ui.add(
                         egui::TextEdit::multiline(&mut spec.text)
-                            .hint_text("<svg>...</svg>")
+                            .hint_text(hint)
                             .font(egui::TextStyle::Monospace)
                             .desired_rows(4)
                             .desired_width(450.0),
