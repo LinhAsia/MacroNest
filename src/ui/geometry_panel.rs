@@ -3,7 +3,7 @@ use crate::ui::{CrosshairApp, MouseCaptureKind, MouseMoveAbsoluteCaptureTarget, 
 use eframe::egui::{self, Button, ComboBox, Frame, Grid, TextEdit};
 
 impl CrosshairApp {
-    const GEOMETRY_LABEL_COL_WIDTH: f32 = 48.0;
+    const GEOMETRY_LABEL_COL_WIDTH: f32 = 110.0;
     const GEOMETRY_FIELD_WIDTH: f32 = 96.0;
     const GEOMETRY_FIELD_EXPANDED_WIDTH: f32 = 120.0;
     const GEOMETRY_GRID_SPACING_X: f32 = 2.0;
@@ -1226,46 +1226,48 @@ impl CrosshairApp {
                                 group_id_override,
                             );
 
-                            ui.add_sized([Self::GEOMETRY_LABEL_COL_WIDTH, 18.0], egui::Label::new(Self::tr_lang(language, "Code", "Mã")));
-                            let cell_width = 120.0;
-                            let textbox_width = 450.0;
-                            let id = ui.make_persistent_id((preset_id, object_id, "svg-text-edit"));
-                            let focus_key = id.with("expand-focus");
-                            let has_focus = ui.memory(|mem| mem.data.get_temp::<bool>(focus_key)).unwrap_or(false);
-                            let target_height = if has_focus { 72.0 } else { 18.0 };
-                            let animated_height = ui.ctx().animate_value_with_time(id.with("h"), target_height, 0.20);
-                            let (cell_rect, _) = ui.allocate_exact_size(egui::vec2(cell_width, animated_height), egui::Sense::hover());
-                            let mut child_ui = ui.child_ui(
-                                egui::Rect::from_min_size(cell_rect.min, egui::vec2(textbox_width, cell_rect.height())),
-                                *ui.layout(),
-                                None,
-                            );
-                            let id = ui.make_persistent_id((preset_id, object_id, "svg-text-edit"));
-                            let text_edit_response = Self::render_plain_text_edit(
-                                &mut child_ui,
-                                &mut spec.text,
-                                id,
-                                textbox_width,
-                                textbox_width,
-                                18.0,
-                                72.0,
-                                "<svg>...</svg>",
-                                true,
-                            );
-                            changed |= text_edit_response.changed();
-                            Self::apply_vietnamese_input_if_changed(
-                                &text_edit_response,
-                                vietnamese_input_enabled,
-                                vietnamese_input_mode,
-                                &mut spec.text,
-                            );
-                            ui.label("");
-                            ui.label("");
-                            ui.end_row();
                         }
                         GeometryShapeKind::Polyline | GeometryShapeKind::Polygon => unreachable!(),
                     }
+                });
+        }
 
+        if spec.shape == GeometryShapeKind::Svg {
+            ui.add_space(4.0);
+
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = Self::GEOMETRY_GRID_SPACING_X;
+                let label_text = Self::tr_lang(language, "Code", "Mã");
+                ui.add_sized([Self::GEOMETRY_LABEL_COL_WIDTH, 18.0], egui::Label::new(label_text));
+
+                let id = ui.make_persistent_id((preset_id, object_id, "svg-text-edit"));
+                let text_edit_response = Self::render_plain_text_edit(
+                    ui,
+                    &mut spec.text,
+                    id,
+                    450.0,
+                    450.0,
+                    18.0,
+                    72.0,
+                    "<svg>...</svg>",
+                    true,
+                );
+                changed |= text_edit_response.changed();
+                Self::apply_vietnamese_input_if_changed(
+                    &text_edit_response,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    &mut spec.text,
+                );
+            });
+        }
+
+        {
+            Grid::new((preset_id, object_id, "geometry-spec-grid-2"))
+                .num_columns(4)
+                .spacing([Self::GEOMETRY_GRID_SPACING_X, 6.0])
+                .min_col_width(0.0)
+                .show(ui, |ui| {
                     if matches!(
                         spec.shape,
                         GeometryShapeKind::Line
@@ -1335,8 +1337,8 @@ impl CrosshairApp {
                         )
                     {
                         changed |= Self::geometry_color_row(
-                        ui,
-                        language,
+                            ui,
+                            language,
                             preset_id,
                             object_id,
                             Self::tr_lang(language, "Fill", "Màu nền"),
