@@ -5205,6 +5205,7 @@ impl CrosshairApp {
                                                         }
                                                         if grid_col % 8 != 0 {
                                                             ui.end_row();
+                                                            grid_col = 0;
                                                         }
                                                         Self::render_mouse_action_group_option(
                                                             ui,
@@ -8303,6 +8304,7 @@ impl CrosshairApp {
                                                             }
                                                             if grid_col % 8 != 0 {
                                                                 ui.end_row();
+                                                                grid_col = 0;
                                                             }
                                                             Self::render_mouse_action_group_option(
                                                                 ui,
