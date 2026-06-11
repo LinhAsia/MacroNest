@@ -248,6 +248,8 @@ mod windows_overlay {
 
     static TEMPLATE_CACHE: Lazy<Mutex<HashMap<u32, CachedTemplate>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
+    static GEOMETRY_SVG_CACHE: Lazy<Mutex<HashMap<(String, u32, u32, u32), RenderedSvgImage>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
     pub fn add_active_step(preset_id: u32, step_index: usize) {
         let mut active = ACTIVE_MACRO_STEPS.lock();
         active.entry(preset_id).or_default().insert(step_index);
@@ -11890,6 +11892,15 @@ mod windows_overlay {
             thickness: i32,
         },
         Label(GeometryRenderText),
+        Svg {
+            x: i32,
+            y: i32,
+            width: u32,
+            height: u32,
+            opacity: f32,
+            rotation: f32,
+            code: String,
+        },
     }
 
     fn geometry_eval_i32(expr: &str, fallback: i32) -> i32 {
@@ -12275,6 +12286,31 @@ mod windows_overlay {
                         points,
                         stroke,
                         thickness,
+                    },
+                })
+            }
+            GeometryShapeKind::Svg => {
+                let x = geometry_eval_i32(&spec.x1_expr, 960);
+                let y = geometry_eval_i32(&spec.y1_expr, 540);
+                let width = geometry_eval_i32(&spec.width_expr, 0).max(0) as u32;
+                let height = geometry_eval_i32(&spec.height_expr, 0).max(0) as u32;
+                let opacity = geometry_eval_f32(&spec.opacity_expr, 1.0).clamp(0.0, 1.0);
+                let rotation = geometry_eval_f32(&spec.rotation_expr, 0.0);
+                let code = spec.text.clone();
+                
+                let w = if width > 0 { width as i32 } else { 1000 };
+                let h = if height > 0 { height as i32 } else { 1000 };
+                
+                Some(GeometryRenderShape {
+                    bounds: (x - w, y - h, x + w * 2, y + h * 2),
+                    draw: GeometryRenderDraw::Svg {
+                        x,
+                        y,
+                        width,
+                        height,
+                        opacity,
+                        rotation,
+                        code,
                     },
                 })
             }
@@ -14867,33 +14903,48 @@ mod windows_overlay {
             };
             let path_str = spec.path.clone();
 
-            // Resolve path: try as-is, then relative to assets folder
-            let resolved = {
-                let p = Path::new(&path_str);
-                if p.exists() {
-                    Some(p.to_path_buf())
-                } else {
-                    let assets_path = Path::new("assets").join(&path_str);
-                    if assets_path.exists() {
-                        Some(assets_path)
-                    } else {
-                        None
-                    }
-                }
-            };
+            let trimmed = path_str.trim();
+            let is_code = trimmed.starts_with('<') || trimmed.contains("<svg");
 
-            if let Some(path) = resolved {
-                match render_svg_image(&path, target_w, target_h, opacity) {
+            if is_code {
+                match crate::render::render_svg_image(&path_str, target_w, target_h, opacity) {
                     Ok(rendered) => {
                         let mut hook_state = HOOK_STATE.lock();
                         hook_state.rendered_svg_image_steps.insert(key, rendered);
                     }
                     Err(e) => {
-                        eprintln!("DrawSvgImage: failed to render {:?}: {e}", path);
+                        eprintln!("DrawSvgImage: failed to render inline SVG: {e}");
                     }
                 }
             } else {
-                eprintln!("DrawSvgImage: path not found: {path_str:?}");
+                // Resolve path: try as-is, then relative to assets folder
+                let resolved = {
+                    let p = Path::new(&path_str);
+                    if p.exists() {
+                        Some(p.to_path_buf())
+                    } else {
+                        let assets_path = Path::new("assets").join(&path_str);
+                        if assets_path.exists() {
+                            Some(assets_path)
+                        } else {
+                            None
+                        }
+                    }
+                };
+
+                if let Some(path) = resolved {
+                    match crate::render::render_svg_image(&path.to_string_lossy(), target_w, target_h, opacity) {
+                        Ok(rendered) => {
+                            let mut hook_state = HOOK_STATE.lock();
+                            hook_state.rendered_svg_image_steps.insert(key, rendered);
+                        }
+                        Err(e) => {
+                            eprintln!("DrawSvgImage: failed to render {:?}: {e}", path);
+                        }
+                    }
+                } else {
+                    eprintln!("DrawSvgImage: path not found: {path_str:?}");
+                }
             }
         }
 
@@ -16230,6 +16281,80 @@ mod windows_overlay {
                     }
                 }
                 GeometryRenderDraw::Label(text) => geometry_texts.push(text.clone()),
+                GeometryRenderDraw::Svg {
+                    x,
+                    y,
+                    width: target_w,
+                    height: target_h,
+                    opacity,
+                    rotation: _,
+                    code,
+                } => {
+                    if !code.trim().is_empty() {
+                        let opacity_key = (opacity * 1000.0).round() as u32;
+                        let cache_key = (code.clone(), *target_w, *target_h, opacity_key);
+                        let mut cache = GEOMETRY_SVG_CACHE.lock();
+                        let rendered = if let Some(cached) = cache.get(&cache_key) {
+                            Some(cached)
+                        } else {
+                            match crate::render::render_svg_image(code, *target_w, *target_h, *opacity) {
+                                Ok(img) => {
+                                    cache.insert(cache_key.clone(), img);
+                                    cache.get(&cache_key)
+                                }
+                                Err(e) => {
+                                    eprintln!("Overlay Svg paint: failed to render inline SVG: {e}");
+                                    None
+                                }
+                            }
+                        };
+                        
+                        if let Some(img) = rendered {
+                            let img_w = img.width as usize;
+                            let img_h = img.height as usize;
+                            let rel_x = x - min_x;
+                            let rel_y = y - min_y;
+                            for py in 0..img_h {
+                                let screen_y = rel_y + py as i32;
+                                if screen_y < 0 || screen_y >= height as i32 {
+                                    continue;
+                                }
+                                for px in 0..img_w {
+                                    let screen_x = rel_x + px as i32;
+                                    if screen_x < 0 || screen_x >= width as i32 {
+                                        continue;
+                                    }
+                                    let img_idx = (py * img_w + px) * 4;
+                                    if img_idx + 3 >= img.rgba.len() {
+                                        continue;
+                                    }
+                                    let alpha = img.rgba[img_idx + 3] as u32;
+                                    if alpha > 0 {
+                                        let dest_idx = ((screen_y as usize) * (width as usize) + (screen_x as usize)) * 4;
+                                        if dest_idx + 3 < pixels.len() {
+                                            let src_r = img.rgba[img_idx] as u32;
+                                            let src_g = img.rgba[img_idx + 1] as u32;
+                                            let src_b = img.rgba[img_idx + 2] as u32;
+                                            
+                                            let dest_b = pixels[dest_idx] as u32;
+                                            let dest_g = pixels[dest_idx + 1] as u32;
+                                            let dest_r = pixels[dest_idx + 2] as u32;
+                                            
+                                            let out_r = (src_r * alpha + dest_r * (255 - alpha)) / 255;
+                                            let out_g = (src_g * alpha + dest_g * (255 - alpha)) / 255;
+                                            let out_b = (src_b * alpha + dest_b * (255 - alpha)) / 255;
+                                            
+                                            pixels[dest_idx] = out_b as u8;
+                                            pixels[dest_idx + 1] = out_g as u8;
+                                            pixels[dest_idx + 2] = out_r as u8;
+                                            pixels[dest_idx + 3] = pixels[dest_idx + 3].max(alpha as u8);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

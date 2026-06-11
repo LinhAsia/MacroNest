@@ -299,7 +299,7 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn geometry_shapes() -> [GeometryShapeKind; 10] {
+    pub(crate) fn geometry_shapes() -> [GeometryShapeKind; 11] {
         [
             GeometryShapeKind::Point,
             GeometryShapeKind::Line,
@@ -311,6 +311,7 @@ impl CrosshairApp {
             GeometryShapeKind::Polyline,
             GeometryShapeKind::Polygon,
             GeometryShapeKind::Arc,
+            GeometryShapeKind::Svg,
         ]
     }
 
@@ -327,6 +328,7 @@ impl CrosshairApp {
                 GeometryShapeKind::Polyline => "Đường gấp khúc",
                 GeometryShapeKind::Polygon => "Đa giác",
                 GeometryShapeKind::Arc => "Cung tròn",
+                GeometryShapeKind::Svg => "Ảnh SVG",
             },
             _ => match shape {
                 GeometryShapeKind::Point => "Point",
@@ -339,6 +341,7 @@ impl CrosshairApp {
                 GeometryShapeKind::Polyline => "Polyline",
                 GeometryShapeKind::Polygon => "Polygon",
                 GeometryShapeKind::Arc => "Arc",
+                GeometryShapeKind::Svg => "SVG Image",
             }
         }
     }
@@ -1138,6 +1141,68 @@ impl CrosshairApp {
                                 group_id_override,
                             );
                         }
+                        GeometryShapeKind::Svg => {
+                            changed |= Self::geometry_expr_pair_row(
+                                ui,
+                                language,
+                                preset_id,
+                                object_id,
+                                "pos",
+                                0,
+                                "X",
+                                &mut spec.x1_expr,
+                                120.0,
+                                120.0,
+                                "Y",
+                                &mut spec.y1_expr,
+                                120.0,
+                                120.0,
+                                begin_mouse_move_absolute_capture_target,
+                                vietnamese_input_enabled,
+                                vietnamese_input_mode,
+                                group_id_override,
+                            );
+                            changed |= Self::geometry_expr_pair_row(
+                                ui,
+                                language,
+                                preset_id,
+                                object_id,
+                                "size",
+                                255,
+                                Self::tr_lang(language, "Width (0=auto)", "Chiều rộng (0=auto)"),
+                                &mut spec.width_expr,
+                                120.0,
+                                120.0,
+                                Self::tr_lang(language, "Height (0=auto)", "Chiều cao (0=auto)"),
+                                &mut spec.height_expr,
+                                120.0,
+                                120.0,
+                                begin_mouse_move_absolute_capture_target,
+                                vietnamese_input_enabled,
+                                vietnamese_input_mode,
+                                group_id_override,
+                            );
+                            changed |= Self::geometry_expr_pair_row(
+                                ui,
+                                language,
+                                preset_id,
+                                object_id,
+                                "transform",
+                                255,
+                                Self::tr_lang(language, "Opacity", "Độ trong suốt"),
+                                &mut spec.opacity_expr,
+                                120.0,
+                                120.0,
+                                Self::tr_lang(language, "Rotate", "Xoay"),
+                                &mut spec.rotation_expr,
+                                120.0,
+                                120.0,
+                                begin_mouse_move_absolute_capture_target,
+                                vietnamese_input_enabled,
+                                vietnamese_input_mode,
+                                group_id_override,
+                            );
+                        }
                         GeometryShapeKind::Polyline | GeometryShapeKind::Polygon => unreachable!(),
                     }
 
@@ -1228,6 +1293,27 @@ impl CrosshairApp {
                         );
                     }
                 });
+        }
+
+        if spec.shape == GeometryShapeKind::Svg {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(Self::tr_lang(language, "SVG Code:", "Code SVG:"));
+                let response = ui.add(
+                    egui::TextEdit::multiline(&mut spec.text)
+                        .hint_text("<svg>...</svg>")
+                        .font(egui::TextStyle::Monospace)
+                        .desired_rows(4)
+                        .desired_width(450.0)
+                );
+                changed |= response.changed();
+                Self::apply_vietnamese_input_if_changed(
+                    &response,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    &mut spec.text,
+                );
+            });
         }
 
         changed

@@ -721,6 +721,7 @@ pub enum GeometryShapeKind {
     Polyline,
     Polygon,
     Arc,
+    Svg,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
