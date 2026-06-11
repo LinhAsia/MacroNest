@@ -12213,7 +12213,7 @@ mod windows_overlay {
                 let y = geometry_eval_i32(&spec.y1_expr, 540);
                 let width = geometry_eval_i32(&spec.width_expr, 0).max(0) as u32;
                 let height = geometry_eval_i32(&spec.height_expr, 0).max(0) as u32;
-                let opacity = geometry_eval_f32(&spec.opacity_expr, 1.0).clamp(0.0, 1.0);
+                let opacity = (geometry_eval_f32(&spec.opacity_expr, 100.0) / 100.0).clamp(0.0, 1.0);
                 let rotation = geometry_eval_f32(&spec.rotation_expr, 0.0);
                 let code = spec.text.clone();
                 

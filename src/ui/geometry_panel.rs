@@ -1322,12 +1322,6 @@ impl CrosshairApp {
                     svg_code_collapsed = !svg_code_collapsed;
                     ui.data_mut(|d| d.insert_temp(svg_code_collapsed_id, svg_code_collapsed));
                 }
-                
-                ui.label(Self::tr_lang(language, "SVG Code:", "Code SVG:"));
-                
-                if svg_code_collapsed {
-                    ui.weak(Self::tr_lang(language, "(click arrow to expand)", "(click mũi tên để mở rộng)"));
-                }
             });
 
             if !svg_code_collapsed {
