@@ -18,6 +18,8 @@ pub struct RenderedSvgImage {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+    pub orig_width: u32,
+    pub orig_height: u32,
 }
 
 pub fn render_crosshair(
@@ -210,7 +212,7 @@ fn apply_global_alpha(rgba: &mut [u8], alpha: f32) {
     }
 }
 
-pub fn render_svg_image(path_or_code: &str, target_width: u32, target_height: u32, opacity: f32) -> Result<RenderedSvgImage> {
+pub fn render_svg_image(path_or_code: &str, target_width: u32, target_height: u32, opacity: f32, rotation: f32) -> Result<RenderedSvgImage> {
     let trimmed = path_or_code.trim();
     let is_code = trimmed.starts_with('<') || trimmed.contains("<svg");
 
@@ -231,6 +233,15 @@ pub fn render_svg_image(path_or_code: &str, target_width: u32, target_height: u3
         }
     };
 
+    let orig_width = pixmap.width();
+    let orig_height = pixmap.height();
+
+    let pixmap = if rotation.abs() >= f32::EPSILON {
+        rotate_pixmap(&pixmap, rotation)?
+    } else {
+        pixmap
+    };
+
     let mut rgba = pixmap.data().to_vec();
     if (opacity - 1.0).abs() > f32::EPSILON {
         apply_global_alpha(&mut rgba, opacity);
@@ -240,6 +251,8 @@ pub fn render_svg_image(path_or_code: &str, target_width: u32, target_height: u3
         width: pixmap.width(),
         height: pixmap.height(),
         rgba,
+        orig_width,
+        orig_height,
     })
 }
 
@@ -320,4 +333,39 @@ fn render_raster_to_pixmap(path: &Path, target_width: u32, target_height: u32) -
     let mut pixmap = Pixmap::new(w, h).context("Failed to create raster pixmap")?;
     pixmap.data_mut().copy_from_slice(rgba.as_raw());
     Ok(pixmap)
+}
+
+fn rotate_pixmap(src: &Pixmap, rotation: f32) -> Result<Pixmap> {
+    use tiny_skia::{Paint, Pattern, SpreadMode, FilterQuality};
+
+    let w = src.width();
+    let h = src.height();
+    
+    let rad = rotation.to_radians();
+    let cos_a = rad.cos().abs();
+    let sin_a = rad.sin().abs();
+    let out_w = (w as f32 * cos_a + h as f32 * sin_a).round().max(1.0) as u32;
+    let out_h = (w as f32 * sin_a + h as f32 * cos_a).round().max(1.0) as u32;
+    
+    let mut dest = Pixmap::new(out_w, out_h).context("Failed to create rotated pixmap")?;
+    
+    let transform = Transform::from_translate(-(w as f32) / 2.0, -(h as f32) / 2.0)
+        .post_rotate(rotation)
+        .post_translate(out_w as f32 / 2.0, out_h as f32 / 2.0);
+        
+    let paint = Paint {
+        shader: Pattern::new(
+            src.as_ref(),
+            SpreadMode::Pad,
+            FilterQuality::Bilinear,
+            1.0,
+            transform,
+        ),
+        ..Default::default()
+    };
+    
+    let rect = Rect::from_xywh(0.0, 0.0, out_w as f32, out_h as f32).context("Invalid rect")?;
+    dest.fill_rect(rect, &paint, Transform::identity(), None);
+    
+    Ok(dest)
 }

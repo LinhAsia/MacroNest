@@ -248,7 +248,7 @@ mod windows_overlay {
 
     static TEMPLATE_CACHE: Lazy<Mutex<HashMap<u32, CachedTemplate>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
-    static GEOMETRY_SVG_CACHE: Lazy<Mutex<HashMap<(String, u32, u32, u32), RenderedSvgImage>>> =
+    static GEOMETRY_SVG_CACHE: Lazy<Mutex<HashMap<(String, u32, u32, u32, i32), RenderedSvgImage>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
     pub fn add_active_step(preset_id: u32, step_index: usize) {
         let mut active = ACTIVE_MACRO_STEPS.lock();
@@ -4202,13 +4202,14 @@ mod windows_overlay {
                             let v = geometry_eval_i32(&s.opacity_expr, 100);
                             (v as f32 / 100.0).clamp(0.0, 1.0)
                         };
+                        let rotation = geometry_eval_f32(&s.rotation_expr, 0.0);
                         let path_str = s.path.clone();
                         let trimmed = path_str.trim();
                         let is_code = trimmed.starts_with('<') || trimmed.contains("<svg");
 
                         let mut rendered_img = None;
                         if is_code {
-                            if let Ok(rendered) = crate::render::render_svg_image(&path_str, target_w, target_h, opacity) {
+                            if let Ok(rendered) = crate::render::render_svg_image(&path_str, target_w, target_h, opacity, rotation) {
                                 rendered_img = Some(rendered);
                             }
                         } else {
@@ -4227,7 +4228,7 @@ mod windows_overlay {
                                 }
                             };
                             if let Some(path) = resolved {
-                                if let Ok(rendered) = crate::render::render_svg_image(&path.to_string_lossy(), target_w, target_h, opacity) {
+                                if let Ok(rendered) = crate::render::render_svg_image(&path.to_string_lossy(), target_w, target_h, opacity, rotation) {
                                     rendered_img = Some(rendered);
                                 }
                             }
@@ -4783,7 +4784,9 @@ mod windows_overlay {
                 let x = geometry_eval_i32(&spec.x_expr, 0);
                 let y = geometry_eval_i32(&spec.y_expr, 0);
                 if let Some(img) = hook_state.rendered_svg_image_steps.get(key) {
-                    svg_layers.push((x, y, img));
+                    let offset_x = (img.orig_width as i32 - img.width as i32) / 2;
+                    let offset_y = (img.orig_height as i32 - img.height as i32) / 2;
+                    svg_layers.push((x + offset_x, y + offset_y, img));
                 }
             }
             if let Some(spec) = &hook_state.preview_svg_image_spec {
@@ -4792,7 +4795,9 @@ mod windows_overlay {
                     let y = geometry_eval_i32(&spec.y_expr, 0);
                     // For preview we use a sentinel key that won't collide with real steps
                     if let Some(img) = hook_state.rendered_svg_image_steps.get(&(u32::MAX, usize::MAX)) {
-                        svg_layers.push((x, y, img));
+                        let offset_x = (img.orig_width as i32 - img.width as i32) / 2;
+                        let offset_y = (img.orig_height as i32 - img.height as i32) / 2;
+                        svg_layers.push((x + offset_x, y + offset_y, img));
                     }
                 }
             }
@@ -14952,13 +14957,14 @@ mod windows_overlay {
                 let v = geometry_eval_i32(&spec.opacity_expr, 100);
                 (v as f32 / 100.0).clamp(0.0, 1.0)
             };
+            let rotation = geometry_eval_f32(&spec.rotation_expr, 0.0);
             let path_str = spec.path.clone();
 
             let trimmed = path_str.trim();
             let is_code = trimmed.starts_with('<') || trimmed.contains("<svg");
 
             if is_code {
-                match crate::render::render_svg_image(&path_str, target_w, target_h, opacity) {
+                match crate::render::render_svg_image(&path_str, target_w, target_h, opacity, rotation) {
                     Ok(rendered) => {
                         let mut hook_state = HOOK_STATE.lock();
                         hook_state.rendered_svg_image_steps.insert(key, rendered);
@@ -14984,7 +14990,7 @@ mod windows_overlay {
                 };
 
                 if let Some(path) = resolved {
-                    match crate::render::render_svg_image(&path.to_string_lossy(), target_w, target_h, opacity) {
+                    match crate::render::render_svg_image(&path.to_string_lossy(), target_w, target_h, opacity, rotation) {
                         Ok(rendered) => {
                             let mut hook_state = HOOK_STATE.lock();
                             hook_state.rendered_svg_image_steps.insert(key, rendered);
@@ -16338,17 +16344,18 @@ mod windows_overlay {
                     width: target_w,
                     height: target_h,
                     opacity,
-                    rotation: _,
+                    rotation,
                     code,
                 } => {
                     if !code.trim().is_empty() {
                         let opacity_key = (opacity * 1000.0).round() as u32;
-                        let cache_key = (code.clone(), *target_w, *target_h, opacity_key);
+                        let rotation_key = (rotation * 1000.0).round() as i32;
+                        let cache_key = (code.clone(), *target_w, *target_h, opacity_key, rotation_key);
                         let mut cache = GEOMETRY_SVG_CACHE.lock();
                         let rendered = if let Some(cached) = cache.get(&cache_key) {
                             Some(cached)
                         } else {
-                            match crate::render::render_svg_image(code, *target_w, *target_h, *opacity) {
+                            match crate::render::render_svg_image(code, *target_w, *target_h, *opacity, *rotation) {
                                 Ok(img) => {
                                     cache.insert(cache_key.clone(), img);
                                     cache.get(&cache_key)
@@ -16363,8 +16370,10 @@ mod windows_overlay {
                         if let Some(img) = rendered {
                             let img_w = img.width as usize;
                             let img_h = img.height as usize;
-                            let rel_x = x - min_x;
-                            let rel_y = y - min_y;
+                            let offset_x = (img.orig_width as i32 - img.width as i32) / 2;
+                            let offset_y = (img.orig_height as i32 - img.height as i32) / 2;
+                            let rel_x = x + offset_x - min_x;
+                            let rel_y = y + offset_y - min_y;
                             for py in 0..img_h {
                                 let screen_y = rel_y + py as i32;
                                 if screen_y < 0 || screen_y >= height as i32 {
