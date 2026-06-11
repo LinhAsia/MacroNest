@@ -457,7 +457,7 @@ impl WindowLayout {
             hotkey: None,
             trigger_keys: String::new(),
             block_taskbar: false,
-            remove_title_bar: false,
+            remove_title_bar: true,
         }
     }
 }
