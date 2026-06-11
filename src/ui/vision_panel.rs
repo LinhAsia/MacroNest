@@ -948,11 +948,7 @@ impl CrosshairApp {
                     capture_mode,
                     VisionCaptureMode::Template | VisionCaptureMode::SearchRegion
                 );
-                let dim_color = if is_region_mode {
-                    Color32::from_black_alpha(140)
-                } else {
-                    Color32::from_black_alpha(40)
-                };
+                let dim_color = Color32::TRANSPARENT;
 
                 let ppp = ctx.pixels_per_point().max(0.5);
                 let (left, top, _, _) = crate::window_list::virtual_screen_bounds();
@@ -1452,13 +1448,21 @@ impl CrosshairApp {
         self.vision_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
         self.enforce_square_window_frames = 0;
 
-        // Hide window
+        // Hide window synchronously using native Win32 API to ensure it disappears instantly from the screen before screenshot
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
         crate::overlay::wake_command_queue();
 
-        // Sleep to let OS process window hide
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        // Sleep to let OS process window hide and refresh desktop
+        std::thread::sleep(std::time::Duration::from_millis(150));
 
         // Capture virtual screen bounds
         let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
@@ -1486,6 +1490,15 @@ impl CrosshairApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+
+        // Show window again using native Win32 API
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+            }
+        }
 
         // Setup vision capture state
         self.vision_capture_target = Some(target);

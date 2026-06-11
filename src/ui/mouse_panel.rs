@@ -1813,7 +1813,7 @@ if arduino_changed {
                     );
                 }
 
-                let dim_color = Color32::from_black_alpha(40);
+                let dim_color = Color32::TRANSPARENT;
                 ui.painter().rect_filled(max_rect, 0.0, dim_color);
 
                 let status_text = &self.status;
@@ -2225,13 +2225,21 @@ if arduino_changed {
         self.mouse_move_absolute_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
         self.enforce_square_window_frames = 0;
 
-        // Hide window
+        // Hide window synchronously using native Win32 API to ensure it disappears instantly from the screen before screenshot
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
         crate::overlay::wake_command_queue();
 
-        // Sleep to let OS process window hide
-        std::thread::sleep(Duration::from_millis(100));
+        // Sleep to let OS process window hide and refresh desktop
+        std::thread::sleep(Duration::from_millis(150));
 
         // Capture virtual screen bounds
         let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
@@ -2259,6 +2267,15 @@ if arduino_changed {
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+
+        // Show window again using native Win32 API
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+            }
+        }
 
         // Setup mouse absolute capture state
         let uses_blocked_click = Self::mouse_move_absolute_capture_uses_blocked_click(target);

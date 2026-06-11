@@ -302,6 +302,34 @@ mod windows_platform {
         }
     }
 
+    pub fn hide_native_window(frame: &Frame) {
+        let Ok(window_handle) = frame.window_handle() else {
+            return;
+        };
+        let hwnd = match window_handle.as_raw() {
+            RawWindowHandle::Win32(handle) => HWND(handle.hwnd.get() as *mut _),
+            _ => return,
+        };
+
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+
+    pub fn show_native_window(frame: &Frame) {
+        let Ok(window_handle) = frame.window_handle() else {
+            return;
+        };
+        let hwnd = match window_handle.as_raw() {
+            RawWindowHandle::Win32(handle) => HWND(handle.hwnd.get() as *mut _),
+            _ => return,
+        };
+
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+        }
+    }
+
     pub fn open_folder_in_explorer(path: &Path) -> Result<()> {
         if !path.exists() {
             bail!("Folder does not exist: {}", path.display());
@@ -459,6 +487,9 @@ mod fallback {
     pub fn copy_folder_to_clipboard(_path: &std::path::Path) -> Result<()> {
         Ok(())
     }
+
+    pub fn hide_native_window(_frame: &Frame) {}
+    pub fn show_native_window(_frame: &Frame) {}
 }
 
 #[cfg(not(windows))]
