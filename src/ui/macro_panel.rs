@@ -14772,11 +14772,13 @@ impl CrosshairApp {
             egui::vec2(animated_width, current_interact_height),
             egui::Sense::hover(),
         );
+        let top_y = if is_multiline {
+            rect.min.y
+        } else {
+            rect.min.y + (rect.height() - animated_height) / 2.0
+        };
         let textbox_rect = egui::Rect::from_min_size(
-            egui::pos2(
-                rect.min.x,
-                rect.min.y + (rect.height() - animated_height) / 2.0,
-            ),
+            egui::pos2(rect.min.x, top_y),
             egui::vec2(animated_width, animated_height),
         );
         let prev_interact_y = ui.spacing().interact_size.y;

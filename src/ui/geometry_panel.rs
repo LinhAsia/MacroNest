@@ -1225,6 +1225,38 @@ impl CrosshairApp {
                                 vietnamese_input_mode,
                                 group_id_override,
                             );
+
+                            ui.add_sized([Self::GEOMETRY_LABEL_COL_WIDTH, 18.0], egui::Label::new(Self::tr_lang(language, "Code", "Mã")));
+                            let cell_width = 120.0;
+                            let textbox_width = 450.0;
+                            let (cell_rect, _) = ui.allocate_exact_size(egui::vec2(cell_width, 18.0), egui::Sense::hover());
+                            let mut child_ui = ui.child_ui(
+                                egui::Rect::from_min_size(cell_rect.min, egui::vec2(textbox_width, cell_rect.height())),
+                                *ui.layout(),
+                                None,
+                            );
+                            let id = ui.make_persistent_id((preset_id, object_id, "svg-text-edit"));
+                            let text_edit_response = Self::render_plain_text_edit(
+                                &mut child_ui,
+                                &mut spec.text,
+                                id,
+                                textbox_width,
+                                textbox_width,
+                                18.0,
+                                72.0,
+                                "<svg>...</svg>",
+                                true,
+                            );
+                            changed |= text_edit_response.changed();
+                            Self::apply_vietnamese_input_if_changed(
+                                &text_edit_response,
+                                vietnamese_input_enabled,
+                                vietnamese_input_mode,
+                                &mut spec.text,
+                            );
+                            ui.label("");
+                            ui.label("");
+                            ui.end_row();
                         }
                         GeometryShapeKind::Polyline | GeometryShapeKind::Polygon => unreachable!(),
                     }
@@ -1318,35 +1350,7 @@ impl CrosshairApp {
                 });
         }
 
-        if spec.shape == GeometryShapeKind::Svg {
-            ui.add_space(4.0);
 
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = Self::GEOMETRY_GRID_SPACING_X;
-                let btn_text = Self::tr_lang(language, "Code", "Mã");
-                ui.add_sized([Self::GEOMETRY_LABEL_COL_WIDTH, 18.0], egui::Label::new(btn_text));
-
-                let id = ui.make_persistent_id((preset_id, object_id, "svg-text-edit"));
-                let text_edit_response = Self::render_plain_text_edit(
-                    ui,
-                    &mut spec.text,
-                    id,
-                    450.0,
-                    450.0,
-                    18.0,
-                    72.0,
-                    "<svg>...</svg>",
-                    true,
-                );
-                changed |= text_edit_response.changed();
-                Self::apply_vietnamese_input_if_changed(
-                    &text_edit_response,
-                    vietnamese_input_enabled,
-                    vietnamese_input_mode,
-                    &mut spec.text,
-                );
-            });
-        }
 
         changed
     }
