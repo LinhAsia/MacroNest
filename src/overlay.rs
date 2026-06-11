@@ -8502,7 +8502,8 @@ mod windows_overlay {
                         let s_lower = s_trimmed.to_lowercase();
                         let math_funcs = [
                             "random(", "min(", "max(", "abs(", "atan(", "atan2(", "sin(", "cos(", "tan(", "sqrt(",
-                            "ln(", "log(",
+                            "ln(", "log(", "asin(", "acos(", "sinh(", "cosh(", "tanh(", "ceil(", "floor(", "round(",
+                            "pow(", "degrees(", "radians(", "gcd(", "lcm(", "isqrt(", "comb(", "perm(", "factorial(",
                         ];
                         for func in &math_funcs {
                             if s_lower.contains(func) {
@@ -9488,14 +9489,20 @@ mod windows_overlay {
                         "min" => resolved_args.first().copied().unwrap_or(0.0).min(resolved_args.get(1).copied().unwrap_or(0.0)),
                         "max" => resolved_args.first().copied().unwrap_or(0.0).max(resolved_args.get(1).copied().unwrap_or(0.0)),
                         "abs" => resolved_args.first().copied().unwrap_or(0.0).abs(),
-                        "atan" => resolved_args.first().copied().unwrap_or(0.0).atan().to_degrees(),
+                        "atan" => resolved_args.first().copied().unwrap_or(0.0).atan(),
                         "atan2" => {
                             let y = resolved_args.first().copied().unwrap_or(0.0);
                             let x = resolved_args.get(1).copied().unwrap_or(0.0);
-                            y.atan2(x).to_degrees()
+                            y.atan2(x)
                         }
-                        "sin" => resolved_args.first().copied().unwrap_or(0.0).to_radians().sin() * 1000.0,
-                        "cos" => resolved_args.first().copied().unwrap_or(0.0).to_radians().cos() * 1000.0,
+                        "sin" => resolved_args.first().copied().unwrap_or(0.0).sin(),
+                        "cos" => resolved_args.first().copied().unwrap_or(0.0).cos(),
+                        "tan" => resolved_args.first().copied().unwrap_or(0.0).tan(),
+                        "asin" => resolved_args.first().copied().unwrap_or(0.0).asin(),
+                        "acos" => resolved_args.first().copied().unwrap_or(0.0).acos(),
+                        "sinh" => resolved_args.first().copied().unwrap_or(0.0).sinh(),
+                        "cosh" => resolved_args.first().copied().unwrap_or(0.0).cosh(),
+                        "tanh" => resolved_args.first().copied().unwrap_or(0.0).tanh(),
                         "sqrt" => {
                             let value = resolved_args.first().copied().unwrap_or(0.0);
                             if value < 0.0 { 0.0 } else { value.sqrt() }
@@ -9726,11 +9733,11 @@ mod windows_overlay {
             // Functions support (min, max, abs, random)
 
             assert_eq!(evaluate_math_expression("abs(-50)"), 50);
-            assert_eq!(evaluate_math_expression("atan(1)"), 45);
-            assert_eq!(evaluate_math_expression("atan2(1, 1)"), 45);
-            assert_eq!(evaluate_math_expression("sin(30)"), 500);
-            assert_eq!(evaluate_math_expression("cos(60)"), 500);
-            assert_eq!(evaluate_math_expression("cos(0)"), 1000);
+            assert_eq!(evaluate_math_expression("degrees(atan(1))"), 45);
+            assert_eq!(evaluate_math_expression("degrees(atan2(1, 1))"), 45);
+            assert_eq!(evaluate_math_expression("sin(radians(30)) * 1000"), 500);
+            assert_eq!(evaluate_math_expression("cos(radians(60)) * 1000"), 500);
+            assert_eq!(evaluate_math_expression("cos(0) * 1000"), 1000);
             assert_eq!(evaluate_math_expression("sqrt(9)"), 3);
             assert_eq!(evaluate_math_expression("pow(2, 3)"), 8);
             assert_eq!(evaluate_math_expression("ceil(pi)"), 4);
