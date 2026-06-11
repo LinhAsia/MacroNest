@@ -5332,7 +5332,7 @@ impl CrosshairApp {
                                                         .find(|(gid, _, _)| *gid == trig_group_id)
                                                         .map(|(gid, _, gpresets)| {
                                                             gpresets.iter()
-                                                                .filter(|(pid, _)| !(*gid == group.id && *pid == preset.id))
+                                                                .filter(|(pid, _)| true)
                                                                 .cloned()
                                                                 .collect()
                                                         })
@@ -8416,7 +8416,7 @@ impl CrosshairApp {
                                                         .find(|(gid, _, _)| *gid == trig_group_id)
                                                         .map(|(gid, _, gpresets)| {
                                                             gpresets.iter()
-                                                                .filter(|(pid, _)| !(*gid == group.id && *pid == preset.id))
+                                                                .filter(|(pid, _)| true)
                                                                 .cloned()
                                                                 .collect()
                                                         })
