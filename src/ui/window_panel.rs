@@ -3133,7 +3133,8 @@ impl CrosshairApp {
                                 }
                                 
                                 let label_text = if let Some(title) = &cell.target_window_title {
-                                    Self::truncate_window_title(title, 12)
+                                    let simplified = Self::simplify_window_title(title);
+                                    Self::truncate_window_title(&simplified, 16)
                                 } else {
                                     format!("{},{}", cell.row, cell.col)
                                 };

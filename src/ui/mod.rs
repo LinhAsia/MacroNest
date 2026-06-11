@@ -7288,27 +7288,8 @@ impl CrosshairApp {
         };
     }
 
-    fn capture_request_keeps_open(&self, target: &CaptureRequest) -> bool {
-        match target {
-            CaptureRequest::MacroPresetHotkey(_, _) => true,
-            CaptureRequest::MacroPresetRecordHotkey(_, _) => true,
-            CaptureRequest::CommandPresetHotkey(_) => true,
-            CaptureRequest::MacroPresetReleaseWaitKey(_, _) => true,
-            CaptureRequest::WindowPresetHotkey(_) => true,
-            CaptureRequest::WindowFocusPresetHotkey(_) => true,
-            CaptureRequest::WindowLayoutHotkey(_) => true,
-            CaptureRequest::PinPresetHotkey(_) => true,
-            CaptureRequest::MouseSensitivityPresetHotkey(_) => true,
-            CaptureRequest::VisionPresetHotkey(_) => true,
-            CaptureRequest::MacroPresetHoldStopInput(_, _) => false,
-            CaptureRequest::MacroStepInput {
-                group_id,
-                preset_id,
-                step_index,
-                ..
-            } => false,
-            _ => false,
-        }
+    fn capture_request_keeps_open(&self, _target: &CaptureRequest) -> bool {
+        false
     }
 
     fn capture_request_accepts_mouse(&self, target: &CaptureRequest) -> bool {
