@@ -369,6 +369,7 @@ impl CrosshairApp {
                                     .strong(),
                             );
                             ui.label(egui::RichText::new("- random(min, max)").monospace());
+                            ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
                             ui.label(egui::RichText::new("- min(a, b)").monospace());
                             ui.label(egui::RichText::new("- max(a, b)").monospace());
                             ui.label(egui::RichText::new("- abs(a)").monospace());
@@ -12220,6 +12221,7 @@ impl CrosshairApp {
                 | "min"
                 | "max"
                 | "random"
+                | "choice"
                 | "atan"
                 | "atan2"
                 | "sin"
@@ -12723,6 +12725,7 @@ impl CrosshairApp {
             "min()",
             "max()",
             "random()",
+            "choice()",
             "atan()",
             "atan2()",
             "sin()",
@@ -12818,6 +12821,7 @@ impl CrosshairApp {
             "min()" => "min(a, b)".to_string(),
             "max()" => "max(a, b)".to_string(),
             "random()" => "random(min, max)".to_string(),
+            "choice()" => "choice(val1, val2, ...)".to_string(),
             "atan()" => "atan(a)".to_string(),
             "atan2()" => "atan2(y, x)".to_string(),
             "sin()" => "sin(angleDeg) * 1000".to_string(),

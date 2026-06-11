@@ -8588,7 +8588,7 @@ mod windows_overlay {
                         }
                         let s_lower = s_trimmed.to_lowercase();
                         let math_funcs = [
-                            "random(", "min(", "max(", "abs(", "atan(", "atan2(", "sin(", "cos(", "tan(", "sqrt(",
+                            "choice(", "random(", "min(", "max(", "abs(", "atan(", "atan2(", "sin(", "cos(", "tan(", "sqrt(",
                             "ln(", "log(", "asin(", "acos(", "sinh(", "cosh(", "tanh(", "ceil(", "floor(", "round(",
                             "pow(", "degrees(", "radians(", "gcd(", "lcm(", "isqrt(", "comb(", "perm(", "factorial(",
                         ];
@@ -9641,6 +9641,14 @@ mod windows_overlay {
                             let k = clamp_f64_to_i32(resolved_args.get(1).copied().unwrap_or(0.0));
                             if n < 0 || k < 0 { 0.0 } else { permutation_u128(n as u64, k as u64).min(i32::MAX as u128) as f64 }
                         }
+                        "choice" => {
+                            if resolved_args.is_empty() {
+                                0.0
+                            } else {
+                                let idx = get_pseudo_random(0, (resolved_args.len() - 1) as i32) as usize;
+                                resolved_args.get(idx).copied().unwrap_or(0.0)
+                            }
+                        }
                         _ => 0.0,
                     };
                     expr_str.replace_range(func_start_idx..=close_idx, &result_val.to_string());
@@ -9843,6 +9851,8 @@ mod windows_overlay {
             assert_eq!(evaluate_math_expression("min(max(-10, 0), 100)"), 0);
             let rnd = evaluate_math_expression("random(10, 20)");
             assert!(rnd >= 10 && rnd <= 20);
+            let val = evaluate_math_expression("choice(10, 20, 30)");
+            assert!(val == 10 || val == 20 || val == 30);
             // Variable resolution
 
             {
