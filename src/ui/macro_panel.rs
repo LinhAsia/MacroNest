@@ -13979,7 +13979,7 @@ impl CrosshairApp {
                         Self::render_variable_suggestions(ui, &response_h, &mut step.svg_image_spec.height_expr, timer_names, language);
                         ui.end_row();
                         
-                        ui.label(Self::tr_lang(language, "Opacity (0.0-1.0)", "Do mo (0.0-1.0)"));
+                        ui.label(Self::tr_lang(language, "Opacity (0-100)", "Do mo (0-100)"));
                         let op_id = ui.make_persistent_id((id_prefix, "svg-op"));
                         let response_op = Self::render_variable_text_edit(
                             ui,
@@ -13989,7 +13989,7 @@ impl CrosshairApp {
                             150.0,
                             18.0,
                             18.0,
-                            "1.0",
+                            "100",
                             false,
                         );
                         *live_sync |= response_op.changed();
