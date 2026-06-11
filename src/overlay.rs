@@ -107,7 +107,7 @@ mod windows_overlay {
                     GetCursorPos, GetForegroundWindow, GetMessageW, GetSystemMetrics, GetWindow,
                     GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HHOOK,
                     HMENU, HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IMAGE_ICON, IsZoomed,
-                    KBDLLHOOKSTRUCT, KillTimer, LLMHF_INJECTED, LR_LOADFROMFILE, LoadCursorW,
+                    KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LoadCursorW,
                     LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT,
                     PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN,
                     SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOWNA,
@@ -152,7 +152,7 @@ mod windows_overlay {
             HotkeyBinding, HudPreset, GeometryShapeKind, GeometrySpec, IfConditionType, MacroAction,
             MacroGroup, MacroPreset, MacroStep, MacroTriggerMode, MousePathEvent,
             MousePathEventKind, MousePathPreset, MouseSensitivityPreset, PinOverlayStyle,
-            PinPreset, ProfileRecord, RgbaColor, SoundLibraryItem, SoundPreset, SvgImageSpec,
+            PinPreset, ProfileRecord, RgbaColor, SoundLibraryItem, SoundPreset,
             TimerPreset, VideoPreset, VisionPreset, VisionSettings, WindowAnchor, WindowExpandControls,
             WindowExpandDirection, WindowFocusPreset, WindowPreset,
         },
@@ -422,7 +422,6 @@ mod windows_overlay {
         UpdateGeometryPresets(Vec<crate::model::GeometryPreset>),
         PreviewGeometrySpec(Option<GeometrySpec>),
         PreviewGeometryPreset(Option<u32>),
-        PreviewSvgImageSpec(Option<SvgImageSpec>),
         RefreshSearchAreaOverlay,
         InvalidateVisionWaits(Vec<u32>),
         ApplyMouseSensitivityPreset(u32),
@@ -741,10 +740,6 @@ mod windows_overlay {
         active_pin_expires: Option<Instant>,
         preview_geometry_spec: Option<GeometrySpec>,
         preview_geometry_preset_id: Option<u32>,
-        active_svg_image_steps: HashMap<(u32, usize), SvgImageSpec>,
-        active_svg_image_steps_expires: HashMap<(u32, usize), Instant>,
-        rendered_svg_image_steps: HashMap<(u32, usize), RenderedSvgImage>,
-        preview_svg_image_spec: Option<SvgImageSpec>,
         vision_following_presets: HashSet<u32>,
         vision_dir: PathBuf,
         opencv_dll_path: PathBuf,
@@ -833,10 +828,6 @@ mod windows_overlay {
                 active_pin_expires: None,
                 preview_geometry_spec: None,
                 preview_geometry_preset_id: None,
-                active_svg_image_steps: HashMap::new(),
-                active_svg_image_steps_expires: HashMap::new(),
-                rendered_svg_image_steps: HashMap::new(),
-                preview_svg_image_spec: None,
                 vision_following_presets: HashSet::new(),
                 vision_dir: PathBuf::new(),
                 opencv_dll_path: PathBuf::new(),
@@ -4192,62 +4183,6 @@ mod windows_overlay {
                     let _ = refresh_search_area_overlay(runtime);
                 }
 
-                OverlayCommand::PreviewSvgImageSpec(spec) => {
-                    if let Some(ref s) = spec {
-                        let target_w = geometry_eval_i32(&s.width_expr, 0).max(0) as u32;
-                        let target_h = geometry_eval_i32(&s.height_expr, 0).max(0) as u32;
-                        let opacity = if s.opacity_expr.trim().is_empty() {
-                            s.opacity
-                        } else {
-                            let v = geometry_eval_i32(&s.opacity_expr, 100);
-                            (v as f32 / 100.0).clamp(0.0, 1.0)
-                        };
-                        let rotation = geometry_eval_f32(&s.rotation_expr, 0.0);
-                        let path_str = s.path.clone();
-                        let trimmed = path_str.trim();
-                        let is_code = trimmed.starts_with('<') || trimmed.contains("<svg");
-
-                        let mut rendered_img = None;
-                        if is_code {
-                            if let Ok(rendered) = crate::render::render_svg_image(&path_str, target_w, target_h, opacity, rotation) {
-                                rendered_img = Some(rendered);
-                            }
-                        } else {
-                            let resolved = {
-                                use std::path::Path;
-                                let p = Path::new(&path_str);
-                                if p.exists() {
-                                    Some(p.to_path_buf())
-                                } else {
-                                    let assets_path = Path::new("assets").join(&path_str);
-                                    if assets_path.exists() {
-                                        Some(assets_path)
-                                    } else {
-                                        None
-                                    }
-                                }
-                            };
-                            if let Some(path) = resolved {
-                                if let Ok(rendered) = crate::render::render_svg_image(&path.to_string_lossy(), target_w, target_h, opacity, rotation) {
-                                    rendered_img = Some(rendered);
-                                }
-                            }
-                        }
-
-                        let mut hook_state = HOOK_STATE.lock();
-                        if let Some(img) = rendered_img {
-                            hook_state.rendered_svg_image_steps.insert((u32::MAX, usize::MAX), img);
-                        } else {
-                            hook_state.rendered_svg_image_steps.remove(&(u32::MAX, usize::MAX));
-                        }
-                        hook_state.preview_svg_image_spec = Some(s.clone());
-                    } else {
-                        let mut hook_state = HOOK_STATE.lock();
-                        hook_state.rendered_svg_image_steps.remove(&(u32::MAX, usize::MAX));
-                        hook_state.preview_svg_image_spec = None;
-                    }
-                    let _ = refresh_search_area_overlay(runtime);
-                }
 
                 OverlayCommand::RefreshSearchAreaOverlay => {
                     SEARCH_AREA_OVERLAY_REFRESH_PENDING.store(false, Ordering::Release);
@@ -4740,7 +4675,7 @@ mod windows_overlay {
     }
 
     fn refresh_search_area_overlay(runtime: &mut Runtime) -> Result<()> {
-        let (regions, preview_regions, static_geometry_shapes, dynamic_geometry_shapes, svg_image_layers) = {
+        let (regions, preview_regions, static_geometry_shapes, dynamic_geometry_shapes) = {
             let mut hook_state = HOOK_STATE.lock();
             // Clear expired geometries
             let now = Instant::now();
@@ -4755,18 +4690,6 @@ mod windows_overlay {
                 hook_state.rendered_geometry_steps.remove(key);
                 hook_state.active_geometry_steps_expires.remove(key);
             }
-            // Clear expired SVG image steps
-            let mut svg_expired = Vec::new();
-            for (key, expires_at) in &hook_state.active_svg_image_steps_expires {
-                if now >= *expires_at {
-                    svg_expired.push(*key);
-                }
-            }
-            for key in &svg_expired {
-                hook_state.active_svg_image_steps.remove(key);
-                hook_state.rendered_svg_image_steps.remove(key);
-                hook_state.active_svg_image_steps_expires.remove(key);
-            }
 
             let regions = hook_state
                 .vision_presets
@@ -4775,43 +4698,11 @@ mod windows_overlay {
                 .filter_map(|preset| configured_image_search_region(preset))
                 .collect::<Vec<_>>();
 
-            // Collect active SVG image layers: (x, y, rendered_image)
-            let mut svg_layers: Vec<(i32, i32, &RenderedSvgImage)> = Vec::new();
-            for (key, spec) in &hook_state.active_svg_image_steps {
-                if !spec.visible || spec.path.is_empty() {
-                    continue;
-                }
-                let x = geometry_eval_i32(&spec.x_expr, 0);
-                let y = geometry_eval_i32(&spec.y_expr, 0);
-                if let Some(img) = hook_state.rendered_svg_image_steps.get(key) {
-                    let offset_x = (img.orig_width as i32 - img.width as i32) / 2;
-                    let offset_y = (img.orig_height as i32 - img.height as i32) / 2;
-                    svg_layers.push((x + offset_x, y + offset_y, img));
-                }
-            }
-            if let Some(spec) = &hook_state.preview_svg_image_spec {
-                if spec.visible && !spec.path.is_empty() {
-                    let x = geometry_eval_i32(&spec.x_expr, 0);
-                    let y = geometry_eval_i32(&spec.y_expr, 0);
-                    // For preview we use a sentinel key that won't collide with real steps
-                    if let Some(img) = hook_state.rendered_svg_image_steps.get(&(u32::MAX, usize::MAX)) {
-                        let offset_x = (img.orig_width as i32 - img.width as i32) / 2;
-                        let offset_y = (img.orig_height as i32 - img.height as i32) / 2;
-                        svg_layers.push((x + offset_x, y + offset_y, img));
-                    }
-                }
-            }
-            // Collect owned copies for painting (needed to drop the lock)
-            let svg_layers_owned: Vec<(i32, i32, Vec<u8>, u32, u32)> = svg_layers
-                .into_iter()
-                .map(|(x, y, img)| (x, y, img.rgba.clone(), img.width, img.height))
-                .collect();
             (
                 regions,
                 hook_state.vision_capture_preview_regions.clone(),
                 geometry_overlay_static_shapes(&mut hook_state),
                 geometry_overlay_dynamic_shapes(&mut hook_state),
-                svg_layers_owned,
             )
         };
         // Check active crosshair expiration
@@ -4871,7 +4762,7 @@ mod windows_overlay {
         let search_layer_is_empty = regions.is_empty()
             && preview_regions.is_empty()
             && static_geometry_shapes.is_empty();
-        let dynamic_layer_is_empty = dynamic_geometry_shapes.is_empty() && svg_image_layers.is_empty();
+        let dynamic_layer_is_empty = dynamic_geometry_shapes.is_empty();
 
         if search_layer_is_empty {
             if runtime.search_area_overlay_visible {
@@ -4895,7 +4786,6 @@ mod windows_overlay {
                         &regions,
                         &preview_regions,
                         &static_geometry_shapes,
-                        &[],
                         &[],
                     )?;
                 }
@@ -4921,7 +4811,6 @@ mod windows_overlay {
                     &[],
                     &[],
                     &dynamic_geometry_shapes,
-                    &svg_image_layers,
                 )?;
             }
             runtime.dynamic_geometry_overlay_visible = true;
@@ -7692,19 +7581,6 @@ mod windows_overlay {
                     }
                 }
 
-                MacroAction::DrawSvgImage => {
-                    set_step_svg_image_spec(preset_id, absolute_index, &step.svg_image_spec);
-                    let duration = step.get_duration_ms();
-                    let mut state = HOOK_STATE.lock();
-                    if duration > 0 {
-                        state.active_svg_image_steps_expires.insert(
-                            (preset_id, absolute_index),
-                            Instant::now() + Duration::from_millis(duration),
-                        );
-                    } else {
-                        state.active_svg_image_steps_expires.remove(&(preset_id, absolute_index));
-                    }
-                }
 
                 MacroAction::ShowGeometryPreset => {
                     if let Some(geometry_preset_id) =
@@ -8267,19 +8143,6 @@ mod windows_overlay {
                     }
                 }
 
-                MacroAction::DrawSvgImage => {
-                    set_step_svg_image_spec(preset_id, absolute_index, &step.svg_image_spec);
-                    let duration = step.get_duration_ms();
-                    let mut state = HOOK_STATE.lock();
-                    if duration > 0 {
-                        state.active_svg_image_steps_expires.insert(
-                            (preset_id, absolute_index),
-                            Instant::now() + Duration::from_millis(duration),
-                        );
-                    } else {
-                        state.active_svg_image_steps_expires.remove(&(preset_id, absolute_index));
-                    }
-                }
 
                 MacroAction::ShowGeometryPreset => {
                     if let Some(geometry_preset_id) =
@@ -14923,101 +14786,6 @@ mod windows_overlay {
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
-    fn set_step_svg_image_spec(preset_id: u32, absolute_step_index: usize, spec: &SvgImageSpec) {
-        use std::path::Path;
-
-        let key = (preset_id, absolute_step_index);
-
-        // Check whether anything that affects rasterization changed
-        let needs_raster = {
-            let hook_state = HOOK_STATE.lock();
-            let existing = hook_state.active_svg_image_steps.get(&key);
-            let raster_params_changed = existing.is_none_or(|e| {
-                e.path != spec.path
-                    || e.width_expr != spec.width_expr
-                    || e.height_expr != spec.height_expr
-                    || e.opacity_expr != spec.opacity_expr
-                    || e.rotation_expr != spec.rotation_expr
-                    || (e.opacity - spec.opacity).abs() > f32::EPSILON
-            });
-            raster_params_changed && spec.visible && !spec.path.is_empty()
-        };
-
-        {
-            let mut hook_state = HOOK_STATE.lock();
-            hook_state.active_svg_image_steps.insert(key, spec.clone());
-        }
-
-        if needs_raster {
-            let target_w = geometry_eval_i32(&spec.width_expr, 0).max(0) as u32;
-            let target_h = geometry_eval_i32(&spec.height_expr, 0).max(0) as u32;
-            let opacity = if spec.opacity_expr.trim().is_empty() {
-                spec.opacity
-            } else {
-                let v = geometry_eval_i32(&spec.opacity_expr, 100);
-                (v as f32 / 100.0).clamp(0.0, 1.0)
-            };
-            let rotation = geometry_eval_f32(&spec.rotation_expr, 0.0);
-            let path_str = spec.path.clone();
-
-            let trimmed = path_str.trim();
-            let is_code = trimmed.starts_with('<') || trimmed.contains("<svg");
-
-            if is_code {
-                match crate::render::render_svg_image(&path_str, target_w, target_h, opacity, rotation) {
-                    Ok(rendered) => {
-                        let mut hook_state = HOOK_STATE.lock();
-                        hook_state.rendered_svg_image_steps.insert(key, rendered);
-                    }
-                    Err(e) => {
-                        eprintln!("DrawSvgImage: failed to render inline SVG: {e}");
-                    }
-                }
-            } else {
-                // Resolve path: try as-is, then relative to assets folder
-                let resolved = {
-                    let p = Path::new(&path_str);
-                    if p.exists() {
-                        Some(p.to_path_buf())
-                    } else {
-                        let assets_path = Path::new("assets").join(&path_str);
-                        if assets_path.exists() {
-                            Some(assets_path)
-                        } else {
-                            None
-                        }
-                    }
-                };
-
-                if let Some(path) = resolved {
-                    match crate::render::render_svg_image(&path.to_string_lossy(), target_w, target_h, opacity, rotation) {
-                        Ok(rendered) => {
-                            let mut hook_state = HOOK_STATE.lock();
-                            hook_state.rendered_svg_image_steps.insert(key, rendered);
-                        }
-                        Err(e) => {
-                            eprintln!("DrawSvgImage: failed to render {:?}: {e}", path);
-                        }
-                    }
-                } else {
-                    eprintln!("DrawSvgImage: path not found: {path_str:?}");
-                }
-            }
-        }
-
-        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
-    }
-
-    fn clear_svg_image_overlay() {
-        {
-            let mut hook_state = HOOK_STATE.lock();
-            hook_state.active_svg_image_steps.clear();
-            hook_state.active_svg_image_steps_expires.clear();
-            hook_state.rendered_svg_image_steps.clear();
-            hook_state.preview_svg_image_spec = None;
-        }
-        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
-    }
 
     fn macro_preset_trigger_matches(preset: &MacroPreset, binding: &HotkeyBinding) -> bool {
         if preset
@@ -15909,7 +15677,6 @@ mod windows_overlay {
         preview_regions: &[VisionRegion],
         static_geometry_shapes: &[GeometryRenderShape],
         dynamic_geometry_shapes: &[GeometryRenderShape],
-        svg_image_layers: &[(i32, i32, Vec<u8>, u32, u32)],
     ) -> Result<()> {
         let mut min_x = i32::MAX;
         let mut min_y = i32::MAX;
@@ -15943,13 +15710,6 @@ mod windows_overlay {
             min_y = min_y.min(top);
             max_x = max_x.max(right);
             max_y = max_y.max(bottom);
-        }
-        // Include SVG image layer bounds
-        for (img_x, img_y, _rgba, img_w, img_h) in svg_image_layers {
-            min_x = min_x.min(*img_x);
-            min_y = min_y.min(*img_y);
-            max_x = max_x.max(img_x.saturating_add(*img_w as i32));
-            max_y = max_y.max(img_y.saturating_add(*img_h as i32));
         }
 
         if min_x == i32::MAX {
@@ -16572,48 +16332,6 @@ mod windows_overlay {
                             chunk[3] = 255;
                         }
                     }
-                }
-            }
-        }
-
-        // Blit SVG image layers with RGBA->BGRA conversion and alpha compositing
-        for (img_x, img_y, img_rgba, img_w, img_h) in svg_image_layers {
-            let img_w = *img_w as usize;
-            let img_h = *img_h as usize;
-            let rel_x = img_x - min_x;
-            let rel_y = img_y - min_y;
-            for py in 0..img_h {
-                let dst_y = rel_y + py as i32;
-                if dst_y < 0 || dst_y >= height {
-                    continue;
-                }
-                for px in 0..img_w {
-                    let dst_x = rel_x + px as i32;
-                    if dst_x < 0 || dst_x >= width {
-                        continue;
-                    }
-                    let src_i = (py * img_w + px) * 4;
-                    if src_i + 3 >= img_rgba.len() {
-                        continue;
-                    }
-                    let src_r = img_rgba[src_i];
-                    let src_g = img_rgba[src_i + 1];
-                    let src_b = img_rgba[src_i + 2];
-                    let src_a = img_rgba[src_i + 3];
-                    if src_a == 0 {
-                        continue;
-                    }
-                    let dst_i = (dst_y as usize * width as usize + dst_x as usize) * 4;
-                    if dst_i + 3 >= pixels.len() {
-                        continue;
-                    }
-                    let alpha = src_a as f32 / 255.0;
-                    let inv = 1.0 - alpha;
-                    // GDI DIB is BGRA: dst[0]=B, dst[1]=G, dst[2]=R, dst[3]=A
-                    pixels[dst_i]     = (pixels[dst_i]     as f32 * inv + src_b as f32 * alpha).round() as u8;
-                    pixels[dst_i + 1] = (pixels[dst_i + 1] as f32 * inv + src_g as f32 * alpha).round() as u8;
-                    pixels[dst_i + 2] = (pixels[dst_i + 2] as f32 * inv + src_r as f32 * alpha).round() as u8;
-                    pixels[dst_i + 3] = pixels[dst_i + 3].max(src_a);
                 }
             }
         }
@@ -17620,19 +17338,6 @@ mod windows_overlay {
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
-    pub(crate) fn is_svg_image_active(preset_id: u32, step_index: usize) -> bool {
-        let hook_state = HOOK_STATE.lock();
-        hook_state.active_svg_image_steps.contains_key(&(preset_id, step_index))
-    }
-
-    pub(crate) fn stop_svg_image(preset_id: u32, step_index: usize) {
-        let mut hook_state = HOOK_STATE.lock();
-        hook_state.active_svg_image_steps.remove(&(preset_id, step_index));
-        hook_state.rendered_svg_image_steps.remove(&(preset_id, step_index));
-        hook_state.active_svg_image_steps_expires.remove(&(preset_id, step_index));
-        drop(hook_state);
-        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
-    }
 
     pub(crate) fn is_audio_sense_active(
         preset_id: Option<u32>,
@@ -17833,11 +17538,6 @@ mod fallback {
 
     pub(crate) fn stop_geometry(_preset_id: u32, _step_index: usize) {}
 
-    pub(crate) fn is_svg_image_active(_preset_id: u32, _step_index: usize) -> bool {
-        false
-    }
-
-    pub(crate) fn stop_svg_image(_preset_id: u32, _step_index: usize) {}
 
     pub(crate) fn is_audio_sense_active(
         _preset_id: Option<u32>,

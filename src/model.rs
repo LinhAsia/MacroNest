@@ -566,7 +566,6 @@ pub enum MacroAction {
     ShowGeometryPreset,
     HideGeometryPreset,
     JumpToStep,
-    DrawSvgImage,
     #[serde(other)]
     Legacy,
 }
@@ -877,65 +876,7 @@ impl Default for GeometryPreset {
     }
 }
 
-fn default_svg_opacity() -> f32 {
-    1.0
-}
 
-fn default_svg_x_expr() -> String {
-    "960".to_owned()
-}
-
-fn default_svg_y_expr() -> String {
-    "540".to_owned()
-}
-
-fn default_svg_width_expr() -> String {
-    "200".to_owned()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct SvgImageSpec {
-    /// Path to the SVG/PNG/JPEG/BMP/WEBP file (absolute or relative to assets folder).
-    pub path: String,
-    /// X position of the image top-left corner (screen pixels). Supports math expressions.
-    #[serde(default = "default_svg_x_expr")]
-    pub x_expr: String,
-    /// Y position of the image top-left corner (screen pixels). Supports math expressions.
-    #[serde(default = "default_svg_y_expr")]
-    pub y_expr: String,
-    /// Target width in pixels (0 = derive from height to maintain aspect ratio). Supports expressions.
-    #[serde(default = "default_svg_width_expr")]
-    pub width_expr: String,
-    /// Target height in pixels (0 = derive from width to maintain aspect ratio). Supports expressions.
-    pub height_expr: String,
-    /// Overall opacity [0.0, 1.0]. Supports math expressions.
-    pub opacity_expr: String,
-    /// Rotation in degrees around the image center. Supports math expressions.
-    pub rotation_expr: String,
-    /// Whether the image should be drawn at all.
-    #[serde(default = "default_true")]
-    pub visible: bool,
-    /// Cached resolved opacity value (used as fallback when expression is empty).
-    #[serde(default = "default_svg_opacity")]
-    pub opacity: f32,
-}
-
-impl Default for SvgImageSpec {
-    fn default() -> Self {
-        Self {
-            path: String::new(),
-            x_expr: default_svg_x_expr(),
-            y_expr: default_svg_y_expr(),
-            width_expr: default_svg_width_expr(),
-            height_expr: String::new(),
-            opacity_expr: String::new(),
-            rotation_expr: String::new(),
-            visible: true,
-            opacity: 1.0,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum SetVariableSource {
@@ -1184,10 +1125,6 @@ pub struct MacroStep {
     pub geometry_spec: GeometrySpec,
     #[serde(default = "default_true")]
     pub geometry_collapsed: bool,
-    #[serde(default)]
-    pub svg_image_spec: SvgImageSpec,
-    #[serde(default = "default_true")]
-    pub svg_image_collapsed: bool,
     pub if_contain_case_sensitive: bool,
     #[serde(default)]
     pub if_contain_isolated: bool,
@@ -1272,8 +1209,6 @@ impl Default for MacroStep {
             geometry_preset_id: None,
             geometry_spec: GeometrySpec::default(),
             geometry_collapsed: true,
-            svg_image_spec: SvgImageSpec::default(),
-            svg_image_collapsed: true,
             if_contain_case_sensitive: false,
             if_contain_isolated: false,
             trigger_macro_group_id: None,
@@ -1317,8 +1252,7 @@ impl MacroStep {
             MacroAction::EnableCrosshairProfile
             | MacroAction::EnablePinPreset
             | MacroAction::ShowHud
-            | MacroAction::DrawGeometry
-            | MacroAction::DrawSvgImage => {
+            | MacroAction::DrawGeometry => {
                 if !self.duration_expr.trim().is_empty() {
                     let trimmed = self.duration_expr.trim();
                     let interpolated = crate::overlay::interpolate_variables(trimmed);

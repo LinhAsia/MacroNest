@@ -4053,9 +4053,6 @@ impl CrosshairApp {
                                                     if step.action == MacroAction::DrawGeometry {
                                                         step.geometry_collapsed = true;
                                                     }
-                                                    if step.action == MacroAction::DrawSvgImage {
-                                                        step.svg_image_collapsed = true;
-                                                    }
                                                     if step.action == MacroAction::StartAudioSensePreset {
                                                         step.audio_sense_collapsed = true;
                                                     }
@@ -4065,13 +4062,6 @@ impl CrosshairApp {
                                                 if preview_group_id == group.id {
                                                     self.draw_geometry_step_preview_target = None;
                                                     let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
-                                                }
-                                            }
-                                            if let Some((preview_group_id, _, _, _)) = self.draw_svg_image_step_preview_target {
-                                                if preview_group_id == group.id {
-                                                    self.draw_svg_image_step_preview_target = None;
-                                                    self.draw_svg_image_step_preview_sent = None;
-                                                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(None));
                                                 }
                                             }
                                         }
@@ -4860,9 +4850,6 @@ impl CrosshairApp {
                                                         if step.action == MacroAction::DrawGeometry {
                                                             step.geometry_collapsed = true;
                                                         }
-                                                        if step.action == MacroAction::DrawSvgImage {
-                                                            step.svg_image_collapsed = true;
-                                                        }
                                                         if step.action == MacroAction::StartAudioSensePreset {
                                                             step.audio_sense_collapsed = true;
                                                         }
@@ -4871,13 +4858,6 @@ impl CrosshairApp {
                                                         if preview_preset_id == preset.id {
                                                             self.draw_geometry_step_preview_target = None;
                                                             let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
-                                                        }
-                                                    }
-                                                    if let Some((_, preview_preset_id, _, _)) = self.draw_svg_image_step_preview_target {
-                                                        if preview_preset_id == preset.id {
-                                                            self.draw_svg_image_step_preview_target = None;
-                                                            self.draw_svg_image_step_preview_sent = None;
-                                                            let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(None));
                                                         }
                                                     }
                                                 }
@@ -7097,30 +7077,12 @@ impl CrosshairApp {
                                             } else if matches!(
                                                 step.action,
                                                 MacroAction::DrawGeometry
-                                                    | MacroAction::DrawSvgImage
                                                     | MacroAction::ShowGeometryPreset
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
-                                                if step.action == MacroAction::DrawSvgImage {
-                                                    Self::render_svg_image_macro_step_editor(
-                                                        ui,
-                                                        language,
-                                                        (group.id, preset.id, "hold-stop-svg-image-step"),
-                                                        group.id,
-                                                        preset.id,
-                                                        0,
-                                                        true,
-                                                        &mut self.draw_svg_image_step_preview_target,
-                                                        &self.overlay_tx,
-                                                        step,
-                                                        &mut live_sync,
-                                                        self.state.vietnamese_input_enabled,
-                                                        self.state.vietnamese_input_mode,
-                                                        &timer_names,
-                                                    );
-                                                } else if matches!(
+                                                if matches!(
                                                     step.action,
                                                     MacroAction::DrawGeometry
                                                         | MacroAction::ShowGeometryPreset
@@ -10660,7 +10622,6 @@ impl CrosshairApp {
                                             } else if matches!(
                                                 step.action,
                                                 MacroAction::DrawGeometry
-                                                    | MacroAction::DrawSvgImage
                                                     | MacroAction::ShowGeometryPreset
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::StartAudioSensePreset
@@ -10856,30 +10817,12 @@ impl CrosshairApp {
                                 } else if matches!(
                                                 step.action,
                                                 MacroAction::DrawGeometry
-                                                    | MacroAction::DrawSvgImage
                                                     | MacroAction::ShowGeometryPreset
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
-                                                if step.action == MacroAction::DrawSvgImage {
-                                                    Self::render_svg_image_macro_step_editor(
-                                                        ui,
-                                                        language,
-                                                        (group.id, preset.id, step_index, "normal-svg-image-step"),
-                                                        group.id,
-                                                        preset.id,
-                                                        step_index,
-                                                        false,
-                                                        &mut self.draw_svg_image_step_preview_target,
-                                                        &self.overlay_tx,
-                                                        step,
-                                                        &mut live_sync,
-                                                        self.state.vietnamese_input_enabled,
-                                                        self.state.vietnamese_input_mode,
-                                                        &timer_names,
-                                                    );
-                                                } else if matches!(
+                                                if matches!(
                                                     step.action,
                                                     MacroAction::DrawGeometry
                                                         | MacroAction::ShowGeometryPreset
@@ -10930,7 +10873,6 @@ impl CrosshairApp {
                                             } else if matches!(
                                                 step.action,
                                                 MacroAction::DrawGeometry
-                                                    | MacroAction::DrawSvgImage
                                                     | MacroAction::EnableCrosshairProfile
                                                     | MacroAction::EnablePinPreset
                                                     | MacroAction::PlayVideoPreset
@@ -12259,19 +12201,6 @@ impl CrosshairApp {
                 Self::extract_braced_vars(expr, vars);
             }
         }
-        if matches!(step.action, MacroAction::DrawSvgImage) {
-            for expr in [
-                &step.svg_image_spec.path,
-                &step.svg_image_spec.x_expr,
-                &step.svg_image_spec.y_expr,
-                &step.svg_image_spec.width_expr,
-                &step.svg_image_spec.height_expr,
-                &step.svg_image_spec.opacity_expr,
-                &step.svg_image_spec.rotation_expr,
-            ] {
-                Self::extract_braced_vars(expr, vars);
-            }
-        }
     }
 
     fn is_builtin_expression_identifier(token: &str) -> bool {
@@ -12903,7 +12832,6 @@ impl CrosshairApp {
     fn geometry_macro_actions() -> &'static [MacroAction] {
         &[
             MacroAction::DrawGeometry,
-            MacroAction::DrawSvgImage,
             MacroAction::ShowGeometryPreset,
             MacroAction::HideGeometryPreset,
         ]
@@ -13309,13 +13237,6 @@ impl CrosshairApp {
                     crate::overlay::is_geometry_active(macro_preset_id, step_index);
                 preview_active || running_active
             }
-            MacroAction::DrawSvgImage => {
-                let preview_active = *preview_target
-                    == Some((group_id, macro_preset_id, step_index, is_hold_stop));
-                let running_active =
-                    crate::overlay::is_svg_image_active(macro_preset_id, step_index);
-                preview_active || running_active
-            }
             MacroAction::EnableCrosshairProfile => crate::overlay::is_crosshair_active(&step.key),
             MacroAction::EnablePinPreset => crate::overlay::is_pin_active(&step.key),
             MacroAction::PlayVideoPreset => crate::overlay::is_video_active(&step.key),
@@ -13351,16 +13272,6 @@ impl CrosshairApp {
                         }
                         crate::overlay::stop_geometry(macro_preset_id, step_index);
                     }
-                    MacroAction::DrawSvgImage => {
-                        let preview_active = *preview_target
-                            == Some((group_id, macro_preset_id, step_index, is_hold_stop));
-                        if preview_active {
-                            *preview_target = None;
-                            let _ = overlay_tx
-                                .send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(None));
-                        }
-                        crate::overlay::stop_svg_image(macro_preset_id, step_index);
-                    }
                     MacroAction::EnableCrosshairProfile => {
                         crate::overlay::disable_crosshair_profile(&step.key);
                     }
@@ -13383,14 +13294,6 @@ impl CrosshairApp {
                         let _ =
                             overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(
                                 Some(step.geometry_spec.clone()),
-                            ));
-                    }
-                    MacroAction::DrawSvgImage => {
-                        *preview_target =
-                            Some((group_id, macro_preset_id, step_index, is_hold_stop));
-                        let _ =
-                            overlay_tx.send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(
-                                Some(step.svg_image_spec.clone()),
                             ));
                     }
                     MacroAction::EnableCrosshairProfile => {
@@ -13668,373 +13571,6 @@ impl CrosshairApp {
         });
     }
 
-    fn render_svg_image_macro_step_editor(
-        ui: &mut egui::Ui,
-        language: UiLanguage,
-        id_prefix: impl std::hash::Hash + Copy,
-        group_id: u32,
-        macro_preset_id: u32,
-        step_index: usize,
-        is_hold_stop: bool,
-        draw_svg_image_step_preview_target: &mut Option<(u32, u32, usize, bool)>,
-        overlay_tx: &crossbeam_channel::Sender<crate::overlay::OverlayCommand>,
-        step: &mut MacroStep,
-        live_sync: &mut bool,
-        vietnamese_input_enabled: bool,
-        vietnamese_input_mode: VietnameseInputMode,
-        timer_names: &[String],
-    ) {
-        step.svg_image_spec.visible = true;
-        let current_preview_target = (group_id, macro_preset_id, step_index, is_hold_stop);
-        let mut preview_dirty = false;
-        
-        ui.vertical(|ui| {
-            let is_code = step.svg_image_spec.path.trim().starts_with('<') || step.svg_image_spec.path.trim().contains("<svg");
-            let code_mode_id = ui.make_persistent_id((id_prefix, "svg-code-mode"));
-            let mut code_mode = ui.data(|d| d.get_temp::<bool>(code_mode_id)).unwrap_or(is_code);
-            
-            ui.horizontal(|ui| {
-                ui.label(Self::tr_lang(language, "Source:", "Nguồn:"));
-                
-                if ui.selectable_label(!code_mode, Self::tr_lang(language, "File Path", "Đường dẫn file")).clicked() {
-                    code_mode = false;
-                    ui.data_mut(|d| d.insert_temp(code_mode_id, false));
-                    if step.svg_image_spec.path.trim().starts_with('<') {
-                        step.svg_image_spec.path = String::new();
-                    }
-                    *live_sync = true;
-                    preview_dirty = true;
-                }
-                if ui.selectable_label(code_mode, Self::tr_lang(language, "SVG Code", "Nhập code")).clicked() {
-                    code_mode = true;
-                    ui.data_mut(|d| d.insert_temp(code_mode_id, true));
-                    if !step.svg_image_spec.path.trim().starts_with('<') {
-                        step.svg_image_spec.path = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\">\n  \n</svg>".to_string();
-                    }
-                    *live_sync = true;
-                    preview_dirty = true;
-                }
-
-                if !code_mode {
-                    ui.add_space(4.0);
-                    let path_id = ui.make_persistent_id((id_prefix, "svg-path"));
-                    let response = Self::render_variable_text_edit(
-                        ui,
-                        &mut step.svg_image_spec.path,
-                        path_id,
-                        160.0,
-                        300.0,
-                        18.0,
-                        18.0,
-                        "path/to/image.svg",
-                        false,
-                    );
-                    *live_sync |= response.changed();
-                    preview_dirty |= response.changed();
-                    
-                    Self::apply_vietnamese_input_if_changed(
-                        &response,
-                        vietnamese_input_enabled,
-                        vietnamese_input_mode,
-                        &mut step.svg_image_spec.path,
-                    );
-                    
-                    if ui.button(Self::tr_lang(language, "Browse...", "Chọn file...")).clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Image", &["svg", "png", "jpg", "jpeg", "bmp", "webp"])
-                            .pick_file()
-                        {
-                            step.svg_image_spec.path = path.to_string_lossy().to_string();
-                            *live_sync = true;
-                            preview_dirty = true;
-                        }
-                    }
-                }
-                
-                ui.add_space(4.0);
-                
-                let mut is_permanent = step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
-                let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Vĩnh viễn"));
-                if cb_response.changed() {
-                    if is_permanent {
-                        step.duration_expr = "0".to_string();
-                    } else {
-                        step.duration_expr = "1500".to_string();
-                    }
-                    *live_sync = true;
-                    preview_dirty = true;
-                }
-                if !is_permanent {
-                    ui.add_space(2.0);
-                    let duration_id = ui.make_persistent_id((group_id, macro_preset_id, step_index, is_hold_stop, "svg-duration"));
-                    let response = Self::render_variable_text_edit(
-                        ui,
-                        &mut step.duration_expr,
-                        duration_id,
-                        56.0,
-                        120.0,
-                        18.0,
-                        18.0,
-                        "0",
-                        false,
-                    );
-                    ui.weak("ms");
-                    Self::apply_vietnamese_input_if_changed(
-                        &response,
-                        vietnamese_input_enabled,
-                        vietnamese_input_mode,
-                        &mut step.duration_expr,
-                    );
-                    *live_sync |= response.changed();
-                    preview_dirty |= response.changed();
-                    Self::render_variable_suggestions(
-                        ui,
-                        &response,
-                        &mut step.duration_expr,
-                        timer_names,
-                        language,
-                    );
-                }
-                
-                ui.add_space(6.0);
-                
-                let collapse_icon = if step.svg_image_collapsed { 0xe5cc } else { 0xe5cf };
-                let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
-                if ui
-                    .add_sized([18.0, 18.0], collapse_btn)
-                    .on_hover_text(if step.svg_image_collapsed { "Expand" } else { "Collapse" })
-                    .clicked()
-                {
-                    step.svg_image_collapsed = !step.svg_image_collapsed;
-                    *live_sync = true;
-                    if step.svg_image_collapsed {
-                        if *draw_svg_image_step_preview_target == Some(current_preview_target) {
-                            *draw_svg_image_step_preview_target = None;
-                            let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(None));
-                        }
-                    }
-                }
-                
-                Self::render_overlay_eye_button(
-                    ui,
-                    language,
-                    step,
-                    group_id,
-                    macro_preset_id,
-                    step_index,
-                    is_hold_stop,
-                    &[],
-                    draw_svg_image_step_preview_target,
-                    overlay_tx,
-                    [18.0, 18.0],
-                    12.0,
-                );
-            });
-            
-            if code_mode {
-                ui.add_space(4.0);
-                
-                let svg_code_collapsed_id = ui.make_persistent_id((id_prefix, "svg-code-collapsed"));
-                let mut svg_code_collapsed = ui.data(|d| d.get_temp::<bool>(svg_code_collapsed_id)).unwrap_or(true);
-                
-                ui.horizontal(|ui| {
-                    let collapse_icon = if svg_code_collapsed { 0xe5cc } else { 0xe5cf }; // right or down arrow
-                    let collapse_btn = egui::Button::new(Self::material_icon_text(collapse_icon, 12.0));
-                    if ui.add_sized([18.0, 18.0], collapse_btn).clicked() {
-                        svg_code_collapsed = !svg_code_collapsed;
-                        ui.data_mut(|d| d.insert_temp(svg_code_collapsed_id, svg_code_collapsed));
-                    }
-                    
-                    ui.label(Self::tr_lang(language, "SVG Code:", "Code SVG:"));
-                    
-                    if svg_code_collapsed {
-                        ui.weak(Self::tr_lang(language, "(click arrow to expand)", "(click mũi tên để mở rộng)"));
-                    }
-                });
-
-                if !svg_code_collapsed {
-                    ui.horizontal(|ui| {
-                        ui.add_space(20.0);
-                        let mut temp_path = step.svg_image_spec.path.clone();
-                        let response = ui.add(
-                            egui::TextEdit::multiline(&mut temp_path)
-                                .hint_text("<svg>...</svg>")
-                                .font(egui::TextStyle::Monospace)
-                                .desired_rows(6)
-                                .desired_width(450.0)
-                        );
-                        if response.changed() {
-                            step.svg_image_spec.path = temp_path;
-                            *live_sync = true;
-                            preview_dirty = true;
-                        }
-                        Self::apply_vietnamese_input_if_changed(
-                            &response,
-                            vietnamese_input_enabled,
-                            vietnamese_input_mode,
-                            &mut step.svg_image_spec.path,
-                        );
-                    });
-                }
-            }
-            
-            if !step.svg_image_collapsed {
-                ui.add_space(4.0);
-                
-                egui::Grid::new((id_prefix, "svg-fields-grid"))
-                    .num_columns(4)
-                    .spacing([8.0, 6.0])
-                    .show(ui, |ui| {
-                        ui.label(Self::tr_lang(language, "X position", "Toa do X"));
-                        let x_id = ui.make_persistent_id((id_prefix, "svg-x"));
-                        let response_x = Self::render_variable_text_edit(
-                            ui,
-                            &mut step.svg_image_spec.x_expr,
-                            x_id,
-                            80.0,
-                            150.0,
-                            18.0,
-                            18.0,
-                            "960",
-                            false,
-                        );
-                        *live_sync |= response_x.changed();
-                        preview_dirty |= response_x.changed();
-                        Self::apply_vietnamese_input_if_changed(
-                            &response_x,
-                            vietnamese_input_enabled,
-                            vietnamese_input_mode,
-                            &mut step.svg_image_spec.x_expr,
-                        );
-                        Self::render_variable_suggestions(ui, &response_x, &mut step.svg_image_spec.x_expr, timer_names, language);
-                        
-                        ui.label(Self::tr_lang(language, "Y position", "Toa do Y"));
-                        let y_id = ui.make_persistent_id((id_prefix, "svg-y"));
-                        let response_y = Self::render_variable_text_edit(
-                            ui,
-                            &mut step.svg_image_spec.y_expr,
-                            y_id,
-                            80.0,
-                            150.0,
-                            18.0,
-                            18.0,
-                            "540",
-                            false,
-                        );
-                        *live_sync |= response_y.changed();
-                        preview_dirty |= response_y.changed();
-                        Self::apply_vietnamese_input_if_changed(
-                            &response_y,
-                            vietnamese_input_enabled,
-                            vietnamese_input_mode,
-                            &mut step.svg_image_spec.y_expr,
-                        );
-                        Self::render_variable_suggestions(ui, &response_y, &mut step.svg_image_spec.y_expr, timer_names, language);
-                        ui.end_row();
-                        
-                        ui.label(Self::tr_lang(language, "Width (0=auto)", "Chieu rong (0=auto)"));
-                        let w_id = ui.make_persistent_id((id_prefix, "svg-w"));
-                        let response_w = Self::render_variable_text_edit(
-                            ui,
-                            &mut step.svg_image_spec.width_expr,
-                            w_id,
-                            80.0,
-                            150.0,
-                            18.0,
-                            18.0,
-                            "200",
-                            false,
-                        );
-                        *live_sync |= response_w.changed();
-                        preview_dirty |= response_w.changed();
-                        Self::apply_vietnamese_input_if_changed(
-                            &response_w,
-                            vietnamese_input_enabled,
-                            vietnamese_input_mode,
-                            &mut step.svg_image_spec.width_expr,
-                        );
-                        Self::render_variable_suggestions(ui, &response_w, &mut step.svg_image_spec.width_expr, timer_names, language);
-                        
-                        ui.label(Self::tr_lang(language, "Height (0=auto)", "Chieu cao (0=auto)"));
-                        let h_id = ui.make_persistent_id((id_prefix, "svg-h"));
-                        let response_h = Self::render_variable_text_edit(
-                            ui,
-                            &mut step.svg_image_spec.height_expr,
-                            h_id,
-                            80.0,
-                            150.0,
-                            18.0,
-                            18.0,
-                            "0",
-                            false,
-                        );
-                        *live_sync |= response_h.changed();
-                        preview_dirty |= response_h.changed();
-                        Self::apply_vietnamese_input_if_changed(
-                            &response_h,
-                            vietnamese_input_enabled,
-                            vietnamese_input_mode,
-                            &mut step.svg_image_spec.height_expr,
-                        );
-                        Self::render_variable_suggestions(ui, &response_h, &mut step.svg_image_spec.height_expr, timer_names, language);
-                        ui.end_row();
-                        
-                        ui.label(Self::tr_lang(language, "Opacity (0-100)", "Do mo (0-100)"));
-                        let op_id = ui.make_persistent_id((id_prefix, "svg-op"));
-                        let response_op = Self::render_variable_text_edit(
-                            ui,
-                            &mut step.svg_image_spec.opacity_expr,
-                            op_id,
-                            80.0,
-                            150.0,
-                            18.0,
-                            18.0,
-                            "100",
-                            false,
-                        );
-                        *live_sync |= response_op.changed();
-                        preview_dirty |= response_op.changed();
-                        Self::apply_vietnamese_input_if_changed(
-                            &response_op,
-                            vietnamese_input_enabled,
-                            vietnamese_input_mode,
-                            &mut step.svg_image_spec.opacity_expr,
-                        );
-                        Self::render_variable_suggestions(ui, &response_op, &mut step.svg_image_spec.opacity_expr, timer_names, language);
-                        
-                        ui.label(Self::tr_lang(language, "Rotate (deg)", "Goc xoay (do)"));
-                        let rot_id = ui.make_persistent_id((id_prefix, "svg-rot"));
-                        let response_rot = Self::render_variable_text_edit(
-                            ui,
-                            &mut step.svg_image_spec.rotation_expr,
-                            rot_id,
-                            80.0,
-                            150.0,
-                            18.0,
-                            18.0,
-                            "0",
-                            false,
-                        );
-                        *live_sync |= response_rot.changed();
-                        preview_dirty |= response_rot.changed();
-                        Self::apply_vietnamese_input_if_changed(
-                            &response_rot,
-                            vietnamese_input_enabled,
-                            vietnamese_input_mode,
-                            &mut step.svg_image_spec.rotation_expr,
-                        );
-                        Self::render_variable_suggestions(ui, &response_rot, &mut step.svg_image_spec.rotation_expr, timer_names, language);
-                        ui.end_row();
-                    });
-            }
-        });
-        
-        if preview_dirty && *draw_svg_image_step_preview_target == Some(current_preview_target) {
-            let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewSvgImageSpec(
-                Some(step.svg_image_spec.clone()),
-            ));
-        }
-    }
 
     fn render_audio_sense_monitor_settings_inline(
         ui: &mut egui::Ui,
