@@ -1229,7 +1229,12 @@ impl CrosshairApp {
                             ui.add_sized([Self::GEOMETRY_LABEL_COL_WIDTH, 18.0], egui::Label::new(Self::tr_lang(language, "Code", "Mã")));
                             let cell_width = 120.0;
                             let textbox_width = 450.0;
-                            let (cell_rect, _) = ui.allocate_exact_size(egui::vec2(cell_width, 18.0), egui::Sense::hover());
+                            let id = ui.make_persistent_id((preset_id, object_id, "svg-text-edit"));
+                            let focus_key = id.with("expand-focus");
+                            let has_focus = ui.memory(|mem| mem.data.get_temp::<bool>(focus_key)).unwrap_or(false);
+                            let target_height = if has_focus { 72.0 } else { 18.0 };
+                            let animated_height = ui.ctx().animate_value_with_time(id.with("h"), target_height, 0.20);
+                            let (cell_rect, _) = ui.allocate_exact_size(egui::vec2(cell_width, animated_height), egui::Sense::hover());
                             let mut child_ui = ui.child_ui(
                                 egui::Rect::from_min_size(cell_rect.min, egui::vec2(textbox_width, cell_rect.height())),
                                 *ui.layout(),
