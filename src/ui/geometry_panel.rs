@@ -372,15 +372,7 @@ impl CrosshairApp {
         group_id_override: Option<u32>,
     ) -> bool {
         let mut changed = false;
-        // Migrate legacy defaults when shape is SVG
-        if spec.shape == GeometryShapeKind::Svg {
-            if spec.opacity_expr == "1" {
-                spec.opacity_expr = "100".to_owned();
-            }
-            if spec.text == "Label" {
-                spec.text = String::new();
-            }
-        }
+
         if matches!(spec.shape, GeometryShapeKind::Polyline | GeometryShapeKind::Polygon) {
             let mut points: Vec<(String, String)> = spec.points_expr
                 .split(';')
