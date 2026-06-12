@@ -9599,12 +9599,9 @@ impl eframe::App for CrosshairApp {
                                     ),
                                 );
                             if taskbar_hidden {
-                                let slash_color = if self.state.ui_theme == UiThemeMode::Dark {
-                                    Color32::from_rgb(255, 132, 132)
-                                } else {
-                                    Color32::from_rgb(180, 52, 52)
-                                };
-                                let slash_rect = taskbar_button_response.rect.shrink2(vec2(10.0, 8.0));
+                                let slash_color = Color32::from_rgb(245, 245, 245);
+                                let slash_rect =
+                                    taskbar_button_response.rect.shrink2(vec2(7.0, 6.0));
                                 ui.painter().line_segment(
                                     [slash_rect.left_top(), slash_rect.right_bottom()],
                                     egui::Stroke::new(2.0, slash_color),
@@ -9981,6 +9978,7 @@ impl eframe::App for CrosshairApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        let _ = crate::platform::show_taskbar();
         self.sync_window_presets();
         self.sync_macro_presets();
         self.sync_macro_master_enabled();

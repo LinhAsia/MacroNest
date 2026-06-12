@@ -15129,6 +15129,7 @@ mod windows_overlay {
 
     fn shutdown_application(hwnd: HWND, runtime: &Runtime) -> Result<()> {
         let _ = unsafe { Shell_NotifyIconW(NIM_DELETE, &notify_icon(hwnd)) };
+        let _ = crate::platform::show_taskbar();
         let _ = restore_mouse_sensitivity_on_exit();
         let _ = unsafe { ShowWindow(runtime.overlay_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.hud_hwnd, SW_HIDE) };
