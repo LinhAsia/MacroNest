@@ -12461,68 +12461,116 @@ impl CrosshairApp {
                             });
                     });
             }
-            // Quick add global constant
             ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                let id_const_name = ui.id().with("new_const_name");
-                let id_const_val = ui.id().with("new_const_val");
-                let mut name_buf = ui.memory(|mem| {
-                    mem.data
-                        .get_temp::<String>(id_const_name)
-                        .unwrap_or_default()
-                });
-                let mut val_buf = ui.memory(|mem| {
-                    mem.data
-                        .get_temp::<String>(id_const_val)
-                        .unwrap_or_default()
-                });
-                let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
-                let hint_color = if is_dark_theme {
-                    Color32::from_rgba_premultiplied(140, 140, 140, 150)
-                } else {
-                    Color32::from_rgba_premultiplied(100, 100, 100, 150)
-                };
-                ui.add_sized(
-                    [100.0, 20.0],
-                    egui::TextEdit::singleline(&mut name_buf).hint_text(
-                        RichText::new(Self::tr_lang(language, "CONST_NAME", "CONST_NAME"))
-                            .color(hint_color)
-                            .weak(),
-                    ),
-                );
-                ui.label("=");
-                ui.add_sized(
-                    [70.0, 20.0],
-                    egui::TextEdit::singleline(&mut val_buf).hint_text(
-                        RichText::new(Self::tr_lang(language, "Value", "Value"))
-                            .color(hint_color)
-                            .weak(),
-                    ),
-                );
-                if ui.button(Self::tr_lang(language, "Add", "Add")).clicked() {
-                    let name_trimmed = name_buf.trim().to_uppercase();
-                    if !name_trimmed.is_empty() {
-                        let parsed_val = val_buf.trim().parse::<i32>().unwrap_or(0);
-                        if !self
-                            .state
-                            .global_constants
-                            .iter()
-                            .any(|(n, _)| n == &name_trimmed)
-                        {
-                            self.state
+            ui.columns(2, |columns| {
+                columns[0].horizontal(|ui| {
+                    let id_const_name = ui.id().with("new_const_name");
+                    let id_const_val = ui.id().with("new_const_val");
+                    let mut name_buf = ui.memory(|mem| {
+                        mem.data
+                            .get_temp::<String>(id_const_name)
+                            .unwrap_or_default()
+                    });
+                    let mut val_buf = ui.memory(|mem| {
+                        mem.data
+                            .get_temp::<String>(id_const_val)
+                            .unwrap_or_default()
+                    });
+                    let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
+                    let hint_color = if is_dark_theme {
+                        Color32::from_rgba_premultiplied(140, 140, 140, 150)
+                    } else {
+                        Color32::from_rgba_premultiplied(100, 100, 100, 150)
+                    };
+                    ui.add_sized(
+                        [100.0, 20.0],
+                        egui::TextEdit::singleline(&mut name_buf).hint_text(
+                            RichText::new(Self::tr_lang(language, "CONST_NAME", "CONST_NAME"))
+                                .color(hint_color)
+                                .weak(),
+                        ),
+                    );
+                    ui.label("=");
+                    ui.add_sized(
+                        [70.0, 20.0],
+                        egui::TextEdit::singleline(&mut val_buf).hint_text(
+                            RichText::new(Self::tr_lang(language, "Value", "Value"))
+                                .color(hint_color)
+                                .weak(),
+                        ),
+                    );
+                    if ui.button(Self::tr_lang(language, "Add", "Add")).clicked() {
+                        let name_trimmed = name_buf.trim().to_uppercase();
+                        if !name_trimmed.is_empty() {
+                            let parsed_val = val_buf.trim().parse::<i32>().unwrap_or(0);
+                            if !self
+                                .state
+                                .global_constants
+                                .iter()
+                                .any(|(n, _)| n == &name_trimmed)
+                            {
+                                self.state
                                     .global_constants
                                     .push((name_trimmed.clone(), parsed_val));
-                            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                            vars.insert(name_trimmed, parsed_val as f64);
-                            name_buf.clear();
-                            val_buf.clear();
-                            self.persist();
+                                let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                                vars.insert(name_trimmed, parsed_val as f64);
+                                name_buf.clear();
+                                val_buf.clear();
+                                self.persist();
+                            }
                         }
                     }
-                }
-                ui.memory_mut(|mem| {
-                    mem.data.insert_temp(id_const_name, name_buf);
-                    mem.data.insert_temp(id_const_val, val_buf);
+                    ui.memory_mut(|mem| {
+                        mem.data.insert_temp(id_const_name, name_buf);
+                        mem.data.insert_temp(id_const_val, val_buf);
+                    });
+                });
+
+                columns[1].horizontal(|ui| {
+                    ui.set_row_height(24.0);
+                    let id_name = ui.id().with("new_dyn_var_name");
+                    let id_val = ui.id().with("new_dyn_var_val");
+                    let mut name_buf =
+                        ui.memory(|mem| mem.data.get_temp::<String>(id_name).unwrap_or_default());
+                    let mut val_buf =
+                        ui.memory(|mem| mem.data.get_temp::<String>(id_val).unwrap_or_default());
+                    let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
+                    let hint_color = if is_dark_theme {
+                        Color32::from_rgba_premultiplied(140, 140, 140, 150)
+                    } else {
+                        Color32::from_rgba_premultiplied(100, 100, 100, 150)
+                    };
+                    ui.add_sized(
+                        [100.0, 20.0],
+                        egui::TextEdit::singleline(&mut name_buf).hint_text(
+                            RichText::new(Self::tr_lang(language, "Var Name", "Var Name"))
+                                .color(hint_color)
+                                .weak(),
+                        ),
+                    );
+                    ui.label("=");
+                    ui.add_sized(
+                        [70.0, 20.0],
+                        egui::TextEdit::singleline(&mut val_buf).hint_text(
+                            RichText::new(Self::tr_lang(language, "Value", "Value"))
+                                .color(hint_color)
+                                .weak(),
+                        ),
+                    );
+                    if ui.button(Self::tr_lang(language, "Set", "Set")).clicked() {
+                        let name_trimmed = name_buf.trim().to_string();
+                        if !name_trimmed.is_empty() {
+                            let parsed_val = val_buf.trim().parse::<f64>().unwrap_or(0.0);
+                            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                            vars.insert(name_trimmed, parsed_val);
+                            name_buf.clear();
+                            val_buf.clear();
+                        }
+                    }
+                    ui.memory_mut(|mem| {
+                        mem.data.insert_temp(id_name, name_buf);
+                        mem.data.insert_temp(id_val, val_buf);
+                    });
                 });
             });
             ui.add_space(4.0);
@@ -12606,54 +12654,6 @@ impl CrosshairApp {
                             });
                     });
             }
-            // Quick set dynamic variable at the bottom
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.set_row_height(24.0);
-                let id_name = ui.id().with("new_dyn_var_name");
-                let id_val = ui.id().with("new_dyn_var_val");
-                let mut name_buf =
-                    ui.memory(|mem| mem.data.get_temp::<String>(id_name).unwrap_or_default());
-                let mut val_buf =
-                    ui.memory(|mem| mem.data.get_temp::<String>(id_val).unwrap_or_default());
-                let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
-                let hint_color = if is_dark_theme {
-                    Color32::from_rgba_premultiplied(140, 140, 140, 150)
-                } else {
-                    Color32::from_rgba_premultiplied(100, 100, 100, 150)
-                };
-                ui.add_sized(
-                    [100.0, 20.0],
-                    egui::TextEdit::singleline(&mut name_buf).hint_text(
-                        RichText::new(Self::tr_lang(language, "Var Name", "Var Name"))
-                            .color(hint_color)
-                            .weak(),
-                    ),
-                );
-                ui.label("=");
-                ui.add_sized(
-                    [70.0, 20.0],
-                    egui::TextEdit::singleline(&mut val_buf).hint_text(
-                        RichText::new(Self::tr_lang(language, "Value", "Value"))
-                            .color(hint_color)
-                            .weak(),
-                    ),
-                );
-                if ui.button(Self::tr_lang(language, "Set", "Set")).clicked() {
-                    let name_trimmed = name_buf.trim().to_string();
-                    if !name_trimmed.is_empty() {
-                        let parsed_val = val_buf.trim().parse::<f64>().unwrap_or(0.0);
-                        let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                        vars.insert(name_trimmed, parsed_val);
-                        name_buf.clear();
-                        val_buf.clear();
-                    }
-                }
-                ui.memory_mut(|mem| {
-                    mem.data.insert_temp(id_name, name_buf);
-                    mem.data.insert_temp(id_val, val_buf);
-                });
-            });
         });
     }
 
