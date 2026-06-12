@@ -13247,53 +13247,260 @@ impl CrosshairApp {
         preset_options: &[(u32, String)],
         step: &mut MacroStep,
         live_sync: &mut bool,
-        timer_names: &[String],
         vietnamese_input_enabled: bool,
         vietnamese_input_mode: VietnameseInputMode,
     ) {
-        let text_id = ui.make_persistent_id((id_source, "geometry-preset-ref"));
-        let response = Self::render_variable_text_edit(
-            ui,
-            &mut step.key,
-            text_id,
-            140.0,
-            220.0,
-            18.0,
-            18.0,
-            "Preset {random(1,4)}",
-            false,
+        let inferred_custom = !step.geometry_preset_use_custom_ref
+            && !step.key.trim().is_empty()
+            && match step.geometry_preset_id {
+                Some(selected_id) => preset_options
+                    .iter()
+                    .find(|(id, _)| *id == selected_id)
+                    .is_none_or(|(_, name)| !name.trim().eq_ignore_ascii_case(step.key.trim())),
+                None => true,
+            };
+        if inferred_custom {
+            step.geometry_preset_use_custom_ref = true;
+        }
+
+        let custom_response = ui.checkbox(
+            &mut step.geometry_preset_use_custom_ref,
+            Self::tr_lang(language, "Custom", "Custom"),
         );
-        Self::apply_vietnamese_input_if_changed(
-            &response,
-            vietnamese_input_enabled,
-            vietnamese_input_mode,
-            &mut step.key,
-        );
-        if response.changed() {
-            let trimmed = step.key.trim();
-            step.geometry_preset_id = trimmed
-                .parse::<u32>()
-                .ok()
-                .or_else(|| {
-                    preset_options
-                        .iter()
-                        .find(|(_, name)| name.trim().eq_ignore_ascii_case(trimmed))
-                        .map(|(id, _)| *id)
-                });
+        if custom_response.changed() {
+            if !step.geometry_preset_use_custom_ref {
+                step.key.clear();
+            }
             *live_sync = true;
         }
-        Self::render_variable_suggestions(ui, &response, &mut step.key, timer_names, language);
-        if let Some(selected_name) = Self::render_geometry_preset_selector(
-            ui,
-            language,
-            (id_source, "geometry-preset-combo"),
-            preset_options,
-            &step.key,
-            &mut step.geometry_preset_id,
-            live_sync,
-        ) {
-            step.key = selected_name;
+
+        let selected_name = step
+            .geometry_preset_id
+            .and_then(|id| {
+                preset_options
+                    .iter()
+                    .find(|(preset_id, _)| *preset_id == id)
+                    .map(|(_, name)| name.clone())
+            })
+            .unwrap_or_else(|| Self::tr_lang(language, "Select geometry", "Chon geometry").to_owned());
+
+        if step.geometry_preset_use_custom_ref {
+            let text_id = ui.make_persistent_id((id_source, "geometry-preset-ref"));
+            let response = Self::render_interpolated_text_edit(
+                ui,
+                &mut step.key,
+                text_id,
+                140.0,
+                220.0,
+                18.0,
+                18.0,
+                "Preset {random(1,4)}",
+                false,
+            );
+            Self::apply_vietnamese_input_if_changed(
+                &response,
+                vietnamese_input_enabled,
+                vietnamese_input_mode,
+                &mut step.key,
+            );
+            if response.changed() {
+                let trimmed = step.key.trim();
+                step.geometry_preset_id = trimmed
+                    .parse::<u32>()
+                    .ok()
+                    .or_else(|| {
+                        preset_options
+                            .iter()
+                            .find(|(_, name)| name.trim().eq_ignore_ascii_case(trimmed))
+                            .map(|(id, _)| *id)
+                    });
+                *live_sync = true;
+            }
+            Self::render_geometry_preset_name_suggestions(
+                ui,
+                &response,
+                &mut step.key,
+                preset_options,
+            );
         }
+
+        ui.add_enabled_ui(!step.geometry_preset_use_custom_ref, |ui| {
+            if let Some(chosen_name) = Self::render_geometry_preset_selector(
+                ui,
+                language,
+                (id_source, "geometry-preset-combo"),
+                preset_options,
+                &selected_name,
+                &mut step.geometry_preset_id,
+                live_sync,
+            ) {
+                step.key = chosen_name;
+            }
+        });
+    }
+
+    fn render_geometry_preset_name_suggestions(
+        ui: &mut egui::Ui,
+        response: &egui::Response,
+        text: &mut String,
+        preset_options: &[(u32, String)],
+    ) {
+        let cursor_index =
+            match egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id).and_then(
+                |state| {
+                    state
+                        .cursor
+                        .char_range()
+                        .and_then(|range| range.single().map(|c| c.index))
+                },
+            ) {
+                Some(index) => index,
+                None => return,
+            };
+        let cursor_byte = text
+            .char_indices()
+            .nth(cursor_index)
+            .map(|(byte, _)| byte)
+            .unwrap_or(text.len());
+        let before_cursor = &text[..cursor_byte];
+        let after_cursor = text[cursor_byte..].to_string();
+        let last_open = before_cursor.rfind('{');
+        let last_close = before_cursor.rfind('}');
+        if last_open.is_some() && last_open > last_close {
+            return;
+        }
+
+        let mut segment_start = 0;
+        for (i, c) in before_cursor.char_indices() {
+            if c == '{' || c == '}' {
+                segment_start = i + c.len_utf8();
+            }
+        }
+        let prefix = before_cursor[..segment_start].to_string();
+        let needle = before_cursor[segment_start..].trim_start();
+        if needle.is_empty() {
+            return;
+        }
+
+        let normalized_needle = needle.replace(' ', "").to_ascii_lowercase();
+        let suggestions: Vec<String> = preset_options
+            .iter()
+            .map(|(_, name)| name)
+            .filter(|name| {
+                let normalized_name = name.replace(' ', "").to_ascii_lowercase();
+                normalized_name.starts_with(&normalized_needle)
+                    && normalized_name != normalized_needle
+            })
+            .cloned()
+            .collect();
+        if suggestions.is_empty() {
+            return;
+        }
+
+        let popup_open_key = response.id.with("geometry-preset-popup-open");
+        let mut popup_open = ui
+            .memory(|mem| mem.data.get_temp::<bool>(popup_open_key))
+            .unwrap_or(false);
+        if response.changed() {
+            popup_open = true;
+        }
+        if response.clicked() || !response.has_focus() {
+            popup_open = false;
+        }
+        if !popup_open {
+            ui.memory_mut(|mem| mem.data.insert_temp(popup_open_key, false));
+            return;
+        }
+
+        let mut selected_index = ui
+            .memory(|mem| mem.data.get_temp::<usize>(response.id.with("geometry-preset-selected")))
+            .unwrap_or(0);
+        if selected_index >= suggestions.len() {
+            selected_index = 0;
+        }
+        let mut confirm_selected = false;
+        let mut selection_changed = false;
+        if response.has_focus() {
+            let enter_pressed = ui
+                .memory(|mem| mem.data.get_temp::<bool>(egui::Id::new("enter_pressed")))
+                .unwrap_or(false);
+            if enter_pressed {
+                confirm_selected = true;
+            }
+            let arrow_up_pressed = ui
+                .memory(|mem| mem.data.get_temp::<bool>(egui::Id::new("arrow_up_pressed")))
+                .unwrap_or(false);
+            let arrow_down_pressed = ui
+                .memory(|mem| mem.data.get_temp::<bool>(egui::Id::new("arrow_down_pressed")))
+                .unwrap_or(false);
+            if arrow_down_pressed {
+                selected_index = (selected_index + 1) % suggestions.len();
+                selection_changed = true;
+            }
+            if arrow_up_pressed {
+                selected_index = if selected_index == 0 {
+                    suggestions.len() - 1
+                } else {
+                    selected_index - 1
+                };
+                selection_changed = true;
+            }
+            ui.memory_mut(|mem| {
+                mem.data.insert_temp(response.id.with("geometry-preset-selected"), selected_index);
+            });
+        }
+
+        if confirm_selected {
+            let chosen = &suggestions[selected_index];
+            Self::apply_variable_suggestion(ui, response, text, &prefix, chosen, false, &after_cursor);
+            ui.memory_mut(|mem| {
+                mem.data.insert_temp(popup_open_key, false);
+                mem.data.insert_temp(egui::Id::new("enter_pressed"), false);
+            });
+            return;
+        }
+
+        let popup_id = response.id.with("geometry-preset-sug-popup");
+        let popup_position = response.rect.left_bottom();
+        let popup_max_height =
+            (ui.ctx().content_rect().bottom() - popup_position.y - 8.0).max(120.0);
+        let mut clicked_choice: Option<String> = None;
+        egui::Area::new(popup_id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(popup_position)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_max_width(240.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(popup_max_height)
+                        .show(ui, |ui| {
+                            ui.vertical(|ui| {
+                                for (idx, suggestion) in suggestions.iter().enumerate() {
+                                    let is_selected = idx == selected_index;
+                                    let response = ui.selectable_label(
+                                        is_selected,
+                                        RichText::new(suggestion).color(Color32::from_rgb(255, 185, 92)),
+                                    );
+                                    if is_selected && selection_changed {
+                                        response.scroll_to_me(None);
+                                    }
+                                    if response.clicked() {
+                                        clicked_choice = Some(suggestion.clone());
+                                    }
+                                }
+                            });
+                        });
+                });
+            });
+
+        if let Some(chosen) = clicked_choice {
+            Self::apply_variable_suggestion(ui, response, text, &prefix, &chosen, false, &after_cursor);
+            popup_open = false;
+        }
+        ui.memory_mut(|mem| {
+            mem.data.insert_temp(popup_open_key, popup_open);
+            mem.data.insert_temp(egui::Id::new("any_popup_open"), true);
+        });
     }
 
     fn render_overlay_eye_button(
@@ -13622,7 +13829,6 @@ impl CrosshairApp {
                             preset_options,
                             step,
                             live_sync,
-                            timer_names,
                             vietnamese_input_enabled,
                             vietnamese_input_mode,
                         );
@@ -13653,7 +13859,6 @@ impl CrosshairApp {
                                 preset_options,
                                 step,
                                 live_sync,
-                                timer_names,
                                 vietnamese_input_enabled,
                                 vietnamese_input_mode,
                             );

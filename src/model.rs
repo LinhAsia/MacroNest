@@ -1138,6 +1138,8 @@ pub struct MacroStep {
     #[serde(default)]
     pub geometry_preset_id: Option<u32>,
     #[serde(default)]
+    pub geometry_preset_use_custom_ref: bool,
+    #[serde(default)]
     pub geometry_spec: GeometrySpec,
     #[serde(default = "default_true")]
     pub geometry_collapsed: bool,
@@ -1223,6 +1225,7 @@ impl Default for MacroStep {
             audio_sense_collapsed: true,
             audio_sense_stop_all: false,
             geometry_preset_id: None,
+            geometry_preset_use_custom_ref: false,
             geometry_spec: GeometrySpec::default(),
             geometry_collapsed: true,
             if_contain_case_sensitive: false,

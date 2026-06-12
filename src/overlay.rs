@@ -14765,6 +14765,15 @@ mod windows_overlay {
     }
 
     fn resolve_geometry_preset_id_from_step(step: &MacroStep) -> Option<u32> {
+        if !step.geometry_preset_use_custom_ref {
+            if step.geometry_preset_id.is_some() {
+                return step.geometry_preset_id;
+            }
+            if step.key.trim().is_empty() {
+                return None;
+            }
+        }
+
         let spec = interpolate_variables(step.key.trim());
         let spec = spec.trim();
         if spec.is_empty() {
