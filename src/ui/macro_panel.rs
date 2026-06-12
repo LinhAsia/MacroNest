@@ -12612,12 +12612,10 @@ impl CrosshairApp {
                             .max_height(160.0)
                             .show(ui, |ui| {
                                 egui::Grid::new("macro_vars_grid")
-                                    .num_columns(3)
+                                    .num_columns(2)
                                     .spacing([8.0, 6.0])
                                     .striped(true)
                                     .show(ui, |ui| {
-                                        let mut to_remove = None;
-                                        let mut to_update = None;
                                         for name in &vars_list {
                                             ui.label(
                                                 RichText::new(name)
@@ -12628,43 +12626,13 @@ impl CrosshairApp {
                                                 let vars = crate::overlay::RUNTIME_VARIABLES.lock();
                                                 vars.get(name).copied().unwrap_or(0.0)
                                             };
-                                            let id_editing = ui.id().with(("var-edit", name));
-                                            let mut val_str = ui
-                                                .memory(|mem| mem.data.get_temp::<String>(id_editing))
-                                                .unwrap_or_else(|| runtime_val.to_string());
-                                            let response = ui.add(
-                                                egui::TextEdit::singleline(&mut val_str)
-                                                    .desired_width(70.0)
-                                                    .font(egui::TextStyle::Monospace),
+                                            ui.add_sized(
+                                                [70.0, 20.0],
+                                                egui::Label::new(
+                                                    RichText::new(runtime_val.to_string()).monospace(),
+                                                ),
                                             );
-                                            if response.changed() {
-                                                ui.memory_mut(|mem| {
-                                                    mem.data.insert_temp(id_editing, val_str.clone())
-                                                });
-                                            }
-                                            if response.lost_focus() || response.clicked_elsewhere() {
-                                                if let Ok(new_val) = val_str.trim().parse::<f64>() {
-                                                    to_update = Some((name.clone(), new_val));
-                                                }
-                                                ui.memory_mut(|mem| {
-                                                    mem.data.remove_temp::<String>(id_editing)
-                                                });
-                                            }
-                                            if ui
-                                                .button(Self::material_icon_text(0xe872, 14.0))
-                                                .on_hover_text(Self::tr_lang(language, "Delete", "Delete"))
-                                                .clicked()
-                                            {
-                                                to_remove = Some(name.clone());
-                                            }
                                             ui.end_row();
-                                        }
-                                        if let Some(name) = to_remove {
-                                            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                            vars.remove(&name);
-                                        } else if let Some((name, new_val)) = to_update {
-                                            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                            vars.insert(name, new_val);
                                         }
                                     });
                             });
