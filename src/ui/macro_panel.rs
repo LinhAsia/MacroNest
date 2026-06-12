@@ -13245,6 +13245,7 @@ impl CrosshairApp {
         language: UiLanguage,
         id_source: impl std::hash::Hash + Copy,
         preset_options: &[(u32, String)],
+        timer_names: &[String],
         step: &mut MacroStep,
         live_sync: &mut bool,
         vietnamese_input_enabled: bool,
@@ -13316,6 +13317,13 @@ impl CrosshairApp {
                     });
                 *live_sync = true;
             }
+            Self::render_variable_suggestions_braced(
+                ui,
+                &response,
+                &mut step.key,
+                timer_names,
+                language,
+            );
             Self::render_geometry_preset_name_suggestions(
                 ui,
                 &response,
@@ -13380,6 +13388,7 @@ impl CrosshairApp {
         row_id: &str,
         label: &str,
         text: &mut String,
+        timer_names: &[String],
         vietnamese_input_enabled: bool,
         vietnamese_input_mode: VietnameseInputMode,
     ) -> bool {
@@ -13404,16 +13413,18 @@ impl CrosshairApp {
             vietnamese_input_mode,
             text,
         );
-        Self::render_variable_suggestions(ui, &response, text, &[], language);
+        Self::render_variable_suggestions_braced(ui, &response, text, timer_names, language);
         ui.end_row();
         changed
     }
 
     fn render_geometry_override_code_row(
         ui: &mut egui::Ui,
+        language: UiLanguage,
         preset_id: u32,
         object_id: u32,
         text: &mut String,
+        timer_names: &[String],
         vietnamese_input_enabled: bool,
         vietnamese_input_mode: VietnameseInputMode,
     ) -> bool {
@@ -13443,6 +13454,7 @@ impl CrosshairApp {
                 vietnamese_input_mode,
                 text,
             );
+            Self::render_variable_suggestions_braced(ui, &response, text, timer_names, language);
         });
         changed
     }
@@ -13460,6 +13472,7 @@ impl CrosshairApp {
         pending_screen_color_target: &mut Option<(u32, u32, bool)>,
         step: &mut MacroStep,
         live_sync: &mut bool,
+        timer_names: &[String],
         vietnamese_input_enabled: bool,
         vietnamese_input_mode: VietnameseInputMode,
     ) {
@@ -13748,6 +13761,7 @@ impl CrosshairApp {
                     "override-content",
                     "Content",
                     &mut step.geometry_spec.text,
+                    timer_names,
                     vietnamese_input_enabled,
                     vietnamese_input_mode,
                 );
@@ -13762,9 +13776,11 @@ impl CrosshairApp {
 
         *live_sync |= Self::render_geometry_override_code_row(
             ui,
+            language,
             preset_id,
             object_id,
             &mut step.geometry_spec.text,
+            timer_names,
             vietnamese_input_enabled,
             vietnamese_input_mode,
         );
@@ -14298,6 +14314,7 @@ impl CrosshairApp {
                             language,
                             (id_prefix, "geometry-preset"),
                             preset_options,
+                            timer_names,
                             step,
                             live_sync,
                             vietnamese_input_enabled,
@@ -14344,6 +14361,7 @@ impl CrosshairApp {
                             &mut pending_screen_color_target,
                             step,
                             live_sync,
+                            timer_names,
                             vietnamese_input_enabled,
                             vietnamese_input_mode,
                         );
@@ -14377,6 +14395,7 @@ impl CrosshairApp {
                                 language,
                                 (id_prefix, "geometry-preset"),
                                 preset_options,
+                                timer_names,
                                 step,
                                 live_sync,
                                 vietnamese_input_enabled,
