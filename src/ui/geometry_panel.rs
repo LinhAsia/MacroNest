@@ -209,14 +209,7 @@ impl CrosshairApp {
                                         );
                                         if response.changed() {
                                             changed = true;
-                                            if object.spec.shape == GeometryShapeKind::Svg {
-                                                if object.spec.text == "Label" {
-                                                    object.spec.text = String::new();
-                                                }
-                                                if object.spec.opacity_expr == "1" {
-                                                    object.spec.opacity_expr = "100".to_owned();
-                                                }
-                                            }
+                                            object.spec.apply_shape_defaults();
                                         }
                                     }
                                 });

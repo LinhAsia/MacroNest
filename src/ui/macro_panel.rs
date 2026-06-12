@@ -13372,6 +13372,9 @@ impl CrosshairApp {
                                             Self::geometry_shape_label(shape, language),
                                          )
                                         .changed();
+                                    if changed {
+                                        step.geometry_spec.apply_shape_defaults();
+                                    }
                                     *live_sync |= changed;
                                     geometry_preview_dirty |= changed;
                                 }

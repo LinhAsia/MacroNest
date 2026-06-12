@@ -820,6 +820,19 @@ impl Default for GeometrySpec {
     }
 }
 
+impl GeometrySpec {
+    pub fn apply_shape_defaults(&mut self) {
+        if self.shape == GeometryShapeKind::Svg {
+            if self.text == "Label" {
+                self.text.clear();
+            }
+            if self.opacity_expr == "1" {
+                self.opacity_expr = "100".to_owned();
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct GeometryObject {
@@ -833,10 +846,7 @@ impl GeometryObject {
     pub fn new(id: u32, shape: GeometryShapeKind) -> Self {
         let mut spec = GeometrySpec::default();
         spec.shape = shape;
-        if shape == GeometryShapeKind::Svg {
-            spec.text = String::new();
-            spec.opacity_expr = "100".to_owned();
-        }
+        spec.apply_shape_defaults();
         Self {
             id,
             name: format!("{shape:?} {id}"),
