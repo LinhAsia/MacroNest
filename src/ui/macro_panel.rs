@@ -13335,47 +13335,6 @@ impl CrosshairApp {
         }
     }
 
-    fn selected_geometry_preset_for_step<'a>(
-        geometry_presets: &'a [crate::model::GeometryPreset],
-        step: &MacroStep,
-    ) -> Option<&'a crate::model::GeometryPreset> {
-        if let Some(preset_id) = step.geometry_preset_id {
-            return geometry_presets.iter().find(|preset| preset.id == preset_id);
-        }
-
-        let trimmed = step.key.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-
-        trimmed
-            .parse::<u32>()
-            .ok()
-            .and_then(|preset_id| geometry_presets.iter().find(|preset| preset.id == preset_id))
-            .or_else(|| {
-                geometry_presets
-                    .iter()
-                    .find(|preset| preset.name.trim().eq_ignore_ascii_case(trimmed))
-            })
-            .or_else(|| {
-                let normalized = trimmed.replace(' ', "").to_ascii_lowercase();
-                geometry_presets.iter().find(|preset| {
-                    preset.name.replace(' ', "").to_ascii_lowercase() == normalized
-                })
-            })
-    }
-
-    fn geometry_preset_seed_spec(
-        preset: &crate::model::GeometryPreset,
-    ) -> Option<crate::model::GeometrySpec> {
-        preset
-            .objects
-            .iter()
-            .find(|object| object.enabled)
-            .or_else(|| preset.objects.first())
-            .map(|object| object.spec.clone())
-    }
-
     fn clear_geometry_spec_override_inputs(spec: &mut crate::model::GeometrySpec) {
         spec.x1_expr.clear();
         spec.y1_expr.clear();
@@ -13401,50 +13360,455 @@ impl CrosshairApp {
         spec.text.clear();
         spec.stroke_color_expr.clear();
         spec.fill_color_expr.clear();
-        if !spec.points_expr.trim().is_empty() {
-            let blank_points = spec
-                .points_expr
-                .split(';')
-                .filter(|pair| !pair.trim().is_empty())
-                .map(|_| ",".to_owned())
-                .collect::<Vec<_>>();
-            spec.points_expr = blank_points.join(";");
-        }
+        spec.points_expr.clear();
     }
 
-    fn sync_show_geometry_modify_seed(
-        step: &mut MacroStep,
-        geometry_presets: &[crate::model::GeometryPreset],
-        force: bool,
-    ) -> bool {
-        let resolved_preset = Self::selected_geometry_preset_for_step(geometry_presets, step);
-        let resolved_id = resolved_preset.map(|preset| preset.id);
-
-        if !step.geometry_preset_modify_enabled {
-            step.geometry_preset_modify_initialized = false;
-            step.geometry_preset_modify_source_id = resolved_id;
+    fn prepare_show_geometry_modify_inputs(step: &mut MacroStep) -> bool {
+        if !step.geometry_preset_modify_enabled || step.geometry_preset_modify_initialized {
             return false;
         }
-
-        if !force
-            && step.geometry_preset_modify_initialized
-            && resolved_id == step.geometry_preset_modify_source_id
-        {
-            return false;
-        }
-
-        step.geometry_preset_modify_source_id = resolved_id;
-        if let Some(preset) = resolved_preset
-            && let Some(spec) = Self::geometry_preset_seed_spec(preset)
-        {
-            step.geometry_spec = spec;
-            Self::clear_geometry_spec_override_inputs(&mut step.geometry_spec);
-            step.geometry_preset_modify_initialized = true;
-            return true;
-        }
-
+        Self::clear_geometry_spec_override_inputs(&mut step.geometry_spec);
         step.geometry_preset_modify_initialized = true;
-        false
+        true
+    }
+
+    fn render_geometry_override_text_row(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        preset_id: u32,
+        object_id: u32,
+        row_id: &str,
+        label: &str,
+        text: &mut String,
+        vietnamese_input_enabled: bool,
+        vietnamese_input_mode: VietnameseInputMode,
+    ) -> bool {
+        let mut changed = false;
+        ui.add_sized([Self::GEOMETRY_LABEL_COL_WIDTH, 18.0], egui::Label::new(label));
+        let id = ui.make_persistent_id((preset_id, object_id, row_id, "text"));
+        let response = Self::render_interpolated_text_edit(
+            ui,
+            text,
+            id,
+            Self::GEOMETRY_FIELD_WIDTH,
+            Self::GEOMETRY_FIELD_EXPANDED_WIDTH,
+            18.0,
+            18.0,
+            "",
+            false,
+        );
+        changed |= response.changed();
+        Self::apply_vietnamese_input_if_changed(
+            &response,
+            vietnamese_input_enabled,
+            vietnamese_input_mode,
+            text,
+        );
+        Self::render_variable_suggestions(ui, &response, text, &[], language);
+        ui.end_row();
+        changed
+    }
+
+    fn render_geometry_override_code_row(
+        ui: &mut egui::Ui,
+        preset_id: u32,
+        object_id: u32,
+        text: &mut String,
+        vietnamese_input_enabled: bool,
+        vietnamese_input_mode: VietnameseInputMode,
+    ) -> bool {
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = Self::GEOMETRY_GRID_SPACING_X;
+            ui.add_sized(
+                [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
+                egui::Label::new("Code"),
+            );
+            let id = ui.make_persistent_id((preset_id, object_id, "override-code"));
+            let response = Self::render_plain_text_edit(
+                ui,
+                text,
+                id,
+                450.0,
+                450.0,
+                18.0,
+                72.0,
+                "",
+                true,
+            );
+            changed |= response.changed();
+            Self::apply_vietnamese_input_if_changed(
+                &response,
+                vietnamese_input_enabled,
+                vietnamese_input_mode,
+                text,
+            );
+        });
+        changed
+    }
+
+    fn render_show_geometry_override_editor(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        macro_preset_id: u32,
+        step_index: usize,
+        group_id: u32,
+        vision_manual_color: &mut RgbaColor,
+        vision_manual_color_hex: &mut String,
+        request_screen_color_pick: &mut bool,
+        begin_mouse_move_absolute_capture_target: &mut Option<MouseMoveAbsoluteCaptureTarget>,
+        pending_screen_color_target: &mut Option<(u32, u32, bool)>,
+        step: &mut MacroStep,
+        live_sync: &mut bool,
+        vietnamese_input_enabled: bool,
+        vietnamese_input_mode: VietnameseInputMode,
+    ) {
+        step.geometry_spec.visible = true;
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(Self::tr_lang(language, "Override:", "Override:"));
+            *live_sync |= ui
+                .checkbox(
+                    &mut step.geometry_modify_position,
+                    Self::tr_lang(language, "Position", "Vi tri"),
+                )
+                .changed();
+            *live_sync |= ui
+                .checkbox(
+                    &mut step.geometry_modify_size,
+                    Self::tr_lang(language, "Size", "Kich thuoc"),
+                )
+                .changed();
+            *live_sync |= ui
+                .checkbox(
+                    &mut step.geometry_modify_transform,
+                    Self::tr_lang(language, "Transform", "Bien doi"),
+                )
+                .changed();
+            *live_sync |= ui
+                .checkbox(
+                    &mut step.geometry_modify_content,
+                    Self::tr_lang(language, "Content", "Noi dung"),
+                )
+                .changed();
+            *live_sync |= ui
+                .checkbox(
+                    &mut step.geometry_modify_style,
+                    Self::tr_lang(language, "Style", "Style"),
+                )
+                .changed();
+        });
+        ui.add_space(2.0);
+        ui.weak(Self::tr_lang(
+            language,
+            "Only the checked groups above will replace values from the selected preset.",
+            "Chi cac nhom duoc tick o tren moi de len gia tri cua preset da chon.",
+        ));
+        ui.add_space(4.0);
+
+        let preset_id = macro_preset_id;
+        let object_id = step_index as u32;
+        *live_sync |= Grid::new((preset_id, object_id, "geometry-override-grid"))
+            .num_columns(4)
+            .spacing([Self::GEOMETRY_GRID_SPACING_X, 6.0])
+            .min_col_width(0.0)
+            .show(ui, |ui| {
+                let mut changed = false;
+                changed |= Self::geometry_expr_pair_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-pos1",
+                    0,
+                    "X",
+                    &mut step.geometry_spec.x1_expr,
+                    120.0,
+                    120.0,
+                    "Y",
+                    &mut step.geometry_spec.y1_expr,
+                    120.0,
+                    120.0,
+                    begin_mouse_move_absolute_capture_target,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    Some(group_id),
+                );
+                changed |= Self::geometry_expr_pair_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-pos2",
+                    255,
+                    "X2",
+                    &mut step.geometry_spec.x2_expr,
+                    120.0,
+                    120.0,
+                    "Y2",
+                    &mut step.geometry_spec.y2_expr,
+                    120.0,
+                    120.0,
+                    begin_mouse_move_absolute_capture_target,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    Some(group_id),
+                );
+                changed |= Self::geometry_expr_pair_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-pos3",
+                    255,
+                    "X3",
+                    &mut step.geometry_spec.x3_expr,
+                    120.0,
+                    120.0,
+                    "Y3",
+                    &mut step.geometry_spec.y3_expr,
+                    120.0,
+                    120.0,
+                    begin_mouse_move_absolute_capture_target,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    Some(group_id),
+                );
+                changed |= Self::geometry_expr_pair_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-pos4",
+                    255,
+                    "X4",
+                    &mut step.geometry_spec.x4_expr,
+                    120.0,
+                    120.0,
+                    "Y4",
+                    &mut step.geometry_spec.y4_expr,
+                    120.0,
+                    120.0,
+                    begin_mouse_move_absolute_capture_target,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    Some(group_id),
+                );
+                changed |= Self::geometry_expr_pair_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-size1",
+                    255,
+                    "Width",
+                    &mut step.geometry_spec.width_expr,
+                    120.0,
+                    120.0,
+                    "Height",
+                    &mut step.geometry_spec.height_expr,
+                    120.0,
+                    120.0,
+                    begin_mouse_move_absolute_capture_target,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    Some(group_id),
+                );
+                changed |= Self::geometry_expr_pair_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-size2",
+                    255,
+                    "Radius",
+                    &mut step.geometry_spec.radius_expr,
+                    120.0,
+                    120.0,
+                    "Radius X",
+                    &mut step.geometry_spec.radius_x_expr,
+                    120.0,
+                    120.0,
+                    begin_mouse_move_absolute_capture_target,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    Some(group_id),
+                );
+                changed |= Self::geometry_expr_pair_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-size3",
+                    255,
+                    "Radius Y",
+                    &mut step.geometry_spec.radius_y_expr,
+                    120.0,
+                    120.0,
+                    "Arrow Head",
+                    &mut step.geometry_spec.arrow_head_size_expr,
+                    120.0,
+                    120.0,
+                    begin_mouse_move_absolute_capture_target,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    Some(group_id),
+                );
+                changed |= Self::geometry_expr_pair_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-size4",
+                    255,
+                    "Font Size",
+                    &mut step.geometry_spec.font_size_expr,
+                    120.0,
+                    120.0,
+                    "Thickness",
+                    &mut step.geometry_spec.thickness_expr,
+                    120.0,
+                    120.0,
+                    begin_mouse_move_absolute_capture_target,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    Some(group_id),
+                );
+                changed |= Self::geometry_expr_pair_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-transform1",
+                    255,
+                    "Start",
+                    &mut step.geometry_spec.start_angle_expr,
+                    120.0,
+                    120.0,
+                    "End",
+                    &mut step.geometry_spec.end_angle_expr,
+                    120.0,
+                    120.0,
+                    begin_mouse_move_absolute_capture_target,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    Some(group_id),
+                );
+                changed |= Self::geometry_expr_pair_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-transform2",
+                    255,
+                    "Rotate",
+                    &mut step.geometry_spec.rotation_expr,
+                    120.0,
+                    120.0,
+                    "Opacity",
+                    &mut step.geometry_spec.opacity_expr,
+                    120.0,
+                    120.0,
+                    begin_mouse_move_absolute_capture_target,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    Some(group_id),
+                );
+                changed |= Self::geometry_expr_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-fill-opacity",
+                    "Fill Opacity",
+                    &mut step.geometry_spec.fill_opacity_expr,
+                    120.0,
+                    120.0,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                );
+                changed |= Self::geometry_expr_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-points",
+                    "Points",
+                    &mut step.geometry_spec.points_expr,
+                    120.0,
+                    120.0,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                );
+                changed |= Self::render_geometry_override_text_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "override-content",
+                    "Content",
+                    &mut step.geometry_spec.text,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                );
+                changed |= Self::geometry_fill_mode_row(
+                    ui,
+                    language,
+                    &mut step.geometry_spec.filled,
+                );
+                changed
+            })
+            .inner;
+
+        *live_sync |= Self::render_geometry_override_code_row(
+            ui,
+            preset_id,
+            object_id,
+            &mut step.geometry_spec.text,
+            vietnamese_input_enabled,
+            vietnamese_input_mode,
+        );
+
+        Grid::new((preset_id, object_id, "geometry-override-colors"))
+            .num_columns(4)
+            .spacing([Self::GEOMETRY_GRID_SPACING_X, 6.0])
+            .min_col_width(0.0)
+            .show(ui, |ui| {
+                *live_sync |= Self::geometry_color_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "Color",
+                    &mut step.geometry_spec.stroke_color,
+                    &mut step.geometry_spec.stroke_color_expr,
+                    vision_manual_color,
+                    vision_manual_color_hex,
+                    true,
+                    request_screen_color_pick,
+                    pending_screen_color_target,
+                    false,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                );
+                *live_sync |= Self::geometry_color_row(
+                    ui,
+                    language,
+                    preset_id,
+                    object_id,
+                    "Fill",
+                    &mut step.geometry_spec.fill_color,
+                    &mut step.geometry_spec.fill_color_expr,
+                    vision_manual_color,
+                    vision_manual_color_hex,
+                    true,
+                    request_screen_color_pick,
+                    pending_screen_color_target,
+                    true,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                );
+            });
     }
 
     fn render_geometry_preset_name_suggestions(
@@ -13948,13 +14312,7 @@ impl CrosshairApp {
                             .changed();
                         if modify_changed {
                             if step.geometry_preset_modify_enabled {
-                                step.geometry_preset_modify_initialized = false;
                                 step.geometry_collapsed = false;
-                                *live_sync |=
-                                    Self::sync_show_geometry_modify_seed(step, geometry_presets, true);
-                            } else {
-                                step.geometry_preset_modify_initialized = false;
-                                step.geometry_preset_modify_source_id = step.geometry_preset_id;
                             }
                             *live_sync = true;
                         }
@@ -13971,81 +14329,24 @@ impl CrosshairApp {
                             }
                         }
                     });
-                    *live_sync |= Self::sync_show_geometry_modify_seed(step, geometry_presets, false);
-                    let selected_modify_preset =
-                        Self::selected_geometry_preset_for_step(geometry_presets, step);
+                    *live_sync |= Self::prepare_show_geometry_modify_inputs(step);
                     if step.geometry_preset_modify_enabled && !step.geometry_collapsed {
-                        ui.add_space(4.0);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(Self::tr_lang(
-                                language,
-                                "Override:",
-                                "Override:",
-                            ));
-                            *live_sync |= ui
-                                .checkbox(
-                                    &mut step.geometry_modify_position,
-                                    Self::tr_lang(language, "Position", "Vi tri"),
-                                )
-                                .changed();
-                            *live_sync |= ui
-                                .checkbox(
-                                    &mut step.geometry_modify_size,
-                                    Self::tr_lang(language, "Size", "Kich thuoc"),
-                                )
-                                .changed();
-                            *live_sync |= ui
-                                .checkbox(
-                                    &mut step.geometry_modify_transform,
-                                    Self::tr_lang(language, "Transform", "Bien doi"),
-                                )
-                                .changed();
-                            *live_sync |= ui
-                                .checkbox(
-                                    &mut step.geometry_modify_content,
-                                    Self::tr_lang(language, "Content", "Noi dung"),
-                                )
-                                .changed();
-                            *live_sync |= ui
-                                .checkbox(
-                                    &mut step.geometry_modify_style,
-                                    Self::tr_lang(language, "Style", "Style"),
-                                )
-                                .changed();
-                        });
-                        ui.add_space(2.0);
-                        ui.weak(Self::tr_lang(
+                        Self::render_show_geometry_override_editor(
+                            ui,
                             language,
-                            "Only the checked groups above will replace values from the selected preset.",
-                            "Chi cac nhom duoc tick o tren moi de len gia tri cua preset da chon.",
-                        ));
-                        if selected_modify_preset.is_some() {
-                            step.geometry_spec.visible = true;
-                            ui.add_space(4.0);
-                            *live_sync |= Self::render_geometry_spec_editor(
-                                ui,
-                                language,
-                                macro_preset_id,
-                                step_index as u32,
-                                true,
-                                &mut step.geometry_spec,
-                                vision_manual_color,
-                                vision_manual_color_hex,
-                                request_screen_color_pick,
-                                &mut pending_screen_color_target,
-                                begin_mouse_move_absolute_capture_target,
-                                vietnamese_input_enabled,
-                                vietnamese_input_mode,
-                                Some(group_id),
-                            );
-                        } else {
-                            ui.add_space(4.0);
-                            ui.weak(Self::tr_lang(
-                                language,
-                                "Select a geometry preset first, then the matching modify fields will appear.",
-                                "Hay chon geometry preset truoc, luc do cac o modify dung voi preset moi hien ra.",
-                            ));
-                        }
+                            macro_preset_id,
+                            step_index,
+                            group_id,
+                            vision_manual_color,
+                            vision_manual_color_hex,
+                            request_screen_color_pick,
+                            begin_mouse_move_absolute_capture_target,
+                            &mut pending_screen_color_target,
+                            step,
+                            live_sync,
+                            vietnamese_input_enabled,
+                            vietnamese_input_mode,
+                        );
                     }
                     if *request_screen_color_pick {
                         if let Some((_, _, is_fill)) = pending_screen_color_target {

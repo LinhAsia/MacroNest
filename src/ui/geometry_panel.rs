@@ -3,10 +3,10 @@ use crate::ui::{CrosshairApp, MouseCaptureKind, MouseMoveAbsoluteCaptureTarget, 
 use eframe::egui::{self, Button, ComboBox, Frame, Grid, TextEdit};
 
 impl CrosshairApp {
-    const GEOMETRY_LABEL_COL_WIDTH: f32 = 110.0;
-    const GEOMETRY_FIELD_WIDTH: f32 = 96.0;
-    const GEOMETRY_FIELD_EXPANDED_WIDTH: f32 = 120.0;
-    const GEOMETRY_GRID_SPACING_X: f32 = 2.0;
+    pub(crate) const GEOMETRY_LABEL_COL_WIDTH: f32 = 110.0;
+    pub(crate) const GEOMETRY_FIELD_WIDTH: f32 = 96.0;
+    pub(crate) const GEOMETRY_FIELD_EXPANDED_WIDTH: f32 = 120.0;
+    pub(crate) const GEOMETRY_GRID_SPACING_X: f32 = 2.0;
 
     pub(crate) fn render_geometry_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
@@ -1407,7 +1407,7 @@ impl CrosshairApp {
         changed
     }
 
-    fn geometry_expr_row(
+    pub(crate) fn geometry_expr_row(
         ui: &mut egui::Ui,
         language: UiLanguage,
         preset_id: u32,
@@ -1454,7 +1454,7 @@ impl CrosshairApp {
         changed
     }
 
-    fn geometry_expr_pair_row(
+    pub(crate) fn geometry_expr_pair_row(
         ui: &mut egui::Ui,
         language: UiLanguage,
         preset_id: u32,
@@ -1578,7 +1578,7 @@ impl CrosshairApp {
         changed
     }
 
-    fn geometry_fill_mode_row(
+    pub(crate) fn geometry_fill_mode_row(
         ui: &mut egui::Ui,
         language: UiLanguage,
         filled: &mut bool,
@@ -1615,7 +1615,7 @@ impl CrosshairApp {
         changed
     }
 
-    fn geometry_color_row(
+    pub(crate) fn geometry_color_row(
         ui: &mut egui::Ui,
         language: UiLanguage,
         preset_id: u32,
