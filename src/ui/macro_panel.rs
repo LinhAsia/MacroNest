@@ -13376,6 +13376,34 @@ impl CrosshairApp {
             .map(|object| object.spec.clone())
     }
 
+    fn clear_geometry_spec_override_inputs(spec: &mut crate::model::GeometrySpec) {
+        spec.x1_expr.clear();
+        spec.y1_expr.clear();
+        spec.x2_expr.clear();
+        spec.y2_expr.clear();
+        spec.x3_expr.clear();
+        spec.y3_expr.clear();
+        spec.x4_expr.clear();
+        spec.y4_expr.clear();
+        spec.width_expr.clear();
+        spec.height_expr.clear();
+        spec.radius_expr.clear();
+        spec.radius_x_expr.clear();
+        spec.radius_y_expr.clear();
+        spec.start_angle_expr.clear();
+        spec.end_angle_expr.clear();
+        spec.rotation_expr.clear();
+        spec.arrow_head_size_expr.clear();
+        spec.font_size_expr.clear();
+        spec.thickness_expr.clear();
+        spec.opacity_expr.clear();
+        spec.fill_opacity_expr.clear();
+        spec.points_expr.clear();
+        spec.text.clear();
+        spec.stroke_color_expr.clear();
+        spec.fill_color_expr.clear();
+    }
+
     fn sync_show_geometry_modify_seed(
         step: &mut MacroStep,
         geometry_presets: &[crate::model::GeometryPreset],
@@ -13398,6 +13426,7 @@ impl CrosshairApp {
             && let Some(spec) = Self::geometry_preset_seed_spec(preset)
         {
             step.geometry_spec = spec;
+            Self::clear_geometry_spec_override_inputs(&mut step.geometry_spec);
             return true;
         }
 

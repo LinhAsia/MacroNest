@@ -14953,47 +14953,95 @@ mod windows_overlay {
 
     fn apply_geometry_spec_overrides(target: &mut GeometrySpec, source: &GeometrySpec, step: &MacroStep) {
         if step.geometry_modify_position {
-            target.x1_expr = source.x1_expr.clone();
-            target.y1_expr = source.y1_expr.clone();
-            target.x2_expr = source.x2_expr.clone();
-            target.y2_expr = source.y2_expr.clone();
-            target.x3_expr = source.x3_expr.clone();
-            target.y3_expr = source.y3_expr.clone();
-            target.x4_expr = source.x4_expr.clone();
-            target.y4_expr = source.y4_expr.clone();
-            target.points_expr = source.points_expr.clone();
+            if !source.x1_expr.trim().is_empty() {
+                target.x1_expr = source.x1_expr.clone();
+            }
+            if !source.y1_expr.trim().is_empty() {
+                target.y1_expr = source.y1_expr.clone();
+            }
+            if !source.x2_expr.trim().is_empty() {
+                target.x2_expr = source.x2_expr.clone();
+            }
+            if !source.y2_expr.trim().is_empty() {
+                target.y2_expr = source.y2_expr.clone();
+            }
+            if !source.x3_expr.trim().is_empty() {
+                target.x3_expr = source.x3_expr.clone();
+            }
+            if !source.y3_expr.trim().is_empty() {
+                target.y3_expr = source.y3_expr.clone();
+            }
+            if !source.x4_expr.trim().is_empty() {
+                target.x4_expr = source.x4_expr.clone();
+            }
+            if !source.y4_expr.trim().is_empty() {
+                target.y4_expr = source.y4_expr.clone();
+            }
+            if !source.points_expr.trim().is_empty() {
+                target.points_expr = source.points_expr.clone();
+            }
         }
 
         if step.geometry_modify_size {
-            target.width_expr = source.width_expr.clone();
-            target.height_expr = source.height_expr.clone();
-            target.radius_expr = source.radius_expr.clone();
-            target.radius_x_expr = source.radius_x_expr.clone();
-            target.radius_y_expr = source.radius_y_expr.clone();
-            target.arrow_head_size_expr = source.arrow_head_size_expr.clone();
-            target.font_size_expr = source.font_size_expr.clone();
+            if !source.width_expr.trim().is_empty() {
+                target.width_expr = source.width_expr.clone();
+            }
+            if !source.height_expr.trim().is_empty() {
+                target.height_expr = source.height_expr.clone();
+            }
+            if !source.radius_expr.trim().is_empty() {
+                target.radius_expr = source.radius_expr.clone();
+            }
+            if !source.radius_x_expr.trim().is_empty() {
+                target.radius_x_expr = source.radius_x_expr.clone();
+            }
+            if !source.radius_y_expr.trim().is_empty() {
+                target.radius_y_expr = source.radius_y_expr.clone();
+            }
+            if !source.arrow_head_size_expr.trim().is_empty() {
+                target.arrow_head_size_expr = source.arrow_head_size_expr.clone();
+            }
+            if !source.font_size_expr.trim().is_empty() {
+                target.font_size_expr = source.font_size_expr.clone();
+            }
         }
 
         if step.geometry_modify_transform {
-            target.start_angle_expr = source.start_angle_expr.clone();
-            target.end_angle_expr = source.end_angle_expr.clone();
-            target.rotation_expr = source.rotation_expr.clone();
+            if !source.start_angle_expr.trim().is_empty() {
+                target.start_angle_expr = source.start_angle_expr.clone();
+            }
+            if !source.end_angle_expr.trim().is_empty() {
+                target.end_angle_expr = source.end_angle_expr.clone();
+            }
+            if !source.rotation_expr.trim().is_empty() {
+                target.rotation_expr = source.rotation_expr.clone();
+            }
         }
 
-        if step.geometry_modify_content {
+        if step.geometry_modify_content && !source.text.is_empty() {
             target.text = source.text.clone();
         }
 
         if step.geometry_modify_style {
-            target.stroke_color_expr = source.stroke_color_expr.clone();
-            target.fill_color_expr = source.fill_color_expr.clone();
+            if !source.stroke_color_expr.trim().is_empty() {
+                target.stroke_color_expr = source.stroke_color_expr.clone();
+            }
+            if !source.fill_color_expr.trim().is_empty() {
+                target.fill_color_expr = source.fill_color_expr.clone();
+            }
             target.stroke_color = source.stroke_color;
             target.fill_color = source.fill_color;
             target.filled = source.filled;
             target.visible = source.visible;
-            target.thickness_expr = source.thickness_expr.clone();
-            target.opacity_expr = source.opacity_expr.clone();
-            target.fill_opacity_expr = source.fill_opacity_expr.clone();
+            if !source.thickness_expr.trim().is_empty() {
+                target.thickness_expr = source.thickness_expr.clone();
+            }
+            if !source.opacity_expr.trim().is_empty() {
+                target.opacity_expr = source.opacity_expr.clone();
+            }
+            if !source.fill_opacity_expr.trim().is_empty() {
+                target.fill_opacity_expr = source.fill_opacity_expr.clone();
+            }
         }
     }
 
