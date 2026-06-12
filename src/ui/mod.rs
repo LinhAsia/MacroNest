@@ -1104,6 +1104,7 @@ impl CrosshairApp {
             .send(OverlayCommand::Update(self.state.active_style.clone()));
         self.sync_profiles();
         self.sync_window_presets();
+        self.sync_window_layouts();
         self.sync_mouse_sensitivity_presets();
         self.sync_mouse_sensitivity_settings();
         self.sync_mouse_driver_settings();
