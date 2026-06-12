@@ -12125,7 +12125,10 @@ impl CrosshairApp {
         });
     }
 
-    pub(crate) fn collect_all_macro_referenced_variables(&self) -> Vec<String> {
+    pub(crate) fn collect_all_macro_referenced_variables(&mut self) -> Vec<String> {
+        if let Some(cached) = self.macro_referenced_variables_cache.as_ref() {
+            return cached.clone();
+        }
         let mut vars = std::collections::HashSet::new();
         for group in &self.state.macro_groups {
             for preset in &group.presets {
@@ -12139,6 +12142,7 @@ impl CrosshairApp {
         }
         let mut list: Vec<String> = vars.into_iter().collect();
         list.sort();
+        self.macro_referenced_variables_cache = Some(list.clone());
         list
     }
 
@@ -12406,10 +12410,16 @@ impl CrosshairApp {
             for v in self.collect_all_macro_referenced_variables() {
                 all_vars_set.insert(v);
             }
+            let constant_names: std::collections::HashSet<&str> = self
+                .state
+                .global_constants
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect();
             {
                 let vars = crate::overlay::RUNTIME_VARIABLES.lock();
                 for k in vars.keys() {
-                    if !self.state.global_constants.iter().any(|(n, _)| n == k) {
+                    if !constant_names.contains(k.as_str()) {
                         all_vars_set.insert(k.clone());
                     }
                 }

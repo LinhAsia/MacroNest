@@ -817,6 +817,7 @@ pub struct CrosshairApp {
     draw_geometry_step_preview_target: Option<(u32, u32, usize, bool)>,
     draw_geometry_step_preview_sent: Option<crate::model::GeometrySpec>,
 
+    macro_referenced_variables_cache: Option<Vec<String>>,
     variable_inspector_open: bool,
     ocr_lang_pack_open: bool,
     ocr_lang_settings_focus: Option<String>,
@@ -1050,6 +1051,7 @@ impl CrosshairApp {
             macro_step_geometry_color_pick_target: None,
             draw_geometry_step_preview_target: None,
             draw_geometry_step_preview_sent: None,
+            macro_referenced_variables_cache: None,
 
             variable_inspector_open: false,
             ocr_lang_pack_open: false,
@@ -1324,6 +1326,7 @@ impl CrosshairApp {
     }
 
     fn persist(&mut self) {
+        self.invalidate_macro_variable_cache();
         if let Err(error) = self.paths.save_profiles(&self.state.profiles) {
             self.status = format!("Failed to save profiles: {error}");
             return;
@@ -1331,6 +1334,10 @@ impl CrosshairApp {
         if let Err(error) = self.paths.save_state(&self.state) {
             self.status = format!("Failed to save app state: {error}");
         }
+    }
+
+    fn invalidate_macro_variable_cache(&mut self) {
+        self.macro_referenced_variables_cache = None;
     }
 
     fn save_profile(&mut self) {
