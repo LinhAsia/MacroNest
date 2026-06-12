@@ -13322,21 +13322,17 @@ impl CrosshairApp {
                 &mut step.key,
                 preset_options,
             );
+        } else if let Some(chosen_name) = Self::render_geometry_preset_selector(
+            ui,
+            language,
+            (id_source, "geometry-preset-combo"),
+            preset_options,
+            &selected_name,
+            &mut step.geometry_preset_id,
+            live_sync,
+        ) {
+            step.key = chosen_name;
         }
-
-        ui.add_enabled_ui(!step.geometry_preset_use_custom_ref, |ui| {
-            if let Some(chosen_name) = Self::render_geometry_preset_selector(
-                ui,
-                language,
-                (id_source, "geometry-preset-combo"),
-                preset_options,
-                &selected_name,
-                &mut step.geometry_preset_id,
-                live_sync,
-            ) {
-                step.key = chosen_name;
-            }
-        });
     }
 
     fn render_geometry_preset_name_suggestions(
@@ -13821,7 +13817,6 @@ impl CrosshairApp {
                 }
                 MacroAction::ShowGeometryPreset => {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.label(Self::tr_lang(language, "Preset", "Preset"));
                         Self::render_geometry_preset_ref_editor(
                             ui,
                             language,
@@ -13851,7 +13846,6 @@ impl CrosshairApp {
                             *live_sync = true;
                         }
                         if !clear_all {
-                            ui.label(Self::tr_lang(language, "Preset", "Preset"));
                             Self::render_geometry_preset_ref_editor(
                                 ui,
                                 language,
