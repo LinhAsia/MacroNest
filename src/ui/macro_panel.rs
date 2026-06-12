@@ -13398,10 +13398,18 @@ impl CrosshairApp {
         spec.thickness_expr.clear();
         spec.opacity_expr.clear();
         spec.fill_opacity_expr.clear();
-        spec.points_expr.clear();
         spec.text.clear();
         spec.stroke_color_expr.clear();
         spec.fill_color_expr.clear();
+        if !spec.points_expr.trim().is_empty() {
+            let blank_points = spec
+                .points_expr
+                .split(';')
+                .filter(|pair| !pair.trim().is_empty())
+                .map(|_| ",".to_owned())
+                .collect::<Vec<_>>();
+            spec.points_expr = blank_points.join(";");
+        }
     }
 
     fn sync_show_geometry_modify_seed(
