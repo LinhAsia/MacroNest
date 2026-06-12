@@ -4935,8 +4935,6 @@ impl CrosshairApp {
                 | MacroAction::DisableZoom
                 | MacroAction::DisablePin
                 | MacroAction::HideHud
-                | MacroAction::HideTaskbar
-                | MacroAction::ShowTaskbar
                 | MacroAction::LockMouse
                 | MacroAction::UnlockMouse
                 | MacroAction::Wait
