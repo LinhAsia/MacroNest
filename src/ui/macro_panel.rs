@@ -12388,82 +12388,24 @@ impl CrosshairApp {
             ui.add_space(4.0);
             Self::render_expression_help_box(ui, language);
             ui.add_space(6.0);
-            // Grid for global constants
-            if !self.state.global_constants.is_empty() {
-                egui::ScrollArea::vertical()
-                    .id_salt("global_constants_scroll")
-                    .max_height(100.0)
-                    .show(ui, |ui| {
-                        egui::Grid::new("global_constants_grid")
-                            .num_columns(3)
-                            .spacing([8.0, 6.0])
-                            .striped(true)
-                            .show(ui, |ui| {
-                                let mut to_remove_idx = None;
-                                let mut to_update = None;
-                                for (idx, (name, val)) in
-                                    self.state.global_constants.iter().enumerate()
-                                {
-                                    ui.label(
-                                        RichText::new(name)
-                                            .monospace()
-                                            .color(Color32::from_rgb(0, 180, 216)),
-                                    );
-                                    let id_editing = ui.id().with(("var-edit", name));
-                                    let mut val_str = ui
-                                        .memory(|mem| mem.data.get_temp::<String>(id_editing))
-                                        .unwrap_or_else(|| val.to_string());
-                                    let response = ui.add(
-                                        egui::TextEdit::singleline(&mut val_str)
-                                            .desired_width(70.0)
-                                            .font(egui::TextStyle::Monospace),
-                                    );
-                                    if response.changed() {
-                                        ui.memory_mut(|mem| {
-                                            mem.data.insert_temp(id_editing, val_str.clone())
-                                        });
-                                    }
-                                    if response.lost_focus() || response.clicked_elsewhere() {
-                                        if let Ok(new_val) = val_str.trim().parse::<i32>() {
-                                            to_update = Some((name.clone(), new_val));
-                                        }
-                                        ui.memory_mut(|mem| {
-                                            mem.data.remove_temp::<String>(id_editing)
-                                        });
-                                    }
-                                    if ui
-                                        .button(Self::material_icon_text(0xe872, 14.0)) // trash
-                                        .on_hover_text(Self::tr_lang(language, "Delete", "Xóa"))
-                                        .clicked()
-                                    {
-                                        to_remove_idx = Some(idx);
-                                    }
-                                    ui.end_row();
-                                }
-                                if let Some(idx) = to_remove_idx {
-                                    let (removed_name, _) = self.state.global_constants.remove(idx);
-                                    let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                    vars.remove(&removed_name);
-                                    self.persist();
-                                } else if let Some((name_to_up, new_val)) = to_update {
-                                    if let Some(pos) = self
-                                        .state
-                                        .global_constants
-                                        .iter()
-                                        .position(|(n, _)| n == &name_to_up)
-                                    {
-                                        self.state.global_constants[pos].1 = new_val;
-                                        let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                        vars.insert(name_to_up, new_val as f64);
-                                        self.persist();
-                                    }
-                                }
-                            });
-                    });
+
+            let mut all_vars_set = std::collections::HashSet::new();
+            for v in self.collect_all_macro_referenced_variables() {
+                all_vars_set.insert(v);
             }
-            ui.add_space(4.0);
+            {
+                let vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                for k in vars.keys() {
+                    if !self.state.global_constants.iter().any(|(n, _)| n == k) {
+                        all_vars_set.insert(k.clone());
+                    }
+                }
+            }
+            let mut vars_list: Vec<String> = all_vars_set.into_iter().collect();
+            vars_list.sort();
+
             ui.columns(2, |columns| {
-                columns[0].horizontal(|ui| {
+                columns[0].vertical(|ui| {
                     let id_const_name = ui.id().with("new_const_name");
                     let id_const_val = ui.id().with("new_const_val");
                     let mut name_buf = ui.memory(|mem| {
@@ -12482,51 +12424,127 @@ impl CrosshairApp {
                     } else {
                         Color32::from_rgba_premultiplied(100, 100, 100, 150)
                     };
-                    ui.add_sized(
-                        [100.0, 20.0],
-                        egui::TextEdit::singleline(&mut name_buf).hint_text(
-                            RichText::new(Self::tr_lang(language, "CONST_NAME", "CONST_NAME"))
-                                .color(hint_color)
-                                .weak(),
-                        ),
-                    );
-                    ui.label("=");
-                    ui.add_sized(
-                        [70.0, 20.0],
-                        egui::TextEdit::singleline(&mut val_buf).hint_text(
-                            RichText::new(Self::tr_lang(language, "Value", "Value"))
-                                .color(hint_color)
-                                .weak(),
-                        ),
-                    );
-                    if ui.button(Self::tr_lang(language, "Add", "Add")).clicked() {
-                        let name_trimmed = name_buf.trim().to_uppercase();
-                        if !name_trimmed.is_empty() {
-                            let parsed_val = val_buf.trim().parse::<i32>().unwrap_or(0);
-                            if !self
-                                .state
-                                .global_constants
-                                .iter()
-                                .any(|(n, _)| n == &name_trimmed)
-                            {
-                                self.state
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            [100.0, 20.0],
+                            egui::TextEdit::singleline(&mut name_buf).hint_text(
+                                RichText::new(Self::tr_lang(language, "CONST_NAME", "CONST_NAME"))
+                                    .color(hint_color)
+                                    .weak(),
+                            ),
+                        );
+                        ui.label("=");
+                        ui.add_sized(
+                            [70.0, 20.0],
+                            egui::TextEdit::singleline(&mut val_buf).hint_text(
+                                RichText::new(Self::tr_lang(language, "Value", "Value"))
+                                    .color(hint_color)
+                                    .weak(),
+                            ),
+                        );
+                        if ui.button(Self::tr_lang(language, "Add", "Add")).clicked() {
+                            let name_trimmed = name_buf.trim().to_uppercase();
+                            if !name_trimmed.is_empty() {
+                                let parsed_val = val_buf.trim().parse::<i32>().unwrap_or(0);
+                                if !self
+                                    .state
                                     .global_constants
-                                    .push((name_trimmed.clone(), parsed_val));
-                                let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                vars.insert(name_trimmed, parsed_val as f64);
-                                name_buf.clear();
-                                val_buf.clear();
-                                self.persist();
+                                    .iter()
+                                    .any(|(n, _)| n == &name_trimmed)
+                                {
+                                    self.state
+                                        .global_constants
+                                        .push((name_trimmed.clone(), parsed_val));
+                                    let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                                    vars.insert(name_trimmed, parsed_val as f64);
+                                    name_buf.clear();
+                                    val_buf.clear();
+                                    self.persist();
+                                }
                             }
                         }
-                    }
+                    });
                     ui.memory_mut(|mem| {
                         mem.data.insert_temp(id_const_name, name_buf);
                         mem.data.insert_temp(id_const_val, val_buf);
                     });
+
+                    ui.add_space(6.0);
+                    if !self.state.global_constants.is_empty() {
+                        egui::ScrollArea::vertical()
+                            .id_salt("global_constants_scroll")
+                            .max_height(160.0)
+                            .show(ui, |ui| {
+                                egui::Grid::new("global_constants_grid")
+                                    .num_columns(3)
+                                    .spacing([8.0, 6.0])
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        let mut to_remove_idx = None;
+                                        let mut to_update = None;
+                                        for (idx, (name, val)) in
+                                            self.state.global_constants.iter().enumerate()
+                                        {
+                                            ui.label(
+                                                RichText::new(name)
+                                                    .monospace()
+                                                    .color(Color32::from_rgb(0, 180, 216)),
+                                            );
+                                            let id_editing = ui.id().with(("var-edit", name));
+                                            let mut val_str = ui
+                                                .memory(|mem| mem.data.get_temp::<String>(id_editing))
+                                                .unwrap_or_else(|| val.to_string());
+                                            let response = ui.add(
+                                                egui::TextEdit::singleline(&mut val_str)
+                                                    .desired_width(70.0)
+                                                    .font(egui::TextStyle::Monospace),
+                                            );
+                                            if response.changed() {
+                                                ui.memory_mut(|mem| {
+                                                    mem.data.insert_temp(id_editing, val_str.clone())
+                                                });
+                                            }
+                                            if response.lost_focus() || response.clicked_elsewhere() {
+                                                if let Ok(new_val) = val_str.trim().parse::<i32>() {
+                                                    to_update = Some((name.clone(), new_val));
+                                                }
+                                                ui.memory_mut(|mem| {
+                                                    mem.data.remove_temp::<String>(id_editing)
+                                                });
+                                            }
+                                            if ui
+                                                .button(Self::material_icon_text(0xe872, 14.0))
+                                                .on_hover_text(Self::tr_lang(language, "Delete", "Delete"))
+                                                .clicked()
+                                            {
+                                                to_remove_idx = Some(idx);
+                                            }
+                                            ui.end_row();
+                                        }
+                                        if let Some(idx) = to_remove_idx {
+                                            let (removed_name, _) = self.state.global_constants.remove(idx);
+                                            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                                            vars.remove(&removed_name);
+                                            self.persist();
+                                        } else if let Some((name_to_up, new_val)) = to_update {
+                                            if let Some(pos) = self
+                                                .state
+                                                .global_constants
+                                                .iter()
+                                                .position(|(n, _)| n == &name_to_up)
+                                            {
+                                                self.state.global_constants[pos].1 = new_val;
+                                                let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                                                vars.insert(name_to_up, new_val as f64);
+                                                self.persist();
+                                            }
+                                        }
+                                    });
+                            });
+                    }
                 });
 
-                columns[1].horizontal(|ui| {
+                columns[1].vertical(|ui| {
                     ui.set_row_height(24.0);
                     let id_name = ui.id().with("new_dyn_var_name");
                     let id_val = ui.id().with("new_dyn_var_val");
@@ -12540,120 +12558,106 @@ impl CrosshairApp {
                     } else {
                         Color32::from_rgba_premultiplied(100, 100, 100, 150)
                     };
-                    ui.add_sized(
-                        [100.0, 20.0],
-                        egui::TextEdit::singleline(&mut name_buf).hint_text(
-                            RichText::new(Self::tr_lang(language, "Var Name", "Var Name"))
-                                .color(hint_color)
-                                .weak(),
-                        ),
-                    );
-                    ui.label("=");
-                    ui.add_sized(
-                        [70.0, 20.0],
-                        egui::TextEdit::singleline(&mut val_buf).hint_text(
-                            RichText::new(Self::tr_lang(language, "Value", "Value"))
-                                .color(hint_color)
-                                .weak(),
-                        ),
-                    );
-                    if ui.button(Self::tr_lang(language, "Set", "Set")).clicked() {
-                        let name_trimmed = name_buf.trim().to_string();
-                        if !name_trimmed.is_empty() {
-                            let parsed_val = val_buf.trim().parse::<f64>().unwrap_or(0.0);
-                            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                            vars.insert(name_trimmed, parsed_val);
-                            name_buf.clear();
-                            val_buf.clear();
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            [100.0, 20.0],
+                            egui::TextEdit::singleline(&mut name_buf).hint_text(
+                                RichText::new(Self::tr_lang(language, "Var Name", "Var Name"))
+                                    .color(hint_color)
+                                    .weak(),
+                            ),
+                        );
+                        ui.label("=");
+                        ui.add_sized(
+                            [70.0, 20.0],
+                            egui::TextEdit::singleline(&mut val_buf).hint_text(
+                                RichText::new(Self::tr_lang(language, "Value", "Value"))
+                                    .color(hint_color)
+                                    .weak(),
+                            ),
+                        );
+                        if ui.button(Self::tr_lang(language, "Set", "Set")).clicked() {
+                            let name_trimmed = name_buf.trim().to_string();
+                            if !name_trimmed.is_empty() {
+                                let parsed_val = val_buf.trim().parse::<f64>().unwrap_or(0.0);
+                                let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                                vars.insert(name_trimmed, parsed_val);
+                                name_buf.clear();
+                                val_buf.clear();
+                            }
                         }
-                    }
+                    });
                     ui.memory_mut(|mem| {
                         mem.data.insert_temp(id_name, name_buf);
                         mem.data.insert_temp(id_val, val_buf);
                     });
+
+                    ui.add_space(6.0);
+                    if !vars_list.is_empty() {
+                        egui::ScrollArea::vertical()
+                            .id_salt("macro_vars_scroll")
+                            .max_height(160.0)
+                            .show(ui, |ui| {
+                                egui::Grid::new("macro_vars_grid")
+                                    .num_columns(3)
+                                    .spacing([8.0, 6.0])
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        let mut to_remove = None;
+                                        let mut to_update = None;
+                                        for name in &vars_list {
+                                            ui.label(
+                                                RichText::new(name)
+                                                    .monospace()
+                                                    .color(Color32::from_rgb(243, 156, 18)),
+                                            );
+                                            let runtime_val = {
+                                                let vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                                                vars.get(name).copied().unwrap_or(0.0)
+                                            };
+                                            let id_editing = ui.id().with(("var-edit", name));
+                                            let mut val_str = ui
+                                                .memory(|mem| mem.data.get_temp::<String>(id_editing))
+                                                .unwrap_or_else(|| runtime_val.to_string());
+                                            let response = ui.add(
+                                                egui::TextEdit::singleline(&mut val_str)
+                                                    .desired_width(70.0)
+                                                    .font(egui::TextStyle::Monospace),
+                                            );
+                                            if response.changed() {
+                                                ui.memory_mut(|mem| {
+                                                    mem.data.insert_temp(id_editing, val_str.clone())
+                                                });
+                                            }
+                                            if response.lost_focus() || response.clicked_elsewhere() {
+                                                if let Ok(new_val) = val_str.trim().parse::<f64>() {
+                                                    to_update = Some((name.clone(), new_val));
+                                                }
+                                                ui.memory_mut(|mem| {
+                                                    mem.data.remove_temp::<String>(id_editing)
+                                                });
+                                            }
+                                            if ui
+                                                .button(Self::material_icon_text(0xe872, 14.0))
+                                                .on_hover_text(Self::tr_lang(language, "Delete", "Delete"))
+                                                .clicked()
+                                            {
+                                                to_remove = Some(name.clone());
+                                            }
+                                            ui.end_row();
+                                        }
+                                        if let Some(name) = to_remove {
+                                            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                                            vars.remove(&name);
+                                        } else if let Some((name, new_val)) = to_update {
+                                            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                                            vars.insert(name, new_val);
+                                        }
+                                    });
+                            });
+                    }
                 });
             });
-            ui.add_space(4.0);
-            ui.separator();
-            ui.add_space(4.0);
-            // Collect referenced variables statically + dynamic runtime variables
-            let mut all_vars_set = std::collections::HashSet::new();
-            for v in self.collect_all_macro_referenced_variables() {
-                all_vars_set.insert(v);
-            }
-            {
-                let vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                for k in vars.keys() {
-                    if !self.state.global_constants.iter().any(|(n, _)| n == k) {
-                        all_vars_set.insert(k.clone());
-                    }
-                }
-            }
-            let mut vars_list: Vec<String> = all_vars_set.into_iter().collect();
-            vars_list.sort();
-            if !vars_list.is_empty() {
-                egui::ScrollArea::vertical()
-                    .id_salt("macro_vars_scroll")
-                    .max_height(160.0)
-                    .show(ui, |ui| {
-                        egui::Grid::new("macro_vars_grid")
-                            .num_columns(3)
-                            .spacing([8.0, 6.0])
-                            .striped(true)
-                            .show(ui, |ui| {
-                                let mut to_remove = None;
-                                let mut to_update = None;
-                                for name in &vars_list {
-                                    ui.label(
-                                        RichText::new(name)
-                                            .monospace()
-                                            .color(Color32::from_rgb(243, 156, 18)),
-                                    );
-                                    let runtime_val = {
-                                        let vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                        vars.get(name).copied().unwrap_or(0.0)
-                                    };
-                                    let id_editing = ui.id().with(("var-edit", name));
-                                    let mut val_str = ui
-                                        .memory(|mem| mem.data.get_temp::<String>(id_editing))
-                                        .unwrap_or_else(|| runtime_val.to_string());
-                                    let response = ui.add(
-                                        egui::TextEdit::singleline(&mut val_str)
-                                            .desired_width(70.0)
-                                            .font(egui::TextStyle::Monospace),
-                                    );
-                                    if response.changed() {
-                                        ui.memory_mut(|mem| {
-                                            mem.data.insert_temp(id_editing, val_str.clone())
-                                        });
-                                    }
-                                    if response.lost_focus() || response.clicked_elsewhere() {
-                                        if let Ok(new_val) = val_str.trim().parse::<f64>() {
-                                            to_update = Some((name.clone(), new_val));
-                                        }
-                                        ui.memory_mut(|mem| {
-                                            mem.data.remove_temp::<String>(id_editing)
-                                        });
-                                    }
-                                    if ui
-                                        .button(Self::material_icon_text(0xe872, 14.0))
-                                        .on_hover_text(Self::tr_lang(language, "Delete", "Xóa"))
-                                        .clicked()
-                                    {
-                                        to_remove = Some(name.clone());
-                                    }
-                                    ui.end_row();
-                                }
-                                if let Some(name) = to_remove {
-                                    let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                    vars.remove(&name);
-                                } else if let Some((name, new_val)) = to_update {
-                                    let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                    vars.insert(name, new_val);
-                                }
-                            });
-                    });
-            }
         });
     }
 
