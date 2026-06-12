@@ -4624,6 +4624,10 @@ impl CrosshairApp {
             }),
             UiLanguage::English => match action {
                 MacroAction::KeyPress => "Press",
+                MacroAction::KeyDown => "KEY Dn",
+                MacroAction::KeyUp => "KEY Up",
+                MacroAction::Wait => "Wait",
+                MacroAction::TypeText => "Text",
                 MacroAction::ApplyWindowPreset => "Window",
                 MacroAction::FocusWindowPreset => "Focus",
                 MacroAction::TriggerMacroPreset => "Macro",
