@@ -336,104 +336,117 @@ impl CrosshairApp {
             .show(ui, |ui| {
                 ui.set_min_width(760.0);
                 ui.horizontal(|ui| {
-                    ui.label(Self::material_icon_text(0xe88f, 14.0).color(Color32::from_rgb(0, 170, 255)));
-                ui.label(
-                    egui::RichText::new(Self::tr_lang(
-                        language,
-                        "EXPRESSION HELP",
-                        "HƯỚNG DẪN BIỂU THỨC",
-                    ))
-                    .strong()
-                    .color(Color32::from_rgb(0, 170, 255)),
-                );
+                    ui.label(
+                        Self::material_icon_text(0xe88f, 14.0)
+                            .color(Color32::from_rgb(0, 170, 255)),
+                    );
+                    ui.label(
+                        egui::RichText::new(Self::tr_lang(
+                            language,
+                            "EXPRESSION HELP",
+                            "HUONG DAN BIEU THUC",
+                        ))
+                        .strong()
+                        .color(Color32::from_rgb(0, 170, 255)),
+                    );
                 });
                 ui.add_space(2.0);
                 ui.label(Self::tr_lang(
                     language,
-                    "You can write math expressions and use variables in {}. Math operators + - * / and parentheses () are supported.\nExample: {100 + (A - B) * 2}",
-                    "Bạn có thể viết biểu thức toán và dùng biến trong {}. Hỗ trợ các phép toán + - * / và dấu ngoặc ().\nVí dụ: {100 + (A - B) * 2}",
+                    "You can write math expressions and use variables in {}. Math operators + - * / and parentheses () are supported. Example: {100 + (A - B) * 2}",
+                    "Ban co the viet bieu thuc toan va dung bien trong {}. Ho tro cac phep toan + - * / va dau ngoac (). Vi du: {100 + (A - B) * 2}",
                 ));
                 ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(Self::tr_lang(language, "Available expressions:", "Hàm hỗ trợ:"))
-                        .strong(),
-                );
-                egui::Grid::new("expression-help-columns")
-                    .num_columns(3)
-                    .min_col_width(220.0)
-                    .spacing([18.0, 0.0])
+                egui::ScrollArea::vertical()
+                    .id_salt("expression_help_scroll")
+                    .max_height(92.0)
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            ui.label(
-                                egui::RichText::new(Self::tr_lang(language, "Functions", "Ham"))
-                                    .strong(),
-                            );
-                            ui.label(egui::RichText::new("- random(min, max)").monospace());
-                            ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
-                            ui.label(egui::RichText::new("- min(a, b)").monospace());
-                            ui.label(egui::RichText::new("- max(a, b)").monospace());
-                            ui.label(egui::RichText::new("- abs(a)").monospace());
-                            ui.label(egui::RichText::new("- atan(a)").monospace());
-                            ui.label(egui::RichText::new("- atan2(y, x)").monospace());
-                            ui.label(egui::RichText::new("- sqrt(a)").monospace());
-                            ui.label(egui::RichText::new("- pow(a, b)").monospace());
-                            ui.label(egui::RichText::new("- ceil(a) / floor(a)").monospace());
-                            ui.label(egui::RichText::new("- factorial(n)").monospace());
-                            ui.label(egui::RichText::new("- gcd(a, b, ...) / lcm(a, b, ...)").monospace());
-                            ui.label(egui::RichText::new("- isqrt(n)").monospace());
-                            ui.label(egui::RichText::new("- comb(n, k) / perm(n, k)").monospace());
-                            ui.label(egui::RichText::new("- sin(angleDeg) * 1000").monospace());
-                            ui.label(egui::RichText::new("- cos(angleDeg) * 1000").monospace());
-                            ui.label(egui::RichText::new("- degrees(rad) / radians(deg)").monospace());
-                            ui.label(egui::RichText::new("- pi").monospace());
-                            ui.label(egui::RichText::new("- myVar.toNumber").monospace());
-                        });
-                        ui.vertical(|ui| {
-                            ui.label(
-                                egui::RichText::new(Self::tr_lang(
-                                    language,
-                                    "Numeric values",
-                                    "Gia tri so",
-                                ))
-                                .strong(),
-                            );
-                            ui.label(egui::RichText::new("- screen.width").monospace());
-                            ui.label(egui::RichText::new("- screen.height").monospace());
-                            ui.label(egui::RichText::new("- mouse.x").monospace());
-                            ui.label(egui::RichText::new("- mouse.y").monospace());
-                            ui.label(egui::RichText::new("- mouse.sensitivity").monospace());
-                            ui.label(egui::RichText::new("- volume.level").monospace());
-                            ui.label(egui::RichText::new("- window.width").monospace());
-                            ui.label(egui::RichText::new("- window.height").monospace());
-                        });
-                        ui.vertical(|ui| {
-                            ui.label(
-                                egui::RichText::new(Self::tr_lang(
-                                    language,
-                                    "System and text",
-                                    "He thong va text",
-                                ))
-                                .strong(),
-                            );
-                            ui.label(
-                                egui::RichText::new("- system.year / month / day").monospace(),
-                            );
-                            ui.label(
-                                egui::RichText::new("- system.hour / minute / second").monospace(),
-                            );
-                            ui.label(egui::RichText::new("- system.millisecond").monospace());
-                            ui.label(egui::RichText::new("- system.date").monospace());
-                            ui.label(egui::RichText::new("- system.time").monospace());
-                            ui.label(egui::RichText::new("- window.title").monospace());
-                            ui.label(egui::RichText::new("- clipboard.text").monospace());
-                            ui.label(
-                                egui::RichText::new("- timer1.hour ... total_sec").monospace(),
-                            );
-                            ui.label(
-                                egui::RichText::new("- TimerName.hour ... total_sec").monospace(),
-                            );
-                        });
-                        ui.end_row();
+                        ui.label(
+                            egui::RichText::new(Self::tr_lang(
+                                language,
+                                "Available expressions:",
+                                "Ham ho tro:",
+                            ))
+                            .strong(),
+                        );
+                        egui::Grid::new("expression-help-columns")
+                            .num_columns(3)
+                            .min_col_width(220.0)
+                            .spacing([18.0, 0.0])
+                            .show(ui, |ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(Self::tr_lang(language, "Functions", "Ham"))
+                                            .strong(),
+                                    );
+                                    ui.label(egui::RichText::new("- random(min, max)").monospace());
+                                    ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
+                                    ui.label(egui::RichText::new("- min(a, b)").monospace());
+                                    ui.label(egui::RichText::new("- max(a, b)").monospace());
+                                    ui.label(egui::RichText::new("- abs(a)").monospace());
+                                    ui.label(egui::RichText::new("- atan(a)").monospace());
+                                    ui.label(egui::RichText::new("- atan2(y, x)").monospace());
+                                    ui.label(egui::RichText::new("- sqrt(a)").monospace());
+                                    ui.label(egui::RichText::new("- pow(a, b)").monospace());
+                                    ui.label(egui::RichText::new("- ceil(a) / floor(a)").monospace());
+                                    ui.label(egui::RichText::new("- factorial(n)").monospace());
+                                    ui.label(egui::RichText::new("- gcd(a, b, ...) / lcm(a, b, ...)").monospace());
+                                    ui.label(egui::RichText::new("- isqrt(n)").monospace());
+                                    ui.label(egui::RichText::new("- comb(n, k) / perm(n, k)").monospace());
+                                    ui.label(egui::RichText::new("- sin(angleDeg) * 1000").monospace());
+                                    ui.label(egui::RichText::new("- cos(angleDeg) * 1000").monospace());
+                                    ui.label(egui::RichText::new("- degrees(rad) / radians(deg)").monospace());
+                                    ui.label(egui::RichText::new("- pi").monospace());
+                                    ui.label(egui::RichText::new("- myVar.toNumber").monospace());
+                                });
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(Self::tr_lang(
+                                            language,
+                                            "Numeric values",
+                                            "Gia tri so",
+                                        ))
+                                        .strong(),
+                                    );
+                                    ui.label(egui::RichText::new("- screen.width").monospace());
+                                    ui.label(egui::RichText::new("- screen.height").monospace());
+                                    ui.label(egui::RichText::new("- mouse.x").monospace());
+                                    ui.label(egui::RichText::new("- mouse.y").monospace());
+                                    ui.label(egui::RichText::new("- mouse.sensitivity").monospace());
+                                    ui.label(egui::RichText::new("- volume.level").monospace());
+                                    ui.label(egui::RichText::new("- window.width").monospace());
+                                    ui.label(egui::RichText::new("- window.height").monospace());
+                                });
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(Self::tr_lang(
+                                            language,
+                                            "System and text",
+                                            "He thong va text",
+                                        ))
+                                        .strong(),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("- system.year / month / day").monospace(),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("- system.hour / minute / second").monospace(),
+                                    );
+                                    ui.label(egui::RichText::new("- system.millisecond").monospace());
+                                    ui.label(egui::RichText::new("- system.date").monospace());
+                                    ui.label(egui::RichText::new("- system.time").monospace());
+                                    ui.label(egui::RichText::new("- window.title").monospace());
+                                    ui.label(egui::RichText::new("- clipboard.text").monospace());
+                                    ui.label(
+                                        egui::RichText::new("- timer1.hour ... total_sec").monospace(),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("- TimerName.hour ... total_sec").monospace(),
+                                    );
+                                });
+                                ui.end_row();
+                            });
                     });
             });
     }
