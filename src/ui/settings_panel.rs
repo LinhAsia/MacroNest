@@ -704,23 +704,27 @@ impl CrosshairApp {
         } else {
             visuals.widgets.inactive.bg_stroke.color
         };
-        ui.add_sized(
+        let response = ui.add_sized(
             [ui.available_width(), 30.0],
             Button::new(label)
                 .fill(fill)
                 .stroke(Stroke::new(1.0, stroke_color))
                 .min_size(vec2(0.0, 30.0)),
-        )
+        );
+        Self::paint_show_hover_outline(ui, &response);
+        response
     }
 
     fn settings_action_button(ui: &mut egui::Ui, label: impl Into<WidgetText>) -> egui::Response {
         let visuals = ui.visuals();
-        ui.add(
+        let response = ui.add(
             Button::new(label)
                 .fill(visuals.widgets.inactive.bg_fill)
                 .stroke(Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color))
                 .min_size(vec2(104.0, 28.0)),
-        )
+        );
+        Self::paint_show_hover_outline(ui, &response);
+        response
     }
 
     pub(crate) fn render_custom_ai_modal(&mut self, ctx: &egui::Context) {
