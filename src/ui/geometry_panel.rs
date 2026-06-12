@@ -343,6 +343,14 @@ impl CrosshairApp {
         }
     }
 
+    fn geometry_color_expr_literal(color: crate::model::RgbaColor) -> String {
+        if color.a == 255 {
+            format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b)
+        } else {
+            format!("#{:02X}{:02X}{:02X}{:02X}", color.r, color.g, color.b, color.a)
+        }
+    }
+
     pub(crate) fn geometry_shapes() -> [GeometryShapeKind; 11] {
         [
             GeometryShapeKind::Point,
@@ -1724,7 +1732,7 @@ impl CrosshairApp {
                             manual_color.r, manual_color.g, manual_color.b, manual_color.a
                         );
                         *color = *manual_color;
-                        expr.clear();
+                        *expr = Self::geometry_color_expr_literal(*manual_color);
                         changed = true;
                     }
                     ui.add_space(4.0);
@@ -1757,7 +1765,7 @@ impl CrosshairApp {
                                 };
                                 *manual_color = crate::model::RgbaColor { r, g, b, a };
                                 *color = *manual_color;
-                                expr.clear();
+                                *expr = Self::geometry_color_expr_literal(*manual_color);
                                 changed = true;
                             }
                         }
