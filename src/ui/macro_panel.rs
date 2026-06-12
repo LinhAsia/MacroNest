@@ -13421,11 +13421,15 @@ impl CrosshairApp {
         let resolved_id = resolved_preset.map(|preset| preset.id);
 
         if !step.geometry_preset_modify_enabled {
+            step.geometry_preset_modify_initialized = false;
             step.geometry_preset_modify_source_id = resolved_id;
             return false;
         }
 
-        if !force && resolved_id == step.geometry_preset_modify_source_id {
+        if !force
+            && step.geometry_preset_modify_initialized
+            && resolved_id == step.geometry_preset_modify_source_id
+        {
             return false;
         }
 
@@ -13435,9 +13439,11 @@ impl CrosshairApp {
         {
             step.geometry_spec = spec;
             Self::clear_geometry_spec_override_inputs(&mut step.geometry_spec);
+            step.geometry_preset_modify_initialized = true;
             return true;
         }
 
+        step.geometry_preset_modify_initialized = true;
         false
     }
 
@@ -13942,10 +13948,12 @@ impl CrosshairApp {
                             .changed();
                         if modify_changed {
                             if step.geometry_preset_modify_enabled {
+                                step.geometry_preset_modify_initialized = false;
                                 step.geometry_collapsed = false;
                                 *live_sync |=
                                     Self::sync_show_geometry_modify_seed(step, geometry_presets, true);
                             } else {
+                                step.geometry_preset_modify_initialized = false;
                                 step.geometry_preset_modify_source_id = step.geometry_preset_id;
                             }
                             *live_sync = true;
