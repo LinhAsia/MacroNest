@@ -33,6 +33,35 @@ enum TextHighlightMode {
 }
 
 impl CrosshairApp {
+    fn ensure_draw_geometry_color_literals(spec: &mut crate::model::GeometrySpec) {
+        if spec.stroke_color_expr.trim().is_empty() {
+            if spec.stroke_color.a == 255 {
+                spec.stroke_color_expr = format!(
+                    "#{:02X}{:02X}{:02X}",
+                    spec.stroke_color.r, spec.stroke_color.g, spec.stroke_color.b
+                );
+            } else {
+                spec.stroke_color_expr = format!(
+                    "#{:02X}{:02X}{:02X}{:02X}",
+                    spec.stroke_color.r, spec.stroke_color.g, spec.stroke_color.b, spec.stroke_color.a
+                );
+            }
+        }
+        if spec.fill_color_expr.trim().is_empty() {
+            if spec.fill_color.a == 255 {
+                spec.fill_color_expr = format!(
+                    "#{:02X}{:02X}{:02X}",
+                    spec.fill_color.r, spec.fill_color.g, spec.fill_color.b
+                );
+            } else {
+                spec.fill_color_expr = format!(
+                    "#{:02X}{:02X}{:02X}{:02X}",
+                    spec.fill_color.r, spec.fill_color.g, spec.fill_color.b, spec.fill_color.a
+                );
+            }
+        }
+    }
+
     fn contrast_text_color(background: Color32) -> Color32 {
         let red = background.r() as f32 / 255.0;
         let green = background.g() as f32 / 255.0;
@@ -13433,7 +13462,7 @@ impl CrosshairApp {
             ui.spacing_mut().item_spacing.x = Self::GEOMETRY_GRID_SPACING_X;
             ui.add_sized(
                 [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
-                egui::Label::new("Code"),
+                egui::Label::new("SVG Code"),
             );
             let id = ui.make_persistent_id((preset_id, object_id, "override-code"));
             let response = Self::render_plain_text_edit(
@@ -14134,6 +14163,7 @@ impl CrosshairApp {
             ui.vertical(|ui| match step.action {
                 MacroAction::DrawGeometry => {
                     step.geometry_spec.visible = true;
+                    Self::ensure_draw_geometry_color_literals(&mut step.geometry_spec);
                     let current_preview_target = (group_id, macro_preset_id, step_index, is_hold_stop);
                     let mut geometry_preview_dirty = false;
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
