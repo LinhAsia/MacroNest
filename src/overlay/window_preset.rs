@@ -309,9 +309,6 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
     use windows::Win32::Graphics::Gdi::MonitorFromWindow;
     use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible};
 
-    if !layout.enabled {
-        return Ok(());
-    }
     if layout.rows == 0 || layout.cols == 0 {
         bail!("Layout has no rows/cols");
     }
@@ -546,4 +543,3 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
 
     Ok(())
 }
-

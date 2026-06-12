@@ -9586,47 +9586,70 @@ impl eframe::App for CrosshairApp {
                             if vietnamese_input_response.clicked() {
                                 self.toggle_vietnamese_input_enabled();
                             }
-                            if crate::platform::is_taskbar_hidden() {
-                                let show_taskbar_response = Self::hover_if(
-                                    Self::add_sized_with_show_hover_radius(
-                                        ui,
-                                        [112.0, 30.0],
-                                        8,
-                                        self.titlebar_button(
-                                            RichText::new(Self::tr_lang(
-                                                self.state.ui_language,
-                                                "Show taskbar",
-                                                "Hien taskbar",
-                                            ))
-                                            .size(13.0),
-                                            false,
-                                            false,
+                            let taskbar_hidden = crate::platform::is_taskbar_hidden();
+                            let taskbar_response = Self::hover_if(
+                                Self::add_sized_with_show_hover_radius(
+                                    ui,
+                                    [38.0, 30.0],
+                                    8,
+                                    self.titlebar_button(
+                                        Self::material_icon_text(
+                                            if taskbar_hidden { 0xe8f4 } else { 0xe8f5 },
+                                            18.0,
                                         ),
+                                        false,
+                                        false,
                                     ),
-                                    show_icon_tooltips,
+                                ),
+                                show_icon_tooltips,
+                                if taskbar_hidden {
                                     Self::tr_lang(
                                         self.state.ui_language,
-                                        "Restore the Windows taskbar if it is hidden",
-                                        "Hien lai taskbar Windows neu dang bi an",
-                                    ),
-                                );
-                                if show_taskbar_response.clicked() {
-                                    if crate::platform::show_taskbar() {
-                                        self.status = Self::tr_lang(
+                                        "Restore the Windows taskbar",
+                                        "Hien lai taskbar Windows",
+                                    )
+                                } else {
+                                    Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Hide the Windows taskbar",
+                                        "An taskbar Windows",
+                                    )
+                                },
+                            );
+                            if taskbar_response.clicked() {
+                                let success = if taskbar_hidden {
+                                    crate::platform::show_taskbar()
+                                } else {
+                                    crate::platform::hide_taskbar()
+                                };
+                                self.status = if success {
+                                    if taskbar_hidden {
+                                        Self::tr_lang(
                                             self.state.ui_language,
                                             "Windows taskbar restored.",
                                             "Da hien lai taskbar Windows.",
                                         )
-                                        .to_owned();
                                     } else {
-                                        self.status = Self::tr_lang(
+                                        Self::tr_lang(
                                             self.state.ui_language,
-                                            "Failed to restore the Windows taskbar.",
-                                            "Khong the hien lai taskbar Windows.",
+                                            "Windows taskbar hidden.",
+                                            "Da an taskbar Windows.",
                                         )
-                                        .to_owned();
                                     }
+                                } else if taskbar_hidden {
+                                    Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Failed to restore the Windows taskbar.",
+                                        "Khong the hien lai taskbar Windows.",
+                                    )
+                                } else {
+                                    Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Failed to hide the Windows taskbar.",
+                                        "Khong the an taskbar Windows.",
+                                    )
                                 }
+                                .to_owned();
                             }
                             let settings_response = Self::hover_if(
                                 Self::add_sized_with_show_hover_radius(
