@@ -7032,6 +7032,14 @@ mod windows_overlay {
                 hide_hud_now();
             }
 
+            MacroAction::HideTaskbar => {
+                let _ = crate::platform::hide_taskbar();
+            }
+
+            MacroAction::ShowTaskbar => {
+                let _ = crate::platform::show_taskbar();
+            }
+
             MacroAction::StartTimerPreset
             | MacroAction::PauseTimerPreset
             | MacroAction::StopTimerPreset => {
@@ -7620,6 +7628,14 @@ mod windows_overlay {
                     hide_hud_now();
                 }
 
+                MacroAction::HideTaskbar => {
+                    let _ = crate::platform::hide_taskbar();
+                }
+
+                MacroAction::ShowTaskbar => {
+                    let _ = crate::platform::show_taskbar();
+                }
+
                 MacroAction::StartTimerPreset
                 | MacroAction::PauseTimerPreset
                 | MacroAction::StopTimerPreset => {
@@ -8180,6 +8196,14 @@ mod windows_overlay {
 
                 MacroAction::HideHud => {
                     hide_hud_now();
+                }
+
+                MacroAction::HideTaskbar => {
+                    let _ = crate::platform::hide_taskbar();
+                }
+
+                MacroAction::ShowTaskbar => {
+                    let _ = crate::platform::show_taskbar();
                 }
 
                 MacroAction::LockKeys => {
@@ -10660,6 +10684,8 @@ mod windows_overlay {
                 | MacroAction::StopIfKeyPressed
                 | MacroAction::ShowHud
                 | MacroAction::HideHud
+                | MacroAction::HideTaskbar
+                | MacroAction::ShowTaskbar
                 | MacroAction::LockKeys
                 | MacroAction::UnlockKeys
                 | MacroAction::LockMouse
@@ -10811,6 +10837,8 @@ mod windows_overlay {
             | MacroAction::StopIfKeyPressed
             | MacroAction::ShowHud
             | MacroAction::HideHud
+            | MacroAction::HideTaskbar
+            | MacroAction::ShowTaskbar
             | MacroAction::LockKeys
             | MacroAction::UnlockKeys
             | MacroAction::LockMouse

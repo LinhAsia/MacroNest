@@ -4163,6 +4163,8 @@ impl CrosshairApp {
             MacroAction::StopIfKeyPressed => "Break Loop",
             MacroAction::ShowHud => "ShowHud",
             MacroAction::HideHud => "HideHud",
+            MacroAction::HideTaskbar => "HideTaskbar",
+            MacroAction::ShowTaskbar => "ShowTaskbar",
             MacroAction::LockKeys => "LockKeys",
             MacroAction::UnlockKeys => "UnlockKeys",
             MacroAction::LockMouse => "LockMouseMove",
@@ -4271,6 +4273,8 @@ impl CrosshairApp {
                 }
                 MacroAction::ShowHud => "Hiển thị HUD từ tab HUD.",
                 MacroAction::HideHud => "Ẩn HUD (Menu công cụ) đang hiển thị.",
+                MacroAction::HideTaskbar => "Ẩn thanh taskbar của Windows để làm màn hình sạch hơn.",
+                MacroAction::ShowTaskbar => "Hiện lại thanh taskbar của Windows nếu đang bị ẩn.",
                 MacroAction::LockKeys => "Khóa các phím được liệt kê trong ô Nhập.",
                 MacroAction::UnlockKeys => "Mở khóa các phím được liệt kê trong ô Nhập.",
                 MacroAction::LockMouse => {
@@ -4398,6 +4402,8 @@ impl CrosshairApp {
                 }
                 MacroAction::ShowHud => "Show one HUD preset from the HUD tab.",
                 MacroAction::HideHud => "Hide the currently visible HUD.",
+                MacroAction::HideTaskbar => "Hide the Windows taskbar for a cleaner fullscreen layout.",
+                MacroAction::ShowTaskbar => "Show the Windows taskbar again if it is hidden.",
                 MacroAction::LockKeys => "Lock the keys listed in Input.",
                 MacroAction::UnlockKeys => "Unlock the keys listed in Input.",
                 MacroAction::LockMouse => {
@@ -4499,6 +4505,8 @@ impl CrosshairApp {
             MacroAction::StopIfKeyPressed => 0xe14b,
             MacroAction::ShowHud => 0xe8f4,
             MacroAction::HideHud => 0xe8f5,
+            MacroAction::HideTaskbar => 0xe8f5,
+            MacroAction::ShowTaskbar => 0xe8f4,
             MacroAction::LockKeys => 0xe897,
             MacroAction::UnlockKeys => 0xe898,
             MacroAction::LockMouse => 0xe897,
@@ -4575,6 +4583,8 @@ impl CrosshairApp {
                 MacroAction::StopAudioSense => "Tắt Audio",
 
                 MacroAction::StopVisionWait => "Chờ",
+                MacroAction::HideTaskbar => "An taskbar",
+                MacroAction::ShowTaskbar => "Hien taskbar",
                 MacroAction::StartVisionSearch => "Tìm ảnh",
                 MacroAction::ScanVisionOnce => "Quét",
                 MacroAction::StartAudioSensePreset => "Audio",
@@ -4655,6 +4665,8 @@ impl CrosshairApp {
                 MacroAction::StopIfKeyPressed => "Break",
                 MacroAction::ShowHud => "Show HUD",
                 MacroAction::HideHud => "Hide HUD",
+                MacroAction::HideTaskbar => "TB Off",
+                MacroAction::ShowTaskbar => "TB On",
                 MacroAction::LockKeys => "KL On",
                 MacroAction::UnlockKeys => "KL Off",
                 MacroAction::LockMouse => "Lock M",
@@ -4728,6 +4740,8 @@ impl CrosshairApp {
                 MacroAction::StopIfKeyPressed => "Break",
                 MacroAction::ShowHud => "Show HUD",
                 MacroAction::HideHud => "Hide HUD",
+                MacroAction::HideTaskbar => "Hide taskbar",
+                MacroAction::ShowTaskbar => "Show taskbar",
                 MacroAction::LockKeys => "KL On",
                 MacroAction::UnlockKeys => "KL Off",
                 MacroAction::LockMouse => "ML On",
@@ -4777,6 +4791,7 @@ impl CrosshairApp {
             MacroAction::KeyDown | MacroAction::KeyUp => Some("KEY"),
             MacroAction::LockKeys | MacroAction::UnlockKeys => Some("KLOCK"),
             MacroAction::LockMouse | MacroAction::UnlockMouse => Some("MLOCK"),
+            MacroAction::HideTaskbar | MacroAction::ShowTaskbar => Some("TASKBAR"),
             _ => None,
         }
     }
@@ -4920,6 +4935,8 @@ impl CrosshairApp {
                 | MacroAction::DisableZoom
                 | MacroAction::DisablePin
                 | MacroAction::HideHud
+                | MacroAction::HideTaskbar
+                | MacroAction::ShowTaskbar
                 | MacroAction::LockMouse
                 | MacroAction::UnlockMouse
                 | MacroAction::Wait
@@ -9570,6 +9587,48 @@ impl eframe::App for CrosshairApp {
                             );
                             if vietnamese_input_response.clicked() {
                                 self.toggle_vietnamese_input_enabled();
+                            }
+                            if crate::platform::is_taskbar_hidden() {
+                                let show_taskbar_response = Self::hover_if(
+                                    Self::add_sized_with_show_hover_radius(
+                                        ui,
+                                        [112.0, 30.0],
+                                        8,
+                                        self.titlebar_button(
+                                            RichText::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Show taskbar",
+                                                "Hien taskbar",
+                                            ))
+                                            .size(13.0),
+                                            false,
+                                            false,
+                                        ),
+                                    ),
+                                    show_icon_tooltips,
+                                    Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Restore the Windows taskbar if it is hidden",
+                                        "Hien lai taskbar Windows neu dang bi an",
+                                    ),
+                                );
+                                if show_taskbar_response.clicked() {
+                                    if crate::platform::show_taskbar() {
+                                        self.status = Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Windows taskbar restored.",
+                                            "Da hien lai taskbar Windows.",
+                                        )
+                                        .to_owned();
+                                    } else {
+                                        self.status = Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Failed to restore the Windows taskbar.",
+                                            "Khong the hien lai taskbar Windows.",
+                                        )
+                                        .to_owned();
+                                    }
+                                }
                             }
                             let settings_response = Self::hover_if(
                                 Self::add_sized_with_show_hover_radius(

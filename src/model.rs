@@ -528,6 +528,8 @@ pub enum MacroAction {
     ShowHud,
     #[serde(alias = "HideToolbox")]
     HideHud,
+    HideTaskbar,
+    ShowTaskbar,
     LockKeys,
     UnlockKeys,
     LockMouse,

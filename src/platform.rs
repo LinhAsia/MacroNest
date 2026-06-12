@@ -29,9 +29,9 @@ mod windows_platform {
                     ShellExecuteW,
                 },
                 WindowsAndMessaging::{
-                    BringWindowToTop, HWND_NOTOPMOST, HWND_TOPMOST, SW_HIDE, SW_RESTORE,
-                    SW_SHOWNORMAL, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow,
-                    SetWindowPos, ShowWindow,
+                    BringWindowToTop, FindWindowExW, FindWindowW, HWND_NOTOPMOST, HWND_TOPMOST,
+                    IsWindowVisible, SW_HIDE, SW_RESTORE, SW_SHOWNA, SW_SHOWNORMAL, SWP_NOMOVE,
+                    SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos, ShowWindow,
                 },
             },
         },
@@ -330,6 +330,68 @@ mod windows_platform {
         }
     }
 
+    fn taskbar_windows() -> Vec<HWND> {
+        let mut windows = Vec::new();
+        unsafe {
+            let primary = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null())
+                .unwrap_or(HWND(std::ptr::null_mut()));
+            if !primary.0.is_null() {
+                windows.push(primary);
+            }
+
+            let mut previous = HWND(std::ptr::null_mut());
+            loop {
+                let next = FindWindowExW(
+                    None,
+                    Some(previous),
+                    w!("Shell_SecondaryTrayWnd"),
+                    PCWSTR::null(),
+                )
+                .unwrap_or(HWND(std::ptr::null_mut()));
+                if next.0.is_null() {
+                    break;
+                }
+                windows.push(next);
+                previous = next;
+            }
+        }
+        windows
+    }
+
+    pub fn hide_taskbar() -> bool {
+        let windows = taskbar_windows();
+        if windows.is_empty() {
+            return false;
+        }
+        for hwnd in windows {
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+        true
+    }
+
+    pub fn show_taskbar() -> bool {
+        let windows = taskbar_windows();
+        if windows.is_empty() {
+            return false;
+        }
+        for hwnd in windows {
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_SHOWNA);
+            }
+        }
+        true
+    }
+
+    pub fn is_taskbar_hidden() -> bool {
+        let windows = taskbar_windows();
+        !windows.is_empty()
+            && windows
+                .iter()
+                .all(|hwnd| unsafe { !IsWindowVisible(*hwnd).as_bool() })
+    }
+
     pub fn open_folder_in_explorer(path: &Path) -> Result<()> {
         if !path.exists() {
             bail!("Folder does not exist: {}", path.display());
@@ -490,6 +552,9 @@ mod fallback {
 
     pub fn hide_native_window(_frame: &Frame) {}
     pub fn show_native_window(_frame: &Frame) {}
+    pub fn hide_taskbar() -> bool { false }
+    pub fn show_taskbar() -> bool { false }
+    pub fn is_taskbar_hidden() -> bool { false }
 }
 
 #[cfg(not(windows))]
