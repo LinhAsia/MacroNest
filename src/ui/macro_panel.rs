@@ -13972,8 +13972,9 @@ impl CrosshairApp {
                         }
                     });
                     *live_sync |= Self::sync_show_geometry_modify_seed(step, geometry_presets, false);
+                    let selected_modify_preset =
+                        Self::selected_geometry_preset_for_step(geometry_presets, step);
                     if step.geometry_preset_modify_enabled && !step.geometry_collapsed {
-                        step.geometry_spec.visible = true;
                         ui.add_space(4.0);
                         ui.horizontal_wrapped(|ui| {
                             ui.label(Self::tr_lang(
@@ -14018,23 +14019,33 @@ impl CrosshairApp {
                             "Only the checked groups above will replace values from the selected preset.",
                             "Chi cac nhom duoc tick o tren moi de len gia tri cua preset da chon.",
                         ));
-                        ui.add_space(4.0);
-                        *live_sync |= Self::render_geometry_spec_editor(
-                            ui,
-                            language,
-                            macro_preset_id,
-                            step_index as u32,
-                            true,
-                            &mut step.geometry_spec,
-                            vision_manual_color,
-                            vision_manual_color_hex,
-                            request_screen_color_pick,
-                            &mut pending_screen_color_target,
-                            begin_mouse_move_absolute_capture_target,
-                            vietnamese_input_enabled,
-                            vietnamese_input_mode,
-                            Some(group_id),
-                        );
+                        if selected_modify_preset.is_some() {
+                            step.geometry_spec.visible = true;
+                            ui.add_space(4.0);
+                            *live_sync |= Self::render_geometry_spec_editor(
+                                ui,
+                                language,
+                                macro_preset_id,
+                                step_index as u32,
+                                true,
+                                &mut step.geometry_spec,
+                                vision_manual_color,
+                                vision_manual_color_hex,
+                                request_screen_color_pick,
+                                &mut pending_screen_color_target,
+                                begin_mouse_move_absolute_capture_target,
+                                vietnamese_input_enabled,
+                                vietnamese_input_mode,
+                                Some(group_id),
+                            );
+                        } else {
+                            ui.add_space(4.0);
+                            ui.weak(Self::tr_lang(
+                                language,
+                                "Select a geometry preset first, then the matching modify fields will appear.",
+                                "Hay chon geometry preset truoc, luc do cac o modify dung voi preset moi hien ra.",
+                            ));
+                        }
                     }
                     if *request_screen_color_pick {
                         if let Some((_, _, is_fill)) = pending_screen_color_target {
