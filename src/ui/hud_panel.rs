@@ -55,6 +55,7 @@ impl CrosshairApp {
         let mut remove_id = None;
         let mut changed = false;
         let mut active_preview: Option<HudPreset> = None;
+        let mut preview_toggled_preset_id = None;
         for index in 0..self.state.hud_presets.len() {
             let language = self.state.ui_language;
             ui.add_space(6.0);
@@ -72,6 +73,26 @@ impl CrosshairApp {
                     );
                     changed |= response.changed();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let preview_active = preset.preview_enabled;
+                        let preview_response = Self::sound_style_icon_button(
+                            ui,
+                            Self::material_icon_text(
+                                if preview_active { 0xe047 } else { 0xe037 },
+                                18.0,
+                            ),
+                        )
+                        .on_hover_text(if preview_active {
+                            Self::tr_lang(language, "Stop HUD preview", "Dung preview HUD")
+                        } else {
+                            Self::tr_lang(language, "Run HUD preview", "Chay preview HUD")
+                        });
+                        if preview_response.clicked() {
+                            preset.preview_enabled = !preset.preview_enabled;
+                            if preset.preview_enabled {
+                                preview_toggled_preset_id = Some(preset.id);
+                            }
+                            changed = true;
+                        }
                         if Self::sound_style_remove_button(ui).clicked() {
                             remove_id = Some(preset.id);
                         }
@@ -151,19 +172,6 @@ impl CrosshairApp {
                             )
                             .changed();
                         ui.end_row();
-
-                        ui.label(Self::tr_lang(language, "Preview", "Preview"));
-                        changed |= ui
-                            .checkbox(
-                                &mut preset.preview_enabled,
-                                Self::tr_lang(
-                                    language,
-                                    "Stream preview in editor",
-                                    "Stream preview trong editor",
-                                ),
-                            )
-                            .changed();
-                        ui.end_row();
                     });
 
                 ui.add_space(6.0);
@@ -204,6 +212,13 @@ impl CrosshairApp {
         if let Some(id) = remove_id {
             self.state.hud_presets.retain(|preset| preset.id != id);
             changed = true;
+        }
+        if let Some(current_id) = preview_toggled_preset_id {
+            for other_preset in &mut self.state.hud_presets {
+                if other_preset.id != current_id {
+                    other_preset.preview_enabled = false;
+                }
+            }
         }
         self.sync_hud_preview(active_preview.as_ref());
         if changed {

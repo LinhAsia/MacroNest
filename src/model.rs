@@ -881,7 +881,7 @@ impl GeometryPreset {
             name: format!("Geometry {id}"),
             enabled: true,
             collapsed: true,
-            objects: vec![GeometryObject::new(1, GeometryShapeKind::Point)],
+            objects: Vec::new(),
         }
     }
 }

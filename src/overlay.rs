@@ -5852,7 +5852,7 @@ mod windows_overlay {
         }
     }
 
-    fn apply_window_preset_by_id(spec: &str) -> Result<()> {
+    pub(crate) fn apply_window_preset_by_id(spec: &str) -> Result<()> {
         window_preset::apply_window_preset_by_id(spec)
     }
 

@@ -13510,7 +13510,6 @@ impl CrosshairApp {
                                     let next_preset_id = geometry_presets.iter().map(|p| p.id).max().unwrap_or(0) + 1;
                                     let mut new_preset = crate::model::GeometryPreset::new(next_preset_id);
                                     new_preset.name = format!("Preset {}", next_preset_id);
-                                    new_preset.objects.clear();
                                     let object_id = 1;
                                     new_preset.objects.push(crate::model::GeometryObject {
                                         id: object_id,

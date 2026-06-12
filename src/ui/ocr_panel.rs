@@ -83,6 +83,18 @@ impl CrosshairApp {
                     live_sync |= response.changed();
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let run_response = Self::sound_style_icon_button(
+                            ui,
+                            Self::material_icon_text(0xe037, 18.0),
+                        )
+                        .on_hover_text(Self::tr_lang(
+                            language,
+                            "Run this OCR preset now",
+                            "Chay preset OCR nay ngay",
+                        ));
+                        if run_response.clicked() {
+                            run_test_preset_id = Some(preset.id);
+                        }
                         // Delete Button
                         if Self::sound_style_remove_button(ui).clicked() {
                             remove_id = Some(preset.id);

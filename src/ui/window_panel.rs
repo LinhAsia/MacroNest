@@ -53,6 +53,7 @@ impl CrosshairApp {
         for index in 0..self.state.window_presets.len() {
             let mut next_capture_target = None;
             let mut cancel_active_capture = false;
+            let mut run_resize_now = false;
             let active_capture_target = self.capture_target.clone();
             let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
             ui.add_space(6.0);
@@ -214,6 +215,19 @@ impl CrosshairApp {
                                         live_sync = true;
                                     }
 
+                                    let run_response = Self::sound_style_icon_button(
+                                        ui,
+                                        Self::material_icon_text(0xe037, 18.0),
+                                    )
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Run this resize preset now",
+                                        "Chay preset kich thuoc nay ngay",
+                                    ));
+                                    if run_response.clicked() {
+                                        run_resize_now = true;
+                                    }
+
                                     if Self::sound_style_remove_button(ui).clicked() {
                                         remove_id = Some(preset.id);
                                     }
@@ -357,6 +371,24 @@ impl CrosshairApp {
             }
             if cancel_active_capture {
                 self.cancel_capture();
+            }
+            if run_resize_now {
+                let preset_id = self.state.window_presets[index].id.to_string();
+                match crate::overlay::apply_window_preset_by_id(&preset_id) {
+                    Ok(()) => {
+                        self.status = format!(
+                            "Applied resize preset {}.",
+                            self.state.window_presets[index].name
+                        );
+                    }
+                    Err(error) => {
+                        self.status = format!(
+                            "Failed to apply resize preset {}: {}",
+                            self.state.window_presets[index].name,
+                            error
+                        );
+                    }
+                }
             }
         }
 
@@ -612,6 +644,7 @@ impl CrosshairApp {
         for index in 0..self.state.pin_presets.len() {
             let mut next_capture_target = None;
             let mut cancel_active_capture = false;
+            let mut toggle_pin_now = false;
             let active_capture_target = self.capture_target.clone();
             let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
             ui.add_space(6.0);
@@ -756,6 +789,31 @@ impl CrosshairApp {
                             preset.trigger_keys.clear();
                             preset.enabled = false;
                             live_sync = true;
+                        }
+
+                        let pin_active = crate::overlay::is_pin_active(&preset.id.to_string());
+                        let run_response = Self::sound_style_icon_button(
+                            ui,
+                            Self::material_icon_text(
+                                if pin_active { 0xe047 } else { 0xe037 },
+                                18.0,
+                            ),
+                        )
+                        .on_hover_text(if pin_active {
+                            Self::tr_lang(
+                                language,
+                                "Stop this pin preset",
+                                "Dung preset ghim nay",
+                            )
+                        } else {
+                            Self::tr_lang(
+                                language,
+                                "Run this pin preset now",
+                                "Chay preset ghim nay ngay",
+                            )
+                        });
+                        if run_response.clicked() {
+                            toggle_pin_now = true;
                         }
 
                         if Self::sound_style_remove_button(ui).clicked() {
@@ -949,6 +1007,24 @@ impl CrosshairApp {
             }
             if cancel_active_capture {
                 self.cancel_capture();
+            }
+            if toggle_pin_now {
+                let preset_id = self.state.pin_presets[index].id.to_string();
+                let preset_name = self.state.pin_presets[index].name.clone();
+                if crate::overlay::is_pin_active(&preset_id) {
+                    crate::overlay::disable_pin_preset(&preset_id);
+                    self.status = format!("Stopped pin preset {}.", preset_name);
+                } else {
+                    match crate::overlay::enable_pin_preset(&preset_id) {
+                        Ok(()) => {
+                            self.status = format!("Started pin preset {}.", preset_name);
+                        }
+                        Err(error) => {
+                            self.status =
+                                format!("Failed to start pin preset {}: {}", preset_name, error);
+                        }
+                    }
+                }
             }
         }
 
@@ -2534,6 +2610,7 @@ impl CrosshairApp {
         for index in 0..layouts_count {
             let mut next_capture_target = None;
             let mut cancel_active_capture = false;
+            let mut run_layout_now = false;
             let active_capture_target = self.capture_target.clone();
             let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
             ui.add_space(6.0);
@@ -2683,6 +2760,19 @@ impl CrosshairApp {
                                     layout.trigger_keys.clear();
                                     layout.enabled = false;
                                     live_sync = true;
+                                }
+
+                                let run_response = Self::sound_style_icon_button(
+                                    ui,
+                                    Self::material_icon_text(0xe037, 18.0),
+                                )
+                                .on_hover_text(Self::tr_lang(
+                                    language,
+                                    "Run this layout preset now",
+                                    "Chay preset bo cuc nay ngay",
+                                ));
+                                if run_response.clicked() {
+                                    run_layout_now = true;
                                 }
 
                                 if Self::sound_style_remove_button(ui).clicked() {
@@ -3317,6 +3407,12 @@ impl CrosshairApp {
             }
             if cancel_active_capture {
                 self.cancel_capture();
+            }
+            if run_layout_now {
+                let layout = self.state.window_layouts[index].clone();
+                let layout_name = layout.name.clone();
+                let _ = self.overlay_tx.send(OverlayCommand::ApplyWindowLayout(layout));
+                self.status = format!("Applied layout preset {}.", layout_name);
             }
         }
         
