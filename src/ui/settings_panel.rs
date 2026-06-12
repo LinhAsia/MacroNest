@@ -727,7 +727,15 @@ impl CrosshairApp {
         response
     }
 
+    pub(crate) fn cleanup_custom_ai_dialog_state(&mut self) {
+        self.command_ai_step_target = None;
+        self.state
+            .command_presets
+            .retain(|preset| preset.id != 999999);
+    }
+
     pub(crate) fn render_custom_ai_modal(&mut self, ctx: &egui::Context) {
+        let dialog_was_open = self.command_ai_dialog.is_some();
         let generating = self.command_ai_job.is_some();
         let Some(dialog_preset_id) = self
             .command_ai_dialog
@@ -920,16 +928,8 @@ impl CrosshairApp {
         if close_request {
             self.command_ai_dialog = None;
         }
-        if self.command_ai_dialog.is_none() {
-            if self.command_ai_job.is_none() {
-                self.command_ai_step_target = None;
-                self.state
-                    .command_presets
-                    .retain(|preset| preset.id != 999999);
-            }
-        }
-        if self.command_ai_dialog.is_some() {
-            ctx.request_repaint_after(Duration::from_millis(16));
+        if dialog_was_open && self.command_ai_dialog.is_none() && self.command_ai_job.is_none() {
+            self.cleanup_custom_ai_dialog_state();
         }
     }
 

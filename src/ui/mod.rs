@@ -6863,6 +6863,9 @@ impl CrosshairApp {
                         let message = Self::ai_generation_feedback(&error);
                         self.command_ai_feedback = Some(message.clone());
                         self.status = message;
+                        if result.preset_id == 999999 && self.command_ai_dialog.is_none() {
+                            self.cleanup_custom_ai_dialog_state();
+                        }
                     }
                 }
                 ctx.request_repaint();
@@ -6872,6 +6875,9 @@ impl CrosshairApp {
                 self.command_ai_job = None;
                 self.command_ai_feedback = Some("AI generation stopped unexpectedly.".to_owned());
                 self.status = "AI generation stopped unexpectedly.".to_owned();
+                if job_preset_id == 999999 && self.command_ai_dialog.is_none() {
+                    self.cleanup_custom_ai_dialog_state();
+                }
                 ctx.request_repaint();
             }
         }
