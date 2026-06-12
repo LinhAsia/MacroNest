@@ -199,7 +199,7 @@ impl CrosshairApp {
         for (position, preset_index) in matching_indices.iter().copied().enumerate() {
                 let preset = &mut self.state.audio_sense_presets[preset_index];
                 ui.add_space(6.0);
-                Self::show_preset_card(ui, preset.enabled, |ui| {
+                Self::show_preset_card(ui, false, |ui| {
                     ui.horizontal(|ui| {
                         let name_width = Self::preset_header_name_width(ui);
                         let response =

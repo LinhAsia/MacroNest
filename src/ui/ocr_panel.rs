@@ -66,7 +66,7 @@ impl CrosshairApp {
             preset.enabled = true; // Always enabled for macros
             ui.add_space(6.0);
 
-            Self::show_preset_card(ui, preset.enabled, |ui| {
+            Self::show_preset_card(ui, false, |ui| {
                 ui.horizontal(|ui| {
                     // Editable Name
                     let name_width = Self::preset_header_name_width(ui);
