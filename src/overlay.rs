@@ -736,6 +736,7 @@ mod windows_overlay {
         active_audio_sense_snapshots: std::collections::HashMap<String, crate::audiosense::PitchSnapshot>,
         geometry_presets: Vec<crate::model::GeometryPreset>,
         active_geometry_preset_ids: HashSet<u32>,
+        active_geometry_preset_instances: HashMap<(u32, usize), ActiveGeometryPresetInstance>,
         active_geometry_steps: HashMap<(u32, usize), crate::model::GeometrySpec>,
         rendered_geometry_steps: HashMap<(u32, usize), GeometryRenderShape>,
         active_geometry_steps_expires: HashMap<(u32, usize), Instant>,
@@ -824,6 +825,7 @@ mod windows_overlay {
                 active_audio_sense_snapshots: std::collections::HashMap::new(),
                 geometry_presets: Vec::new(),
                 active_geometry_preset_ids: HashSet::new(),
+                active_geometry_preset_instances: HashMap::new(),
                 active_geometry_steps: HashMap::new(),
                 rendered_geometry_steps: HashMap::new(),
                 active_geometry_steps_expires: HashMap::new(),
@@ -7595,14 +7597,21 @@ mod windows_overlay {
 
 
                 MacroAction::ShowGeometryPreset => {
-                    if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
-                        set_geometry_preset_visible(geometry_preset_id, true);
+                    let owner = (preset_id, absolute_index);
+                    if let Some(base_preset) = resolve_geometry_preset_from_step(step) {
+                        if step.geometry_preset_modify_enabled {
+                            let instance = build_geometry_preset_instance_from_step(&base_preset, step);
+                            upsert_geometry_preset_instance(owner, base_preset.id, instance);
+                        } else {
+                            clear_geometry_preset_instance(owner);
+                            set_geometry_preset_visible(base_preset.id, true);
+                        }
                     }
                 }
 
                 MacroAction::HideGeometryPreset => {
                     if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
-                        set_geometry_preset_visible(geometry_preset_id, false);
+                        hide_geometry_preset_by_id(geometry_preset_id);
                     } else {
                         clear_geometry_overlay();
                     }
@@ -8161,14 +8170,21 @@ mod windows_overlay {
 
 
                 MacroAction::ShowGeometryPreset => {
-                    if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
-                        set_geometry_preset_visible(geometry_preset_id, true);
+                    let owner = (preset_id, absolute_index);
+                    if let Some(base_preset) = resolve_geometry_preset_from_step(step) {
+                        if step.geometry_preset_modify_enabled {
+                            let instance = build_geometry_preset_instance_from_step(&base_preset, step);
+                            upsert_geometry_preset_instance(owner, base_preset.id, instance);
+                        } else {
+                            clear_geometry_preset_instance(owner);
+                            set_geometry_preset_visible(base_preset.id, true);
+                        }
                     }
                 }
 
                 MacroAction::HideGeometryPreset => {
                     if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
-                        set_geometry_preset_visible(geometry_preset_id, false);
+                        hide_geometry_preset_by_id(geometry_preset_id);
                     } else {
                         clear_geometry_overlay();
                     }
@@ -9150,6 +9166,111 @@ mod windows_overlay {
         vars.insert(target_trimmed.to_string(), value.to_string());
     }
 
+    fn split_expression_arguments(expr: &str) -> Vec<String> {
+        let mut args = Vec::new();
+        let mut current = String::new();
+        let mut paren_depth = 0i32;
+        let mut brace_depth = 0i32;
+
+        for ch in expr.chars() {
+            match ch {
+                ',' if paren_depth == 0 && brace_depth == 0 => {
+                    let trimmed = current.trim();
+                    if !trimmed.is_empty() {
+                        args.push(trimmed.to_string());
+                    }
+                    current.clear();
+                }
+                '(' => {
+                    paren_depth += 1;
+                    current.push(ch);
+                }
+                ')' => {
+                    paren_depth = (paren_depth - 1).max(0);
+                    current.push(ch);
+                }
+                '{' => {
+                    brace_depth += 1;
+                    current.push(ch);
+                }
+                '}' => {
+                    brace_depth = (brace_depth - 1).max(0);
+                    current.push(ch);
+                }
+                _ => current.push(ch),
+            }
+        }
+
+        let trimmed = current.trim();
+        if !trimmed.is_empty() {
+            args.push(trimmed.to_string());
+        }
+
+        args
+    }
+
+    fn resolve_choice_expression_value(expr: &str) -> Option<String> {
+        let trimmed = expr.trim();
+        let inner = trimmed
+            .strip_prefix("choice(")?
+            .strip_suffix(')')?
+            .trim();
+        let args = split_expression_arguments(inner);
+        if args.is_empty() {
+            return None;
+        }
+
+        let idx = get_pseudo_random(0, (args.len() - 1) as i32) as usize;
+        let chosen = args.get(idx)?.trim();
+        if chosen.is_empty() {
+            return None;
+        }
+
+        let interpolated = interpolate_variables(chosen);
+        let resolved = interpolated.trim();
+        if resolved.is_empty() {
+            return Some(String::new());
+        }
+
+        let lower = resolved.to_ascii_lowercase();
+        let looks_like_expression = resolved.chars().any(|c| "+-*/()".contains(c))
+            || lower == "pi"
+            || lower.contains("random(")
+            || lower.contains("choice(")
+            || lower.contains("min(")
+            || lower.contains("max(")
+            || lower.contains("abs(")
+            || lower.contains("atan(")
+            || lower.contains("atan2(")
+            || lower.contains("sin(")
+            || lower.contains("cos(")
+            || lower.contains("tan(")
+            || lower.contains("asin(")
+            || lower.contains("acos(")
+            || lower.contains("sinh(")
+            || lower.contains("cosh(")
+            || lower.contains("tanh(")
+            || lower.contains("sqrt(")
+            || lower.contains("pow(")
+            || lower.contains("ceil(")
+            || lower.contains("floor(")
+            || lower.contains("degrees(")
+            || lower.contains("radians(")
+            || lower.contains("factorial(")
+            || lower.contains("gcd(")
+            || lower.contains("lcm(")
+            || lower.contains("isqrt(")
+            || lower.contains("comb(")
+            || lower.contains("perm(")
+            || lower.contains(".tonumber");
+
+        if looks_like_expression {
+            Some(evaluate_math_expression_f64(resolved).to_string())
+        } else {
+            Some(resolved.to_string())
+        }
+    }
+
     fn smart_set_variable_from_expression(target_var: &str, expr_raw: &str) {
         let target_trimmed = target_var.trim();
         if target_trimmed.is_empty() {
@@ -9157,6 +9278,16 @@ mod windows_overlay {
         }
 
         let expr_trimmed = expr_raw.trim().to_string();
+        if let Some(chosen) = resolve_choice_expression_value(&expr_trimmed) {
+            if let Ok(val) = chosen.parse::<f64>() {
+                set_variable_value(target_trimmed, val);
+                TEXT_VARIABLES.lock().remove(target_trimmed);
+            } else {
+                set_text_variable_value(target_trimmed, &chosen);
+                RUNTIME_VARIABLES.lock().remove(target_trimmed);
+            }
+            return;
+        }
         if !expr_trimmed.contains('{') {
             if let Ok(val) = expr_trimmed.parse::<f64>() {
                 set_variable_value(target_trimmed, val);
@@ -9950,6 +10081,27 @@ mod windows_overlay {
             assert_eq!(interpolate_variables("test {A+A}"), "test 1040");
             assert_eq!(interpolate_variables("test {A + B * 2}"), "test 540");
             assert_eq!(interpolate_variables("test {C}"), "test 0");
+        }
+
+        #[test]
+        fn test_choice_expression_supports_text_and_numeric_values() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+
+            for _ in 0..20 {
+                let chosen = resolve_choice_expression_value("choice(hi, hello, bye)").unwrap();
+                assert!(matches!(chosen.as_str(), "hi" | "hello" | "bye"));
+            }
+
+            for _ in 0..20 {
+                let chosen = resolve_choice_expression_value("choice(123, hello123, 456)").unwrap();
+                assert!(matches!(chosen.as_str(), "123" | "hello123" | "456"));
+            }
+
+            for _ in 0..20 {
+                let chosen = resolve_choice_expression_value("choice(random(1, 3), 9)").unwrap();
+                let parsed = chosen.parse::<i32>().unwrap();
+                assert!((1..=3).contains(&parsed) || parsed == 9);
+            }
         }
 
         #[test]
@@ -11762,6 +11914,12 @@ mod windows_overlay {
         text: String,
     }
 
+    #[derive(Clone, Debug)]
+    struct ActiveGeometryPresetInstance {
+        base_preset_id: u32,
+        preset: crate::model::GeometryPreset,
+    }
+
     fn geometry_label_bounds(
         x: i32,
         y: i32,
@@ -12274,7 +12432,15 @@ mod windows_overlay {
 
     fn geometry_overlay_static_shapes(hook_state: &mut HookState) -> Vec<GeometryRenderShape> {
         let mut shapes = Vec::new();
+        let overridden_preset_ids: HashSet<u32> = hook_state
+            .active_geometry_preset_instances
+            .values()
+            .map(|instance| instance.base_preset_id)
+            .collect();
         for preset_id in &hook_state.active_geometry_preset_ids {
+            if overridden_preset_ids.contains(preset_id) {
+                continue;
+            }
             if let Some(preset) = hook_state
                 .geometry_presets
                 .iter()
@@ -12289,8 +12455,21 @@ mod windows_overlay {
                 }
             }
         }
+        for instance in hook_state.active_geometry_preset_instances.values() {
+            if !instance.preset.enabled {
+                continue;
+            }
+            for object in &instance.preset.objects {
+                if object.enabled {
+                    if let Some(shape) = geometry_render_shape_from_spec(&object.spec) {
+                        shapes.push(shape);
+                    }
+                }
+            }
+        }
         if let Some(preview_preset_id) = hook_state.preview_geometry_preset_id {
-            let is_active = hook_state.active_geometry_preset_ids.contains(&preview_preset_id);
+            let is_active = hook_state.active_geometry_preset_ids.contains(&preview_preset_id)
+                || overridden_preset_ids.contains(&preview_preset_id);
             if let Some(preset) = hook_state
                 .geometry_presets
                 .iter()
@@ -14764,6 +14943,114 @@ mod windows_overlay {
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
+    fn geometry_preset_override_groups_enabled(step: &MacroStep) -> bool {
+        step.geometry_modify_position
+            || step.geometry_modify_size
+            || step.geometry_modify_transform
+            || step.geometry_modify_content
+            || step.geometry_modify_style
+    }
+
+    fn apply_geometry_spec_overrides(target: &mut GeometrySpec, source: &GeometrySpec, step: &MacroStep) {
+        if step.geometry_modify_position {
+            target.x1_expr = source.x1_expr.clone();
+            target.y1_expr = source.y1_expr.clone();
+            target.x2_expr = source.x2_expr.clone();
+            target.y2_expr = source.y2_expr.clone();
+            target.x3_expr = source.x3_expr.clone();
+            target.y3_expr = source.y3_expr.clone();
+            target.x4_expr = source.x4_expr.clone();
+            target.y4_expr = source.y4_expr.clone();
+            target.points_expr = source.points_expr.clone();
+        }
+
+        if step.geometry_modify_size {
+            target.width_expr = source.width_expr.clone();
+            target.height_expr = source.height_expr.clone();
+            target.radius_expr = source.radius_expr.clone();
+            target.radius_x_expr = source.radius_x_expr.clone();
+            target.radius_y_expr = source.radius_y_expr.clone();
+            target.arrow_head_size_expr = source.arrow_head_size_expr.clone();
+            target.font_size_expr = source.font_size_expr.clone();
+        }
+
+        if step.geometry_modify_transform {
+            target.start_angle_expr = source.start_angle_expr.clone();
+            target.end_angle_expr = source.end_angle_expr.clone();
+            target.rotation_expr = source.rotation_expr.clone();
+        }
+
+        if step.geometry_modify_content {
+            target.text = source.text.clone();
+        }
+
+        if step.geometry_modify_style {
+            target.stroke_color_expr = source.stroke_color_expr.clone();
+            target.fill_color_expr = source.fill_color_expr.clone();
+            target.stroke_color = source.stroke_color;
+            target.fill_color = source.fill_color;
+            target.filled = source.filled;
+            target.visible = source.visible;
+            target.thickness_expr = source.thickness_expr.clone();
+            target.opacity_expr = source.opacity_expr.clone();
+            target.fill_opacity_expr = source.fill_opacity_expr.clone();
+        }
+    }
+
+    fn build_geometry_preset_instance_from_step(
+        base_preset: &crate::model::GeometryPreset,
+        step: &MacroStep,
+    ) -> crate::model::GeometryPreset {
+        let mut preset = base_preset.clone();
+        if !step.geometry_preset_modify_enabled || !geometry_preset_override_groups_enabled(step) {
+            return preset;
+        }
+
+        for object in &mut preset.objects {
+            apply_geometry_spec_overrides(&mut object.spec, &step.geometry_spec, step);
+        }
+        preset
+    }
+
+    fn upsert_geometry_preset_instance(
+        owner: (u32, usize),
+        base_preset_id: u32,
+        preset: crate::model::GeometryPreset,
+    ) {
+        {
+            let mut hook_state = HOOK_STATE.lock();
+            hook_state.active_geometry_preset_instances.insert(
+                owner,
+                ActiveGeometryPresetInstance {
+                    base_preset_id,
+                    preset,
+                },
+            );
+        }
+        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+    }
+
+    fn clear_geometry_preset_instance(owner: (u32, usize)) {
+        let removed = {
+            let mut hook_state = HOOK_STATE.lock();
+            hook_state.active_geometry_preset_instances.remove(&owner).is_some()
+        };
+        if removed {
+            send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+        }
+    }
+
+    fn hide_geometry_preset_by_id(preset_id: u32) {
+        {
+            let mut hook_state = HOOK_STATE.lock();
+            hook_state.active_geometry_preset_ids.remove(&preset_id);
+            hook_state
+                .active_geometry_preset_instances
+                .retain(|_, instance| instance.base_preset_id != preset_id);
+        }
+        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+    }
+
     fn resolve_geometry_preset_id_from_step(step: &MacroStep) -> Option<u32> {
         if !step.geometry_preset_use_custom_ref {
             if step.geometry_preset_id.is_some() {
@@ -14802,6 +15089,16 @@ mod windows_overlay {
             })
             .map(|preset| preset.id)
             .or(step.geometry_preset_id)
+    }
+
+    fn resolve_geometry_preset_from_step(step: &MacroStep) -> Option<crate::model::GeometryPreset> {
+        let preset_id = resolve_geometry_preset_id_from_step(step)?;
+        HOOK_STATE
+            .lock()
+            .geometry_presets
+            .iter()
+            .find(|preset| preset.id == preset_id)
+            .cloned()
     }
 
     fn set_step_geometry_spec(preset_id: u32, absolute_step_index: usize, spec: &GeometrySpec) {
@@ -14853,6 +15150,7 @@ mod windows_overlay {
         {
             let mut hook_state = HOOK_STATE.lock();
             hook_state.active_geometry_preset_ids.clear();
+            hook_state.active_geometry_preset_instances.clear();
             hook_state.active_geometry_steps.clear();
             hook_state.rendered_geometry_steps.clear();
             hook_state.last_geometry_overlay_refresh_at = None;

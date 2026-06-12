@@ -13335,6 +13335,75 @@ impl CrosshairApp {
         }
     }
 
+    fn selected_geometry_preset_for_step<'a>(
+        geometry_presets: &'a [crate::model::GeometryPreset],
+        step: &MacroStep,
+    ) -> Option<&'a crate::model::GeometryPreset> {
+        if let Some(preset_id) = step.geometry_preset_id {
+            return geometry_presets.iter().find(|preset| preset.id == preset_id);
+        }
+
+        let trimmed = step.key.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        trimmed
+            .parse::<u32>()
+            .ok()
+            .and_then(|preset_id| geometry_presets.iter().find(|preset| preset.id == preset_id))
+            .or_else(|| {
+                geometry_presets
+                    .iter()
+                    .find(|preset| preset.name.trim().eq_ignore_ascii_case(trimmed))
+            })
+            .or_else(|| {
+                let normalized = trimmed.replace(' ', "").to_ascii_lowercase();
+                geometry_presets.iter().find(|preset| {
+                    preset.name.replace(' ', "").to_ascii_lowercase() == normalized
+                })
+            })
+    }
+
+    fn geometry_preset_seed_spec(
+        preset: &crate::model::GeometryPreset,
+    ) -> Option<crate::model::GeometrySpec> {
+        preset
+            .objects
+            .iter()
+            .find(|object| object.enabled)
+            .or_else(|| preset.objects.first())
+            .map(|object| object.spec.clone())
+    }
+
+    fn sync_show_geometry_modify_seed(
+        step: &mut MacroStep,
+        geometry_presets: &[crate::model::GeometryPreset],
+        force: bool,
+    ) -> bool {
+        let resolved_preset = Self::selected_geometry_preset_for_step(geometry_presets, step);
+        let resolved_id = resolved_preset.map(|preset| preset.id);
+
+        if !step.geometry_preset_modify_enabled {
+            step.geometry_preset_modify_source_id = resolved_id;
+            return false;
+        }
+
+        if !force && resolved_id == step.geometry_preset_modify_source_id {
+            return false;
+        }
+
+        step.geometry_preset_modify_source_id = resolved_id;
+        if let Some(preset) = resolved_preset
+            && let Some(spec) = Self::geometry_preset_seed_spec(preset)
+        {
+            step.geometry_spec = spec;
+            return true;
+        }
+
+        false
+    }
+
     fn render_geometry_preset_name_suggestions(
         ui: &mut egui::Ui,
         response: &egui::Response,
@@ -13827,7 +13896,107 @@ impl CrosshairApp {
                             vietnamese_input_enabled,
                             vietnamese_input_mode,
                         );
+                        ui.add_space(6.0);
+                        let modify_changed = ui
+                            .checkbox(
+                                &mut step.geometry_preset_modify_enabled,
+                                Self::tr_lang(language, "Modify", "Modify"),
+                            )
+                            .changed();
+                        if modify_changed {
+                            if step.geometry_preset_modify_enabled {
+                                step.geometry_collapsed = false;
+                                *live_sync |=
+                                    Self::sync_show_geometry_modify_seed(step, geometry_presets, true);
+                            } else {
+                                step.geometry_preset_modify_source_id = step.geometry_preset_id;
+                            }
+                            *live_sync = true;
+                        }
+                        if step.geometry_preset_modify_enabled {
+                            let collapse_icon = if step.geometry_collapsed { 0xe5cc } else { 0xe5cf };
+                            let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
+                            if ui
+                                .add_sized([18.0, 18.0], collapse_btn)
+                                .on_hover_text(if step.geometry_collapsed { "Expand" } else { "Collapse" })
+                                .clicked()
+                            {
+                                step.geometry_collapsed = !step.geometry_collapsed;
+                                *live_sync = true;
+                            }
+                        }
                     });
+                    *live_sync |= Self::sync_show_geometry_modify_seed(step, geometry_presets, false);
+                    if step.geometry_preset_modify_enabled && !step.geometry_collapsed {
+                        step.geometry_spec.visible = true;
+                        ui.add_space(4.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(Self::tr_lang(
+                                language,
+                                "Override:",
+                                "Override:",
+                            ));
+                            *live_sync |= ui
+                                .checkbox(
+                                    &mut step.geometry_modify_position,
+                                    Self::tr_lang(language, "Position", "Vi tri"),
+                                )
+                                .changed();
+                            *live_sync |= ui
+                                .checkbox(
+                                    &mut step.geometry_modify_size,
+                                    Self::tr_lang(language, "Size", "Kich thuoc"),
+                                )
+                                .changed();
+                            *live_sync |= ui
+                                .checkbox(
+                                    &mut step.geometry_modify_transform,
+                                    Self::tr_lang(language, "Transform", "Bien doi"),
+                                )
+                                .changed();
+                            *live_sync |= ui
+                                .checkbox(
+                                    &mut step.geometry_modify_content,
+                                    Self::tr_lang(language, "Content", "Noi dung"),
+                                )
+                                .changed();
+                            *live_sync |= ui
+                                .checkbox(
+                                    &mut step.geometry_modify_style,
+                                    Self::tr_lang(language, "Style", "Style"),
+                                )
+                                .changed();
+                        });
+                        ui.add_space(2.0);
+                        ui.weak(Self::tr_lang(
+                            language,
+                            "Only the checked groups above will replace values from the selected preset.",
+                            "Chi cac nhom duoc tick o tren moi de len gia tri cua preset da chon.",
+                        ));
+                        ui.add_space(4.0);
+                        *live_sync |= Self::render_geometry_spec_editor(
+                            ui,
+                            language,
+                            macro_preset_id,
+                            step_index as u32,
+                            true,
+                            &mut step.geometry_spec,
+                            vision_manual_color,
+                            vision_manual_color_hex,
+                            request_screen_color_pick,
+                            &mut pending_screen_color_target,
+                            begin_mouse_move_absolute_capture_target,
+                            vietnamese_input_enabled,
+                            vietnamese_input_mode,
+                            Some(group_id),
+                        );
+                    }
+                    if *request_screen_color_pick {
+                        if let Some((_, _, is_fill)) = pending_screen_color_target {
+                            *pending_macro_step_color_pick =
+                                Some((group_id, macro_preset_id, step_index, is_fill, is_hold_stop));
+                        }
+                    }
                 }
                 MacroAction::HideGeometryPreset => {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
