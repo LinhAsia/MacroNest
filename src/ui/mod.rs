@@ -9587,20 +9587,31 @@ impl eframe::App for CrosshairApp {
                                 self.toggle_vietnamese_input_enabled();
                             }
                             let taskbar_hidden = crate::platform::is_taskbar_hidden();
-                            let taskbar_response = Self::hover_if(
+                            let taskbar_button_response =
                                 Self::add_sized_with_show_hover_radius(
                                     ui,
                                     [38.0, 30.0],
                                     8,
                                     self.titlebar_button(
-                                        Self::material_icon_text(
-                                            if taskbar_hidden { 0xe8f4 } else { 0xe8f5 },
-                                            18.0,
-                                        ),
+                                        Self::material_icon_text(0xf86e, 18.0),
                                         false,
                                         false,
                                     ),
-                                ),
+                                );
+                            if taskbar_hidden {
+                                let slash_color = if self.state.ui_theme == UiThemeMode::Dark {
+                                    Color32::from_rgb(255, 132, 132)
+                                } else {
+                                    Color32::from_rgb(180, 52, 52)
+                                };
+                                let slash_rect = taskbar_button_response.rect.shrink2(vec2(10.0, 8.0));
+                                ui.painter().line_segment(
+                                    [slash_rect.left_top(), slash_rect.right_bottom()],
+                                    egui::Stroke::new(2.0, slash_color),
+                                );
+                            }
+                            let taskbar_response = Self::hover_if(
+                                taskbar_button_response,
                                 show_icon_tooltips,
                                 if taskbar_hidden {
                                     Self::tr_lang(
