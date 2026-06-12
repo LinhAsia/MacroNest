@@ -206,17 +206,13 @@ fn main() -> Result<()> {
         "MacroNest v{}",
         option_env!("MACRONEST_BUILD_TAG").unwrap_or(env!("CARGO_PKG_VERSION"))
     );
-    let app_icon = app_icon::icon_data(128).ok().map(Arc::new);
     let mut viewport_builder = eframe::egui::ViewportBuilder::default()
         .with_title(&app_title)
         .with_inner_size([1180.0, 780.0])
         .with_min_inner_size([1180.0, 780.0])
-        .with_visible(false)
+        .with_visible(true)
         .with_decorations(false)
         .with_transparent(true);
-    if let Some(icon) = app_icon {
-        viewport_builder = viewport_builder.with_icon(icon);
-    }
 
     #[cfg(windows)]
     {
