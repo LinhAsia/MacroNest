@@ -112,12 +112,23 @@ fn main() -> Result<()> {
         });
     }
 
-    let (state, startup_state_dirty) = match load_startup_state(&paths) {
-        Ok(res) => res,
-        Err(_) => (AppState::default(), false),
-    };
+    let state = AppState::default();
 
     let (ui_tx, ui_rx) = unbounded();
+    {
+        let startup_paths = paths.clone();
+        let startup_ui_tx = ui_tx.clone();
+        std::thread::spawn(move || {
+            let (state, startup_state_dirty) = match load_startup_state(&startup_paths) {
+                Ok(result) => result,
+                Err(_) => (AppState::default(), false),
+            };
+            let _ = startup_ui_tx.send(crate::overlay::UiCommand::StartupStateLoaded {
+                state,
+                startup_state_dirty,
+            });
+        });
+    }
     let startup_gate: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
     {
         let icon_ui_tx = ui_tx.clone();
@@ -238,7 +249,7 @@ fn main() -> Result<()> {
             ui::configure_fonts(&cc.egui_ctx, false);
             ui::configure_theme(&cc.egui_ctx, state.ui_theme);
             Ok(Box::new(CrosshairApp::new(
-                paths, state, overlay_tx, ui_tx, ui_rx, startup_state_dirty, startup_gate,
+                paths, state, overlay_tx, ui_tx, ui_rx, false, startup_gate,
             )))
         }),
     )

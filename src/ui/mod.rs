@@ -1200,6 +1200,47 @@ impl CrosshairApp {
         let _ = audio::preload_preview_audio(&path);
     }
 
+    fn apply_loaded_startup_state(
+        &mut self,
+        ctx: &egui::Context,
+        state: AppState,
+        startup_state_dirty: bool,
+    ) {
+        self.state = state;
+        self.save_name = self.state.selected_profile.clone().unwrap_or_default();
+        self.last_active_panel = self.state.active_panel;
+        self.macro_panel_render_limit = if self.state.active_panel == AppPanel::Macros {
+            8
+        } else {
+            usize::MAX
+        };
+        self.panel_warmup_target = Some(self.state.active_panel);
+        self.panel_warmup_frames_remaining = 1;
+        self.warmed_panels.clear();
+        self.video_preview_cursor_ms.clear();
+        for preset in &self.state.audio_settings.video_presets {
+            self.video_preview_cursor_ms
+                .insert(preset.id, preset.clip.start_ms);
+        }
+        {
+            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
+            vars.clear();
+            for (name, val) in &self.state.global_constants {
+                vars.insert(name.clone(), *val as f64);
+            }
+        }
+        let mut persist_pending = startup_state_dirty;
+        if self.apply_startup_state_adjustments() {
+            persist_pending = true;
+        }
+        self.startup_state_persist_pending |= persist_pending;
+        self.startup_overlay_sync_pending = true;
+        self.startup_cjk_font_check_pending = true;
+        self.startup_shell_frames_remaining = self.startup_shell_frames_remaining.max(1);
+        configure_theme(ctx, self.state.ui_theme);
+        ctx.request_repaint();
+    }
+
     fn sync_vision_settings(&self) {
         let _ = self.overlay_tx.send(OverlayCommand::UpdateVisionSettings(
             self.state.vision_settings.clone(),
@@ -8714,6 +8755,12 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::StartupIconLoaded(icon) => {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(icon)));
+                }
+                UiCommand::StartupStateLoaded {
+                    state,
+                    startup_state_dirty,
+                } => {
+                    self.apply_loaded_startup_state(ctx, state, startup_state_dirty);
                 }
                 UiCommand::SyncMacroGroups(groups, status) => {
                     self.state.macro_groups = groups;

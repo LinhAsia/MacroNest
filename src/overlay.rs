@@ -463,6 +463,10 @@ mod windows_overlay {
         ShowWindow,
         Exit,
         StartupIconLoaded(std::sync::Arc<eframe::egui::IconData>),
+        StartupStateLoaded {
+            state: crate::model::AppState,
+            startup_state_dirty: bool,
+        },
         SyncMacroGroups(Vec<MacroGroup>, String),
         SyncCrosshairProfiles(Vec<ProfileRecord>, String),
         SetMacrosMasterEnabled(bool, String),
@@ -17531,6 +17535,10 @@ mod fallback {
         ShowWindow,
         Exit,
         StartupIconLoaded(std::sync::Arc<eframe::egui::IconData>),
+        StartupStateLoaded {
+            state: crate::model::AppState,
+            startup_state_dirty: bool,
+        },
         VisionFinished(String),
         VisionPointCaptureCancelled(String),
         MacroRealtimeStepRemoved(u32, u32),
