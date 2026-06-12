@@ -7595,17 +7595,13 @@ mod windows_overlay {
 
 
                 MacroAction::ShowGeometryPreset => {
-                    if let Some(geometry_preset_id) =
-                        step.geometry_preset_id.or_else(|| step.key.trim().parse::<u32>().ok())
-                    {
+                    if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
                         set_geometry_preset_visible(geometry_preset_id, true);
                     }
                 }
 
                 MacroAction::HideGeometryPreset => {
-                    if let Some(geometry_preset_id) =
-                        step.geometry_preset_id.or_else(|| step.key.trim().parse::<u32>().ok())
-                    {
+                    if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
                         set_geometry_preset_visible(geometry_preset_id, false);
                     } else {
                         clear_geometry_overlay();
@@ -8165,17 +8161,13 @@ mod windows_overlay {
 
 
                 MacroAction::ShowGeometryPreset => {
-                    if let Some(geometry_preset_id) =
-                        step.geometry_preset_id.or_else(|| step.key.trim().parse::<u32>().ok())
-                    {
+                    if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
                         set_geometry_preset_visible(geometry_preset_id, true);
                     }
                 }
 
                 MacroAction::HideGeometryPreset => {
-                    if let Some(geometry_preset_id) =
-                        step.geometry_preset_id.or_else(|| step.key.trim().parse::<u32>().ok())
-                    {
+                    if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
                         set_geometry_preset_visible(geometry_preset_id, false);
                     } else {
                         clear_geometry_overlay();
@@ -14770,6 +14762,37 @@ mod windows_overlay {
             }
         }
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+    }
+
+    fn resolve_geometry_preset_id_from_step(step: &MacroStep) -> Option<u32> {
+        let spec = interpolate_variables(step.key.trim());
+        let spec = spec.trim();
+        if spec.is_empty() {
+            return step.geometry_preset_id;
+        }
+
+        let hook_state = HOOK_STATE.lock();
+        if let Some(preset_id) = spec
+            .parse::<u32>()
+            .ok()
+            .filter(|preset_id| hook_state.geometry_presets.iter().any(|preset| preset.id == *preset_id))
+        {
+            return Some(preset_id);
+        }
+
+        hook_state
+            .geometry_presets
+            .iter()
+            .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
+            .or_else(|| {
+                let normalized = spec.replace(' ', "").to_ascii_lowercase();
+                hook_state
+                    .geometry_presets
+                    .iter()
+                    .find(|preset| preset.name.replace(' ', "").to_ascii_lowercase() == normalized)
+            })
+            .map(|preset| preset.id)
+            .or(step.geometry_preset_id)
     }
 
     fn set_step_geometry_spec(preset_id: u32, absolute_step_index: usize, spec: &GeometrySpec) {

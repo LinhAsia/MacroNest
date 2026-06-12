@@ -13199,10 +13199,15 @@ impl CrosshairApp {
         language: UiLanguage,
         id_source: impl std::hash::Hash,
         preset_options: &[(u32, String)],
+        selected_spec: &str,
         preset_id: &mut Option<u32>,
         live_sync: &mut bool,
-    ) {
-        let selected_label = preset_id
+    ) -> Option<String> {
+        let trimmed_spec = selected_spec.trim();
+        let selected_label = trimmed_spec
+            .parse::<u32>()
+            .ok()
+            .or(*preset_id)
             .and_then(|id| {
                 preset_options
                     .iter()
@@ -13210,8 +13215,13 @@ impl CrosshairApp {
                     .map(|preset| preset.1.clone())
             })
             .unwrap_or_else(|| {
-                Self::tr_lang(language, "Select geometry", "Chon geometry").to_owned()
+                if trimmed_spec.is_empty() {
+                    Self::tr_lang(language, "Select geometry", "Chon geometry").to_owned()
+                } else {
+                    selected_spec.to_owned()
+                }
             });
+        let mut selected_name = None;
         ComboBox::from_id_salt(id_source)
             .width(180.0)
             .selected_text(selected_label)
@@ -13223,9 +13233,67 @@ impl CrosshairApp {
                     {
                         *preset_id = Some(*preset_entry_id);
                         *live_sync = true;
+                        selected_name = Some(preset_entry_name.clone());
                     }
                 }
             });
+        selected_name
+    }
+
+    fn render_geometry_preset_ref_editor(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_source: impl std::hash::Hash + Copy,
+        preset_options: &[(u32, String)],
+        step: &mut MacroStep,
+        live_sync: &mut bool,
+        timer_names: &[String],
+        vietnamese_input_enabled: bool,
+        vietnamese_input_mode: VietnameseInputMode,
+    ) {
+        let text_id = ui.make_persistent_id((id_source, "geometry-preset-ref"));
+        let response = Self::render_variable_text_edit(
+            ui,
+            &mut step.key,
+            text_id,
+            140.0,
+            220.0,
+            18.0,
+            18.0,
+            "Preset {random(1,4)}",
+            false,
+        );
+        Self::apply_vietnamese_input_if_changed(
+            &response,
+            vietnamese_input_enabled,
+            vietnamese_input_mode,
+            &mut step.key,
+        );
+        if response.changed() {
+            let trimmed = step.key.trim();
+            step.geometry_preset_id = trimmed
+                .parse::<u32>()
+                .ok()
+                .or_else(|| {
+                    preset_options
+                        .iter()
+                        .find(|(_, name)| name.trim().eq_ignore_ascii_case(trimmed))
+                        .map(|(id, _)| *id)
+                });
+            *live_sync = true;
+        }
+        Self::render_variable_suggestions(ui, &response, &mut step.key, timer_names, language);
+        if let Some(selected_name) = Self::render_geometry_preset_selector(
+            ui,
+            language,
+            (id_source, "geometry-preset-combo"),
+            preset_options,
+            &step.key,
+            &mut step.geometry_preset_id,
+            live_sync,
+        ) {
+            step.key = selected_name;
+        }
     }
 
     fn render_overlay_eye_button(
@@ -13373,7 +13441,8 @@ impl CrosshairApp {
                     step.geometry_spec.visible = true;
                     let current_preview_target = (group_id, macro_preset_id, step_index, is_hold_stop);
                     let mut geometry_preview_dirty = false;
-                    ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.spacing_mut().interact_size.y = 18.0;
                         ComboBox::from_id_salt((id_prefix, "geometry-shape"))
                             .width(90.0)
                             .selected_text(Self::geometry_shape_label(step.geometry_spec.shape, language))
@@ -13544,39 +13613,49 @@ impl CrosshairApp {
                     }
                 }
                 MacroAction::ShowGeometryPreset => {
-                    ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.label(Self::tr_lang(language, "Preset", "Preset"));
-                        Self::render_geometry_preset_selector(
+                        Self::render_geometry_preset_ref_editor(
                             ui,
                             language,
                             (id_prefix, "geometry-preset"),
                             preset_options,
-                            &mut step.geometry_preset_id,
+                            step,
                             live_sync,
+                            timer_names,
+                            vietnamese_input_enabled,
+                            vietnamese_input_mode,
                         );
                     });
                 }
                 MacroAction::HideGeometryPreset => {
-                    ui.horizontal(|ui| {
-                        let mut clear_all = step.geometry_preset_id.is_none();
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        let mut clear_all = step.geometry_preset_id.is_none() && step.key.trim().is_empty();
                         let changed = ui.checkbox(&mut clear_all, Self::tr_lang(language, "Clear all", "Xóa hết")).changed();
                         if changed {
                             if clear_all {
                                 step.geometry_preset_id = None;
+                                step.key.clear();
                             } else {
                                 step.geometry_preset_id = preset_options.first().map(|o| o.0).or(Some(1));
+                                if let Some((_, name)) = preset_options.first() {
+                                    step.key = name.clone();
+                                }
                             }
                             *live_sync = true;
                         }
                         if !clear_all {
                             ui.label(Self::tr_lang(language, "Preset", "Preset"));
-                            Self::render_geometry_preset_selector(
+                            Self::render_geometry_preset_ref_editor(
                                 ui,
                                 language,
                                 (id_prefix, "geometry-preset"),
                                 preset_options,
-                                &mut step.geometry_preset_id,
+                                step,
                                 live_sync,
+                                timer_names,
+                                vietnamese_input_enabled,
+                                vietnamese_input_mode,
                             );
                         }
                     });
