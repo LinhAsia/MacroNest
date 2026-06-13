@@ -16,7 +16,8 @@ mod windows_platform {
                 DwmSetWindowAttribute, DwmExtendFrameIntoClientArea,
             },
             System::Threading::{
-                CreateMutexW, GetCurrentProcess, HIGH_PRIORITY_CLASS, SetPriorityClass,
+                CreateMutexW, GetCurrentProcess, GetCurrentProcessId, HIGH_PRIORITY_CLASS,
+                SetPriorityClass,
             },
             System::{
                 DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
@@ -29,8 +30,10 @@ mod windows_platform {
                 },
                 WindowsAndMessaging::{
                     BringWindowToTop, FindWindowExW, FindWindowW, HWND_NOTOPMOST, HWND_TOPMOST,
-                    IsWindowVisible, SW_HIDE, SW_RESTORE, SW_SHOWNA, SW_SHOWNORMAL, SWP_NOMOVE,
-                    SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos, ShowWindow,
+                    GWL_EXSTYLE, GetForegroundWindow, GetWindowLongW, GetWindowThreadProcessId,
+                    IsWindow, IsWindowVisible, SW_HIDE, SW_RESTORE, SW_SHOWNA, SW_SHOWNORMAL,
+                    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos,
+                    ShowWindow, WS_EX_TOPMOST,
                 },
             },
         },
@@ -381,6 +384,68 @@ mod windows_platform {
                 .all(|hwnd| unsafe { !IsWindowVisible(*hwnd).as_bool() })
     }
 
+    fn app_hwnd_from_frame(frame: &Frame) -> Option<HWND> {
+        let window_handle = frame.window_handle().ok()?;
+        match window_handle.as_raw() {
+            RawWindowHandle::Win32(handle) => Some(HWND(handle.hwnd.get() as *mut _)),
+            _ => None,
+        }
+    }
+
+    pub fn current_external_foreground_window(frame: &Frame) -> Option<isize> {
+        let app_hwnd = app_hwnd_from_frame(frame)?;
+        let foreground = unsafe { GetForegroundWindow() };
+        if foreground.0.is_null() || foreground == app_hwnd {
+            return None;
+        }
+
+        let mut process_id = 0u32;
+        unsafe {
+            let _ = GetWindowThreadProcessId(foreground, Some(&mut process_id));
+        }
+        if process_id == unsafe { GetCurrentProcessId() } {
+            return None;
+        }
+
+        Some(foreground.0 as isize)
+    }
+
+    pub fn is_window_topmost(hwnd_raw: isize) -> bool {
+        if hwnd_raw == 0 {
+            return false;
+        }
+        let hwnd = HWND(hwnd_raw as *mut _);
+        unsafe {
+            if !IsWindow(Some(hwnd)).as_bool() {
+                return false;
+            }
+            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            (ex_style & WS_EX_TOPMOST.0) != 0
+        }
+    }
+
+    pub fn set_window_topmost(hwnd_raw: isize, topmost: bool) -> bool {
+        if hwnd_raw == 0 {
+            return false;
+        }
+        let hwnd = HWND(hwnd_raw as *mut _);
+        unsafe {
+            if !IsWindow(Some(hwnd)).as_bool() {
+                return false;
+            }
+            SetWindowPos(
+                hwnd,
+                Some(if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST }),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            )
+            .is_ok()
+        }
+    }
+
     pub fn open_folder_in_explorer(path: &Path) -> Result<()> {
         if !path.exists() {
             bail!("Folder does not exist: {}", path.display());
@@ -540,6 +605,9 @@ mod fallback {
     pub fn hide_taskbar() -> bool { false }
     pub fn show_taskbar() -> bool { false }
     pub fn is_taskbar_hidden() -> bool { false }
+    pub fn current_external_foreground_window(_frame: &Frame) -> Option<isize> { None }
+    pub fn is_window_topmost(_hwnd_raw: isize) -> bool { false }
+    pub fn set_window_topmost(_hwnd_raw: isize, _topmost: bool) -> bool { false }
 }
 
 #[cfg(not(windows))]

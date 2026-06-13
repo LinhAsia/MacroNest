@@ -101,6 +101,13 @@ pub(crate) enum AudioEditorTarget {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum TitlebarQuickActionKind {
+    Taskbar,
+    WindowsKey,
+    WindowPin,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VisionCaptureMode {
     Template,
     SearchRegion,
@@ -757,6 +764,7 @@ pub struct CrosshairApp {
     last_applied_theme: Option<UiThemeMode>,
     native_shadow_applied: bool,
     native_transitions_disabled_applied: bool,
+    last_external_foreground_window: Option<isize>,
     startup_show_pending: bool,
     startup_gate_release_pending: bool,
     startup_gate_frames_remaining: u8,
@@ -990,6 +998,7 @@ impl CrosshairApp {
             last_applied_theme: None,
             native_shadow_applied: false,
             native_transitions_disabled_applied: false,
+            last_external_foreground_window: None,
             startup_show_pending: true,
             startup_gate_release_pending: false,
             startup_gate_frames_remaining: 1,
@@ -3625,59 +3634,105 @@ impl CrosshairApp {
         &self,
         painter: &egui::Painter,
         rect: egui::Rect,
-        is_taskbar: bool,
+        action_kind: TitlebarQuickActionKind,
         active: bool,
         icon_color: Color32,
     ) {
-        if is_taskbar {
-            let frame_rect = rect.shrink2(vec2(18.0, 18.0));
-            let shelf_y = frame_rect.bottom() - 4.0;
-            painter.rect_stroke(
-                frame_rect,
-                4.0,
-                egui::Stroke::new(1.9, icon_color),
-                StrokeKind::Inside,
-            );
-            painter.line_segment(
-                [
-                    pos2(frame_rect.left() + 2.0, shelf_y),
-                    pos2(frame_rect.right() - 2.0, shelf_y),
-                ],
-                egui::Stroke::new(1.9, icon_color),
-            );
-            if active {
-                let slash_rect = frame_rect.expand2(vec2(4.0, 3.0));
-                painter.line_segment(
-                    [slash_rect.left_top(), slash_rect.right_bottom()],
-                    egui::Stroke::new(2.0, icon_color),
+        match action_kind {
+            TitlebarQuickActionKind::Taskbar => {
+                let frame_rect = rect.shrink2(vec2(18.0, 18.0));
+                let shelf_y = frame_rect.bottom() - 4.0;
+                painter.rect_stroke(
+                    frame_rect,
+                    4.0,
+                    egui::Stroke::new(1.9, icon_color),
+                    StrokeKind::Inside,
                 );
-            }
-        } else {
-            let logo_rect = rect.shrink2(vec2(17.0, 17.0));
-            let gap = 3.0;
-            let tile_w = (logo_rect.width() - gap) * 0.5;
-            let tile_h = (logo_rect.height() - gap) * 0.5;
-            for row in 0..2 {
-                for col in 0..2 {
-                    let min = pos2(
-                        logo_rect.left() + col as f32 * (tile_w + gap),
-                        logo_rect.top() + row as f32 * (tile_h + gap),
+                painter.line_segment(
+                    [
+                        pos2(frame_rect.left() + 2.0, shelf_y),
+                        pos2(frame_rect.right() - 2.0, shelf_y),
+                    ],
+                    egui::Stroke::new(1.9, icon_color),
+                );
+                if active {
+                    let slash_rect = frame_rect.expand2(vec2(4.0, 3.0));
+                    painter.line_segment(
+                        [slash_rect.left_top(), slash_rect.right_bottom()],
+                        egui::Stroke::new(2.0, icon_color),
                     );
-                    let max = pos2(min.x + tile_w, min.y + tile_h);
-                    painter.rect_filled(egui::Rect::from_min_max(min, max), 1.2, icon_color);
                 }
             }
-            if active {
-                let slash_rect = logo_rect.expand2(vec2(3.0, 3.0));
+            TitlebarQuickActionKind::WindowsKey => {
+                let logo_rect = rect.shrink2(vec2(17.0, 17.0));
+                let gap = 3.0;
+                let tile_w = (logo_rect.width() - gap) * 0.5;
+                let tile_h = (logo_rect.height() - gap) * 0.5;
+                for row in 0..2 {
+                    for col in 0..2 {
+                        let min = pos2(
+                            logo_rect.left() + col as f32 * (tile_w + gap),
+                            logo_rect.top() + row as f32 * (tile_h + gap),
+                        );
+                        let max = pos2(min.x + tile_w, min.y + tile_h);
+                        painter.rect_filled(egui::Rect::from_min_max(min, max), 1.2, icon_color);
+                    }
+                }
+                if active {
+                    let slash_rect = logo_rect.expand2(vec2(3.0, 3.0));
+                    painter.line_segment(
+                        [slash_rect.left_top(), slash_rect.right_bottom()],
+                        egui::Stroke::new(2.0, icon_color),
+                    );
+                    let dot_rect = egui::Rect::from_center_size(
+                        pos2(logo_rect.right() + 2.0, logo_rect.top() + 2.0),
+                        vec2(6.0, 6.0),
+                    );
+                    painter.rect_filled(dot_rect, 3.0, icon_color);
+                }
+            }
+            TitlebarQuickActionKind::WindowPin => {
+                let frame_rect = rect.shrink2(vec2(18.0, 18.0));
+                let title_y = frame_rect.top() + 6.0;
+                painter.rect_stroke(
+                    frame_rect,
+                    4.0,
+                    egui::Stroke::new(1.9, icon_color),
+                    StrokeKind::Inside,
+                );
                 painter.line_segment(
-                    [slash_rect.left_top(), slash_rect.right_bottom()],
-                    egui::Stroke::new(2.0, icon_color),
+                    [
+                        pos2(frame_rect.left() + 2.0, title_y),
+                        pos2(frame_rect.right() - 2.0, title_y),
+                    ],
+                    egui::Stroke::new(1.7, icon_color),
                 );
-                let dot_rect = egui::Rect::from_center_size(
-                    pos2(logo_rect.right() + 2.0, logo_rect.top() + 2.0),
-                    vec2(6.0, 6.0),
+                let pin_head = egui::Rect::from_center_size(
+                    pos2(frame_rect.center().x, frame_rect.top() + 4.0),
+                    vec2(8.0, 6.0),
                 );
-                painter.rect_filled(dot_rect, 3.0, icon_color);
+                painter.rect_filled(pin_head, 2.0, icon_color);
+                painter.line_segment(
+                    [
+                        pos2(pin_head.center().x, pin_head.bottom() - 1.0),
+                        pos2(pin_head.center().x, frame_rect.bottom() - 5.0),
+                    ],
+                    egui::Stroke::new(1.8, icon_color),
+                );
+                painter.line_segment(
+                    [
+                        pos2(pin_head.center().x - 4.0, frame_rect.bottom() - 9.0),
+                        pos2(pin_head.center().x + 4.0, frame_rect.bottom() - 5.0),
+                    ],
+                    egui::Stroke::new(1.8, icon_color),
+                );
+                if !active {
+                    let slash_rect = frame_rect.expand2(vec2(4.0, 3.0));
+                    painter.line_segment(
+                        [slash_rect.left_top(), slash_rect.right_bottom()],
+                        egui::Stroke::new(2.0, icon_color),
+                    );
+                }
             }
         }
     }
@@ -3685,7 +3740,7 @@ impl CrosshairApp {
     fn titlebar_quick_action_button(
         &self,
         ui: &mut egui::Ui,
-        is_taskbar: bool,
+        action_kind: TitlebarQuickActionKind,
         active: bool,
     ) -> egui::Response {
         let button_size = vec2(92.0, 66.0);
@@ -3755,7 +3810,7 @@ impl CrosshairApp {
             egui::Stroke::new(1.2, face_border),
             StrokeKind::Inside,
         );
-        self.paint_titlebar_quick_action_icon(ui.painter(), face_rect, is_taskbar, active, icon_color);
+        self.paint_titlebar_quick_action_icon(ui.painter(), face_rect, action_kind, active, icon_color);
         response
     }
 
@@ -8849,6 +8904,9 @@ impl eframe::App for CrosshairApp {
             self.state.active_panel = AppPanel::Pin;
         }
         crate::overlay::set_ui_context(ctx.clone());
+        if let Some(hwnd) = crate::platform::current_external_foreground_window(frame) {
+            self.last_external_foreground_window = Some(hwnd);
+        }
         self.apply_theme(ctx);
         let wants_native_shadow = false;
         if self.native_shadow_applied != wants_native_shadow {
@@ -9833,9 +9891,9 @@ impl eframe::App for CrosshairApp {
                                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                 .align(egui::RectAlign::BOTTOM_END)
                                 .layout(egui::Layout::top_down(egui::Align::Min))
-                                .width(220.0)
+                                .width(332.0)
                                 .show(|ui| {
-                                    ui.set_min_width(220.0);
+                                    ui.set_min_width(332.0);
                                     Frame::new()
                                         .fill(button_fill)
                                         .stroke(egui::Stroke::new(
@@ -9850,13 +9908,17 @@ impl eframe::App for CrosshairApp {
                                         .inner_margin(egui::Margin::symmetric(10, 10))
                                         .show(ui, |ui| {
                                             Grid::new("titlebar-quick-actions-grid")
-                                                .num_columns(2)
+                                                .num_columns(3)
                                                 .spacing([8.0, 8.0])
                                                 .show(ui, |ui| {
+                                                    let pinned_window_active = self
+                                                        .last_external_foreground_window
+                                                        .map(crate::platform::is_window_topmost)
+                                                        .unwrap_or(false);
                                                     let taskbar_clicked = self
                                                     .titlebar_quick_action_button(
                                                         ui,
-                                                        true,
+                                                        TitlebarQuickActionKind::Taskbar,
                                                         taskbar_hidden,
                                                     )
                                                     .on_hover_text(if taskbar_hidden {
@@ -9912,7 +9974,7 @@ impl eframe::App for CrosshairApp {
                                                     let windows_clicked = self
                                                     .titlebar_quick_action_button(
                                                         ui,
-                                                        false,
+                                                        TitlebarQuickActionKind::WindowsKey,
                                                         self.state.windows_key_locked,
                                                     )
                                                     .on_hover_text(if self.state.windows_key_locked {
@@ -9948,6 +10010,63 @@ impl eframe::App for CrosshairApp {
                                                             )
                                                         }
                                                         .to_owned();
+                                                    }
+
+                                                    let window_pin_clicked = self
+                                                    .titlebar_quick_action_button(
+                                                        ui,
+                                                        TitlebarQuickActionKind::WindowPin,
+                                                        pinned_window_active,
+                                                    )
+                                                    .on_hover_text(if pinned_window_active {
+                                                        Self::tr_lang(
+                                                            self.state.ui_language,
+                                                            "Unpin the last active window",
+                                                            "Bo ghim cua so vua dung",
+                                                        )
+                                                    } else {
+                                                        Self::tr_lang(
+                                                            self.state.ui_language,
+                                                            "Pin the last active window on top",
+                                                            "Ghim cua so vua dung len tren cung",
+                                                        )
+                                                    })
+                                                    .clicked();
+                                                    if window_pin_clicked {
+                                                        if let Some(hwnd) = self.last_external_foreground_window {
+                                                            let next_state = !crate::platform::is_window_topmost(hwnd);
+                                                            let success = crate::platform::set_window_topmost(hwnd, next_state);
+                                                            self.status = if success {
+                                                                if next_state {
+                                                                    Self::tr_lang(
+                                                                        self.state.ui_language,
+                                                                        "Pinned the last active window on top.",
+                                                                        "Da ghim cua so vua dung len tren cung.",
+                                                                    )
+                                                                } else {
+                                                                    Self::tr_lang(
+                                                                        self.state.ui_language,
+                                                                        "Removed topmost from the last active window.",
+                                                                        "Da bo ghim cua so vua dung.",
+                                                                    )
+                                                                }
+                                                            } else {
+                                                                self.last_external_foreground_window = None;
+                                                                Self::tr_lang(
+                                                                    self.state.ui_language,
+                                                                    "Could not update the last active window.",
+                                                                    "Khong the cap nhat cua so vua dung.",
+                                                                )
+                                                            }
+                                                            .to_owned();
+                                                        } else {
+                                                            self.status = Self::tr_lang(
+                                                                self.state.ui_language,
+                                                                "Focus another window first, then open quick actions.",
+                                                                "Hay focus cua so khac truoc roi mo quick actions.",
+                                                            )
+                                                            .to_owned();
+                                                        }
                                                     }
                                                 });
                                         });
