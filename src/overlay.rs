@@ -9208,8 +9208,14 @@ mod windows_overlay {
             }
 
             return match prop_name.as_str() {
+                "x" | "left" => Some(rect.left),
+                "y" | "top" => Some(rect.top),
+                "right" => Some(rect.right),
+                "bottom" => Some(rect.bottom),
                 "width" | "w" => Some((rect.right - rect.left).max(0)),
                 "height" | "h" => Some((rect.bottom - rect.top).max(0)),
+                "centerx" | "cx" => Some(rect.left + ((rect.right - rect.left) / 2)),
+                "centery" | "cy" => Some(rect.top + ((rect.bottom - rect.top) / 2)),
                 _ => None,
             };
         }
