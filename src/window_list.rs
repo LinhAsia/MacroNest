@@ -12,11 +12,13 @@ mod windows_impl {
             },
             Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
             UI::WindowsAndMessaging::{
-                EnumWindows, GetForegroundWindow, GetSystemMetrics, GetWindowLongW, GetWindowRect,
-                GetWindowTextLengthW, GetWindowTextW, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic,
-                IsWindow, IsWindowVisible, PW_RENDERFULLCONTENT, SetWindowPos, GWL_EXSTYLE,
+                BringWindowToTop, EnumWindows, GetForegroundWindow, GetSystemMetrics,
+                GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+                HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindow, IsWindowVisible,
+                PW_RENDERFULLCONTENT, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+                SetForegroundWindow, SetWindowPos, ShowWindow, GWL_EXSTYLE,
                 SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-                SWP_NOMOVE, SWP_NOSIZE, WS_EX_TOPMOST,
+                WS_EX_TOPMOST,
             },
         },
         core::BOOL,
@@ -124,23 +126,7 @@ mod windows_impl {
                 return false;
             }
             let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            let is_topmost = (ex_style & WS_EX_TOPMOST.0) != 0;
-            if !is_topmost {
-                return false;
-            }
-            if IsIconic(hwnd).as_bool() {
-                let _ = SetWindowPos(
-                    hwnd,
-                    Some(HWND_NOTOPMOST),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE,
-                );
-                return false;
-            }
-            true
+            (ex_style & WS_EX_TOPMOST.0) != 0
         }
     }
 
@@ -152,16 +138,27 @@ mod windows_impl {
             if !IsWindow(Some(hwnd)).as_bool() {
                 return false;
             }
-            SetWindowPos(
+            if topmost && IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+
+            let success = SetWindowPos(
                 hwnd,
                 Some(if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST }),
                 0,
                 0,
                 0,
                 0,
-                SWP_NOMOVE | SWP_NOSIZE,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
             )
-            .is_ok()
+            .is_ok();
+
+            if success && topmost {
+                let _ = BringWindowToTop(hwnd);
+                let _ = SetForegroundWindow(hwnd);
+            }
+
+            success
         }
     }
 
