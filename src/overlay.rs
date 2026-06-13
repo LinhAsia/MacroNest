@@ -14582,6 +14582,13 @@ mod windows_overlay {
         hook_state.pending_window_focus_stable_polls = 0;
     }
 
+    fn reset_window_focus_dispatch_guard() {
+        let mut hook_state = HOOK_STATE.lock();
+        hook_state.pending_window_focus_trigger = None;
+        hook_state.pending_window_focus_stable_polls = 0;
+        hook_state.last_dispatched_window_focus_hwnd = None;
+    }
+
     fn handle_window_focus_event(controller_hwnd: HWND, hwnd: HWND) {
         if !update_foreground_window(hwnd) {
             return;
@@ -14595,7 +14602,7 @@ mod windows_overlay {
                 }
             }
         } else {
-            clear_pending_window_focus_trigger();
+            reset_window_focus_dispatch_guard();
             unsafe {
                 let _ = KillTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID);
             }
@@ -14621,7 +14628,8 @@ mod windows_overlay {
 
         let current_hwnd = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
         if current_hwnd != pending {
-            return true;
+            clear_pending_window_focus_trigger();
+            return false;
         }
 
         {
