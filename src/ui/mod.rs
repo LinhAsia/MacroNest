@@ -3694,70 +3694,107 @@ impl CrosshairApp {
     ) -> egui::Response {
         let button_size = vec2(92.0, 66.0);
         let corner_radius = 14.0;
-        let (outer_fill, face_fill, border_color, icon_color, top_edge, bottom_edge) =
+        let (
+            outer_fill,
+            face_fill,
+            border_color,
+            icon_color,
+            top_edge,
+            bottom_edge,
+            rim_color,
+            drop_shadow,
+        ) =
             match (self.state.ui_theme, active) {
                 (UiThemeMode::Dark, true) => (
-                    Color32::from_rgb(24, 34, 46),
-                    Color32::from_rgba_premultiplied(72, 150, 118, 210),
+                    Color32::from_rgb(16, 24, 33),
+                    Color32::from_rgba_premultiplied(78, 158, 124, 228),
                     Color32::from_rgb(126, 224, 182),
                     Color32::from_rgb(238, 255, 247),
-                    Color32::from_rgba_premultiplied(255, 255, 255, 28),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 52),
                     Color32::from_rgba_premultiplied(0, 0, 0, 0),
+                    Color32::from_rgba_premultiplied(14, 20, 28, 210),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 92),
                 ),
                 (UiThemeMode::Dark, false) => (
-                    Color32::from_rgb(19, 26, 36),
-                    Color32::from_rgba_premultiplied(60, 76, 100, 228),
-                    Color32::from_rgb(81, 101, 132),
+                    Color32::from_rgb(15, 22, 30),
+                    Color32::from_rgba_premultiplied(74, 92, 120, 244),
+                    Color32::from_rgb(90, 112, 146),
                     Color32::from_rgb(232, 240, 252),
-                    Color32::from_rgba_premultiplied(255, 255, 255, 32),
-                    Color32::from_rgba_premultiplied(10, 16, 24, 220),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 66),
+                    Color32::from_rgba_premultiplied(8, 12, 18, 235),
+                    Color32::from_rgba_premultiplied(18, 26, 36, 224),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 110),
                 ),
                 (UiThemeMode::Light, true) => (
-                    Color32::from_rgb(165, 182, 168),
-                    Color32::from_rgba_premultiplied(94, 184, 138, 224),
+                    Color32::from_rgb(148, 164, 150),
+                    Color32::from_rgba_premultiplied(100, 188, 142, 236),
                     Color32::from_rgb(34, 122, 88),
                     Color32::from_rgb(22, 30, 38),
-                    Color32::from_rgba_premultiplied(255, 255, 255, 34),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 62),
                     Color32::from_rgba_premultiplied(0, 0, 0, 0),
+                    Color32::from_rgba_premultiplied(84, 104, 88, 120),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 48),
                 ),
                 (UiThemeMode::Light, false) => (
-                    Color32::from_rgb(176, 188, 204),
+                    Color32::from_rgb(168, 180, 196),
                     Color32::from_rgba_premultiplied(226, 232, 240, 246),
                     Color32::from_rgb(176, 188, 204),
                     Color32::from_rgb(52, 66, 84),
-                    Color32::from_rgba_premultiplied(255, 255, 255, 80),
-                    Color32::from_rgba_premultiplied(126, 142, 164, 210),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 112),
+                    Color32::from_rgba_premultiplied(126, 142, 164, 226),
+                    Color32::from_rgba_premultiplied(132, 146, 164, 150),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 36),
                 ),
             };
         let (outer_rect, response) = ui.allocate_exact_size(button_size, Sense::click());
-        let face_offset_y = if active { 4.0 } else { 1.0 };
+        let face_offset_y = if active { 6.0 } else { 0.0 };
         let face_rect = outer_rect.translate(vec2(0.0, face_offset_y));
+        let rim_rect = face_rect.expand2(vec2(1.0, 1.0));
         let shadow_rect = egui::Rect::from_min_max(
-            pos2(outer_rect.left(), outer_rect.top() + 4.0),
-            pos2(outer_rect.right(), outer_rect.bottom()),
+            pos2(outer_rect.left() + 1.0, outer_rect.top() + 6.0),
+            pos2(outer_rect.right() - 1.0, outer_rect.bottom() + 1.0),
         );
-        ui.painter().rect_filled(shadow_rect, corner_radius, outer_fill);
+        ui.painter().rect_filled(shadow_rect, corner_radius + 1.0, drop_shadow);
+        ui.painter().rect_filled(outer_rect, corner_radius, outer_fill);
+        ui.painter().rect_stroke(
+            outer_rect,
+            corner_radius,
+            egui::Stroke::new(1.0, rim_color),
+            StrokeKind::Inside,
+        );
+        ui.painter().rect_filled(rim_rect, corner_radius, border_color.gamma_multiply(0.35));
         ui.painter().rect_filled(face_rect, corner_radius, face_fill);
         ui.painter().rect_stroke(
             face_rect,
             corner_radius,
-            egui::Stroke::new(1.0, border_color),
+            egui::Stroke::new(1.0, border_color.gamma_multiply(1.1)),
             StrokeKind::Inside,
         );
         ui.painter().line_segment(
             [
-                pos2(face_rect.left() + 8.0, face_rect.top() + 1.5),
-                pos2(face_rect.right() - 8.0, face_rect.top() + 1.5),
+                pos2(face_rect.left() + 8.0, face_rect.top() + 2.0),
+                pos2(face_rect.right() - 8.0, face_rect.top() + 2.0),
             ],
-            egui::Stroke::new(1.2, top_edge),
+            egui::Stroke::new(1.6, top_edge),
         );
         if !active {
+            ui.painter().line_segment(
+                [
+                    pos2(face_rect.left() + 10.0, face_rect.bottom() - 2.0),
+                    pos2(face_rect.right() - 10.0, face_rect.bottom() - 2.0),
+                ],
+                egui::Stroke::new(2.6, bottom_edge),
+            );
+        } else {
             ui.painter().line_segment(
                 [
                     pos2(face_rect.left() + 10.0, face_rect.bottom() - 1.5),
                     pos2(face_rect.right() - 10.0, face_rect.bottom() - 1.5),
                 ],
-                egui::Stroke::new(2.0, bottom_edge),
+                egui::Stroke::new(
+                    1.6,
+                    Color32::from_rgba_premultiplied(0, 0, 0, 54),
+                ),
             );
         }
         self.paint_titlebar_quick_action_icon(ui.painter(), face_rect, is_taskbar, active, icon_color);
@@ -9832,7 +9869,6 @@ impl eframe::App for CrosshairApp {
                             if quick_actions_response.clicked() {
                                 quick_actions_open = !quick_actions_open;
                             }
-                            let mut close_quick_actions_popup = false;
                             let popup_result = egui::Popup::from_response(&quick_actions_response)
                                 .id(quick_actions_popup_id)
                                 .open_bool(&mut quick_actions_open)
@@ -9912,7 +9948,6 @@ impl eframe::App for CrosshairApp {
                                                             )
                                                         }
                                                         .to_owned();
-                                                        close_quick_actions_popup = true;
                                                     }
 
                                                     let windows_clicked = self
@@ -9954,14 +9989,10 @@ impl eframe::App for CrosshairApp {
                                                             )
                                                         }
                                                         .to_owned();
-                                                        close_quick_actions_popup = true;
                                                     }
                                                 });
                                         });
                                 });
-                            if close_quick_actions_popup {
-                                quick_actions_open = false;
-                            }
                             let _ = popup_result;
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(quick_actions_popup_id, quick_actions_open);
