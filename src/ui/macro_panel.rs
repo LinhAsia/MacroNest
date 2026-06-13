@@ -13864,44 +13864,10 @@ impl CrosshairApp {
     ) {
         step.geometry_spec.visible = true;
         ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.label(Self::tr_lang(language, "Override:", "Override:"));
-            *live_sync |= ui
-                .checkbox(
-                    &mut step.geometry_modify_position,
-                    Self::tr_lang(language, "Position", "Vi tri"),
-                )
-                .changed();
-            *live_sync |= ui
-                .checkbox(
-                    &mut step.geometry_modify_size,
-                    Self::tr_lang(language, "Size", "Kich thuoc"),
-                )
-                .changed();
-            *live_sync |= ui
-                .checkbox(
-                    &mut step.geometry_modify_transform,
-                    Self::tr_lang(language, "Transform", "Bien doi"),
-                )
-                .changed();
-            *live_sync |= ui
-                .checkbox(
-                    &mut step.geometry_modify_content,
-                    Self::tr_lang(language, "Content", "Noi dung"),
-                )
-                .changed();
-            *live_sync |= ui
-                .checkbox(
-                    &mut step.geometry_modify_style,
-                    Self::tr_lang(language, "Style", "Style"),
-                )
-                .changed();
-        });
-        ui.add_space(2.0);
         ui.weak(Self::tr_lang(
             language,
-            "Only the checked groups above will replace values from the selected preset.",
-            "Chi cac nhom duoc tick o tren moi de len gia tri cua preset da chon.",
+            "Any override field you fill in here will replace the selected preset value.",
+            "O nao ban dien gia tri vao thi se de len gia tri tu preset da chon.",
         ));
         ui.add_space(4.0);
 
