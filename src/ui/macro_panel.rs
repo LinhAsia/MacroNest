@@ -646,7 +646,7 @@ impl CrosshairApp {
                 let _popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
-                    .align(egui::RectAlign::TOP_START)
+                    .align(egui::RectAlign::BOTTOM_START)
                     .layout(egui::Layout::top_down_justified(egui::Align::Min))
                     .width(140.0)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
@@ -676,9 +676,29 @@ impl CrosshairApp {
                     ui.ctx().data(|data| data.get_temp(popup_rect_id));
                 if open {
                     if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
-                        let mut keep_open_rect = response.rect.expand(10.0);
+                        let mut keep_open_rect = response.rect.expand(16.0);
                         if let Some(rect) = popup_rect {
-                            keep_open_rect = keep_open_rect.union(rect.expand(10.0));
+                            keep_open_rect = keep_open_rect.union(rect.expand(12.0));
+                            let bridge_min = egui::pos2(
+                                response.rect.min.x.min(rect.min.x) - 6.0,
+                                response.rect.max.y.min(rect.min.y) - 8.0,
+                            );
+                            let bridge_max = egui::pos2(
+                                response.rect.max.x.max(rect.max.x) + 6.0,
+                                response.rect.max.y.max(rect.min.y) + 8.0,
+                            );
+                            keep_open_rect = keep_open_rect.union(egui::Rect::from_min_max(
+                                bridge_min,
+                                bridge_max,
+                            ));
+                            if rect.contains(pointer_pos) {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(
+                                        active_mouse_click_popup_key_id,
+                                        Some(popup_key),
+                                    )
+                                });
+                            }
                         }
                         if !keep_open_rect.contains(pointer_pos) {
                             open = false;
