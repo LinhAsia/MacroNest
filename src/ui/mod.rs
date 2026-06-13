@@ -1656,7 +1656,8 @@ impl CrosshairApp {
             }
         };
         match crate::macro_code::decode_step(&code) {
-            Ok(step) => {
+            Ok(mut step) => {
+                Self::bind_trigger_macro_step_to_group(&mut step, group_id);
                 if let Some(group) = self
                     .state
                     .macro_groups
@@ -1731,9 +1732,16 @@ impl CrosshairApp {
         };
         match crate::macro_code::decode_preset(&code) {
             Ok(mut preset) => {
+                let source_preset_id = preset.id;
                 let id = self.state.next_macro_preset_id.max(1);
                 self.state.next_macro_preset_id = id + 1;
                 preset.id = id;
+                Self::remap_macro_step_self_ref(&mut preset.hold_stop_step, source_preset_id, id);
+                Self::bind_trigger_macro_step_to_group(&mut preset.hold_stop_step, group_id);
+                for step in &mut preset.steps {
+                    Self::remap_macro_step_self_ref(step, source_preset_id, id);
+                    Self::bind_trigger_macro_step_to_group(step, group_id);
+                }
                 if let Some(group) = self
                     .state
                     .macro_groups
@@ -1807,16 +1815,37 @@ impl CrosshairApp {
         };
         match crate::macro_code::decode_group(&code) {
             Ok(mut group) => {
+                let source_group_id = group.id;
                 let id = self.state.next_macro_group_id.max(1);
                 self.state.next_macro_group_id = id + 1;
                 group.id = id;
                 group.name = self.unique_macro_group_name(&group.name);
                 group.folder_id = folder_id;
 
+                let mut preset_id_map = HashMap::new();
                 for preset in &mut group.presets {
+                    let old_preset_id = preset.id;
                     let preset_id = self.state.next_macro_preset_id.max(1);
                     self.state.next_macro_preset_id = preset_id + 1;
                     preset.id = preset_id;
+                    preset_id_map.insert(old_preset_id, preset_id);
+                }
+
+                for preset in &mut group.presets {
+                    Self::remap_macro_step_group_refs(
+                        &mut preset.hold_stop_step,
+                        &preset_id_map,
+                        source_group_id,
+                        id,
+                    );
+                    for step in &mut preset.steps {
+                        Self::remap_macro_step_group_refs(
+                            step,
+                            &preset_id_map,
+                            source_group_id,
+                            id,
+                        );
+                    }
                 }
 
                 if let Some(target_id) = insert_after_group_id {
@@ -7726,9 +7755,19 @@ impl CrosshairApp {
         }
 
         for preset in &mut copied_group.presets {
-            Self::remap_macro_step_group_refs(&mut preset.hold_stop_step, &preset_id_map);
+            Self::remap_macro_step_group_refs(
+                &mut preset.hold_stop_step,
+                &preset_id_map,
+                source_group.id,
+                new_group_id,
+            );
             for step in &mut preset.steps {
-                Self::remap_macro_step_group_refs(step, &preset_id_map);
+                Self::remap_macro_step_group_refs(
+                    step,
+                    &preset_id_map,
+                    source_group.id,
+                    new_group_id,
+                );
             }
         }
 
@@ -7758,7 +7797,12 @@ impl CrosshairApp {
         }
     }
 
-    fn remap_macro_step_group_refs(step: &mut MacroStep, preset_id_map: &HashMap<u32, u32>) {
+    fn remap_macro_step_group_refs(
+        step: &mut MacroStep,
+        preset_id_map: &HashMap<u32, u32>,
+        old_group_id: u32,
+        new_group_id: u32,
+    ) {
         if matches!(
             step.action,
             MacroAction::TriggerMacroPreset
@@ -7768,6 +7812,17 @@ impl CrosshairApp {
             && let Some(new_id) = preset_id_map.get(&old_id)
         {
             step.key = new_id.to_string();
+        }
+        if step.action == MacroAction::TriggerMacroPreset
+            && step.trigger_macro_group_id == Some(old_group_id)
+        {
+            step.trigger_macro_group_id = Some(new_group_id);
+        }
+    }
+
+    fn bind_trigger_macro_step_to_group(step: &mut MacroStep, group_id: u32) {
+        if step.action == MacroAction::TriggerMacroPreset {
+            step.trigger_macro_group_id = Some(group_id);
         }
     }
 

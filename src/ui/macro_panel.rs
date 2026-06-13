@@ -2785,6 +2785,25 @@ impl CrosshairApp {
                 self.refresh_macro_share_clipboard_kind(false);
                 ui.ctx().request_repaint_after(Duration::from_millis(250));
             }
+            if self.show_share_buttons {
+                let import_enabled =
+                    self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Group;
+                let import_button = ui.add_enabled(
+                    import_enabled,
+                    Button::new(Self::tr_lang(language, "Import", "Import"))
+                        .min_size(egui::vec2(72.0, 28.0)),
+                );
+                if import_button
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Import macro group from clipboard",
+                        "Nhap macro group tu clipboard",
+                    ))
+                    .clicked()
+                {
+                    self.import_macro_group_from_clipboard(None, None);
+                }
+            }
             let paste_enabled = !self.macro_group_clipboard.is_empty();
             let paste_fill = if paste_enabled {
                 Color32::from_rgb(84, 90, 102)
