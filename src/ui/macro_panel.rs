@@ -4397,6 +4397,17 @@ impl CrosshairApp {
                                                 .size()
                                                 .x,
                                         )
+                                        .max(
+                                            ui.painter()
+                                                .layout_no_wrap(
+                                                    Self::tr_lang(language, "On Focus", "Focus")
+                                                        .to_owned(),
+                                                    egui::FontId::proportional(14.0),
+                                                    ui.visuals().text_color(),
+                                                )
+                                                .size()
+                                                .x,
+                                        )
                                         + 10.0;
                                     let label_width = trigger_label_width.max(48.0);
                                     let binding_width = (left_width - label_width - 6.0).max(160.0);
@@ -4416,6 +4427,10 @@ impl CrosshairApp {
                                                              == MacroTriggerMode::Release
                                                          {
                                                              "Release"
+                                                         } else if preset.trigger_mode
+                                                             == MacroTriggerMode::WindowFocus
+                                                         {
+                                                             "On Focus"
                                                          } else {
                                                              "Trigger"
                                                          },
@@ -4433,14 +4448,63 @@ impl CrosshairApp {
                                                 vec2(binding_width, 0.0),
                                                 egui::Layout::top_down(egui::Align::LEFT),
                                                 |ui| {
-                                                    live_sync |= Self::render_macro_trigger_chips(
-                                                        ui,
-                                                        language,
-                                                        group.id,
-                                                        preset,
-                                                        capture_target_snapshot.as_ref(),
-                                                        capture_hotkey_combo_keys_snapshot.as_ref(),
-                                                    );
+                                                    if preset.trigger_mode
+                                                        == MacroTriggerMode::WindowFocus
+                                                    {
+                                                        egui::Frame::group(ui.style())
+                                                            .fill(Color32::from_rgba_premultiplied(
+                                                                36, 92, 132, 88,
+                                                            ))
+                                                            .stroke(egui::Stroke::new(
+                                                                1.0,
+                                                                Color32::from_rgb(116, 204, 255),
+                                                            ))
+                                                            .show(ui, |ui| {
+                                                                ui.set_min_width(binding_width);
+                                                                let mut selected_window =
+                                                                    preset
+                                                                        .event_target_window_title
+                                                                        .clone();
+                                                                let mut duplicate_mode = preset
+                                                                    .event_match_duplicate_window_titles;
+                                                                if Self::render_window_target_combo_with_duplicate_mode(
+                                                                    ui,
+                                                                    (
+                                                                        group.id,
+                                                                        preset.id,
+                                                                        "window-focus-trigger-target",
+                                                                    ),
+                                                                    Self::tr_lang(
+                                                                        language,
+                                                                        "Any focused window",
+                                                                        "Bat ky cua so dang focus",
+                                                                    ),
+                                                                    &mut selected_window,
+                                                                    &mut duplicate_mode,
+                                                                    &self.open_windows,
+                                                                    (binding_width - 16.0)
+                                                                        .max(180.0),
+                                                                    true,
+                                                                ) {
+                                                                    preset.event_target_window_title =
+                                                                        selected_window;
+                                                                    preset.event_extra_target_window_titles
+                                                                        .clear();
+                                                                    preset.event_match_duplicate_window_titles =
+                                                                        duplicate_mode;
+                                                                    live_sync = true;
+                                                                }
+                                                            });
+                                                    } else {
+                                                        live_sync |= Self::render_macro_trigger_chips(
+                                                            ui,
+                                                            language,
+                                                            group.id,
+                                                            preset,
+                                                            capture_target_snapshot.as_ref(),
+                                                            capture_hotkey_combo_keys_snapshot.as_ref(),
+                                                        );
+                                                    }
                                                     if !preset.collapsed && !referenced_vars.is_empty() {
                                                         let active_vars_expanded_id = ui.make_persistent_id(
                                                             (group.id, preset.id, "active-vars-expanded"),
@@ -4858,26 +4922,28 @@ impl CrosshairApp {
                                                 .response
                                                 .on_hover_text(selected_mouse_label);
                                             }
-                                            let capture_target = CaptureRequest::MacroPresetHotkey(
-                                                group.id, preset.id,
-                                            );
-                                            if ui
-                                                .add_sized(
-                                                    [64.0, 24.0],
-                                                    Button::new(Self::capture_button_text(
-                                                        language,
-                                                        capture_target_snapshot.as_ref()
-                                                            == Some(&capture_target),
-                                                    )),
-                                                )
-                                                .clicked()
-                                            {
-                                                if capture_target_snapshot.as_ref()
-                                                    == Some(&capture_target)
+                                            if preset.trigger_mode != MacroTriggerMode::WindowFocus {
+                                                let capture_target = CaptureRequest::MacroPresetHotkey(
+                                                    group.id, preset.id,
+                                                );
+                                                if ui
+                                                    .add_sized(
+                                                        [64.0, 24.0],
+                                                        Button::new(Self::capture_button_text(
+                                                            language,
+                                                            capture_target_snapshot.as_ref()
+                                                                == Some(&capture_target),
+                                                        )),
+                                                    )
+                                                    .clicked()
                                                 {
-                                                    cancel_active_capture = true;
-                                                } else {
-                                                    next_capture_target = Some(capture_target);
+                                                    if capture_target_snapshot.as_ref()
+                                                        == Some(&capture_target)
+                                                    {
+                                                        cancel_active_capture = true;
+                                                    } else {
+                                                        next_capture_target = Some(capture_target);
+                                                    }
                                                 }
                                             }
                                             if Self::sized_button(
@@ -5024,6 +5090,7 @@ impl CrosshairApp {
                                         MacroTriggerMode::Press,
                                         MacroTriggerMode::Hold,
                                         MacroTriggerMode::Release,
+                                        MacroTriggerMode::WindowFocus,
                                     ] {
                                         if ui
                                             .selectable_label(
@@ -5033,6 +5100,12 @@ impl CrosshairApp {
                                             .clicked()
                                         {
                                             preset.trigger_mode = mode;
+                                            if mode == MacroTriggerMode::WindowFocus {
+                                                preset.pass_through_press = false;
+                                                preset.pass_through_hold = false;
+                                                preset.stop_on_retrigger_immediate = false;
+                                                preset.release_requires_all_inputs_released = false;
+                                            }
                                             live_sync = true;
                                         }
                                     }

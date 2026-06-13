@@ -1408,6 +1408,7 @@ pub enum MacroTriggerMode {
     Press,
     Hold,
     Release,
+    WindowFocus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2012,6 +2013,10 @@ pub struct MacroPreset {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub trigger_keys: String,
     pub hotkey: Option<HotkeyBinding>,
+    pub event_target_window_title: Option<String>,
+    pub event_extra_target_window_titles: Vec<String>,
+    #[serde(default = "default_true")]
+    pub event_match_duplicate_window_titles: bool,
     pub hold_stop_step_enabled: bool,
     pub hold_stop_step: MacroStep,
     pub steps: Vec<MacroStep>,
@@ -2034,6 +2039,9 @@ impl MacroPreset {
             release_wait_key: String::new(),
             trigger_keys: String::new(),
             hotkey: None,
+            event_target_window_title: None,
+            event_extra_target_window_titles: Vec::new(),
+            event_match_duplicate_window_titles: true,
             hold_stop_step_enabled: false,
             hold_stop_step: MacroStep::default(),
             steps: vec![MacroStep::default()],

@@ -3298,6 +3298,19 @@ impl CrosshairApp {
         capture_target: Option<&CaptureRequest>,
         capture_hotkey_combo_keys: Option<&Vec<String>>,
     ) -> bool {
+        if preset.trigger_mode == MacroTriggerMode::WindowFocus {
+            let target = preset
+                .event_target_window_title
+                .as_deref()
+                .map(Self::simplify_window_title)
+                .unwrap_or_else(|| {
+                    Self::tr_lang(language, "Any focused window", "Bat ky cua so dang focus")
+                        .to_owned()
+                });
+            ui.label(target);
+            return false;
+        }
+
         let bindings = Self::macro_trigger_bindings(preset);
         if bindings.is_empty() {
             ui.label(Self::tr_lang(language, "Not set", "Not set"));
@@ -3373,6 +3386,18 @@ impl CrosshairApp {
     }
 
     fn format_macro_trigger_ui(language: UiLanguage, preset: &MacroPreset) -> String {
+        if preset.trigger_mode == MacroTriggerMode::WindowFocus {
+            let target = preset
+                .event_target_window_title
+                .as_deref()
+                .map(Self::simplify_window_title)
+                .unwrap_or_else(|| {
+                    Self::tr_lang(language, "Any focused window", "Bat ky cua so dang focus")
+                        .to_owned()
+                });
+            return format!("Focus: {target}");
+        }
+
         let bindings = Self::macro_trigger_bindings(preset);
         let label = hotkey::format_binding_list(&bindings);
         if label == "Not set" {
@@ -5556,16 +5581,19 @@ impl CrosshairApp {
                 MacroTriggerMode::Press => "Nhấn",
                 MacroTriggerMode::Hold => "Giữ",
                 MacroTriggerMode::Release => "Thả",
+                _ => "Focus",
             },
             UiLanguage::English => match mode {
                 MacroTriggerMode::Press => "Press",
                 MacroTriggerMode::Hold => "Hold",
                 MacroTriggerMode::Release => "Release",
+                MacroTriggerMode::WindowFocus => "Window focus",
             },
             UiLanguage::Icon => match mode {
                 MacroTriggerMode::Press => "Press",
                 MacroTriggerMode::Hold => "Hold",
                 MacroTriggerMode::Release => "Release",
+                MacroTriggerMode::WindowFocus => "Focus",
             },
         }
     }

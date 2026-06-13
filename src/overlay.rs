@@ -1193,7 +1193,9 @@ mod windows_overlay {
             while poll_running.load(Ordering::Relaxed) {
                 unsafe {
                     let foreground = GetForegroundWindow();
-                    update_foreground_window(foreground);
+                    if update_foreground_window(foreground) {
+                        trigger_macros_on_window_focus_change();
+                    }
                     let mut ui_in_foreground = false;
                     let mut ui_visible = false;
                     let mut ui_rect = windows::Win32::Foundation::RECT::default();
@@ -3076,6 +3078,7 @@ mod windows_overlay {
             MacroTriggerMode::Press => !preset.pass_through_press,
             MacroTriggerMode::Hold => !preset.pass_through_hold,
             MacroTriggerMode::Release => false,
+            MacroTriggerMode::WindowFocus => false,
         }
     }
 
@@ -14459,7 +14462,62 @@ mod windows_overlay {
         }
     }
 
-    pub fn update_foreground_window(hwnd: HWND) {
+    fn trigger_macros_on_window_focus_change() {
+        let matches = {
+            let hook_state = HOOK_STATE.lock();
+            if !hook_state.macros_master_enabled {
+                return;
+            }
+
+            let mut matches = Vec::new();
+            for group in &hook_state.macro_groups {
+                if !group.enabled || !macro_target_matches(group) {
+                    continue;
+                }
+
+                for preset in &group.presets {
+                    if !preset.enabled || preset.trigger_mode != MacroTriggerMode::WindowFocus {
+                        continue;
+                    }
+
+                    if !window_focus_matches(
+                        preset.event_target_window_title.as_deref(),
+                        &preset.event_extra_target_window_titles,
+                        preset.event_match_duplicate_window_titles,
+                    ) {
+                        continue;
+                    }
+
+                    matches.push((
+                        preset.clone(),
+                        group.target_window_title.clone(),
+                        group.extra_target_window_titles.clone(),
+                        group.match_duplicate_window_titles,
+                    ));
+                }
+            }
+
+            matches
+        };
+
+        for (preset, target_window_title, extra_target_window_titles, match_duplicate_window_titles) in
+            matches
+        {
+            let hotkey_id = MACRO_PRESET_BASE_ID + preset.id as i32;
+            if !SUPPRESSED_MACRO_HOTKEYS.lock().contains(&hotkey_id) {
+                let _ = play_macro_preset(
+                    hotkey_id,
+                    preset,
+                    target_window_title,
+                    extra_target_window_titles,
+                    match_duplicate_window_titles,
+                    "WindowFocus".to_owned(),
+                );
+            }
+        }
+    }
+
+    pub fn update_foreground_window(hwnd: HWND) -> bool {
         let current_hwnd = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
         if hwnd.0 as isize != current_hwnd {
             FOREGROUND_WINDOW_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
@@ -14470,6 +14528,9 @@ mod windows_overlay {
             };
             let mut guard = FOREGROUND_WINDOW_TITLE.lock();
             *guard = title;
+            true
+        } else {
+            false
         }
     }
 
