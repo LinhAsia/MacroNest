@@ -14470,11 +14470,20 @@ mod windows_overlay {
     }
 
     fn focus_trigger_ready_for_dispatch() -> bool {
-        let hook_state = HOOK_STATE.lock();
-        !hook_state.alt
-            && !hook_state.win
-            && !hook_state.held_inputs.contains("Tab")
-            && hook_state.held_mouse_buttons.is_empty()
+        let alt_down = unsafe { GetAsyncKeyState(0x12) } < 0;
+        let tab_down = unsafe { GetAsyncKeyState(0x09) } < 0;
+        let win_down =
+            unsafe { GetAsyncKeyState(0x5B) } < 0 || unsafe { GetAsyncKeyState(0x5C) } < 0;
+        let left_mouse_down = unsafe { GetAsyncKeyState(0x01) } < 0;
+        let right_mouse_down = unsafe { GetAsyncKeyState(0x02) } < 0;
+        let middle_mouse_down = unsafe { GetAsyncKeyState(0x04) } < 0;
+
+        !(alt_down
+            || tab_down
+            || win_down
+            || left_mouse_down
+            || right_mouse_down
+            || middle_mouse_down)
     }
 
     fn schedule_window_focus_trigger(hwnd: HWND) {
