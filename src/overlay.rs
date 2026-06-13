@@ -14543,43 +14543,6 @@ mod windows_overlay {
         }
     }
 
-    fn focus_trigger_ready_for_dispatch() -> bool {
-        let hook_state = HOOK_STATE.lock();
-        let alt_down = hook_state.held_inputs.iter().any(|key| key.eq_ignore_ascii_case("Alt"));
-        let tab_down = hook_state.held_inputs.iter().any(|key| key.eq_ignore_ascii_case("Tab"));
-        let win_down = hook_state
-            .held_inputs
-            .iter()
-            .any(|key| key.eq_ignore_ascii_case("Win"));
-        let left_mouse_down = hook_state
-            .held_mouse_buttons
-            .iter()
-            .any(|key| key.eq_ignore_ascii_case("MouseLeft"));
-        let right_mouse_down = hook_state
-            .held_mouse_buttons
-            .iter()
-            .any(|key| key.eq_ignore_ascii_case("MouseRight"));
-        let middle_mouse_down = hook_state
-            .held_mouse_buttons
-            .iter()
-            .any(|key| key.eq_ignore_ascii_case("MouseMiddle"));
-
-        !(alt_down
-            || tab_down
-            || win_down
-            || left_mouse_down
-            || right_mouse_down
-            || middle_mouse_down)
-    }
-
-    fn alt_tab_transition_active() -> bool {
-        let hook_state = HOOK_STATE.lock();
-        hook_state
-            .held_inputs
-            .iter()
-            .any(|key| key.eq_ignore_ascii_case("Alt") || key.eq_ignore_ascii_case("Tab"))
-    }
-
     fn schedule_window_focus_trigger(hwnd: HWND) {
         let mut hook_state = HOOK_STATE.lock();
         if hwnd.0.is_null() {
@@ -14623,21 +14586,6 @@ mod windows_overlay {
         }
 
         let is_candidate = is_focus_trigger_candidate_window(hwnd);
-        if alt_tab_transition_active() || !focus_trigger_ready_for_dispatch() {
-            if is_candidate {
-                schedule_window_focus_trigger(hwnd);
-                unsafe {
-                    let _ = SetTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID, 10, None);
-                }
-            } else {
-                reset_window_focus_dispatch_guard();
-                unsafe {
-                    let _ = KillTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID);
-                }
-            }
-            return;
-        }
-
         if is_candidate {
             schedule_window_focus_trigger(hwnd);
             if process_pending_window_focus_trigger() {
@@ -14665,14 +14613,6 @@ mod windows_overlay {
         let Some(pending) = pending else {
             return false;
         };
-
-        if alt_tab_transition_active() {
-            return true;
-        }
-
-        if !focus_trigger_ready_for_dispatch() {
-            return true;
-        }
 
         let current_hwnd = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
         if current_hwnd != pending {
