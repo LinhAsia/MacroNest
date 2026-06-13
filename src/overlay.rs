@@ -796,6 +796,7 @@ mod windows_overlay {
         press_trigger_suppression: HashMap<String, usize>,
         pending_press_trigger_keys: HashSet<String>,
         pending_window_focus_trigger: Option<isize>,
+        pending_window_focus_stable_polls: u8,
         last_dispatched_window_focus_hwnd: Option<isize>,
         ctrl: bool,
         alt: bool,
@@ -888,6 +889,7 @@ mod windows_overlay {
                 press_trigger_suppression: HashMap::new(),
                 pending_press_trigger_keys: HashSet::new(),
                 pending_window_focus_trigger: None,
+                pending_window_focus_stable_polls: 0,
                 last_dispatched_window_focus_hwnd: None,
                 ctrl: false,
                 alt: false,
@@ -14479,10 +14481,17 @@ mod windows_overlay {
         let mut hook_state = HOOK_STATE.lock();
         if hwnd.0.is_null() {
             hook_state.pending_window_focus_trigger = None;
+            hook_state.pending_window_focus_stable_polls = 0;
             return;
         }
 
-        hook_state.pending_window_focus_trigger = Some(hwnd.0 as isize);
+        let hwnd_value = hwnd.0 as isize;
+        if hook_state.pending_window_focus_trigger == Some(hwnd_value) {
+            return;
+        }
+
+        hook_state.pending_window_focus_trigger = Some(hwnd_value);
+        hook_state.pending_window_focus_stable_polls = 0;
     }
 
     fn process_pending_window_focus_trigger() {
@@ -14505,8 +14514,14 @@ mod windows_overlay {
 
         {
             let mut hook_state = HOOK_STATE.lock();
+            hook_state.pending_window_focus_stable_polls =
+                hook_state.pending_window_focus_stable_polls.saturating_add(1);
+            if hook_state.pending_window_focus_stable_polls < 2 {
+                return;
+            }
             if hook_state.pending_window_focus_trigger == Some(pending) {
                 hook_state.pending_window_focus_trigger = None;
+                hook_state.pending_window_focus_stable_polls = 0;
             }
             if hook_state.last_dispatched_window_focus_hwnd == Some(pending) {
                 return;
