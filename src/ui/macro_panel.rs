@@ -15594,12 +15594,27 @@ impl CrosshairApp {
             return;
         }
         let popup_id = response.id.with("sug_popup");
-        let popup_position = response.rect.left_bottom();
+        let below_space = ui.ctx().content_rect().bottom() - response.rect.bottom() - 8.0;
+        let above_space = response.rect.top() - ui.ctx().content_rect().top() - 8.0;
+        let open_upward = above_space > below_space && above_space >= 120.0;
+        let popup_position = if open_upward {
+            egui::pos2(response.rect.left(), response.rect.top() - 4.0)
+        } else {
+            response.rect.left_bottom()
+        };
         let mut clicked_choice: Option<String> = None;
-        let popup_max_height =
-            (ui.ctx().content_rect().bottom() - popup_position.y - 8.0).max(120.0);
+        let popup_max_height = if open_upward {
+            above_space.max(120.0)
+        } else {
+            below_space.max(120.0)
+        };
         let area_res = egui::Area::new(popup_id)
             .order(egui::Order::Foreground)
+            .pivot(if open_upward {
+                egui::Align2::LEFT_BOTTOM
+            } else {
+                egui::Align2::LEFT_TOP
+            })
             .fixed_pos(popup_position)
             .show(ui.ctx(), |ui| {
                 let frame_res = egui::Frame::popup(ui.style()).show(ui, |ui| {
@@ -15838,12 +15853,27 @@ impl CrosshairApp {
             return;
         }
         let popup_id = response.id.with("sug_popup_raw");
-        let popup_position = response.rect.left_bottom();
+        let below_space = ui.ctx().content_rect().bottom() - response.rect.bottom() - 8.0;
+        let above_space = response.rect.top() - ui.ctx().content_rect().top() - 8.0;
+        let open_upward = above_space > below_space && above_space >= 120.0;
+        let popup_position = if open_upward {
+            egui::pos2(response.rect.left(), response.rect.top() - 4.0)
+        } else {
+            response.rect.left_bottom()
+        };
         let mut clicked_choice: Option<String> = None;
-        let popup_max_height =
-            (ui.ctx().content_rect().bottom() - popup_position.y - 8.0).max(120.0);
+        let popup_max_height = if open_upward {
+            above_space.max(120.0)
+        } else {
+            below_space.max(120.0)
+        };
         let area_res = egui::Area::new(popup_id)
             .order(egui::Order::Foreground)
+            .pivot(if open_upward {
+                egui::Align2::LEFT_BOTTOM
+            } else {
+                egui::Align2::LEFT_TOP
+            })
             .fixed_pos(popup_position)
             .show(ui.ctx(), |ui| {
                 let frame_res = egui::Frame::popup(ui.style()).show(ui, |ui| {
