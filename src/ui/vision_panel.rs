@@ -2271,10 +2271,12 @@ impl CrosshairApp {
                         {
                             if is_fill {
                                 object.spec.fill_color = color;
-                                object.spec.fill_color_expr.clear();
+                                object.spec.fill_color_expr =
+                                    Self::geometry_color_expr_literal(color);
                             } else {
                                 object.spec.stroke_color = color;
-                                object.spec.stroke_color_expr.clear();
+                                object.spec.stroke_color_expr =
+                                    Self::geometry_color_expr_literal(color);
                             }
                             applied = true;
                         }
@@ -2319,10 +2321,12 @@ impl CrosshairApp {
                 if let Some(step) = step {
                     if is_fill {
                         step.geometry_spec.fill_color = color;
-                        step.geometry_spec.fill_color_expr.clear();
+                        step.geometry_spec.fill_color_expr =
+                            Self::geometry_color_expr_literal(color);
                     } else {
                         step.geometry_spec.stroke_color = color;
-                        step.geometry_spec.stroke_color_expr.clear();
+                        step.geometry_spec.stroke_color_expr =
+                            Self::geometry_color_expr_literal(color);
                     }
                     if self.draw_geometry_step_preview_target == Some((group_id, preset_id, step_index, is_hold_stop)) {
                         let _ = self.overlay_tx.send(
@@ -2807,10 +2811,12 @@ impl CrosshairApp {
                         {
                             if is_fill {
                                 object.spec.fill_color = color;
-                                object.spec.fill_color_expr.clear();
+                                object.spec.fill_color_expr =
+                                    Self::geometry_color_expr_literal(color);
                             } else {
                                 object.spec.stroke_color = color;
-                                object.spec.stroke_color_expr.clear();
+                                object.spec.stroke_color_expr =
+                                    Self::geometry_color_expr_literal(color);
                             }
                             applied = true;
                         }
@@ -2855,10 +2861,12 @@ impl CrosshairApp {
                 if let Some(step) = step {
                     if is_fill {
                         step.geometry_spec.fill_color = color;
-                        step.geometry_spec.fill_color_expr.clear();
+                        step.geometry_spec.fill_color_expr =
+                            Self::geometry_color_expr_literal(color);
                     } else {
                         step.geometry_spec.stroke_color = color;
-                        step.geometry_spec.stroke_color_expr.clear();
+                        step.geometry_spec.stroke_color_expr =
+                            Self::geometry_color_expr_literal(color);
                     }
                     if self.draw_geometry_step_preview_target == Some((group_id, preset_id, step_index, is_hold_stop)) {
                         let _ = self.overlay_tx.send(

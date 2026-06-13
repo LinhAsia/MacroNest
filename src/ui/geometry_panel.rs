@@ -343,7 +343,7 @@ impl CrosshairApp {
         }
     }
 
-    fn geometry_color_expr_literal(color: crate::model::RgbaColor) -> String {
+    pub(crate) fn geometry_color_expr_literal(color: crate::model::RgbaColor) -> String {
         if color.a == 255 {
             format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b)
         } else {

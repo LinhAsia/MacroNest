@@ -76,6 +76,7 @@ fn apply_process_startup_tuning(paths: &AppPaths) {
 }
 
 fn main() -> Result<()> {
+    let _ = platform::set_app_user_model_id();
     let args = std::env::args().collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--already-running-popup") {
         return run_popup_blob(PopupBlobKind::AlreadyRunning);
@@ -206,6 +207,7 @@ fn main() -> Result<()> {
         "MacroNest v{}",
         option_env!("MACRONEST_BUILD_TAG").unwrap_or(env!("CARGO_PKG_VERSION"))
     );
+    let app_icon = app_icon::icon_data(128).ok().map(Arc::new);
     let mut viewport_builder = eframe::egui::ViewportBuilder::default()
         .with_title(&app_title)
         .with_inner_size([1180.0, 780.0])
@@ -213,6 +215,9 @@ fn main() -> Result<()> {
         .with_visible(true)
         .with_decorations(false)
         .with_transparent(true);
+    if let Some(icon) = app_icon {
+        viewport_builder = viewport_builder.with_icon(icon);
+    }
 
     #[cfg(windows)]
     {
@@ -255,6 +260,7 @@ fn main() -> Result<()> {
 }
 
 fn run_popup_blob(kind: PopupBlobKind) -> Result<()> {
+    let _ = platform::set_app_user_model_id();
     let app_title = format!(
         "MacroNest v{}",
         option_env!("MACRONEST_BUILD_TAG").unwrap_or(env!("CARGO_PKG_VERSION"))
