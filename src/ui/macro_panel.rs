@@ -7451,18 +7451,20 @@ impl CrosshairApp {
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 2.0;
+                                        ui.spacing_mut().interact_size.y = 20.0;
                                         let capture_target = CaptureRequest::MacroPresetRecordHotkey(group.id, preset.id);
                                         let has_rec_hotkey = preset.record_hotkey.is_some();
                                         let capture_active = self.capture_target.as_ref() == Some(&capture_target);
-                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(118.0, 18.0), egui::Sense::hover());
+                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(118.0, 20.0), egui::Sense::hover());
                                          let mut child_ui = ui.new_child(
                                              egui::UiBuilder::new()
                                                  .max_rect(rect)
                                                  .layout(egui::Layout::left_to_right(egui::Align::Center))
                                          );
                                          child_ui.spacing_mut().item_spacing.x = 2.0;
+                                         child_ui.spacing_mut().interact_size.y = 20.0;
                                          if child_ui
-                                             .add_sized([18.0, 18.0], Button::new(Self::material_icon_text(0xe145, 12.0)))
+                                             .add_sized([18.0, 20.0], Button::new(Self::material_icon_text(0xe145, 12.0)))
                                              .on_hover_text(Self::tr_lang(
                                                  language,
                                                  "Add step",
@@ -7565,17 +7567,17 @@ impl CrosshairApp {
                                                  "Nhấp để gán phím tắt bắt đầu/dừng ghi macro nhanh",
                                               ).to_string()
                                           };
-                                          let clicked = child_ui.scope(|ui| {
-                                              ui.spacing_mut().button_padding = egui::vec2(6.0, 0.0);
-                                              let kbd_btn = Button::new(
-                                                  RichText::new(kbd_btn_text)
+                                         let clicked = child_ui.scope(|ui| {
+                                             ui.spacing_mut().button_padding = egui::vec2(6.0, 0.0);
+                                             let kbd_btn = Button::new(
+                                                 RichText::new(kbd_btn_text)
                                                       .color(text_color)
                                                       .strong()
                                                       .size(10.0)
                                               )
                                               .fill(capture_fill)
-                                              .min_size(egui::vec2(18.0, 18.0));
-                                              ui.add_sized([18.0, 18.0], kbd_btn)
+                                              .min_size(egui::vec2(18.0, 20.0));
+                                              ui.add_sized([18.0, 20.0], kbd_btn)
                                           }).inner.on_hover_text(hover_text).clicked();
                                           if clicked {
                                               if capture_active {
