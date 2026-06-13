@@ -443,8 +443,13 @@ impl CrosshairApp {
                                     ui.label(egui::RichText::new("- mouse.y").monospace());
                                     ui.label(egui::RichText::new("- mouse.sensitivity").monospace());
                                     ui.label(egui::RichText::new("- volume.level").monospace());
+                                    ui.label(egui::RichText::new("- window.x / left").monospace());
+                                    ui.label(egui::RichText::new("- window.y / top").monospace());
+                                    ui.label(egui::RichText::new("- window.right").monospace());
+                                    ui.label(egui::RichText::new("- window.bottom").monospace());
                                     ui.label(egui::RichText::new("- window.width").monospace());
                                     ui.label(egui::RichText::new("- window.height").monospace());
+                                    ui.label(egui::RichText::new("- window.centerX / centerY").monospace());
                                 });
                                 ui.vertical(|ui| {
                                     ui.label(
