@@ -1157,16 +1157,6 @@ pub struct MacroStep {
     #[serde(default)]
     pub geometry_preset_modify_initialized: bool,
     #[serde(default)]
-    pub geometry_modify_position: bool,
-    #[serde(default)]
-    pub geometry_modify_size: bool,
-    #[serde(default)]
-    pub geometry_modify_transform: bool,
-    #[serde(default)]
-    pub geometry_modify_content: bool,
-    #[serde(default)]
-    pub geometry_modify_style: bool,
-    #[serde(default)]
     pub geometry_spec: GeometrySpec,
     #[serde(default = "default_true")]
     pub geometry_collapsed: bool,
@@ -1255,11 +1245,6 @@ impl Default for MacroStep {
             geometry_preset_use_custom_ref: false,
             geometry_preset_modify_enabled: false,
             geometry_preset_modify_initialized: false,
-            geometry_modify_position: false,
-            geometry_modify_size: false,
-            geometry_modify_transform: false,
-            geometry_modify_content: false,
-            geometry_modify_style: false,
             geometry_spec: GeometrySpec::default(),
             geometry_collapsed: true,
             if_contain_case_sensitive: false,
