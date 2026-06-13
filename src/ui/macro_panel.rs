@@ -13049,6 +13049,11 @@ impl CrosshairApp {
         suggestion.to_string()
     }
 
+    fn dedupe_suggestions_preserve_order(suggestions: &mut Vec<String>) {
+        let mut seen = std::collections::HashSet::new();
+        suggestions.retain(|item| seen.insert(item.to_lowercase()));
+    }
+
     fn expression_suggestion_label(suggestion: &str, timer_names: &[String]) -> String {
         match suggestion {
             "abs()" => "abs(a)".to_string(),
@@ -15512,6 +15517,7 @@ impl CrosshairApp {
                 }
             }
         }
+        Self::dedupe_suggestions_preserve_order(&mut suggestions);
         if suggestions.is_empty() {
             return;
         }
@@ -15775,6 +15781,7 @@ impl CrosshairApp {
                 }
             }
         }
+        Self::dedupe_suggestions_preserve_order(&mut suggestions);
         if suggestions.is_empty() {
             return;
         }
