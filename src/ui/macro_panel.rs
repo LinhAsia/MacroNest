@@ -7940,36 +7940,55 @@ impl CrosshairApp {
                                     .inner_margin(egui::Margin::symmetric(4, 2))
                                     .show(ui, |ui| {
                                         ui.horizontal(|ui| {
+                                            const STEP_TOOLBAR_BUTTON: [f32; 2] = [20.0, 20.0];
+                                            const STEP_TOOLBAR_ICON_SMALL: f32 = 14.0;
+                                            const STEP_TOOLBAR_ICON_MEDIUM: f32 = 15.0;
                                             ui.spacing_mut().item_spacing.x = 2.0;
-                                            ui.spacing_mut().interact_size.y = 18.0;
+                                            ui.spacing_mut().interact_size.y = STEP_TOOLBAR_BUTTON[1];
                                             let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
                                             let hint_color = if is_dark_theme {
                                                 Color32::from_rgba_unmultiplied(140, 140, 140, 150)
                                             } else {
                                                 Color32::from_rgba_unmultiplied(100, 100, 100, 150)
                                             };
-                                            let (rect, _) = ui.allocate_exact_size(egui::vec2(118.0, 18.0), egui::Sense::hover());
+                                            let (rect, _) = ui.allocate_exact_size(
+                                                egui::vec2(132.0, STEP_TOOLBAR_BUTTON[1]),
+                                                egui::Sense::hover(),
+                                            );
                                             let mut child_ui = ui.new_child(
                                                 egui::UiBuilder::new()
                                                     .max_rect(rect)
                                                     .layout(egui::Layout::left_to_right(egui::Align::Center))
                                             );
                                             child_ui.spacing_mut().item_spacing.x = 2.0;
+                                            child_ui.spacing_mut().button_padding = egui::vec2(0.0, 0.0);
+                                            child_ui.spacing_mut().interact_size = egui::vec2(
+                                                STEP_TOOLBAR_BUTTON[0],
+                                                STEP_TOOLBAR_BUTTON[1],
+                                            );
                                             if child_ui
-                                                .add_sized([18.0, 18.0], Button::new(Self::material_icon_text(0xe145, 12.0)))
+                                                .add_sized(
+                                                    STEP_TOOLBAR_BUTTON,
+                                                    Button::new(Self::material_icon_text(
+                                                        0xe145,
+                                                        STEP_TOOLBAR_ICON_MEDIUM,
+                                                    )),
+                                                )
                                                 .on_hover_text(Self::tr_lang(language, "Add a new step below this one", "Thêm một bước mới phía dưới"))
                                                 .clicked()
                                             {
                                                 insert_step_after = Some((preset.id, step_index));
                                             }
                                             let select_icon = if is_selected {
-                                                Self::material_icon_text(0xe5ca, 12.0).color(Color32::from_rgb(96, 232, 255))
+                                                Self::material_icon_text(0xe5ca, STEP_TOOLBAR_ICON_SMALL)
+                                                    .color(Color32::from_rgb(96, 232, 255))
                                             } else {
-                                                RichText::new("")
+                                                Self::material_icon_text(0xe835, STEP_TOOLBAR_ICON_SMALL)
+                                                    .color(ui.visuals().widgets.inactive.fg_stroke.color)
                                             };
                                             if child_ui
                                                 .add_sized(
-                                                    [18.0, 18.0],
+                                                    STEP_TOOLBAR_BUTTON,
                                                     Button::new(select_icon),
                                                 )
                                                 .on_hover_text(Self::tr_lang(language, "Select step", "Chọn bước này"))
@@ -8024,8 +8043,11 @@ impl CrosshairApp {
                                                         ui.visuals().widgets.noninteractive.bg_stroke.color
                                                     };
                                                     let resp = ui.add_sized(
-                                                        [18.0, 18.0],
-                                                        Button::new(Self::material_icon_text(icon, 12.0))
+                                                        STEP_TOOLBAR_BUTTON,
+                                                        Button::new(Self::material_icon_text(
+                                                            icon,
+                                                            STEP_TOOLBAR_ICON_SMALL,
+                                                        ))
                                                             .fill(fill)
                                                             .stroke(egui::Stroke::new(1.0, stroke)),
                                                     ).on_hover_text(Self::tr_lang(language, "Toggle step enabled", "Bật/Tắt bước này"));
@@ -8037,8 +8059,11 @@ impl CrosshairApp {
                                                 }
                                                 if ui
                                                     .add_sized(
-                                                        [18.0, 18.0],
-                                                        Button::new(Self::material_icon_text(0xe872, 16.0)),
+                                                        STEP_TOOLBAR_BUTTON,
+                                                        Button::new(Self::material_icon_text(
+                                                            0xe872,
+                                                            STEP_TOOLBAR_ICON_MEDIUM,
+                                                        )),
                                                     )
                                                     .on_hover_text(Self::tr_lang(
                                                         language,
@@ -8051,8 +8076,11 @@ impl CrosshairApp {
                                                 }
                                                 let drag_handle = ui
                                                     .add_sized(
-                                                        [18.0, 18.0],
-                                                        Button::new(Self::material_icon_text(0xe25d, 16.0))
+                                                        STEP_TOOLBAR_BUTTON,
+                                                        Button::new(Self::material_icon_text(
+                                                            0xe25d,
+                                                            STEP_TOOLBAR_ICON_MEDIUM,
+                                                        ))
                                                             .sense(Sense::drag()),
                                                     )
                                                     .on_hover_cursor(egui::CursorIcon::Grab);
