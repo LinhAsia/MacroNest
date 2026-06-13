@@ -6624,7 +6624,7 @@ impl CrosshairApp {
                                                         Self::render_variable_suggestions_braced(ui, &response, &mut step.key, &timer_names, language);
                                                     });
                                                 } else if step.action == MacroAction::FunnyMemeReply {
-                                                    ui.vertical(|ui| {
+                                                    ui.horizontal(|ui| {
                                                         let response = Self::render_interpolated_text_edit(
                                                             ui,
                                                             &mut step.key,

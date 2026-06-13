@@ -4308,31 +4308,28 @@ impl CrosshairApp {
         }
 
         let mut open_settings_clicked = false;
-        ui.add_space(2.0);
-        ui.horizontal(|ui| {
-            let message_response = ui.add_sized(
-                [210.0, 18.0],
-                egui::Label::new(
-                    RichText::new(feedback.message.clone())
-                        .size(11.0)
-                        .color(Color32::from_rgb(255, 170, 170)),
-                )
-                .wrap_mode(egui::TextWrapMode::Truncate),
-            );
-            if message_response.hovered() {
-                let _ = message_response.on_hover_text(feedback.message.clone());
-            }
-            if feedback.open_groq_settings
-                && Self::add_sized_with_show_hover(
-                    ui,
-                    [58.0, 18.0],
-                    egui::Button::new(RichText::new("Settings").size(11.0)),
-                )
-                .clicked()
-            {
-                open_settings_clicked = true;
-            }
-        });
+        let message_response = ui.add_sized(
+            [170.0, 18.0],
+            egui::Label::new(
+                RichText::new(feedback.message.clone())
+                    .size(11.0)
+                    .color(Color32::from_rgb(255, 170, 170)),
+            )
+            .wrap_mode(egui::TextWrapMode::Truncate),
+        );
+        if message_response.hovered() {
+            let _ = message_response.on_hover_text(feedback.message.clone());
+        }
+        if feedback.open_groq_settings
+            && Self::add_sized_with_show_hover(
+                ui,
+                [58.0, 18.0],
+                egui::Button::new(RichText::new("Settings").size(11.0)),
+            )
+            .clicked()
+        {
+            open_settings_clicked = true;
+        }
 
         open_settings_clicked
     }
