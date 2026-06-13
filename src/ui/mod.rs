@@ -4040,19 +4040,22 @@ impl CrosshairApp {
                         }
 
                         ui.add_space(6.0);
-                        let pin_label = if pinned_window_active {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Unpin window",
-                                "Bo ghim cua so",
-                            )
-                        } else {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Pin window on top",
-                                "Ghim cua so len tren cung",
-                            )
-                        };
+                        let pin_label = Self::truncate_window_title(
+                            if pinned_window_active {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Unpin window",
+                                    "Bo ghim cua so",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Pin window on top",
+                                    "Ghim cua so len tren cung",
+                                )
+                            },
+                            14,
+                        );
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
@@ -4060,14 +4063,13 @@ impl CrosshairApp {
                                 ui.add(
                                     egui::Label::new(
                                         RichText::new(pin_label)
-                                            .size(11.0)
+                                            .size(10.0)
                                             .color(if button_response.hovered() {
                                                 ui.visuals().strong_text_color()
                                             } else {
                                                 ui.visuals().text_color()
                                             }),
                                     )
-                                    .wrap(),
                                 );
                             },
                         );
@@ -4084,7 +4086,7 @@ impl CrosshairApp {
                                     &self.quick_action_window_selector,
                                     &self.open_windows,
                                 ),
-                                12,
+                                9,
                             )
                         };
                         ui.set_min_width(92.0);
@@ -4095,8 +4097,9 @@ impl CrosshairApp {
                             .ctx()
                             .data(|data| data.get_temp::<bool>(selector_popup_id))
                             .unwrap_or(false);
-                        let selector_button = Button::new(format!("{selected_window_text}  v"))
-                            .wrap()
+                        let selector_button = Button::new(
+                            RichText::new(format!("{selected_window_text}  v")).size(10.0),
+                        )
                             .fill(Color32::from_rgba_premultiplied(60, 60, 60, 220));
                         let selector_response = ui.add_sized([92.0, 22.0], selector_button);
                         if selector_response.clicked() {
