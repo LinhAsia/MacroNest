@@ -14559,6 +14559,12 @@ mod windows_overlay {
             || middle_mouse_down)
     }
 
+    fn alt_tab_transition_active() -> bool {
+        let alt_down = unsafe { GetAsyncKeyState(0x12) } < 0;
+        let tab_down = unsafe { GetAsyncKeyState(0x09) } < 0;
+        alt_down || tab_down
+    }
+
     fn schedule_window_focus_trigger(hwnd: HWND) {
         let mut hook_state = HOOK_STATE.lock();
         if hwnd.0.is_null() {
@@ -14594,6 +14600,14 @@ mod windows_overlay {
             return;
         }
 
+        if alt_tab_transition_active() {
+            reset_window_focus_dispatch_guard();
+            unsafe {
+                let _ = KillTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID);
+            }
+            return;
+        }
+
         if is_focus_trigger_candidate_window(hwnd) {
             schedule_window_focus_trigger(hwnd);
             if process_pending_window_focus_trigger() {
@@ -14621,6 +14635,11 @@ mod windows_overlay {
         let Some(pending) = pending else {
             return false;
         };
+
+        if alt_tab_transition_active() {
+            clear_pending_window_focus_trigger();
+            return false;
+        }
 
         if !focus_trigger_ready_for_dispatch() {
             return true;
