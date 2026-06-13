@@ -14543,13 +14543,25 @@ mod windows_overlay {
     }
 
     fn focus_trigger_ready_for_dispatch() -> bool {
-        let alt_down = unsafe { GetAsyncKeyState(0x12) } < 0;
-        let tab_down = unsafe { GetAsyncKeyState(0x09) } < 0;
-        let win_down =
-            unsafe { GetAsyncKeyState(0x5B) } < 0 || unsafe { GetAsyncKeyState(0x5C) } < 0;
-        let left_mouse_down = unsafe { GetAsyncKeyState(0x01) } < 0;
-        let right_mouse_down = unsafe { GetAsyncKeyState(0x02) } < 0;
-        let middle_mouse_down = unsafe { GetAsyncKeyState(0x04) } < 0;
+        let hook_state = HOOK_STATE.lock();
+        let alt_down = hook_state.held_inputs.iter().any(|key| key.eq_ignore_ascii_case("Alt"));
+        let tab_down = hook_state.held_inputs.iter().any(|key| key.eq_ignore_ascii_case("Tab"));
+        let win_down = hook_state
+            .held_inputs
+            .iter()
+            .any(|key| key.eq_ignore_ascii_case("Win"));
+        let left_mouse_down = hook_state
+            .held_mouse_buttons
+            .iter()
+            .any(|key| key.eq_ignore_ascii_case("MouseLeft"));
+        let right_mouse_down = hook_state
+            .held_mouse_buttons
+            .iter()
+            .any(|key| key.eq_ignore_ascii_case("MouseRight"));
+        let middle_mouse_down = hook_state
+            .held_mouse_buttons
+            .iter()
+            .any(|key| key.eq_ignore_ascii_case("MouseMiddle"));
 
         !(alt_down
             || tab_down
@@ -14560,9 +14572,11 @@ mod windows_overlay {
     }
 
     fn alt_tab_transition_active() -> bool {
-        let alt_down = unsafe { GetAsyncKeyState(0x12) } < 0;
-        let tab_down = unsafe { GetAsyncKeyState(0x09) } < 0;
-        alt_down || tab_down
+        let hook_state = HOOK_STATE.lock();
+        hook_state
+            .held_inputs
+            .iter()
+            .any(|key| key.eq_ignore_ascii_case("Alt") || key.eq_ignore_ascii_case("Tab"))
     }
 
     fn schedule_window_focus_trigger(hwnd: HWND) {
@@ -14606,6 +14620,13 @@ mod windows_overlay {
                 let _ = KillTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID);
             }
             return;
+        }
+
+        {
+            let mut hook_state = HOOK_STATE.lock();
+            if hook_state.last_dispatched_window_focus_hwnd != Some(hwnd.0 as isize) {
+                hook_state.last_dispatched_window_focus_hwnd = None;
+            }
         }
 
         if is_focus_trigger_candidate_window(hwnd) {
