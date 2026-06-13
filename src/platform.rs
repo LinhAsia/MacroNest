@@ -25,8 +25,7 @@ mod windows_platform {
             UI::{
                 Controls::MARGINS,
                 Shell::{
-                    DROPFILES, IsUserAnAdmin, SetCurrentProcessExplicitAppUserModelID,
-                    ShellExecuteW,
+                    DROPFILES, IsUserAnAdmin, ShellExecuteW,
                 },
                 WindowsAndMessaging::{
                     BringWindowToTop, FindWindowExW, FindWindowW, HWND_NOTOPMOST, HWND_TOPMOST,
@@ -39,8 +38,6 @@ mod windows_platform {
     };
 
     const MUTEX_NAME: &str = "Global\\CrosshairOverlaySingleInstance";
-    const APP_USER_MODEL_ID: &str = "Crosshair.MacroNest";
-
     fn spawn_popup_arg(arg: &str) {
         if let Ok(exe) = env::current_exe() {
             let exe_wide = widestring(exe.as_os_str().to_string_lossy().as_ref());
@@ -56,14 +53,6 @@ mod windows_platform {
                 );
             }
         }
-    }
-
-    pub fn set_app_user_model_id() -> Result<()> {
-        let appid = widestring(APP_USER_MODEL_ID);
-        unsafe {
-            SetCurrentProcessExplicitAppUserModelID(PCWSTR(appid.as_ptr()))?;
-        }
-        Ok(())
     }
 
     pub struct SingleInstanceGuard {
@@ -525,10 +514,6 @@ mod fallback {
     }
 
     pub fn set_high_priority() {}
-
-    pub fn set_app_user_model_id() -> Result<()> {
-        Ok(())
-    }
 
     pub fn set_native_window_shadow(_frame: &Frame, _enabled: bool) -> bool {
         true
