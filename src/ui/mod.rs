@@ -3845,260 +3845,276 @@ impl CrosshairApp {
             .num_columns(3)
             .spacing([8.0, 8.0])
             .show(ui, |ui| {
-                ui.vertical(|ui| {
-                    let button_response = self.titlebar_quick_action_button(
-                        ui,
-                        TitlebarQuickActionKind::Taskbar,
-                        taskbar_hidden,
-                    );
-                    if button_response.clicked() {
-                        let success = if taskbar_hidden {
-                            crate::platform::show_taskbar()
-                        } else {
-                            crate::platform::hide_taskbar()
-                        };
-                        self.status = if success {
-                            if taskbar_hidden {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Windows taskbar restored.",
-                                    "Da hien lai taskbar Windows.",
-                                )
+                ui.allocate_ui_with_layout(
+                    vec2(92.0, 116.0),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::Taskbar,
+                            taskbar_hidden,
+                        );
+                        if button_response.clicked() {
+                            let success = if taskbar_hidden {
+                                crate::platform::show_taskbar()
                             } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Windows taskbar hidden.",
-                                    "Da an taskbar Windows.",
-                                )
-                            }
-                        } else if taskbar_hidden {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Failed to restore the Windows taskbar.",
-                                "Khong the hien lai taskbar Windows.",
-                            )
-                        } else {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Failed to hide the Windows taskbar.",
-                                "Khong the an taskbar Windows.",
-                            )
-                        }
-                        .to_owned();
-                    }
-
-                    ui.add_space(6.0);
-                    let taskbar_label = if taskbar_hidden {
-                        Self::tr_lang(
-                            self.state.ui_language,
-                            "Show taskbar",
-                            "Hien taskbar",
-                        )
-                    } else {
-                        Self::tr_lang(
-                            self.state.ui_language,
-                            "Hide taskbar",
-                            "An taskbar",
-                        )
-                    };
-                    ui.allocate_ui_with_layout(
-                        vec2(92.0, 28.0),
-                        egui::Layout::top_down(egui::Align::Center),
-                        |ui| {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(taskbar_label)
-                                        .size(11.0)
-                                        .color(if button_response.hovered() {
-                                            ui.visuals().strong_text_color()
-                                        } else {
-                                            ui.visuals().text_color()
-                                        }),
-                                )
-                                .wrap(),
-                            );
-                        },
-                    );
-                    ui.add_space(12.0);
-                });
-
-                ui.vertical(|ui| {
-                    let button_response = self.titlebar_quick_action_button(
-                        ui,
-                        TitlebarQuickActionKind::WindowsKey,
-                        self.state.windows_key_locked,
-                    );
-                    if button_response.clicked() {
-                        self.state.windows_key_locked = !self.state.windows_key_locked;
-                        self.sync_windows_key_locked();
-                        self.persist();
-                        self.status = if self.state.windows_key_locked {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Windows key locked.",
-                                "Da khoa phim Windows.",
-                            )
-                        } else {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Windows key unlocked.",
-                                "Da mo phim Windows.",
-                            )
-                        }
-                        .to_owned();
-                    }
-
-                    ui.add_space(6.0);
-                    let windows_label = if self.state.windows_key_locked {
-                        Self::tr_lang(
-                            self.state.ui_language,
-                            "Unlock Windows key",
-                            "Mo khoa phim Windows",
-                        )
-                    } else {
-                        Self::tr_lang(
-                            self.state.ui_language,
-                            "Lock Windows key",
-                            "Khoa phim Windows",
-                        )
-                    };
-                    ui.allocate_ui_with_layout(
-                        vec2(92.0, 28.0),
-                        egui::Layout::top_down(egui::Align::Center),
-                        |ui| {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(windows_label)
-                                        .size(11.0)
-                                        .color(if button_response.hovered() {
-                                            ui.visuals().strong_text_color()
-                                        } else {
-                                            ui.visuals().text_color()
-                                        }),
-                                )
-                                .wrap(),
-                            );
-                        },
-                    );
-                    ui.add_space(12.0);
-                });
-
-                ui.vertical(|ui| {
-                    let button_response = self.titlebar_quick_action_button(
-                        ui,
-                        TitlebarQuickActionKind::WindowPin,
-                        pinned_window_active,
-                    );
-                    if button_response.clicked() {
-                        if pin_window_available {
-                            let next_state = !pinned_window_active;
-                            let success = window_list::set_window_topmost(
-                                &self.quick_action_window_selector,
-                                next_state,
-                            );
+                                crate::platform::hide_taskbar()
+                            };
                             self.status = if success {
-                                if next_state {
+                                if taskbar_hidden {
                                     Self::tr_lang(
                                         self.state.ui_language,
-                                        "Pinned the selected window on top.",
-                                        "Da ghim cua so da chon len tren cung.",
+                                        "Windows taskbar restored.",
+                                        "Da hien lai taskbar Windows.",
                                     )
                                 } else {
                                     Self::tr_lang(
                                         self.state.ui_language,
-                                        "Removed topmost from the selected window.",
-                                        "Da bo ghim cua so da chon.",
+                                        "Windows taskbar hidden.",
+                                        "Da an taskbar Windows.",
                                     )
                                 }
+                            } else if taskbar_hidden {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Failed to restore the Windows taskbar.",
+                                    "Khong the hien lai taskbar Windows.",
+                                )
                             } else {
                                 Self::tr_lang(
                                     self.state.ui_language,
-                                    "Could not update the selected window.",
-                                    "Khong the cap nhat cua so da chon.",
+                                    "Failed to hide the Windows taskbar.",
+                                    "Khong the an taskbar Windows.",
                                 )
                             }
-                            .to_owned();
-                        } else {
-                            self.status = Self::tr_lang(
-                                self.state.ui_language,
-                                "No window is available to pin.",
-                                "Khong co cua so nao de ghim.",
-                            )
                             .to_owned();
                         }
-                    }
 
-                    ui.add_space(6.0);
-                    let pin_label = if pinned_window_active {
-                        Self::tr_lang(
-                            self.state.ui_language,
-                            "Unpin window",
-                            "Bo ghim cua so",
-                        )
-                    } else {
-                        Self::tr_lang(
-                            self.state.ui_language,
-                            "Pin window on top",
-                            "Ghim cua so len tren cung",
-                        )
-                    };
-                    ui.allocate_ui_with_layout(
-                        vec2(92.0, 28.0),
-                        egui::Layout::top_down(egui::Align::Center),
-                        |ui| {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(pin_label)
-                                        .size(11.0)
-                                        .color(if button_response.hovered() {
-                                            ui.visuals().strong_text_color()
-                                        } else {
-                                            ui.visuals().text_color()
-                                        }),
-                                )
-                                .wrap(),
-                            );
-                        },
-                    );
-                    let selected_window_text = if self.quick_action_window_selector.is_empty() {
-                        Self::tr_lang(
-                            self.state.ui_language,
-                            "Select window",
-                            "Chon cua so",
-                        )
-                        .to_owned()
-                    } else {
-                        Self::truncate_window_title(
-                            &Self::quick_action_window_display(
-                                &self.quick_action_window_selector,
-                                &self.open_windows,
-                            ),
-                            18,
-                        )
-                    };
-                    egui::ComboBox::from_id_salt("quick-action-window-selector")
-                        .width(92.0)
-                        .selected_text(selected_window_text)
-                        .show_ui(ui, |ui| {
-                            ui.set_min_width(92.0);
-                            ui.set_max_width(92.0);
-                            for selector in &self.open_windows {
-                                let display_title =
-                                    Self::quick_action_window_display(selector, &self.open_windows);
-                                let truncated_title =
-                                    Self::truncate_window_title(&display_title, 18);
-                                let selected = self.quick_action_window_selector == *selector;
-                                let response = ui.add_sized(
-                                    [92.0, 0.0],
-                                    egui::Button::new(truncated_title).selected(selected),
+                        ui.add_space(6.0);
+                        let taskbar_label = if taskbar_hidden {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Show taskbar",
+                                "Hien taskbar",
+                            )
+                        } else {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Hide taskbar",
+                                "An taskbar",
+                            )
+                        };
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(taskbar_label)
+                                            .size(11.0)
+                                            .color(if button_response.hovered() {
+                                                ui.visuals().strong_text_color()
+                                            } else {
+                                                ui.visuals().text_color()
+                                            }),
+                                    )
+                                    .wrap(),
                                 );
-                                if response.clicked() {
-                                    self.quick_action_window_selector = selector.clone();
-                                    keep_menu_open = true;
-                                }
-                                response.on_hover_text(Self::selector_base_title(selector));
+                            },
+                        );
+                        ui.add_space(12.0);
+                    },
+                });
+
+                ui.allocate_ui_with_layout(
+                    vec2(92.0, 116.0),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::WindowsKey,
+                            self.state.windows_key_locked,
+                        );
+                        if button_response.clicked() {
+                            self.state.windows_key_locked = !self.state.windows_key_locked;
+                            self.sync_windows_key_locked();
+                            self.persist();
+                            self.status = if self.state.windows_key_locked {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Windows key locked.",
+                                    "Da khoa phim Windows.",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Windows key unlocked.",
+                                    "Da mo phim Windows.",
+                                )
                             }
-                        });
+                            .to_owned();
+                        }
+
+                        ui.add_space(6.0);
+                        let windows_label = if self.state.windows_key_locked {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Unlock Windows key",
+                                "Mo khoa phim Windows",
+                            )
+                        } else {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Lock Windows key",
+                                "Khoa phim Windows",
+                            )
+                        };
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(windows_label)
+                                            .size(11.0)
+                                            .color(if button_response.hovered() {
+                                                ui.visuals().strong_text_color()
+                                            } else {
+                                                ui.visuals().text_color()
+                                            }),
+                                    )
+                                    .wrap(),
+                                );
+                            },
+                        );
+                        ui.add_space(12.0);
+                    },
+                });
+
+                ui.allocate_ui_with_layout(
+                    vec2(92.0, 116.0),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::WindowPin,
+                            pinned_window_active,
+                        );
+                        if button_response.clicked() {
+                            if pin_window_available {
+                                let next_state = !pinned_window_active;
+                                let success = window_list::set_window_topmost(
+                                    &self.quick_action_window_selector,
+                                    next_state,
+                                );
+                                self.status = if success {
+                                    if next_state {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Pinned the selected window on top.",
+                                            "Da ghim cua so da chon len tren cung.",
+                                        )
+                                    } else {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Removed topmost from the selected window.",
+                                            "Da bo ghim cua so da chon.",
+                                        )
+                                    }
+                                } else {
+                                    Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Could not update the selected window.",
+                                        "Khong the cap nhat cua so da chon.",
+                                    )
+                                }
+                                .to_owned();
+                            } else {
+                                self.status = Self::tr_lang(
+                                    self.state.ui_language,
+                                    "No window is available to pin.",
+                                    "Khong co cua so nao de ghim.",
+                                )
+                                .to_owned();
+                            }
+                        }
+
+                        ui.add_space(6.0);
+                        let pin_label = if pinned_window_active {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Unpin window",
+                                "Bo ghim cua so",
+                            )
+                        } else {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Pin window on top",
+                                "Ghim cua so len tren cung",
+                            )
+                        };
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(pin_label)
+                                            .size(11.0)
+                                            .color(if button_response.hovered() {
+                                                ui.visuals().strong_text_color()
+                                            } else {
+                                                ui.visuals().text_color()
+                                            }),
+                                    )
+                                    .wrap(),
+                                );
+                            },
+                        );
+                        let selected_window_text = if self.quick_action_window_selector.is_empty() {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Select window",
+                                "Chon cua so",
+                            )
+                            .to_owned()
+                        } else {
+                            Self::truncate_window_title(
+                                &Self::quick_action_window_display(
+                                    &self.quick_action_window_selector,
+                                    &self.open_windows,
+                                ),
+                                12,
+                            )
+                        };
+                        ui.set_min_width(92.0);
+                        ui.set_max_width(92.0);
+                        egui::ComboBox::from_id_salt("quick-action-window-selector")
+                            .width(92.0)
+                            .selected_text(selected_window_text)
+                            .show_ui(ui, |ui| {
+                                ui.set_min_width(92.0);
+                                ui.set_max_width(92.0);
+                                for selector in &self.open_windows {
+                                    let display_title = Self::quick_action_window_display(
+                                        selector,
+                                        &self.open_windows,
+                                    );
+                                    let truncated_title =
+                                        Self::truncate_window_title(&display_title, 18);
+                                    let selected = self.quick_action_window_selector == *selector;
+                                    let response = ui.add_sized(
+                                        [92.0, 0.0],
+                                        egui::Button::new(truncated_title).selected(selected),
+                                    );
+                                    if response.clicked() {
+                                        self.quick_action_window_selector = selector.clone();
+                                        keep_menu_open = true;
+                                    }
+                                    response.on_hover_text(Self::selector_base_title(selector));
+                                }
+                            });
+                    },
                 });
             });
         keep_menu_open
