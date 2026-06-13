@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use arboard::{Clipboard, ImageData};
 use image::DynamicImage;
 use serde::Deserialize;
@@ -183,8 +183,12 @@ struct GroqMessage {
 }
 
 #[derive(Deserialize)]
-struct MemeReplyQuery {
-    query: String,
+struct MemeReplyPlan {
+    reaction: String,
+    #[serde(default)]
+    template_names: Vec<String>,
+    #[serde(default)]
+    queries: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -195,78 +199,343 @@ struct DuckDuckGoImageSearchResponse {
 
 #[derive(Deserialize)]
 struct DuckDuckGoImageResult {
+    #[serde(default)]
+    title: String,
     image: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    width: u32,
+    #[serde(default)]
+    height: u32,
+    #[serde(default)]
+    encoding_format: String,
+}
+
+#[derive(Deserialize)]
+struct ImgflipMemesResponse {
+    success: bool,
+    data: ImgflipMemesData,
+}
+
+#[derive(Deserialize)]
+struct ImgflipMemesData {
+    memes: Vec<ImgflipMeme>,
+}
+
+#[derive(Clone, Deserialize)]
+struct ImgflipMeme {
+    name: String,
+    url: String,
+    width: u32,
+    height: u32,
 }
 
 pub fn copy_funny_meme_reply_to_clipboard(
     settings: &GroqSettings,
     source_text: &str,
 ) -> Result<String> {
-    let query = generate_meme_reply_query_groq(settings, source_text)?;
-    let image = fetch_first_meme_image(&query)?;
+    let plan = generate_meme_reply_plan_groq(settings, source_text)?;
+    let image = fetch_best_meme_image(&plan)?;
     copy_image_to_clipboard(image)?;
-    Ok(query)
+    Ok(plan.reaction)
 }
 
-fn generate_meme_reply_query_groq(settings: &GroqSettings, source_text: &str) -> Result<String> {
+fn generate_meme_reply_plan_groq(
+    settings: &GroqSettings,
+    source_text: &str,
+) -> Result<MemeReplyPlan> {
     let trimmed = source_text.trim();
     if trimmed.is_empty() {
         bail!("Funny Meme Reply input is empty");
     }
 
     let prompt = format!(
-        "Turn this message into a short meme image search query.\n\
-Return JSON with exactly one field: query.\n\
+        "Turn this message into a meme reply search plan.\n\
+Return JSON with exactly these fields: reaction, template_names, queries.\n\
 Rules:\n\
-- 2 to 6 words only\n\
-- plain lowercase English\n\
-- no punctuation except spaces\n\
-- aim for a reaction meme image someone would send back\n\
-- no explanation\n\
+- reaction: 2 to 5 lowercase English words describing the reaction intent\n\
+- template_names: 0 to 4 well-known meme or reaction names\n\
+- queries: 4 to 8 search queries ordered from best to fallback\n\
+- every query must be plain English and optimized to find an actual meme image or reaction image\n\
+- prefer reaction-image style queries like \"side eye reaction meme\", \"confused blinking guy meme\", \"bruh reaction image\"\n\
+- do not explain the joke\n\
+- do not include markdown\n\
+- if the input is generic, still choose a specific reaction that would be funny to send back\n\
 Message:\n{}",
         trimmed
     );
 
-    let system_instruction = "You turn chat messages into short meme image search queries.";
+    let system_instruction =
+        "You turn chat messages into strong meme reaction search plans for image search engines.";
     let text = groq_chat_completion_text(
         settings,
         &prompt,
         system_instruction,
         Some(serde_json::json!({"type": "json_object"})),
     )?;
-    let parsed: MemeReplyQuery =
-        serde_json::from_str(text.trim()).context("Groq did not return a valid meme query JSON")?;
-    let query = parsed.query.trim().to_owned();
-    if query.is_empty() {
-        bail!("Groq returned an empty meme search query");
+    let mut parsed: MemeReplyPlan =
+        serde_json::from_str(text.trim()).context("Groq did not return a valid meme plan JSON")?;
+    parsed.reaction = parsed.reaction.trim().to_owned();
+    parsed.template_names = parsed
+        .template_names
+        .into_iter()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .collect();
+    parsed.queries = parsed
+        .queries
+        .into_iter()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .collect();
+
+    if parsed.reaction.is_empty() {
+        bail!("Groq returned an empty meme reaction");
     }
-    Ok(query)
+    if parsed.queries.is_empty() {
+        parsed.queries = build_fallback_queries(&parsed.reaction, &parsed.template_names);
+    }
+    Ok(parsed)
 }
 
-fn fetch_first_meme_image(query: &str) -> Result<DynamicImage> {
+fn build_fallback_queries(reaction: &str, template_names: &[String]) -> Vec<String> {
+    let mut queries = Vec::new();
+    let trimmed_reaction = reaction.trim();
+    if !trimmed_reaction.is_empty() {
+        queries.push(format!("{trimmed_reaction} reaction meme"));
+        queries.push(format!("{trimmed_reaction} reaction image"));
+        queries.push(format!("{trimmed_reaction} meme"));
+    }
+    for name in template_names {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() {
+            queries.push(trimmed.to_owned());
+            queries.push(format!("{trimmed} meme"));
+            queries.push(format!("{trimmed} reaction image"));
+        }
+    }
+    dedupe_strings_preserve_order(queries)
+}
+
+fn fetch_best_meme_image(plan: &MemeReplyPlan) -> Result<DynamicImage> {
     let client = reqwest::blocking::Client::builder()
         .user_agent("MacroNest/1.1")
         .build()
         .context("Failed to prepare the image search client")?;
-    let token = fetch_duckduckgo_vqd(&client, query)?;
-    let results = fetch_duckduckgo_image_results(&client, query, &token)?;
-    if results.is_empty() {
-        bail!("No meme image results were found");
+
+    let queries = dedupe_strings_preserve_order({
+        let mut combined = plan.queries.clone();
+        combined.extend(build_fallback_queries(&plan.reaction, &plan.template_names));
+        combined
+    });
+
+    let mut best_result = None;
+    let mut best_score = i32::MIN;
+    let mut last_error = None;
+
+    for query in queries.iter().take(8) {
+        let token = match fetch_duckduckgo_vqd(&client, query) {
+            Ok(token) => token,
+            Err(error) => {
+                last_error = Some(error);
+                continue;
+            }
+        };
+        let results = match fetch_duckduckgo_image_results(&client, query, &token) {
+            Ok(results) => results,
+            Err(error) => {
+                last_error = Some(error);
+                continue;
+            }
+        };
+        for result in results.into_iter().take(12) {
+            let score =
+                score_duckduckgo_image_result(query, &plan.reaction, &plan.template_names, &result);
+            if score > best_score {
+                best_score = score;
+                best_result = Some(result);
+            }
+        }
     }
 
-    let mut last_error = None;
-    for result in results.into_iter().take(8) {
-        let image_url = result.image.trim();
-        if image_url.is_empty() || image_url.ends_with(".svg") {
-            continue;
-        }
-        match download_image(&client, image_url) {
+    if let Some(result) = best_result {
+        match download_image(&client, result.image.trim()) {
             Ok(image) => return Ok(image),
             Err(error) => last_error = Some(error),
         }
     }
 
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Could not download a usable meme image")))
+    if let Some(result) = match_imgflip_template(&client, plan)? {
+        return download_image(&client, result.url.trim());
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Could not find a usable meme image")))
+}
+
+fn score_duckduckgo_image_result(
+    query: &str,
+    reaction: &str,
+    template_names: &[String],
+    result: &DuckDuckGoImageResult,
+) -> i32 {
+    let mut score = 0;
+    let title = normalize_search_text(&result.title);
+    let url = normalize_search_text(&result.url);
+    let source = normalize_search_text(&result.source);
+    let image = normalize_search_text(&result.image);
+    let query_text = normalize_search_text(query);
+    let reaction_text = normalize_search_text(reaction);
+
+    for term in query_text.split_whitespace() {
+        if title.contains(term) || url.contains(term) {
+            score += 8;
+        }
+    }
+    for term in reaction_text.split_whitespace() {
+        if title.contains(term) || url.contains(term) {
+            score += 10;
+        }
+    }
+    for template in template_names {
+        let template_text = normalize_search_text(template);
+        if !template_text.is_empty()
+            && (title.contains(&template_text) || url.contains(&template_text))
+        {
+            score += 30;
+        }
+    }
+
+    let meme_hints = [
+        "meme",
+        "reaction",
+        "imgflip",
+        "knowyourmeme",
+        "tenor",
+        "giphy",
+        "meme arsenal",
+    ];
+    for hint in meme_hints {
+        if title.contains(hint)
+            || url.contains(hint)
+            || source.contains(hint)
+            || image.contains(hint)
+        {
+            score += 18;
+        }
+    }
+
+    match result.encoding_format.as_str() {
+        "jpeg" | "jpg" | "png" | "webp" => score += 25,
+        "gif" | "animatedgif" => score += 8,
+        "svg" => score -= 200,
+        _ => {}
+    }
+
+    if result.width >= 300 && result.height >= 300 {
+        score += 10;
+    }
+    if result.width < 120 || result.height < 120 {
+        score -= 40;
+    }
+    if image.ends_with(".svg") {
+        score -= 200;
+    }
+
+    score
+}
+
+fn normalize_search_text(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect()
+}
+
+fn dedupe_strings_preserve_order(values: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut deduped = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let key = trimmed.to_ascii_lowercase();
+        if seen.insert(key) {
+            deduped.push(trimmed.to_owned());
+        }
+    }
+    deduped
+}
+
+fn match_imgflip_template(
+    client: &reqwest::blocking::Client,
+    plan: &MemeReplyPlan,
+) -> Result<Option<ImgflipMeme>> {
+    let response = client
+        .get("https://api.imgflip.com/get_memes")
+        .send()
+        .context("Failed to fetch Imgflip meme templates")?
+        .error_for_status()
+        .context("Imgflip meme template request failed")?;
+    let payload: ImgflipMemesResponse = response
+        .json()
+        .context("Failed to parse Imgflip meme templates")?;
+    if !payload.success {
+        bail!("Imgflip did not return a successful meme template response");
+    }
+
+    let wanted_names = dedupe_strings_preserve_order({
+        let mut names = plan.template_names.clone();
+        names.push(plan.reaction.clone());
+        names.extend(plan.queries.clone());
+        names
+    });
+
+    let mut best_match: Option<ImgflipMeme> = None;
+    let mut best_score = 0;
+    for meme in payload.data.memes {
+        if meme.url.trim().is_empty() {
+            continue;
+        }
+        let meme_name = normalize_search_text(&meme.name);
+        let mut score = 0;
+        for wanted in &wanted_names {
+            let wanted_name = normalize_search_text(wanted);
+            if wanted_name.is_empty() {
+                continue;
+            }
+            if meme_name == wanted_name {
+                score += 200;
+            } else if meme_name.contains(&wanted_name) || wanted_name.contains(&meme_name) {
+                score += 80;
+            } else {
+                let wanted_terms = wanted_name.split_whitespace().collect::<Vec<_>>();
+                let overlap = wanted_terms
+                    .iter()
+                    .filter(|term| meme_name.contains(**term))
+                    .count() as i32;
+                score += overlap * 14;
+            }
+        }
+        if meme.width >= 300 && meme.height >= 300 {
+            score += 8;
+        }
+        if score > best_score {
+            best_score = score;
+            best_match = Some(meme);
+        }
+    }
+
+    Ok(if best_score >= 70 { best_match } else { None })
 }
 
 fn fetch_duckduckgo_vqd(client: &reqwest::blocking::Client, query: &str) -> Result<String> {
