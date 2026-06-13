@@ -15388,7 +15388,9 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
     ) -> bool {
         if target_title.is_none() && extra_target_titles.is_empty() {
-            return true;
+            let foreground =
+                HWND(FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void);
+            return is_focus_trigger_candidate_window(foreground);
         }
 
         let foreground =
@@ -15443,6 +15445,33 @@ mod windows_overlay {
 
             false
         })
+    }
+
+    fn is_focus_trigger_candidate_window(hwnd: HWND) -> bool {
+        unsafe {
+            if hwnd.0.is_null()
+                || !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool()
+            {
+                return false;
+            }
+
+            let root = GetAncestor(hwnd, GA_ROOT);
+            if root.0.is_null() || root != hwnd {
+                return false;
+            }
+
+            if GetWindow(hwnd, GW_OWNER).is_ok_and(|owner| !owner.0.is_null()) {
+                return false;
+            }
+
+            if window_belongs_to_current_process(hwnd) || is_internal_app_window(hwnd) {
+                return false;
+            }
+
+            window_title(hwnd)
+                .map(|title| !title.trim().is_empty())
+                .unwrap_or(false)
+        }
     }
 
     thread_local! {
