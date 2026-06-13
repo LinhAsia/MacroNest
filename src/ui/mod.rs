@@ -4089,31 +4089,56 @@ impl CrosshairApp {
                         };
                         ui.set_min_width(92.0);
                         ui.set_max_width(92.0);
-                        egui::ComboBox::from_id_salt("quick-action-window-selector")
-                            .width(92.0)
-                            .selected_text(selected_window_text)
-                            .show_ui(ui, |ui| {
-                                ui.set_min_width(92.0);
-                                ui.set_max_width(92.0);
+                        let selector_popup_id =
+                            ui.make_persistent_id("quick-action-window-selector-popup");
+                        let mut selector_popup_open = ui
+                            .ctx()
+                            .data(|data| data.get_temp::<bool>(selector_popup_id))
+                            .unwrap_or(false);
+                        let selector_button = Button::new(format!("{selected_window_text}  v"))
+                            .wrap()
+                            .fill(Color32::from_rgba_premultiplied(60, 60, 60, 220));
+                        let selector_response = ui.add_sized([92.0, 22.0], selector_button);
+                        if selector_response.clicked() {
+                            selector_popup_open = !selector_popup_open;
+                            keep_menu_open = true;
+                        }
+                        let selector_popup_result = egui::Popup::from_response(&selector_response)
+                            .id(selector_popup_id)
+                            .open_bool(&mut selector_popup_open)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .align(egui::RectAlign::BOTTOM_START)
+                            .width(132.0)
+                            .show(|ui| {
+                                ui.set_min_width(132.0);
+                                ui.set_max_width(132.0);
                                 for selector in &self.open_windows {
                                     let display_title = Self::quick_action_window_display(
                                         selector,
                                         &self.open_windows,
                                     );
                                     let truncated_title =
-                                        Self::truncate_window_title(&display_title, 18);
+                                        Self::truncate_window_title(&display_title, 20);
                                     let selected = self.quick_action_window_selector == *selector;
                                     let response = ui.add_sized(
-                                        [92.0, 0.0],
+                                        [132.0, 20.0],
                                         egui::Button::new(truncated_title).selected(selected),
                                     );
                                     if response.clicked() {
                                         self.quick_action_window_selector = selector.clone();
+                                        selector_popup_open = false;
                                         keep_menu_open = true;
                                     }
                                     response.on_hover_text(Self::selector_base_title(selector));
                                 }
                             });
+                        let _ = selector_popup_result;
+                        if selector_popup_open {
+                            keep_menu_open = true;
+                        }
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(selector_popup_id, selector_popup_open);
+                        });
                     },
                 );
             });
