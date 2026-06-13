@@ -1595,7 +1595,7 @@ mod windows_overlay {
             }
 
             WMAPP_WINDOW_FOCUS_CHANGED => {
-                let foreground = HWND(wparam.0 as *mut c_void);
+                let foreground = GetForegroundWindow();
                 handle_window_focus_event(hwnd, foreground);
                 LRESULT(0)
             }
@@ -14573,7 +14573,17 @@ mod windows_overlay {
         hook_state.last_dispatched_window_focus_hwnd = None;
     }
 
+    fn normalize_focus_window(hwnd: HWND) -> HWND {
+        if hwnd.0.is_null() {
+            return hwnd;
+        }
+
+        let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
+        if root.0.is_null() { hwnd } else { root }
+    }
+
     fn handle_window_focus_event(controller_hwnd: HWND, hwnd: HWND) {
+        let hwnd = normalize_focus_window(hwnd);
         if !update_foreground_window(hwnd) {
             return;
         }
