@@ -13,8 +13,8 @@ mod windows_impl {
             Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
             UI::WindowsAndMessaging::{
                 EnumWindows, GetForegroundWindow, GetSystemMetrics, GetWindowLongW, GetWindowRect,
-                GetWindowTextLengthW, GetWindowTextW, HWND_NOTOPMOST, HWND_TOPMOST, IsWindow,
-                IsWindowVisible, PW_RENDERFULLCONTENT, SetWindowPos, GWL_EXSTYLE,
+                GetWindowTextLengthW, GetWindowTextW, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic,
+                IsWindow, IsWindowVisible, PW_RENDERFULLCONTENT, SetWindowPos, GWL_EXSTYLE,
                 SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
                 SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WS_EX_TOPMOST,
             },
@@ -124,7 +124,23 @@ mod windows_impl {
                 return false;
             }
             let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            (ex_style & WS_EX_TOPMOST.0) != 0
+            let is_topmost = (ex_style & WS_EX_TOPMOST.0) != 0;
+            if !is_topmost {
+                return false;
+            }
+            if IsIconic(hwnd).as_bool() {
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_NOTOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                );
+                return false;
+            }
+            true
         }
     }
 

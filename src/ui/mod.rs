@@ -3900,19 +3900,25 @@ impl CrosshairApp {
                             "An taskbar",
                         )
                     };
-                    ui.add_sized(
-                        vec2(92.0, 16.0),
-                        egui::Label::new(
-                            RichText::new(taskbar_label)
-                                .size(11.0)
-                                .color(if button_response.hovered() {
-                                    ui.visuals().strong_text_color()
-                                } else {
-                                    ui.visuals().text_color()
-                                }),
-                        ),
+                    ui.allocate_ui_with_layout(
+                        vec2(92.0, 28.0),
+                        egui::Layout::top_down(egui::Align::Center),
+                        |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(taskbar_label)
+                                        .size(11.0)
+                                        .color(if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        }),
+                                )
+                                .wrap(),
+                            );
+                        },
                     );
-                    ui.add_space(24.0);
+                    ui.add_space(12.0);
                 });
 
                 ui.vertical(|ui| {
@@ -3955,19 +3961,25 @@ impl CrosshairApp {
                             "Khoa phim Windows",
                         )
                     };
-                    ui.add_sized(
-                        vec2(92.0, 16.0),
-                        egui::Label::new(
-                            RichText::new(windows_label)
-                                .size(11.0)
-                                .color(if button_response.hovered() {
-                                    ui.visuals().strong_text_color()
-                                } else {
-                                    ui.visuals().text_color()
-                                }),
-                        ),
+                    ui.allocate_ui_with_layout(
+                        vec2(92.0, 28.0),
+                        egui::Layout::top_down(egui::Align::Center),
+                        |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(windows_label)
+                                        .size(11.0)
+                                        .color(if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        }),
+                                )
+                                .wrap(),
+                            );
+                        },
                     );
-                    ui.add_space(24.0);
+                    ui.add_space(12.0);
                 });
 
                 ui.vertical(|ui| {
@@ -4029,36 +4041,55 @@ impl CrosshairApp {
                             "Ghim cua so da chon len tren cung",
                         )
                     };
-                    ui.add_sized(
-                        vec2(92.0, 16.0),
-                        egui::Label::new(
-                            RichText::new(pin_label)
-                                .size(11.0)
-                                .color(if button_response.hovered() {
-                                    ui.visuals().strong_text_color()
-                                } else {
-                                    ui.visuals().text_color()
-                                }),
-                        ),
+                    ui.allocate_ui_with_layout(
+                        vec2(92.0, 28.0),
+                        egui::Layout::top_down(egui::Align::Center),
+                        |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(pin_label)
+                                        .size(11.0)
+                                        .color(if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        }),
+                                )
+                                .wrap(),
+                            );
+                        },
                     );
+                    let selected_window_text = if self.quick_action_window_selector.is_empty() {
+                        Self::tr_lang(
+                            self.state.ui_language,
+                            "Select window",
+                            "Chon cua so",
+                        )
+                        .to_owned()
+                    } else {
+                        Self::truncate_window_title(
+                            &Self::quick_action_window_display(
+                                &self.quick_action_window_selector,
+                                &self.open_windows,
+                            ),
+                            18,
+                        )
+                    };
                     egui::ComboBox::from_id_salt("quick-action-window-selector")
                         .width(92.0)
-                        .selected_text(if self.quick_action_window_selector.is_empty() {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Select window",
-                                "Chon cua so",
-                            )
-                        } else {
-                            &self.quick_action_window_selector
-                        })
+                        .selected_text(selected_window_text)
                         .show_ui(ui, |ui| {
                             for selector in &self.open_windows {
+                                let display_title =
+                                    Self::quick_action_window_display(selector, &self.open_windows);
+                                let truncated_title =
+                                    Self::truncate_window_title(&display_title, 36);
                                 ui.selectable_value(
                                     &mut self.quick_action_window_selector,
                                     selector.clone(),
-                                    selector,
-                                );
+                                    truncated_title,
+                                )
+                                .on_hover_text(Self::selector_base_title(selector));
                             }
                         });
                 });
@@ -4231,6 +4262,22 @@ impl CrosshairApp {
         }
 
         base.to_owned()
+    }
+
+    fn quick_action_window_display(
+        selector: &str,
+        open_windows: &[String],
+    ) -> String {
+        let simplified = Self::simplify_window_title(selector);
+        let duplicate_count = open_windows
+            .iter()
+            .filter(|candidate| Self::simplify_window_title(candidate) == simplified)
+            .count();
+        if duplicate_count > 1 {
+            Self::selector_base_title(selector).to_owned()
+        } else {
+            simplified
+        }
     }
 
     fn render_multi_window_targets(
