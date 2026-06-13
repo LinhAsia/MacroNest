@@ -23,7 +23,7 @@ use crossbeam_channel::unbounded;
 use std::sync::{Arc, Condvar, Mutex};
 
 use crate::{
-    model::AppState,
+    model::{AppState, GeometryObject, GeometryPreset, GeometryShapeKind},
     overlay::OverlayCommand,
     storage::AppPaths,
     ui::{CrosshairApp, PopupBlobApp, PopupBlobKind},
@@ -41,17 +41,94 @@ fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool)> {
             state_changed = true;
         }
     }
-    for preset in &mut state.geometry_presets {
-        let old_len = preset.objects.len();
-        preset
-            .objects
-            .retain(|obj| obj.name != "Point 1" && obj.name != "Point 2" && obj.name != "Point 3");
-        if preset.objects.len() != old_len {
-            state_changed = true;
-        }
+    if normalize_geometry_presets(&mut state) {
+        state_changed = true;
     }
     state.show_window = true;
     Ok((state, state_changed))
+}
+
+fn make_default_geometry_object(preset_id: u32) -> GeometryObject {
+    GeometryObject::new(preset_id, GeometryShapeKind::Point)
+}
+
+fn normalize_geometry_presets(state: &mut AppState) -> bool {
+    let mut changed = false;
+    let original_presets = std::mem::take(&mut state.geometry_presets);
+    let mut normalized_presets = Vec::with_capacity(original_presets.len());
+    let mut next_preset_id = original_presets
+        .iter()
+        .map(|preset| preset.id)
+        .max()
+        .unwrap_or(0)
+        .max(state.next_geometry_preset_id.saturating_sub(1))
+        + 1;
+
+    for preset in original_presets {
+        let base_name = preset.name.clone();
+        let mut objects: Vec<GeometryObject> = preset
+            .objects
+            .into_iter()
+            .filter(|obj| obj.name != "Point 1" && obj.name != "Point 2" && obj.name != "Point 3")
+            .collect();
+
+        if objects.is_empty() {
+            changed = true;
+            normalized_presets.push(GeometryPreset {
+                id: preset.id,
+                name: base_name,
+                enabled: preset.enabled,
+                collapsed: preset.collapsed,
+                objects: vec![make_default_geometry_object(preset.id)],
+            });
+            continue;
+        }
+
+        if objects.len() > 1 {
+            changed = true;
+        }
+
+        for (index, mut object) in objects.drain(..).enumerate() {
+            let preset_id = if index == 0 {
+                preset.id
+            } else {
+                let id = next_preset_id;
+                next_preset_id += 1;
+                id
+            };
+            if object.id != preset_id {
+                object.id = preset_id;
+                changed = true;
+            }
+            let preset_name = if index == 0 {
+                base_name.clone()
+            } else if object.name.trim().is_empty() {
+                format!("{base_name} {}", index + 1)
+            } else {
+                object.name.clone()
+            };
+            normalized_presets.push(GeometryPreset {
+                id: preset_id,
+                name: preset_name,
+                enabled: preset.enabled,
+                collapsed: preset.collapsed,
+                objects: vec![object],
+            });
+        }
+    }
+
+    let desired_next_id = normalized_presets
+        .iter()
+        .map(|preset| preset.id)
+        .max()
+        .unwrap_or(0)
+        + 1;
+    if state.next_geometry_preset_id != desired_next_id {
+        state.next_geometry_preset_id = desired_next_id;
+        changed = true;
+    }
+    state.geometry_presets = normalized_presets;
+    changed
 }
 
 fn wait_for_startup_gate(startup_gate: &Arc<(Mutex<bool>, Condvar)>) {

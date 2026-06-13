@@ -14658,26 +14658,23 @@ impl CrosshairApp {
                                     let next_preset_id = geometry_presets.iter().map(|p| p.id).max().unwrap_or(0) + 1;
                                     let mut new_preset = crate::model::GeometryPreset::new(next_preset_id);
                                     new_preset.name = format!("Preset {}", next_preset_id);
-                                    let object_id = 1;
-                                    new_preset.objects.push(crate::model::GeometryObject {
-                                        id: object_id,
-                                        name: format!("{:?} {}", step.geometry_spec.shape, object_id),
-                                        enabled: true,
-                                        spec: step.geometry_spec.clone(),
-                                    });
+                                    if let Some(object) = new_preset.object_mut() {
+                                        object.name = format!("{:?} {}", step.geometry_spec.shape, next_preset_id);
+                                        object.enabled = true;
+                                        object.spec = step.geometry_spec.clone();
+                                    }
                                     geometry_presets.push(new_preset);
                                     *geometry_presets_changed = true;
                                     ui.close_menu();
                                 }
                                 for preset in geometry_presets.iter_mut() {
                                     if ui.button(&preset.name).clicked() {
-                                        let object_id = preset.objects.iter().map(|o| o.id).max().unwrap_or(0) + 1;
-                                        preset.objects.push(crate::model::GeometryObject {
-                                            id: object_id,
-                                            name: format!("{:?} {}", step.geometry_spec.shape, object_id),
-                                            enabled: true,
-                                            spec: step.geometry_spec.clone(),
-                                        });
+                                        let preset_id = preset.id;
+                                        if let Some(object) = preset.object_mut() {
+                                            object.name = format!("{:?} {}", step.geometry_spec.shape, preset_id);
+                                            object.enabled = true;
+                                            object.spec = step.geometry_spec.clone();
+                                        }
                                         *geometry_presets_changed = true;
                                         ui.close_menu();
                                     }
