@@ -3621,56 +3621,147 @@ impl CrosshairApp {
             .corner_radius(8.0)
     }
 
+    fn paint_titlebar_quick_action_icon(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        is_taskbar: bool,
+        active: bool,
+        icon_color: Color32,
+    ) {
+        if is_taskbar {
+            let frame_rect = rect.shrink2(vec2(18.0, 20.0));
+            let shelf_y = frame_rect.bottom() - 5.0;
+            painter.rect_stroke(
+                frame_rect,
+                4.0,
+                egui::Stroke::new(1.8, icon_color),
+                StrokeKind::Inside,
+            );
+            painter.line_segment(
+                [
+                    pos2(frame_rect.left() + 2.0, shelf_y),
+                    pos2(frame_rect.right() - 2.0, shelf_y),
+                ],
+                egui::Stroke::new(1.8, icon_color),
+            );
+            if active {
+                let slash_rect = frame_rect.expand2(vec2(4.0, 2.0));
+                painter.line_segment(
+                    [slash_rect.left_top(), slash_rect.right_bottom()],
+                    egui::Stroke::new(2.2, icon_color),
+                );
+            }
+        } else {
+            let logo_rect = rect.shrink2(vec2(18.0, 18.0));
+            let gap = 3.0;
+            let tile_w = (logo_rect.width() - gap) * 0.5;
+            let tile_h = (logo_rect.height() - gap) * 0.5;
+            for row in 0..2 {
+                for col in 0..2 {
+                    let min = pos2(
+                        logo_rect.left() + col as f32 * (tile_w + gap),
+                        logo_rect.top() + row as f32 * (tile_h + gap),
+                    );
+                    let max = pos2(min.x + tile_w, min.y + tile_h);
+                    painter.rect_filled(
+                        egui::Rect::from_min_max(min, max),
+                        1.5,
+                        icon_color,
+                    );
+                }
+            }
+            if active {
+                let lock_body = egui::Rect::from_center_size(
+                    pos2(logo_rect.right() + 2.0, logo_rect.bottom() - 1.0),
+                    vec2(10.0, 8.0),
+                );
+                painter.rect_filled(lock_body, 2.0, icon_color);
+                painter.circle_stroke(
+                    pos2(lock_body.center().x, lock_body.top() + 0.5),
+                    3.5,
+                    egui::Stroke::new(1.8, icon_color),
+                );
+            }
+        }
+    }
+
     fn titlebar_quick_action_button(
         &self,
-        icon: u32,
-        title: &str,
-        subtitle: &str,
+        ui: &mut egui::Ui,
+        is_taskbar: bool,
         active: bool,
-    ) -> Button<'static> {
-        let (fill, stroke, icon_color, text_color) = match (self.state.ui_theme, active) {
-            (UiThemeMode::Dark, true) => (
-                Color32::from_rgba_premultiplied(58, 120, 96, 164),
-                Color32::from_rgb(126, 224, 182),
-                Color32::from_rgb(214, 255, 236),
-                Color32::from_rgb(236, 248, 242),
-            ),
-            (UiThemeMode::Dark, false) => (
-                Color32::from_rgba_premultiplied(38, 48, 64, 188),
-                Color32::from_rgb(74, 92, 118),
-                Color32::from_rgb(214, 224, 240),
-                Color32::from_rgb(236, 241, 248),
-            ),
-            (UiThemeMode::Light, true) => (
-                Color32::from_rgba_premultiplied(90, 180, 132, 108),
-                Color32::from_rgb(34, 122, 88),
-                Color32::from_rgb(20, 92, 66),
-                Color32::from_rgb(22, 30, 38),
-            ),
-            (UiThemeMode::Light, false) => (
-                Color32::from_rgba_premultiplied(226, 232, 240, 220),
-                Color32::from_rgb(188, 198, 214),
-                Color32::from_rgb(62, 74, 92),
-                Color32::from_rgb(24, 30, 38),
-            ),
-        };
-        let text = format!(
-            "{}\n{}\n{}",
-            Self::material_icon_text(icon, 20.0).color(icon_color).text(),
-            title,
-            subtitle
+    ) -> egui::Response {
+        let button_size = vec2(92.0, 66.0);
+        let corner_radius = 14.0;
+        let (outer_fill, face_fill, border_color, icon_color, top_edge, bottom_edge) =
+            match (self.state.ui_theme, active) {
+                (UiThemeMode::Dark, true) => (
+                    Color32::from_rgb(24, 34, 46),
+                    Color32::from_rgba_premultiplied(72, 150, 118, 210),
+                    Color32::from_rgb(126, 224, 182),
+                    Color32::from_rgb(238, 255, 247),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 28),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 0),
+                ),
+                (UiThemeMode::Dark, false) => (
+                    Color32::from_rgb(19, 26, 36),
+                    Color32::from_rgba_premultiplied(60, 76, 100, 228),
+                    Color32::from_rgb(81, 101, 132),
+                    Color32::from_rgb(232, 240, 252),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 32),
+                    Color32::from_rgba_premultiplied(10, 16, 24, 220),
+                ),
+                (UiThemeMode::Light, true) => (
+                    Color32::from_rgb(165, 182, 168),
+                    Color32::from_rgba_premultiplied(94, 184, 138, 224),
+                    Color32::from_rgb(34, 122, 88),
+                    Color32::from_rgb(22, 30, 38),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 34),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 0),
+                ),
+                (UiThemeMode::Light, false) => (
+                    Color32::from_rgb(176, 188, 204),
+                    Color32::from_rgba_premultiplied(226, 232, 240, 246),
+                    Color32::from_rgb(176, 188, 204),
+                    Color32::from_rgb(52, 66, 84),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 80),
+                    Color32::from_rgba_premultiplied(126, 142, 164, 210),
+                ),
+            };
+        let (outer_rect, response) = ui.allocate_exact_size(button_size, Sense::click());
+        let face_offset_y = if active { 4.0 } else { 1.0 };
+        let face_rect = outer_rect.translate(vec2(0.0, face_offset_y));
+        let shadow_rect = egui::Rect::from_min_max(
+            pos2(outer_rect.left(), outer_rect.top() + 4.0),
+            pos2(outer_rect.right(), outer_rect.bottom()),
         );
-        Button::new(
-            RichText::new(text)
-                .color(text_color)
-                .size(12.0)
-                .line_height(Some(16.0)),
-        )
-        .fill(fill)
-        .stroke(egui::Stroke::new(1.0, stroke))
-        .corner_radius(12.0)
-        .min_size(vec2(110.0, 74.0))
-        .wrap()
+        ui.painter().rect_filled(shadow_rect, corner_radius, outer_fill);
+        ui.painter().rect_filled(face_rect, corner_radius, face_fill);
+        ui.painter().rect_stroke(
+            face_rect,
+            corner_radius,
+            egui::Stroke::new(1.0, border_color),
+            StrokeKind::Inside,
+        );
+        ui.painter().line_segment(
+            [
+                pos2(face_rect.left() + 8.0, face_rect.top() + 1.5),
+                pos2(face_rect.right() - 8.0, face_rect.top() + 1.5),
+            ],
+            egui::Stroke::new(1.2, top_edge),
+        );
+        if !active {
+            ui.painter().line_segment(
+                [
+                    pos2(face_rect.left() + 10.0, face_rect.bottom() - 1.5),
+                    pos2(face_rect.right() - 10.0, face_rect.bottom() - 1.5),
+                ],
+                egui::Stroke::new(2.0, bottom_edge),
+            );
+        }
+        self.paint_titlebar_quick_action_icon(ui.painter(), face_rect, is_taskbar, active, icon_color);
+        response
     }
 
     fn top_tab_button(&self, text: RichText, selected: bool, emphasized: bool) -> Button<'static> {
@@ -9747,9 +9838,9 @@ impl eframe::App for CrosshairApp {
                                 .open_bool(&mut quick_actions_open)
                                 .align(egui::RectAlign::BOTTOM_END)
                                 .layout(egui::Layout::top_down(egui::Align::Min))
-                                .width(248.0)
+                                .width(220.0)
                                 .show(|ui| {
-                                    ui.set_min_width(248.0);
+                                    ui.set_min_width(220.0);
                                     Frame::new()
                                         .fill(button_fill)
                                         .stroke(egui::Stroke::new(
@@ -9763,46 +9854,29 @@ impl eframe::App for CrosshairApp {
                                         .corner_radius(14.0)
                                         .inner_margin(egui::Margin::symmetric(10, 10))
                                         .show(ui, |ui| {
-                                            ui.label(
-                                                RichText::new(Self::tr_lang(
-                                                    self.state.ui_language,
-                                                    "Quick actions",
-                                                    "Thao tac nhanh",
-                                                ))
-                                                .strong()
-                                                .size(13.0),
-                                            );
-                                            ui.add_space(8.0);
                                             Grid::new("titlebar-quick-actions-grid")
                                                 .num_columns(2)
                                                 .spacing([8.0, 8.0])
                                                 .show(ui, |ui| {
-                                                    let taskbar_clicked = Self::add_with_show_hover_radius(
+                                                    let taskbar_clicked = self
+                                                    .titlebar_quick_action_button(
                                                         ui,
-                                                        12,
-                                                        self.titlebar_quick_action_button(
-                                                            0xf86e,
-                                                            Self::tr_lang(
-                                                                self.state.ui_language,
-                                                                "Taskbar",
-                                                                "Taskbar",
-                                                            ),
-                                                            if taskbar_hidden {
-                                                                Self::tr_lang(
-                                                                    self.state.ui_language,
-                                                                    "Hidden",
-                                                                    "Dang an",
-                                                                )
-                                                            } else {
-                                                                Self::tr_lang(
-                                                                    self.state.ui_language,
-                                                                    "Visible",
-                                                                    "Dang hien",
-                                                                )
-                                                            },
-                                                            taskbar_hidden,
-                                                        ),
+                                                        true,
+                                                        taskbar_hidden,
                                                     )
+                                                    .on_hover_text(if taskbar_hidden {
+                                                        Self::tr_lang(
+                                                            self.state.ui_language,
+                                                            "Show taskbar",
+                                                            "Hien taskbar",
+                                                        )
+                                                    } else {
+                                                        Self::tr_lang(
+                                                            self.state.ui_language,
+                                                            "Hide taskbar",
+                                                            "An taskbar",
+                                                        )
+                                                    })
                                                     .clicked();
                                                     if taskbar_clicked {
                                                         let success = if taskbar_hidden {
@@ -9841,32 +9915,25 @@ impl eframe::App for CrosshairApp {
                                                         close_quick_actions_popup = true;
                                                     }
 
-                                                    let windows_clicked = Self::add_with_show_hover_radius(
+                                                    let windows_clicked = self
+                                                    .titlebar_quick_action_button(
                                                         ui,
-                                                        12,
-                                                        self.titlebar_quick_action_button(
-                                                            0xe30a,
-                                                            Self::tr_lang(
-                                                                self.state.ui_language,
-                                                                "Windows key",
-                                                                "Phim Windows",
-                                                            ),
-                                                            if self.state.windows_key_locked {
-                                                                Self::tr_lang(
-                                                                    self.state.ui_language,
-                                                                    "Locked",
-                                                                    "Da khoa",
-                                                                )
-                                                            } else {
-                                                                Self::tr_lang(
-                                                                    self.state.ui_language,
-                                                                    "Unlocked",
-                                                                    "Dang mo",
-                                                                )
-                                                            },
-                                                            self.state.windows_key_locked,
-                                                        ),
+                                                        false,
+                                                        self.state.windows_key_locked,
                                                     )
+                                                    .on_hover_text(if self.state.windows_key_locked {
+                                                        Self::tr_lang(
+                                                            self.state.ui_language,
+                                                            "Unlock Windows key",
+                                                            "Mo khoa phim Windows",
+                                                        )
+                                                    } else {
+                                                        Self::tr_lang(
+                                                            self.state.ui_language,
+                                                            "Lock Windows key",
+                                                            "Khoa phim Windows",
+                                                        )
+                                                    })
                                                     .clicked();
                                                     if windows_clicked {
                                                         self.state.windows_key_locked =

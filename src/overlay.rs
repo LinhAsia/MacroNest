@@ -1864,7 +1864,7 @@ mod windows_overlay {
                     let hook_state = HOOK_STATE.lock();
                     hook_state.windows_key_locked
                 };
-                if windows_key_locked && !is_ui_in_foreground() && matches!(info.vkCode, 0x5B | 0x5C)
+                if windows_key_locked && matches!(info.vkCode, 0x5B | 0x5C)
                 {
                     if let Some(key_name) = key_name.as_ref() {
                         update_held_key(key_name, is_key_down, is_key_up);
