@@ -795,6 +795,7 @@ mod windows_overlay {
         stop_ignore_keys: HashMap<u32, String>,
         press_trigger_suppression: HashMap<String, usize>,
         pending_press_trigger_keys: HashSet<String>,
+        pending_window_focus_trigger: Option<PendingWindowFocusTrigger>,
         ctrl: bool,
         alt: bool,
         shift: bool,
@@ -885,6 +886,7 @@ mod windows_overlay {
                 stop_ignore_keys: HashMap::new(),
                 press_trigger_suppression: HashMap::new(),
                 pending_press_trigger_keys: HashSet::new(),
+                pending_window_focus_trigger: None,
                 ctrl: false,
                 alt: false,
                 shift: false,
@@ -991,6 +993,12 @@ mod windows_overlay {
         locked_mouse_masks: Vec<MouseMoveLockMask>,
         run_token: u64,
         completed: bool,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct PendingWindowFocusTrigger {
+        hwnd: isize,
+        ready_at: Instant,
     }
 
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1194,8 +1202,9 @@ mod windows_overlay {
                 unsafe {
                     let foreground = GetForegroundWindow();
                     if update_foreground_window(foreground) {
-                        trigger_macros_on_window_focus_change();
+                        schedule_window_focus_trigger(foreground);
                     }
+                    process_pending_window_focus_trigger();
                     let mut ui_in_foreground = false;
                     let mut ui_visible = false;
                     let mut ui_rect = windows::Win32::Foundation::RECT::default();
@@ -14460,6 +14469,58 @@ mod windows_overlay {
             UI_WINDOW_RECT_RIGHT.store(right, Ordering::Relaxed);
             UI_WINDOW_RECT_BOTTOM.store(bottom, Ordering::Relaxed);
         }
+    }
+
+    fn focus_trigger_ready_for_dispatch() -> bool {
+        let hook_state = HOOK_STATE.lock();
+        !hook_state.alt
+            && !hook_state.win
+            && !hook_state.held_inputs.contains("Tab")
+            && hook_state.held_mouse_buttons.is_empty()
+    }
+
+    fn schedule_window_focus_trigger(hwnd: HWND) {
+        let mut hook_state = HOOK_STATE.lock();
+        if hwnd.0.is_null() {
+            hook_state.pending_window_focus_trigger = None;
+            return;
+        }
+
+        hook_state.pending_window_focus_trigger = Some(PendingWindowFocusTrigger {
+            hwnd: hwnd.0 as isize,
+            ready_at: Instant::now() + Duration::from_millis(90),
+        });
+    }
+
+    fn process_pending_window_focus_trigger() {
+        let pending = {
+            let hook_state = HOOK_STATE.lock();
+            hook_state.pending_window_focus_trigger
+        };
+        let Some(pending) = pending else {
+            return;
+        };
+
+        if Instant::now() < pending.ready_at || !focus_trigger_ready_for_dispatch() {
+            return;
+        }
+
+        let current_hwnd = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
+        {
+            let mut hook_state = HOOK_STATE.lock();
+            if hook_state
+                .pending_window_focus_trigger
+                .is_some_and(|item| item.hwnd == pending.hwnd)
+            {
+                hook_state.pending_window_focus_trigger = None;
+            }
+        }
+
+        if current_hwnd != pending.hwnd {
+            return;
+        }
+
+        trigger_macros_on_window_focus_change();
     }
 
     fn trigger_macros_on_window_focus_change() {

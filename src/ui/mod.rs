@@ -2657,16 +2657,24 @@ impl CrosshairApp {
         ui: &mut egui::Ui,
         group_enabled: bool,
         preset_enabled: bool,
+        window_focus_trigger: bool,
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> R {
         let dark_mode = ui.visuals().dark_mode;
         let (fill, stroke_color) = if group_enabled {
             if preset_enabled {
-                // Combination 1: Group Active + Preset Active (Bright glowing green)
-                (
-                    Color32::from_rgba_premultiplied(32, 92, 52, 120),
-                    Color32::from_rgb(108, 224, 148),
-                )
+                if window_focus_trigger {
+                    (
+                        Color32::from_rgba_premultiplied(32, 76, 106, 132),
+                        Color32::from_rgb(116, 204, 255),
+                    )
+                } else {
+                    // Combination 1: Group Active + Preset Active (Bright glowing green)
+                    (
+                        Color32::from_rgba_premultiplied(32, 92, 52, 120),
+                        Color32::from_rgb(108, 224, 148),
+                    )
+                }
             } else {
                 // Combination 2: Group Active + Preset Inactive (Restore user's desired old behavior!)
                 (
@@ -2676,11 +2684,18 @@ impl CrosshairApp {
             }
         } else {
             if preset_enabled {
-                // Combination 3: Group Inactive + Preset Active (Armed but dormant - show sleep green tint!)
-                (
-                    Color32::from_rgba_premultiplied(25, 65, 40, 60),
-                    Color32::from_rgb(60, 120, 85),
-                )
+                if window_focus_trigger {
+                    (
+                        Color32::from_rgba_premultiplied(22, 54, 78, 72),
+                        Color32::from_rgb(78, 132, 176),
+                    )
+                } else {
+                    // Combination 3: Group Inactive + Preset Active (Armed but dormant - show sleep green tint!)
+                    (
+                        Color32::from_rgba_premultiplied(25, 65, 40, 60),
+                        Color32::from_rgb(60, 120, 85),
+                    )
+                }
             } else {
                 // Combination 4: Group Inactive + Preset Inactive (Fully dark/dormant)
                 (

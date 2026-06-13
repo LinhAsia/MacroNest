@@ -4372,7 +4372,12 @@ impl CrosshairApp {
                                     }
                                 }
                             }
-                            Self::show_macro_preset_card(ui, group.enabled && folder_enabled, preset.enabled, |ui| {
+                            Self::show_macro_preset_card(
+                                ui,
+                                group.enabled && folder_enabled,
+                                preset.enabled,
+                                preset.trigger_mode == MacroTriggerMode::WindowFocus,
+                                |ui| {
                                 ui.horizontal_top(|ui| {
                                     let available_width = ui.available_width();
                                     let right_width = 540.0;
@@ -4451,50 +4456,38 @@ impl CrosshairApp {
                                                     if preset.trigger_mode
                                                         == MacroTriggerMode::WindowFocus
                                                     {
-                                                        egui::Frame::group(ui.style())
-                                                            .fill(Color32::from_rgba_premultiplied(
-                                                                36, 92, 132, 88,
-                                                            ))
-                                                            .stroke(egui::Stroke::new(
-                                                                1.0,
-                                                                Color32::from_rgb(116, 204, 255),
-                                                            ))
-                                                            .show(ui, |ui| {
-                                                                ui.set_min_width(binding_width);
-                                                                let mut selected_window =
-                                                                    preset
-                                                                        .event_target_window_title
-                                                                        .clone();
-                                                                let mut duplicate_mode = preset
-                                                                    .event_match_duplicate_window_titles;
-                                                                if Self::render_window_target_combo_with_duplicate_mode(
-                                                                    ui,
-                                                                    (
-                                                                        group.id,
-                                                                        preset.id,
-                                                                        "window-focus-trigger-target",
-                                                                    ),
-                                                                    Self::tr_lang(
-                                                                        language,
-                                                                        "Any focused window",
-                                                                        "Bat ky cua so dang focus",
-                                                                    ),
-                                                                    &mut selected_window,
-                                                                    &mut duplicate_mode,
-                                                                    &self.open_windows,
-                                                                    (binding_width - 16.0)
-                                                                        .max(180.0),
-                                                                    true,
-                                                                ) {
-                                                                    preset.event_target_window_title =
-                                                                        selected_window;
-                                                                    preset.event_extra_target_window_titles
-                                                                        .clear();
-                                                                    preset.event_match_duplicate_window_titles =
-                                                                        duplicate_mode;
-                                                                    live_sync = true;
-                                                                }
-                                                            });
+                                                        ui.set_min_width(binding_width);
+                                                        let mut selected_window = preset
+                                                            .event_target_window_title
+                                                            .clone();
+                                                        let mut duplicate_mode = preset
+                                                            .event_match_duplicate_window_titles;
+                                                        if Self::render_window_target_combo_with_duplicate_mode(
+                                                            ui,
+                                                            (
+                                                                group.id,
+                                                                preset.id,
+                                                                "window-focus-trigger-target",
+                                                            ),
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Any focused window",
+                                                                "Bat ky cua so dang focus",
+                                                            ),
+                                                            &mut selected_window,
+                                                            &mut duplicate_mode,
+                                                            &self.open_windows,
+                                                            binding_width.max(180.0),
+                                                            true,
+                                                        ) {
+                                                            preset.event_target_window_title =
+                                                                selected_window;
+                                                            preset.event_extra_target_window_titles
+                                                                .clear();
+                                                            preset.event_match_duplicate_window_titles =
+                                                                duplicate_mode;
+                                                            live_sync = true;
+                                                        }
                                                     } else {
                                                         live_sync |= Self::render_macro_trigger_chips(
                                                             ui,
@@ -5385,7 +5378,7 @@ impl CrosshairApp {
                                                         );
                                                         grid_col += 1;
                                                         if grid_col % 8 == 0 { ui.end_row(); }
-                                                    });
+                                });
                             });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
                                             let action_supports_capture =
