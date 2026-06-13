@@ -890,8 +890,12 @@ impl GeometryPreset {
             name: format!("Geometry {id}"),
             enabled: true,
             collapsed: true,
-            objects: Vec::new(),
+            objects: vec![GeometryObject::new(id, GeometryShapeKind::Point)],
         }
+    }
+
+    pub fn object_mut(&mut self) -> Option<&mut GeometryObject> {
+        self.objects.first_mut()
     }
 }
 
@@ -2616,8 +2620,6 @@ pub struct AppState {
     pub geometry_presets: Vec<GeometryPreset>,
     #[serde(default)]
     pub next_geometry_preset_id: u32,
-    #[serde(default)]
-    pub next_geometry_object_id: u32,
     pub macros_master_enabled: bool,
     #[serde(default)]
     pub windows_key_locked: bool,
@@ -2718,7 +2720,6 @@ impl Default for AppState {
             next_macro_preset_id: 1,
             geometry_presets: Vec::new(),
             next_geometry_preset_id: 1,
-            next_geometry_object_id: 1,
             macros_master_enabled: true,
             windows_key_locked: false,
             macros_master_hotkey: None,

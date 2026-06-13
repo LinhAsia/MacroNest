@@ -1,4 +1,4 @@
-use crate::model::{GeometryObject, GeometryPreset, GeometryShapeKind, GeometrySpec, VietnameseInputMode};
+use crate::model::{GeometryPreset, GeometryShapeKind, GeometrySpec, VietnameseInputMode};
 use crate::ui::{CrosshairApp, MouseCaptureKind, MouseMoveAbsoluteCaptureTarget, UiLanguage};
 use eframe::egui::{self, Button, ComboBox, Frame, Grid, TextEdit};
 
@@ -79,6 +79,13 @@ impl CrosshairApp {
 
         for preset_index in 0..self.state.geometry_presets.len() {
             let preset = &mut self.state.geometry_presets[preset_index];
+            if preset.objects.is_empty() {
+                preset.objects.push(crate::model::GeometryObject::new(
+                    preset.id,
+                    GeometryShapeKind::Point,
+                ));
+                changed = true;
+            }
             Self::show_preset_card(ui, false, |ui| {
                 ui.horizontal(|ui| {
                     let name_width = Self::preset_header_name_width(ui);
@@ -119,21 +126,6 @@ impl CrosshairApp {
                             preset.collapsed = !preset.collapsed;
                             changed = true;
                         }
-                        if ui
-                            .add_sized(
-                                [100.0, 24.0],
-                                Button::new(Self::tr_lang(language, "+ New object", "+ Đối tượng mới")),
-                            )
-                            .clicked()
-                        {
-                            let object_id = preset.objects.iter().map(|o| o.id).max().unwrap_or(0) + 1;
-                            self.state.next_geometry_object_id = object_id + 1;
-                            preset
-                                .objects
-                                .push(GeometryObject::new(object_id, GeometryShapeKind::Point));
-                            preset.collapsed = false;
-                            changed = true;
-                        }
 
                         let preview_all_active = self.geometry_preset_preview_target == Some(preset.id);
                         let preview_all_btn = Button::new(Self::material_icon_text(
@@ -160,8 +152,8 @@ impl CrosshairApp {
                     return;
                 }
 
-                let mut remove_object_id = None;
-                for object in &mut preset.objects {
+                let preset_id = preset.id;
+                if let Some(object) = preset.object_mut() {
                     ui.add_space(6.0);
                     let mut frame = Frame::group(ui.style());
                     if object.enabled {
@@ -174,7 +166,7 @@ impl CrosshairApp {
                         ui.set_min_width(card_width);
                         ui.horizontal(|ui| {
                             let preview_active =
-                                self.geometry_preview_target == Some((preset.id, object.id));
+                                self.geometry_preview_target == Some((preset_id, object.id));
                             let checkbox_response = {
                                 let old_icon_width = ui.spacing().icon_width;
                                 ui.spacing_mut().icon_width = 20.0;
@@ -197,7 +189,7 @@ impl CrosshairApp {
                             );
                             changed |= response.changed();
 
-                            ComboBox::from_id_salt((preset.id, object.id, "shape"))
+                            ComboBox::from_id_salt((preset_id, object.id, "shape"))
                                 .width(132.0)
                                 .selected_text(Self::geometry_shape_label(object.spec.shape, language))
                                 .show_ui(ui, |ui| {
@@ -225,7 +217,7 @@ impl CrosshairApp {
                                     self.geometry_preview_sent = None;
                                     let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
                                 } else {
-                                    self.geometry_preview_target = Some((preset.id, object.id));
+                                    self.geometry_preview_target = Some((preset_id, object.id));
                                     self.geometry_preview_sent = Some(object.spec.clone());
                                     let _ = self.overlay_tx.send(
                                         crate::overlay::OverlayCommand::PreviewGeometrySpec(
@@ -234,45 +226,26 @@ impl CrosshairApp {
                                     );
                                 }
                             }
-
-                            if ui
-                                .add_sized(
-                                    [24.0, 21.0],
-                                    Button::new(Self::material_icon_text(0xe5cd, 16.0)),
-                                )
-                                .on_hover_text(Self::tr_lang(language, "Delete object", "Xoá đối tượng"))
-                                .clicked()
-                            {
-                                remove_object_id = Some(object.id);
-                                if self.geometry_preview_target == Some((preset.id, object.id)) {
-                                    clear_preview_target = true;
-                                }
-                            }
                         });
 
-                            ui.add_space(6.0);
-                            changed |= Self::render_geometry_spec_editor(
-                                ui,
-                                language,
-                                preset.id,
-                                object.id,
-                                false,
-                                &mut object.spec,
-                                &mut self.vision_manual_color,
-                                &mut self.vision_manual_color_hex,
-                                &mut request_screen_color_pick,
-                                &mut pending_screen_color_target,
-                                &mut begin_mouse_move_absolute_capture_target,
-                                self.state.vietnamese_input_enabled,
-                                self.state.vietnamese_input_mode,
-                                None,
-                            );
-                        });
-                }
-
-                if let Some(object_id) = remove_object_id {
-                    preset.objects.retain(|object| object.id != object_id);
-                    changed = true;
+                        ui.add_space(6.0);
+                        changed |= Self::render_geometry_spec_editor(
+                            ui,
+                            language,
+                            preset_id,
+                            object.id,
+                            false,
+                            &mut object.spec,
+                            &mut self.vision_manual_color,
+                            &mut self.vision_manual_color_hex,
+                            &mut request_screen_color_pick,
+                            &mut pending_screen_color_target,
+                            &mut begin_mouse_move_absolute_capture_target,
+                            self.state.vietnamese_input_enabled,
+                            self.state.vietnamese_input_mode,
+                            None,
+                        );
+                    });
                 }
             });
         }
