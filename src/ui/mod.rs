@@ -3630,12 +3630,12 @@ impl CrosshairApp {
         icon_color: Color32,
     ) {
         if is_taskbar {
-            let frame_rect = rect.shrink2(vec2(18.0, 20.0));
-            let shelf_y = frame_rect.bottom() - 5.0;
+            let frame_rect = rect.shrink2(vec2(18.0, 18.0));
+            let shelf_y = frame_rect.bottom() - 4.0;
             painter.rect_stroke(
                 frame_rect,
                 4.0,
-                egui::Stroke::new(1.8, icon_color),
+                egui::Stroke::new(1.9, icon_color),
                 StrokeKind::Inside,
             );
             painter.line_segment(
@@ -3643,17 +3643,17 @@ impl CrosshairApp {
                     pos2(frame_rect.left() + 2.0, shelf_y),
                     pos2(frame_rect.right() - 2.0, shelf_y),
                 ],
-                egui::Stroke::new(1.8, icon_color),
+                egui::Stroke::new(1.9, icon_color),
             );
             if active {
-                let slash_rect = frame_rect.expand2(vec2(4.0, 2.0));
+                let slash_rect = frame_rect.expand2(vec2(4.0, 3.0));
                 painter.line_segment(
                     [slash_rect.left_top(), slash_rect.right_bottom()],
-                    egui::Stroke::new(2.2, icon_color),
+                    egui::Stroke::new(2.0, icon_color),
                 );
             }
         } else {
-            let logo_rect = rect.shrink2(vec2(18.0, 18.0));
+            let logo_rect = rect.shrink2(vec2(17.0, 17.0));
             let gap = 3.0;
             let tile_w = (logo_rect.width() - gap) * 0.5;
             let tile_h = (logo_rect.height() - gap) * 0.5;
@@ -3664,24 +3664,20 @@ impl CrosshairApp {
                         logo_rect.top() + row as f32 * (tile_h + gap),
                     );
                     let max = pos2(min.x + tile_w, min.y + tile_h);
-                    painter.rect_filled(
-                        egui::Rect::from_min_max(min, max),
-                        1.5,
-                        icon_color,
-                    );
+                    painter.rect_filled(egui::Rect::from_min_max(min, max), 1.2, icon_color);
                 }
             }
             if active {
-                let lock_body = egui::Rect::from_center_size(
-                    pos2(logo_rect.right() + 2.0, logo_rect.bottom() - 1.0),
-                    vec2(10.0, 8.0),
+                let slash_rect = logo_rect.expand2(vec2(3.0, 3.0));
+                painter.line_segment(
+                    [slash_rect.left_top(), slash_rect.right_bottom()],
+                    egui::Stroke::new(2.0, icon_color),
                 );
-                painter.rect_filled(lock_body, 2.0, icon_color);
-                painter.circle_stroke(
-                    pos2(lock_body.center().x, lock_body.top() + 0.5),
-                    3.5,
-                    egui::Stroke::new(1.8, icon_color),
+                let dot_rect = egui::Rect::from_center_size(
+                    pos2(logo_rect.right() + 2.0, logo_rect.top() + 2.0),
+                    vec2(6.0, 6.0),
                 );
+                painter.rect_filled(dot_rect, 3.0, icon_color);
             }
         }
     }
@@ -3694,65 +3690,56 @@ impl CrosshairApp {
     ) -> egui::Response {
         let button_size = vec2(92.0, 66.0);
         let corner_radius = 14.0;
-        let (frame_fill, frame_stroke, face_fill, face_bottom_fill, face_border, icon_color, shadow_color) =
+        let (frame_fill, frame_stroke, face_fill, face_bottom_fill, face_border, icon_color) =
             match (self.state.ui_theme, active) {
                 (UiThemeMode::Dark, true) => (
-                    Color32::from_rgb(39, 51, 70),
-                    Color32::from_rgb(86, 103, 132),
-                    Color32::from_rgb(115, 218, 164),
-                    Color32::from_rgb(63, 156, 112),
-                    Color32::from_rgb(226, 250, 238),
+                    Color32::from_rgb(57, 72, 96),
+                    Color32::from_rgb(92, 110, 138),
+                    Color32::from_rgb(117, 219, 166),
+                    Color32::from_rgb(82, 180, 132),
+                    Color32::from_rgb(232, 250, 240),
                     Color32::from_rgb(246, 252, 248),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 88),
                 ),
                 (UiThemeMode::Dark, false) => (
-                    Color32::from_rgb(39, 51, 70),
-                    Color32::from_rgb(86, 103, 132),
-                    Color32::from_rgb(122, 148, 196),
-                    Color32::from_rgb(70, 94, 146),
+                    Color32::from_rgb(57, 72, 96),
+                    Color32::from_rgb(92, 110, 138),
+                    Color32::from_rgb(128, 151, 198),
+                    Color32::from_rgb(88, 112, 160),
                     Color32::from_rgb(234, 242, 252),
                     Color32::from_rgb(244, 248, 252),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 96),
                 ),
                 (UiThemeMode::Light, true) => (
-                    Color32::from_rgb(171, 183, 198),
+                    Color32::from_rgb(181, 192, 206),
                     Color32::from_rgb(116, 130, 152),
                     Color32::from_rgb(118, 214, 160),
                     Color32::from_rgb(72, 168, 118),
                     Color32::from_rgb(248, 252, 250),
                     Color32::from_rgb(248, 252, 250),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 42),
                 ),
                 (UiThemeMode::Light, false) => (
-                    Color32::from_rgb(171, 183, 198),
+                    Color32::from_rgb(181, 192, 206),
                     Color32::from_rgb(116, 130, 152),
                     Color32::from_rgb(122, 164, 218),
                     Color32::from_rgb(58, 120, 188),
                     Color32::from_rgb(244, 248, 252),
                     Color32::from_rgb(248, 250, 252),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 36),
                 ),
             };
         let (outer_rect, response) = ui.allocate_exact_size(button_size, Sense::click());
         let hovered = response.hovered();
         let pressed = response.is_pointer_button_down_on();
-        let rest_offset = if active { 3.0 } else { 1.0 };
-        let press_offset = if pressed { 2.0 } else if hovered { 0.5 } else { 0.0 };
+        let rest_offset = if active { 2.0 } else { 0.0 };
+        let press_offset = if pressed { 1.5 } else if hovered { 0.5 } else { 0.0 };
         let face_offset_y = rest_offset + press_offset;
-        let base_rect = outer_rect.shrink2(vec2(1.0, 0.0));
+        let base_rect = outer_rect.shrink2(vec2(2.0, 3.0));
         let face_rect = egui::Rect::from_min_max(
-            pos2(base_rect.left() + 6.0, base_rect.top() + 8.0 + face_offset_y),
-            pos2(base_rect.right() - 6.0, base_rect.bottom() - 10.0 + face_offset_y),
+            pos2(base_rect.left() + 2.0, base_rect.top() + 2.0 + face_offset_y),
+            pos2(base_rect.right() - 2.0, base_rect.bottom() - 6.0 + face_offset_y),
         );
         let face_bottom_rect = egui::Rect::from_min_max(
-            pos2(face_rect.left(), face_rect.bottom() - 10.0),
+            pos2(face_rect.left(), face_rect.bottom() - 9.0),
             face_rect.right_bottom(),
         );
-        let shadow_rect = egui::Rect::from_min_max(
-            pos2(base_rect.left() + 6.0, base_rect.top() + 12.0),
-            pos2(base_rect.right() - 6.0, base_rect.bottom() + 4.0),
-        );
-        ui.painter().rect_filled(shadow_rect, corner_radius + 4.0, shadow_color);
         ui.painter().rect_filled(base_rect, corner_radius, frame_fill);
         ui.painter().rect_stroke(
             base_rect,
@@ -3767,13 +3754,6 @@ impl CrosshairApp {
             corner_radius - 3.0,
             egui::Stroke::new(1.2, face_border),
             StrokeKind::Inside,
-        );
-        ui.painter().line_segment(
-            [
-                pos2(face_rect.left() + 10.0, face_rect.top() + 3.0),
-                pos2(face_rect.right() - 10.0, face_rect.top() + 3.0),
-            ],
-            egui::Stroke::new(1.6, Color32::from_rgba_premultiplied(255, 255, 255, 90)),
         );
         self.paint_titlebar_quick_action_icon(ui.painter(), face_rect, is_taskbar, active, icon_color);
         response
