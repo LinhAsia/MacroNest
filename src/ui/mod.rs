@@ -4045,13 +4045,13 @@ impl CrosshairApp {
                                 Self::tr_lang(
                                     self.state.ui_language,
                                     "Unpin window",
-                                    "Bo ghim cua so",
+                                    "Bo ghim",
                                 )
                             } else {
                                 Self::tr_lang(
                                     self.state.ui_language,
-                                    "Pin window on top",
-                                    "Ghim cua so len tren cung",
+                                    "Pin window",
+                                    "Ghim cua so",
                                 )
                             },
                             14,
@@ -4063,7 +4063,7 @@ impl CrosshairApp {
                                 ui.add(
                                     egui::Label::new(
                                         RichText::new(pin_label)
-                                            .size(10.0)
+                                            .size(11.0)
                                             .color(if button_response.hovered() {
                                                 ui.visuals().strong_text_color()
                                             } else {
