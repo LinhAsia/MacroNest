@@ -3978,8 +3978,7 @@ impl CrosshairApp {
                                 let response = ui.add_sized([24.0, 21.0], egui::Button::new(
                                     Self::material_icon_text(0xe002, 18.0).color(Color32::from_rgb(255, 10, 10))
                                 ).frame(false));
-                                if response.contains_pointer() {
-                                    egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("group-tip"), |ui| {
+                                response.clone().on_hover_ui(|ui| {
                                         ui.horizontal(|ui| {
                                             ui.label(Self::material_icon_text(0xe002, 14.0).color(Color32::from_rgb(255, 10, 10)));
                                             ui.label(RichText::new(Self::tr_lang(language, "CRITICAL WARNING", "CẢNH BÁO NGUY HIỂM")).strong().color(Color32::from_rgb(255, 10, 10)));
@@ -3998,8 +3997,7 @@ impl CrosshairApp {
                                                 "Nhóm macro này chứa một hoặc nhiều macro bắt đầu tìm ảnh (kích hoạt bằng Nhấn/Thả) nhưng không dừng lại! Điều này có thể gây chạy luồng ngầm liên tục hao CPU."
                                             ));
                                         }
-                                    });
-                                }
+                                });
                                 ui.add_space(2.0);
                             }
                             let name_width = Self::preset_header_name_width(ui);
@@ -5011,8 +5009,7 @@ impl CrosshairApp {
                                                  let response = ui.add_sized([24.0, 21.0], egui::Button::new(
                                                      Self::material_icon_text(0xe002, 18.0).color(Color32::from_rgb(255, 90, 0))
                                                  ).frame(false));
-                                                 if response.contains_pointer() {
-                                                     egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("preset-tip"), |ui| {
+                                                 response.clone().on_hover_ui(|ui| {
                                                          ui.horizontal(|ui| {
                                                              ui.label(Self::material_icon_text(0xe002, 14.0).color(Color32::from_rgb(255, 90, 0)));
                                                              ui.label(RichText::new(Self::tr_lang(language, "MACRO WARNING", "CẢNH BÁO MACRO")).strong().color(Color32::from_rgb(255, 90, 0)));
@@ -5038,8 +5035,7 @@ impl CrosshairApp {
                                                                  "Macro nay bat dau AudioSense o trigger Nhan/Tha nhung khong co buoc dung audio! Dieu nay co the de lai mot bo giam sat am thanh chay ngam. Hay them buoc 'StopAudio' hoac doi trigger sang Giu (Hold)."
                                                              ));
                                                          }
-                                                     });
-                                                 }
+                                                 });
                                              }
                                             },
                                     );
@@ -5469,8 +5465,7 @@ impl CrosshairApp {
                                                             let response = ui.add_sized([18.0, 18.0], egui::Button::new(
                                                                 Self::material_icon_text(0xe002, 16.0).color(warn_color)
                                                             ).frame(false));
-                                                            if response.contains_pointer() {
-                                                                egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("trigger-macro-warning-tip"), |ui| {
+                                                            response.clone().on_hover_ui(|ui| {
                                                                     ui.horizontal(|ui| {
                                                                         ui.label(Self::material_icon_text(0xe002, 14.0).color(warn_color));
                                                                         ui.label(RichText::new(Self::tr_lang(language, "TRIGGER WARNING", "CẢNH BÁO KÍCH HOẠT")).strong().color(warn_color));
@@ -5480,8 +5475,7 @@ impl CrosshairApp {
                                                                         "This macro preset can run continuously or keep working in the background. Triggering it from another macro can make it run immediately without a hold key.",
                                                                         "Macro này có thể chạy liên tục hoặc tiếp tục chạy trong nền. Kích hoạt nó từ macro khác có thể làm nó chạy ngay mà không cần giữ phím.",
                                                                     ));
-                                                                });
-                                                            }
+                                                            });
                                                         }
                                                         let cb_text = Self::tr_lang(language, "Wait for completion", "Đợi chạy xong");
                                                         if ui.checkbox(&mut step.wait_for_completion, cb_text).changed() {
@@ -7340,9 +7334,7 @@ impl CrosshairApp {
                                                             "Display duration (0 = show until macro/overlay ends, supports variables/math)",
                                                             "Thời gian hiển thị (0 = hiện đến khi dừng macro/overlay, hỗ trợ biến/phép tính)",
                                                         );
-                                                        if response.hovered() {
-                                                            egui::show_tooltip_text(ui.ctx(), ui.layer_id(), response.id, tooltip_text);
-                                                        }
+                                                        response.clone().on_hover_text(tooltip_text);
                                                     }
                                                 });
                                             } else {
@@ -8141,8 +8133,7 @@ impl CrosshairApp {
                                                 let response = child_ui.add_sized([18.0, 18.0], egui::Button::new(
                                                     Self::material_icon_text(0xe002, 16.0).color(warn_color)
                                                 ).frame(false));
-                                                if response.contains_pointer() {
-                                                    egui::show_tooltip_at_pointer(child_ui.ctx(), child_ui.layer_id(), response.id.with("step-tip"), |ui| {
+                                                response.clone().on_hover_ui(|ui| {
                                                         ui.horizontal(|ui| {
                                                             ui.label(Self::material_icon_text(0xe002, 14.0).color(warn_color));
                                                             ui.label(RichText::new(Self::tr_lang(language, "STEP WARNING", "CẢNH BÁO BƯỚC")).strong().color(warn_color));
@@ -8175,8 +8166,7 @@ impl CrosshairApp {
                                                                 "Bước này thoát vòng lặp, nhưng nó hiện không nằm trong cặp khối Lặp (Loop Start) / Hết lặp (Loop End) nào! Nó sẽ không có tác dụng."
                                                             ));
                                                         }
-                                                    });
-                                                }
+                                                });
                                             }
                                             if is_active {
                                                 child_ui.add_sized([18.0, 18.0], egui::Label::new(
@@ -8597,8 +8587,7 @@ impl CrosshairApp {
                                                             let response = ui.add_sized([18.0, 18.0], egui::Button::new(
                                                                 Self::material_icon_text(0xe002, 16.0).color(warn_color)
                                                             ).frame(false));
-                                                            if response.contains_pointer() {
-                                                                egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id.with("trigger-macro-warning-tip"), |ui| {
+                                                            response.clone().on_hover_ui(|ui| {
                                                                     ui.horizontal(|ui| {
                                                                         ui.label(Self::material_icon_text(0xe002, 14.0).color(warn_color));
                                                                         ui.label(RichText::new(Self::tr_lang(language, "TRIGGER WARNING", "CẢNH BÁO KÍCH HOẠT")).strong().color(warn_color));
@@ -8608,8 +8597,7 @@ impl CrosshairApp {
                                                                         "This macro preset can run continuously or keep working in the background. Triggering it from another macro can make it run immediately without a hold key.",
                                                                         "Macro này có thể chạy liên tục hoặc tiếp tục chạy trong nền. Kích hoạt nó từ macro khác có thể làm nó chạy ngay mà không cần giữ phím.",
                                                                     ));
-                                                                });
-                                                            }
+                                                            });
                                                         }
                                                         let cb_text = Self::tr_lang(language, "Wait for completion", "Đợi chạy xong");
                                                         if ui.checkbox(&mut step.wait_for_completion, cb_text).changed() {
@@ -9916,9 +9904,7 @@ impl CrosshairApp {
                                                                     "Display duration (0 = show until macro/overlay ends, supports variables/math)",
                                                                     "Thời gian hiển thị (0 = hiện đến khi dừng macro/overlay, hỗ trợ biến/phép tính)",
                                                                 );
-                                                                if duration_response.hovered() {
-                                                                    egui::show_tooltip_text(ui.ctx(), ui.layer_id(), duration_response.id, tooltip_text);
-                                                                }
+                                                                duration_response.clone().on_hover_text(tooltip_text);
                                                             }                                                        });
                                                     });
                                                 } else if step.action == MacroAction::TypeText {
@@ -11061,9 +11047,7 @@ impl CrosshairApp {
                                                             "Display duration (0 = show until macro/overlay ends, supports variables/math)",
                                                             "Thời gian hiển thị (0 = hiện đến khi dừng macro/overlay, hỗ trợ biến/phép tính)",
                                                         );
-                                                        if response.hovered() {
-                                                            egui::show_tooltip_text(ui.ctx(), ui.layer_id(), response.id, tooltip_text);
-                                                        }
+                                                        response.clone().on_hover_text(tooltip_text);
                                                     }
                                                 });
                                             } else if action_supports_capture
@@ -12469,12 +12453,7 @@ impl CrosshairApp {
                         )
                         .sense(egui::Sense::hover()),
                     );
-                    if response.contains_pointer() {
-                        egui::show_tooltip_at_pointer(
-                            ui.ctx(),
-                            ui.layer_id(),
-                            response.id.with(warning_tooltip_id),
-                            |ui| {
+                    response.clone().on_hover_ui(|ui| {
                                 ui.horizontal(|ui| {
                                     ui.label(Self::material_icon_text(0xe002, 14.0).color(warn_color));
                                     ui.label(
@@ -12492,9 +12471,7 @@ impl CrosshairApp {
                                     "Warning: Keeping mouse movement locked after the macro ends can make the cursor feel stuck until you unlock it manually.",
                                     "Canh bao: Neu giu khoa di chuot sau khi macro ket thuc, con tro co the bi ket cho toi khi ban tu mo khoa.",
                                 ));
-                            },
-                        );
-                    }
+                            });
                 }
             }
         });
@@ -14136,10 +14113,7 @@ impl CrosshairApp {
             Self::tr_lang(language, "Preview/Show overlay", "Xem trước/Hiện overlay")
         };
         let response = ui.add_sized(button_size, preview_btn);
-        // Immediate tooltip
-        if response.hovered() {
-            egui::show_tooltip_text(ui.ctx(), ui.layer_id(), response.id, tooltip);
-        }
+        response.clone().on_hover_text(tooltip);
         if response.clicked() {
             if is_active {
                 match step.action {
@@ -14308,9 +14282,7 @@ impl CrosshairApp {
                                 "Display duration (0 = show until macro/overlay ends, supports variables/math)",
                                 "Thời gian hiển thị (0 = hiện đến khi dừng macro/overlay, hỗ trợ biến/phép tính)",
                             );
-                            if response.hovered() {
-                                egui::show_tooltip_text(ui.ctx(), ui.layer_id(), response.id, tooltip_text);
-                            }
+                            response.clone().on_hover_text(tooltip_text);
                         }
                         ui.add_space(6.0);
                         let collapse_icon = if step.geometry_collapsed { 0xe5cc } else { 0xe5cf };
@@ -14835,9 +14807,7 @@ impl CrosshairApp {
                                     } else {
                                         Self::tr_lang(language, "Preview sound capture", "Xem trước âm thanh")
                                     };
-                                    if preview_response.hovered() {
-                                        egui::show_tooltip_text(ui.ctx(), ui.layer_id(), preview_response.id, tooltip);
-                                    }
+                                    preview_response.clone().on_hover_text(tooltip);
                                     if preview_response.clicked() {
                                         if is_active {
                                             crate::overlay::stop_audio_sense(

@@ -365,9 +365,9 @@ pub fn configure_fonts(ctx: &egui::Context, load_cjk_fallback: bool) {
     }
     ctx.set_fonts(fonts);
     ctx.style_mut(|style| {
-        style.interaction.show_tooltips_only_when_still = false;
-        style.interaction.tooltip_delay = 0.0;
-        style.interaction.tooltip_grace_time = 0.0;
+        style.interaction.show_tooltips_only_when_still = true;
+        style.interaction.tooltip_delay = 0.08;
+        style.interaction.tooltip_grace_time = 0.10;
 
         use egui::{FontId, TextStyle};
         let text_styles = &mut style.text_styles;
@@ -6681,13 +6681,11 @@ impl CrosshairApp {
         response: &egui::Response,
         text: impl Into<String>,
     ) {
-        if response.hovered() {
-            let text = text.into();
-            let _ = response.clone().on_hover_ui(|ui| {
-                ui.set_max_width(280.0);
-                ui.label(&text);
-            });
-        }
+        let text = text.into();
+        let _ = response.clone().on_hover_ui(|ui| {
+            ui.set_max_width(280.0);
+            ui.label(&text);
+        });
     }
 
     fn capture_master_preset_snapshot(&self, id: u32, name: String) -> MasterPreset {
