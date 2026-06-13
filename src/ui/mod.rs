@@ -3833,12 +3833,13 @@ impl CrosshairApp {
         &mut self,
         ui: &mut egui::Ui,
         taskbar_hidden: bool,
-    ) {
+    ) -> bool {
         self.ensure_open_windows_ready(false);
         self.sync_quick_action_window_selection();
         let pin_window_available = !self.quick_action_window_selector.is_empty();
         let pinned_window_active =
             pin_window_available && window_list::is_window_topmost(&self.quick_action_window_selector);
+        let mut keep_menu_open = false;
 
         Grid::new("titlebar-quick-actions-grid")
             .num_columns(3)
@@ -4084,16 +4085,20 @@ impl CrosshairApp {
                                     Self::quick_action_window_display(selector, &self.open_windows);
                                 let truncated_title =
                                     Self::truncate_window_title(&display_title, 36);
-                                ui.selectable_value(
+                                let response = ui.selectable_value(
                                     &mut self.quick_action_window_selector,
                                     selector.clone(),
                                     truncated_title,
-                                )
-                                .on_hover_text(Self::selector_base_title(selector));
+                                );
+                                if response.clicked() {
+                                    keep_menu_open = true;
+                                }
+                                response.on_hover_text(Self::selector_base_title(selector));
                             }
                         });
                 });
             });
+        keep_menu_open
     }
 
     fn top_tab_button(&self, text: RichText, selected: bool, emphasized: bool) -> Button<'static> {
@@ -10181,6 +10186,7 @@ impl eframe::App for CrosshairApp {
                             if quick_actions_response.clicked() {
                                 quick_actions_open = !quick_actions_open;
                             }
+                            let mut keep_quick_actions_open = false;
                             let popup_result = egui::Popup::from_response(&quick_actions_response)
                                 .id(quick_actions_popup_id)
                                 .open_bool(&mut quick_actions_open)
@@ -10203,10 +10209,17 @@ impl eframe::App for CrosshairApp {
                                         .corner_radius(14.0)
                                         .inner_margin(egui::Margin::symmetric(10, 10))
                                         .show(ui, |ui| {
-                                            self.render_titlebar_quick_actions_grid(ui, taskbar_hidden);
+                                            keep_quick_actions_open =
+                                                self.render_titlebar_quick_actions_grid(
+                                                    ui,
+                                                    taskbar_hidden,
+                                                );
                                         });
                                 });
                             let _ = popup_result;
+                            if keep_quick_actions_open {
+                                quick_actions_open = true;
+                            }
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(quick_actions_popup_id, quick_actions_open);
                             });

@@ -16,7 +16,7 @@ mod windows_impl {
                 GetWindowTextLengthW, GetWindowTextW, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic,
                 IsWindow, IsWindowVisible, PW_RENDERFULLCONTENT, SetWindowPos, GWL_EXSTYLE,
                 SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-                SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WS_EX_TOPMOST,
+                SWP_NOMOVE, SWP_NOSIZE, WS_EX_TOPMOST,
             },
         },
         core::BOOL,
@@ -136,7 +136,7 @@ mod windows_impl {
                     0,
                     0,
                     0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                    SWP_NOMOVE | SWP_NOSIZE,
                 );
                 return false;
             }
@@ -159,7 +159,7 @@ mod windows_impl {
                 0,
                 0,
                 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                SWP_NOMOVE | SWP_NOSIZE,
             )
             .is_ok()
         }
