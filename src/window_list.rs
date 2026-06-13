@@ -12,9 +12,11 @@ mod windows_impl {
             },
             Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
             UI::WindowsAndMessaging::{
-                EnumWindows, GetForegroundWindow, GetSystemMetrics, GetWindowRect,
-                GetWindowTextLengthW, GetWindowTextW, IsWindowVisible, PW_RENDERFULLCONTENT,
+                EnumWindows, GetForegroundWindow, GetSystemMetrics, GetWindowLongW, GetWindowRect,
+                GetWindowTextLengthW, GetWindowTextW, HWND_NOTOPMOST, HWND_TOPMOST, IsWindow,
+                IsWindowVisible, PW_RENDERFULLCONTENT, SetWindowPos, GWL_EXSTYLE,
                 SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+                SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WS_EX_TOPMOST,
             },
         },
         core::BOOL,
@@ -111,6 +113,40 @@ mod windows_impl {
         height: i32,
     ) -> Option<ScreenCaptureFrame> {
         unsafe { capture_screen_region_from_desktop(left, top, width.max(1), height.max(1)) }
+    }
+
+    pub fn is_window_topmost(selector: &str) -> bool {
+        let Some(hwnd) = find_window_handle(Some(selector)) else {
+            return false;
+        };
+        unsafe {
+            if !IsWindow(Some(hwnd)).as_bool() {
+                return false;
+            }
+            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            (ex_style & WS_EX_TOPMOST.0) != 0
+        }
+    }
+
+    pub fn set_window_topmost(selector: &str, topmost: bool) -> bool {
+        let Some(hwnd) = find_window_handle(Some(selector)) else {
+            return false;
+        };
+        unsafe {
+            if !IsWindow(Some(hwnd)).as_bool() {
+                return false;
+            }
+            SetWindowPos(
+                hwnd,
+                Some(if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST }),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            )
+            .is_ok()
+        }
     }
 
     unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -604,6 +640,7 @@ mod fallback {
     #[derive(Debug, Clone)]
     pub struct WindowInfo {
         pub title: String,
+        pub selector: String,
     }
 
     #[derive(Debug, Clone)]
@@ -653,6 +690,14 @@ mod fallback {
         _match_duplicate_window_titles: bool,
     ) -> Option<ScreenCaptureFrame> {
         None
+    }
+
+    pub fn is_window_topmost(_selector: &str) -> bool {
+        false
+    }
+
+    pub fn set_window_topmost(_selector: &str, _topmost: bool) -> bool {
+        false
     }
 }
 

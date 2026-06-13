@@ -756,6 +756,8 @@ pub struct CrosshairApp {
     active_macro_record_preset_id: Option<u32>,
     active_hud_preview_preset_id: Option<u32>,
     active_timer_preview_preset_id: Option<u32>,
+    quick_action_window_selector: String,
+    quick_action_expanded: Option<TitlebarQuickActionKind>,
     command_ai_dialog: Option<CommandAiDialog>,
     command_ai_job: Option<CommandAiJob>,
     command_ai_next_token: u64,
@@ -764,7 +766,6 @@ pub struct CrosshairApp {
     last_applied_theme: Option<UiThemeMode>,
     native_shadow_applied: bool,
     native_transitions_disabled_applied: bool,
-    last_external_foreground_window: Option<isize>,
     startup_show_pending: bool,
     startup_gate_release_pending: bool,
     startup_gate_frames_remaining: u8,
@@ -990,6 +991,8 @@ impl CrosshairApp {
             active_macro_record_preset_id: None,
             active_hud_preview_preset_id: None,
             active_timer_preview_preset_id: None,
+            quick_action_window_selector: String::new(),
+            quick_action_expanded: None,
             command_ai_dialog: None,
             command_ai_job: None,
             command_ai_next_token: 1,
@@ -998,7 +1001,6 @@ impl CrosshairApp {
             last_applied_theme: None,
             native_shadow_applied: false,
             native_transitions_disabled_applied: false,
-            last_external_foreground_window: None,
             startup_show_pending: true,
             startup_gate_release_pending: false,
             startup_gate_frames_remaining: 1,
@@ -1965,6 +1967,21 @@ impl CrosshairApp {
             return;
         }
         self.schedule_open_windows_refresh(None);
+    }
+
+    fn sync_quick_action_window_selection(&mut self) {
+        if self.open_windows.is_empty() {
+            self.quick_action_window_selector.clear();
+            return;
+        }
+        if self.quick_action_window_selector.is_empty()
+            || !self
+                .open_windows
+                .iter()
+                .any(|item| item == &self.quick_action_window_selector)
+        {
+            self.quick_action_window_selector = self.open_windows[0].clone();
+        }
     }
 
     fn schedule_audio_sense_devices_refresh(&mut self) {
@@ -3812,6 +3829,246 @@ impl CrosshairApp {
         );
         self.paint_titlebar_quick_action_icon(ui.painter(), face_rect, action_kind, active, icon_color);
         response
+    }
+
+    fn render_titlebar_quick_actions_grid(
+        &mut self,
+        ui: &mut egui::Ui,
+        taskbar_hidden: bool,
+    ) {
+        self.ensure_open_windows_ready(false);
+        self.sync_quick_action_window_selection();
+        let pin_window_available = !self.quick_action_window_selector.is_empty();
+        let pinned_window_active =
+            pin_window_available && window_list::is_window_topmost(&self.quick_action_window_selector);
+        let mut next_expanded = None;
+
+        Grid::new("titlebar-quick-actions-grid")
+            .num_columns(3)
+            .spacing([8.0, 8.0])
+            .show(ui, |ui| {
+                let taskbar_panel = ui.vertical(|ui| {
+                    let button_response = self.titlebar_quick_action_button(
+                        ui,
+                        TitlebarQuickActionKind::Taskbar,
+                        taskbar_hidden,
+                    );
+                    if button_response.clicked() {
+                        let success = if taskbar_hidden {
+                            crate::platform::show_taskbar()
+                        } else {
+                            crate::platform::hide_taskbar()
+                        };
+                        self.status = if success {
+                            if taskbar_hidden {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Windows taskbar restored.",
+                                    "Da hien lai taskbar Windows.",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Windows taskbar hidden.",
+                                    "Da an taskbar Windows.",
+                                )
+                            }
+                        } else if taskbar_hidden {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Failed to restore the Windows taskbar.",
+                                "Khong the hien lai taskbar Windows.",
+                            )
+                        } else {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Failed to hide the Windows taskbar.",
+                                "Khong the an taskbar Windows.",
+                            )
+                        }
+                        .to_owned();
+                    }
+
+                    let expanded =
+                        self.quick_action_expanded == Some(TitlebarQuickActionKind::Taskbar)
+                            || button_response.hovered();
+                    ui.add_space(6.0);
+                    if expanded {
+                        ui.label(
+                            RichText::new(if taskbar_hidden {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Show taskbar",
+                                    "Hien taskbar",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Hide taskbar",
+                                    "An taskbar",
+                                )
+                            })
+                            .size(11.0),
+                        );
+                    } else {
+                        ui.add_space(16.0);
+                    }
+                });
+                if taskbar_panel.response.hovered() {
+                    next_expanded = Some(TitlebarQuickActionKind::Taskbar);
+                }
+
+                let windows_panel = ui.vertical(|ui| {
+                    let button_response = self.titlebar_quick_action_button(
+                        ui,
+                        TitlebarQuickActionKind::WindowsKey,
+                        self.state.windows_key_locked,
+                    );
+                    if button_response.clicked() {
+                        self.state.windows_key_locked = !self.state.windows_key_locked;
+                        self.sync_windows_key_locked();
+                        self.persist();
+                        self.status = if self.state.windows_key_locked {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Windows key locked.",
+                                "Da khoa phim Windows.",
+                            )
+                        } else {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Windows key unlocked.",
+                                "Da mo phim Windows.",
+                            )
+                        }
+                        .to_owned();
+                    }
+
+                    let expanded =
+                        self.quick_action_expanded == Some(TitlebarQuickActionKind::WindowsKey)
+                            || button_response.hovered();
+                    ui.add_space(6.0);
+                    if expanded {
+                        ui.label(
+                            RichText::new(if self.state.windows_key_locked {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Unlock Windows key",
+                                    "Mo khoa phim Windows",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Lock Windows key",
+                                    "Khoa phim Windows",
+                                )
+                            })
+                            .size(11.0),
+                        );
+                    } else {
+                        ui.add_space(16.0);
+                    }
+                });
+                if windows_panel.response.hovered() {
+                    next_expanded = Some(TitlebarQuickActionKind::WindowsKey);
+                }
+
+                let pin_panel = ui.vertical(|ui| {
+                    let button_response = self.titlebar_quick_action_button(
+                        ui,
+                        TitlebarQuickActionKind::WindowPin,
+                        pinned_window_active,
+                    );
+                    if button_response.clicked() {
+                        if pin_window_available {
+                            let next_state = !pinned_window_active;
+                            let success = window_list::set_window_topmost(
+                                &self.quick_action_window_selector,
+                                next_state,
+                            );
+                            self.status = if success {
+                                if next_state {
+                                    Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Pinned the selected window on top.",
+                                        "Da ghim cua so da chon len tren cung.",
+                                    )
+                                } else {
+                                    Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Removed topmost from the selected window.",
+                                        "Da bo ghim cua so da chon.",
+                                    )
+                                }
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Could not update the selected window.",
+                                    "Khong the cap nhat cua so da chon.",
+                                )
+                            }
+                            .to_owned();
+                        } else {
+                            self.status = Self::tr_lang(
+                                self.state.ui_language,
+                                "No window is available to pin.",
+                                "Khong co cua so nao de ghim.",
+                            )
+                            .to_owned();
+                        }
+                    }
+
+                    let expanded =
+                        self.quick_action_expanded == Some(TitlebarQuickActionKind::WindowPin)
+                            || button_response.hovered();
+                    ui.add_space(6.0);
+                    if expanded {
+                        ui.label(
+                            RichText::new(if pinned_window_active {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Unpin selected window",
+                                    "Bo ghim cua so da chon",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Pin selected window on top",
+                                    "Ghim cua so da chon len tren cung",
+                                )
+                            })
+                            .size(11.0),
+                        );
+                        egui::ComboBox::from_id_salt("quick-action-window-selector")
+                            .width(92.0)
+                            .selected_text(if self.quick_action_window_selector.is_empty() {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Select window",
+                                    "Chon cua so",
+                                )
+                            } else {
+                                &self.quick_action_window_selector
+                            })
+                            .show_ui(ui, |ui| {
+                                for selector in &self.open_windows {
+                                    ui.selectable_value(
+                                        &mut self.quick_action_window_selector,
+                                        selector.clone(),
+                                        selector,
+                                    );
+                                }
+                            });
+                    } else {
+                        ui.add_space(40.0);
+                    }
+                });
+                if pin_panel.response.hovered() {
+                    next_expanded = Some(TitlebarQuickActionKind::WindowPin);
+                }
+            });
+
+        self.quick_action_expanded = next_expanded;
     }
 
     fn top_tab_button(&self, text: RichText, selected: bool, emphasized: bool) -> Button<'static> {
@@ -8904,9 +9161,6 @@ impl eframe::App for CrosshairApp {
             self.state.active_panel = AppPanel::Pin;
         }
         crate::overlay::set_ui_context(ctx.clone());
-        if let Some(hwnd) = crate::platform::current_external_foreground_window(frame) {
-            self.last_external_foreground_window = Some(hwnd);
-        }
         self.apply_theme(ctx);
         let wants_native_shadow = false;
         if self.native_shadow_applied != wants_native_shadow {
@@ -9372,6 +9626,7 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::OpenWindowsLoaded { windows, status } => {
                     self.open_windows = windows;
+                    self.sync_quick_action_window_selection();
                     self.open_windows_loaded_once = true;
                     self.open_windows_loading = false;
                     self.last_window_refresh_at = Instant::now();
@@ -9907,168 +10162,7 @@ impl eframe::App for CrosshairApp {
                                         .corner_radius(14.0)
                                         .inner_margin(egui::Margin::symmetric(10, 10))
                                         .show(ui, |ui| {
-                                            Grid::new("titlebar-quick-actions-grid")
-                                                .num_columns(3)
-                                                .spacing([8.0, 8.0])
-                                                .show(ui, |ui| {
-                                                    let pinned_window_active = self
-                                                        .last_external_foreground_window
-                                                        .map(crate::platform::is_window_topmost)
-                                                        .unwrap_or(false);
-                                                    let taskbar_clicked = self
-                                                    .titlebar_quick_action_button(
-                                                        ui,
-                                                        TitlebarQuickActionKind::Taskbar,
-                                                        taskbar_hidden,
-                                                    )
-                                                    .on_hover_text(if taskbar_hidden {
-                                                        Self::tr_lang(
-                                                            self.state.ui_language,
-                                                            "Show taskbar",
-                                                            "Hiện taskbar",
-                                                        )
-                                                    } else {
-                                                        Self::tr_lang(
-                                                            self.state.ui_language,
-                                                            "Hide taskbar",
-                                                            "Ẩn taskbar",
-                                                        )
-                                                    })
-                                                    .clicked();
-                                                    if taskbar_clicked {
-                                                        let success = if taskbar_hidden {
-                                                            crate::platform::show_taskbar()
-                                                        } else {
-                                                            crate::platform::hide_taskbar()
-                                                        };
-                                                        self.status = if success {
-                                                            if taskbar_hidden {
-                                                                Self::tr_lang(
-                                                                    self.state.ui_language,
-                                                                    "Windows taskbar restored.",
-                                                                    "Đã hiện lại taskbar Windows.",
-                                                                )
-                                                            } else {
-                                                                Self::tr_lang(
-                                                                    self.state.ui_language,
-                                                                    "Windows taskbar hidden.",
-                                                                    "Đã ẩn taskbar Windows.",
-                                                                )
-                                                            }
-                                                        } else if taskbar_hidden {
-                                                            Self::tr_lang(
-                                                                self.state.ui_language,
-                                                                "Failed to restore the Windows taskbar.",
-                                                                "Không thể hiện lại taskbar Windows.",
-                                                            )
-                                                        } else {
-                                                            Self::tr_lang(
-                                                                self.state.ui_language,
-                                                                "Failed to hide the Windows taskbar.",
-                                                                "Không thể ẩn taskbar Windows.",
-                                                            )
-                                                        }
-                                                        .to_owned();
-                                                    }
-
-                                                    let windows_clicked = self
-                                                    .titlebar_quick_action_button(
-                                                        ui,
-                                                        TitlebarQuickActionKind::WindowsKey,
-                                                        self.state.windows_key_locked,
-                                                    )
-                                                    .on_hover_text(if self.state.windows_key_locked {
-                                                        Self::tr_lang(
-                                                            self.state.ui_language,
-                                                            "Unlock Windows key",
-                                                            "Mở khóa phím Windows",
-                                                        )
-                                                    } else {
-                                                        Self::tr_lang(
-                                                            self.state.ui_language,
-                                                            "Lock Windows key",
-                                                            "Khóa phím Windows",
-                                                        )
-                                                    })
-                                                    .clicked();
-                                                    if windows_clicked {
-                                                        self.state.windows_key_locked =
-                                                            !self.state.windows_key_locked;
-                                                        self.sync_windows_key_locked();
-                                                        self.persist();
-                                                        self.status = if self.state.windows_key_locked {
-                                                            Self::tr_lang(
-                                                                self.state.ui_language,
-                                                                "Windows key locked.",
-                                                                "Da khoa phim Windows.",
-                                                            )
-                                                        } else {
-                                                            Self::tr_lang(
-                                                                self.state.ui_language,
-                                                                "Windows key unlocked.",
-                                                                "Da mo phim Windows.",
-                                                            )
-                                                        }
-                                                        .to_owned();
-                                                    }
-
-                                                    let window_pin_clicked = self
-                                                    .titlebar_quick_action_button(
-                                                        ui,
-                                                        TitlebarQuickActionKind::WindowPin,
-                                                        pinned_window_active,
-                                                    )
-                                                    .on_hover_text(if pinned_window_active {
-                                                        Self::tr_lang(
-                                                            self.state.ui_language,
-                                                            "Unpin the last active window",
-                                                            "Bo ghim cua so vua dung",
-                                                        )
-                                                    } else {
-                                                        Self::tr_lang(
-                                                            self.state.ui_language,
-                                                            "Pin the last active window on top",
-                                                            "Ghim cua so vua dung len tren cung",
-                                                        )
-                                                    })
-                                                    .clicked();
-                                                    if window_pin_clicked {
-                                                        if let Some(hwnd) = self.last_external_foreground_window {
-                                                            let next_state = !crate::platform::is_window_topmost(hwnd);
-                                                            let success = crate::platform::set_window_topmost(hwnd, next_state);
-                                                            self.status = if success {
-                                                                if next_state {
-                                                                    Self::tr_lang(
-                                                                        self.state.ui_language,
-                                                                        "Pinned the last active window on top.",
-                                                                        "Da ghim cua so vua dung len tren cung.",
-                                                                    )
-                                                                } else {
-                                                                    Self::tr_lang(
-                                                                        self.state.ui_language,
-                                                                        "Removed topmost from the last active window.",
-                                                                        "Da bo ghim cua so vua dung.",
-                                                                    )
-                                                                }
-                                                            } else {
-                                                                self.last_external_foreground_window = None;
-                                                                Self::tr_lang(
-                                                                    self.state.ui_language,
-                                                                    "Could not update the last active window.",
-                                                                    "Khong the cap nhat cua so vua dung.",
-                                                                )
-                                                            }
-                                                            .to_owned();
-                                                        } else {
-                                                            self.status = Self::tr_lang(
-                                                                self.state.ui_language,
-                                                                "Focus another window first, then open quick actions.",
-                                                                "Hay focus cua so khac truoc roi mo quick actions.",
-                                                            )
-                                                            .to_owned();
-                                                        }
-                                                    }
-                                                });
+                                            self.render_titlebar_quick_actions_grid(ui, taskbar_hidden);
                                         });
                                 });
                             let _ = popup_result;
@@ -10426,6 +10520,7 @@ pub(crate) fn video_duration(clip: &VideoClipSettings) -> Option<u64> {
             .map(|meta| meta.duration_ms)
     }
 }
+
 
 
 
