@@ -1177,6 +1177,16 @@ impl CrosshairApp {
             Color32::from_rgba_unmultiplied(color.r, color.g, color.b, 255)
         });
         ui.painter().rect_filled(rect, 4.0, fill);
+        if color.is_none() {
+            let inset = 4.0;
+            ui.painter().line_segment(
+                [
+                    egui::pos2(rect.left() + inset, rect.bottom() - inset),
+                    egui::pos2(rect.right() - inset, rect.top() + inset),
+                ],
+                egui::Stroke::new(1.5, Color32::from_rgb(210, 220, 232)),
+            );
+        }
         ui.painter().rect_stroke(
             rect,
             4.0,

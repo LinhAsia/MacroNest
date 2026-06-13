@@ -193,6 +193,14 @@ fn default_geometry_fill_color() -> RgbaColor {
     }
 }
 
+fn default_geometry_stroke_color_expr() -> String {
+    "#00FFAA".to_owned()
+}
+
+fn default_geometry_fill_color_expr() -> String {
+    "#00FFAA".to_owned()
+}
+
 fn default_geometry_thickness() -> f32 {
     2.0
 }
@@ -806,8 +814,8 @@ impl Default for GeometrySpec {
             fill_opacity_expr: "0.3".to_owned(),
             points_expr: "960,540;1120,540;1120,660".to_owned(),
             text: "Label".to_owned(),
-            stroke_color_expr: String::new(),
-            fill_color_expr: String::new(),
+            stroke_color_expr: default_geometry_stroke_color_expr(),
+            fill_color_expr: default_geometry_fill_color_expr(),
             stroke_color: default_geometry_stroke_color(),
             fill_color: default_geometry_fill_color(),
             filled: false,

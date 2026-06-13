@@ -614,6 +614,7 @@ impl CrosshairApp {
                         request_screen_color_pick,
                         pending_screen_color_target,
                         false,
+                        false,
                         vietnamese_input_enabled,
                         vietnamese_input_mode,
                     );
@@ -633,6 +634,7 @@ impl CrosshairApp {
                             request_screen_color_pick,
                             pending_screen_color_target,
                             true,
+                            false,
                             vietnamese_input_enabled,
                             vietnamese_input_mode,
                         );
@@ -1377,6 +1379,7 @@ impl CrosshairApp {
                         request_screen_color_pick,
                         pending_screen_color_target,
                         false,
+                        false,
                         vietnamese_input_enabled,
                         vietnamese_input_mode,
                     );
@@ -1403,6 +1406,7 @@ impl CrosshairApp {
                             request_screen_color_pick,
                             pending_screen_color_target,
                             true,
+                            false,
                             vietnamese_input_enabled,
                             vietnamese_input_mode,
                         );
@@ -1637,13 +1641,28 @@ impl CrosshairApp {
         request_screen_color_pick: &mut bool,
         pending_screen_color_target: &mut Option<(u32, u32, bool)>,
         is_fill: bool,
+        empty_expr_means_unset: bool,
         vietnamese_input_enabled: bool,
         vietnamese_input_mode: VietnameseInputMode,
     ) -> bool {
         let mut changed = false;
+        if allow_color_expression && !empty_expr_means_unset && expr.trim().is_empty() {
+            *expr = Self::geometry_color_expr_literal(*color);
+            changed = true;
+        }
+        let display_color = if empty_expr_means_unset && expr.trim().is_empty() {
+            None
+        } else {
+            Some(*color)
+        };
         let color_tooltip = format!(
             "#{:02X}{:02X}{:02X}{:02X} rgba({}, {}, {}, {})",
             color.r, color.g, color.b, color.a, color.r, color.g, color.b, color.a
+        );
+        let empty_tooltip = Self::tr_lang(
+            language,
+            "No override color set yet.",
+            "Chua co mau ghi de nao duoc dat.",
         );
         ui.add_sized([Self::GEOMETRY_LABEL_COL_WIDTH, 18.0], egui::Label::new(label));
         ui.horizontal(|ui| {
@@ -1679,10 +1698,14 @@ impl CrosshairApp {
 
             let _swatch_response = ui
                 .scope(|ui| {
-                    Self::image_search_target_color_swatch(ui, Some(*color), egui::vec2(24.0, 24.0));
+                    Self::image_search_target_color_swatch(ui, display_color, egui::vec2(24.0, 24.0));
                 })
                 .response
-                .on_hover_text(color_tooltip.clone());
+                .on_hover_text(if display_color.is_some() {
+                    color_tooltip.clone()
+                } else {
+                    empty_tooltip.to_owned()
+                });
 
             let popup_id =
                 ui.make_persistent_id((preset_id, object_id, label, "geometry-color-popup"));

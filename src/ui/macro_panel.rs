@@ -13397,6 +13397,18 @@ impl CrosshairApp {
         spec.text.clear();
         spec.stroke_color_expr.clear();
         spec.fill_color_expr.clear();
+        spec.stroke_color = RgbaColor {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        };
+        spec.fill_color = RgbaColor {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        };
         spec.points_expr.clear();
     }
 
@@ -13833,6 +13845,7 @@ impl CrosshairApp {
                     request_screen_color_pick,
                     pending_screen_color_target,
                     false,
+                    true,
                     vietnamese_input_enabled,
                     vietnamese_input_mode,
                 );
@@ -13849,6 +13862,7 @@ impl CrosshairApp {
                     true,
                     request_screen_color_pick,
                     pending_screen_color_target,
+                    true,
                     true,
                     vietnamese_input_enabled,
                     vietnamese_input_mode,
