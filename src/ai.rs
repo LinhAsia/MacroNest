@@ -1,4 +1,8 @@
+use std::borrow::Cow;
+
 use anyhow::{Context, Result, bail};
+use arboard::{Clipboard, ImageData};
+use image::DynamicImage;
 use serde::Deserialize;
 
 use crate::model::{CommandPreset, GroqSettings};
@@ -176,6 +180,186 @@ struct GroqChoice {
 #[derive(Deserialize)]
 struct GroqMessage {
     content: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MemeReplyQuery {
+    query: String,
+}
+
+#[derive(Deserialize)]
+struct DuckDuckGoImageSearchResponse {
+    #[serde(default)]
+    results: Vec<DuckDuckGoImageResult>,
+}
+
+#[derive(Deserialize)]
+struct DuckDuckGoImageResult {
+    image: String,
+}
+
+pub fn copy_funny_meme_reply_to_clipboard(
+    settings: &GroqSettings,
+    source_text: &str,
+) -> Result<String> {
+    let query = generate_meme_reply_query_groq(settings, source_text)?;
+    let image = fetch_first_meme_image(&query)?;
+    copy_image_to_clipboard(image)?;
+    Ok(query)
+}
+
+fn generate_meme_reply_query_groq(settings: &GroqSettings, source_text: &str) -> Result<String> {
+    let trimmed = source_text.trim();
+    if trimmed.is_empty() {
+        bail!("Funny Meme Reply input is empty");
+    }
+
+    let prompt = format!(
+        "Turn this message into a short meme image search query.\n\
+Return JSON with exactly one field: query.\n\
+Rules:\n\
+- 2 to 6 words only\n\
+- plain lowercase English\n\
+- no punctuation except spaces\n\
+- aim for a reaction meme image someone would send back\n\
+- no explanation\n\
+Message:\n{}",
+        trimmed
+    );
+
+    let system_instruction = "You turn chat messages into short meme image search queries.";
+    let text = groq_chat_completion_text(
+        settings,
+        &prompt,
+        system_instruction,
+        Some(serde_json::json!({"type": "json_object"})),
+    )?;
+    let parsed: MemeReplyQuery =
+        serde_json::from_str(text.trim()).context("Groq did not return a valid meme query JSON")?;
+    let query = parsed.query.trim().to_owned();
+    if query.is_empty() {
+        bail!("Groq returned an empty meme search query");
+    }
+    Ok(query)
+}
+
+fn fetch_first_meme_image(query: &str) -> Result<DynamicImage> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("MacroNest/1.1")
+        .build()
+        .context("Failed to prepare the image search client")?;
+    let token = fetch_duckduckgo_vqd(&client, query)?;
+    let results = fetch_duckduckgo_image_results(&client, query, &token)?;
+    if results.is_empty() {
+        bail!("No meme image results were found");
+    }
+
+    let mut last_error = None;
+    for result in results.into_iter().take(8) {
+        let image_url = result.image.trim();
+        if image_url.is_empty() || image_url.ends_with(".svg") {
+            continue;
+        }
+        match download_image(&client, image_url) {
+            Ok(image) => return Ok(image),
+            Err(error) => last_error = Some(error),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Could not download a usable meme image")))
+}
+
+fn fetch_duckduckgo_vqd(client: &reqwest::blocking::Client, query: &str) -> Result<String> {
+    let html = client
+        .get("https://duckduckgo.com/")
+        .query(&[("q", query), ("iax", "images"), ("ia", "images")])
+        .send()
+        .context("Failed to open DuckDuckGo image search")?
+        .error_for_status()
+        .context("DuckDuckGo image search returned an error")?
+        .text()
+        .context("Failed to read DuckDuckGo image search response")?;
+
+    extract_duckduckgo_vqd(&html).context("DuckDuckGo did not return an image search token")
+}
+
+fn extract_duckduckgo_vqd(html: &str) -> Option<String> {
+    for marker in ["vqd=\"", "vqd='", "vqd="] {
+        let start = html.find(marker)?;
+        let tail = &html[start + marker.len()..];
+        if marker == "vqd=" {
+            let value = tail
+                .split(['&', '\'', '"', '\n', '\r', ';'])
+                .next()
+                .unwrap_or_default()
+                .trim();
+            if !value.is_empty() {
+                return Some(value.to_owned());
+            }
+        } else {
+            let quote = if marker.ends_with('"') { '"' } else { '\'' };
+            let end = tail.find(quote)?;
+            let value = tail[..end].trim();
+            if !value.is_empty() {
+                return Some(value.to_owned());
+            }
+        }
+    }
+    None
+}
+
+fn fetch_duckduckgo_image_results(
+    client: &reqwest::blocking::Client,
+    query: &str,
+    vqd: &str,
+) -> Result<Vec<DuckDuckGoImageResult>> {
+    let response = client
+        .get("https://duckduckgo.com/i.js")
+        .query(&[
+            ("l", "us-en"),
+            ("o", "json"),
+            ("q", query),
+            ("vqd", vqd),
+            ("f", ",,,"),
+            ("p", "1"),
+        ])
+        .header("Referer", "https://duckduckgo.com/")
+        .send()
+        .context("Failed to fetch DuckDuckGo image results")?
+        .error_for_status()
+        .context("DuckDuckGo image result request failed")?;
+
+    let payload: DuckDuckGoImageSearchResponse = response
+        .json()
+        .context("Failed to parse DuckDuckGo image results")?;
+    Ok(payload.results)
+}
+
+fn download_image(client: &reqwest::blocking::Client, image_url: &str) -> Result<DynamicImage> {
+    let bytes = client
+        .get(image_url)
+        .header("Referer", "https://duckduckgo.com/")
+        .send()
+        .with_context(|| format!("Failed to download meme image: {image_url}"))?
+        .error_for_status()
+        .with_context(|| format!("Meme image request failed: {image_url}"))?
+        .bytes()
+        .context("Failed to read meme image bytes")?;
+
+    image::load_from_memory(&bytes).context("Downloaded meme image format is not supported")
+}
+
+fn copy_image_to_clipboard(image: DynamicImage) -> Result<()> {
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let mut clipboard = Clipboard::new().context("Failed to open the clipboard")?;
+    clipboard
+        .set_image(ImageData {
+            width: width as usize,
+            height: height as usize,
+            bytes: Cow::Owned(rgba.into_raw()),
+        })
+        .context("Failed to copy the meme image to the clipboard")
 }
 
 fn groq_chat_completion_text(

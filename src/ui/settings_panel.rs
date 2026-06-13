@@ -134,6 +134,7 @@ impl CrosshairApp {
                         });
                     });
                     if groq_changed {
+                        self.sync_groq_settings();
                         self.persist();
                     }
 

@@ -299,6 +299,7 @@ impl CrosshairApp {
         let if_popup_id = ui.make_persistent_id((id_source, "if-submenu-popup"));
         let geometry_popup_id = ui.make_persistent_id((id_source, "geometry-submenu-popup"));
         let audio_sense_popup_id = ui.make_persistent_id((id_source, "audiosense-submenu-popup"));
+        let funny_popup_id = ui.make_persistent_id((id_source, "funny-submenu-popup"));
         ui.ctx().data_mut(|data| {
             data.insert_temp(owner_id, None::<MacroActionSubmenuKind>);
             data.insert_temp(active_mouse_click_popup_key_id, None::<&'static str>);
@@ -308,6 +309,7 @@ impl CrosshairApp {
             data.insert_temp(if_popup_id, false);
             data.insert_temp(geometry_popup_id, false);
             data.insert_temp(audio_sense_popup_id, false);
+            data.insert_temp(funny_popup_id, false);
         });
         egui::Popup::close_id(ui.ctx(), mouse_popup_id);
         egui::Popup::close_id(ui.ctx(), image_popup_id);
@@ -315,6 +317,7 @@ impl CrosshairApp {
         egui::Popup::close_id(ui.ctx(), if_popup_id);
         egui::Popup::close_id(ui.ctx(), geometry_popup_id);
         egui::Popup::close_id(ui.ctx(), audio_sense_popup_id);
+        egui::Popup::close_id(ui.ctx(), funny_popup_id);
         for (_, _, _, popup_key) in Self::mouse_click_action_groups().iter().copied() {
             let child_popup_id = ui.make_persistent_id((id_source, popup_key, "popup"));
             ui.ctx()
@@ -5345,6 +5348,16 @@ impl CrosshairApp {
                                                         );
                                                         grid_col += 1;
                                                         if grid_col % 8 == 0 { ui.end_row(); }
+                                                        Self::render_funny_action_group_option(
+                                                            ui,
+                                                            language,
+                                                            (group.id, preset.id, "hold-stop-funny-group"),
+                                                            &mut step.action,
+                                                            &mut live_sync,
+                                                            action_hover_id,
+                                                        );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
                                 });
                             });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
@@ -6588,6 +6601,38 @@ impl CrosshairApp {
                                                         );
                                                         live_sync |= response.changed();
                                                         Self::render_variable_suggestions_braced(ui, &response, &mut step.key, &timer_names, language);
+                                                    });
+                                                } else if step.action == MacroAction::FunnyMemeReply {
+                                                    ui.vertical(|ui| {
+                                                        let response = Self::render_interpolated_text_edit(
+                                                            ui,
+                                                            &mut step.key,
+                                                            ui.id().with("hold-stop-funny-meme-key"),
+                                                            220.0,
+                                                            360.0,
+                                                            17.0,
+                                                            44.0,
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Message or variable",
+                                                                "Tin nhan hoac bien",
+                                                            ),
+                                                            true,
+                                                        );
+                                                        Self::apply_vietnamese_input_if_changed(
+                                                            &response,
+                                                            self.state.vietnamese_input_enabled,
+                                                            self.state.vietnamese_input_mode,
+                                                            &mut step.key,
+                                                        );
+                                                        live_sync |= response.changed();
+                                                        Self::render_variable_suggestions_braced(
+                                                            ui,
+                                                            &response,
+                                                            &mut step.key,
+                                                            &timer_names,
+                                                            language,
+                                                        );
                                                     });
                                                 } else if step.action == MacroAction::DisableCrosshair {
                                                     ui.scope(|ui| {
@@ -8467,6 +8512,16 @@ impl CrosshairApp {
                                                             );
                                                             grid_col += 1;
                                                             if grid_col % 8 == 0 { ui.end_row(); }
+                                                            Self::render_funny_action_group_option(
+                                                                ui,
+                                                                language,
+                                                                (group.id, preset.id, step_index, "funny-group"),
+                                                                &mut step.action,
+                                                                &mut live_sync,
+                                                                action_hover_id,
+                                                            );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
                                                         });
                                                 });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
@@ -9923,6 +9978,38 @@ impl CrosshairApp {
                                                          live_sync |= response.changed();
                                                          Self::render_variable_suggestions_braced(ui, &response, &mut step.key, &timer_names, language);
                                                      });
+                                                } else if step.action == MacroAction::FunnyMemeReply {
+                                                    ui.vertical(|ui| {
+                                                        let response = Self::render_interpolated_text_edit(
+                                                            ui,
+                                                            &mut step.key,
+                                                            ui.id().with((step_index, "funny-meme-key")),
+                                                            146.0,
+                                                            260.0,
+                                                            21.0,
+                                                            36.0,
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Message or variable",
+                                                                "Tin nhan hoac bien",
+                                                            ),
+                                                            true,
+                                                        );
+                                                        Self::apply_vietnamese_input_if_changed(
+                                                            &response,
+                                                            self.state.vietnamese_input_enabled,
+                                                            self.state.vietnamese_input_mode,
+                                                            &mut step.key,
+                                                        );
+                                                        live_sync |= response.changed();
+                                                        Self::render_variable_suggestions_braced(
+                                                            ui,
+                                                            &response,
+                                                            &mut step.key,
+                                                            &timer_names,
+                                                            language,
+                                                        );
+                                                    });
                                                 } else if step.action == MacroAction::DisableCrosshair {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
@@ -12937,6 +13024,14 @@ impl CrosshairApp {
         Self::audio_sense_macro_actions().contains(&action)
     }
 
+    fn funny_macro_actions() -> &'static [MacroAction] {
+        &[MacroAction::FunnyMemeReply]
+    }
+
+    fn macro_action_is_funny(action: MacroAction) -> bool {
+        Self::funny_macro_actions().contains(&action)
+    }
+
     fn render_geometry_action_group_option(
         ui: &mut egui::Ui,
         language: UiLanguage,
@@ -13196,6 +13291,138 @@ impl CrosshairApp {
                     language,
                     "AudioSense\nOpen pitch audio actions.",
                     "AudioSense\nMo cac hanh dong cao do va huong am.",
+                ),
+            );
+        }
+    }
+
+    fn render_funny_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_source: impl std::hash::Hash + Copy,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        let selected = Self::macro_action_is_funny(*current);
+        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let popup_id = ui.make_persistent_id((id_source, "funny-submenu-popup"));
+        let active_owner = ui
+            .ctx()
+            .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
+        let top_level_hovered = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(action_hover_id))
+            .unwrap_or(false);
+        let mut open = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(popup_id))
+            .unwrap_or(false);
+        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::Funny) {
+            open = false;
+        }
+        if top_level_hovered {
+            open = false;
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
+        }
+        let inner = ui.allocate_ui_with_layout(
+            vec2(58.0, 42.0),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| {
+                let response = ui.add_sized(
+                    [34.0, 24.0],
+                    Button::new(Self::material_icon_text(0xe420, 18.0)).selected(selected),
+                );
+                if response.hovered() || response.clicked() {
+                    Self::clear_macro_action_submenus(ui, id_source);
+                    open = true;
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(owner_id, MacroActionSubmenuKind::Funny)
+                    });
+                }
+                let popup_rect_id = ui.make_persistent_id((id_source, "funny-submenu-rect"));
+                let popup_response = egui::Popup::from_response(&response)
+                    .id(popup_id)
+                    .open_bool(&mut open)
+                    .align(egui::RectAlign::BOTTOM_START)
+                    .layout(egui::Layout::top_down_justified(egui::Align::Min))
+                    .width(120.0)
+                    .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                    .show(|ui| {
+                        let rect = ui.max_rect();
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(popup_rect_id, rect));
+                        egui::Grid::new((id_source, "funny-action-grid"))
+                            .num_columns(2)
+                            .spacing([6.0, 6.0])
+                            .show(ui, |ui| {
+                                for action in Self::funny_macro_actions().iter().copied() {
+                                    Self::render_macro_action_option(
+                                        ui,
+                                        language,
+                                        current,
+                                        action,
+                                        live_sync,
+                                        action_hover_id,
+                                        true,
+                                    );
+                                }
+                            });
+                    });
+                let popup_rect: Option<egui::Rect> =
+                    ui.ctx().data(|data| data.get_temp(popup_rect_id));
+                if open {
+                    if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
+                        let mut keep_open_rect = response.rect.expand(10.0);
+                        if let Some(rect) = popup_rect {
+                            keep_open_rect = keep_open_rect.union(rect.expand(10.0));
+                            if rect.contains(pointer_pos) {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(owner_id, MacroActionSubmenuKind::Funny)
+                                });
+                            }
+                        }
+                        if !keep_open_rect.contains(pointer_pos) {
+                            open = false;
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
+                            });
+                        }
+                    } else {
+                        open = false;
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
+                        });
+                    }
+                }
+                ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
+                let label_color = if selected {
+                    ui.visuals().strong_text_color()
+                } else {
+                    ui.visuals().text_color()
+                };
+                ui.label(
+                    RichText::new(Self::tr_lang(language, "Funny", "Funny"))
+                        .size(9.0)
+                        .color(label_color),
+                );
+                if let Some(popup) = popup_response {
+                    popup.response
+                } else {
+                    response
+                }
+            },
+        );
+        let response = inner.inner;
+        if !open {
+            Self::show_instant_hover_tooltip(
+                ui,
+                &response,
+                Self::tr_lang(
+                    language,
+                    "Funny\nOpen meme reply actions.",
+                    "Funny\nMo cac action reply meme.",
                 ),
             );
         }

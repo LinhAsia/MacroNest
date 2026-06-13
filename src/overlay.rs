@@ -434,6 +434,7 @@ mod windows_overlay {
         RestoreMouseSensitivity,
         UpdateHudPresets(Vec<HudPreset>),
         UpdateCommandPresets(Vec<CommandPreset>),
+        UpdateGroqSettings(crate::model::GroqSettings),
         PreviewHudPreset(Vec<HudPreset>),
         UpdateMacroPresets(Vec<MacroGroup>),
         UpdateAudioSettings(AudioSettings),
@@ -779,6 +780,7 @@ mod windows_overlay {
         hud_presets: Vec<HudPreset>,
         ocr_presets: Vec<crate::model::OcrPreset>,
         command_presets: Vec<CommandPreset>,
+        groq_settings: crate::model::GroqSettings,
         macro_groups: Vec<MacroGroup>,
         macros_master_enabled: bool,
         windows_key_locked: bool,
@@ -872,6 +874,7 @@ mod windows_overlay {
                 hud_presets: Vec::new(),
                 ocr_presets: Vec::new(),
                 command_presets: Vec::new(),
+                groq_settings: crate::model::GroqSettings::default(),
                 macro_groups: Vec::new(),
                 macros_master_enabled: true,
                 windows_key_locked: false,
@@ -4279,6 +4282,10 @@ mod windows_overlay {
                     HOOK_STATE.lock().command_presets = presets;
                 }
 
+                OverlayCommand::UpdateGroqSettings(settings) => {
+                    HOOK_STATE.lock().groq_settings = settings;
+                }
+
                 OverlayCommand::PreviewHudPreset(presets) => {
                     *HUD_PREVIEW_DISPLAY.lock() = presets
                         .into_iter()
@@ -6143,6 +6150,28 @@ mod windows_overlay {
         Ok(())
     }
 
+    fn trigger_funny_meme_reply_step(step: &MacroStep) -> Result<()> {
+        let source_text = interpolate_variables(&step.key);
+        let source_text = source_text.trim().to_owned();
+        if source_text.is_empty() {
+            bail!("Funny Meme Reply input is empty");
+        }
+
+        let (groq_settings, ui_tx) = {
+            let hook_state = HOOK_STATE.lock();
+            (hook_state.groq_settings.clone(), hook_state.ui_tx.clone())
+        };
+
+        let query = ai::copy_funny_meme_reply_to_clipboard(&groq_settings, &source_text)?;
+        if let Some(tx) = ui_tx {
+            let _ = tx.send(UiCommand::VisionFinished(format!(
+                "Funny Meme Reply copied an image for query: {}",
+                query
+            )));
+        }
+        Ok(())
+    }
+
     fn focus_window_by_preset_id(spec: &str) -> Result<()> {
         window_preset::focus_window_by_preset_id(spec)
     }
@@ -7020,6 +7049,10 @@ mod windows_overlay {
 
             MacroAction::TriggerCommandPreset => {
                 let _ = trigger_command_preset_step(step);
+            }
+
+            MacroAction::FunnyMemeReply => {
+                let _ = trigger_funny_meme_reply_step(step);
             }
 
             MacroAction::EnableCrosshairProfile => {

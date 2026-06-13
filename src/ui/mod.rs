@@ -628,6 +628,7 @@ pub(crate) enum MacroActionSubmenuKind {
     If,
     Geometry,
     AudioSense,
+    Funny,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1122,6 +1123,7 @@ impl CrosshairApp {
         self.sync_macro_delay_settings();
         self.sync_macro_presets();
         self.sync_audio_settings();
+        self.sync_groq_settings();
         self.sync_vision_presets();
         self.sync_ocr_presets();
         self.sync_vision_settings();
@@ -1199,6 +1201,14 @@ impl CrosshairApp {
         let _ = self.overlay_tx.send(OverlayCommand::UpdateAudioSettings(
             self.state.audio_settings.clone(),
         ));
+    }
+
+    fn sync_groq_settings(&self) {
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateGroqSettings(
+                self.state.groq_settings.clone(),
+            ));
     }
 
     fn preload_primary_sound_preset_audio(&self) {
@@ -4842,6 +4852,7 @@ impl CrosshairApp {
             MacroAction::DrawGeometry => "DrawGeometry",
             MacroAction::ShowGeometryPreset => "ShowGeometry",
             MacroAction::HideGeometryPreset => "HideGeometry",
+            MacroAction::FunnyMemeReply => "MemeReply",
             MacroAction::JumpToStep => "JumpToStep",
             _ => "Legacy (Deprecated)",
         }
@@ -4973,6 +4984,9 @@ impl CrosshairApp {
                 MacroAction::HideGeometryPreset => {
                     "Ẩn preset hình học (hoặc xóa toàn bộ hình học)."
                 }
+                MacroAction::FunnyMemeReply => {
+                    "Biến câu nhắn thành query meme, tìm ảnh phù hợp và chép ảnh đầu tiên vào clipboard."
+                }
                 MacroAction::JumpToStep => {
                     "Nhảy đến bước chỉ định (bắt đầu từ 1 hoặc dùng biểu thức)."
                 }
@@ -5102,6 +5116,9 @@ impl CrosshairApp {
                 MacroAction::HideGeometryPreset => {
                     "Hide geometry preset (or clear all geometry overlay)."
                 }
+                MacroAction::FunnyMemeReply => {
+                    "Turn one message into a meme search query, fetch the best image result, and copy it to the clipboard."
+                }
                 MacroAction::JumpToStep => {
                     "Jump to a specified step (1-indexed or math expression)."
                 }
@@ -5184,6 +5201,7 @@ impl CrosshairApp {
             MacroAction::DrawGeometry => 0xe85b,
             MacroAction::ShowGeometryPreset => 0xe8f4,
             MacroAction::HideGeometryPreset => 0xe8f5,
+            MacroAction::FunnyMemeReply => 0xe420,
             MacroAction::JumpToStep => 0xe5c8,
             _ => 0xe8b5,
         };
@@ -5267,6 +5285,7 @@ impl CrosshairApp {
                 MacroAction::DrawGeometry => "Vẽ",
                 MacroAction::ShowGeometryPreset => "Hiện",
                 MacroAction::HideGeometryPreset => "Ẩn",
+                MacroAction::FunnyMemeReply => "Meme",
                 MacroAction::OcrSearch => "OCR",
                 MacroAction::JumpToStep => "Nhảy",
                 _ => "Cũ",
@@ -5343,6 +5362,7 @@ impl CrosshairApp {
                 MacroAction::DrawGeometry => "DrawGeo",
                 MacroAction::ShowGeometryPreset => "ShowGeo",
                 MacroAction::HideGeometryPreset => "HideGeo",
+                MacroAction::FunnyMemeReply => "Meme",
                 MacroAction::OcrSearch => "OCR",
                 MacroAction::JumpToStep => "Jump",
                 _ => "Legacy",
@@ -5418,6 +5438,7 @@ impl CrosshairApp {
                 MacroAction::DrawGeometry => "DrawGeo",
                 MacroAction::ShowGeometryPreset => "ShowGeo",
                 MacroAction::HideGeometryPreset => "HideGeo",
+                MacroAction::FunnyMemeReply => "Meme",
                 MacroAction::OcrSearch => "OCR",
                 MacroAction::JumpToStep => "Jump",
                 _ => "Legacy",
@@ -5570,6 +5591,7 @@ impl CrosshairApp {
                 | MacroAction::Else
                 | MacroAction::IfEnd
                 | MacroAction::SetVariable
+                | MacroAction::FunnyMemeReply
                 | MacroAction::DisableCrosshair
                 | MacroAction::DisableZoom
                 | MacroAction::DisablePin

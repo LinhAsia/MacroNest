@@ -579,6 +579,7 @@ pub enum MacroAction {
     DrawGeometry,
     ShowGeometryPreset,
     HideGeometryPreset,
+    FunnyMemeReply,
     JumpToStep,
     #[serde(other)]
     Legacy,
