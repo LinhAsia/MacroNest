@@ -86,6 +86,9 @@ mod windows_overlay {
                 Threading::{CREATE_NO_WINDOW, GetCurrentProcessId},
             },
             UI::{
+                Accessibility::{
+                    HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent,
+                },
                 Input::KeyboardAndMouse::{
                     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
                     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE,
@@ -103,8 +106,9 @@ mod windows_overlay {
                 WindowsAndMessaging::{
                     AppendMenuW, CREATESTRUCTW, CallNextHookEx, CreatePopupMenu, CreateWindowExW,
                     DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW,
-                    GA_ROOT, GW_OWNER, GWLP_USERDATA, GetAncestor, GetClassNameW, GetClientRect,
-                    GetCursorPos, GetForegroundWindow, GetMessageW, GetSystemMetrics, GetWindow,
+                    EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWLP_USERDATA, GetAncestor,
+                    GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
+                    GetSystemMetrics, GetWindow,
                     GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HHOOK,
                     HMENU, HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IMAGE_ICON, IsZoomed,
                     KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LoadCursorW,
@@ -121,7 +125,7 @@ mod windows_overlay {
                     WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL,
                     WM_NCCREATE, WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
                     WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION,
-                    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                    WINEVENT_OUTOFCONTEXT, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
                     WS_EX_TRANSPARENT, WS_OVERLAPPEDWINDOW, WS_POPUP, WindowFromPoint,
                 },
             },
@@ -170,7 +174,9 @@ mod windows_overlay {
     const XBUTTON2_DATA: u16 = 0x0002;
     const WMAPP_TRAYICON: u32 = WM_APP + 1;
     const WMAPP_PROCESS_QUEUE: u32 = WM_APP + 2;
+    const WMAPP_WINDOW_FOCUS_CHANGED: u32 = WM_APP + 3;
     const MACRO_PRESET_BASE_ID: i32 = 10000;
+    const FOCUS_TRIGGER_TIMER_ID: usize = 2;
     #[derive(Debug, Clone)]
     struct VisionRunOutcome {
         matched: bool,
@@ -941,6 +947,7 @@ mod windows_overlay {
         tray_menu: HMENU,
         keyboard_hook: HHOOK,
         mouse_hook: HHOOK,
+        window_focus_event_hook: HWINEVENTHOOK,
         running: Arc<AtomicBool>,
         active_pin_thumbnail: Option<ActivePinThumbnail>,
         timer_interval_ms: u32,
@@ -1198,11 +1205,9 @@ mod windows_overlay {
         thread::spawn(move || {
             while poll_running.load(Ordering::Relaxed) {
                 unsafe {
-                    let foreground = GetForegroundWindow();
-                    if update_foreground_window(foreground) {
-                        schedule_window_focus_trigger(foreground);
-                    }
-                    process_pending_window_focus_trigger();
+                    let foreground = HWND(
+                        FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void,
+                    );
                     let mut ui_in_foreground = false;
                     let mut ui_visible = false;
                     let mut ui_rect = windows::Win32::Foundation::RECT::default();
@@ -1411,6 +1416,7 @@ mod windows_overlay {
                 tray_menu,
                 keyboard_hook: HHOOK::default(),
                 mouse_hook: HHOOK::default(),
+                window_focus_event_hook: HWINEVENTHOOK::default(),
                 running,
                 active_pin_thumbnail: None,
                 timer_interval_ms: 500,
@@ -1511,6 +1517,8 @@ mod windows_overlay {
 
                     let _ =
                         RegisterHotKey(Some(hwnd), HOTKEY_ID, MOD_CONTROL | MOD_ALT, b'X' as u32);
+                    update_foreground_window(GetForegroundWindow());
+                    let _ = set_window_focus_event_hook_enabled(runtime, true);
                     let _ = SetTimer(Some(hwnd), TIMER_ID, 500, None);
                     let _ = set_input_hooks_enabled(runtime, false);
                     let _ = refresh_overlay(runtime);
@@ -1521,6 +1529,13 @@ mod windows_overlay {
 
             WM_TIMER => {
                 if let Some(runtime) = runtime_mut(hwnd) {
+                    if wparam.0 == FOCUS_TRIGGER_TIMER_ID {
+                        if !process_pending_window_focus_trigger() {
+                            let _ = KillTimer(Some(hwnd), FOCUS_TRIGGER_TIMER_ID);
+                        }
+                        return LRESULT(0);
+                    }
+
                     process_pending_commands(hwnd, runtime);
                     let ui_foreground = is_ui_in_foreground();
                     if ui_foreground != runtime.ui_foreground {
@@ -1575,6 +1590,12 @@ mod windows_overlay {
                     refresh_overlay_timer(hwnd, runtime);
                 }
 
+                LRESULT(0)
+            }
+
+            WMAPP_WINDOW_FOCUS_CHANGED => {
+                let foreground = HWND(wparam.0 as *mut c_void);
+                handle_window_focus_event(hwnd, foreground);
                 LRESULT(0)
             }
 
@@ -1793,6 +1814,7 @@ mod windows_overlay {
                     let _ = DestroyMenu(runtime.tray_menu);
                     let _ = ShowWindow(runtime.overlay_hwnd, SW_HIDE);
                     let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
+                    let _ = set_window_focus_event_hook_enabled(runtime, false);
                     let _ = set_input_hooks_enabled(runtime, false);
                 }
 
@@ -4930,6 +4952,57 @@ mod windows_overlay {
 
     fn desired_hooks_enabled(_runtime: &Runtime) -> bool {
         true
+    }
+
+    unsafe fn set_window_focus_event_hook_enabled(
+        runtime: &mut Runtime,
+        enabled: bool,
+    ) -> Result<()> {
+        if enabled {
+            if runtime.window_focus_event_hook.0.is_null() {
+                runtime.window_focus_event_hook = SetWinEventHook(
+                    EVENT_SYSTEM_FOREGROUND,
+                    EVENT_SYSTEM_FOREGROUND,
+                    None,
+                    Some(window_focus_event_proc),
+                    0,
+                    0,
+                    WINEVENT_OUTOFCONTEXT,
+                );
+                if runtime.window_focus_event_hook.0.is_null() {
+                    bail!("Failed to register window focus event hook");
+                }
+            }
+        } else if !runtime.window_focus_event_hook.0.is_null() {
+            let _ = UnhookWinEvent(runtime.window_focus_event_hook);
+            runtime.window_focus_event_hook = HWINEVENTHOOK::default();
+        }
+
+        Ok(())
+    }
+
+    unsafe extern "system" fn window_focus_event_proc(
+        _hook: HWINEVENTHOOK,
+        event: u32,
+        hwnd: HWND,
+        _id_object: i32,
+        _id_child: i32,
+        _event_thread: u32,
+        _event_time: u32,
+    ) {
+        if event != EVENT_SYSTEM_FOREGROUND {
+            return;
+        }
+
+        let controller = HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void);
+        if !controller.0.is_null() {
+            let _ = PostMessageW(
+                Some(controller),
+                WMAPP_WINDOW_FOCUS_CHANGED,
+                WPARAM(hwnd.0 as usize),
+                LPARAM(0),
+            );
+        }
     }
 
     unsafe fn set_input_hooks_enabled(runtime: &mut Runtime, enabled: bool) -> Result<()> {
@@ -14503,22 +14576,52 @@ mod windows_overlay {
         hook_state.pending_window_focus_stable_polls = 0;
     }
 
-    fn process_pending_window_focus_trigger() {
+    fn clear_pending_window_focus_trigger() {
+        let mut hook_state = HOOK_STATE.lock();
+        hook_state.pending_window_focus_trigger = None;
+        hook_state.pending_window_focus_stable_polls = 0;
+    }
+
+    fn handle_window_focus_event(controller_hwnd: HWND, hwnd: HWND) {
+        if !update_foreground_window(hwnd) {
+            return;
+        }
+
+        if is_focus_trigger_candidate_window(hwnd) {
+            schedule_window_focus_trigger(hwnd);
+            if process_pending_window_focus_trigger() {
+                unsafe {
+                    let _ = SetTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID, 10, None);
+                }
+            }
+        } else {
+            clear_pending_window_focus_trigger();
+            unsafe {
+                let _ = KillTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID);
+            }
+        }
+    }
+
+    fn has_pending_window_focus_trigger() -> bool {
+        HOOK_STATE.lock().pending_window_focus_trigger.is_some()
+    }
+
+    fn process_pending_window_focus_trigger() -> bool {
         let pending = {
             let hook_state = HOOK_STATE.lock();
             hook_state.pending_window_focus_trigger
         };
         let Some(pending) = pending else {
-            return;
+            return false;
         };
 
         if !focus_trigger_ready_for_dispatch() {
-            return;
+            return true;
         }
 
         let current_hwnd = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
         if current_hwnd != pending {
-            return;
+            return true;
         }
 
         {
@@ -14526,19 +14629,20 @@ mod windows_overlay {
             hook_state.pending_window_focus_stable_polls =
                 hook_state.pending_window_focus_stable_polls.saturating_add(1);
             if hook_state.pending_window_focus_stable_polls < 2 {
-                return;
+                return true;
             }
             if hook_state.pending_window_focus_trigger == Some(pending) {
                 hook_state.pending_window_focus_trigger = None;
                 hook_state.pending_window_focus_stable_polls = 0;
             }
             if hook_state.last_dispatched_window_focus_hwnd == Some(pending) {
-                return;
+                return false;
             }
             hook_state.last_dispatched_window_focus_hwnd = Some(pending);
         }
 
         trigger_macros_on_window_focus_change();
+        has_pending_window_focus_trigger()
     }
 
     fn trigger_macros_on_window_focus_change() {
@@ -15716,6 +15820,10 @@ mod windows_overlay {
 
         if !runtime.mouse_hook.0.is_null() {
             let _ = unsafe { UnhookWindowsHookEx(runtime.mouse_hook) };
+        }
+
+        if !runtime.window_focus_event_hook.0.is_null() {
+            let _ = unsafe { UnhookWinEvent(runtime.window_focus_event_hook) };
         }
 
         {
