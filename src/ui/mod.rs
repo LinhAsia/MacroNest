@@ -3747,47 +3747,50 @@ impl CrosshairApp {
                 }
             }
             TitlebarQuickActionKind::WindowPin => {
-                let frame_rect = rect.shrink2(vec2(18.0, 18.0));
-                let title_y = frame_rect.top() + 6.0;
-                painter.rect_stroke(
-                    frame_rect,
-                    4.0,
-                    egui::Stroke::new(1.9, icon_color),
-                    StrokeKind::Inside,
+                let center = rect.center();
+                let head_rect = egui::Rect::from_center_size(
+                    pos2(center.x, rect.top() + 18.0),
+                    vec2(18.0, 7.0),
                 );
+                painter.rect_filled(head_rect, 3.0, icon_color);
+
+                let collar_rect = egui::Rect::from_center_size(
+                    pos2(center.x, head_rect.bottom() + 2.5),
+                    vec2(7.0, 5.0),
+                );
+                painter.rect_filled(collar_rect, 2.0, icon_color);
+
                 painter.line_segment(
                     [
-                        pos2(frame_rect.left() + 2.0, title_y),
-                        pos2(frame_rect.right() - 2.0, title_y),
+                        pos2(center.x, collar_rect.bottom() - 1.0),
+                        pos2(center.x, rect.bottom() - 19.0),
                     ],
-                    egui::Stroke::new(1.7, icon_color),
+                    egui::Stroke::new(2.0, icon_color),
                 );
-                let pin_head = egui::Rect::from_center_size(
-                    pos2(frame_rect.center().x, frame_rect.top() + 4.0),
-                    vec2(8.0, 6.0),
-                );
-                painter.rect_filled(pin_head, 2.0, icon_color);
+
                 painter.line_segment(
                     [
-                        pos2(pin_head.center().x, pin_head.bottom() - 1.0),
-                        pos2(pin_head.center().x, frame_rect.bottom() - 5.0),
+                        pos2(center.x, rect.bottom() - 19.0),
+                        pos2(center.x - 5.5, rect.bottom() - 11.5),
+                    ],
+                    egui::Stroke::new(2.0, icon_color),
+                );
+
+                painter.line_segment(
+                    [
+                        pos2(center.x, rect.bottom() - 19.0),
+                        pos2(center.x + 5.5, rect.bottom() - 11.5),
+                    ],
+                    egui::Stroke::new(2.0, icon_color),
+                );
+
+                painter.line_segment(
+                    [
+                        pos2(center.x, rect.bottom() - 19.0),
+                        pos2(center.x, rect.bottom() - 7.0),
                     ],
                     egui::Stroke::new(1.8, icon_color),
                 );
-                painter.line_segment(
-                    [
-                        pos2(pin_head.center().x - 4.0, frame_rect.bottom() - 9.0),
-                        pos2(pin_head.center().x + 4.0, frame_rect.bottom() - 5.0),
-                    ],
-                    egui::Stroke::new(1.8, icon_color),
-                );
-                if !active {
-                    let slash_rect = frame_rect.expand2(vec2(4.0, 3.0));
-                    painter.line_segment(
-                        [slash_rect.left_top(), slash_rect.right_bottom()],
-                        egui::Stroke::new(2.0, icon_color),
-                    );
-                }
             }
         }
     }
