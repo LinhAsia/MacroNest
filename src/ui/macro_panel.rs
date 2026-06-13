@@ -13169,7 +13169,7 @@ impl CrosshairApp {
                     ui.visuals().text_color()
                 };
                 ui.label(
-                    RichText::new(Self::tr_lang(language, "Audio", "Am thanh"))
+                    RichText::new(Self::tr_lang(language, "Audio", "Âm thanh"))
                         .size(9.0)
                         .color(label_color),
                 );

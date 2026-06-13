@@ -1256,7 +1256,7 @@ impl CrosshairApp {
                                 group_id_override,
                             );
                             let op_label = if spec.shape == GeometryShapeKind::Svg {
-                                Self::tr_lang(language, "Opacity (0-100)", "Do mo (0-100)")
+                                Self::tr_lang(language, "Opacity (0-100)", "Độ mờ (0-100)")
                             } else {
                                 Self::tr_lang(language, "Opacity", "Độ trong suốt")
                             };
@@ -1292,7 +1292,7 @@ impl CrosshairApp {
 
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = Self::GEOMETRY_GRID_SPACING_X;
-                let label_text = Self::tr_lang(language, "SVG Code", "Ma SVG");
+                let label_text = Self::tr_lang(language, "SVG Code", "Mã SVG");
                 ui.add_sized([Self::GEOMETRY_LABEL_COL_WIDTH, 18.0], egui::Label::new(label_text));
 
                 let id = ui.make_persistent_id((preset_id, object_id, "svg-text-edit"));

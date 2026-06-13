@@ -4838,8 +4838,8 @@ impl CrosshairApp {
                 MacroAction::StopAudioSense => "Tắt Audio",
 
                 MacroAction::StopVisionWait => "Chờ",
-                MacroAction::HideTaskbar => "An taskbar",
-                MacroAction::ShowTaskbar => "Hien taskbar",
+                MacroAction::HideTaskbar => "Ẩn taskbar",
+                MacroAction::ShowTaskbar => "Hiện taskbar",
                 MacroAction::StartVisionSearch => "Tìm ảnh",
                 MacroAction::ScanVisionOnce => "Quét",
                 MacroAction::StartAudioSensePreset => "Audio",
@@ -9931,13 +9931,13 @@ impl eframe::App for CrosshairApp {
                                                         Self::tr_lang(
                                                             self.state.ui_language,
                                                             "Show taskbar",
-                                                            "Hien taskbar",
+                                                            "Hiện taskbar",
                                                         )
                                                     } else {
                                                         Self::tr_lang(
                                                             self.state.ui_language,
                                                             "Hide taskbar",
-                                                            "An taskbar",
+                                                            "Ẩn taskbar",
                                                         )
                                                     })
                                                     .clicked();
@@ -9952,26 +9952,26 @@ impl eframe::App for CrosshairApp {
                                                                 Self::tr_lang(
                                                                     self.state.ui_language,
                                                                     "Windows taskbar restored.",
-                                                                    "Da hien lai taskbar Windows.",
+                                                                    "Đã hiện lại taskbar Windows.",
                                                                 )
                                                             } else {
                                                                 Self::tr_lang(
                                                                     self.state.ui_language,
                                                                     "Windows taskbar hidden.",
-                                                                    "Da an taskbar Windows.",
+                                                                    "Đã ẩn taskbar Windows.",
                                                                 )
                                                             }
                                                         } else if taskbar_hidden {
                                                             Self::tr_lang(
                                                                 self.state.ui_language,
                                                                 "Failed to restore the Windows taskbar.",
-                                                                "Khong the hien lai taskbar Windows.",
+                                                                "Không thể hiện lại taskbar Windows.",
                                                             )
                                                         } else {
                                                             Self::tr_lang(
                                                                 self.state.ui_language,
                                                                 "Failed to hide the Windows taskbar.",
-                                                                "Khong the an taskbar Windows.",
+                                                                "Không thể ẩn taskbar Windows.",
                                                             )
                                                         }
                                                         .to_owned();
@@ -9987,13 +9987,13 @@ impl eframe::App for CrosshairApp {
                                                         Self::tr_lang(
                                                             self.state.ui_language,
                                                             "Unlock Windows key",
-                                                            "Mo khoa phim Windows",
+                                                            "Mở khóa phím Windows",
                                                         )
                                                     } else {
                                                         Self::tr_lang(
                                                             self.state.ui_language,
                                                             "Lock Windows key",
-                                                            "Khoa phim Windows",
+                                                            "Khóa phím Windows",
                                                         )
                                                     })
                                                     .clicked();
