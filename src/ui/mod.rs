@@ -757,7 +757,6 @@ pub struct CrosshairApp {
     active_hud_preview_preset_id: Option<u32>,
     active_timer_preview_preset_id: Option<u32>,
     quick_action_window_selector: String,
-    quick_action_expanded: Option<TitlebarQuickActionKind>,
     command_ai_dialog: Option<CommandAiDialog>,
     command_ai_job: Option<CommandAiJob>,
     command_ai_next_token: u64,
@@ -992,7 +991,6 @@ impl CrosshairApp {
             active_hud_preview_preset_id: None,
             active_timer_preview_preset_id: None,
             quick_action_window_selector: String::new(),
-            quick_action_expanded: None,
             command_ai_dialog: None,
             command_ai_job: None,
             command_ai_next_token: 1,
@@ -3841,13 +3839,12 @@ impl CrosshairApp {
         let pin_window_available = !self.quick_action_window_selector.is_empty();
         let pinned_window_active =
             pin_window_available && window_list::is_window_topmost(&self.quick_action_window_selector);
-        let mut next_expanded = None;
 
         Grid::new("titlebar-quick-actions-grid")
             .num_columns(3)
             .spacing([8.0, 8.0])
             .show(ui, |ui| {
-                let taskbar_panel = ui.vertical(|ui| {
+                ui.vertical(|ui| {
                     let button_response = self.titlebar_quick_action_button(
                         ui,
                         TitlebarQuickActionKind::Taskbar,
@@ -3889,36 +3886,36 @@ impl CrosshairApp {
                         .to_owned();
                     }
 
-                    let expanded =
-                        self.quick_action_expanded == Some(TitlebarQuickActionKind::Taskbar)
-                            || button_response.hovered();
                     ui.add_space(6.0);
-                    if expanded {
-                        ui.label(
-                            RichText::new(if taskbar_hidden {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Show taskbar",
-                                    "Hien taskbar",
-                                )
-                            } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Hide taskbar",
-                                    "An taskbar",
-                                )
-                            })
-                            .size(11.0),
-                        );
+                    let taskbar_label = if taskbar_hidden {
+                        Self::tr_lang(
+                            self.state.ui_language,
+                            "Show taskbar",
+                            "Hien taskbar",
+                        )
                     } else {
-                        ui.add_space(16.0);
-                    }
+                        Self::tr_lang(
+                            self.state.ui_language,
+                            "Hide taskbar",
+                            "An taskbar",
+                        )
+                    };
+                    ui.add_sized(
+                        vec2(92.0, 16.0),
+                        egui::Label::new(
+                            RichText::new(taskbar_label)
+                                .size(11.0)
+                                .color(if button_response.hovered() {
+                                    ui.visuals().strong_text_color()
+                                } else {
+                                    ui.visuals().text_color()
+                                }),
+                        ),
+                    );
+                    ui.add_space(24.0);
                 });
-                if taskbar_panel.response.hovered() {
-                    next_expanded = Some(TitlebarQuickActionKind::Taskbar);
-                }
 
-                let windows_panel = ui.vertical(|ui| {
+                ui.vertical(|ui| {
                     let button_response = self.titlebar_quick_action_button(
                         ui,
                         TitlebarQuickActionKind::WindowsKey,
@@ -3944,36 +3941,36 @@ impl CrosshairApp {
                         .to_owned();
                     }
 
-                    let expanded =
-                        self.quick_action_expanded == Some(TitlebarQuickActionKind::WindowsKey)
-                            || button_response.hovered();
                     ui.add_space(6.0);
-                    if expanded {
-                        ui.label(
-                            RichText::new(if self.state.windows_key_locked {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Unlock Windows key",
-                                    "Mo khoa phim Windows",
-                                )
-                            } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Lock Windows key",
-                                    "Khoa phim Windows",
-                                )
-                            })
-                            .size(11.0),
-                        );
+                    let windows_label = if self.state.windows_key_locked {
+                        Self::tr_lang(
+                            self.state.ui_language,
+                            "Unlock Windows key",
+                            "Mo khoa phim Windows",
+                        )
                     } else {
-                        ui.add_space(16.0);
-                    }
+                        Self::tr_lang(
+                            self.state.ui_language,
+                            "Lock Windows key",
+                            "Khoa phim Windows",
+                        )
+                    };
+                    ui.add_sized(
+                        vec2(92.0, 16.0),
+                        egui::Label::new(
+                            RichText::new(windows_label)
+                                .size(11.0)
+                                .color(if button_response.hovered() {
+                                    ui.visuals().strong_text_color()
+                                } else {
+                                    ui.visuals().text_color()
+                                }),
+                        ),
+                    );
+                    ui.add_space(24.0);
                 });
-                if windows_panel.response.hovered() {
-                    next_expanded = Some(TitlebarQuickActionKind::WindowsKey);
-                }
 
-                let pin_panel = ui.vertical(|ui| {
+                ui.vertical(|ui| {
                     let button_response = self.titlebar_quick_action_button(
                         ui,
                         TitlebarQuickActionKind::WindowPin,
@@ -4018,57 +4015,54 @@ impl CrosshairApp {
                         }
                     }
 
-                    let expanded =
-                        self.quick_action_expanded == Some(TitlebarQuickActionKind::WindowPin)
-                            || button_response.hovered();
                     ui.add_space(6.0);
-                    if expanded {
-                        ui.label(
-                            RichText::new(if pinned_window_active {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Unpin selected window",
-                                    "Bo ghim cua so da chon",
-                                )
-                            } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Pin selected window on top",
-                                    "Ghim cua so da chon len tren cung",
-                                )
-                            })
-                            .size(11.0),
-                        );
-                        egui::ComboBox::from_id_salt("quick-action-window-selector")
-                            .width(92.0)
-                            .selected_text(if self.quick_action_window_selector.is_empty() {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Select window",
-                                    "Chon cua so",
-                                )
-                            } else {
-                                &self.quick_action_window_selector
-                            })
-                            .show_ui(ui, |ui| {
-                                for selector in &self.open_windows {
-                                    ui.selectable_value(
-                                        &mut self.quick_action_window_selector,
-                                        selector.clone(),
-                                        selector,
-                                    );
-                                }
-                            });
+                    let pin_label = if pinned_window_active {
+                        Self::tr_lang(
+                            self.state.ui_language,
+                            "Unpin selected window",
+                            "Bo ghim cua so da chon",
+                        )
                     } else {
-                        ui.add_space(40.0);
-                    }
+                        Self::tr_lang(
+                            self.state.ui_language,
+                            "Pin selected window on top",
+                            "Ghim cua so da chon len tren cung",
+                        )
+                    };
+                    ui.add_sized(
+                        vec2(92.0, 16.0),
+                        egui::Label::new(
+                            RichText::new(pin_label)
+                                .size(11.0)
+                                .color(if button_response.hovered() {
+                                    ui.visuals().strong_text_color()
+                                } else {
+                                    ui.visuals().text_color()
+                                }),
+                        ),
+                    );
+                    egui::ComboBox::from_id_salt("quick-action-window-selector")
+                        .width(92.0)
+                        .selected_text(if self.quick_action_window_selector.is_empty() {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Select window",
+                                "Chon cua so",
+                            )
+                        } else {
+                            &self.quick_action_window_selector
+                        })
+                        .show_ui(ui, |ui| {
+                            for selector in &self.open_windows {
+                                ui.selectable_value(
+                                    &mut self.quick_action_window_selector,
+                                    selector.clone(),
+                                    selector,
+                                );
+                            }
+                        });
                 });
-                if pin_panel.response.hovered() {
-                    next_expanded = Some(TitlebarQuickActionKind::WindowPin);
-                }
             });
-
-        self.quick_action_expanded = next_expanded;
     }
 
     fn top_tab_button(&self, text: RichText, selected: bool, emphasized: bool) -> Button<'static> {
