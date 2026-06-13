@@ -14729,6 +14729,62 @@ impl CrosshairApp {
                                 *live_sync = true;
                             }
                         }
+                        ui.add_space(6.0);
+                        let mut is_permanent =
+                            step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
+                        let permanent_changed = ui
+                            .checkbox(
+                                &mut is_permanent,
+                                Self::tr_lang(language, "Permanent", "Vinh vien"),
+                            )
+                            .changed();
+                        if permanent_changed {
+                            step.duration_expr = if is_permanent {
+                                "0".to_string()
+                            } else {
+                                "1500".to_string()
+                            };
+                            *live_sync = true;
+                        }
+                        if !is_permanent {
+                            let duration_id = ui.make_persistent_id((
+                                group_id,
+                                macro_preset_id,
+                                step_index,
+                                is_hold_stop,
+                                "show-geometry-duration",
+                            ));
+                            let duration_response = Self::render_variable_text_edit(
+                                ui,
+                                &mut step.duration_expr,
+                                duration_id,
+                                74.0,
+                                150.0,
+                                21.0,
+                                21.0,
+                                "1500",
+                                false,
+                            );
+                            Self::apply_vietnamese_input_if_changed(
+                                &duration_response,
+                                vietnamese_input_enabled,
+                                vietnamese_input_mode,
+                                &mut step.duration_expr,
+                            );
+                            *live_sync |= duration_response.changed();
+                            Self::render_variable_suggestions(
+                                ui,
+                                &duration_response,
+                                &mut step.duration_expr,
+                                timer_names,
+                                language,
+                            );
+                            duration_response.on_hover_text(Self::tr_lang(
+                                language,
+                                "Display duration (0 = show until macro/overlay ends, supports variables/math)",
+                                "Thoi gian hien (0 = hien den khi macro/overlay ket thuc, ho tro bien/toan)",
+                            ));
+                        }
                     });
                     *live_sync |= Self::prepare_show_geometry_modify_inputs(step);
                     if step.geometry_preset_modify_enabled && !step.geometry_collapsed {
