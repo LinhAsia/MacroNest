@@ -3924,7 +3924,7 @@ impl CrosshairApp {
                         );
                         ui.add_space(12.0);
                     },
-                });
+                );
 
                 ui.allocate_ui_with_layout(
                     vec2(92.0, 116.0),
@@ -3989,7 +3989,7 @@ impl CrosshairApp {
                         );
                         ui.add_space(12.0);
                     },
-                });
+                );
 
                 ui.allocate_ui_with_layout(
                     vec2(92.0, 116.0),
@@ -4115,7 +4115,7 @@ impl CrosshairApp {
                                 }
                             });
                     },
-                });
+                );
             });
         keep_menu_open
     }
