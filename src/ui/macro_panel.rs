@@ -323,7 +323,6 @@ impl CrosshairApp {
                 .data_mut(|data| data.insert_temp(child_popup_id, false));
             egui::Popup::close_id(ui.ctx(), child_popup_id);
         }
-        ui.ctx().request_repaint();
     }
 
     fn clear_mouse_click_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
@@ -338,7 +337,6 @@ impl CrosshairApp {
                 .data_mut(|data| data.insert_temp(child_popup_id, false));
             egui::Popup::close_id(ui.ctx(), child_popup_id);
         }
-        ui.ctx().request_repaint();
     }
 
     fn close_inactive_mouse_click_submenus(
@@ -683,11 +681,9 @@ impl CrosshairApp {
                         }
                         if !keep_open_rect.contains(pointer_pos) {
                             open = false;
-                            ui.ctx().request_repaint();
                         }
                     } else {
                         open = false;
-                        ui.ctx().request_repaint();
                     }
                 }
                 let active_popup_key = ui
@@ -817,14 +813,12 @@ impl CrosshairApp {
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
                             });
-                            ui.ctx().request_repaint();
                         }
                     } else {
                         open = false;
                         ui.ctx().data_mut(|data| {
                             data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
                         });
-                        ui.ctx().request_repaint();
                     }
                 }
                 ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
@@ -1078,7 +1072,6 @@ impl CrosshairApp {
             open = false;
             ui.ctx()
                 .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
-            ui.ctx().request_repaint();
         }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
@@ -1149,14 +1142,12 @@ impl CrosshairApp {
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
                             });
-                            ui.ctx().request_repaint();
                         }
                     } else {
                         open = false;
                         ui.ctx().data_mut(|data| {
                             data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
                         });
-                        ui.ctx().request_repaint();
                     }
                 }
                 ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
@@ -1230,7 +1221,6 @@ impl CrosshairApp {
             open = false;
             ui.ctx()
                 .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
-            ui.ctx().request_repaint();
         }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
@@ -1298,14 +1288,12 @@ impl CrosshairApp {
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
                             });
-                            ui.ctx().request_repaint();
                         }
                     } else {
                         open = false;
                         ui.ctx().data_mut(|data| {
                             data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
                         });
-                        ui.ctx().request_repaint();
                     }
                 }
                 ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
@@ -12216,7 +12204,6 @@ impl CrosshairApp {
             });
             self.macro_panel_render_limit =
                 (self.macro_panel_render_limit + 24).min(total_render_items);
-            ui.ctx().request_repaint();
         }
         ui.add_space((macro_panel_scroll_height - 50.0).max(0.0));
         if let Some(group_scroll_rect) = pending_macro_group_scroll_rect {
@@ -13004,7 +12991,6 @@ impl CrosshairApp {
             open = false;
             ui.ctx()
                 .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
-            ui.ctx().request_repaint();
         }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
@@ -13068,14 +13054,12 @@ impl CrosshairApp {
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
                             });
-                            ui.ctx().request_repaint();
                         }
                     } else {
                         open = false;
                         ui.ctx().data_mut(|data| {
                             data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
                         });
-                        ui.ctx().request_repaint();
                     }
                 }
                 ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
@@ -13139,7 +13123,6 @@ impl CrosshairApp {
             open = false;
             ui.ctx()
                 .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
-            ui.ctx().request_repaint();
         }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
@@ -13203,14 +13186,12 @@ impl CrosshairApp {
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
                             });
-                            ui.ctx().request_repaint();
                         }
                     } else {
                         open = false;
                         ui.ctx().data_mut(|data| {
                             data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
                         });
-                        ui.ctx().request_repaint();
                     }
                 }
                 ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));

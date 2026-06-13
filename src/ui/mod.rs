@@ -6682,15 +6682,11 @@ impl CrosshairApp {
         text: impl Into<String>,
     ) {
         if response.hovered() {
-            egui::show_tooltip_at_pointer(
-                ui.ctx(),
-                ui.layer_id(),
-                response.id.with("instant-tip"),
-                |ui| {
-                    ui.set_max_width(280.0);
-                    ui.label(text.into());
-                },
-            );
+            let text = text.into();
+            let _ = response.clone().on_hover_ui(|ui| {
+                ui.set_max_width(280.0);
+                ui.label(&text);
+            });
         }
     }
 
