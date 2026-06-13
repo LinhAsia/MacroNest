@@ -11,8 +11,9 @@ use anyhow::Result;
 use arboard::Clipboard;
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use eframe::egui::{
-    self, Button, Color32, ColorImage, FontData, FontDefinitions, FontFamily, Frame, Image, Margin,
-    Order, RichText, Sense, Shadow, Stroke, StrokeKind, TextureHandle, TextureOptions, pos2, vec2,
+    self, Button, Color32, ColorImage, FontData, FontDefinitions, FontFamily, Frame, Grid, Image,
+    Margin, Order, RichText, Sense, Shadow, Stroke, StrokeKind, TextureHandle, TextureOptions,
+    pos2, vec2,
 };
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -1122,6 +1123,7 @@ impl CrosshairApp {
         self.sync_geometry_presets();
         self.preload_primary_sound_preset_audio();
         self.sync_macro_master_enabled();
+        self.sync_windows_key_locked();
         self.sync_vietnamese_input_enabled();
         self.sync_macro_master_hotkey();
         self.startup_overlay_sync_pending = false;
@@ -1159,6 +1161,12 @@ impl CrosshairApp {
     fn sync_macro_master_enabled(&self) {
         let _ = self.overlay_tx.send(OverlayCommand::SetMacrosMasterEnabled(
             self.state.macros_master_enabled,
+        ));
+    }
+
+    fn sync_windows_key_locked(&self) {
+        let _ = self.overlay_tx.send(OverlayCommand::SetWindowsKeyLocked(
+            self.state.windows_key_locked,
         ));
     }
 
@@ -3611,6 +3619,58 @@ impl CrosshairApp {
             .fill(fill)
             .stroke(egui::Stroke::new(1.0, stroke))
             .corner_radius(8.0)
+    }
+
+    fn titlebar_quick_action_button(
+        &self,
+        icon: u32,
+        title: &str,
+        subtitle: &str,
+        active: bool,
+    ) -> Button<'static> {
+        let (fill, stroke, icon_color, text_color) = match (self.state.ui_theme, active) {
+            (UiThemeMode::Dark, true) => (
+                Color32::from_rgba_premultiplied(58, 120, 96, 164),
+                Color32::from_rgb(126, 224, 182),
+                Color32::from_rgb(214, 255, 236),
+                Color32::from_rgb(236, 248, 242),
+            ),
+            (UiThemeMode::Dark, false) => (
+                Color32::from_rgba_premultiplied(38, 48, 64, 188),
+                Color32::from_rgb(74, 92, 118),
+                Color32::from_rgb(214, 224, 240),
+                Color32::from_rgb(236, 241, 248),
+            ),
+            (UiThemeMode::Light, true) => (
+                Color32::from_rgba_premultiplied(90, 180, 132, 108),
+                Color32::from_rgb(34, 122, 88),
+                Color32::from_rgb(20, 92, 66),
+                Color32::from_rgb(22, 30, 38),
+            ),
+            (UiThemeMode::Light, false) => (
+                Color32::from_rgba_premultiplied(226, 232, 240, 220),
+                Color32::from_rgb(188, 198, 214),
+                Color32::from_rgb(62, 74, 92),
+                Color32::from_rgb(24, 30, 38),
+            ),
+        };
+        let text = format!(
+            "{}\n{}\n{}",
+            Self::material_icon_text(icon, 20.0).color(icon_color).text(),
+            title,
+            subtitle
+        );
+        Button::new(
+            RichText::new(text)
+                .color(text_color)
+                .size(12.0)
+                .line_height(Some(16.0)),
+        )
+        .fill(fill)
+        .stroke(egui::Stroke::new(1.0, stroke))
+        .corner_radius(12.0)
+        .min_size(vec2(110.0, 74.0))
+        .wrap()
     }
 
     fn top_tab_button(&self, text: RichText, selected: bool, emphasized: bool) -> Button<'static> {
@@ -9634,7 +9694,7 @@ impl eframe::App for CrosshairApp {
                                 self.toggle_vietnamese_input_enabled();
                             }
                             let taskbar_hidden = crate::platform::is_taskbar_hidden();
-                            let taskbar_button_response =
+                            let quick_actions_button_response =
                                 Self::add_sized_with_show_hover_radius(
                                     ui,
                                     [38.0, 30.0],
@@ -9648,64 +9708,197 @@ impl eframe::App for CrosshairApp {
                             if taskbar_hidden {
                                 let slash_color = Color32::from_rgb(245, 245, 245);
                                 let slash_rect =
-                                    taskbar_button_response.rect.shrink2(vec2(7.0, 6.0));
+                                    quick_actions_button_response.rect.shrink2(vec2(7.0, 6.0));
                                 ui.painter().line_segment(
                                     [slash_rect.left_top(), slash_rect.right_bottom()],
                                     egui::Stroke::new(2.0, slash_color),
                                 );
                             }
-                            let taskbar_response = Self::hover_if(
-                                taskbar_button_response,
-                                show_icon_tooltips,
-                                if taskbar_hidden {
-                                    Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Restore the Windows taskbar",
-                                        "Hien lai taskbar Windows",
-                                    )
-                                } else {
-                                    Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Hide the Windows taskbar",
-                                        "An taskbar Windows",
-                                    )
-                                },
-                            );
-                            if taskbar_response.clicked() {
-                                let success = if taskbar_hidden {
-                                    crate::platform::show_taskbar()
-                                } else {
-                                    crate::platform::hide_taskbar()
-                                };
-                                self.status = if success {
-                                    if taskbar_hidden {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Windows taskbar restored.",
-                                            "Da hien lai taskbar Windows.",
-                                        )
-                                    } else {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Windows taskbar hidden.",
-                                            "Da an taskbar Windows.",
-                                        )
-                                    }
-                                } else if taskbar_hidden {
-                                    Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Failed to restore the Windows taskbar.",
-                                        "Khong the hien lai taskbar Windows.",
-                                    )
-                                } else {
-                                    Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Failed to hide the Windows taskbar.",
-                                        "Khong the an taskbar Windows.",
-                                    )
-                                }
-                                .to_owned();
+                            if self.state.windows_key_locked {
+                                let badge_center = quick_actions_button_response.rect.right_top()
+                                    + vec2(-7.0, 7.0);
+                                ui.painter().circle_filled(
+                                    badge_center,
+                                    3.0,
+                                    Color32::from_rgb(255, 92, 92),
+                                );
                             }
+                            let quick_actions_response = Self::hover_if(
+                                quick_actions_button_response,
+                                show_icon_tooltips,
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Quick actions",
+                                    "Thao tac nhanh",
+                                ),
+                            );
+                            let quick_actions_popup_id =
+                                ui.make_persistent_id("titlebar-quick-actions-popup");
+                            let mut quick_actions_open = ui
+                                .ctx()
+                                .data(|data| data.get_temp::<bool>(quick_actions_popup_id))
+                                .unwrap_or(false);
+                            if quick_actions_response.clicked() {
+                                quick_actions_open = !quick_actions_open;
+                            }
+                            let mut close_quick_actions_popup = false;
+                            let popup_result = egui::Popup::from_response(&quick_actions_response)
+                                .id(quick_actions_popup_id)
+                                .open_bool(&mut quick_actions_open)
+                                .align(egui::RectAlign::BOTTOM_END)
+                                .layout(egui::Layout::top_down(egui::Align::Min))
+                                .width(248.0)
+                                .show(|ui| {
+                                    ui.set_min_width(248.0);
+                                    Frame::new()
+                                        .fill(button_fill)
+                                        .stroke(egui::Stroke::new(
+                                            1.0,
+                                            if self.state.ui_theme == UiThemeMode::Dark {
+                                                Color32::from_rgb(74, 92, 118)
+                                            } else {
+                                                Color32::from_rgb(188, 198, 214)
+                                            },
+                                        ))
+                                        .corner_radius(14.0)
+                                        .inner_margin(egui::Margin::symmetric(10, 10))
+                                        .show(ui, |ui| {
+                                            ui.label(
+                                                RichText::new(Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Quick actions",
+                                                    "Thao tac nhanh",
+                                                ))
+                                                .strong()
+                                                .size(13.0),
+                                            );
+                                            ui.add_space(8.0);
+                                            Grid::new("titlebar-quick-actions-grid")
+                                                .num_columns(2)
+                                                .spacing([8.0, 8.0])
+                                                .show(ui, |ui| {
+                                                    let taskbar_clicked = Self::add_with_show_hover_radius(
+                                                        ui,
+                                                        12,
+                                                        self.titlebar_quick_action_button(
+                                                            0xf86e,
+                                                            Self::tr_lang(
+                                                                self.state.ui_language,
+                                                                "Taskbar",
+                                                                "Taskbar",
+                                                            ),
+                                                            if taskbar_hidden {
+                                                                Self::tr_lang(
+                                                                    self.state.ui_language,
+                                                                    "Hidden",
+                                                                    "Dang an",
+                                                                )
+                                                            } else {
+                                                                Self::tr_lang(
+                                                                    self.state.ui_language,
+                                                                    "Visible",
+                                                                    "Dang hien",
+                                                                )
+                                                            },
+                                                            taskbar_hidden,
+                                                        ),
+                                                    )
+                                                    .clicked();
+                                                    if taskbar_clicked {
+                                                        let success = if taskbar_hidden {
+                                                            crate::platform::show_taskbar()
+                                                        } else {
+                                                            crate::platform::hide_taskbar()
+                                                        };
+                                                        self.status = if success {
+                                                            if taskbar_hidden {
+                                                                Self::tr_lang(
+                                                                    self.state.ui_language,
+                                                                    "Windows taskbar restored.",
+                                                                    "Da hien lai taskbar Windows.",
+                                                                )
+                                                            } else {
+                                                                Self::tr_lang(
+                                                                    self.state.ui_language,
+                                                                    "Windows taskbar hidden.",
+                                                                    "Da an taskbar Windows.",
+                                                                )
+                                                            }
+                                                        } else if taskbar_hidden {
+                                                            Self::tr_lang(
+                                                                self.state.ui_language,
+                                                                "Failed to restore the Windows taskbar.",
+                                                                "Khong the hien lai taskbar Windows.",
+                                                            )
+                                                        } else {
+                                                            Self::tr_lang(
+                                                                self.state.ui_language,
+                                                                "Failed to hide the Windows taskbar.",
+                                                                "Khong the an taskbar Windows.",
+                                                            )
+                                                        }
+                                                        .to_owned();
+                                                        close_quick_actions_popup = true;
+                                                    }
+
+                                                    let windows_clicked = Self::add_with_show_hover_radius(
+                                                        ui,
+                                                        12,
+                                                        self.titlebar_quick_action_button(
+                                                            0xe30a,
+                                                            Self::tr_lang(
+                                                                self.state.ui_language,
+                                                                "Windows key",
+                                                                "Phim Windows",
+                                                            ),
+                                                            if self.state.windows_key_locked {
+                                                                Self::tr_lang(
+                                                                    self.state.ui_language,
+                                                                    "Locked",
+                                                                    "Da khoa",
+                                                                )
+                                                            } else {
+                                                                Self::tr_lang(
+                                                                    self.state.ui_language,
+                                                                    "Unlocked",
+                                                                    "Dang mo",
+                                                                )
+                                                            },
+                                                            self.state.windows_key_locked,
+                                                        ),
+                                                    )
+                                                    .clicked();
+                                                    if windows_clicked {
+                                                        self.state.windows_key_locked =
+                                                            !self.state.windows_key_locked;
+                                                        self.sync_windows_key_locked();
+                                                        self.persist();
+                                                        self.status = if self.state.windows_key_locked {
+                                                            Self::tr_lang(
+                                                                self.state.ui_language,
+                                                                "Windows key locked.",
+                                                                "Da khoa phim Windows.",
+                                                            )
+                                                        } else {
+                                                            Self::tr_lang(
+                                                                self.state.ui_language,
+                                                                "Windows key unlocked.",
+                                                                "Da mo phim Windows.",
+                                                            )
+                                                        }
+                                                        .to_owned();
+                                                        close_quick_actions_popup = true;
+                                                    }
+                                                });
+                                        });
+                                });
+                            if close_quick_actions_popup {
+                                quick_actions_open = false;
+                            }
+                            let _ = popup_result;
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(quick_actions_popup_id, quick_actions_open);
+                            });
                             let settings_response = Self::hover_if(
                                 Self::add_sized_with_show_hover_radius(
                                     ui,

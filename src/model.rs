@@ -2610,6 +2610,8 @@ pub struct AppState {
     #[serde(default)]
     pub next_geometry_object_id: u32,
     pub macros_master_enabled: bool,
+    #[serde(default)]
+    pub windows_key_locked: bool,
     pub macros_master_hotkey: Option<HotkeyBinding>,
     #[serde(default = "default_true")]
     pub macro_infinite_loop_warning_enabled: bool,
@@ -2709,6 +2711,7 @@ impl Default for AppState {
             next_geometry_preset_id: 1,
             next_geometry_object_id: 1,
             macros_master_enabled: true,
+            windows_key_locked: false,
             macros_master_hotkey: None,
             macro_infinite_loop_warning_enabled: true,
             vision_presets: vec![VisionPreset::default()],

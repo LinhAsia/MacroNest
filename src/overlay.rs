@@ -435,6 +435,7 @@ mod windows_overlay {
         PlayVideoPresetFrom(u32, u64),
         StopVideoPlayback,
         SetMacrosMasterEnabled(bool),
+        SetWindowsKeyLocked(bool),
         UpdateVisionSettings(VisionSettings),
         SetArduinoFlashInProgress(bool),
         SetVietnameseInputEnabled(bool),
@@ -773,6 +774,7 @@ mod windows_overlay {
         command_presets: Vec<CommandPreset>,
         macro_groups: Vec<MacroGroup>,
         macros_master_enabled: bool,
+        windows_key_locked: bool,
         macros_master_hotkey: Option<HotkeyBinding>,
         vietnamese_input_enabled: bool,
         locked_inputs: HashMap<String, usize>,
@@ -862,6 +864,7 @@ mod windows_overlay {
                 command_presets: Vec::new(),
                 macro_groups: Vec::new(),
                 macros_master_enabled: true,
+                windows_key_locked: false,
                 macros_master_hotkey: None,
                 vietnamese_input_enabled: false,
                 locked_inputs: HashMap::new(),
@@ -1857,6 +1860,18 @@ mod windows_overlay {
                 }
 
                 let key_name = hotkey::vk_to_key_name(info.vkCode).map(str::to_owned);
+                let windows_key_locked = {
+                    let hook_state = HOOK_STATE.lock();
+                    hook_state.windows_key_locked
+                };
+                if windows_key_locked && !is_ui_in_foreground() && matches!(info.vkCode, 0x5B | 0x5C)
+                {
+                    if let Some(key_name) = key_name.as_ref() {
+                        update_held_key(key_name, is_key_down, is_key_up);
+                    }
+                    update_modifier_state(info.vkCode, is_key_down);
+                    return LRESULT(1);
+                }
                 if is_key_down && !is_ui_in_foreground() {
                     let mut rec_guard = MACRO_RECORDING.lock();
                     if let Some(session) = rec_guard.as_mut() {
@@ -4315,6 +4330,10 @@ mod windows_overlay {
 
                     drop(hook_state);
                     let _ = update_tray_icon(hwnd, enabled);
+                }
+
+                OverlayCommand::SetWindowsKeyLocked(locked) => {
+                    HOOK_STATE.lock().windows_key_locked = locked;
                 }
 
                 OverlayCommand::UpdateVisionSettings(settings) => {
