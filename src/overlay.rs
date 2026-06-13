@@ -6153,23 +6153,32 @@ mod windows_overlay {
     fn trigger_funny_meme_reply_step(step: &MacroStep) -> Result<()> {
         let source_text = interpolate_variables(&step.key);
         let source_text = source_text.trim().to_owned();
-        if source_text.is_empty() {
-            bail!("Funny Meme Reply input is empty");
-        }
 
         let (groq_settings, ui_tx) = {
             let hook_state = HOOK_STATE.lock();
             (hook_state.groq_settings.clone(), hook_state.ui_tx.clone())
         };
 
-        let query = ai::copy_funny_meme_reply_to_clipboard(&groq_settings, &source_text)?;
+        let result = (|| -> Result<String> {
+            if source_text.is_empty() {
+                bail!("Funny Meme Reply input is empty");
+            }
+
+            ai::copy_funny_meme_reply_to_clipboard(&groq_settings, &source_text)
+        })();
+
         if let Some(tx) = ui_tx {
-            let _ = tx.send(UiCommand::VisionFinished(format!(
-                "Funny Meme Reply copied an image for query: {}",
-                query
-            )));
+            let status = match &result {
+                Ok(query) => format!(
+                    "Funny Meme Reply copied an image for query: {}",
+                    query
+                ),
+                Err(error) => format!("Funny Meme Reply failed: {error:#}"),
+            };
+            let _ = tx.send(UiCommand::VisionFinished(status));
         }
-        Ok(())
+
+        result.map(|_| ())
     }
 
     fn focus_window_by_preset_id(spec: &str) -> Result<()> {
