@@ -4103,6 +4103,7 @@ impl CrosshairApp {
                             selector_popup_open = !selector_popup_open;
                             keep_menu_open = true;
                         }
+                        let mut close_selector_popup = false;
                         let selector_popup_result = egui::Popup::from_response(&selector_response)
                             .id(selector_popup_id)
                             .open_bool(&mut selector_popup_open)
@@ -4126,13 +4127,16 @@ impl CrosshairApp {
                                     );
                                     if response.clicked() {
                                         self.quick_action_window_selector = selector.clone();
-                                        selector_popup_open = false;
+                                        close_selector_popup = true;
                                         keep_menu_open = true;
                                     }
                                     response.on_hover_text(Self::selector_base_title(selector));
                                 }
                             });
                         let _ = selector_popup_result;
+                        if close_selector_popup {
+                            selector_popup_open = false;
+                        }
                         if selector_popup_open {
                             keep_menu_open = true;
                         }
