@@ -583,6 +583,7 @@ mod windows_overlay {
     impl OverlayHandle {
         pub fn send(&self, command: OverlayCommand) {
             let _ = self.tx.send(command);
+            wake_command_queue();
         }
     }
 
@@ -14614,14 +14615,6 @@ mod windows_overlay {
             return;
         }
 
-        if alt_tab_transition_active() {
-            reset_window_focus_dispatch_guard();
-            unsafe {
-                let _ = KillTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID);
-            }
-            return;
-        }
-
         {
             let mut hook_state = HOOK_STATE.lock();
             if hook_state.last_dispatched_window_focus_hwnd != Some(hwnd.0 as isize) {
@@ -14629,7 +14622,23 @@ mod windows_overlay {
             }
         }
 
-        if is_focus_trigger_candidate_window(hwnd) {
+        let is_candidate = is_focus_trigger_candidate_window(hwnd);
+        if alt_tab_transition_active() || !focus_trigger_ready_for_dispatch() {
+            if is_candidate {
+                schedule_window_focus_trigger(hwnd);
+                unsafe {
+                    let _ = SetTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID, 10, None);
+                }
+            } else {
+                reset_window_focus_dispatch_guard();
+                unsafe {
+                    let _ = KillTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID);
+                }
+            }
+            return;
+        }
+
+        if is_candidate {
             schedule_window_focus_trigger(hwnd);
             if process_pending_window_focus_trigger() {
                 unsafe {
@@ -14658,8 +14667,7 @@ mod windows_overlay {
         };
 
         if alt_tab_transition_active() {
-            clear_pending_window_focus_trigger();
-            return false;
+            return true;
         }
 
         if !focus_trigger_ready_for_dispatch() {
