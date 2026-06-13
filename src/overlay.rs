@@ -483,6 +483,12 @@ mod windows_overlay {
         MousePathRecordingFinished(u32, Vec<MousePathEvent>, String),
         MousePathDrawCaptureCancelled(String),
         VisionFinished(String),
+        MacroStepInlineFeedback {
+            preset_id: u32,
+            step_index: usize,
+            message: String,
+            open_groq_settings: bool,
+        },
         VisionCaptureMouseDown {
             screen_x: i32,
             screen_y: i32,
@@ -6150,7 +6156,46 @@ mod windows_overlay {
         Ok(())
     }
 
-    fn trigger_funny_meme_reply_step(step: &MacroStep) -> Result<()> {
+    fn summarize_funny_meme_reply_error(error: &anyhow::Error) -> (String, bool) {
+        let text = format!("{error:#}");
+        let lower = text.to_ascii_lowercase();
+        if lower.contains("api key") && lower.contains("groq") && lower.contains("enter") {
+            return ("Enter a Groq API key in Settings.".to_owned(), true);
+        }
+        if lower.contains("401")
+            || lower.contains("invalid_api_key")
+            || lower.contains("invalid api key")
+            || lower.contains("incorrect api key")
+            || lower.contains("authentication")
+        {
+            return ("Groq API key is invalid. Fix it in Settings.".to_owned(), true);
+        }
+        if lower.contains("403") || lower.contains("forbidden") {
+            return ("Groq rejected this API key. Check Settings.".to_owned(), true);
+        }
+        if lower.contains("429") || lower.contains("rate limit") {
+            return ("Groq rate limit hit. Try again soon.".to_owned(), false);
+        }
+        if lower.contains("empty") && lower.contains("input") {
+            return ("Enter a message or variable first.".to_owned(), false);
+        }
+        if lower.contains("did not return") || lower.contains("empty meme search query") {
+            return ("AI did not return a usable meme query.".to_owned(), false);
+        }
+        if lower.contains("no meme image results") {
+            return ("No meme image was found for that query.".to_owned(), false);
+        }
+        if lower.contains("clipboard") {
+            return ("Could not copy the meme image to clipboard.".to_owned(), false);
+        }
+        ("MemeReply failed. Check API key or try again.".to_owned(), false)
+    }
+
+    fn trigger_funny_meme_reply_step(
+        preset_id: u32,
+        step_index: Option<usize>,
+        step: &MacroStep,
+    ) -> Result<()> {
         let source_text = interpolate_variables(&step.key);
         let source_text = source_text.trim().to_owned();
 
@@ -6168,14 +6213,27 @@ mod windows_overlay {
         })();
 
         if let Some(tx) = ui_tx {
-            let status = match &result {
-                Ok(query) => format!(
-                    "Funny Meme Reply copied an image for query: {}",
-                    query
+            let (status, inline_message, open_groq_settings) = match &result {
+                Ok(query) => (
+                    format!("Funny Meme Reply copied an image for query: {}", query),
+                    String::new(),
+                    false,
                 ),
-                Err(error) => format!("Funny Meme Reply failed: {error:#}"),
+                Err(error) => {
+                    let (short_message, needs_settings) =
+                        summarize_funny_meme_reply_error(error);
+                    (format!("Funny Meme Reply failed: {short_message}"), short_message, needs_settings)
+                }
             };
             let _ = tx.send(UiCommand::VisionFinished(status));
+            if let Some(step_index) = step_index {
+                let _ = tx.send(UiCommand::MacroStepInlineFeedback {
+                    preset_id,
+                    step_index,
+                    message: inline_message,
+                    open_groq_settings,
+                });
+            }
         }
 
         result.map(|_| ())
@@ -7061,7 +7119,7 @@ mod windows_overlay {
             }
 
             MacroAction::FunnyMemeReply => {
-                let _ = trigger_funny_meme_reply_step(step);
+                let _ = trigger_funny_meme_reply_step(preset_id, None, step);
             }
 
             MacroAction::EnableCrosshairProfile => {
@@ -7609,7 +7667,7 @@ mod windows_overlay {
                 }
 
                 MacroAction::FunnyMemeReply => {
-                    let _ = trigger_funny_meme_reply_step(step);
+                    let _ = trigger_funny_meme_reply_step(preset_id, Some(absolute_index), step);
                 }
 
                 MacroAction::EnableCrosshairProfile => {
@@ -8186,7 +8244,7 @@ mod windows_overlay {
                 }
 
                 MacroAction::FunnyMemeReply => {
-                    let _ = trigger_funny_meme_reply_step(step);
+                    let _ = trigger_funny_meme_reply_step(preset_id, Some(absolute_index), step);
                 }
 
                 MacroAction::EnableCrosshairProfile => {
@@ -18270,6 +18328,12 @@ mod fallback {
             startup_state_dirty: bool,
         },
         VisionFinished(String),
+        MacroStepInlineFeedback {
+            preset_id: u32,
+            step_index: usize,
+            message: String,
+            open_groq_settings: bool,
+        },
         VisionPointCaptureCancelled(String),
         MacroRealtimeStepRemoved(u32, u32),
         CustomCommandResult { preset_id: u32, output: String },

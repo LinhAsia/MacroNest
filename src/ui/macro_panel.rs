@@ -3931,6 +3931,7 @@ impl CrosshairApp {
                     let mut geometry_manual_color_hex = self.vision_manual_color_hex.clone();
                     let mut request_geometry_screen_color_pick = false;
                     let mut pending_geometry_macro_step_color_pick: Option<(u32, u32, usize, bool, bool)> = None;
+                    let mut open_groq_api_settings_requested = false;
                     let group = &mut self.state.macro_groups[group_index];
                     let folder_enabled = true;
                     let group_scroll_rect_top = ui.cursor().min.y;
@@ -10022,6 +10023,14 @@ impl CrosshairApp {
                                                             &mut step.key,
                                                         );
                                                         live_sync |= response.changed();
+                                                        if response.changed() {
+                                                            self.macro_step_inline_feedback
+                                                                .remove(&(preset.id, step_index));
+                                                        }
+                                                        let inline_feedback = self
+                                                            .macro_step_inline_feedback
+                                                            .get(&(preset.id, step_index))
+                                                            .cloned();
                                                         Self::render_variable_suggestions_braced(
                                                             ui,
                                                             &response,
@@ -10029,6 +10038,12 @@ impl CrosshairApp {
                                                             &timer_names,
                                                             language,
                                                         );
+                                                        if Self::render_macro_step_inline_feedback(
+                                                            ui,
+                                                            inline_feedback.as_ref(),
+                                                        ) {
+                                                            open_groq_api_settings_requested = true;
+                                                        }
                                                     });
                                                 } else if step.action == MacroAction::DisableCrosshair {
                                                     ui.scope(|ui| {
@@ -11928,6 +11943,9 @@ impl CrosshairApp {
                     }
                     if let Some(target) = begin_mouse_move_absolute_capture_target {
                         self.begin_mouse_move_absolute_capture(ui.ctx(), target);
+                    }
+                    if open_groq_api_settings_requested {
+                        self.open_groq_api_settings();
                     }
                     if let Some((group_id, preset_id, step_index, is_fill, is_hold_stop)) = pending_geometry_macro_step_color_pick {
                         self.begin_image_search_capture(

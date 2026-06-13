@@ -200,6 +200,12 @@ pub(crate) struct CommandAiJobResult {
     outcome: Result<ai::CommandPresetPatch, String>,
 }
 
+#[derive(Clone, Default)]
+pub(crate) struct MacroStepInlineFeedback {
+    message: String,
+    open_groq_settings: bool,
+}
+
 struct StartupSplashState {
     started_at: Option<f64>,
     duration_sec: f64,
@@ -736,6 +742,7 @@ pub struct CrosshairApp {
     crosshair_panel_collapsed: bool,
     startup_splash: StartupSplashState,
     settings_popup_open: bool,
+    focus_groq_api_key_pending: bool,
     advanced_settings_open: bool,
     downloaded_tools_open: bool,
     zoom_preview_cache: HashMap<u32, ZoomPreviewCache>,
@@ -826,6 +833,7 @@ pub struct CrosshairApp {
     /// Which DrawGeometry macro step is currently being previewed on overlay (group_id, preset_id, step_index, is_hold_stop)
     draw_geometry_step_preview_target: Option<(u32, u32, usize, bool)>,
     draw_geometry_step_preview_sent: Option<crate::model::GeometrySpec>,
+    macro_step_inline_feedback: HashMap<(u32, usize), MacroStepInlineFeedback>,
 
     macro_referenced_variables_cache: Option<Vec<String>>,
     variable_inspector_open: bool,
@@ -970,6 +978,7 @@ impl CrosshairApp {
                 duration_sec: 0.0,
             },
             settings_popup_open: false,
+            focus_groq_api_key_pending: false,
             advanced_settings_open: false,
             downloaded_tools_open: false,
             zoom_preview_cache: HashMap::new(),
@@ -1062,6 +1071,7 @@ impl CrosshairApp {
             macro_step_geometry_color_pick_target: None,
             draw_geometry_step_preview_target: None,
             draw_geometry_step_preview_sent: None,
+            macro_step_inline_feedback: HashMap::new(),
             macro_referenced_variables_cache: None,
 
             variable_inspector_open: false,
@@ -4286,6 +4296,47 @@ impl CrosshairApp {
         response
     }
 
+    fn render_macro_step_inline_feedback(
+        ui: &mut egui::Ui,
+        feedback: Option<&MacroStepInlineFeedback>,
+    ) -> bool {
+        let Some(feedback) = feedback else {
+            return false;
+        };
+        if feedback.message.trim().is_empty() {
+            return false;
+        }
+
+        let mut open_settings_clicked = false;
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            let message_response = ui.add_sized(
+                [210.0, 18.0],
+                egui::Label::new(
+                    RichText::new(feedback.message.clone())
+                        .size(11.0)
+                        .color(Color32::from_rgb(255, 170, 170)),
+                )
+                .wrap_mode(egui::TextWrapMode::Truncate),
+            );
+            if message_response.hovered() {
+                let _ = message_response.on_hover_text(feedback.message.clone());
+            }
+            if feedback.open_groq_settings
+                && Self::add_sized_with_show_hover(
+                    ui,
+                    [58.0, 18.0],
+                    egui::Button::new(RichText::new("Settings").size(11.0)),
+                )
+                .clicked()
+            {
+                open_settings_clicked = true;
+            }
+        });
+
+        open_settings_clicked
+    }
+
     fn paint_show_hover_outline(ui: &mut egui::Ui, response: &egui::Response) {
         if response.hovered() {
             let hovered = ui.visuals().widgets.hovered;
@@ -7225,8 +7276,7 @@ impl CrosshairApp {
             return;
         }
         if self.state.groq_settings.api_key.trim().is_empty() {
-            self.settings_popup_open = true;
-            self.state.groq_settings.details_open = true;
+            self.open_groq_api_settings();
             self.command_ai_dialog = None;
             self.command_ai_feedback =
                 Some("Open Settings > API and paste your Groq API key.".to_owned());
@@ -7741,6 +7791,33 @@ impl CrosshairApp {
         self.status = format!(
             "Copied {} macro group(s).",
             self.macro_group_clipboard.len()
+        );
+    }
+
+    fn open_groq_api_settings(&mut self) {
+        self.settings_popup_open = true;
+        self.state.groq_settings.details_open = true;
+        self.focus_groq_api_key_pending = true;
+    }
+
+    fn set_macro_step_inline_feedback(
+        &mut self,
+        preset_id: u32,
+        step_index: usize,
+        message: impl Into<String>,
+        open_groq_settings: bool,
+    ) {
+        let message = message.into();
+        if message.trim().is_empty() {
+            self.macro_step_inline_feedback.remove(&(preset_id, step_index));
+            return;
+        }
+        self.macro_step_inline_feedback.insert(
+            (preset_id, step_index),
+            MacroStepInlineFeedback {
+                message,
+                open_groq_settings,
+            },
         );
     }
 
@@ -9546,6 +9623,20 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::VisionFinished(status) => {
                     self.status = status;
+                }
+                UiCommand::MacroStepInlineFeedback {
+                    preset_id,
+                    step_index,
+                    message,
+                    open_groq_settings,
+                } => {
+                    self.set_macro_step_inline_feedback(
+                        preset_id,
+                        step_index,
+                        message,
+                        open_groq_settings,
+                    );
+                    ctx.request_repaint();
                 }
                 UiCommand::VisionCaptureMouseDown { screen_x, screen_y } => {
                     if self.vision_capture_active {

@@ -1,14 +1,14 @@
 use crate::model::*;
 use crate::overlay::UiCommand;
 use crate::ui::{CrosshairApp, OcrLanguageOperationKind, UpdateStatus};
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use eframe::egui::{
-    self, Button, Color32, Frame, Margin, Order, RichText, Shadow, Stroke, TextEdit, WidgetText,
-    vec2,
+    self, vec2, Button, Color32, Frame, Margin, Order, RichText, Shadow, Stroke, TextEdit,
+    WidgetText,
 };
 use std::fs;
-use std::path::PathBuf;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -50,6 +50,10 @@ impl CrosshairApp {
                                             key_editor.password(true)
                                         },
                                     );
+                                    if self.focus_groq_api_key_pending {
+                                        response.request_focus();
+                                        self.focus_groq_api_key_pending = false;
+                                    }
                                     Self::apply_vietnamese_input_if_changed(
                                         &response,
                                         self.state.vietnamese_input_enabled,
@@ -1271,11 +1275,7 @@ impl CrosshairApp {
         Path::new(&system_root).join("System32").join("dism.exe")
     }
 
-    pub(crate) fn install_ocr_language_capability(
-        &mut self,
-        lang_code: &str,
-        display_name: &str,
-    ) {
+    pub(crate) fn install_ocr_language_capability(&mut self, lang_code: &str, display_name: &str) {
         let Some(capability_name) = crate::ocr::ocr_capability_name(lang_code) else {
             return;
         };
@@ -1301,7 +1301,10 @@ impl CrosshairApp {
                 );
             }
             Err(error) => {
-                self.status = format!("Failed to start OCR install for {}: {}", display_name, error);
+                self.status = format!(
+                    "Failed to start OCR install for {}: {}",
+                    display_name, error
+                );
             }
         }
     }
@@ -1332,7 +1335,10 @@ impl CrosshairApp {
                 );
             }
             Err(error) => {
-                self.status = format!("Failed to start OCR removal for {}: {}", display_name, error);
+                self.status = format!(
+                    "Failed to start OCR removal for {}: {}",
+                    display_name, error
+                );
             }
         }
     }
@@ -1522,5 +1528,4 @@ impl CrosshairApp {
             });
         });
     }
-
 }
