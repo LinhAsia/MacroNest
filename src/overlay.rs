@@ -7608,6 +7608,10 @@ mod windows_overlay {
                     let _ = trigger_command_preset_step(step);
                 }
 
+                MacroAction::FunnyMemeReply => {
+                    let _ = trigger_funny_meme_reply_step(step);
+                }
+
                 MacroAction::EnableCrosshairProfile => {
                     let _ = enable_crosshair_profile(&step.key);
                     let duration = step.get_duration_ms();
@@ -8179,6 +8183,10 @@ mod windows_overlay {
 
                 MacroAction::TriggerCommandPreset => {
                     let _ = trigger_command_preset_step(step);
+                }
+
+                MacroAction::FunnyMemeReply => {
+                    let _ = trigger_funny_meme_reply_step(step);
                 }
 
                 MacroAction::EnableCrosshairProfile => {
