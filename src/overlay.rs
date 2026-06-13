@@ -795,7 +795,8 @@ mod windows_overlay {
         stop_ignore_keys: HashMap<u32, String>,
         press_trigger_suppression: HashMap<String, usize>,
         pending_press_trigger_keys: HashSet<String>,
-        pending_window_focus_trigger: Option<PendingWindowFocusTrigger>,
+        pending_window_focus_trigger: Option<isize>,
+        last_dispatched_window_focus_hwnd: Option<isize>,
         ctrl: bool,
         alt: bool,
         shift: bool,
@@ -887,6 +888,7 @@ mod windows_overlay {
                 press_trigger_suppression: HashMap::new(),
                 pending_press_trigger_keys: HashSet::new(),
                 pending_window_focus_trigger: None,
+                last_dispatched_window_focus_hwnd: None,
                 ctrl: false,
                 alt: false,
                 shift: false,
@@ -993,12 +995,6 @@ mod windows_overlay {
         locked_mouse_masks: Vec<MouseMoveLockMask>,
         run_token: u64,
         completed: bool,
-    }
-
-    #[derive(Clone, Copy, Debug)]
-    struct PendingWindowFocusTrigger {
-        hwnd: isize,
-        ready_at: Instant,
     }
 
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -14486,10 +14482,7 @@ mod windows_overlay {
             return;
         }
 
-        hook_state.pending_window_focus_trigger = Some(PendingWindowFocusTrigger {
-            hwnd: hwnd.0 as isize,
-            ready_at: Instant::now() + Duration::from_millis(90),
-        });
+        hook_state.pending_window_focus_trigger = Some(hwnd.0 as isize);
     }
 
     fn process_pending_window_focus_trigger() {
@@ -14501,23 +14494,24 @@ mod windows_overlay {
             return;
         };
 
-        if Instant::now() < pending.ready_at || !focus_trigger_ready_for_dispatch() {
+        if !focus_trigger_ready_for_dispatch() {
             return;
         }
 
         let current_hwnd = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
-        {
-            let mut hook_state = HOOK_STATE.lock();
-            if hook_state
-                .pending_window_focus_trigger
-                .is_some_and(|item| item.hwnd == pending.hwnd)
-            {
-                hook_state.pending_window_focus_trigger = None;
-            }
+        if current_hwnd != pending {
+            return;
         }
 
-        if current_hwnd != pending.hwnd {
-            return;
+        {
+            let mut hook_state = HOOK_STATE.lock();
+            if hook_state.pending_window_focus_trigger == Some(pending) {
+                hook_state.pending_window_focus_trigger = None;
+            }
+            if hook_state.last_dispatched_window_focus_hwnd == Some(pending) {
+                return;
+            }
+            hook_state.last_dispatched_window_focus_hwnd = Some(pending);
         }
 
         trigger_macros_on_window_focus_change();
