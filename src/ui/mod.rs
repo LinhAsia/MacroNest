@@ -3710,26 +3710,26 @@ impl CrosshairApp {
             match (self.state.ui_theme, active) {
                 (UiThemeMode::Dark, true) => (
                     Color32::from_rgb(34, 45, 62),
-                    Color32::from_rgb(86, 104, 132),
-                    Color32::from_rgb(30, 40, 56),
-                    Color32::from_rgb(18, 24, 36),
+                    Color32::from_rgb(76, 94, 122),
+                    Color32::from_rgb(44, 58, 78),
+                    Color32::from_rgb(34, 46, 64),
                     Color32::from_rgb(124, 224, 176),
                     Color32::from_rgb(78, 170, 128),
                     Color32::from_rgb(238, 255, 247),
-                    Color32::from_rgb(124, 224, 176),
+                    Color32::from_rgb(244, 252, 248),
                     Color32::from_rgba_premultiplied(255, 255, 255, 54),
                     Color32::from_rgba_premultiplied(22, 54, 39, 168),
                     Color32::from_rgba_premultiplied(0, 0, 0, 88),
                 ),
                 (UiThemeMode::Dark, false) => (
                     Color32::from_rgb(34, 45, 62),
-                    Color32::from_rgb(82, 100, 128),
-                    Color32::from_rgb(30, 40, 56),
-                    Color32::from_rgb(18, 24, 36),
+                    Color32::from_rgb(76, 94, 122),
+                    Color32::from_rgb(44, 58, 78),
+                    Color32::from_rgb(34, 46, 64),
                     Color32::from_rgb(120, 144, 188),
                     Color32::from_rgb(76, 96, 132),
                     Color32::from_rgb(232, 240, 252),
-                    Color32::from_rgb(120, 144, 188),
+                    Color32::from_rgb(236, 242, 252),
                     Color32::from_rgba_premultiplied(255, 255, 255, 62),
                     Color32::from_rgba_premultiplied(22, 30, 44, 176),
                     Color32::from_rgba_premultiplied(0, 0, 0, 104),
@@ -3737,12 +3737,12 @@ impl CrosshairApp {
                 (UiThemeMode::Light, true) => (
                     Color32::from_rgb(166, 180, 196),
                     Color32::from_rgb(108, 126, 150),
-                    Color32::from_rgb(136, 150, 170),
-                    Color32::from_rgb(110, 122, 140),
+                    Color32::from_rgb(150, 162, 182),
+                    Color32::from_rgb(126, 138, 156),
                     Color32::from_rgb(122, 218, 164),
                     Color32::from_rgb(86, 178, 128),
                     Color32::from_rgb(34, 122, 88),
-                    Color32::from_rgb(28, 36, 48),
+                    Color32::from_rgb(248, 252, 250),
                     Color32::from_rgba_premultiplied(255, 255, 255, 72),
                     Color32::from_rgba_premultiplied(36, 72, 50, 120),
                     Color32::from_rgba_premultiplied(0, 0, 0, 52),
@@ -3750,12 +3750,12 @@ impl CrosshairApp {
                 (UiThemeMode::Light, false) => (
                     Color32::from_rgb(166, 180, 196),
                     Color32::from_rgb(108, 126, 150),
-                    Color32::from_rgb(136, 150, 170),
-                    Color32::from_rgb(110, 122, 140),
+                    Color32::from_rgb(150, 162, 182),
+                    Color32::from_rgb(126, 138, 156),
                     Color32::from_rgb(238, 242, 248),
                     Color32::from_rgb(208, 216, 232),
                     Color32::from_rgb(170, 182, 202),
-                    Color32::from_rgb(52, 66, 84),
+                    Color32::from_rgb(72, 86, 106),
                     Color32::from_rgba_premultiplied(255, 255, 255, 92),
                     Color32::from_rgba_premultiplied(92, 110, 136, 176),
                     Color32::from_rgba_premultiplied(0, 0, 0, 42),
@@ -3764,12 +3764,12 @@ impl CrosshairApp {
         let (outer_rect, response) = ui.allocate_exact_size(button_size, Sense::click());
         let hovered = response.hovered();
         let pressed = response.is_pointer_button_down_on();
-        let rest_offset = if active { 9.0 } else { 3.0 };
+        let rest_offset = if active { 7.0 } else { 2.0 };
         let press_offset = if pressed { 3.0 } else if hovered { 1.0 } else { 0.0 };
         let face_offset_y = rest_offset + press_offset;
         let base_rect = outer_rect.shrink2(vec2(1.0, 0.0));
         let deck_rect = egui::Rect::from_min_max(
-            pos2(base_rect.left() + 4.0, base_rect.top() + 6.0),
+            pos2(base_rect.left() + 4.0, base_rect.top() + 8.0),
             pos2(base_rect.right() - 4.0, base_rect.bottom() - 5.0),
         );
         let face_rect = egui::Rect::from_min_max(
@@ -3798,13 +3798,6 @@ impl CrosshairApp {
             corner_radius - 2.0,
             egui::Stroke::new(1.0, deck_rim),
             StrokeKind::Inside,
-        );
-        ui.painter().line_segment(
-            [
-                pos2(deck_rect.left() + 8.0, deck_rect.top() + 2.0),
-                pos2(deck_rect.right() - 8.0, deck_rect.top() + 2.0),
-            ],
-            egui::Stroke::new(1.2, Color32::from_rgba_premultiplied(255, 255, 255, 34)),
         );
         ui.painter().rect_filled(face_top_rect, corner_radius - 3.0, face_fill_top);
         ui.painter().rect_filled(face_bottom_rect, corner_radius - 3.0, face_fill_bottom);
@@ -9927,9 +9920,9 @@ impl eframe::App for CrosshairApp {
                                         .stroke(egui::Stroke::new(
                                             1.0,
                                             if self.state.ui_theme == UiThemeMode::Dark {
-                                                Color32::from_rgb(74, 92, 118)
+                                                Color32::from_rgba_premultiplied(96, 118, 148, 196)
                                             } else {
-                                                Color32::from_rgb(188, 198, 214)
+                                                Color32::from_rgba_premultiplied(170, 182, 198, 180)
                                             },
                                         ))
                                         .corner_radius(14.0)
