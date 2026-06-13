@@ -4032,14 +4032,14 @@ impl CrosshairApp {
                     let pin_label = if pinned_window_active {
                         Self::tr_lang(
                             self.state.ui_language,
-                            "Unpin selected window",
-                            "Bo ghim cua so da chon",
+                            "Unpin window",
+                            "Bo ghim cua so",
                         )
                     } else {
                         Self::tr_lang(
                             self.state.ui_language,
-                            "Pin selected window on top",
-                            "Ghim cua so da chon len tren cung",
+                            "Pin window on top",
+                            "Ghim cua so len tren cung",
                         )
                     };
                     ui.allocate_ui_with_layout(
@@ -4080,17 +4080,20 @@ impl CrosshairApp {
                         .width(92.0)
                         .selected_text(selected_window_text)
                         .show_ui(ui, |ui| {
+                            ui.set_min_width(92.0);
+                            ui.set_max_width(92.0);
                             for selector in &self.open_windows {
                                 let display_title =
                                     Self::quick_action_window_display(selector, &self.open_windows);
                                 let truncated_title =
-                                    Self::truncate_window_title(&display_title, 36);
-                                let response = ui.selectable_value(
-                                    &mut self.quick_action_window_selector,
-                                    selector.clone(),
-                                    truncated_title,
+                                    Self::truncate_window_title(&display_title, 18);
+                                let selected = self.quick_action_window_selector == *selector;
+                                let response = ui.add_sized(
+                                    [92.0, 0.0],
+                                    egui::Button::new(truncated_title).selected(selected),
                                 );
                                 if response.clicked() {
+                                    self.quick_action_window_selector = selector.clone();
                                     keep_menu_open = true;
                                 }
                                 response.on_hover_text(Self::selector_base_title(selector));
