@@ -4457,35 +4457,20 @@ impl CrosshairApp {
                                                         == MacroTriggerMode::WindowFocus
                                                     {
                                                         ui.set_min_width(binding_width);
-                                                        let mut selected_window = preset
-                                                            .event_target_window_title
-                                                            .clone();
-                                                        let mut duplicate_mode = preset
-                                                            .event_match_duplicate_window_titles;
-                                                        if Self::render_window_target_combo_with_duplicate_mode(
+                                                        if Self::render_multi_window_targets_with_duplicate_mode(
                                                             ui,
-                                                            (
-                                                                group.id,
-                                                                preset.id,
-                                                                "window-focus-trigger-target",
-                                                            ),
+                                                            language,
+                                                            (group.id, preset.id, "window-focus-trigger-target"),
                                                             Self::tr_lang(
                                                                 language,
                                                                 "Any focused window",
                                                                 "Bat ky cua so dang focus",
                                                             ),
-                                                            &mut selected_window,
-                                                            &mut duplicate_mode,
+                                                            &mut preset.event_target_window_title,
+                                                            &mut preset.event_extra_target_window_titles,
+                                                            &mut preset.event_match_duplicate_window_titles,
                                                             &self.open_windows,
-                                                            binding_width.max(180.0),
-                                                            true,
                                                         ) {
-                                                            preset.event_target_window_title =
-                                                                selected_window;
-                                                            preset.event_extra_target_window_titles
-                                                                .clear();
-                                                            preset.event_match_duplicate_window_titles =
-                                                                duplicate_mode;
                                                             live_sync = true;
                                                         }
                                                     } else {
