@@ -3695,105 +3695,123 @@ impl CrosshairApp {
         let button_size = vec2(92.0, 66.0);
         let corner_radius = 14.0;
         let (
-            base_fill,
-            base_edge,
+            frame_fill,
+            frame_stroke,
+            deck_fill,
+            deck_rim,
             face_fill_top,
             face_fill_bottom,
-            border_color,
+            face_border,
             icon_color,
             top_edge,
             bottom_edge,
-            rim_color,
-            drop_shadow,
+            shadow_color,
         ) =
             match (self.state.ui_theme, active) {
                 (UiThemeMode::Dark, true) => (
-                    Color32::from_rgb(60, 112, 90),
-                    Color32::from_rgb(44, 84, 68),
-                    Color32::from_rgb(114, 214, 164),
-                    Color32::from_rgb(72, 164, 124),
-                    Color32::from_rgb(126, 224, 182),
+                    Color32::from_rgb(34, 45, 62),
+                    Color32::from_rgb(86, 104, 132),
+                    Color32::from_rgb(30, 40, 56),
+                    Color32::from_rgb(18, 24, 36),
+                    Color32::from_rgb(124, 224, 176),
+                    Color32::from_rgb(78, 170, 128),
                     Color32::from_rgb(238, 255, 247),
-                    Color32::from_rgba_premultiplied(255, 255, 255, 72),
-                    Color32::from_rgba_premultiplied(20, 44, 33, 150),
-                    Color32::from_rgba_premultiplied(28, 60, 46, 180),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 78),
+                    Color32::from_rgb(124, 224, 176),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 54),
+                    Color32::from_rgba_premultiplied(22, 54, 39, 168),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 88),
                 ),
                 (UiThemeMode::Dark, false) => (
-                    Color32::from_rgb(58, 72, 96),
-                    Color32::from_rgb(38, 48, 68),
-                    Color32::from_rgb(103, 126, 164),
-                    Color32::from_rgb(72, 92, 126),
-                    Color32::from_rgb(114, 136, 174),
+                    Color32::from_rgb(34, 45, 62),
+                    Color32::from_rgb(82, 100, 128),
+                    Color32::from_rgb(30, 40, 56),
+                    Color32::from_rgb(18, 24, 36),
+                    Color32::from_rgb(120, 144, 188),
+                    Color32::from_rgb(76, 96, 132),
                     Color32::from_rgb(232, 240, 252),
-                    Color32::from_rgba_premultiplied(255, 255, 255, 88),
-                    Color32::from_rgba_premultiplied(12, 18, 28, 180),
-                    Color32::from_rgba_premultiplied(18, 26, 38, 210),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 98),
+                    Color32::from_rgb(120, 144, 188),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 62),
+                    Color32::from_rgba_premultiplied(22, 30, 44, 176),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 104),
                 ),
                 (UiThemeMode::Light, true) => (
-                    Color32::from_rgb(80, 126, 100),
-                    Color32::from_rgb(62, 96, 76),
-                    Color32::from_rgb(120, 220, 166),
-                    Color32::from_rgb(88, 182, 132),
+                    Color32::from_rgb(166, 180, 196),
+                    Color32::from_rgb(108, 126, 150),
+                    Color32::from_rgb(136, 150, 170),
+                    Color32::from_rgb(110, 122, 140),
+                    Color32::from_rgb(122, 218, 164),
+                    Color32::from_rgb(86, 178, 128),
                     Color32::from_rgb(34, 122, 88),
-                    Color32::from_rgb(22, 30, 38),
-                    Color32::from_rgba_premultiplied(255, 255, 255, 84),
-                    Color32::from_rgba_premultiplied(34, 62, 44, 104),
-                    Color32::from_rgba_premultiplied(84, 104, 88, 118),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 42),
+                    Color32::from_rgb(28, 36, 48),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 72),
+                    Color32::from_rgba_premultiplied(36, 72, 50, 120),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 52),
                 ),
                 (UiThemeMode::Light, false) => (
-                    Color32::from_rgb(142, 154, 176),
-                    Color32::from_rgb(116, 126, 146),
+                    Color32::from_rgb(166, 180, 196),
+                    Color32::from_rgb(108, 126, 150),
+                    Color32::from_rgb(136, 150, 170),
+                    Color32::from_rgb(110, 122, 140),
                     Color32::from_rgb(238, 242, 248),
-                    Color32::from_rgb(210, 218, 232),
+                    Color32::from_rgb(208, 216, 232),
                     Color32::from_rgb(170, 182, 202),
                     Color32::from_rgb(52, 66, 84),
-                    Color32::from_rgba_premultiplied(255, 255, 255, 124),
-                    Color32::from_rgba_premultiplied(122, 136, 160, 185),
-                    Color32::from_rgba_premultiplied(132, 146, 164, 148),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 36),
+                    Color32::from_rgba_premultiplied(255, 255, 255, 92),
+                    Color32::from_rgba_premultiplied(92, 110, 136, 176),
+                    Color32::from_rgba_premultiplied(0, 0, 0, 42),
                 ),
             };
         let (outer_rect, response) = ui.allocate_exact_size(button_size, Sense::click());
-        let face_offset_y = if active { 8.0 } else { 0.0 };
-        let face_rect = outer_rect.translate(vec2(0.0, face_offset_y));
-        let rim_rect = face_rect.expand2(vec2(1.0, 1.0));
+        let hovered = response.hovered();
+        let pressed = response.is_pointer_button_down_on();
+        let rest_offset = if active { 9.0 } else { 3.0 };
+        let press_offset = if pressed { 3.0 } else if hovered { 1.0 } else { 0.0 };
+        let face_offset_y = rest_offset + press_offset;
         let base_rect = outer_rect.shrink2(vec2(1.0, 0.0));
-        let face_top_rect =
-            egui::Rect::from_min_max(face_rect.min, pos2(face_rect.max.x, face_rect.center().y + 2.0));
-        let face_bottom_rect =
-            egui::Rect::from_min_max(pos2(face_rect.min.x, face_rect.center().y - 2.0), face_rect.max);
-        let shadow_rect = egui::Rect::from_min_max(
-            pos2(outer_rect.left() + 3.0, outer_rect.top() + 9.0),
-            pos2(outer_rect.right() - 3.0, outer_rect.bottom() + 4.0),
+        let deck_rect = egui::Rect::from_min_max(
+            pos2(base_rect.left() + 4.0, base_rect.top() + 6.0),
+            pos2(base_rect.right() - 4.0, base_rect.bottom() - 5.0),
         );
-        ui.painter().rect_filled(shadow_rect, corner_radius + 3.0, drop_shadow);
-        ui.painter().rect_filled(base_rect, corner_radius, base_fill);
+        let face_rect = egui::Rect::from_min_max(
+            pos2(base_rect.left() + 6.0, base_rect.top() + face_offset_y),
+            pos2(base_rect.right() - 6.0, base_rect.top() + face_offset_y + 38.0),
+        );
+        let face_top_rect =
+            egui::Rect::from_min_max(face_rect.min, pos2(face_rect.max.x, face_rect.center().y + 1.0));
+        let face_bottom_rect =
+            egui::Rect::from_min_max(pos2(face_rect.min.x, face_rect.center().y - 1.0), face_rect.max);
+        let shadow_rect = egui::Rect::from_min_max(
+            pos2(base_rect.left() + 4.0, base_rect.top() + 10.0),
+            pos2(base_rect.right() - 4.0, base_rect.bottom() + 5.0),
+        );
+        ui.painter().rect_filled(shadow_rect, corner_radius + 4.0, shadow_color);
+        ui.painter().rect_filled(base_rect, corner_radius, frame_fill);
         ui.painter().rect_stroke(
             base_rect,
             corner_radius,
-            egui::Stroke::new(1.2, rim_color),
+            egui::Stroke::new(1.2, frame_stroke),
+            StrokeKind::Inside,
+        );
+        ui.painter().rect_filled(deck_rect, corner_radius - 2.0, deck_fill);
+        ui.painter().rect_stroke(
+            deck_rect,
+            corner_radius - 2.0,
+            egui::Stroke::new(1.0, deck_rim),
             StrokeKind::Inside,
         );
         ui.painter().line_segment(
             [
-                pos2(base_rect.left() + 9.0, base_rect.bottom() - 2.0),
-                pos2(base_rect.right() - 9.0, base_rect.bottom() - 2.0),
+                pos2(deck_rect.left() + 8.0, deck_rect.top() + 2.0),
+                pos2(deck_rect.right() - 8.0, deck_rect.top() + 2.0),
             ],
-            egui::Stroke::new(3.2, base_edge),
+            egui::Stroke::new(1.2, Color32::from_rgba_premultiplied(255, 255, 255, 34)),
         );
-        ui.painter()
-            .rect_filled(rim_rect, corner_radius, border_color.gamma_multiply(0.34));
-        ui.painter()
-            .rect_filled(face_top_rect, corner_radius, face_fill_top);
-        ui.painter()
-            .rect_filled(face_bottom_rect, corner_radius, face_fill_bottom);
+        ui.painter().rect_filled(face_top_rect, corner_radius - 3.0, face_fill_top);
+        ui.painter().rect_filled(face_bottom_rect, corner_radius - 3.0, face_fill_bottom);
         ui.painter().rect_stroke(
             face_rect,
-            corner_radius,
-            egui::Stroke::new(1.1, border_color.gamma_multiply(1.08)),
+            corner_radius - 3.0,
+            egui::Stroke::new(1.2, face_border),
             StrokeKind::Inside,
         );
         ui.painter().line_segment(
@@ -3806,20 +3824,20 @@ impl CrosshairApp {
         if !active {
             ui.painter().line_segment(
                 [
-                    pos2(face_rect.left() + 9.0, face_rect.bottom() - 2.5),
-                    pos2(face_rect.right() - 9.0, face_rect.bottom() - 2.5),
+                    pos2(face_rect.left() + 10.0, face_rect.bottom() - 2.0),
+                    pos2(face_rect.right() - 10.0, face_rect.bottom() - 2.0),
                 ],
                 egui::Stroke::new(3.4, bottom_edge),
             );
         } else {
             ui.painter().line_segment(
                 [
-                    pos2(face_rect.left() + 9.0, face_rect.bottom() - 2.0),
-                    pos2(face_rect.right() - 9.0, face_rect.bottom() - 2.0),
+                    pos2(face_rect.left() + 10.0, face_rect.bottom() - 1.5),
+                    pos2(face_rect.right() - 10.0, face_rect.bottom() - 1.5),
                 ],
                 egui::Stroke::new(
-                    2.2,
-                    Color32::from_rgba_premultiplied(0, 0, 0, 70),
+                    1.6,
+                    Color32::from_rgba_premultiplied(0, 0, 0, 90),
                 ),
             );
         }
