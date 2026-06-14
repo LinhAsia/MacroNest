@@ -7090,6 +7090,25 @@ mod windows_overlay {
         }
     }
 
+    fn stop_macro_preset_by_id(preset_id: u32) {
+        let is_active_hold = {
+            let hook_state = HOOK_STATE.lock();
+            hook_state.active_hold_macros.contains_key(&preset_id)
+        };
+
+        if is_active_hold {
+            deactivate_hold_macro(preset_id);
+        } else {
+            STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
+        }
+    }
+
+    fn execute_stop_macro_step(step: &MacroStep) {
+        for preset_id in parse_macro_trigger_preset_ids(&step.key) {
+            stop_macro_preset_by_id(preset_id);
+        }
+    }
+
     fn set_macro_steps_enabled(spec: &str, enabled: bool) -> Result<()> {
         let parts: Vec<&str> = spec.split('|').collect();
         if parts.is_empty() {
@@ -7175,6 +7194,10 @@ mod windows_overlay {
                 let mut no_locked_keys = Vec::new();
                 let mut no_locked_mouse: Vec<MouseMoveLockMask> = Vec::new();
                 execute_trigger_macro_step(step, false, &mut no_locked_keys, &mut no_locked_mouse);
+            }
+
+            MacroAction::StopMacroPreset => {
+                execute_stop_macro_step(step);
             }
 
             MacroAction::TriggerCommandPreset => {
@@ -7748,6 +7771,10 @@ mod windows_overlay {
                             spawn_macro_by_preset_id(preset_id, false);
                         }
                     }
+                }
+
+                MacroAction::StopMacroPreset => {
+                    execute_stop_macro_step(step);
                 }
 
                 MacroAction::TriggerCommandPreset => {
@@ -8324,6 +8351,10 @@ mod windows_overlay {
                     let mut no_locked_keys = Vec::new();
                     let mut no_locked_mouse: Vec<MouseMoveLockMask> = Vec::new();
                     execute_trigger_macro_step(step, false, &mut no_locked_keys, &mut no_locked_mouse);
+                }
+
+                MacroAction::StopMacroPreset => {
+                    execute_stop_macro_step(step);
                 }
 
                 MacroAction::TriggerCommandPreset => {
@@ -11131,6 +11162,7 @@ mod windows_overlay {
                 | MacroAction::FocusWindowPreset
                 | MacroAction::TriggerMacroPreset
                 | MacroAction::TriggerMacroPresetIfEnabled
+                | MacroAction::StopMacroPreset
                 | MacroAction::TriggerCommandPreset
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::DisableCrosshair
@@ -11286,6 +11318,7 @@ mod windows_overlay {
             | MacroAction::FocusWindowPreset
             | MacroAction::TriggerMacroPreset
             | MacroAction::TriggerMacroPresetIfEnabled
+            | MacroAction::StopMacroPreset
             | MacroAction::TriggerCommandPreset
             | MacroAction::EnableCrosshairProfile
             | MacroAction::DisableCrosshair

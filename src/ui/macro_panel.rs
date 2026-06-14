@@ -5457,6 +5457,7 @@ impl CrosshairApp {
                                                     step.action,
                                                     MacroAction::TriggerMacroPreset
                                                         | MacroAction::TriggerMacroPresetIfEnabled
+                                                        | MacroAction::StopMacroPreset
                                                 ) {
                                                     Self::render_trigger_macro_target_editor(
                                                         ui,
@@ -8550,6 +8551,7 @@ impl CrosshairApp {
                                                     step.action,
                                                     MacroAction::TriggerMacroPreset
                                                         | MacroAction::TriggerMacroPresetIfEnabled
+                                                        | MacroAction::StopMacroPreset
                                                 ) {
                                                     Self::render_trigger_macro_target_editor(
                                                         ui,
@@ -13370,6 +13372,7 @@ impl CrosshairApp {
         &[
             MacroAction::TriggerMacroPreset,
             MacroAction::TriggerMacroPresetIfEnabled,
+            MacroAction::StopMacroPreset,
         ]
     }
 
@@ -13507,9 +13510,11 @@ impl CrosshairApp {
                 );
             });
         }
-        let cb_text = Self::tr_lang(language, "Wait for completion", "Doi chay xong");
-        if ui.checkbox(&mut step.wait_for_completion, cb_text).changed() {
-            *live_sync = true;
+        if step.action != MacroAction::StopMacroPreset {
+            let cb_text = Self::tr_lang(language, "Wait for completion", "Doi chay xong");
+            if ui.checkbox(&mut step.wait_for_completion, cb_text).changed() {
+                *live_sync = true;
+            }
         }
     }
 
