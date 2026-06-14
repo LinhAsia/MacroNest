@@ -58,8 +58,9 @@ mod windows_overlay {
                 Dwm::{
                     DWM_THUMBNAIL_PROPERTIES, DWM_TNP_OPACITY, DWM_TNP_RECTDESTINATION,
                     DWM_TNP_RECTSOURCE, DWM_TNP_SOURCECLIENTAREAONLY, DWM_TNP_VISIBLE,
-                    DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute, DwmRegisterThumbnail,
-                    DwmUnregisterThumbnail, DwmUpdateThumbnailProperties,
+                    DWMWA_BORDER_COLOR, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
+                    DwmRegisterThumbnail, DwmSetWindowAttribute, DwmUnregisterThumbnail,
+                    DwmUpdateThumbnailProperties,
                 },
                 Gdi::{
                     AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO,
@@ -452,6 +453,7 @@ mod windows_overlay {
         StopVideoPlayback,
         SetMacrosMasterEnabled(bool),
         SetWindowsKeyLocked(bool),
+        SetNativeFocusHighlightEnabled(bool),
         UpdateVisionSettings(VisionSettings),
         SetArduinoFlashInProgress(bool),
         SetVietnameseInputEnabled(bool),
@@ -981,6 +983,8 @@ mod windows_overlay {
         timer_hwnds: HashMap<u32, HWND>,
         ui_visible: bool,
         ui_foreground: bool,
+        native_focus_highlight_enabled: bool,
+        active_focus_highlight_hwnd: Option<HWND>,
         cached_search_overlay_regions: Vec<VisionRegion>,
         cached_search_overlay_preview_regions: Vec<VisionRegion>,
         cached_search_overlay_static_geometry: Vec<GeometryRenderShape>,
@@ -1450,6 +1454,8 @@ mod windows_overlay {
                 timer_hwnds: HashMap::new(),
                 ui_visible: true,
                 ui_foreground: true,
+                native_focus_highlight_enabled: false,
+                active_focus_highlight_hwnd: None,
                 cached_search_overlay_regions: Vec::new(),
                 cached_search_overlay_preview_regions: Vec::new(),
                 cached_search_overlay_static_geometry: Vec::new(),
@@ -1620,6 +1626,9 @@ mod windows_overlay {
 
             WMAPP_WINDOW_FOCUS_CHANGED => {
                 let foreground = GetForegroundWindow();
+                if let Some(runtime) = runtime_mut(hwnd) {
+                    update_native_focus_highlight(runtime, foreground);
+                }
                 handle_window_focus_event(hwnd, foreground);
                 LRESULT(0)
             }
@@ -1836,6 +1845,7 @@ mod windows_overlay {
                 let _ = Shell_NotifyIconW(NIM_DELETE, &notify_icon(hwnd));
                 if let Some(runtime) = runtime_mut(hwnd) {
                     runtime.running.store(false, Ordering::Relaxed);
+                    clear_native_focus_highlight(runtime);
                     let _ = DestroyMenu(runtime.tray_menu);
                     let _ = ShowWindow(runtime.overlay_hwnd, SW_HIDE);
                     let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
@@ -4397,6 +4407,15 @@ mod windows_overlay {
                     HOOK_STATE.lock().windows_key_locked = locked;
                 }
 
+                OverlayCommand::SetNativeFocusHighlightEnabled(enabled) => {
+                    runtime.native_focus_highlight_enabled = enabled;
+                    if enabled {
+                        update_native_focus_highlight(runtime, GetForegroundWindow());
+                    } else {
+                        clear_native_focus_highlight(runtime);
+                    }
+                }
+
                 OverlayCommand::UpdateVisionSettings(settings) => {
                     let mut hook_state = HOOK_STATE.lock();
                     hook_state.use_interception = settings.use_interception;
@@ -4994,6 +5013,64 @@ mod windows_overlay {
 
     fn desired_hooks_enabled(_runtime: &Runtime) -> bool {
         true
+    }
+
+    const DWM_COLOR_DEFAULT: u32 = 0xFFFF_FFFF;
+    const FOCUS_HIGHLIGHT_BORDER_COLOR: u32 = 0x00B6_E07E;
+
+    unsafe fn set_native_border_color(hwnd: HWND, color: u32) -> bool {
+        if hwnd.0.is_null() {
+            return false;
+        }
+
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            &color as *const _ as *const _,
+            size_of::<u32>() as u32,
+        )
+        .is_ok()
+    }
+
+    unsafe fn is_native_focus_highlight_target(hwnd: HWND) -> bool {
+        if hwnd.0.is_null() || is_internal_app_window(hwnd) || looks_like_main_ui_window(hwnd) {
+            return false;
+        }
+
+        if !windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)).as_bool() {
+            return false;
+        }
+
+        let root = GetAncestor(hwnd, GA_ROOT);
+        if root.0.is_null() || root != hwnd {
+            return false;
+        }
+
+        true
+    }
+
+    unsafe fn clear_native_focus_highlight(runtime: &mut Runtime) {
+        if let Some(previous) = runtime.active_focus_highlight_hwnd.take() {
+            let _ = set_native_border_color(previous, DWM_COLOR_DEFAULT);
+        }
+    }
+
+    unsafe fn update_native_focus_highlight(runtime: &mut Runtime, foreground: HWND) {
+        if !runtime.native_focus_highlight_enabled {
+            clear_native_focus_highlight(runtime);
+            return;
+        }
+
+        if runtime.active_focus_highlight_hwnd == Some(foreground) {
+            return;
+        }
+
+        clear_native_focus_highlight(runtime);
+        if is_native_focus_highlight_target(foreground)
+            && set_native_border_color(foreground, FOCUS_HIGHLIGHT_BORDER_COLOR)
+        {
+            runtime.active_focus_highlight_hwnd = Some(foreground);
+        }
     }
 
     unsafe fn set_window_focus_event_hook_enabled(
@@ -16127,6 +16204,9 @@ mod windows_overlay {
     fn shutdown_application(hwnd: HWND, runtime: &Runtime) -> Result<()> {
         let _ = unsafe { Shell_NotifyIconW(NIM_DELETE, &notify_icon(hwnd)) };
         let _ = crate::platform::show_taskbar();
+        if let Some(highlighted_hwnd) = runtime.active_focus_highlight_hwnd {
+            let _ = unsafe { set_native_border_color(highlighted_hwnd, DWM_COLOR_DEFAULT) };
+        }
         let _ = restore_mouse_sensitivity_on_exit();
         let _ = unsafe { ShowWindow(runtime.overlay_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.hud_hwnd, SW_HIDE) };
@@ -18522,6 +18602,7 @@ mod fallback {
         UpdateVisionPresets(Vec<VisionPreset>),
         SetArduinoFlashInProgress(bool),
         SetMacrosMasterEnabled(bool),
+        SetNativeFocusHighlightEnabled(bool),
         SetUiVisible(bool),
         SetTrayIconVisible(bool),
         Exit,

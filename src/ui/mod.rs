@@ -105,6 +105,7 @@ enum TitlebarQuickActionKind {
     Taskbar,
     WindowsKey,
     WindowPin,
+    FocusHighlight,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1150,6 +1151,7 @@ impl CrosshairApp {
         self.preload_primary_sound_preset_audio();
         self.sync_macro_master_enabled();
         self.sync_windows_key_locked();
+        self.sync_native_focus_highlight_enabled();
         self.sync_vietnamese_input_enabled();
         self.sync_macro_master_hotkey();
         self.startup_overlay_sync_pending = false;
@@ -1194,6 +1196,14 @@ impl CrosshairApp {
         let _ = self.overlay_tx.send(OverlayCommand::SetWindowsKeyLocked(
             self.state.windows_key_locked,
         ));
+    }
+
+    fn sync_native_focus_highlight_enabled(&self) {
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::SetNativeFocusHighlightEnabled(
+                self.state.native_focus_highlight_enabled,
+            ));
     }
 
     fn sync_vietnamese_input_enabled(&self) {
@@ -3846,6 +3856,33 @@ impl CrosshairApp {
                     egui::Stroke::new(1.8, icon_color),
                 );
             }
+            TitlebarQuickActionKind::FocusHighlight => {
+                let frame_rect = rect.shrink2(vec2(16.0, 16.0));
+                painter.rect_stroke(
+                    frame_rect,
+                    5.0,
+                    egui::Stroke::new(2.0, icon_color),
+                    StrokeKind::Inside,
+                );
+
+                let corner = 8.0;
+                for (start, end) in [
+                    (frame_rect.left_top(), pos2(frame_rect.left() + corner, frame_rect.top())),
+                    (frame_rect.left_top(), pos2(frame_rect.left(), frame_rect.top() + corner)),
+                    (frame_rect.right_top(), pos2(frame_rect.right() - corner, frame_rect.top())),
+                    (frame_rect.right_top(), pos2(frame_rect.right(), frame_rect.top() + corner)),
+                    (frame_rect.left_bottom(), pos2(frame_rect.left() + corner, frame_rect.bottom())),
+                    (frame_rect.left_bottom(), pos2(frame_rect.left(), frame_rect.bottom() - corner)),
+                    (frame_rect.right_bottom(), pos2(frame_rect.right() - corner, frame_rect.bottom())),
+                    (frame_rect.right_bottom(), pos2(frame_rect.right(), frame_rect.bottom() - corner)),
+                ] {
+                    painter.line_segment([start, end], egui::Stroke::new(2.7, icon_color));
+                }
+
+                if active {
+                    painter.circle_filled(rect.center(), 4.0, icon_color);
+                }
+            }
         }
     }
 
@@ -3939,7 +3976,7 @@ impl CrosshairApp {
         let mut keep_menu_open = false;
 
         Grid::new("titlebar-quick-actions-grid")
-            .num_columns(3)
+            .num_columns(4)
             .spacing([8.0, 8.0])
             .show(ui, |ui| {
                 ui.allocate_ui_with_layout(
@@ -4243,6 +4280,61 @@ impl CrosshairApp {
                         ui.ctx().data_mut(|data| {
                             data.insert_temp(selector_popup_id, selector_popup_open);
                         });
+                    },
+                );
+
+                ui.allocate_ui_with_layout(
+                    vec2(92.0, 116.0),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::FocusHighlight,
+                            self.state.native_focus_highlight_enabled,
+                        );
+                        if button_response.clicked() {
+                            self.state.native_focus_highlight_enabled =
+                                !self.state.native_focus_highlight_enabled;
+                            self.sync_native_focus_highlight_enabled();
+                            self.persist();
+                            self.status = if self.state.native_focus_highlight_enabled {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Native focus highlight enabled.",
+                                    "Đã bật viền focus native.",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Native focus highlight disabled.",
+                                    "Đã tắt viền focus native.",
+                                )
+                            }
+                            .to_owned();
+                        }
+
+                        ui.add_space(6.0);
+                        let focus_label = Self::tr_lang(
+                            self.state.ui_language,
+                            "Focus highlight",
+                            "Viền focus",
+                        );
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(focus_label)
+                                        .size(11.0)
+                                        .color(if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        }),
+                                ));
+                            },
+                        );
+                        ui.add_space(12.0);
                     },
                 );
             });
@@ -10556,9 +10648,9 @@ impl eframe::App for CrosshairApp {
                                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                 .align(egui::RectAlign::BOTTOM_END)
                                 .layout(egui::Layout::top_down(egui::Align::Min))
-                                .width(332.0)
+                                .width(432.0)
                                 .show(|ui| {
-                                    ui.set_min_width(332.0);
+                                    ui.set_min_width(432.0);
                                     Frame::new()
                                         .fill(button_fill)
                                         .stroke(egui::Stroke::new(
