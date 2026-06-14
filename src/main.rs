@@ -66,11 +66,7 @@ fn normalize_geometry_presets(state: &mut AppState) -> bool {
 
     for preset in original_presets {
         let base_name = preset.name.clone();
-        let mut objects: Vec<GeometryObject> = preset
-            .objects
-            .into_iter()
-            .filter(|obj| obj.name != "Point 1" && obj.name != "Point 2" && obj.name != "Point 3")
-            .collect();
+        let mut objects: Vec<GeometryObject> = preset.objects;
 
         if objects.is_empty() {
             changed = true;
@@ -102,10 +98,8 @@ fn normalize_geometry_presets(state: &mut AppState) -> bool {
             }
             let preset_name = if index == 0 {
                 base_name.clone()
-            } else if object.name.trim().is_empty() {
-                format!("{base_name} {}", index + 1)
             } else {
-                object.name.clone()
+                format!("{base_name} {}", index + 1)
             };
             normalized_presets.push(GeometryPreset {
                 id: preset_id,

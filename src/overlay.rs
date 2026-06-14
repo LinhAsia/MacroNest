@@ -12708,10 +12708,8 @@ mod windows_overlay {
                 .find(|preset| preset.id == *preset_id && preset.enabled)
             {
                 for object in &preset.objects {
-                    if object.enabled {
-                        if let Some(shape) = geometry_render_shape_from_spec(&object.spec) {
-                            shapes.push(shape);
-                        }
+                    if let Some(shape) = geometry_render_shape_from_spec(&object.spec) {
+                        shapes.push(shape);
                     }
                 }
             }
@@ -12721,10 +12719,8 @@ mod windows_overlay {
                 continue;
             }
             for object in &instance.preset.objects {
-                if object.enabled {
-                    if let Some(shape) = geometry_render_shape_from_spec(&object.spec) {
-                        shapes.push(shape);
-                    }
+                if let Some(shape) = geometry_render_shape_from_spec(&object.spec) {
+                    shapes.push(shape);
                 }
             }
         }
@@ -12737,7 +12733,7 @@ mod windows_overlay {
                 .find(|preset| preset.id == preview_preset_id)
             {
                 for object in &preset.objects {
-                    if !is_active && object.enabled {
+                    if !is_active {
                         if let Some(shape) = geometry_render_shape_from_spec(&object.spec) {
                             shapes.push(shape);
                         }

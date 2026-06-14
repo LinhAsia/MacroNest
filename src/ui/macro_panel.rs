@@ -14625,8 +14625,6 @@ impl CrosshairApp {
                                     let mut new_preset = crate::model::GeometryPreset::new(next_preset_id);
                                     new_preset.name = format!("Preset {}", next_preset_id);
                                     if let Some(object) = new_preset.object_mut() {
-                                        object.name = format!("{:?} {}", step.geometry_spec.shape, next_preset_id);
-                                        object.enabled = true;
                                         object.spec = step.geometry_spec.clone();
                                     }
                                     geometry_presets.push(new_preset);
@@ -14635,10 +14633,7 @@ impl CrosshairApp {
                                 }
                                 for preset in geometry_presets.iter_mut() {
                                     if ui.button(&preset.name).clicked() {
-                                        let preset_id = preset.id;
                                         if let Some(object) = preset.object_mut() {
-                                            object.name = format!("{:?} {}", step.geometry_spec.shape, preset_id);
-                                            object.enabled = true;
                                             object.spec = step.geometry_spec.clone();
                                         }
                                         *geometry_presets_changed = true;
