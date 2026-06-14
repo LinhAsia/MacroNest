@@ -848,8 +848,6 @@ impl GeometrySpec {
 #[serde(default)]
 pub struct GeometryObject {
     pub id: u32,
-    pub name: String,
-    pub enabled: bool,
     pub spec: GeometrySpec,
 }
 
@@ -858,12 +856,7 @@ impl GeometryObject {
         let mut spec = GeometrySpec::default();
         spec.shape = shape;
         spec.apply_shape_defaults();
-        Self {
-            id,
-            name: format!("{shape:?} {id}"),
-            enabled: true,
-            spec,
-        }
+        Self { id, spec }
     }
 }
 

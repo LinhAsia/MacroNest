@@ -155,39 +155,12 @@ impl CrosshairApp {
                 let preset_id = preset.id;
                 if let Some(object) = preset.object_mut() {
                     ui.add_space(6.0);
-                    let mut frame = Frame::group(ui.style());
-                    if object.enabled {
-                        frame = frame
-                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 255, 170)))
-                            .fill(egui::Color32::from_rgba_unmultiplied(0, 255, 170, 30));
-                    }
                     let card_width = ui.available_width() - 16.0;
-                    frame.inner_margin(8).show(ui, |ui| {
+                    Frame::group(ui.style()).inner_margin(8).show(ui, |ui| {
                         ui.set_min_width(card_width);
                         ui.horizontal(|ui| {
                             let preview_active =
                                 self.geometry_preview_target == Some((preset_id, object.id));
-                            let checkbox_response = {
-                                let old_icon_width = ui.spacing().icon_width;
-                                ui.spacing_mut().icon_width = 20.0;
-                                let r = ui.checkbox(&mut object.enabled, "");
-                                ui.spacing_mut().icon_width = old_icon_width;
-                                r
-                            };
-                            if checkbox_response.changed() {
-                                changed = true;
-                            }
-                            let response = ui.add_sized(
-                                [180.0, 24.0],
-                                TextEdit::singleline(&mut object.name),
-                            );
-                            Self::apply_vietnamese_input_if_changed(
-                                &response,
-                                self.state.vietnamese_input_enabled,
-                                self.state.vietnamese_input_mode,
-                                &mut object.name,
-                            );
-                            changed |= response.changed();
 
                             ComboBox::from_id_salt((preset_id, object.id, "shape"))
                                 .width(132.0)
