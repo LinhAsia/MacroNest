@@ -14983,12 +14983,43 @@ impl CrosshairApp {
                             *live_sync = true;
                         }
                         if !clear_all {
-                            *live_sync |= ui
-                                .checkbox(
-                                    &mut step.geometry_hide_all_matches,
-                                    Self::tr_lang(language, "All shown", "Tat ca dang hien"),
-                                )
-                                .changed();
+                            let hide_mode_text = match step.geometry_hide_mode {
+                                crate::model::HideGeometryMode::Newest => {
+                                    Self::tr_lang(language, "Newest", "Moi nhat")
+                                }
+                                crate::model::HideGeometryMode::Oldest => {
+                                    Self::tr_lang(language, "Oldest", "Cu nhat")
+                                }
+                                crate::model::HideGeometryMode::AllShown => {
+                                    Self::tr_lang(language, "All shown", "Tat ca dang hien")
+                                }
+                            };
+                            egui::ComboBox::from_id_salt((id_prefix, "geometry-hide-mode"))
+                                .width(98.0)
+                                .selected_text(hide_mode_text)
+                                .show_ui(ui, |ui| {
+                                    *live_sync |= ui
+                                        .selectable_value(
+                                            &mut step.geometry_hide_mode,
+                                            crate::model::HideGeometryMode::Newest,
+                                            Self::tr_lang(language, "Newest", "Moi nhat"),
+                                        )
+                                        .changed();
+                                    *live_sync |= ui
+                                        .selectable_value(
+                                            &mut step.geometry_hide_mode,
+                                            crate::model::HideGeometryMode::Oldest,
+                                            Self::tr_lang(language, "Oldest", "Cu nhat"),
+                                        )
+                                        .changed();
+                                    *live_sync |= ui
+                                        .selectable_value(
+                                            &mut step.geometry_hide_mode,
+                                            crate::model::HideGeometryMode::AllShown,
+                                            Self::tr_lang(language, "All shown", "Tat ca dang hien"),
+                                        )
+                                        .changed();
+                                });
                             Self::render_geometry_preset_ref_editor(
                                 ui,
                                 language,

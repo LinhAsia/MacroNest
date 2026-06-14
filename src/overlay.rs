@@ -7913,7 +7913,7 @@ mod windows_overlay {
                     if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
                         hide_geometry_preset_by_id(
                             geometry_preset_id,
-                            step.geometry_hide_all_matches,
+                            step.geometry_hide_mode,
                         );
                     } else {
                         clear_geometry_overlay();
@@ -8489,7 +8489,7 @@ mod windows_overlay {
                     if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
                         hide_geometry_preset_by_id(
                             geometry_preset_id,
-                            step.geometry_hide_all_matches,
+                            step.geometry_hide_mode,
                         );
                     } else {
                         clear_geometry_overlay();
@@ -15573,10 +15573,10 @@ mod windows_overlay {
         preset
     }
 
-    fn hide_geometry_preset_by_id(preset_id: u32, hide_all_matches: bool) {
+    fn hide_geometry_preset_by_id(preset_id: u32, hide_mode: crate::model::HideGeometryMode) {
         {
             let mut hook_state = HOOK_STATE.lock();
-            if hide_all_matches {
+            if hide_mode == crate::model::HideGeometryMode::AllShown {
                 hook_state
                     .active_geometry_preset_owner_ids
                     .retain(|_, active_id| *active_id != preset_id);
@@ -15594,19 +15594,34 @@ mod windows_overlay {
                 hook_state
                     .active_geometry_preset_activation_order
                     .retain(|owner| remaining_owner_keys.contains(owner));
-            } else if let Some(owner) = hook_state
-                .active_geometry_preset_activation_order
-                .iter()
-                .rev()
-                .copied()
-                .find(|owner| {
-                    hook_state
-                        .active_geometry_preset_owner_ids
-                        .get(owner)
-                        .is_some_and(|active_id| *active_id == preset_id)
-                })
-            {
-                remove_active_geometry_preset_owner(&mut hook_state, owner);
+            } else {
+                let owner = match hide_mode {
+                    crate::model::HideGeometryMode::Newest => hook_state
+                        .active_geometry_preset_activation_order
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|owner| {
+                            hook_state
+                                .active_geometry_preset_owner_ids
+                                .get(owner)
+                                .is_some_and(|active_id| *active_id == preset_id)
+                        }),
+                    crate::model::HideGeometryMode::Oldest => hook_state
+                        .active_geometry_preset_activation_order
+                        .iter()
+                        .copied()
+                        .find(|owner| {
+                            hook_state
+                                .active_geometry_preset_owner_ids
+                                .get(owner)
+                                .is_some_and(|active_id| *active_id == preset_id)
+                        }),
+                    crate::model::HideGeometryMode::AllShown => None,
+                };
+                if let Some(owner) = owner {
+                    remove_active_geometry_preset_owner(&mut hook_state, owner);
+                }
             }
             rebuild_active_geometry_preset_ids(&mut hook_state);
         }
