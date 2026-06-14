@@ -13866,8 +13866,8 @@ impl CrosshairApp {
         ui.add_space(4.0);
         ui.weak(Self::tr_lang(
             language,
-            "Any override field you fill in here will replace the selected preset value.",
-            "O nao ban dien gia tri vao thi se de len gia tri tu preset da chon.",
+            "Filled fields override the selected preset.",
+            "O co gia tri se de len preset da chon.",
         ));
         ui.add_space(4.0);
 
