@@ -1148,6 +1148,8 @@ pub struct MacroStep {
     pub geometry_preset_use_custom_ref: bool,
     #[serde(default)]
     pub geometry_preset_modify_enabled: bool,
+    #[serde(default = "default_true")]
+    pub geometry_hide_all_matches: bool,
     #[serde(default)]
     pub geometry_preset_modify_initialized: bool,
     #[serde(default)]
@@ -1238,6 +1240,7 @@ impl Default for MacroStep {
             geometry_preset_id: None,
             geometry_preset_use_custom_ref: false,
             geometry_preset_modify_enabled: false,
+            geometry_hide_all_matches: true,
             geometry_preset_modify_initialized: false,
             geometry_spec: GeometrySpec::default(),
             geometry_collapsed: true,
