@@ -5108,10 +5108,35 @@ mod windows_overlay {
             return Ok(());
         };
 
-        let margin = 5;
+        let monitor = MonitorFromWindow(target, MONITOR_DEFAULTTONEAREST);
+        let mut monitor_info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        let monitor_rect = if GetMonitorInfoW(monitor, &mut monitor_info).as_bool() {
+            monitor_info.rcMonitor
+        } else {
+            RECT {
+                left: 0,
+                top: 0,
+                right: GetSystemMetrics(SM_CXSCREEN),
+                bottom: GetSystemMetrics(SM_CYSCREEN),
+            }
+        };
+
+        let margin = 5i32;
         let thickness = 4u32;
-        let width = (rect.right - rect.left + margin * 2).max(1) as u32;
-        let height = (rect.bottom - rect.top + margin * 2).max(1) as u32;
+        let visible_left = (rect.left - margin).max(monitor_rect.left);
+        let visible_top = (rect.top - margin).max(monitor_rect.top);
+        let visible_right = (rect.right + margin).min(monitor_rect.right);
+        let visible_bottom = (rect.bottom + margin).min(monitor_rect.bottom);
+        if visible_right <= visible_left || visible_bottom <= visible_top {
+            let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
+            return Ok(());
+        }
+
+        let width = (visible_right - visible_left).max(1) as u32;
+        let height = (visible_bottom - visible_top).max(1) as u32;
         let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
         let color = image::Rgba([126, 224, 182, 235]);
 
@@ -5130,8 +5155,8 @@ mod windows_overlay {
         paint_crosshair_canvas(
             runtime.focus_highlight_hwnd,
             canvas,
-            rect.left - margin,
-            rect.top - margin,
+            visible_left,
+            visible_top,
         )?;
         let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_SHOWNA);
         Ok(())
