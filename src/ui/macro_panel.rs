@@ -420,6 +420,7 @@ impl CrosshairApp {
                                     ui.label(egui::RichText::new("- atan2(y, x)").monospace());
                                     ui.label(egui::RichText::new("- sqrt(a)").monospace());
                                     ui.label(egui::RichText::new("- pow(a, b)").monospace());
+                                    ui.label(egui::RichText::new("- round(a, digits)").monospace());
                                     ui.label(egui::RichText::new("- ceil(a) / floor(a)").monospace());
                                     ui.label(egui::RichText::new("- factorial(n)").monospace());
                                     ui.label(egui::RichText::new("- gcd(a, b, ...) / lcm(a, b, ...)").monospace());
@@ -12340,6 +12341,7 @@ impl CrosshairApp {
                 | "cos"
                 | "sqrt"
                 | "pow"
+                | "round"
                 | "ceil"
                 | "floor"
                 | "degrees"
@@ -12815,6 +12817,7 @@ impl CrosshairApp {
             "cos()",
             "sqrt()",
             "pow()",
+            "round()",
             "ceil()",
             "floor()",
             "degrees()",
@@ -12930,6 +12933,7 @@ impl CrosshairApp {
             "cos()" => "cos(angleDeg) * 1000".to_string(),
             "sqrt()" => "sqrt(a)".to_string(),
             "pow()" => "pow(a, b)".to_string(),
+            "round()" => "round(a, digits)".to_string(),
             "ceil()" => "ceil(a)".to_string(),
             "floor()" => "floor(a)".to_string(),
             "degrees()" => "degrees(rad)".to_string(),

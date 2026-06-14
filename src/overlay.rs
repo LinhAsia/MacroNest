@@ -9584,8 +9584,16 @@ mod windows_overlay {
             return Some(String::new());
         }
 
-        let lower = resolved.to_ascii_lowercase();
-        let looks_like_expression = resolved.chars().any(|c| "+-*/()".contains(c))
+        if looks_like_math_expression_text(resolved) {
+            Some(evaluate_math_expression_f64(resolved).to_string())
+        } else {
+            Some(resolved.to_string())
+        }
+    }
+
+    fn looks_like_math_expression_text(text: &str) -> bool {
+        let lower = text.to_ascii_lowercase();
+        text.chars().any(|c| "+-*/()".contains(c))
             || lower == "pi"
             || lower.contains("random(")
             || lower.contains("choice(")
@@ -9604,6 +9612,7 @@ mod windows_overlay {
             || lower.contains("tanh(")
             || lower.contains("sqrt(")
             || lower.contains("pow(")
+            || lower.contains("round(")
             || lower.contains("ceil(")
             || lower.contains("floor(")
             || lower.contains("degrees(")
@@ -9614,13 +9623,7 @@ mod windows_overlay {
             || lower.contains("isqrt(")
             || lower.contains("comb(")
             || lower.contains("perm(")
-            || lower.contains(".tonumber");
-
-        if looks_like_expression {
-            Some(evaluate_math_expression_f64(resolved).to_string())
-        } else {
-            Some(resolved.to_string())
-        }
+            || lower.contains(".tonumber")
     }
 
     fn smart_set_variable_from_expression(target_var: &str, expr_raw: &str) {
@@ -9644,6 +9647,10 @@ mod windows_overlay {
             if let Ok(val) = expr_trimmed.parse::<f64>() {
                 set_variable_value(target_trimmed, val);
                 TEXT_VARIABLES.lock().remove(target_trimmed);
+            } else if looks_like_math_expression_text(&expr_trimmed) {
+                let val = evaluate_math_expression_f64(&expr_trimmed);
+                set_variable_value(target_trimmed, val);
+                TEXT_VARIABLES.lock().remove(target_trimmed);
             } else {
                 set_text_variable_value(target_trimmed, &expr_trimmed);
                 RUNTIME_VARIABLES.lock().remove(target_trimmed);
@@ -9654,33 +9661,7 @@ mod windows_overlay {
                 set_variable_value(target_trimmed, val);
                 TEXT_VARIABLES.lock().remove(target_trimmed);
             } else {
-                let has_math_op = interpolated
-                    .chars()
-                    .any(|c| c == '+' || c == '-' || c == '*' || c == '/' || c == '(' || c == ')');
-                let lower = interpolated.to_lowercase();
-                let has_math_func = lower.contains("min(")
-                    || lower.contains("max(")
-                    || lower.contains("abs(")
-                    || lower.contains("random(")
-                    || lower.contains("atan(")
-                    || lower.contains("atan2(")
-                    || lower.contains("sin(")
-                    || lower.contains("cos(")
-                    || lower.contains("sqrt(")
-                    || lower.contains("pow(")
-                    || lower.contains("ceil(")
-                    || lower.contains("floor(")
-                    || lower.contains("degrees(")
-                    || lower.contains("radians(")
-                    || lower.contains("factorial(")
-                    || lower.contains("gcd(")
-                    || lower.contains("lcm(")
-                    || lower.contains("isqrt(")
-                    || lower.contains("comb(")
-                    || lower.contains("perm(")
-                    || lower == "pi"
-                    || lower.contains(".tonumber");
-                if has_math_op || has_math_func {
+                if looks_like_math_expression_text(&interpolated) {
                     let val = evaluate_math_expression_f64(&interpolated);
                     set_variable_value(target_trimmed, val);
                     TEXT_VARIABLES.lock().remove(target_trimmed);
@@ -10103,6 +10084,17 @@ mod windows_overlay {
                             let value = base.powf(exponent);
                             if value.is_finite() { value } else { 0.0 }
                         }
+                        "round" => {
+                            let value = resolved_args.first().copied().unwrap_or(0.0);
+                            let digits = clamp_f64_to_i32(resolved_args.get(1).copied().unwrap_or(0.0))
+                                .clamp(0, 9);
+                            let factor = 10_f64.powi(digits);
+                            if value.is_finite() {
+                                (value * factor).round() / factor
+                            } else {
+                                0.0
+                            }
+                        }
                         "ceil" => resolved_args.first().copied().unwrap_or(0.0).ceil(),
                         "floor" => resolved_args.first().copied().unwrap_or(0.0).floor(),
                         "degrees" => resolved_args.first().copied().unwrap_or(0.0).to_degrees(),
@@ -10338,6 +10330,15 @@ mod windows_overlay {
             assert_eq!(evaluate_math_expression("cos(0) * 1000"), 1000);
             assert_eq!(evaluate_math_expression("sqrt(9)"), 3);
             assert_eq!(evaluate_math_expression("pow(2, 3)"), 8);
+            assert_eq!(evaluate_math_expression("round(863.6897460727389)"), 864);
+            assert!(
+                (evaluate_math_expression_f64("round(863.6897460727389, 2)") - 863.69).abs()
+                    < 0.000001
+            );
+            assert!(
+                (evaluate_math_expression_f64("round(863.6897460727389, 1)") - 863.7).abs()
+                    < 0.000001
+            );
             assert_eq!(evaluate_math_expression("ceil(pi)"), 4);
             assert_eq!(evaluate_math_expression("floor(pi)"), 3);
             assert_eq!(evaluate_math_expression("degrees(pi)"), 180);
@@ -10454,6 +10455,24 @@ mod windows_overlay {
                 let parsed = chosen.parse::<i32>().unwrap();
                 assert!((1..=3).contains(&parsed) || parsed == 9);
             }
+        }
+
+        #[test]
+        fn test_set_variable_round_expression_without_braces() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            RUNTIME_VARIABLES.lock().clear();
+            TEXT_VARIABLES.lock().clear();
+
+            smart_set_variable_from_expression("pretty", "round(863.6897460727389, 2)");
+
+            let val = RUNTIME_VARIABLES.lock()
+                .get("pretty")
+                .copied()
+                .unwrap_or_default();
+            assert!((val - 863.69).abs() < 0.000001);
+            assert_eq!(TEXT_VARIABLES.lock().get("pretty"), None);
+
+            RUNTIME_VARIABLES.lock().clear();
         }
 
         #[test]
