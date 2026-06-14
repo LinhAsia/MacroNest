@@ -821,6 +821,8 @@ pub struct CrosshairApp {
     geometry_preview_target: Option<(u32, u32)>,
     geometry_preset_preview_target: Option<u32>,
     geometry_preview_sent: Option<GeometrySpec>,
+    show_geometry_preset_preview_target: Option<(u32, u32, usize, bool)>,
+    show_geometry_preset_preview_sent: Option<Option<u32>>,
     audio_sense_devices: Vec<String>,
     audio_sense_devices_loaded_once: bool,
     audio_sense_devices_loading: bool,
@@ -1061,6 +1063,8 @@ impl CrosshairApp {
             geometry_preview_target: None,
             geometry_preset_preview_target: None,
             geometry_preview_sent: None,
+            show_geometry_preset_preview_target: None,
+            show_geometry_preset_preview_sent: None,
             audio_sense_devices: Vec::new(),
             audio_sense_devices_loaded_once: false,
             audio_sense_devices_loading: false,
@@ -10109,10 +10113,16 @@ impl eframe::App for CrosshairApp {
         }
 
         let keep_macro_geometry_preview = viewport_focused && self.state.active_panel == AppPanel::Macros;
-        if !keep_macro_geometry_preview && self.draw_geometry_step_preview_target.is_some() {
+        if !keep_macro_geometry_preview
+            && (self.draw_geometry_step_preview_target.is_some()
+                || self.show_geometry_preset_preview_target.is_some())
+        {
             self.draw_geometry_step_preview_target = None;
             self.draw_geometry_step_preview_sent = None;
+            self.show_geometry_preset_preview_target = None;
+            self.show_geometry_preset_preview_sent = None;
             let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+            let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometryPreset(None));
         } else if let Some((group_id, preset_id, step_index, is_hold_stop)) = self.draw_geometry_step_preview_target {
             let preview_spec = self.state.macro_groups.iter()
                 .find(|g| g.id == group_id)
@@ -10142,6 +10152,42 @@ impl eframe::App for CrosshairApp {
                 let _ = self
                     .overlay_tx
                     .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(preview_spec));
+            }
+        }
+        if keep_macro_geometry_preview {
+            if let Some((group_id, preset_id, step_index, is_hold_stop)) =
+                self.show_geometry_preset_preview_target
+            {
+                let preview_preset_id = self
+                    .state
+                    .macro_groups
+                    .iter()
+                    .find(|g| g.id == group_id)
+                    .and_then(|g| g.presets.iter().find(|p| p.id == preset_id))
+                    .and_then(|p| {
+                        if is_hold_stop {
+                            Some(&p.hold_stop_step)
+                        } else {
+                            p.steps.get(step_index)
+                        }
+                    })
+                    .and_then(|step| {
+                        if step.action == crate::model::MacroAction::ShowGeometryPreset {
+                            Self::resolve_geometry_preset_preview_id(
+                                step,
+                                &self.state.geometry_presets,
+                            )
+                        } else {
+                            None
+                        }
+                    });
+
+                if self.show_geometry_preset_preview_sent != Some(preview_preset_id) {
+                    self.show_geometry_preset_preview_sent = Some(preview_preset_id);
+                    let _ = self.overlay_tx.send(
+                        crate::overlay::OverlayCommand::PreviewGeometryPreset(preview_preset_id),
+                    );
+                }
             }
         }
 
