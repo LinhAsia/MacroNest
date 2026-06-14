@@ -14983,6 +14983,12 @@ impl CrosshairApp {
                             *live_sync = true;
                         }
                         if !clear_all {
+                            *live_sync |= ui
+                                .checkbox(
+                                    &mut step.geometry_hide_all_matches,
+                                    Self::tr_lang(language, "All shown", "Tat ca dang hien"),
+                                )
+                                .changed();
                             Self::render_geometry_preset_ref_editor(
                                 ui,
                                 language,

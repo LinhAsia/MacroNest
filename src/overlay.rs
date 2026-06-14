@@ -761,6 +761,7 @@ mod windows_overlay {
         active_geometry_preset_owner_ids: HashMap<(u32, usize), u32>,
         active_geometry_preset_owner_expires: HashMap<(u32, usize), Instant>,
         active_geometry_preset_instances: HashMap<(u32, usize), ActiveGeometryPresetInstance>,
+        active_geometry_preset_activation_order: Vec<(u32, usize)>,
         active_geometry_steps: HashMap<(u32, usize), crate::model::GeometrySpec>,
         rendered_geometry_steps: HashMap<(u32, usize), GeometryRenderShape>,
         active_geometry_steps_expires: HashMap<(u32, usize), Instant>,
@@ -857,6 +858,7 @@ mod windows_overlay {
                 active_geometry_preset_owner_ids: HashMap::new(),
                 active_geometry_preset_owner_expires: HashMap::new(),
                 active_geometry_preset_instances: HashMap::new(),
+                active_geometry_preset_activation_order: Vec::new(),
                 active_geometry_steps: HashMap::new(),
                 rendered_geometry_steps: HashMap::new(),
                 active_geometry_steps_expires: HashMap::new(),
@@ -4781,9 +4783,7 @@ mod windows_overlay {
             }
             if !expired_geometry_owners.is_empty() {
                 for owner in &expired_geometry_owners {
-                    hook_state.active_geometry_preset_owner_ids.remove(owner);
-                    hook_state.active_geometry_preset_owner_expires.remove(owner);
-                    hook_state.active_geometry_preset_instances.remove(owner);
+                    remove_active_geometry_preset_owner(&mut hook_state, *owner);
                 }
                 rebuild_active_geometry_preset_ids(&mut hook_state);
             }
@@ -7911,7 +7911,10 @@ mod windows_overlay {
 
                 MacroAction::HideGeometryPreset => {
                     if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
-                        hide_geometry_preset_by_id(geometry_preset_id);
+                        hide_geometry_preset_by_id(
+                            geometry_preset_id,
+                            step.geometry_hide_all_matches,
+                        );
                     } else {
                         clear_geometry_overlay();
                     }
@@ -8484,7 +8487,10 @@ mod windows_overlay {
 
                 MacroAction::HideGeometryPreset => {
                     if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
-                        hide_geometry_preset_by_id(geometry_preset_id);
+                        hide_geometry_preset_by_id(
+                            geometry_preset_id,
+                            step.geometry_hide_all_matches,
+                        );
                     } else {
                         clear_geometry_overlay();
                     }
@@ -12806,6 +12812,15 @@ mod windows_overlay {
             .extend(hook_state.active_geometry_preset_owner_ids.values().copied());
     }
 
+    fn remove_active_geometry_preset_owner(hook_state: &mut HookState, owner: (u32, usize)) {
+        hook_state.active_geometry_preset_owner_ids.remove(&owner);
+        hook_state.active_geometry_preset_owner_expires.remove(&owner);
+        hook_state.active_geometry_preset_instances.remove(&owner);
+        hook_state
+            .active_geometry_preset_activation_order
+            .retain(|active_owner| *active_owner != owner);
+    }
+
     fn geometry_overlay_dynamic_shapes(hook_state: &mut HookState) -> Vec<GeometryRenderShape> {
         let mut shapes = Vec::new();
         for spec in hook_state.active_geometry_steps.values() {
@@ -15424,6 +15439,10 @@ mod windows_overlay {
     ) {
         {
             let mut hook_state = HOOK_STATE.lock();
+            hook_state
+                .active_geometry_preset_activation_order
+                .retain(|active_owner| *active_owner != owner);
+            hook_state.active_geometry_preset_activation_order.push(owner);
             hook_state.active_geometry_preset_owner_ids.insert(owner, preset_id);
             if duration_ms > 0 {
                 hook_state.active_geometry_preset_owner_expires.insert(
@@ -15554,23 +15573,41 @@ mod windows_overlay {
         preset
     }
 
-    fn hide_geometry_preset_by_id(preset_id: u32) {
+    fn hide_geometry_preset_by_id(preset_id: u32, hide_all_matches: bool) {
         {
             let mut hook_state = HOOK_STATE.lock();
-            hook_state
-                .active_geometry_preset_owner_ids
-                .retain(|_, active_id| *active_id != preset_id);
-            let remaining_owner_keys = hook_state
-                .active_geometry_preset_owner_ids
-                .keys()
+            if hide_all_matches {
+                hook_state
+                    .active_geometry_preset_owner_ids
+                    .retain(|_, active_id| *active_id != preset_id);
+                let remaining_owner_keys = hook_state
+                    .active_geometry_preset_owner_ids
+                    .keys()
+                    .copied()
+                    .collect::<HashSet<_>>();
+                hook_state
+                    .active_geometry_preset_owner_expires
+                    .retain(|owner, _| remaining_owner_keys.contains(owner));
+                hook_state
+                    .active_geometry_preset_instances
+                    .retain(|_, instance| instance.base_preset_id != preset_id);
+                hook_state
+                    .active_geometry_preset_activation_order
+                    .retain(|owner| remaining_owner_keys.contains(owner));
+            } else if let Some(owner) = hook_state
+                .active_geometry_preset_activation_order
+                .iter()
+                .rev()
                 .copied()
-                .collect::<HashSet<_>>();
-            hook_state
-                .active_geometry_preset_owner_expires
-                .retain(|owner, _| remaining_owner_keys.contains(owner));
-            hook_state
-                .active_geometry_preset_instances
-                .retain(|_, instance| instance.base_preset_id != preset_id);
+                .find(|owner| {
+                    hook_state
+                        .active_geometry_preset_owner_ids
+                        .get(owner)
+                        .is_some_and(|active_id| *active_id == preset_id)
+                })
+            {
+                remove_active_geometry_preset_owner(&mut hook_state, owner);
+            }
             rebuild_active_geometry_preset_ids(&mut hook_state);
         }
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
@@ -15678,6 +15715,7 @@ mod windows_overlay {
             hook_state.active_geometry_preset_owner_ids.clear();
             hook_state.active_geometry_preset_owner_expires.clear();
             hook_state.active_geometry_preset_instances.clear();
+            hook_state.active_geometry_preset_activation_order.clear();
             hook_state.active_geometry_steps.clear();
             hook_state.rendered_geometry_steps.clear();
             hook_state.active_geometry_steps_expires.clear();
