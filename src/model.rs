@@ -504,6 +504,7 @@ pub enum MacroAction {
     FocusWindowPreset,
     TriggerMacroPreset,
     TriggerMacroPresetIfEnabled,
+    StopMacroPreset,
     #[serde(alias = "TriggerCustomPreset")]
     TriggerCommandPreset,
     EnableCrosshairProfile,
