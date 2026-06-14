@@ -189,6 +189,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(HashSet::new()));
     static STOP_REQUESTED_MACRO_PRESETS: Lazy<Mutex<HashSet<u32>>> =
         Lazy::new(|| Mutex::new(HashSet::new()));
+    static FORCE_STOP_REQUESTED_MACRO_PRESETS: Lazy<Mutex<HashSet<u32>>> =
+        Lazy::new(|| Mutex::new(HashSet::new()));
     static IMAGE_SEARCH_WAIT_GENERATIONS: Lazy<Mutex<HashMap<u32, u64>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
     pub(crate) static HUD_DISPLAY: Lazy<Mutex<Option<HudDisplayState>>> = Lazy::new(|| Mutex::new(None));
@@ -5803,6 +5805,7 @@ mod windows_overlay {
     ) -> Result<()> {
         SUPPRESSED_MACRO_HOTKEYS.lock().insert(hotkey_id);
         STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
+        FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
         HOOK_STATE
             .lock()
             .stop_ignore_keys
@@ -5842,6 +5845,7 @@ mod windows_overlay {
             hide_toolbox_for_owner(preset.id);
             HOOK_STATE.lock().stop_ignore_keys.remove(&preset.id);
             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
+            FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
             SUPPRESSED_MACRO_HOTKEYS.lock().remove(&hotkey_id);
         });
         Ok(())
@@ -5864,6 +5868,7 @@ mod windows_overlay {
         }
 
         STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
+        FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
         HOOK_STATE
             .lock()
             .stop_ignore_keys
@@ -5956,6 +5961,7 @@ mod windows_overlay {
         stop_vision_following_ids(&image_search_preset_ids);
         hide_toolbox_for_owner(preset_id);
         HOOK_STATE.lock().stop_ignore_keys.remove(&preset_id);
+        FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
     }
 
     fn current_hold_run_matches(preset_id: u32, run_token: u64) -> bool {
@@ -6307,6 +6313,10 @@ mod windows_overlay {
     }
 
     fn macro_stop_requested(preset_id: u32, stop_immediately_on_retrigger: bool) -> bool {
+        if FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id) {
+            return true;
+        }
+
         if !STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id) {
             return false;
         }
@@ -7091,6 +7101,7 @@ mod windows_overlay {
     }
 
     fn stop_macro_preset_by_id(preset_id: u32) {
+        FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
         let is_active_hold = {
             let hook_state = HOOK_STATE.lock();
             hook_state.active_hold_macros.contains_key(&preset_id)
@@ -18299,6 +18310,7 @@ mod windows_overlay {
             let hotkey_id = preset.id as i32;
             SUPPRESSED_MACRO_HOTKEYS.lock().insert(hotkey_id);
             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
+            FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
             thread::spawn(move || {
                 MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().clear());
                 let cleanup_steps = collect_macro_release_steps(&preset.steps);
@@ -18320,6 +18332,8 @@ mod windows_overlay {
                 for step in cleanup_steps {
                     let _ = send_key_event(&step);
                 }
+                STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
+                FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
                 SUPPRESSED_MACRO_HOTKEYS.lock().remove(&hotkey_id);
             });
         }
