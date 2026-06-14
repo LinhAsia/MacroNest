@@ -628,6 +628,7 @@ impl eframe::App for PopupBlobApp {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MacroActionSubmenuKind {
+    Macro,
     Mouse,
     ImageSearch,
     Timer,
@@ -4869,6 +4870,7 @@ impl CrosshairApp {
             MacroAction::ApplyWindowPreset => "Window Control",
             MacroAction::FocusWindowPreset => "FocusWindow",
             MacroAction::TriggerMacroPreset => "TriggerMacro",
+            MacroAction::TriggerMacroPresetIfEnabled => "TriggerMacroIfEnabled",
             MacroAction::TriggerCommandPreset => "TriggerCommand",
             MacroAction::EnableCrosshairProfile => "EnableCrosshair",
             MacroAction::DisableCrosshair => "DisableCrosshair",
@@ -4957,6 +4959,9 @@ impl CrosshairApp {
                 }
                 MacroAction::TriggerMacroPreset => {
                     "Chạy một preset macro khác trong cùng nhóm macro."
+                }
+                MacroAction::TriggerMacroPresetIfEnabled => {
+                    "Only trigger selected macro presets when they are enabled."
                 }
                 MacroAction::TriggerCommandPreset => {
                     "Chạy một preset câu lệnh tùy chỉnh từ tab Dòng lệnh."
@@ -5088,6 +5093,9 @@ impl CrosshairApp {
                 MacroAction::TriggerMacroPreset => {
                     "Run another macro preset from the same macro group."
                 }
+                MacroAction::TriggerMacroPresetIfEnabled => {
+                    "Run selected macro presets only when those presets are enabled."
+                }
                 MacroAction::TriggerCommandPreset => {
                     "Run one custom command preset from the Custom tab."
                 }
@@ -5218,6 +5226,7 @@ impl CrosshairApp {
             MacroAction::ApplyWindowPreset => 0xe8b8,
             MacroAction::FocusWindowPreset => 0xe89e,
             MacroAction::TriggerMacroPreset => 0xe037,
+            MacroAction::TriggerMacroPresetIfEnabled => 0xe86c,
             MacroAction::TriggerCommandPreset => 0xeb8e,
             MacroAction::EnableCrosshairProfile => 0xe3c5,
             MacroAction::DisableCrosshair => 0xe1b7,
@@ -5304,6 +5313,7 @@ impl CrosshairApp {
                 MacroAction::ApplyWindowPreset => "Cửa sổ",
                 MacroAction::FocusWindowPreset => "Cửa sổ",
                 MacroAction::TriggerMacroPreset => "Macro",
+                MacroAction::TriggerMacroPresetIfEnabled => "Macro On",
                 MacroAction::TriggerCommandPreset => "Câu lệnh",
                 MacroAction::EnableCrosshairProfile => "Tâm ngắm",
                 MacroAction::DisableCrosshair => "Tắt tâm",
@@ -5380,6 +5390,7 @@ impl CrosshairApp {
                 MacroAction::ApplyWindowPreset => "Window",
                 MacroAction::FocusWindowPreset => "Focus",
                 MacroAction::TriggerMacroPreset => "Macro",
+                MacroAction::TriggerMacroPresetIfEnabled => "Macro On",
                 MacroAction::TriggerCommandPreset => "Cmd",
                 MacroAction::EnableCrosshairProfile => "Cross",
                 MacroAction::DisableCrosshair => "NoCross",
@@ -5457,6 +5468,7 @@ impl CrosshairApp {
                 MacroAction::ApplyWindowPreset => "Window",
                 MacroAction::FocusWindowPreset => "Focus",
                 MacroAction::TriggerMacroPreset => "Macro",
+                MacroAction::TriggerMacroPresetIfEnabled => "Macro On",
                 MacroAction::TriggerCommandPreset => "Cmd",
                 MacroAction::EnableCrosshairProfile => "Cross",
                 MacroAction::DisableCrosshair => "NoCross",
@@ -5643,6 +5655,7 @@ impl CrosshairApp {
                 | MacroAction::ApplyWindowPreset
                 | MacroAction::FocusWindowPreset
                 | MacroAction::TriggerMacroPreset
+                | MacroAction::TriggerMacroPresetIfEnabled
                 | MacroAction::TriggerCommandPreset
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::EnablePinPreset
@@ -7725,12 +7738,24 @@ impl CrosshairApp {
         if matches!(
             step.action,
             MacroAction::TriggerMacroPreset
+                | MacroAction::TriggerMacroPresetIfEnabled
                 | MacroAction::EnableMacroPreset
                 | MacroAction::DisableMacroPreset
-        ) && let Ok(id) = step.key.trim().parse::<u32>()
-            && id == old_preset_id
+        )
         {
-            step.key = new_preset_id.to_string();
+            let remapped = step
+                .key
+                .split(',')
+                .filter_map(|part| part.trim().parse::<u32>().ok())
+                .map(|id| if id == old_preset_id { new_preset_id } else { id })
+                .collect::<Vec<_>>();
+            if !remapped.is_empty() {
+                step.key = remapped
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+            }
         }
     }
 
@@ -7810,14 +7835,29 @@ impl CrosshairApp {
         if matches!(
             step.action,
             MacroAction::TriggerMacroPreset
+                | MacroAction::TriggerMacroPresetIfEnabled
                 | MacroAction::EnableMacroPreset
                 | MacroAction::DisableMacroPreset
-        ) && let Ok(old_id) = step.key.trim().parse::<u32>()
-            && let Some(new_id) = preset_id_map.get(&old_id)
+        )
         {
-            step.key = new_id.to_string();
+            let remapped = step
+                .key
+                .split(',')
+                .filter_map(|part| part.trim().parse::<u32>().ok())
+                .map(|id| preset_id_map.get(&id).copied().unwrap_or(id))
+                .collect::<Vec<_>>();
+            if !remapped.is_empty() {
+                step.key = remapped
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+            }
         }
-        if step.action == MacroAction::TriggerMacroPreset
+        if matches!(
+            step.action,
+            MacroAction::TriggerMacroPreset | MacroAction::TriggerMacroPresetIfEnabled
+        )
             && step.trigger_macro_group_id == Some(old_group_id)
         {
             step.trigger_macro_group_id = Some(new_group_id);
@@ -7825,7 +7865,10 @@ impl CrosshairApp {
     }
 
     fn bind_trigger_macro_step_to_group(step: &mut MacroStep, group_id: u32) {
-        if step.action == MacroAction::TriggerMacroPreset {
+        if matches!(
+            step.action,
+            MacroAction::TriggerMacroPreset | MacroAction::TriggerMacroPresetIfEnabled
+        ) {
             step.trigger_macro_group_id = Some(group_id);
         }
     }

@@ -291,6 +291,7 @@ impl CrosshairApp {
 
     fn clear_macro_action_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let macro_popup_id = ui.make_persistent_id((id_source, "macro-submenu-popup"));
         let active_mouse_click_popup_key_id =
             ui.make_persistent_id((id_source, "mouse-click-active-submenu-key"));
         let mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
@@ -302,6 +303,7 @@ impl CrosshairApp {
         let funny_popup_id = ui.make_persistent_id((id_source, "funny-submenu-popup"));
         ui.ctx().data_mut(|data| {
             data.insert_temp(owner_id, None::<MacroActionSubmenuKind>);
+            data.insert_temp(macro_popup_id, false);
             data.insert_temp(active_mouse_click_popup_key_id, None::<&'static str>);
             data.insert_temp(mouse_popup_id, false);
             data.insert_temp(image_popup_id, false);
@@ -311,6 +313,7 @@ impl CrosshairApp {
             data.insert_temp(audio_sense_popup_id, false);
             data.insert_temp(funny_popup_id, false);
         });
+        egui::Popup::close_id(ui.ctx(), macro_popup_id);
         egui::Popup::close_id(ui.ctx(), mouse_popup_id);
         egui::Popup::close_id(ui.ctx(), image_popup_id);
         egui::Popup::close_id(ui.ctx(), timer_popup_id);
@@ -5292,7 +5295,6 @@ impl CrosshairApp {
                                                             MacroAction::TypeText,
                                                             MacroAction::ApplyWindowPreset,
                                                             MacroAction::FocusWindowPreset,
-                                                            MacroAction::TriggerMacroPreset,
                                                             MacroAction::TriggerCommandPreset,
                                                             MacroAction::EnableCrosshairProfile,
                                                             MacroAction::DisableCrosshair,
@@ -5337,6 +5339,16 @@ impl CrosshairApp {
                                                             ui,
                                                             language,
                                                             (group.id, preset.id, "hold-stop-mouse-group"),
+                                                            &mut step.action,
+                                                            &mut live_sync,
+                                                            action_hover_id,
+                                                        );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
+                                                        Self::render_trigger_macro_action_group_option(
+                                                            ui,
+                                                            language,
+                                                            (group.id, preset.id, "hold-stop-trigger-macro-group"),
                                                             &mut step.action,
                                                             &mut live_sync,
                                                             action_hover_id,
@@ -5441,102 +5453,21 @@ impl CrosshairApp {
                                                         step.key = selected_window.unwrap_or_default();
                                                         live_sync = true;
                                                     }
-                                                } else if step.action == MacroAction::TriggerMacroPreset {
-                                                    // Auto-init group if None
-                                                    if step.trigger_macro_group_id.is_none() {
-                                                        step.trigger_macro_group_id = Some(group.id);
-                                                        live_sync = true;
-                                                    }
-                                                    let trig_group_id = step.trigger_macro_group_id.unwrap_or(group.id);
-                                                    let trig_group_name = all_groups_for_trigger
-                                                        .iter()
-                                                        .find(|(gid, _, _)| *gid == trig_group_id)
-                                                        .map(|(_, gname, _)| gname.clone())
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select group", "Chọn group").to_owned());
-                                                    // ComboBox 1: Select group
-                                                    egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-trigger-macro-group"))
-                                                        .width(110.0)
-                                                        .selected_text(&trig_group_name)
-                                                        .show_ui(ui, |ui| {
-                                                            for (gid, gname, gpresets) in &all_groups_for_trigger {
-                                                                if ui
-                                                                    .selectable_label(*gid == trig_group_id, &{
-                                                                    if gname.starts_with("Macro Group") && !gpresets.is_empty() {
-                                                                        let preset_labels: Vec<String> = gpresets.iter().map(|(_, lbl)| lbl.clone()).collect();
-                                                                        format!("{} [{}]", gname, preset_labels.join(", "))
-                                                                    } else {
-                                                                        gname.clone()
-                                                                    }
-                                                                })
-                                                                    .clicked()
-                                                                {
-                                                                    step.trigger_macro_group_id = Some(*gid);
-                                                                    if *gid != trig_group_id {
-                                                                        step.key = String::new();
-                                                                    }
-                                                                    live_sync = true;
-                                                                }
-                                                            }
-                                                        });
-                                                    // ComboBox 2: Select preset from chosen group
-                                                    let trig_presets: Vec<(u32, String)> = all_groups_for_trigger
-                                                        .iter()
-                                                        .find(|(gid, _, _)| *gid == trig_group_id)
-                                                        .map(|(gid, _, gpresets)| {
-                                                            gpresets.iter()
-                                                                .filter(|(pid, _)| true)
-                                                                .cloned()
-                                                                .collect()
-                                                        })
-                                                        .unwrap_or_default();
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| trig_presets.iter().find(|(pid, _)| *pid == id).map(|(_, lbl)| lbl.clone()))
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select macro", "Chọn macro").to_owned());
-                                                    egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-trigger-macro"))
-                                                        .width(146.0)
-                                                        .selected_text(selected_label)
-                                                        .show_ui(ui, |ui| {
-                                                            for (preset_option_id, preset_option_label) in &trig_presets {
-                                                                if ui
-                                                                    .selectable_label(selected_id == Some(*preset_option_id), preset_option_label)
-                                                                    .clicked()
-                                                                {
-                                                                    step.key = preset_option_id.to_string();
-                                                                    live_sync = true;
-                                                                }
-                                                            }
-                                                        });
-                                                        ui.add_space(4.0);
-                                                        let selected_trigger_warning = selected_id
-                                                            .and_then(|id| {
-                                                                all_trigger_macro_warnings
-                                                                    .iter()
-                                                                    .find(|(preset_id, _)| *preset_id == id)
-                                                                    .map(|(_, warning)| *warning)
-                                                            })
-                                                            .unwrap_or(false);
-                                                        if selected_trigger_warning {
-                                                            let warn_color = Color32::from_rgb(255, 90, 0);
-                                                            let response = ui.add_sized([18.0, 18.0], egui::Button::new(
-                                                                Self::material_icon_text(0xe002, 16.0).color(warn_color)
-                                                            ).frame(false));
-                                                            response.clone().on_hover_ui(|ui| {
-                                                                    ui.horizontal(|ui| {
-                                                                        ui.label(Self::material_icon_text(0xe002, 14.0).color(warn_color));
-                                                                        ui.label(RichText::new(Self::tr_lang(language, "TRIGGER WARNING", "CẢNH BÁO KÍCH HOẠT")).strong().color(warn_color));
-                                                                    });
-                                                                    ui.label(Self::tr_lang(
-                                                                        language,
-                                                                        "This macro preset can run continuously or keep working in the background. Triggering it from another macro can make it run immediately without a hold key.",
-                                                                        "Macro này có thể chạy liên tục hoặc tiếp tục chạy trong nền. Kích hoạt nó từ macro khác có thể làm nó chạy ngay mà không cần giữ phím.",
-                                                                    ));
-                                                            });
-                                                        }
-                                                        let cb_text = Self::tr_lang(language, "Wait for completion", "Đợi chạy xong");
-                                                        if ui.checkbox(&mut step.wait_for_completion, cb_text).changed() {
-                                                            live_sync = true;
-                                                        }
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::TriggerMacroPreset
+                                                        | MacroAction::TriggerMacroPresetIfEnabled
+                                                ) {
+                                                    Self::render_trigger_macro_target_editor(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, "hold-stop-trigger-macro-editor"),
+                                                        step,
+                                                        group.id,
+                                                        &all_groups_for_trigger,
+                                                        &all_trigger_macro_warnings,
+                                                        &mut live_sync,
+                                                    );
                                                 } else if step.action == MacroAction::TriggerCommandPreset {
                                                     let selected_id = step
                                                         .key
@@ -8458,7 +8389,6 @@ impl CrosshairApp {
                                                                 MacroAction::TypeText,
                                                                 MacroAction::ApplyWindowPreset,
                                                                 MacroAction::FocusWindowPreset,
-                                                                MacroAction::TriggerMacroPreset,
                                                                 MacroAction::TriggerCommandPreset,
                                                                 MacroAction::EnableCrosshairProfile,
                                                                 MacroAction::DisableCrosshair,
@@ -8502,6 +8432,16 @@ impl CrosshairApp {
                                                                 ui,
                                                                 language,
                                                                 (group.id, preset.id, step_index, "mouse-group"),
+                                                                &mut step.action,
+                                                                &mut live_sync,
+                                                                action_hover_id,
+                                                            );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
+                                                            Self::render_trigger_macro_action_group_option(
+                                                                ui,
+                                                                language,
+                                                                (group.id, preset.id, step_index, "trigger-macro-group"),
                                                                 &mut step.action,
                                                                 &mut live_sync,
                                                                 action_hover_id,
@@ -8606,102 +8546,21 @@ impl CrosshairApp {
                                                         step.key = selected_window.unwrap_or_default();
                                                         live_sync = true;
                                                     }
-                                                } else if step.action == MacroAction::TriggerMacroPreset {
-                                                    // Auto-init group if None
-                                                    if step.trigger_macro_group_id.is_none() {
-                                                        step.trigger_macro_group_id = Some(group.id);
-                                                        live_sync = true;
-                                                    }
-                                                    let trig_group_id = step.trigger_macro_group_id.unwrap_or(group.id);
-                                                    let trig_group_name = all_groups_for_trigger
-                                                        .iter()
-                                                        .find(|(gid, _, _)| *gid == trig_group_id)
-                                                        .map(|(_, gname, _)| gname.clone())
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select group", "Chọn group").to_owned());
-                                                    // ComboBox 1: Select group
-                                                    egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "trigger-macro-group-step"))
-                                                        .width(110.0)
-                                                        .selected_text(&trig_group_name)
-                                                        .show_ui(ui, |ui| {
-                                                            for (gid, gname, gpresets) in &all_groups_for_trigger {
-                                                                if ui
-                                                                    .selectable_label(*gid == trig_group_id, &{
-                                                                    if gname.starts_with("Macro Group") && !gpresets.is_empty() {
-                                                                        let preset_labels: Vec<String> = gpresets.iter().map(|(_, lbl)| lbl.clone()).collect();
-                                                                        format!("{} [{}]", gname, preset_labels.join(", "))
-                                                                    } else {
-                                                                        gname.clone()
-                                                                    }
-                                                                })
-                                                                    .clicked()
-                                                                {
-                                                                    step.trigger_macro_group_id = Some(*gid);
-                                                                    if *gid != trig_group_id {
-                                                                        step.key = String::new();
-                                                                    }
-                                                                    live_sync = true;
-                                                                }
-                                                            }
-                                                        });
-                                                    // ComboBox 2: Select preset from chosen group
-                                                    let trig_presets: Vec<(u32, String)> = all_groups_for_trigger
-                                                        .iter()
-                                                        .find(|(gid, _, _)| *gid == trig_group_id)
-                                                        .map(|(gid, _, gpresets)| {
-                                                            gpresets.iter()
-                                                                .filter(|(pid, _)| true)
-                                                                .cloned()
-                                                                .collect()
-                                                        })
-                                                        .unwrap_or_default();
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| trig_presets.iter().find(|(pid, _)| *pid == id).map(|(_, lbl)| lbl.clone()))
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select macro", "Chọn macro").to_owned());
-                                                    egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "trigger-macro-preset-step"))
-                                                        .width(146.0)
-                                                        .selected_text(selected_label)
-                                                        .show_ui(ui, |ui| {
-                                                            for (preset_option_id, preset_option_label) in &trig_presets {
-                                                                if ui
-                                                                    .selectable_label(selected_id == Some(*preset_option_id), preset_option_label)
-                                                                    .clicked()
-                                                                {
-                                                                    step.key = preset_option_id.to_string();
-                                                                    live_sync = true;
-                                                                }
-                                                            }
-                                                        });
-                                                        ui.add_space(4.0);
-                                                        let selected_trigger_warning = selected_id
-                                                            .and_then(|id| {
-                                                                all_trigger_macro_warnings
-                                                                    .iter()
-                                                                    .find(|(preset_id, _)| *preset_id == id)
-                                                                    .map(|(_, warning)| *warning)
-                                                            })
-                                                            .unwrap_or(false);
-                                                        if selected_trigger_warning {
-                                                            let warn_color = Color32::from_rgb(255, 90, 0);
-                                                            let response = ui.add_sized([18.0, 18.0], egui::Button::new(
-                                                                Self::material_icon_text(0xe002, 16.0).color(warn_color)
-                                                            ).frame(false));
-                                                            response.clone().on_hover_ui(|ui| {
-                                                                    ui.horizontal(|ui| {
-                                                                        ui.label(Self::material_icon_text(0xe002, 14.0).color(warn_color));
-                                                                        ui.label(RichText::new(Self::tr_lang(language, "TRIGGER WARNING", "CẢNH BÁO KÍCH HOẠT")).strong().color(warn_color));
-                                                                    });
-                                                                    ui.label(Self::tr_lang(
-                                                                        language,
-                                                                        "This macro preset can run continuously or keep working in the background. Triggering it from another macro can make it run immediately without a hold key.",
-                                                                        "Macro này có thể chạy liên tục hoặc tiếp tục chạy trong nền. Kích hoạt nó từ macro khác có thể làm nó chạy ngay mà không cần giữ phím.",
-                                                                    ));
-                                                            });
-                                                        }
-                                                        let cb_text = Self::tr_lang(language, "Wait for completion", "Đợi chạy xong");
-                                                        if ui.checkbox(&mut step.wait_for_completion, cb_text).changed() {
-                                                            live_sync = true;
-                                                        }
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::TriggerMacroPreset
+                                                        | MacroAction::TriggerMacroPresetIfEnabled
+                                                ) {
+                                                    Self::render_trigger_macro_target_editor(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, step_index, "trigger-macro-editor"),
+                                                        step,
+                                                        group.id,
+                                                        &all_groups_for_trigger,
+                                                        &all_trigger_macro_warnings,
+                                                        &mut live_sync,
+                                                    );
                                                 } else if step.action == MacroAction::TriggerCommandPreset {
                                                     let selected_id = step
                                                         .key
@@ -13092,6 +12951,134 @@ impl CrosshairApp {
         ]
     }
 
+    fn render_trigger_macro_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_source: impl std::hash::Hash + Copy,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        let selected = Self::macro_action_is_trigger_macro(*current);
+        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let popup_id = ui.make_persistent_id((id_source, "macro-submenu-popup"));
+        let active_owner = ui
+            .ctx()
+            .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
+        let top_level_hovered = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(action_hover_id))
+            .unwrap_or(false);
+        let mut open = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(popup_id))
+            .unwrap_or(false);
+        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::Macro) {
+            open = false;
+        }
+        if top_level_hovered {
+            open = false;
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
+        }
+        let inner = ui.allocate_ui_with_layout(
+            vec2(58.0, 42.0),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| {
+                let response = ui.add_sized(
+                    [34.0, 24.0],
+                    Button::new(Self::material_icon_text(0xe037, 18.0)).selected(selected),
+                );
+                if response.hovered() || response.clicked() {
+                    Self::clear_macro_action_submenus(ui, id_source);
+                    open = true;
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(owner_id, MacroActionSubmenuKind::Macro)
+                    });
+                }
+                let popup_rect_id = ui.make_persistent_id((id_source, "macro-submenu-rect"));
+                let popup_response = egui::Popup::from_response(&response)
+                    .id(popup_id)
+                    .open_bool(&mut open)
+                    .align(egui::RectAlign::BOTTOM_START)
+                    .layout(egui::Layout::top_down_justified(egui::Align::Min))
+                    .width(220.0)
+                    .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                    .show(|ui| {
+                        let rect = ui.max_rect();
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(popup_rect_id, rect));
+                        egui::Grid::new((id_source, "macro-action-grid"))
+                            .num_columns(2)
+                            .spacing([6.0, 6.0])
+                            .show(ui, |ui| {
+                                for action in Self::trigger_macro_action_choices().iter().copied() {
+                                    Self::render_macro_action_option(
+                                        ui,
+                                        language,
+                                        current,
+                                        action,
+                                        live_sync,
+                                        action_hover_id,
+                                        true,
+                                    );
+                                }
+                            });
+                    });
+                let popup_rect: Option<egui::Rect> =
+                    ui.ctx().data(|data| data.get_temp(popup_rect_id));
+                if open {
+                    if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
+                        let mut keep_open_rect = response.rect.expand(10.0);
+                        if let Some(rect) = popup_rect {
+                            keep_open_rect = keep_open_rect.union(rect.expand(10.0));
+                            if rect.contains(pointer_pos) {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(owner_id, MacroActionSubmenuKind::Macro)
+                                });
+                            }
+                        }
+                        if !keep_open_rect.contains(pointer_pos) {
+                            open = false;
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
+                            });
+                        }
+                    } else {
+                        open = false;
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
+                        });
+                    }
+                }
+                ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
+                let label_color = if selected {
+                    ui.visuals().strong_text_color()
+                } else {
+                    ui.visuals().text_color()
+                };
+                ui.label(
+                    RichText::new("Macro")
+                        .size(9.0)
+                        .color(label_color),
+                );
+                if let Some(popup) = popup_response {
+                    popup.response
+                } else {
+                    response
+                }
+            },
+        );
+        let response = inner.inner;
+        if !open {
+            Self::show_instant_hover_tooltip(
+                ui,
+                &response,
+                "Macro\nOpen normal trigger and enabled-only trigger macro actions.",
+            );
+        }
+    }
+
     fn macro_action_is_geometry(action: MacroAction) -> bool {
         Self::geometry_macro_actions().contains(&action)
     }
@@ -13376,6 +13363,153 @@ impl CrosshairApp {
                     "AudioSense\nMo cac hanh dong cao do va huong am.",
                 ),
             );
+        }
+    }
+
+    fn trigger_macro_action_choices() -> &'static [MacroAction] {
+        &[
+            MacroAction::TriggerMacroPreset,
+            MacroAction::TriggerMacroPresetIfEnabled,
+        ]
+    }
+
+    fn macro_action_is_trigger_macro(action: MacroAction) -> bool {
+        Self::trigger_macro_action_choices().contains(&action)
+    }
+
+    fn parse_macro_trigger_preset_ids(step_key: &str) -> Vec<u32> {
+        step_key
+            .split(',')
+            .filter_map(|part| part.trim().parse::<u32>().ok())
+            .collect()
+    }
+
+    fn render_trigger_macro_target_editor(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_source: impl std::hash::Hash + Copy,
+        step: &mut MacroStep,
+        current_group_id: u32,
+        all_groups_for_trigger: &[(u32, String, Vec<(u32, String)>)],
+        all_trigger_macro_warnings: &[(u32, bool)],
+        live_sync: &mut bool,
+    ) {
+        if step.trigger_macro_group_id.is_none() {
+            step.trigger_macro_group_id = Some(current_group_id);
+            *live_sync = true;
+        }
+        let trig_group_id = step.trigger_macro_group_id.unwrap_or(current_group_id);
+        let trig_group_name = all_groups_for_trigger
+            .iter()
+            .find(|(gid, _, _)| *gid == trig_group_id)
+            .map(|(_, gname, _)| gname.clone())
+            .unwrap_or_else(|| Self::tr_lang(language, "Select group", "Chon group").to_owned());
+        egui::ComboBox::from_id_salt((id_source, "trigger-macro-group"))
+            .width(110.0)
+            .selected_text(&trig_group_name)
+            .show_ui(ui, |ui| {
+                for (gid, gname, gpresets) in all_groups_for_trigger {
+                    let display_name = if gname.starts_with("Macro Group") && !gpresets.is_empty() {
+                        let preset_labels: Vec<String> =
+                            gpresets.iter().map(|(_, label)| label.clone()).collect();
+                        format!("{} [{}]", gname, preset_labels.join(", "))
+                    } else {
+                        gname.clone()
+                    };
+                    if ui
+                        .selectable_label(*gid == trig_group_id, display_name)
+                        .clicked()
+                    {
+                        step.trigger_macro_group_id = Some(*gid);
+                        if *gid != trig_group_id {
+                            step.key.clear();
+                        }
+                        *live_sync = true;
+                    }
+                }
+            });
+        let trig_presets = all_groups_for_trigger
+            .iter()
+            .find(|(gid, _, _)| *gid == trig_group_id)
+            .map(|(_, _, gpresets)| gpresets.clone())
+            .unwrap_or_default();
+        let mut selected_ids = Self::parse_macro_trigger_preset_ids(&step.key);
+        let original_len = selected_ids.len();
+        selected_ids.retain(|id| trig_presets.iter().any(|(preset_id, _)| preset_id == id));
+        if selected_ids.len() != original_len {
+            step.key = selected_ids
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            *live_sync = true;
+        }
+        let selected_label = if selected_ids.is_empty() {
+            Self::tr_lang(language, "Select macros", "Chon macro").to_owned()
+        } else {
+            trig_presets
+                .iter()
+                .filter(|(preset_id, _)| selected_ids.contains(preset_id))
+                .map(|(_, label)| label.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        egui::ComboBox::from_id_salt((id_source, "trigger-macro-preset"))
+            .width(146.0)
+            .selected_text(selected_label)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show_ui(ui, |ui| {
+                for (preset_option_id, preset_option_label) in &trig_presets {
+                    let mut is_selected = selected_ids.contains(preset_option_id);
+                    if ui.checkbox(&mut is_selected, preset_option_label).changed() {
+                        if is_selected {
+                            selected_ids.push(*preset_option_id);
+                        } else {
+                            selected_ids.retain(|id| *id != *preset_option_id);
+                        }
+                        selected_ids.sort_unstable();
+                        selected_ids.dedup();
+                        step.key = selected_ids
+                            .iter()
+                            .map(u32::to_string)
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        *live_sync = true;
+                    }
+                }
+            });
+        ui.add_space(4.0);
+        let selected_trigger_warning = selected_ids.iter().any(|selected_id| {
+            all_trigger_macro_warnings
+                .iter()
+                .find(|(preset_id, _)| preset_id == selected_id)
+                .map(|(_, warning)| *warning)
+                .unwrap_or(false)
+        });
+        if selected_trigger_warning {
+            let warn_color = Color32::from_rgb(255, 90, 0);
+            let response = ui.add_sized(
+                [18.0, 18.0],
+                egui::Button::new(Self::material_icon_text(0xe002, 16.0).color(warn_color))
+                    .frame(false),
+            );
+            response.clone().on_hover_ui(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(Self::material_icon_text(0xe002, 14.0).color(warn_color));
+                    ui.label(
+                        RichText::new("TRIGGER WARNING")
+                            .strong()
+                            .color(warn_color),
+                    );
+                });
+                ui.label(
+                    "At least one selected macro can run continuously or keep running in the background.",
+                );
+            });
+        }
+        let cb_text = Self::tr_lang(language, "Wait for completion", "Doi chay xong");
+        if ui.checkbox(&mut step.wait_for_completion, cb_text).changed() {
+            *live_sync = true;
         }
     }
 
