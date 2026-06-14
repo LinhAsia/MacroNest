@@ -7273,6 +7273,7 @@ impl CrosshairApp {
                                                         &mut begin_mouse_move_absolute_capture_target,
                                                         &mut pending_geometry_macro_step_color_pick,
                                                         &mut self.draw_geometry_step_preview_target,
+                                                        &mut self.show_geometry_preset_preview_target,
                                                         &self.overlay_tx,
                                                         step,
                                                         &mut live_sync,
@@ -7781,7 +7782,7 @@ impl CrosshairApp {
                                                     );
                                                 } else {
                                                     let copy_btn = Button::new(Self::tr_lang(language, "Copy", "Copy"))
-                                                        .min_size(egui::vec2(56.0, 20.0));
+                                                        .min_size(egui::vec2(42.0, 20.0));
                                                     if ui
                                                         .add(copy_btn)
                                                         .on_hover_text(Self::tr_lang(
@@ -7795,7 +7796,7 @@ impl CrosshairApp {
                                                     }
                                                 }
                                                 let delete_btn = Button::new(Self::tr_lang(language, "Delete", "Xoa"))
-                                                    .min_size(egui::vec2(64.0, 20.0));
+                                                    .min_size(egui::vec2(50.0, 20.0));
                                                 if ui
                                                     .add(delete_btn)
                                                     .on_hover_text(Self::tr_lang(
@@ -11098,6 +11099,7 @@ impl CrosshairApp {
                                                         &mut begin_mouse_move_absolute_capture_target,
                                                         &mut pending_geometry_macro_step_color_pick,
                                                         &mut self.draw_geometry_step_preview_target,
+                                                        &mut self.show_geometry_preset_preview_target,
                                                         &self.overlay_tx,
                                                         step,
                                                         &mut live_sync,
@@ -13717,6 +13719,31 @@ impl CrosshairApp {
         }
     }
 
+    pub(crate) fn resolve_geometry_preset_preview_id(
+        step: &MacroStep,
+        presets: &[crate::model::GeometryPreset],
+    ) -> Option<u32> {
+        if !step.geometry_preset_use_custom_ref {
+            return step.geometry_preset_id;
+        }
+
+        let trimmed = step.key.trim();
+        if trimmed.is_empty() {
+            return step.geometry_preset_id;
+        }
+
+        trimmed
+            .parse::<u32>()
+            .ok()
+            .or_else(|| {
+                presets
+                    .iter()
+                    .find(|preset| preset.name.trim().eq_ignore_ascii_case(trimmed))
+                    .map(|preset| preset.id)
+            })
+            .or(step.geometry_preset_id)
+    }
+
     fn clear_geometry_spec_override_inputs(spec: &mut crate::model::GeometrySpec) {
         spec.x1_expr.clear();
         spec.y1_expr.clear();
@@ -14471,6 +14498,7 @@ impl CrosshairApp {
         begin_mouse_move_absolute_capture_target: &mut Option<MouseMoveAbsoluteCaptureTarget>,
         pending_macro_step_color_pick: &mut Option<(u32, u32, usize, bool, bool)>,
         draw_geometry_step_preview_target: &mut Option<(u32, u32, usize, bool)>,
+        show_geometry_preset_preview_target: &mut Option<(u32, u32, usize, bool)>,
         overlay_tx: &crossbeam_channel::Sender<crate::overlay::OverlayCommand>,
         step: &mut MacroStep,
         live_sync: &mut bool,
@@ -14651,6 +14679,8 @@ impl CrosshairApp {
                 }
                 MacroAction::ShowGeometryPreset => {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        let current_preview_target =
+                            (group_id, macro_preset_id, step_index, is_hold_stop);
                         Self::render_geometry_preset_ref_editor(
                             ui,
                             language,
@@ -14662,6 +14692,37 @@ impl CrosshairApp {
                             vietnamese_input_enabled,
                             vietnamese_input_mode,
                         );
+                        ui.add_space(6.0);
+                        let preview_preset_id =
+                            Self::resolve_geometry_preset_preview_id(step, geometry_presets);
+                        let preview_active =
+                            *show_geometry_preset_preview_target == Some(current_preview_target)
+                                && preview_preset_id.is_some();
+                        let preview_btn = Button::new(Self::material_icon_text(
+                            if preview_active { 0xe8f5 } else { 0xe8f4 },
+                            12.0,
+                        ));
+                        let preview_response = ui.add_sized([18.0, 18.0], preview_btn);
+                        preview_response.clone().on_hover_text(if preview_active {
+                            Self::tr_lang(language, "Stop preview", "Dung xem truoc")
+                        } else {
+                            Self::tr_lang(language, "Preview preset", "Xem truoc preset")
+                        });
+                        if preview_response.clicked() {
+                            if preview_active {
+                                *show_geometry_preset_preview_target = None;
+                                let _ = overlay_tx.send(
+                                    crate::overlay::OverlayCommand::PreviewGeometryPreset(None),
+                                );
+                            } else if preview_preset_id.is_some() {
+                                *show_geometry_preset_preview_target = Some(current_preview_target);
+                                let _ = overlay_tx.send(
+                                    crate::overlay::OverlayCommand::PreviewGeometryPreset(
+                                        preview_preset_id,
+                                    ),
+                                );
+                            }
+                        }
                         ui.add_space(6.0);
                         let modify_changed = ui
                             .checkbox(
