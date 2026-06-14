@@ -7050,13 +7050,26 @@ mod windows_overlay {
             .collect()
     }
 
+    fn collect_trigger_macro_target_ids(spec: &str, bypass_enabled: bool) -> Vec<u32> {
+        let target_ids = parse_macro_trigger_preset_ids(spec);
+        if bypass_enabled {
+            return target_ids;
+        }
+
+        let hook_state = HOOK_STATE.lock();
+        target_ids
+            .into_iter()
+            .filter(|preset_id| is_macro_preset_enabled_with_guard(*preset_id, &hook_state))
+            .collect()
+    }
+
     fn execute_trigger_macro_step(
         step: &MacroStep,
         bypass_enabled: bool,
         no_locked_keys: &mut Vec<String>,
         no_locked_mouse: &mut Vec<MouseMoveLockMask>,
     ) {
-        let target_ids = parse_macro_trigger_preset_ids(&step.key);
+        let target_ids = collect_trigger_macro_target_ids(&step.key, bypass_enabled);
         if step.wait_for_completion {
             for preset_id in target_ids {
                 let _ = trigger_nested_macro_preset(
@@ -7694,8 +7707,9 @@ mod windows_overlay {
                 }
 
                 MacroAction::TriggerMacroPreset => {
+                    let target_ids = collect_trigger_macro_target_ids(&step.key, true);
                     if step.wait_for_completion {
-                        for preset_id in parse_macro_trigger_preset_ids(&step.key) {
+                        for preset_id in target_ids {
                             let _ = trigger_nested_macro_preset(
                                 &preset_id.to_string(),
                                 press_locked_keys,
@@ -7708,15 +7722,16 @@ mod windows_overlay {
                             );
                         }
                     } else {
-                        for preset_id in parse_macro_trigger_preset_ids(&step.key) {
+                        for preset_id in target_ids {
                             spawn_macro_by_preset_id(preset_id, true);
                         }
                     }
                 }
 
                 MacroAction::TriggerMacroPresetIfEnabled => {
+                    let target_ids = collect_trigger_macro_target_ids(&step.key, false);
                     if step.wait_for_completion {
-                        for preset_id in parse_macro_trigger_preset_ids(&step.key) {
+                        for preset_id in target_ids {
                             let _ = trigger_nested_macro_preset(
                                 &preset_id.to_string(),
                                 press_locked_keys,
@@ -7729,7 +7744,7 @@ mod windows_overlay {
                             );
                         }
                     } else {
-                        for preset_id in parse_macro_trigger_preset_ids(&step.key) {
+                        for preset_id in target_ids {
                             spawn_macro_by_preset_id(preset_id, false);
                         }
                     }
