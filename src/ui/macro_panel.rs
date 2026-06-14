@@ -13482,13 +13482,14 @@ impl CrosshairApp {
                 }
             });
         ui.add_space(4.0);
-        let selected_trigger_warning = selected_ids.iter().any(|selected_id| {
-            all_trigger_macro_warnings
-                .iter()
-                .find(|(preset_id, _)| preset_id == selected_id)
-                .map(|(_, warning)| *warning)
-                .unwrap_or(false)
-        });
+        let selected_trigger_warning = step.action != MacroAction::StopMacroPreset
+            && selected_ids.iter().any(|selected_id| {
+                all_trigger_macro_warnings
+                    .iter()
+                    .find(|(preset_id, _)| preset_id == selected_id)
+                    .map(|(_, warning)| *warning)
+                    .unwrap_or(false)
+            });
         if selected_trigger_warning {
             let warn_color = Color32::from_rgb(255, 90, 0);
             let response = ui.add_sized(

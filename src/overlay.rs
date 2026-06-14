@@ -7476,9 +7476,7 @@ mod windows_overlay {
                 return MacroRunFlow::StopExecution;
             }
 
-            if stop_immediately_on_retrigger
-                && STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id)
-            {
+            if macro_stop_requested(preset_id, stop_immediately_on_retrigger) {
                 return MacroRunFlow::StopExecution;
             }
 
@@ -8087,9 +8085,7 @@ mod windows_overlay {
                 return MacroRunFlow::StopExecution;
             }
 
-            if stop_immediately_on_retrigger
-                && STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id)
-            {
+            if macro_stop_requested(preset_id, stop_immediately_on_retrigger) {
                 return MacroRunFlow::StopExecution;
             }
 
@@ -8625,8 +8621,7 @@ mod windows_overlay {
                 match_duplicate_window_titles,
             ) || (!bypass_enabled && !is_macro_preset_enabled(preset_id))
                 || !current_hold_run_matches(preset_id, run_token)
-                || (stop_immediately_on_retrigger
-                    && STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id));
+                || macro_stop_requested(preset_id, stop_immediately_on_retrigger);
         }
 
         let mut remaining_ms = delay_ms;
@@ -8655,9 +8650,7 @@ mod windows_overlay {
                 }
             }
 
-            if stop_immediately_on_retrigger
-                && STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id)
-            {
+            if macro_stop_requested(preset_id, stop_immediately_on_retrigger) {
                 return true;
             }
 
@@ -8672,8 +8665,7 @@ mod windows_overlay {
             match_duplicate_window_titles,
         ) || (!bypass_enabled && !is_macro_preset_enabled(preset_id))
             || !current_hold_run_matches(preset_id, run_token)
-            || (stop_immediately_on_retrigger
-                && STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id))
+            || macro_stop_requested(preset_id, stop_immediately_on_retrigger)
     }
 
     fn sleep_for_macro_delay(
@@ -8690,7 +8682,8 @@ mod windows_overlay {
                 target_window_title,
                 extra_target_window_titles,
                 match_duplicate_window_titles,
-            ) || (!bypass_enabled && !is_macro_preset_enabled(preset_id));
+            ) || (!bypass_enabled && !is_macro_preset_enabled(preset_id))
+                || macro_stop_requested(preset_id, stop_immediately_on_retrigger);
         }
 
         let mut remaining_ms = delay_ms;
@@ -8715,9 +8708,7 @@ mod windows_overlay {
                 }
             }
 
-            if stop_immediately_on_retrigger
-                && STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id)
-            {
+            if macro_stop_requested(preset_id, stop_immediately_on_retrigger) {
                 return true;
             }
 
@@ -8731,8 +8722,7 @@ mod windows_overlay {
             extra_target_window_titles,
             match_duplicate_window_titles,
         ) || (!bypass_enabled && !is_macro_preset_enabled(preset_id))
-            || (stop_immediately_on_retrigger
-            && STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id))
+            || macro_stop_requested(preset_id, stop_immediately_on_retrigger)
     }
 
     fn find_matching_loop_end(steps: &[MacroStep], start_index: usize) -> Option<usize> {
