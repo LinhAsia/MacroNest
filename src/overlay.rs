@@ -7044,6 +7044,39 @@ mod windows_overlay {
         bail!("Macro preset was not found")
     }
 
+    fn parse_macro_trigger_preset_ids(spec: &str) -> Vec<u32> {
+        spec.split(',')
+            .filter_map(|part| part.trim().parse::<u32>().ok())
+            .collect()
+    }
+
+    fn execute_trigger_macro_step(
+        step: &MacroStep,
+        bypass_enabled: bool,
+        no_locked_keys: &mut Vec<String>,
+        no_locked_mouse: &mut Vec<MouseMoveLockMask>,
+    ) {
+        let target_ids = parse_macro_trigger_preset_ids(&step.key);
+        if step.wait_for_completion {
+            for preset_id in target_ids {
+                let _ = trigger_nested_macro_preset(
+                    &preset_id.to_string(),
+                    no_locked_keys,
+                    no_locked_mouse,
+                    false,
+                    None,
+                    &[],
+                    false,
+                    bypass_enabled,
+                );
+            }
+        } else {
+            for preset_id in target_ids {
+                spawn_macro_by_preset_id(preset_id, bypass_enabled);
+            }
+        }
+    }
+
     fn set_macro_steps_enabled(spec: &str, enabled: bool) -> Result<()> {
         let parts: Vec<&str> = spec.split('|').collect();
         if parts.is_empty() {
@@ -7120,24 +7153,15 @@ mod windows_overlay {
             }
 
             MacroAction::TriggerMacroPreset => {
-                if step.wait_for_completion {
-                    let mut no_locked_keys = Vec::new();
-                    let mut no_locked_mouse: Vec<MouseMoveLockMask> = Vec::new();
-                    let _ = trigger_nested_macro_preset(
-                        &step.key,
-                        &mut no_locked_keys,
-                        &mut no_locked_mouse,
-                        false,
-                        None,
-                        &[],
-                        false,
-                        true,
-                    );
-                } else {
-                    if let Ok(pid) = step.key.trim().parse::<u32>() {
-                        spawn_macro_by_preset_id(pid, true);
-                    }
-                }
+                let mut no_locked_keys = Vec::new();
+                let mut no_locked_mouse: Vec<MouseMoveLockMask> = Vec::new();
+                execute_trigger_macro_step(step, true, &mut no_locked_keys, &mut no_locked_mouse);
+            }
+
+            MacroAction::TriggerMacroPresetIfEnabled => {
+                let mut no_locked_keys = Vec::new();
+                let mut no_locked_mouse: Vec<MouseMoveLockMask> = Vec::new();
+                execute_trigger_macro_step(step, false, &mut no_locked_keys, &mut no_locked_mouse);
             }
 
             MacroAction::TriggerCommandPreset => {
@@ -7671,19 +7695,42 @@ mod windows_overlay {
 
                 MacroAction::TriggerMacroPreset => {
                     if step.wait_for_completion {
-                        let _ = trigger_nested_macro_preset(
-                            &step.key,
-                            press_locked_keys,
-                            press_locked_mouse_masks,
-                            stop_immediately_on_retrigger,
-                            target_window_title,
-                            extra_target_window_titles,
-                            match_duplicate_window_titles,
-                            true,
-                        );
+                        for preset_id in parse_macro_trigger_preset_ids(&step.key) {
+                            let _ = trigger_nested_macro_preset(
+                                &preset_id.to_string(),
+                                press_locked_keys,
+                                press_locked_mouse_masks,
+                                stop_immediately_on_retrigger,
+                                target_window_title,
+                                extra_target_window_titles,
+                                match_duplicate_window_titles,
+                                true,
+                            );
+                        }
                     } else {
-                        if let Ok(pid) = step.key.trim().parse::<u32>() {
-                            spawn_macro_by_preset_id(pid, true);
+                        for preset_id in parse_macro_trigger_preset_ids(&step.key) {
+                            spawn_macro_by_preset_id(preset_id, true);
+                        }
+                    }
+                }
+
+                MacroAction::TriggerMacroPresetIfEnabled => {
+                    if step.wait_for_completion {
+                        for preset_id in parse_macro_trigger_preset_ids(&step.key) {
+                            let _ = trigger_nested_macro_preset(
+                                &preset_id.to_string(),
+                                press_locked_keys,
+                                press_locked_mouse_masks,
+                                stop_immediately_on_retrigger,
+                                target_window_title,
+                                extra_target_window_titles,
+                                match_duplicate_window_titles,
+                                false,
+                            );
+                        }
+                    } else {
+                        for preset_id in parse_macro_trigger_preset_ids(&step.key) {
+                            spawn_macro_by_preset_id(preset_id, false);
                         }
                     }
                 }
@@ -8250,24 +8297,15 @@ mod windows_overlay {
                 }
 
                 MacroAction::TriggerMacroPreset => {
-                    if step.wait_for_completion {
-                        let mut no_locked_keys = Vec::new();
-                        let mut no_locked_mouse: Vec<MouseMoveLockMask> = Vec::new();
-                        let _ = trigger_nested_macro_preset(
-                            &step.key,
-                            &mut no_locked_keys,
-                            &mut no_locked_mouse,
-                            stop_immediately_on_retrigger,
-                            target_window_title,
-                            extra_target_window_titles,
-                            match_duplicate_window_titles,
-                            true,
-                        );
-                    } else {
-                        if let Ok(pid) = step.key.trim().parse::<u32>() {
-                            spawn_macro_by_preset_id(pid, true);
-                        }
-                    }
+                    let mut no_locked_keys = Vec::new();
+                    let mut no_locked_mouse: Vec<MouseMoveLockMask> = Vec::new();
+                    execute_trigger_macro_step(step, true, &mut no_locked_keys, &mut no_locked_mouse);
+                }
+
+                MacroAction::TriggerMacroPresetIfEnabled => {
+                    let mut no_locked_keys = Vec::new();
+                    let mut no_locked_mouse: Vec<MouseMoveLockMask> = Vec::new();
+                    execute_trigger_macro_step(step, false, &mut no_locked_keys, &mut no_locked_mouse);
                 }
 
                 MacroAction::TriggerCommandPreset => {
@@ -11071,6 +11109,7 @@ mod windows_overlay {
                 | MacroAction::ApplyWindowPreset
                 | MacroAction::FocusWindowPreset
                 | MacroAction::TriggerMacroPreset
+                | MacroAction::TriggerMacroPresetIfEnabled
                 | MacroAction::TriggerCommandPreset
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::DisableCrosshair
@@ -11225,6 +11264,7 @@ mod windows_overlay {
             MacroAction::ApplyWindowPreset
             | MacroAction::FocusWindowPreset
             | MacroAction::TriggerMacroPreset
+            | MacroAction::TriggerMacroPresetIfEnabled
             | MacroAction::TriggerCommandPreset
             | MacroAction::EnableCrosshairProfile
             | MacroAction::DisableCrosshair
