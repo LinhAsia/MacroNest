@@ -967,6 +967,7 @@ mod windows_overlay {
         mouse_trail_hwnd: HWND,
         search_area_hwnd: HWND,
         dynamic_geometry_hwnd: HWND,
+        focus_highlight_hwnd: HWND,
         hud_hwnd: HWND,
         pin_hwnd: HWND,
         last_pin_update: Instant,
@@ -1375,6 +1376,24 @@ mod windows_overlay {
                 Some(instance),
                 None,
             )?;
+            let focus_highlight_hwnd = CreateWindowExW(
+                WS_EX_LAYERED
+                    | WS_EX_TRANSPARENT
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_TOPMOST
+                    | WS_EX_NOACTIVATE,
+                w!("CrosshairOverlay"),
+                w!("CrosshairFocusHighlight"),
+                WS_POPUP,
+                0,
+                0,
+                32,
+                32,
+                None,
+                None,
+                Some(instance),
+                None,
+            )?;
             let hud_hwnd = CreateWindowExW(
                 WS_EX_LAYERED
                     | WS_EX_TOOLWINDOW
@@ -1438,6 +1457,7 @@ mod windows_overlay {
                 mouse_trail_hwnd,
                 search_area_hwnd,
                 dynamic_geometry_hwnd,
+                focus_highlight_hwnd,
                 hud_hwnd,
                 pin_hwnd,
                 last_pin_update: Instant::now() - Duration::from_secs(1),
@@ -1849,6 +1869,7 @@ mod windows_overlay {
                     let _ = DestroyMenu(runtime.tray_menu);
                     let _ = ShowWindow(runtime.overlay_hwnd, SW_HIDE);
                     let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
+                    let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
                     let _ = set_window_focus_event_hook_enabled(runtime, false);
                     let _ = set_input_hooks_enabled(runtime, false);
                 }
@@ -5053,6 +5074,67 @@ mod windows_overlay {
         if let Some(previous) = runtime.active_focus_highlight_hwnd.take() {
             let _ = set_native_border_color(previous, DWM_COLOR_DEFAULT);
         }
+        let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
+    }
+
+    unsafe fn focus_highlight_rect(hwnd: HWND) -> Option<RECT> {
+        let mut rect = RECT::default();
+        let frame_ok = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut rect as *mut _ as *mut c_void,
+            size_of::<RECT>() as u32,
+        )
+        .is_ok()
+            && rect.right > rect.left
+            && rect.bottom > rect.top;
+        if frame_ok {
+            return Some(rect);
+        }
+
+        if GetWindowRect(hwnd, &mut rect).is_ok()
+            && rect.right > rect.left
+            && rect.bottom > rect.top
+        {
+            Some(rect)
+        } else {
+            None
+        }
+    }
+
+    unsafe fn paint_focus_highlight_overlay(runtime: &Runtime, target: HWND) -> Result<()> {
+        let Some(rect) = focus_highlight_rect(target) else {
+            let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
+            return Ok(());
+        };
+
+        let margin = 5;
+        let thickness = 4u32;
+        let width = (rect.right - rect.left + margin * 2).max(1) as u32;
+        let height = (rect.bottom - rect.top + margin * 2).max(1) as u32;
+        let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
+        let color = image::Rgba([126, 224, 182, 235]);
+
+        for y in 0..height {
+            for x in 0..width {
+                let near_edge = x < thickness
+                    || y < thickness
+                    || x >= width.saturating_sub(thickness)
+                    || y >= height.saturating_sub(thickness);
+                if near_edge {
+                    canvas.put_pixel(x, y, color);
+                }
+            }
+        }
+
+        paint_crosshair_canvas(
+            runtime.focus_highlight_hwnd,
+            canvas,
+            rect.left - margin,
+            rect.top - margin,
+        )?;
+        let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_SHOWNA);
+        Ok(())
     }
 
     unsafe fn update_native_focus_highlight(runtime: &mut Runtime, foreground: HWND) {
@@ -5066,9 +5148,9 @@ mod windows_overlay {
         }
 
         clear_native_focus_highlight(runtime);
-        if is_native_focus_highlight_target(foreground)
-            && set_native_border_color(foreground, FOCUS_HIGHLIGHT_BORDER_COLOR)
-        {
+        if is_native_focus_highlight_target(foreground) {
+            let _ = set_native_border_color(foreground, FOCUS_HIGHLIGHT_BORDER_COLOR);
+            let _ = paint_focus_highlight_overlay(runtime, foreground);
             runtime.active_focus_highlight_hwnd = Some(foreground);
         }
     }
@@ -16211,6 +16293,7 @@ mod windows_overlay {
         let _ = unsafe { ShowWindow(runtime.overlay_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.hud_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.pin_hwnd, SW_HIDE) };
+        let _ = unsafe { ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE) };
         if let Some(active) = &runtime.active_pin_thumbnail {
             if let Some(thumbnail_id) = active.thumbnail_id {
                 let _ = unsafe { DwmUnregisterThumbnail(thumbnail_id) };
