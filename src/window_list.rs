@@ -202,20 +202,40 @@ mod windows_impl {
         }
 
         if let Some(title_or_selector) = primary_title
-            && let Some(hwnd) =
-                find_window_by_candidate(title_or_selector, match_duplicate_window_titles)
+            && let Some(hwnd) = find_window_by_candidate_exact(title_or_selector)
+                .or_else(|| {
+                    find_window_by_candidate(title_or_selector, match_duplicate_window_titles)
+                })
         {
             return Some(hwnd);
         }
 
         for title in extra_titles {
-            if let Some(hwnd) = find_window_by_candidate(title, match_duplicate_window_titles) {
+            if let Some(hwnd) = find_window_by_candidate_exact(title).or_else(|| {
+                find_window_by_candidate(title, match_duplicate_window_titles)
+            }) {
                 return Some(hwnd);
             }
         }
 
         let hwnd = unsafe { GetForegroundWindow() };
         if hwnd.0.is_null() { None } else { Some(hwnd) }
+    }
+
+    fn find_window_by_candidate_exact(title_or_selector: &str) -> Option<HWND> {
+        if !looks_like_window_selector(title_or_selector) {
+            return None;
+        }
+
+        let mut found = None;
+        unsafe {
+            let mut payload = (title_or_selector, &mut found);
+            let _ = EnumWindows(
+                Some(find_window_by_exact_selector_proc),
+                LPARAM((&mut payload) as *mut _ as isize),
+            );
+        }
+        found
     }
 
     fn find_window_by_candidate(
@@ -231,6 +251,24 @@ mod windows_impl {
             );
         }
         found
+    }
+
+    unsafe extern "system" fn find_window_by_exact_selector_proc(
+        hwnd: HWND,
+        lparam: LPARAM,
+    ) -> BOOL {
+        let (target_selector, found) = &mut *(lparam.0 as *mut (&str, &mut Option<HWND>));
+        if !IsWindowVisible(hwnd).as_bool() {
+            return true.into();
+        }
+        let Some(title) = window_title(hwnd) else {
+            return true.into();
+        };
+        if window_selector(hwnd, &title) == *target_selector {
+            **found = Some(hwnd);
+            return false.into();
+        }
+        true.into()
     }
 
     unsafe extern "system" fn find_window_by_candidate_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -263,6 +301,10 @@ mod windows_impl {
 
     fn window_selector(hwnd: HWND, title: &str) -> String {
         format!("{title} (0x{:X})", hwnd.0 as usize)
+    }
+
+    fn looks_like_window_selector(target: &str) -> bool {
+        target.ends_with(')') && target.contains(" (0x")
     }
 
     fn selector_base_title(target: &str) -> &str {
