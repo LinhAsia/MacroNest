@@ -599,14 +599,6 @@ mod windows_overlay {
             center_y: i32,
             thickness: f32,
         },
-        ProtractorCalibrationCancelled,
-        ProtractorCalibrationProgress(String),
-        ProtractorCalibrated {
-            center_x: i32,
-            center_y: i32,
-            scale: f32,
-        },
-        ProtractorCalibrationFailed(String),
         RequestProtractorCalibration,
     }
 

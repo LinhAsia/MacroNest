@@ -855,6 +855,7 @@ pub struct CrosshairApp {
     selected_layout_cell: Option<(u32, usize, usize)>,
     drag_start_layout_cell: Option<(u32, usize, usize)>,
     protractor_picking_active: bool,
+    protractor_calibration_points: Option<Vec<(i32, i32)>>,
 }
 
 impl CrosshairApp {
@@ -942,6 +943,7 @@ impl CrosshairApp {
             vision_capture_target: None,
             vision_capture_mode: None,
             protractor_picking_active: false,
+            protractor_calibration_points: None,
             vision_capture_anchor: None,
             vision_capture_current: None,
             vision_capture_screen_region_preview: None,
@@ -4448,6 +4450,14 @@ impl CrosshairApp {
                         );
                         if button_response.clicked() {
                             self.state.protractor_enabled = !self.state.protractor_enabled;
+                            if self.state.protractor_enabled {
+                                let (left, top, w, h) = crate::window_list::virtual_screen_bounds();
+                                self.state.protractor_center_x = left + w / 2;
+                                self.state.protractor_center_y = top + h / 2;
+                                self.state.protractor_scale = 1.0;
+                                self.state.protractor_needle1_angle = 0.0;
+                                self.state.protractor_needle2_angle = 90.0;
+                            }
                             self.sync_protractor_state();
                             self.persist();
                             self.status = if self.state.protractor_enabled {
@@ -9827,104 +9837,255 @@ impl CrosshairApp {
     }
 
     fn begin_protractor_calibration(&mut self, ctx: &egui::Context) {
+        if self.protractor_calibration_points.is_some() {
+            return;
+        }
+
         self.protractor_picking_active = true;
-        // Temporarily hide protractor overlay so user can see the screen to pick points
+        self.protractor_calibration_points = Some(Vec::new());
+
+        let viewport = ctx.input(|input| input.viewport().clone());
+        self.mouse_move_absolute_restore_inner_size = viewport
+            .inner_rect
+            .map(|rect| rect.size())
+            .or(Some(Self::desired_window_size()));
+        self.mouse_move_absolute_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
+        self.enforce_square_window_frames = 0;
+
+        // Hide main app window
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
+        // Tell overlay to hide protractor
         let _ = self.overlay_tx.send(OverlayCommand::SetProtractorEnabled(false));
+        crate::overlay::wake_command_queue();
+
+        // Sleep to let OS process window hide and refresh desktop
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        // Capture virtual screen bounds
+        let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+        if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                [capture.width, capture.height],
+                &capture.rgba,
+            );
+            let texture = ctx.load_texture(
+                "screen-freeze-frame",
+                color_image,
+                egui::TextureOptions::NEAREST,
+            );
+            self.captured_freeze_texture = Some(texture);
+            self.captured_freeze_frame = Some(capture);
+            self.captured_freeze_pos = egui::pos2(left as f32, top as f32);
+        }
+
+        // Resize window to virtual screen dimensions
+        let ppp = ctx.pixels_per_point().max(0.5);
+        let pos = egui::pos2(left as f32 / ppp, top as f32 / ppp);
+        let size = egui::vec2(width as f32 / ppp, height as f32 / ppp);
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+
+        // Show window again using native Win32 API
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+            }
+        }
+
+        self.mouse_move_absolute_capture_wait_for_mouse_release = true; // Wait for initial release if mouse is pressed
         self.status = Self::tr_lang(
             self.state.ui_language,
             "Calibration: Click point 1/3 on screen. Press Esc to cancel.",
-            "Can chinh: Click diem 1/3 tren man hinh. Nhan Esc de huy.",
+            "Cân chỉnh: Click điểm 1/3 trên màn hình. Nhấn Esc để hủy.",
         ).to_owned();
 
-        let ui_tx = self.ui_tx.clone();
-        let ctx_clone = ctx.clone();
-
-        #[cfg(windows)]
-        std::thread::spawn(move || {
-            use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
-            use windows::Win32::Foundation::POINT;
-            use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
-            
-            let is_down = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
-            
-            // Wait until mouse is released if left button is currently pressed
-            while is_down(0x01) {
-                if is_down(0x1B) {
-                    let _ = ui_tx.send(UiCommand::ProtractorCalibrationCancelled);
-                    ctx_clone.request_repaint();
-                    return;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            
-            let mut points = Vec::new();
-            while points.len() < 3 {
-                if is_down(0x1B) {
-                    let _ = ui_tx.send(UiCommand::ProtractorCalibrationCancelled);
-                    ctx_clone.request_repaint();
-                    return;
-                }
-                
-                if is_down(0x01) {
-                    let mut point = POINT::default();
-                    if unsafe { GetCursorPos(&mut point).is_ok() } {
-                        points.push((point.x, point.y));
-                        
-                        if points.len() < 3 {
-                            let msg = if points.len() == 1 {
-                                "Calibration: Click point 2/3 on screen. Press Esc to cancel."
-                            } else {
-                                "Calibration: Click point 3/3 on screen. Press Esc to cancel."
-                            };
-                            let _ = ui_tx.send(UiCommand::ProtractorCalibrationProgress(msg.to_string()));
-                        } else {
-                            // Calculate circle
-                            if let Some(((cx, cy), radius)) = circle_from_3_points(points[0], points[1], points[2]) {
-                                let scale = (radius / 150.0).clamp(0.4, 2.5);
-                                let _ = ui_tx.send(UiCommand::ProtractorCalibrated {
-                                    center_x: cx,
-                                    center_y: cy,
-                                    scale,
-                                });
-                            } else {
-                                let _ = ui_tx.send(UiCommand::ProtractorCalibrationFailed(
-                                    "Points are collinear. Cannot form a circle.".to_string(),
-                                ));
-                            }
-                        }
-                    }
-                    
-                    // Wait for mouse release before next click detection
-                    while is_down(0x01) {
-                        if is_down(0x1B) {
-                            let _ = ui_tx.send(UiCommand::ProtractorCalibrationCancelled);
-                            ctx_clone.request_repaint();
-                            return;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                }
-                
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            ctx_clone.request_repaint();
-        });
-
-        #[cfg(not(windows))]
-        {
-            let _ = ui_tx.send(UiCommand::ProtractorCalibrationFailed(
-                "Protractor calibration is only supported on Windows.".to_string(),
-            ));
-        }
+        ctx.request_repaint();
     }
 
     fn cancel_protractor_calibration(&mut self) {
         self.protractor_picking_active = false;
+        self.protractor_calibration_points = None;
+        self.captured_freeze_texture = None;
+        self.captured_freeze_frame = None;
         self.status = Self::tr_lang(
             self.state.ui_language,
             "Protractor calibration cancelled.",
             "Huy can chinh thuoc do do.",
         ).to_owned();
+    }
+
+    pub(crate) fn cancel_protractor_calibration_freeze(&mut self, ctx: &egui::Context) {
+        self.protractor_picking_active = false;
+        self.protractor_calibration_points = None;
+        self.captured_freeze_texture = None;
+        self.captured_freeze_frame = None;
+        self.restore_mouse_move_absolute_capture_window(ctx);
+        self.mouse_move_absolute_capture_raise_window = true;
+        self.status = Self::tr_lang(
+            self.state.ui_language,
+            "Protractor calibration cancelled.",
+            "Đã hủy cân chỉnh thước đo góc.",
+        ).to_owned();
+        self.sync_protractor_state();
+        ctx.request_repaint_after(std::time::Duration::from_millis(33));
+    }
+
+    pub(crate) fn finish_protractor_calibration_freeze(&mut self, ctx: &egui::Context, points: Vec<(i32, i32)>) {
+        self.protractor_picking_active = false;
+        self.protractor_calibration_points = None;
+        self.captured_freeze_texture = None;
+        self.captured_freeze_frame = None;
+        self.restore_mouse_move_absolute_capture_window(ctx);
+        self.mouse_move_absolute_capture_raise_window = true;
+
+        if points.len() == 3 {
+            if let Some(((cx, cy), radius)) = circle_from_3_points(points[0], points[1], points[2]) {
+                let scale = (radius / 150.0).clamp(0.4, 2.5);
+                self.state.protractor_center_x = cx;
+                self.state.protractor_center_y = cy;
+                self.state.protractor_scale = scale;
+                self.status = Self::tr_lang(
+                    self.state.ui_language,
+                    "Protractor calibrated successfully!",
+                    "Cân chỉnh thước đo góc thành công!",
+                ).to_owned();
+            } else {
+                self.status = Self::tr_lang(
+                    self.state.ui_language,
+                    "Points are collinear. Cannot form a circle.",
+                    "Các điểm thẳng hàng. Không thể tạo đường tròn.",
+                ).to_owned();
+            }
+        }
+
+        self.sync_protractor_state();
+        self.persist();
+        ctx.request_repaint_after(std::time::Duration::from_millis(33));
+    }
+
+    pub(crate) fn render_protractor_calibration_overlay(&mut self, ctx: &egui::Context) -> bool {
+        if self.protractor_calibration_points.is_none() {
+            return false;
+        }
+
+        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) || Self::is_vk_down(0x1B) {
+            self.cancel_protractor_calibration_freeze(ctx);
+            return true;
+        }
+
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::NONE)
+                    .inner_margin(egui::Margin::same(0)),
+            )
+            .show(ctx, |ui| {
+                let max_rect = ui.max_rect();
+
+                if let Some(ref texture) = self.captured_freeze_texture {
+                    ui.painter().image(
+                        texture.id(),
+                        max_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
+
+                let status_text = &self.status;
+                if !status_text.is_empty() {
+                    let text_width = ui.painter().layout_no_wrap(status_text.clone(), egui::FontId::proportional(14.0), egui::Color32::WHITE).size().x;
+                    let padding = 24.0;
+                    let top_bar_rect = egui::Rect::from_center_size(
+                        egui::pos2(max_rect.center().x, max_rect.top() + 40.0),
+                        egui::vec2(text_width + padding * 2.0, 36.0),
+                    );
+                    ui.painter().rect_filled(
+                        top_bar_rect,
+                        18.0,
+                        egui::Color32::from_rgb(12, 18, 28),
+                    );
+                    ui.painter().rect_stroke(
+                        top_bar_rect,
+                        18.0,
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(110, 156, 210)),
+                        egui::StrokeKind::Outside,
+                    );
+                    ui.painter().text(
+                        top_bar_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        status_text,
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::WHITE,
+                    );
+                }
+
+                let ppp = ctx.pixels_per_point().max(0.5);
+                let (left, top, _, _) = crate::window_list::virtual_screen_bounds();
+                let points = self.protractor_calibration_points.as_mut().unwrap();
+                for (idx, pt) in points.iter().enumerate() {
+                    let rx = (pt.0 - left) as f32 / ppp;
+                    let ry = (pt.1 - top) as f32 / ppp;
+                    let pt_pos = egui::pos2(rx, ry);
+
+                    ui.painter().circle_filled(pt_pos, 6.0, egui::Color32::from_rgb(255, 50, 50));
+                    ui.painter().circle_stroke(pt_pos, 10.0, egui::Stroke::new(2.0, egui::Color32::WHITE));
+                    ui.painter().text(
+                        pt_pos + egui::vec2(12.0, -12.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        format!("{}", idx + 1),
+                        egui::FontId::proportional(16.0),
+                        egui::Color32::from_rgb(255, 50, 50),
+                    );
+                }
+
+                if self.mouse_move_absolute_capture_wait_for_mouse_release {
+                    if !Self::is_vk_down(0x01) {
+                        self.mouse_move_absolute_capture_wait_for_mouse_release = false;
+                    }
+                } else if Self::is_vk_down(0x01) {
+                    use windows::Win32::Foundation::POINT;
+                    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+                    let mut point = POINT::default();
+                    if unsafe { GetCursorPos(&mut point) }.is_ok() {
+                        points.push((point.x, point.y));
+                        self.mouse_move_absolute_capture_wait_for_mouse_release = true;
+
+                        if points.len() == 1 {
+                            self.status = Self::tr_lang(
+                                self.state.ui_language,
+                                "Calibration: Click point 2/3 on screen. Press Esc to cancel.",
+                                "Cân chỉnh: Click điểm 2/3 trên màn hình. Nhấn Esc để hủy.",
+                            ).to_owned();
+                        } else if points.len() == 2 {
+                            self.status = Self::tr_lang(
+                                self.state.ui_language,
+                                "Calibration: Click point 3/3 on screen. Press Esc to cancel.",
+                                "Cân chỉnh: Click điểm 3/3 trên màn hình. Nhấn Esc để hủy.",
+                            ).to_owned();
+                        } else if points.len() == 3 {
+                            let pts = points.clone();
+                            self.finish_protractor_calibration_freeze(ctx, pts);
+                        }
+                    }
+                }
+            });
+        true
     }
 }
 
@@ -10470,16 +10631,24 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::SetProtractorEnabled(enabled) => {
                     self.state.protractor_enabled = enabled;
+                    if enabled {
+                        let (left, top, w, h) = crate::window_list::virtual_screen_bounds();
+                        self.state.protractor_center_x = left + w / 2;
+                        self.state.protractor_center_y = top + h / 2;
+                        self.state.protractor_scale = 1.0;
+                        self.state.protractor_needle1_angle = 0.0;
+                        self.state.protractor_needle2_angle = 90.0;
+                    }
+                    self.sync_protractor_state();
                     self.persist();
                     ctx.request_repaint();
                 }
                 UiCommand::RequestProtractorCalibration => {
                     if self.protractor_picking_active {
-                        self.cancel_protractor_calibration();
+                        self.cancel_protractor_calibration_freeze(ctx);
                     } else {
                         self.begin_protractor_calibration(ctx);
                     }
-                    self.sync_protractor_state();
                 }
                 UiCommand::UpdateProtractorConfig {
                     scale,
@@ -10496,40 +10665,6 @@ impl eframe::App for CrosshairApp {
                     self.state.protractor_center_y = center_y;
                     self.state.protractor_thickness = thickness;
                     self.persist();
-                }
-                UiCommand::ProtractorCalibrationCancelled => {
-                    self.protractor_picking_active = false;
-                    self.sync_protractor_state();
-                    self.status = Self::tr_lang(
-                        self.state.ui_language,
-                        "Protractor calibration cancelled.",
-                        "Huy can chinh thuoc do do.",
-                    ).to_owned();
-                    ctx.request_repaint();
-                }
-                UiCommand::ProtractorCalibrationProgress(msg) => {
-                    self.status = msg;
-                    ctx.request_repaint();
-                }
-                UiCommand::ProtractorCalibrated { center_x, center_y, scale } => {
-                    self.protractor_picking_active = false;
-                    self.state.protractor_center_x = center_x;
-                    self.state.protractor_center_y = center_y;
-                    self.state.protractor_scale = scale;
-                    self.sync_protractor_state();
-                    self.persist();
-                    self.status = Self::tr_lang(
-                        self.state.ui_language,
-                        "Protractor calibrated successfully!",
-                        "Can chinh thuoc do do thanh cong!",
-                    ).to_owned();
-                    ctx.request_repaint();
-                }
-                UiCommand::ProtractorCalibrationFailed(err) => {
-                    self.protractor_picking_active = false;
-                    self.sync_protractor_state();
-                    self.status = err;
-                    ctx.request_repaint();
                 }
             }
         }
@@ -10835,6 +10970,9 @@ impl eframe::App for CrosshairApp {
             return;
         }
         if self.render_mouse_move_absolute_capture_overlay(ctx) {
+            return;
+        }
+        if self.render_protractor_calibration_overlay(ctx) {
             return;
         }
 
