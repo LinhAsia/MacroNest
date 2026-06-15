@@ -106,6 +106,7 @@ enum TitlebarQuickActionKind {
     WindowsKey,
     WindowPin,
     FocusHighlight,
+    Protractor,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1152,6 +1153,8 @@ impl CrosshairApp {
         self.sync_macro_master_enabled();
         self.sync_windows_key_locked();
         self.sync_native_focus_highlight_enabled();
+        self.sync_focus_highlight_config();
+        self.sync_protractor_state();
         self.sync_vietnamese_input_enabled();
         self.sync_macro_master_hotkey();
         self.startup_overlay_sync_pending = false;
@@ -1204,6 +1207,26 @@ impl CrosshairApp {
             .send(OverlayCommand::SetNativeFocusHighlightEnabled(
                 self.state.native_focus_highlight_enabled,
             ));
+    }
+
+    fn sync_focus_highlight_config(&self) {
+        let _ = self.overlay_tx.send(OverlayCommand::SetFocusHighlightConfig {
+            color: self.state.focus_highlight_color,
+            rainbow: self.state.focus_highlight_rainbow,
+        });
+    }
+
+    fn sync_protractor_state(&self) {
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::SetProtractorEnabled(self.state.protractor_enabled));
+        let _ = self.overlay_tx.send(OverlayCommand::UpdateProtractorConfig {
+            scale: self.state.protractor_scale,
+            needle1_angle: self.state.protractor_needle1_angle,
+            needle2_angle: self.state.protractor_needle2_angle,
+            center_x: self.state.protractor_center_x,
+            center_y: self.state.protractor_center_y,
+        });
     }
 
     fn sync_vietnamese_input_enabled(&self) {
@@ -3883,6 +3906,20 @@ impl CrosshairApp {
                     painter.circle_filled(rect.center(), 4.0, icon_color);
                 }
             }
+            TitlebarQuickActionKind::Protractor => {
+                let center = rect.center();
+                let radius = 11.0;
+                painter.circle_stroke(center, radius, egui::Stroke::new(1.8, icon_color));
+                painter.line_segment(
+                    [pos2(center.x - radius, center.y), pos2(center.x + radius, center.y)],
+                    egui::Stroke::new(1.2, icon_color),
+                );
+                let rad = (-45.0_f32).to_radians();
+                painter.line_segment(
+                    [center, pos2(center.x + radius * rad.cos(), center.y + radius * rad.sin())],
+                    egui::Stroke::new(1.8, icon_color),
+                );
+            }
         }
     }
 
@@ -3976,7 +4013,7 @@ impl CrosshairApp {
         let mut keep_menu_open = false;
 
         Grid::new("titlebar-quick-actions-grid")
-            .num_columns(4)
+            .num_columns(5)
             .spacing([8.0, 8.0])
             .show(ui, |ui| {
                 ui.allocate_ui_with_layout(
@@ -4284,7 +4321,7 @@ impl CrosshairApp {
                 );
 
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 116.0),
+                    vec2(92.0, 155.0),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let button_response = self.titlebar_quick_action_button(
@@ -4301,26 +4338,26 @@ impl CrosshairApp {
                                 Self::tr_lang(
                                     self.state.ui_language,
                                     "Native focus highlight enabled.",
-                                    "Đã bật viền focus native.",
+                                    "Da bat vien focus native.",
                                 )
                             } else {
                                 Self::tr_lang(
                                     self.state.ui_language,
                                     "Native focus highlight disabled.",
-                                    "Đã tắt viền focus native.",
+                                    "Da tat vien focus native.",
                                 )
                             }
                             .to_owned();
                         }
 
-                        ui.add_space(6.0);
+                        ui.add_space(4.0);
                         let focus_label = Self::tr_lang(
                             self.state.ui_language,
                             "Focus highlight",
-                            "Viền focus",
+                            "Vien focus",
                         );
                         ui.allocate_ui_with_layout(
-                            vec2(92.0, 28.0),
+                            vec2(92.0, 20.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(
@@ -4334,7 +4371,142 @@ impl CrosshairApp {
                                 ));
                             },
                         );
-                        ui.add_space(12.0);
+
+                        ui.add_space(4.0);
+                        // Color picker row
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 22.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(4.0);
+                                let color_changed =
+                                    Self::edit_rgba_color(ui, &mut self.state.focus_highlight_color)
+                                        .changed();
+                                if color_changed {
+                                    self.sync_focus_highlight_config();
+                                    self.persist();
+                                }
+                                ui.add_space(4.0);
+                                ui.add(egui::Label::new(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Color",
+                                        "Mau",
+                                    ))
+                                    .size(10.0),
+                                ));
+                            },
+                        );
+
+                        ui.add_space(2.0);
+                        // Rainbow checkbox row
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 22.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(4.0);
+                                let rainbow_changed = ui
+                                    .checkbox(
+                                        &mut self.state.focus_highlight_rainbow,
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Rainbow",
+                                            "Cau vong",
+                                        ))
+                                        .size(10.0),
+                                    )
+                                    .changed();
+                                if rainbow_changed {
+                                    self.sync_focus_highlight_config();
+                                    self.persist();
+                                }
+                            },
+                        );
+
+                        ui.add_space(4.0);
+                    },
+                );
+
+                // Protractor tool
+                ui.allocate_ui_with_layout(
+                    vec2(92.0, 155.0),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::Protractor,
+                            self.state.protractor_enabled,
+                        );
+                        if button_response.clicked() {
+                            self.state.protractor_enabled = !self.state.protractor_enabled;
+                            self.sync_protractor_state();
+                            self.persist();
+                            self.status = if self.state.protractor_enabled {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Protractor overlay enabled.",
+                                    "Da bat thuoc do do.",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Protractor overlay disabled.",
+                                    "Da tat thuoc do do.",
+                                )
+                            }
+                            .to_owned();
+                        }
+
+                        ui.add_space(4.0);
+                        let proto_label = Self::tr_lang(
+                            self.state.ui_language,
+                            "Protractor",
+                            "Thuoc do do",
+                        );
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 20.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(proto_label)
+                                        .size(11.0)
+                                        .color(if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        }),
+                                ));
+                            },
+                        );
+
+                        ui.add_space(4.0);
+                        // Scale slider
+                        ui.allocate_ui_with_layout(
+                            vec2(88.0, 22.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                let scale_changed = ui
+                                    .add(
+                                        egui::Slider::new(
+                                            &mut self.state.protractor_scale,
+                                            0.3..=3.0,
+                                        )
+                                        .text(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Scale",
+                                            "Co",
+                                        ))
+                                        .show_value(false),
+                                    )
+                                    .changed();
+                                if scale_changed {
+                                    self.sync_protractor_state();
+                                    self.persist();
+                                }
+                            },
+                        );
+
+                        ui.add_space(4.0);
                     },
                 );
             });
@@ -10191,6 +10363,25 @@ impl eframe::App for CrosshairApp {
                         self.active_video_overlay_preset_id = None;
                     }
                     ctx.request_repaint();
+                }
+                UiCommand::SetProtractorEnabled(enabled) => {
+                    self.state.protractor_enabled = enabled;
+                    self.persist();
+                    ctx.request_repaint();
+                }
+                UiCommand::UpdateProtractorConfig {
+                    scale,
+                    needle1_angle,
+                    needle2_angle,
+                    center_x,
+                    center_y,
+                } => {
+                    self.state.protractor_scale = scale;
+                    self.state.protractor_needle1_angle = needle1_angle;
+                    self.state.protractor_needle2_angle = needle2_angle;
+                    self.state.protractor_center_x = center_x;
+                    self.state.protractor_center_y = center_y;
+                    self.persist();
                 }
             }
         }
