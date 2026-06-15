@@ -190,14 +190,19 @@ fn main() -> Result<()> {
         let startup_paths = paths.clone();
         let startup_ui_tx = ui_tx.clone();
         std::thread::spawn(move || {
-            let (state, startup_state_dirty) = match load_startup_state(&startup_paths) {
-                Ok(result) => result,
-                Err(_) => (AppState::default(), false),
-            };
-            let _ = startup_ui_tx.send(crate::overlay::UiCommand::StartupStateLoaded {
-                state,
-                startup_state_dirty,
-            });
+            match load_startup_state(&startup_paths) {
+                Ok((state, startup_state_dirty)) => {
+                    let _ = startup_ui_tx.send(crate::overlay::UiCommand::StartupStateLoaded {
+                        state,
+                        startup_state_dirty,
+                    });
+                }
+                Err(error) => {
+                    let _ = startup_ui_tx.send(crate::overlay::UiCommand::StartupStateLoadFailed(
+                        error.to_string(),
+                    ));
+                }
+            }
         });
     }
     let startup_gate: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));

@@ -1,6 +1,7 @@
 use std::{
     env, fs,
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
@@ -124,6 +125,22 @@ impl AppPaths {
 
     pub fn vision_template_file_for(&self, preset_id: u32) -> PathBuf {
         self.vision_dir.join(format!("preset-{preset_id}.png"))
+    }
+
+    fn state_backup_file(&self) -> PathBuf {
+        self.state_file.with_extension("json.bak")
+    }
+
+    fn state_temp_file(&self) -> PathBuf {
+        self.state_file.with_extension("json.tmp")
+    }
+
+    fn state_recovery_file(&self) -> PathBuf {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.root.join(format!("state-recovery-{ts}.json"))
     }
 
     pub fn load_state(&self) -> Result<(AppState, StateLoadStatus)> {
@@ -539,12 +556,6 @@ impl AppPaths {
             item.collapsed = true;
         }
 
-        if !self.state_file.exists() {
-            self.save_state(&state)?;
-        } else {
-            self.save_state(&state)?;
-        }
-
         Ok((state, status))
     }
 
@@ -557,7 +568,15 @@ impl AppPaths {
             preset.window_focus_presets.clear();
         }
         let content = serde_json::to_string_pretty(&state)?;
-        fs::write(&self.state_file, content)?;
+        let temp_file = self.state_temp_file();
+        let backup_file = self.state_backup_file();
+        fs::write(&temp_file, content)?;
+        if self.state_file.exists() {
+            let _ = fs::copy(&self.state_file, self.state_recovery_file());
+            let _ = fs::copy(&self.state_file, &backup_file);
+        }
+        fs::copy(&temp_file, &self.state_file)?;
+        let _ = fs::remove_file(temp_file);
         Ok(())
     }
 

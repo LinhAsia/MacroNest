@@ -9665,6 +9665,15 @@ impl eframe::App for CrosshairApp {
                 } => {
                     self.apply_loaded_startup_state(ctx, state, startup_state_dirty);
                 }
+                UiCommand::StartupStateLoadFailed(error) => {
+                    self.status = format!("Failed to load app state: {error}");
+                    self.startup_state_persist_pending = false;
+                    self.startup_overlay_sync_pending = true;
+                    self.startup_cjk_font_check_pending = true;
+                    self.startup_shell_frames_remaining =
+                        self.startup_shell_frames_remaining.max(1);
+                    ctx.request_repaint();
+                }
                 UiCommand::SyncMacroGroups(groups, status) => {
                     self.state.macro_groups = groups;
                     self.persist_macro_presets();
