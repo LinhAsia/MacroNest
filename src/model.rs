@@ -188,6 +188,10 @@ fn default_protractor_center_y() -> i32 {
     500
 }
 
+fn default_protractor_thickness() -> f32 {
+    2.0
+}
+
 fn default_image_search_move_passes() -> u8 {
     3
 }
@@ -2661,6 +2665,8 @@ pub struct AppState {
     pub protractor_center_x: i32,
     #[serde(default = "default_protractor_center_y")]
     pub protractor_center_y: i32,
+    #[serde(default = "default_protractor_thickness")]
+    pub protractor_thickness: f32,
     pub macros_master_hotkey: Option<HotkeyBinding>,
     #[serde(default = "default_true")]
     pub macro_infinite_loop_warning_enabled: bool,
@@ -2769,6 +2775,7 @@ impl Default for AppState {
             protractor_needle2_angle: 90.0,
             protractor_center_x: 500,
             protractor_center_y: 500,
+            protractor_thickness: 2.0,
             macros_master_hotkey: None,
             macro_infinite_loop_warning_enabled: true,
             vision_presets: vec![VisionPreset::default()],

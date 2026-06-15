@@ -329,6 +329,7 @@ mod windows_overlay {
         Needle2,
         ResizeGrip,
         Body,
+        ThicknessSlider,
     }
 
     struct ProtractorState {
@@ -338,6 +339,7 @@ mod windows_overlay {
         needle2_angle: f32,
         center_x: i32,
         center_y: i32,
+        thickness: f32,
     }
 
     static PROTRACTOR_STATE: Lazy<Mutex<ProtractorState>> = Lazy::new(|| Mutex::new(ProtractorState {
@@ -347,6 +349,7 @@ mod windows_overlay {
         needle2_angle: 90.0,
         center_x: 500,
         center_y: 500,
+        thickness: 2.0,
     }));
 
     static PROTRACTOR_DRAG_TARGET: Lazy<Mutex<Option<ProtractorDragTarget>>> = Lazy::new(|| Mutex::new(None));
@@ -460,6 +463,7 @@ mod windows_overlay {
             needle2_angle: f32,
             center_x: i32,
             center_y: i32,
+            thickness: f32,
         },
     }
 
@@ -586,7 +590,16 @@ mod windows_overlay {
             needle2_angle: f32,
             center_x: i32,
             center_y: i32,
+            thickness: f32,
         },
+        ProtractorCalibrationCancelled,
+        ProtractorCalibrationProgress(String),
+        ProtractorCalibrated {
+            center_x: i32,
+            center_y: i32,
+            scale: f32,
+        },
+        ProtractorCalibrationFailed(String),
     }
 
     pub struct OverlayHandle {
@@ -1496,6 +1509,16 @@ mod windows_overlay {
                     let dist = (dist_sq as f32).sqrt();
 
                     let size = 2 * half_size;
+
+                    // Thickness slider hit test
+                    let slider_left = cx - 30;
+                    let slider_right = cx + 30;
+                    let slider_top = size - 18;
+                    let slider_bottom = size - 6;
+                    if pt.x >= slider_left - 4 && pt.x <= slider_right + 4 && pt.y >= slider_top - 4 && pt.y <= slider_bottom + 4 {
+                        return LRESULT(1isize); // HTCLIENT
+                    }
+
                     if pt.x >= size - 24 && pt.x < size - 8 && pt.y >= 8 && pt.y < 24 {
                         return LRESULT(1isize); // HTCLIENT
                     }
@@ -1564,7 +1587,16 @@ mod windows_overlay {
 
                     let mut hit = None;
 
-                    if mx >= size - 24 && mx < size - 8 && my >= 8 && my < 24 {
+                    // Thickness slider hit test
+                    let slider_left = cx - 30;
+                    let slider_right = cx + 30;
+                    let slider_top = size - 18;
+                    let slider_bottom = size - 6;
+                    if mx >= slider_left - 4 && mx <= slider_right + 4 && my >= slider_top - 4 && my <= slider_bottom + 4 {
+                        hit = Some(ProtractorDragTarget::ThicknessSlider);
+                    }
+
+                    if hit.is_none() && mx >= size - 24 && mx < size - 8 && my >= 8 && my < 24 {
                         hit = Some(ProtractorDragTarget::Close);
                     }
                     if hit.is_none() {
@@ -1640,7 +1672,6 @@ mod windows_overlay {
 
                         let start_mouse = *PROTRACTOR_DRAG_START_MOUSE.lock();
                         let start_center = *PROTRACTOR_DRAG_START_CENTER.lock();
-                        let start_scale = *PROTRACTOR_DRAG_START_SCALE.lock();
 
                         match target {
                             ProtractorDragTarget::Body => {
@@ -1697,7 +1728,33 @@ mod windows_overlay {
                                     let _ = paint_protractor_overlay(runtime);
                                 }
                             }
-                            _ => {}
+                            ProtractorDragTarget::ThicknessSlider => {
+                                let mut pt = mouse_screen;
+                                let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
+
+                                let scale = {
+                                    let state = PROTRACTOR_STATE.lock();
+                                    state.scale
+                                };
+                                let radius = (scale * 150.0) as i32;
+                                let padding = (scale * 30.0) as i32;
+                                let half_size = radius + padding;
+                                let cx = half_size;
+                                let slider_left = cx - 30;
+
+                                let t_frac = ((pt.x - slider_left) as f32 / 60.0).clamp(0.0, 1.0);
+                                let new_thick = 1.0 + t_frac * 7.0; // 1.0 to 8.0
+
+                                {
+                                    let mut state = PROTRACTOR_STATE.lock();
+                                    state.thickness = new_thick;
+                                }
+
+                                if let Some(runtime) = runtime_mut(HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void)) {
+                                    let _ = paint_protractor_overlay(runtime);
+                                }
+                            }
+                            ProtractorDragTarget::Close => {} // no drag behavior for close button
                         }
                     }
                     return LRESULT(0);
@@ -1706,12 +1763,12 @@ mod windows_overlay {
                 WM_LBUTTONUP => {
                     let was_dragging = PROTRACTOR_DRAG_TARGET.lock().is_some();
                     if was_dragging {
-                        windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+                        let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
                         *PROTRACTOR_DRAG_TARGET.lock() = None;
 
-                        let (scale, needle1, needle2, cx, cy) = {
+                        let (scale, needle1, needle2, cx, cy, thickness) = {
                             let state = PROTRACTOR_STATE.lock();
-                            (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y)
+                            (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y, state.thickness)
                         };
 
                         if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
@@ -1721,6 +1778,7 @@ mod windows_overlay {
                                 needle2_angle: needle2,
                                 center_x: cx,
                                 center_y: cy,
+                                thickness,
                             });
                         }
                     }
@@ -4606,6 +4664,7 @@ mod windows_overlay {
                     needle2_angle,
                     center_x,
                     center_y,
+                    thickness,
                 } => {
                     let enabled = {
                         let mut state = PROTRACTOR_STATE.lock();
@@ -4614,6 +4673,7 @@ mod windows_overlay {
                         state.needle2_angle = needle2_angle;
                         state.center_x = center_x;
                         state.center_y = center_y;
+                        state.thickness = thickness;
                         state.enabled
                     };
                     if enabled {
@@ -5401,9 +5461,9 @@ mod windows_overlay {
     }
 
     unsafe fn paint_protractor_overlay(runtime: &Runtime) -> Result<()> {
-        let (scale, needle1, needle2, cx_val, cy_val) = {
+        let (scale, needle1, needle2, cx_val, cy_val, thickness) = {
             let state = PROTRACTOR_STATE.lock();
-            (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y)
+            (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y, state.thickness)
         };
 
         let base_radius = 150.0;
@@ -5457,7 +5517,7 @@ mod windows_overlay {
             2 * radius,
             2 * radius,
             [255, 255, 255, 140],
-            2,
+            (thickness as i32).max(1),
         );
 
         // 3. Draw tick marks every 5 degrees
@@ -5499,7 +5559,7 @@ mod windows_overlay {
         let rad1 = (needle1 as f32).to_radians();
         let n1x = cx + (radius as f32 * rad1.cos()) as i32;
         let n1y = cy + (radius as f32 * rad1.sin()) as i32;
-        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, cx, cy, n1x, n1y, [0, 220, 255, 240], 2);
+        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, cx, cy, n1x, n1y, [0, 220, 255, 240], (thickness as i32).max(1));
         fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, n1x - 6, n1y - 6, 12, 12, [0, 220, 255, 255]);
         draw_ellipse_outline_thick_rgba(canvas.as_mut(), width as usize, height as usize, n1x - 6, n1y - 6, 12, 12, [255, 255, 255, 255], 1);
 
@@ -5507,7 +5567,7 @@ mod windows_overlay {
         let rad2 = (needle2 as f32).to_radians();
         let n2x = cx + (radius as f32 * rad2.cos()) as i32;
         let n2y = cy + (radius as f32 * rad2.sin()) as i32;
-        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, cx, cy, n2x, n2y, [255, 92, 141, 240], 2);
+        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, cx, cy, n2x, n2y, [255, 92, 141, 240], (thickness as i32).max(1));
         fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, n2x - 6, n2y - 6, 12, 12, [255, 92, 141, 255]);
         draw_ellipse_outline_thick_rgba(canvas.as_mut(), width as usize, height as usize, n2x - 6, n2y - 6, 12, 12, [255, 255, 255, 255], 1);
 
@@ -5522,6 +5582,15 @@ mod windows_overlay {
         fill_rect_rgba(canvas.as_mut(), width as usize, height as usize, size - 24, 8, 16, 16, [255, 80, 80, 220]);
         draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, size - 21, 11, size - 11, 21, [255, 255, 255, 255], 2);
         draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, size - 11, 11, size - 21, 21, [255, 255, 255, 255], 2);
+
+        // 9. Thickness Slider
+        let slider_left = cx - 30;
+        let slider_right = cx + 30;
+        draw_line_rgba(canvas.as_mut(), width as usize, height as usize, slider_left, size - 12, slider_right, size - 12, [200, 200, 200, 180]);
+        let t_frac = ((thickness - 1.0) / 7.0).clamp(0.0, 1.0);
+        let thumb_x = slider_left + (t_frac * 60.0) as i32;
+        fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, thumb_x - 4, size - 12 - 4, 8, 8, [0, 220, 255, 255]);
+        draw_ellipse_outline_thick_rgba(canvas.as_mut(), width as usize, height as usize, thumb_x - 4, size - 12 - 4, 8, 8, [255, 255, 255, 255], 1);
 
         // GDI render & Text setup
         let screen_dc = GetDC(None);
@@ -5573,8 +5642,15 @@ mod windows_overlay {
         let angle_str = format!("{:.1}°", angle_val);
         let center_str = format!("X:{} Y:{}", cx_val, cy_val);
 
+        let p1_x = cx_val + (radius as f32 * rad1.cos()) as i32;
+        let p1_y = cy_val + (radius as f32 * rad1.sin()) as i32;
+        let p2_x = cx_val + (radius as f32 * rad2.cos()) as i32;
+        let p2_y = cy_val + (radius as f32 * rad2.sin()) as i32;
+        let p1_str = format!("P1: {}, {}", p1_x, p1_y);
+        let p2_str = format!("P2: {}, {}", p2_x, p2_y);
+
         let font = CreateFontW(
-            (11.0 * scale) as i32,
+            12, // Fixed font size 12 pixels
             0,
             0,
             0,
@@ -5595,22 +5671,40 @@ mod windows_overlay {
         let _ = SetTextColor(mem_dc, COLORREF(0xFFFFFF));
 
         let mut r_angle = RECT {
-            left: cx - 60,
-            top: cy - (32.0 * scale) as i32,
-            right: cx + 60,
-            bottom: cy - (10.0 * scale) as i32,
+            left: cx - 80,
+            top: cy - 35,
+            right: cx + 80,
+            bottom: cy - 23,
         };
         let mut w_angle = angle_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         let _ = DrawTextW(mem_dc, &mut w_angle, &mut r_angle, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
         let mut r_center = RECT {
-            left: cx - 60,
-            top: cy + (10.0 * scale) as i32,
-            right: cx + 60,
-            bottom: cy + (32.0 * scale) as i32,
+            left: cx - 80,
+            top: cy - 21,
+            right: cx + 80,
+            bottom: cy - 9,
         };
         let mut w_center = center_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         let _ = DrawTextW(mem_dc, &mut w_center, &mut r_center, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+
+        let mut r_p1 = RECT {
+            left: cx - 80,
+            top: cy + 9,
+            right: cx + 80,
+            bottom: cy + 21,
+        };
+        let mut w_p1 = p1_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+        let _ = DrawTextW(mem_dc, &mut w_p1, &mut r_p1, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+
+        let mut r_p2 = RECT {
+            left: cx - 80,
+            top: cy + 23,
+            right: cx + 80,
+            bottom: cy + 35,
+        };
+        let mut w_p2 = p2_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+        let _ = DrawTextW(mem_dc, &mut w_p2, &mut r_p2, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
         let _ = SelectObject(mem_dc, old_font);
         let _ = DeleteObject(HGDIOBJ(font.0));
