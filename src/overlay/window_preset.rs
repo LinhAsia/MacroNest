@@ -91,14 +91,10 @@ pub(super) fn focus_window_by_preset_id(spec: &str) -> Result<()> {
         focus_window_for_preset(&preset)
     } else {
         // Fallback: if spec matches no preset, treat it as a direct window title/selector
-        let clean_title = if let Some(prefix) = spec.strip_suffix(')')
-            && let Some((base, _)) = prefix.rsplit_once(" (0x")
-        {
-            base
-        } else {
-            spec
-        };
-        focus_window_for_title(Some(clean_title), &[], false, true)
+        let is_specific = spec.strip_suffix(')').is_some_and(|prefix| {
+            prefix.rsplit_once(" (0x").is_some()
+        });
+        focus_window_for_title(Some(spec), &[], !is_specific, true)
     }
 }
 
