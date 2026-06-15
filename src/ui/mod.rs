@@ -10036,7 +10036,8 @@ impl CrosshairApp {
                 }
 
                 let ppp = ctx.pixels_per_point().max(0.5);
-                let (left, top, _, _) = crate::window_list::virtual_screen_bounds();
+                let left = self.captured_freeze_pos.x as i32;
+                let top = self.captured_freeze_pos.y as i32;
                 let points = self.protractor_calibration_points.as_mut().unwrap();
                 for (idx, pt) in points.iter().enumerate() {
                     let rx = (pt.0 - left) as f32 / ppp;
@@ -10644,9 +10645,7 @@ impl eframe::App for CrosshairApp {
                     ctx.request_repaint();
                 }
                 UiCommand::RequestProtractorCalibration => {
-                    if self.protractor_picking_active {
-                        self.cancel_protractor_calibration_freeze(ctx);
-                    } else {
+                    if !self.protractor_picking_active {
                         self.begin_protractor_calibration(ctx);
                     }
                 }
