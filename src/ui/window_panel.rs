@@ -941,6 +941,37 @@ impl CrosshairApp {
                         preset.source_crop_fit_version = 1;
                         live_sync = true;
                     }
+                    if preset.source_crop_initialized
+                        && preset.source_crop_fit_version < 2
+                        && let Some(preview_frame) = preview.as_ref()
+                    {
+                        let logical_width = preview_frame.logical_width.max(1);
+                        let logical_height = preview_frame.logical_height.max(1);
+                        let looks_screen_relative = preset.source_x < 0
+                            || preset.source_y < 0
+                            || preset.source_x >= logical_width
+                            || preset.source_y >= logical_height
+                            || preset.source_x + preset.source_width > logical_width
+                            || preset.source_y + preset.source_height > logical_height;
+                        if looks_screen_relative {
+                            preset.source_x -= preview_frame.screen_x;
+                            preset.source_y -= preview_frame.screen_y;
+                            preset.source_x =
+                                preset.source_x.clamp(0, logical_width.saturating_sub(1));
+                            preset.source_y =
+                                preset.source_y.clamp(0, logical_height.saturating_sub(1));
+                            preset.source_width = preset
+                                .source_width
+                                .max(1)
+                                .min(logical_width.saturating_sub(preset.source_x).max(1));
+                            preset.source_height = preset
+                                .source_height
+                                .max(1)
+                                .min(logical_height.saturating_sub(preset.source_y).max(1));
+                            live_sync = true;
+                        }
+                        preset.source_crop_fit_version = 2;
+                    }
                     let crop_changed = Self::render_zoom_rect_editor(
                         ui,
                         (preset.id, "pin-source-crop"),
@@ -957,7 +988,7 @@ impl CrosshairApp {
                     );
                     if crop_changed {
                         preset.source_crop_initialized = true;
-                        preset.source_crop_fit_version = 1;
+                        preset.source_crop_fit_version = 2;
                     }
                     live_sync |= crop_changed;
                     ui.horizontal_wrapped(|ui| {
@@ -995,7 +1026,7 @@ impl CrosshairApp {
                                 preset.source_width = w.max(1);
                                 preset.source_height = h.max(1);
                                 preset.source_crop_initialized = true;
-                                preset.source_crop_fit_version = 1;
+                                preset.source_crop_fit_version = 2;
                                 live_sync = true;
                             }
                         }
