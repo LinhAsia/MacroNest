@@ -4588,8 +4588,10 @@ mod windows_overlay {
                 }
 
                 OverlayCommand::SetProtractorEnabled(enabled) => {
-                    let mut state = PROTRACTOR_STATE.lock();
-                    state.enabled = enabled;
+                    {
+                        let mut state = PROTRACTOR_STATE.lock();
+                        state.enabled = enabled;
+                    }
                     if enabled {
                         let _ = ShowWindow(runtime.protractor_hwnd, SW_SHOWNA);
                         let _ = paint_protractor_overlay(runtime);
@@ -4605,13 +4607,16 @@ mod windows_overlay {
                     center_x,
                     center_y,
                 } => {
-                    let mut state = PROTRACTOR_STATE.lock();
-                    state.scale = scale;
-                    state.needle1_angle = needle1_angle;
-                    state.needle2_angle = needle2_angle;
-                    state.center_x = center_x;
-                    state.center_y = center_y;
-                    if state.enabled {
+                    let enabled = {
+                        let mut state = PROTRACTOR_STATE.lock();
+                        state.scale = scale;
+                        state.needle1_angle = needle1_angle;
+                        state.needle2_angle = needle2_angle;
+                        state.center_x = center_x;
+                        state.center_y = center_y;
+                        state.enabled
+                    };
+                    if enabled {
                         let _ = paint_protractor_overlay(runtime);
                     }
                 }
