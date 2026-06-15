@@ -159,6 +159,35 @@ fn default_image_search_offset_px() -> i32 {
     0
 }
 
+fn default_focus_highlight_color() -> RgbaColor {
+    RgbaColor {
+        r: 126,
+        g: 224,
+        b: 182,
+        a: 235,
+    }
+}
+
+fn default_protractor_scale() -> f32 {
+    1.0
+}
+
+fn default_protractor_needle1_angle() -> f32 {
+    0.0
+}
+
+fn default_protractor_needle2_angle() -> f32 {
+    90.0
+}
+
+fn default_protractor_center_x() -> i32 {
+    500
+}
+
+fn default_protractor_center_y() -> i32 {
+    500
+}
+
 fn default_image_search_move_passes() -> u8 {
     3
 }
@@ -2616,6 +2645,22 @@ pub struct AppState {
     pub windows_key_locked: bool,
     #[serde(default)]
     pub native_focus_highlight_enabled: bool,
+    #[serde(default = "default_focus_highlight_color")]
+    pub focus_highlight_color: RgbaColor,
+    #[serde(default)]
+    pub focus_highlight_rainbow: bool,
+    #[serde(default)]
+    pub protractor_enabled: bool,
+    #[serde(default = "default_protractor_scale")]
+    pub protractor_scale: f32,
+    #[serde(default = "default_protractor_needle1_angle")]
+    pub protractor_needle1_angle: f32,
+    #[serde(default = "default_protractor_needle2_angle")]
+    pub protractor_needle2_angle: f32,
+    #[serde(default = "default_protractor_center_x")]
+    pub protractor_center_x: i32,
+    #[serde(default = "default_protractor_center_y")]
+    pub protractor_center_y: i32,
     pub macros_master_hotkey: Option<HotkeyBinding>,
     #[serde(default = "default_true")]
     pub macro_infinite_loop_warning_enabled: bool,
@@ -2716,6 +2761,14 @@ impl Default for AppState {
             macros_master_enabled: true,
             windows_key_locked: false,
             native_focus_highlight_enabled: false,
+            focus_highlight_color: default_focus_highlight_color(),
+            focus_highlight_rainbow: false,
+            protractor_enabled: false,
+            protractor_scale: 1.0,
+            protractor_needle1_angle: 0.0,
+            protractor_needle2_angle: 90.0,
+            protractor_center_x: 500,
+            protractor_center_y: 500,
             macros_master_hotkey: None,
             macro_infinite_loop_warning_enabled: true,
             vision_presets: vec![VisionPreset::default()],

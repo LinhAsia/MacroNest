@@ -320,6 +320,40 @@ mod windows_overlay {
     static CONTROLLER_HWND: AtomicIsize = AtomicIsize::new(0);
     static ACTIVE_HIGHLIGHT_HWND: AtomicIsize = AtomicIsize::new(0);
     static ACTIVE_PIN_SOURCE_HWND: AtomicIsize = AtomicIsize::new(0);
+    static PROTRACTOR_HWND: AtomicIsize = AtomicIsize::new(0);
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ProtractorDragTarget {
+        Close,
+        Needle1,
+        Needle2,
+        ResizeGrip,
+        Body,
+    }
+
+    struct ProtractorState {
+        enabled: bool,
+        scale: f32,
+        needle1_angle: f32,
+        needle2_angle: f32,
+        center_x: i32,
+        center_y: i32,
+    }
+
+    static PROTRACTOR_STATE: Lazy<Mutex<ProtractorState>> = Lazy::new(|| Mutex::new(ProtractorState {
+        enabled: false,
+        scale: 1.0,
+        needle1_angle: 0.0,
+        needle2_angle: 90.0,
+        center_x: 500,
+        center_y: 500,
+    }));
+
+    static PROTRACTOR_DRAG_TARGET: Lazy<Mutex<Option<ProtractorDragTarget>>> = Lazy::new(|| Mutex::new(None));
+    static PROTRACTOR_DRAG_START_MOUSE: Lazy<Mutex<POINT>> = Lazy::new(|| Mutex::new(POINT::default()));
+    static PROTRACTOR_DRAG_START_CENTER: Lazy<Mutex<(i32, i32)>> = Lazy::new(|| Mutex::new((0, 0)));
+    static PROTRACTOR_DRAG_START_ANGLE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(0.0));
+    static PROTRACTOR_DRAG_START_SCALE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(1.0));
     static CACHED_APP_UI_HWND: AtomicIsize = AtomicIsize::new(0);
     pub static UI_WINDOW_RECT_LEFT: std::sync::atomic::AtomicI32 =
         std::sync::atomic::AtomicI32::new(0);
@@ -415,6 +449,18 @@ mod windows_overlay {
         UpdateTimerPresets(Vec<TimerPreset>),
         PreviewTimerPreset(Option<TimerPreset>),
         UpdateOcrPresets(Vec<crate::model::OcrPreset>),
+        SetFocusHighlightConfig {
+            color: crate::model::RgbaColor,
+            rainbow: bool,
+        },
+        SetProtractorEnabled(bool),
+        UpdateProtractorConfig {
+            scale: f32,
+            needle1_angle: f32,
+            needle2_angle: f32,
+            center_x: i32,
+            center_y: i32,
+        },
     }
 
     #[derive(Debug, Clone)]
@@ -533,6 +579,14 @@ mod windows_overlay {
             frame: crate::window_list::WindowPreviewFrame,
         },
         VideoPlaybackFinished(u32),
+        SetProtractorEnabled(bool),
+        UpdateProtractorConfig {
+            scale: f32,
+            needle1_angle: f32,
+            needle2_angle: f32,
+            center_x: i32,
+            center_y: i32,
+        },
     }
 
     pub struct OverlayHandle {
@@ -840,6 +894,10 @@ mod windows_overlay {
         ui_visible: bool,
         ui_foreground: bool,
         native_focus_highlight_enabled: bool,
+        focus_highlight_color: crate::model::RgbaColor,
+        focus_highlight_rainbow: bool,
+        focus_highlight_rainbow_hue: f32,
+        protractor_hwnd: HWND,
         active_focus_highlight_hwnd: Option<HWND>,
         cached_search_overlay_regions: Vec<VisionRegion>,
         cached_search_overlay_preview_regions: Vec<VisionRegion>,
@@ -1285,6 +1343,24 @@ mod windows_overlay {
                 Some(instance),
                 None,
             )?;
+            let protractor_hwnd = CreateWindowExW(
+                WS_EX_LAYERED
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_TOPMOST
+                    | WS_EX_NOACTIVATE,
+                w!("CrosshairOverlay"),
+                w!("CrosshairProtractor"),
+                WS_POPUP,
+                0,
+                0,
+                32,
+                32,
+                None,
+                None,
+                Some(instance),
+                None,
+            )?;
+            PROTRACTOR_HWND.store(protractor_hwnd.0 as isize, Ordering::Relaxed);
             let tray_menu = CreatePopupMenu()?;
             let _ = AppendMenuW(tray_menu, MF_STRING, MENU_SHOW, w!("Open settings"));
             let _ = AppendMenuW(tray_menu, MF_SEPARATOR, 0, PCWSTR::null());
@@ -1331,6 +1407,10 @@ mod windows_overlay {
                 ui_visible: true,
                 ui_foreground: true,
                 native_focus_highlight_enabled: false,
+                focus_highlight_color: crate::model::RgbaColor { r: 126, g: 224, b: 182, a: 235 },
+                focus_highlight_rainbow: false,
+                focus_highlight_rainbow_hue: 0.0,
+                protractor_hwnd,
                 active_focus_highlight_hwnd: None,
                 cached_search_overlay_regions: Vec::new(),
                 cached_search_overlay_preview_regions: Vec::new(),
@@ -1388,6 +1468,268 @@ mod windows_overlay {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
+        let protractor_hwnd = PROTRACTOR_HWND.load(Ordering::Relaxed);
+        if protractor_hwnd != 0 && hwnd.0 as isize == protractor_hwnd {
+            match msg {
+                WM_NCHITTEST => {
+                    let sx = (lparam.0 & 0xFFFF) as i16 as i32;
+                    let sy = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
+                    let mut pt = POINT { x: sx, y: sy };
+                    let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
+
+                    let (scale, needle1, needle2) = {
+                        let state = PROTRACTOR_STATE.lock();
+                        (state.scale, state.needle1_angle, state.needle2_angle)
+                    };
+
+                    let base_radius = 150.0;
+                    let radius = (scale * base_radius) as i32;
+                    let padding = (scale * 30.0) as i32;
+                    let half_size = radius + padding;
+                    
+                    let cx = half_size;
+                    let cy = half_size;
+
+                    let dx = pt.x - cx;
+                    let dy = pt.y - cy;
+                    let dist_sq = dx * dx + dy * dy;
+                    let dist = (dist_sq as f32).sqrt();
+
+                    let size = 2 * half_size;
+                    if pt.x >= size - 24 && pt.x < size - 8 && pt.y >= 8 && pt.y < 24 {
+                        return LRESULT(1isize); // HTCLIENT
+                    }
+
+                    let rad1 = (needle1 as f32).to_radians();
+                    let n1x = cx + (radius as f32 * rad1.cos()) as i32;
+                    let n1y = cy + (radius as f32 * rad1.sin()) as i32;
+                    if (pt.x - n1x).pow(2) + (pt.y - n1y).pow(2) <= 12 * 12 {
+                        return LRESULT(1isize); // HTCLIENT
+                    }
+
+                    let rad2 = (needle2 as f32).to_radians();
+                    let n2x = cx + (radius as f32 * rad2.cos()) as i32;
+                    let n2y = cy + (radius as f32 * rad2.sin()) as i32;
+                    if (pt.x - n2x).pow(2) + (pt.y - n2y).pow(2) <= 12 * 12 {
+                        return LRESULT(1isize); // HTCLIENT
+                    }
+
+                    let rad_g = (-45.0_f32).to_radians();
+                    let gx = cx + (radius as f32 * rad_g.cos()) as i32;
+                    let gy = cy + (radius as f32 * rad_g.sin()) as i32;
+                    if (pt.x - gx).pow(2) + (pt.y - gy).pow(2) <= 14 * 14 {
+                        return LRESULT(1isize); // HTCLIENT
+                    }
+
+                    if dist <= 20.0 {
+                        return LRESULT(1isize); // HTCLIENT
+                    }
+
+                    if (dist - radius as f32).abs() <= 12.0 * scale {
+                        return LRESULT(1isize); // HTCLIENT
+                    }
+
+                    if dist < radius as f32 {
+                        let mut a = (dy as f32).atan2(dx as f32).to_degrees();
+                        if a < 0.0 { a += 360.0; }
+                        if angle_between(a, needle1, needle2) {
+                            return LRESULT(1isize); // HTCLIENT
+                        }
+                    }
+
+                    return LRESULT(HTTRANSPARENT as isize);
+                }
+
+                WM_LBUTTONDOWN => {
+                    let mx = (lparam.0 & 0xFFFF) as i16 as i32;
+                    let my = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
+                    
+                    let (scale, needle1, needle2, cx_val, cy_val) = {
+                        let state = PROTRACTOR_STATE.lock();
+                        (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y)
+                    };
+
+                    let base_radius = 150.0;
+                    let radius = (scale * base_radius) as i32;
+                    let padding = (scale * 30.0) as i32;
+                    let half_size = radius + padding;
+                    let size = 2 * half_size;
+                    let cx = half_size;
+                    let cy = half_size;
+
+                    let dx = mx - cx;
+                    let dy = my - cy;
+                    let dist_sq = dx * dx + dy * dy;
+                    let dist = (dist_sq as f32).sqrt();
+
+                    let mut hit = None;
+
+                    if mx >= size - 24 && mx < size - 8 && my >= 8 && my < 24 {
+                        hit = Some(ProtractorDragTarget::Close);
+                    }
+                    if hit.is_none() {
+                        let rad1 = (needle1 as f32).to_radians();
+                        let n1x = cx + (radius as f32 * rad1.cos()) as i32;
+                        let n1y = cy + (radius as f32 * rad1.sin()) as i32;
+                        if (mx - n1x).pow(2) + (my - n1y).pow(2) <= 12 * 12 {
+                            hit = Some(ProtractorDragTarget::Needle1);
+                        }
+                    }
+                    if hit.is_none() {
+                        let rad2 = (needle2 as f32).to_radians();
+                        let n2x = cx + (radius as f32 * rad2.cos()) as i32;
+                        let n2y = cy + (radius as f32 * rad2.sin()) as i32;
+                        if (mx - n2x).pow(2) + (my - n2y).pow(2) <= 12 * 12 {
+                            hit = Some(ProtractorDragTarget::Needle2);
+                        }
+                    }
+                    if hit.is_none() {
+                        let rad_g = (-45.0_f32).to_radians();
+                        let gx = cx + (radius as f32 * rad_g.cos()) as i32;
+                        let gy = cy + (radius as f32 * rad_g.sin()) as i32;
+                        if (mx - gx).pow(2) + (my - gy).pow(2) <= 14 * 14 {
+                            hit = Some(ProtractorDragTarget::ResizeGrip);
+                        }
+                    }
+                    if hit.is_none() {
+                        if dist <= 20.0 || (dist - radius as f32).abs() <= 12.0 * scale {
+                            hit = Some(ProtractorDragTarget::Body);
+                        } else if dist < radius as f32 {
+                            let mut a = (dy as f32).atan2(dx as f32).to_degrees();
+                            if a < 0.0 { a += 360.0; }
+                            if angle_between(a, needle1, needle2) {
+                                hit = Some(ProtractorDragTarget::Body);
+                            }
+                        }
+                    }
+
+                    if let Some(target) = hit {
+                        if target == ProtractorDragTarget::Close {
+                            PROTRACTOR_STATE.lock().enabled = false;
+                            let _ = ShowWindow(hwnd, SW_HIDE);
+                            if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
+                                let _ = ui_tx.send(UiCommand::SetProtractorEnabled(false));
+                            }
+                        } else {
+                            let mut mouse_screen = POINT::default();
+                            let _ = GetCursorPos(&mut mouse_screen);
+
+                            *PROTRACTOR_DRAG_TARGET.lock() = Some(target);
+                            *PROTRACTOR_DRAG_START_MOUSE.lock() = mouse_screen;
+                            *PROTRACTOR_DRAG_START_CENTER.lock() = (cx_val, cy_val);
+                            
+                            let start_ang = match target {
+                                ProtractorDragTarget::Needle1 => needle1,
+                                ProtractorDragTarget::Needle2 => needle2,
+                                _ => 0.0,
+                            };
+                            *PROTRACTOR_DRAG_START_ANGLE.lock() = start_ang;
+                            *PROTRACTOR_DRAG_START_SCALE.lock() = scale;
+
+                            windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd);
+                        }
+                    }
+                    return LRESULT(0);
+                }
+
+                WM_MOUSEMOVE => {
+                    let drag_target = *PROTRACTOR_DRAG_TARGET.lock();
+                    if let Some(target) = drag_target {
+                        let mut mouse_screen = POINT::default();
+                        let _ = GetCursorPos(&mut mouse_screen);
+
+                        let start_mouse = *PROTRACTOR_DRAG_START_MOUSE.lock();
+                        let start_center = *PROTRACTOR_DRAG_START_CENTER.lock();
+                        let start_scale = *PROTRACTOR_DRAG_START_SCALE.lock();
+
+                        match target {
+                            ProtractorDragTarget::Body => {
+                                let dx = mouse_screen.x - start_mouse.x;
+                                let dy = mouse_screen.y - start_mouse.y;
+                                let new_cx = start_center.0 + dx;
+                                let new_cy = start_center.1 + dy;
+                                
+                                {
+                                    let mut state = PROTRACTOR_STATE.lock();
+                                    state.center_x = new_cx;
+                                    state.center_y = new_cy;
+                                }
+
+                                if let Some(runtime) = runtime_mut(HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void)) {
+                                    let _ = paint_protractor_overlay(runtime);
+                                }
+                            }
+                            ProtractorDragTarget::Needle1 | ProtractorDragTarget::Needle2 => {
+                                let cx = start_center.0;
+                                let cy = start_center.1;
+                                let dx = mouse_screen.x - cx;
+                                let dy = mouse_screen.y - cy;
+                                let mut angle = (dy as f32).atan2(dx as f32).to_degrees();
+                                if angle < 0.0 { angle += 360.0; }
+
+                                {
+                                    let mut state = PROTRACTOR_STATE.lock();
+                                    if target == ProtractorDragTarget::Needle1 {
+                                        state.needle1_angle = angle;
+                                    } else {
+                                        state.needle2_angle = angle;
+                                    }
+                                }
+
+                                if let Some(runtime) = runtime_mut(HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void)) {
+                                    let _ = paint_protractor_overlay(runtime);
+                                }
+                            }
+                            ProtractorDragTarget::ResizeGrip => {
+                                let cx = start_center.0;
+                                let cy = start_center.1;
+                                let dx = mouse_screen.x - cx;
+                                let dy = mouse_screen.y - cy;
+                                let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                                let new_scale = (dist / 150.0).clamp(0.4, 2.5);
+
+                                {
+                                    let mut state = PROTRACTOR_STATE.lock();
+                                    state.scale = new_scale;
+                                }
+
+                                if let Some(runtime) = runtime_mut(HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void)) {
+                                    let _ = paint_protractor_overlay(runtime);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    return LRESULT(0);
+                }
+
+                WM_LBUTTONUP => {
+                    let was_dragging = PROTRACTOR_DRAG_TARGET.lock().is_some();
+                    if was_dragging {
+                        windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+                        *PROTRACTOR_DRAG_TARGET.lock() = None;
+
+                        let (scale, needle1, needle2, cx, cy) = {
+                            let state = PROTRACTOR_STATE.lock();
+                            (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y)
+                        };
+
+                        if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
+                            let _ = ui_tx.send(UiCommand::UpdateProtractorConfig {
+                                scale,
+                                needle1_angle: needle1,
+                                needle2_angle: needle2,
+                                center_x: cx,
+                                center_y: cy,
+                            });
+                        }
+                    }
+                    return LRESULT(0);
+                }
+                _ => {}
+            }
+        }
+
         if msg == WM_NCHITTEST {
             return LRESULT(HTTRANSPARENT as isize);
         }
@@ -4237,6 +4579,43 @@ mod windows_overlay {
                     }
                 }
 
+                OverlayCommand::SetFocusHighlightConfig { color, rainbow } => {
+                    runtime.focus_highlight_color = color;
+                    runtime.focus_highlight_rainbow = rainbow;
+                    if let Some(target) = runtime.active_focus_highlight_hwnd {
+                        let _ = paint_focus_highlight_overlay(runtime, target);
+                    }
+                }
+
+                OverlayCommand::SetProtractorEnabled(enabled) => {
+                    let mut state = PROTRACTOR_STATE.lock();
+                    state.enabled = enabled;
+                    if enabled {
+                        let _ = ShowWindow(runtime.protractor_hwnd, SW_SHOWNA);
+                        let _ = paint_protractor_overlay(runtime);
+                    } else {
+                        let _ = ShowWindow(runtime.protractor_hwnd, SW_HIDE);
+                    }
+                }
+
+                OverlayCommand::UpdateProtractorConfig {
+                    scale,
+                    needle1_angle,
+                    needle2_angle,
+                    center_x,
+                    center_y,
+                } => {
+                    let mut state = PROTRACTOR_STATE.lock();
+                    state.scale = scale;
+                    state.needle1_angle = needle1_angle;
+                    state.needle2_angle = needle2_angle;
+                    state.center_x = center_x;
+                    state.center_y = center_y;
+                    if state.enabled {
+                        let _ = paint_protractor_overlay(runtime);
+                    }
+                }
+
                 OverlayCommand::UpdateVisionSettings(settings) => {
                     let mut hook_state = HOOK_STATE.lock();
                     hook_state.use_interception = settings.use_interception;
@@ -4759,6 +5138,13 @@ mod windows_overlay {
     }
 
     fn desired_timer_interval_ms(runtime: &Runtime) -> u32 {
+        if runtime.native_focus_highlight_enabled
+            && runtime.focus_highlight_rainbow
+            && runtime.active_focus_highlight_hwnd.is_some()
+        {
+            return 30;
+        }
+
         let capture_active = {
             let hook_state = HOOK_STATE.lock();
             !hook_state.vision_capture_preview_regions.is_empty()
@@ -4879,6 +5265,395 @@ mod windows_overlay {
         let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
     }
 
+    fn angle_between(angle: f32, start: f32, end: f32) -> bool {
+        let mut s = start % 360.0;
+        if s < 0.0 { s += 360.0; }
+        let mut e = end % 360.0;
+        if e < 0.0 { e += 360.0; }
+        let mut a = angle % 360.0;
+        if a < 0.0 { a += 360.0; }
+
+        if s <= e {
+            a >= s && a <= e
+        } else {
+            a >= s || a <= e
+        }
+    }
+
+    fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 4] {
+        let c = v * s;
+        let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+        let m = v - c;
+        let (r, g, b) = if h < 60.0 {
+            (c, x, 0.0)
+        } else if h < 120.0 {
+            (x, c, 0.0)
+        } else if h < 180.0 {
+            (0.0, c, x)
+        } else if h < 240.0 {
+            (0.0, x, c)
+        } else if h < 300.0 {
+            (x, 0.0, c)
+        } else {
+            (c, 0.0, x)
+        };
+        [
+            ((r + m) * 255.0) as u8,
+            ((g + m) * 255.0) as u8,
+            ((b + m) * 255.0) as u8,
+            235,
+        ]
+    }
+
+    fn blend_rgba_pixel(buf: &mut [u8], w: usize, _h: usize, x: i32, y: i32, color: [u8; 4]) {
+        if x < 0 || y < 0 { return; }
+        let (x, y) = (x as usize, y as usize);
+        if x >= w { return; }
+        let off = (y * w + x) * 4;
+        if off + 3 >= buf.len() { return; }
+        let sa = color[3] as u32;
+        let da = buf[off + 3] as u32;
+        let out_a = sa + da * (255 - sa) / 255;
+        if out_a == 0 { return; }
+        buf[off]     = ((color[0] as u32 * sa + buf[off]     as u32 * da * (255 - sa) / 255) / out_a) as u8;
+        buf[off + 1] = ((color[1] as u32 * sa + buf[off + 1] as u32 * da * (255 - sa) / 255) / out_a) as u8;
+        buf[off + 2] = ((color[2] as u32 * sa + buf[off + 2] as u32 * da * (255 - sa) / 255) / out_a) as u8;
+        buf[off + 3] = out_a as u8;
+    }
+
+    fn draw_line_rgba(buf: &mut [u8], w: usize, h: usize, x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4]) {
+        let (mut x0, mut y0) = (x0, y0);
+        let (x1, y1) = (x1, y1);
+        let dx = (x1 - x0).abs();
+        let dy = (y1 - y0).abs();
+        let sx = if x0 < x1 { 1i32 } else { -1i32 };
+        let sy = if y0 < y1 { 1i32 } else { -1i32 };
+        let mut err = dx - dy;
+        loop {
+            blend_rgba_pixel(buf, w, h, x0, y0, color);
+            if x0 == x1 && y0 == y1 { break; }
+            let e2 = 2 * err;
+            if e2 > -dy { err -= dy; x0 += sx; }
+            if e2 < dx  { err += dx; y0 += sy; }
+        }
+    }
+
+    fn draw_line_thick_rgba(buf: &mut [u8], w: usize, h: usize, x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4], thickness: i32) {
+        let half = thickness / 2;
+        for t in -half..=half {
+            let len = ((x1 - x0).pow(2) + (y1 - y0).pow(2)) as f32;
+            if len < 0.001 { break; }
+            let nx = -(y1 - y0) as f32 / len.sqrt();
+            let ny =  (x1 - x0) as f32 / len.sqrt();
+            let ox = (nx * t as f32).round() as i32;
+            let oy = (ny * t as f32).round() as i32;
+            draw_line_rgba(buf, w, h, x0 + ox, y0 + oy, x1 + ox, y1 + oy, color);
+        }
+    }
+
+    fn fill_ellipse_rgba(buf: &mut [u8], w: usize, h: usize, bx: i32, by: i32, bw: i32, bh: i32, color: [u8; 4]) {
+        let cx = bx + bw / 2;
+        let cy = by + bh / 2;
+        let rx = (bw / 2).max(1) as f32;
+        let ry = (bh / 2).max(1) as f32;
+        for py in by..by + bh {
+            for px in bx..bx + bw {
+                let dx = (px - cx) as f32 / rx;
+                let dy = (py - cy) as f32 / ry;
+                if dx * dx + dy * dy <= 1.0 {
+                    blend_rgba_pixel(buf, w, h, px, py, color);
+                }
+            }
+        }
+    }
+
+    fn draw_ellipse_outline_thick_rgba(buf: &mut [u8], w: usize, h: usize, bx: i32, by: i32, bw: i32, bh: i32, color: [u8; 4], thickness: i32) {
+        let cx = bx + bw / 2;
+        let cy = by + bh / 2;
+        let rx = (bw / 2).max(1) as f32;
+        let ry = (bh / 2).max(1) as f32;
+        let steps = ((rx.max(ry) * std::f32::consts::PI * 2.0) as i32).max(64);
+        for i in 0..steps {
+            let t = (i as f32 / steps as f32) * std::f32::consts::PI * 2.0;
+            let x = cx + (rx * t.cos()) as i32;
+            let y = cy + (ry * t.sin()) as i32;
+            for tx in -thickness..=thickness {
+                for ty in -thickness..=thickness {
+                    if tx * tx + ty * ty <= thickness * thickness {
+                        blend_rgba_pixel(buf, w, h, x + tx, y + ty, color);
+                    }
+                }
+            }
+        }
+    }
+
+    fn fill_rect_rgba(buf: &mut [u8], w: usize, h: usize, x: i32, y: i32, rw: i32, rh: i32, color: [u8; 4]) {
+        for py in y..y + rh {
+            for px in x..x + rw {
+                blend_rgba_pixel(buf, w, h, px, py, color);
+            }
+        }
+    }
+
+    unsafe fn paint_protractor_overlay(runtime: &Runtime) -> Result<()> {
+        let (scale, needle1, needle2, cx_val, cy_val) = {
+            let state = PROTRACTOR_STATE.lock();
+            (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y)
+        };
+
+        let base_radius = 150.0;
+        let radius = (scale * base_radius) as i32;
+        let padding = (scale * 30.0) as i32;
+        let half_size = radius + padding;
+        let size = 2 * half_size;
+        let width = size.max(1) as u32;
+        let height = size.max(1) as u32;
+
+        let win_x = cx_val - half_size;
+        let win_y = cy_val - half_size;
+
+        let _ = SetWindowPos(
+            runtime.protractor_hwnd,
+            Some(HWND_TOPMOST),
+            win_x,
+            win_y,
+            width as i32,
+            height as i32,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+
+        let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
+        let cx = half_size;
+        let cy = half_size;
+
+        // 1. Draw angular sector fill between needles
+        for y in 0..size {
+            for x in 0..size {
+                let dx = x - cx;
+                let dy = y - cy;
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq <= radius * radius {
+                    let mut angle_deg = (dy as f32).atan2(dx as f32).to_degrees();
+                    if angle_deg < 0.0 { angle_deg += 360.0; }
+                    if angle_between(angle_deg, needle1, needle2) {
+                        blend_rgba_pixel(canvas.as_mut(), width as usize, height as usize, x, y, [0, 160, 255, 40]);
+                    }
+                }
+            }
+        }
+
+        // 2. Draw outer circle
+        draw_ellipse_outline_thick_rgba(
+            canvas.as_mut(),
+            width as usize,
+            height as usize,
+            cx - radius,
+            cy - radius,
+            2 * radius,
+            2 * radius,
+            [255, 255, 255, 140],
+            2,
+        );
+
+        // 3. Draw tick marks every 5 degrees
+        for deg in 0..360 {
+            if deg % 5 == 0 {
+                let len = if deg % 90 == 0 { (15.0 * scale) as i32 }
+                          else if deg % 10 == 0 { (10.0 * scale) as i32 }
+                          else { (5.0 * scale) as i32 };
+                let thick = if deg % 10 == 0 { 2 } else { 1 };
+                let color = if deg % 90 == 0 { [255, 255, 255, 200] } else { [255, 255, 255, 100] };
+                
+                let rad = (deg as f32).to_radians();
+                let r_in = radius - len;
+                let x0 = cx + (r_in as f32 * rad.cos()) as i32;
+                let y0 = cy + (r_in as f32 * rad.sin()) as i32;
+                let x1 = cx + (radius as f32 * rad.cos()) as i32;
+                let y1 = cy + (radius as f32 * rad.sin()) as i32;
+                
+                draw_line_thick_rgba(
+                    canvas.as_mut(),
+                    width as usize,
+                    height as usize,
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    color,
+                    thick,
+                );
+            }
+        }
+
+        // 4. Center crosshair
+        fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, cx - 3, cy - 3, 6, 6, [255, 92, 141, 255]);
+        draw_line_rgba(canvas.as_mut(), width as usize, height as usize, cx - 12, cy, cx + 12, cy, [255, 255, 255, 180]);
+        draw_line_rgba(canvas.as_mut(), width as usize, height as usize, cx, cy - 12, cx, cy + 12, [255, 255, 255, 180]);
+
+        // 5. Needle 1 & handle
+        let rad1 = (needle1 as f32).to_radians();
+        let n1x = cx + (radius as f32 * rad1.cos()) as i32;
+        let n1y = cy + (radius as f32 * rad1.sin()) as i32;
+        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, cx, cy, n1x, n1y, [0, 220, 255, 240], 2);
+        fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, n1x - 6, n1y - 6, 12, 12, [0, 220, 255, 255]);
+        draw_ellipse_outline_thick_rgba(canvas.as_mut(), width as usize, height as usize, n1x - 6, n1y - 6, 12, 12, [255, 255, 255, 255], 1);
+
+        // 6. Needle 2 & handle
+        let rad2 = (needle2 as f32).to_radians();
+        let n2x = cx + (radius as f32 * rad2.cos()) as i32;
+        let n2y = cy + (radius as f32 * rad2.sin()) as i32;
+        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, cx, cy, n2x, n2y, [255, 92, 141, 240], 2);
+        fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, n2x - 6, n2y - 6, 12, 12, [255, 92, 141, 255]);
+        draw_ellipse_outline_thick_rgba(canvas.as_mut(), width as usize, height as usize, n2x - 6, n2y - 6, 12, 12, [255, 255, 255, 255], 1);
+
+        // 7. Resize Grip handle
+        let rad_g = (-45.0_f32).to_radians();
+        let gx = cx + (radius as f32 * rad_g.cos()) as i32;
+        let gy = cy + (radius as f32 * rad_g.sin()) as i32;
+        fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, gx - 7, gy - 7, 14, 14, [160, 160, 160, 220]);
+        draw_ellipse_outline_thick_rgba(canvas.as_mut(), width as usize, height as usize, gx - 7, gy - 7, 14, 14, [255, 255, 255, 255], 1);
+
+        // 8. Close Button
+        fill_rect_rgba(canvas.as_mut(), width as usize, height as usize, size - 24, 8, 16, 16, [255, 80, 80, 220]);
+        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, size - 21, 11, size - 11, 21, [255, 255, 255, 255], 2);
+        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, size - 11, 11, size - 21, 21, [255, 255, 255, 255], 2);
+
+        // GDI render & Text setup
+        let screen_dc = GetDC(None);
+        if screen_dc.0.is_null() {
+            bail!("Failed to acquire screen DC");
+        }
+        let mem_dc = CreateCompatibleDC(Some(screen_dc));
+        if mem_dc.0.is_null() {
+            let _ = ReleaseDC(None, screen_dc);
+            bail!("Failed to create memory DC");
+        }
+
+        let mut bitmap_info = BITMAPINFO::default();
+        bitmap_info.bmiHeader = BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width as i32,
+            biHeight: -(height as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        };
+        let mut bits: *mut c_void = null_mut();
+        let bitmap = CreateDIBSection(
+            Some(screen_dc),
+            &bitmap_info,
+            DIB_RGB_COLORS,
+            &mut bits,
+            None,
+            0,
+        )?;
+        if bits.is_null() {
+            let _ = DeleteObject(HGDIOBJ(bitmap.0));
+            let _ = DeleteDC(mem_dc);
+            let _ = ReleaseDC(None, screen_dc);
+            bail!("Failed to map DIB section");
+        }
+
+        let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
+        std::ptr::copy_nonoverlapping(
+            canvas.as_raw().as_ptr(),
+            bits as *mut u8,
+            canvas.as_raw().len(),
+        );
+
+        // Draw labels
+        let angle_diff = (needle2 - needle1).abs();
+        let angle_val = if angle_diff > 180.0 { 360.0 - angle_diff } else { angle_diff };
+        let angle_str = format!("{:.1}°", angle_val);
+        let center_str = format!("X:{} Y:{}", cx_val, cy_val);
+
+        let font = CreateFontW(
+            (11.0 * scale) as i32,
+            0,
+            0,
+            0,
+            FW_MEDIUM.0 as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY,
+            FF_DONTCARE.0 as u32,
+            w!("Segoe UI"),
+        );
+        let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
+
+        let _ = SetBkMode(mem_dc, TRANSPARENT);
+        let _ = SetTextColor(mem_dc, COLORREF(0xFFFFFF));
+
+        let mut r_angle = RECT {
+            left: cx - 60,
+            top: cy - (32.0 * scale) as i32,
+            right: cx + 60,
+            bottom: cy - (10.0 * scale) as i32,
+        };
+        let mut w_angle = angle_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+        let _ = DrawTextW(mem_dc, &mut w_angle, &mut r_angle, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+
+        let mut r_center = RECT {
+            left: cx - 60,
+            top: cy + (10.0 * scale) as i32,
+            right: cx + 60,
+            bottom: cy + (32.0 * scale) as i32,
+        };
+        let mut w_center = center_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+        let _ = DrawTextW(mem_dc, &mut w_center, &mut r_center, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+
+        let _ = SelectObject(mem_dc, old_font);
+        let _ = DeleteObject(HGDIOBJ(font.0));
+
+        // Fix alpha of GDI text drawn
+        let bits_ptr = bits as *mut u8;
+        let total_pixels = width as usize * height as usize;
+        for i in 0..total_pixels {
+            let offset = i * 4;
+            let pixel = std::slice::from_raw_parts_mut(bits_ptr.add(offset), 4);
+            if pixel[3] == 0 && (pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0) {
+                pixel[3] = 230;
+            }
+            let a = pixel[3] as u32;
+            pixel[0] = ((pixel[0] as u32 * a) / 255) as u8;
+            pixel[1] = ((pixel[1] as u32 * a) / 255) as u8;
+            pixel[2] = ((pixel[2] as u32 * a) / 255) as u8;
+        }
+
+        let destination = POINT { x: win_x, y: win_y };
+        let source = POINT { x: 0, y: 0 };
+        let sz = SIZE { cx: width as i32, cy: height as i32 };
+        let blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: AC_SRC_ALPHA as u8,
+        };
+
+        let _ = UpdateLayeredWindow(
+            runtime.protractor_hwnd,
+            Some(screen_dc),
+            Some(&destination),
+            Some(&sz),
+            Some(mem_dc),
+            Some(&source),
+            COLORREF(0),
+            Some(&blend),
+            ULW_ALPHA,
+        );
+
+        let _ = SelectObject(mem_dc, old_bitmap);
+        let _ = DeleteObject(HGDIOBJ(bitmap.0));
+        let _ = DeleteDC(mem_dc);
+        let _ = ReleaseDC(None, screen_dc);
+        Ok(())
+    }
+
     unsafe fn focus_highlight_rect(hwnd: HWND) -> Option<RECT> {
         let mut rect = RECT::default();
         let frame_ok = DwmGetWindowAttribute(
@@ -4940,7 +5715,18 @@ mod windows_overlay {
         let width = (visible_right - visible_left).max(1) as u32;
         let height = (visible_bottom - visible_top).max(1) as u32;
         let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
-        let color = image::Rgba([126, 224, 182, 235]);
+        let mut hue = runtime.focus_highlight_rainbow_hue;
+        let color = if runtime.focus_highlight_rainbow {
+            let rgb = hsv_to_rgb(hue, 0.85, 0.95);
+            image::Rgba(rgb)
+        } else {
+            image::Rgba([
+                runtime.focus_highlight_color.r,
+                runtime.focus_highlight_color.g,
+                runtime.focus_highlight_color.b,
+                runtime.focus_highlight_color.a,
+            ])
+        };
 
         // Draw the 4 edges of the border without scanning the entire inner area.
         // Top edge:
