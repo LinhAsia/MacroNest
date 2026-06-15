@@ -5346,6 +5346,10 @@ mod windows_overlay {
                 right: client_bottom_right.x,
                 bottom: client_bottom_right.y,
             };
+            let mut source_window_rect = RECT::default();
+            GetWindowRect(source, &mut source_window_rect)?;
+            let source_client_offset_x = source_rect.left - source_window_rect.left;
+            let source_client_offset_y = source_rect.top - source_window_rect.top;
             let base_bounds = if preset.use_custom_bounds {
                 (
                     preset.x,
@@ -5407,10 +5411,10 @@ mod windows_overlay {
                 let mut source_rect_crop = RECT::default();
                 if let Some((crop_x, crop_y, crop_w, crop_h)) = source_crop_key {
                     source_rect_crop = RECT {
-                        left: crop_x,
-                        top: crop_y,
-                        right: crop_x + crop_w,
-                        bottom: crop_y + crop_h,
+                        left: crop_x + source_client_offset_x,
+                        top: crop_y + source_client_offset_y,
+                        right: crop_x + source_client_offset_x + crop_w,
+                        bottom: crop_y + source_client_offset_y + crop_h,
                     };
                     source_flags |= DWM_TNP_RECTSOURCE;
                 }
