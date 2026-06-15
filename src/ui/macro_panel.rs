@@ -8537,7 +8537,7 @@ impl CrosshairApp {
                                                     let mut duplicate_mode = false;
                                                     if Self::render_window_target_combo_with_duplicate_mode(
                                                         ui, language,
-                                                        (group.id, preset.id, "hold-stop-focus-window-preset"),
+                                                        (group.id, preset.id, step_index, "focus-window-preset"),
                                                         &Self::tr_lang(language, "Select window", "Chọn cửa sổ"),
                                                         &mut selected_window,
                                                         &mut duplicate_mode,
