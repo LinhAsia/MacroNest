@@ -1548,20 +1548,8 @@ mod windows_overlay {
                         return LRESULT(1isize); // HTCLIENT
                     }
 
-                    if dist <= 20.0 {
+                    if dist <= radius as f32 + 12.0 * scale {
                         return LRESULT(1isize); // HTCLIENT
-                    }
-
-                    if (dist - radius as f32).abs() <= 12.0 * scale {
-                        return LRESULT(1isize); // HTCLIENT
-                    }
-
-                    if dist < radius as f32 {
-                        let mut a = (dy as f32).atan2(dx as f32).to_degrees();
-                        if a < 0.0 { a += 360.0; }
-                        if angle_between(a, needle1, needle2) {
-                            return LRESULT(1isize); // HTCLIENT
-                        }
                     }
 
                     return LRESULT(HTTRANSPARENT as isize);
@@ -1631,14 +1619,8 @@ mod windows_overlay {
                         }
                     }
                     if hit.is_none() {
-                        if dist <= 20.0 || (dist - radius as f32).abs() <= 12.0 * scale {
+                        if dist <= radius as f32 + 12.0 * scale {
                             hit = Some(ProtractorDragTarget::Body);
-                        } else if dist < radius as f32 {
-                            let mut a = (dy as f32).atan2(dx as f32).to_degrees();
-                            if a < 0.0 { a += 360.0; }
-                            if angle_between(a, needle1, needle2) {
-                                hit = Some(ProtractorDragTarget::Body);
-                            }
                         }
                     }
 
@@ -1650,6 +1632,15 @@ mod windows_overlay {
                                 let _ = ui_tx.send(UiCommand::SetProtractorEnabled(false));
                             }
                         } else if target == ProtractorDragTarget::CalibrationButton {
+                            unsafe {
+                                if let Some(app_hwnd) = find_app_ui_window() {
+                                    use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_RESTORE, IsIconic};
+                                    if IsIconic(app_hwnd).as_bool() {
+                                        let _ = ShowWindow(app_hwnd, SW_RESTORE);
+                                    }
+                                    let _ = SetForegroundWindow(app_hwnd);
+                                }
+                            }
                             if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
                                 let _ = ui_tx.send(UiCommand::RequestProtractorCalibration);
                             }
@@ -5647,12 +5638,22 @@ mod windows_overlay {
         }
 
         // 2. Draw outer circle
+        // Draw black outline backing first for high contrast
         draw_skia_circle_outline(
             &mut pixmap,
             cx as f32,
             cy as f32,
             radius as f32,
-            [255, 255, 255, 140],
+            [0, 0, 0, 255],
+            thickness + 2.0,
+        );
+        // Draw white outline
+        draw_skia_circle_outline(
+            &mut pixmap,
+            cx as f32,
+            cy as f32,
+            radius as f32,
+            [255, 255, 255, 255],
             thickness,
         );
 
@@ -5663,7 +5664,6 @@ mod windows_overlay {
                           else if deg % 10 == 0 { (10.0 * scale) as i32 }
                           else { (5.0 * scale) as i32 };
                 let thick = if deg % 10 == 0 { 2.0 } else { 1.0 };
-                let color = if deg % 90 == 0 { [255, 255, 255, 200] } else { [255, 255, 255, 100] };
                 
                 let rad = (deg as f32).to_radians();
                 let r_in = radius - len;
@@ -5672,30 +5672,45 @@ mod windows_overlay {
                 let x1 = cx as f32 + radius as f32 * rad.cos();
                 let y1 = cy as f32 + radius as f32 * rad.sin();
                 
+                // Draw black backing for high contrast
+                draw_skia_line(&mut pixmap, x0, y0, x1, y1, [0, 0, 0, 220], thick + 1.5);
+                // Draw white tick
+                let color = if deg % 90 == 0 { [255, 255, 255, 255] } else { [255, 255, 255, 220] };
                 draw_skia_line(&mut pixmap, x0, y0, x1, y1, color, thick);
             }
         }
 
         // 4. Center crosshair
-        draw_skia_circle_fill(&mut pixmap, cx as f32, cy as f32, 3.0, [255, 92, 141, 255]);
-        draw_skia_line(&mut pixmap, cx as f32 - 12.0, cy as f32, cx as f32 + 12.0, cy as f32, [255, 255, 255, 180], 1.0);
-        draw_skia_line(&mut pixmap, cx as f32, cy as f32 - 12.0, cx as f32, cy as f32 + 12.0, [255, 255, 255, 180], 1.0);
+        draw_skia_circle_fill(&mut pixmap, cx as f32, cy as f32, 4.0, [0, 0, 0, 255]);
+        draw_skia_circle_fill(&mut pixmap, cx as f32, cy as f32, 2.0, [255, 92, 141, 255]);
+        // Black backing
+        draw_skia_line(&mut pixmap, cx as f32 - 12.0, cy as f32, cx as f32 + 12.0, cy as f32, [0, 0, 0, 255], 3.0);
+        draw_skia_line(&mut pixmap, cx as f32, cy as f32 - 12.0, cx as f32, cy as f32 + 12.0, [0, 0, 0, 255], 3.0);
+        // White crosshair
+        draw_skia_line(&mut pixmap, cx as f32 - 12.0, cy as f32, cx as f32 + 12.0, cy as f32, [255, 255, 255, 255], 1.0);
+        draw_skia_line(&mut pixmap, cx as f32, cy as f32 - 12.0, cx as f32, cy as f32 + 12.0, [255, 255, 255, 255], 1.0);
 
         // 5. Needle 1 & handle
         let rad1 = (needle1 as f32).to_radians();
         let n1x = cx as f32 + radius as f32 * rad1.cos();
         let n1y = cy as f32 + radius as f32 * rad1.sin();
-        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n1x, n1y, [0, 220, 255, 240], thickness);
+        // Black backing
+        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n1x, n1y, [0, 0, 0, 255], thickness + 2.0);
+        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n1x, n1y, [0, 220, 255, 255], thickness);
+        draw_skia_circle_fill(&mut pixmap, n1x, n1y, 7.5, [0, 0, 0, 255]);
         draw_skia_circle_fill(&mut pixmap, n1x, n1y, 6.0, [0, 220, 255, 255]);
-        draw_skia_circle_outline(&mut pixmap, n1x, n1y, 6.0, [255, 255, 255, 255], 1.0);
+        draw_skia_circle_outline(&mut pixmap, n1x, n1y, 6.0, [255, 255, 255, 255], 1.5);
 
         // 6. Needle 2 & handle
         let rad2 = (needle2 as f32).to_radians();
         let n2x = cx as f32 + radius as f32 * rad2.cos();
         let n2y = cy as f32 + radius as f32 * rad2.sin();
-        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n2x, n2y, [255, 92, 141, 240], thickness);
+        // Black backing
+        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n2x, n2y, [0, 0, 0, 255], thickness + 2.0);
+        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n2x, n2y, [255, 92, 141, 255], thickness);
+        draw_skia_circle_fill(&mut pixmap, n2x, n2y, 7.5, [0, 0, 0, 255]);
         draw_skia_circle_fill(&mut pixmap, n2x, n2y, 6.0, [255, 92, 141, 255]);
-        draw_skia_circle_outline(&mut pixmap, n2x, n2y, 6.0, [255, 255, 255, 255], 1.0);
+        draw_skia_circle_outline(&mut pixmap, n2x, n2y, 6.0, [255, 255, 255, 255], 1.5);
 
         // 7. Resize Grip handle
         let rad_g = (-45.0_f32).to_radians();
