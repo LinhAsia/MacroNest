@@ -573,6 +573,7 @@ impl CrosshairApp {
                     preview.as_ref(),
                     None,
                     None,
+                    false,
                 );
                 ui.add_space(8.0);
                 live_sync |= Self::render_zoom_rect_editor(
@@ -594,6 +595,7 @@ impl CrosshairApp {
                     Some(
                         (preset.source_width.max(1) as f32) / (preset.source_height.max(1) as f32),
                     ),
+                    false,
                 );
             });
             if let Some((target, status)) = next_capture_target.take() {
@@ -853,10 +855,6 @@ impl CrosshairApp {
                             &mut preset.match_duplicate_window_titles,
                             &self.open_windows,
                         );
-                        if target_changed {
-                            preset.source_crop_initialized = false;
-                            preset.source_crop_fit_version = 0;
-                        }
                         live_sync |= target_changed;
                         ui.end_row();
 
@@ -902,6 +900,7 @@ impl CrosshairApp {
                             None
                         },
                         None,
+                        false,
                     );
                     ui.horizontal_wrapped(|ui| {
                         if ui
@@ -954,6 +953,7 @@ impl CrosshairApp {
                         preview.as_ref(),
                         None,
                         None,
+                        true,
                     );
                     if crop_changed {
                         preset.source_crop_initialized = true;
@@ -1677,6 +1677,7 @@ impl CrosshairApp {
         preview: Option<&ZoomPreviewView>,
         target_preview_source: Option<(i32, i32, i32, i32)>,
         keep_aspect_ratio: Option<f32>,
+        use_preview_local_coordinates: bool,
     ) -> bool {
         let mut changed = false;
         ui.label(RichText::new(label).strong());
@@ -1727,7 +1728,7 @@ impl CrosshairApp {
         );
 
         let selection_bounds_rect = preview_rect;
-        let (coord_width, coord_height, content_scale, preview_content_rect) =
+        let (coord_width, coord_height, content_scale, preview_content_rect, coords_origin_x, coords_origin_y) =
             if let Some(preview_frame) = preview {
                 let window_pos = egui::pos2(
                     selection_bounds_rect.left() + (preview_frame.screen_x as f32 * scale),
@@ -1737,14 +1738,35 @@ impl CrosshairApp {
                     preview_frame.logical_width.max(1) as f32 * scale,
                     preview_frame.logical_height.max(1) as f32 * scale,
                 );
+                let preview_content_rect = egui::Rect::from_min_size(window_pos, window_size);
+                if use_preview_local_coordinates {
+                    (
+                        preview_frame.logical_width.max(1) as f32,
+                        preview_frame.logical_height.max(1) as f32,
+                        scale,
+                        preview_content_rect,
+                        preview_content_rect.left(),
+                        preview_content_rect.top(),
+                    )
+                } else {
+                    (
+                        screen_size.x,
+                        screen_size.y,
+                        scale,
+                        preview_content_rect,
+                        selection_bounds_rect.left(),
+                        selection_bounds_rect.top(),
+                    )
+                }
+            } else {
                 (
                     screen_size.x,
                     screen_size.y,
                     scale,
-                    egui::Rect::from_min_size(window_pos, window_size),
+                    selection_bounds_rect,
+                    selection_bounds_rect.left(),
+                    selection_bounds_rect.top(),
                 )
-            } else {
-                (screen_size.x, screen_size.y, scale, selection_bounds_rect)
             };
 
         if let Some(preview_frame) = preview {
@@ -1766,20 +1788,25 @@ impl CrosshairApp {
         let min_size = vec2(6.0, 6.0);
         let mut rect = egui::Rect::from_min_size(
             egui::pos2(
-                selection_bounds_rect.left() + (*x as f32 * content_scale),
-                selection_bounds_rect.top() + (*y as f32 * content_scale),
+                coords_origin_x + (*x as f32 * content_scale),
+                coords_origin_y + (*y as f32 * content_scale),
             ),
             vec2(
                 (*width).max(1) as f32 * content_scale,
                 (*height).max(1) as f32 * content_scale,
             ),
         );
-        rect = rect.intersect(selection_bounds_rect);
+        let active_bounds_rect = if use_preview_local_coordinates && preview.is_some() {
+            preview_content_rect
+        } else {
+            selection_bounds_rect
+        };
+        rect = rect.intersect(active_bounds_rect);
         if rect.width() < min_size.x {
-            rect.max.x = (rect.min.x + min_size.x).min(selection_bounds_rect.right());
+            rect.max.x = (rect.min.x + min_size.x).min(active_bounds_rect.right());
         }
         if rect.height() < min_size.y {
-            rect.max.y = (rect.min.y + min_size.y).min(selection_bounds_rect.bottom());
+            rect.max.y = (rect.min.y + min_size.y).min(active_bounds_rect.bottom());
         }
 
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1985,35 +2012,35 @@ impl CrosshairApp {
             }
 
             // Bound checking
-            if rect.left() < selection_bounds_rect.left() {
-                rect = rect.translate(vec2(selection_bounds_rect.left() - rect.left(), 0.0));
+            if rect.left() < active_bounds_rect.left() {
+                rect = rect.translate(vec2(active_bounds_rect.left() - rect.left(), 0.0));
             }
-            if rect.top() < selection_bounds_rect.top() {
-                rect = rect.translate(vec2(0.0, selection_bounds_rect.top() - rect.top()));
+            if rect.top() < active_bounds_rect.top() {
+                rect = rect.translate(vec2(0.0, active_bounds_rect.top() - rect.top()));
             }
-            if rect.right() > selection_bounds_rect.right() {
-                rect = rect.translate(vec2(selection_bounds_rect.right() - rect.right(), 0.0));
+            if rect.right() > active_bounds_rect.right() {
+                rect = rect.translate(vec2(active_bounds_rect.right() - rect.right(), 0.0));
             }
-            if rect.bottom() > selection_bounds_rect.bottom() {
-                rect = rect.translate(vec2(0.0, selection_bounds_rect.bottom() - rect.bottom()));
+            if rect.bottom() > active_bounds_rect.bottom() {
+                rect = rect.translate(vec2(0.0, active_bounds_rect.bottom() - rect.bottom()));
             }
 
             rect.min.x = rect.min.x.clamp(
-                selection_bounds_rect.left(),
-                selection_bounds_rect.right() - min_size.x,
+                active_bounds_rect.left(),
+                active_bounds_rect.right() - min_size.x,
             );
             rect.min.y = rect.min.y.clamp(
-                selection_bounds_rect.top(),
-                selection_bounds_rect.bottom() - min_size.y,
+                active_bounds_rect.top(),
+                active_bounds_rect.bottom() - min_size.y,
             );
             rect.max.x = rect
                 .max
                 .x
-                .clamp(rect.min.x + min_size.x, selection_bounds_rect.right());
+                .clamp(rect.min.x + min_size.x, active_bounds_rect.right());
             rect.max.y = rect
                 .max
                 .y
-                .clamp(rect.min.y + min_size.y, selection_bounds_rect.bottom());
+                .clamp(rect.min.y + min_size.y, active_bounds_rect.bottom());
         }
 
         if ui.input(|i| i.pointer.any_released()) {
@@ -2127,8 +2154,8 @@ impl CrosshairApp {
         );
 
         if changed {
-            *x = ((rect.left() - selection_bounds_rect.left()) / content_scale).round() as i32;
-            *y = ((rect.top() - selection_bounds_rect.top()) / content_scale).round() as i32;
+            *x = ((rect.left() - coords_origin_x) / content_scale).round() as i32;
+            *y = ((rect.top() - coords_origin_y) / content_scale).round() as i32;
             *width = (rect.width() / content_scale).round().max(1.0) as i32;
             *height = (rect.height() / content_scale).round().max(1.0) as i32;
             *x = (*x).clamp(0, coord_width.round() as i32);
