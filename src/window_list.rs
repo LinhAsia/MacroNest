@@ -4,7 +4,7 @@
 mod windows_impl {
     use windows::{
         Win32::{
-            Foundation::{HWND, LPARAM, POINT, RECT},
+            Foundation::{HWND, LPARAM, POINT, RECT, HMODULE},
             Graphics::Gdi::{
                 BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, ClientToScreen, CreateCompatibleDC, CreateDIBSection,
                 DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetWindowDC, HALFTONE, HGDIOBJ,
@@ -23,6 +23,33 @@ mod windows_impl {
             },
         },
         core::BOOL,
+    };
+
+    use once_cell::sync::Lazy;
+    use parking_lot::Mutex;
+    use anyhow::Context;
+    use windows::{
+        core::Interface,
+        Graphics::{
+            Capture::{GraphicsCaptureItem, Direct3D11CaptureFramePool, GraphicsCaptureSession},
+            DirectX::DirectXPixelFormat,
+        },
+        Win32::{
+            Graphics::{
+                Direct3D::D3D_DRIVER_TYPE_HARDWARE,
+                Direct3D11::{
+                    D3D11CreateDevice, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
+                    ID3D11Device, ID3D11Texture2D, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+                    D3D11_BIND_FLAG, D3D11_CPU_ACCESS_READ, D3D11_RESOURCE_MISC_FLAG,
+                    D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
+                },
+                Dxgi::IDXGIDevice,
+            },
+            System::WinRT::{
+                Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess},
+                Graphics::Capture::IGraphicsCaptureItemInterop,
+            },
+        },
     };
 
     #[derive(Debug, Clone)]
@@ -760,7 +787,202 @@ mod windows_impl {
         })
     }
 
+    struct WgcSession {
+        hwnd: HWND,
+        dxgi_device: windows::Graphics::DirectX::Direct3D11::IDirect3DDevice,
+        d3d_device: ID11Device,
+        frame_pool: Direct3D11CaptureFramePool,
+        session: GraphicsCaptureSession,
+        staging_texture: Option<(ID3D11Texture2D, u32, u32)>,
+    }
+
+    unsafe impl Send for WgcSession {}
+    unsafe impl Sync for WgcSession {}
+
+    type ID11Device = ID3D11Device;
+
+    impl Drop for WgcSession {
+        fn drop(&mut self) {
+            let _ = self.session.Close();
+            let _ = self.frame_pool.Close();
+        }
+    }
+
+    static WGC_MANAGER: Lazy<Mutex<Option<WgcSession>>> = Lazy::new(|| Mutex::new(None));
+
+    fn init_wgc_session(hwnd: HWND) -> anyhow::Result<WgcSession> {
+        let mut d3d_device: Option<ID3D11Device> = None;
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut d3d_device),
+                None,
+                None,
+            )?;
+        }
+        let d3d_device = d3d_device.context("Failed to create D3D11 Device")?;
+        let dxgi_device: IDXGIDevice = d3d_device.cast()?;
+        let dxgi_device_winrt = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
+        let dxgi_device_winrt: windows::Graphics::DirectX::Direct3D11::IDirect3DDevice = dxgi_device_winrt.cast()?;
+
+        let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+        let item: GraphicsCaptureItem = unsafe { interop.CreateForWindow(hwnd)? };
+        let size = item.Size()?;
+
+        let frame_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
+            &dxgi_device_winrt,
+            DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            1,
+            size,
+        )?;
+
+        let session = frame_pool.CreateCaptureSession(&item)?;
+        session.StartCapture()?;
+
+        Ok(WgcSession {
+            hwnd,
+            dxgi_device: dxgi_device_winrt,
+            d3d_device,
+            frame_pool,
+            session,
+            staging_texture: None,
+        })
+    }
+
+    impl WgcSession {
+        fn get_next_frame(&mut self) -> anyhow::Result<ScreenCaptureFrame> {
+            let mut frame_opt = None;
+            for _ in 0..15 {
+                if let Ok(frame) = self.frame_pool.TryGetNextFrame() {
+                    frame_opt = Some(frame);
+                    while let Ok(next) = self.frame_pool.TryGetNextFrame() {
+                        frame_opt = Some(next);
+                    }
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+
+            let frame = frame_opt.context("No frame available from WGC pool")?;
+            let surface = frame.Surface()?;
+            let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
+            let texture: ID3D11Texture2D = unsafe { access.GetInterface()? };
+
+            let mut desc = D3D11_TEXTURE2D_DESC::default();
+            unsafe { texture.GetDesc(&mut desc); }
+            let width = desc.Width;
+            let height = desc.Height;
+
+            let mut recreate_staging = true;
+            if let Some((_, st_w, st_h)) = self.staging_texture {
+                if st_w == width && st_h == height {
+                    recreate_staging = false;
+                }
+            }
+
+            if recreate_staging {
+                let mut staging_desc = desc;
+                staging_desc.Usage = D3D11_USAGE_STAGING;
+                staging_desc.BindFlags = 0;
+                staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+                staging_desc.MiscFlags = 0;
+
+                let mut staging = None;
+                unsafe {
+                    self.d3d_device.CreateTexture2D(&staging_desc, None, Some(&mut staging))?;
+                }
+                self.staging_texture = Some((staging.unwrap(), width, height));
+            }
+
+            let (staging_tex, _, _) = self.staging_texture.as_ref().unwrap();
+
+            let d3d_context = unsafe {
+                self.d3d_device.GetImmediateContext()?
+            };
+
+            unsafe {
+                d3d_context.CopyResource(staging_tex, &texture);
+            }
+
+            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+            unsafe {
+                d3d_context.Map(staging_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+            }
+
+            let pitch = mapped.RowPitch as usize;
+            let src_slice = unsafe { std::slice::from_raw_parts(mapped.pData as *const u8, pitch * height as usize) };
+            let mut rgba = vec![0u8; (width as usize) * (height as usize) * 4];
+            for y in 0..height as usize {
+                let src_offset = y * pitch;
+                let dst_offset = y * (width as usize) * 4;
+                let src_row = &src_slice[src_offset..(src_offset + (width as usize) * 4)];
+                let dst_row = &mut rgba[dst_offset..(dst_offset + (width as usize) * 4)];
+                for (dst, src) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+                    dst[0] = src[2];
+                    dst[1] = src[1];
+                    dst[2] = src[0];
+                    dst[3] = src[3];
+                }
+            }
+
+            unsafe {
+                d3d_context.Unmap(staging_tex, 0);
+            }
+
+            let mut rect = RECT::default();
+            let _ = unsafe { GetWindowRect(self.hwnd, &mut rect) };
+
+            Ok(ScreenCaptureFrame {
+                screen_x: rect.left,
+                screen_y: rect.top,
+                width: width as usize,
+                height: height as usize,
+                rgba,
+            })
+        }
+    }
+
+    fn capture_wgc_frame(hwnd: HWND) -> Option<ScreenCaptureFrame> {
+        let mut manager = WGC_MANAGER.lock();
+        let mut reinit = true;
+        if let Some(ref session) = *manager {
+            if session.hwnd == hwnd {
+                reinit = false;
+            }
+        }
+
+        if reinit {
+            *manager = None;
+            match init_wgc_session(hwnd) {
+                Ok(session) => {
+                    *manager = Some(session);
+                }
+                Err(_) => {
+                    return None;
+                }
+            }
+        }
+
+        let session = manager.as_mut().unwrap();
+        match session.get_next_frame() {
+            Ok(frame) => Some(frame),
+            Err(_) => {
+                *manager = None;
+                None
+            }
+        }
+    }
+
     unsafe fn capture_window_region_from_hwnd(hwnd: HWND) -> Option<ScreenCaptureFrame> {
+        if let Some(frame) = capture_wgc_frame(hwnd) {
+            return Some(frame);
+        }
+
         let mut rect = RECT::default();
         if GetWindowRect(hwnd, &mut rect).is_err() {
             return None;

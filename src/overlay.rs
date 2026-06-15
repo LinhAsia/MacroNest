@@ -319,6 +319,7 @@ mod windows_overlay {
     static UI_CONTEXT: Lazy<Mutex<Option<egui::Context>>> = Lazy::new(|| Mutex::new(None));
     static CONTROLLER_HWND: AtomicIsize = AtomicIsize::new(0);
     static ACTIVE_HIGHLIGHT_HWND: AtomicIsize = AtomicIsize::new(0);
+    static ACTIVE_PIN_SOURCE_HWND: AtomicIsize = AtomicIsize::new(0);
     static CACHED_APP_UI_HWND: AtomicIsize = AtomicIsize::new(0);
     pub static UI_WINDOW_RECT_LEFT: std::sync::atomic::AtomicI32 =
         std::sync::atomic::AtomicI32::new(0);
@@ -1511,10 +1512,19 @@ mod windows_overlay {
             WMAPP_WINDOW_LOCATION_CHANGED => {
                 let target_hwnd = HWND(wparam.0 as *mut c_void);
                 if let Some(runtime) = runtime_mut(hwnd) {
-                    if runtime.native_focus_highlight_enabled
-                        && runtime.active_focus_highlight_hwnd == Some(target_hwnd)
-                    {
-                        let _ = paint_focus_highlight_overlay(runtime, target_hwnd);
+                    let active_hwnd = ACTIVE_HIGHLIGHT_HWND.load(Ordering::Relaxed);
+                    let pin_source_hwnd = ACTIVE_PIN_SOURCE_HWND.load(Ordering::Relaxed);
+
+                    if active_hwnd != 0 && target_hwnd.0 as isize == active_hwnd {
+                        if runtime.native_focus_highlight_enabled
+                            && runtime.active_focus_highlight_hwnd == Some(target_hwnd)
+                        {
+                            let _ = paint_focus_highlight_overlay(runtime, target_hwnd);
+                        }
+                    }
+
+                    if pin_source_hwnd != 0 && target_hwnd.0 as isize == pin_source_hwnd {
+                        let _ = refresh_pin_overlay(runtime);
                     }
                 }
                 LRESULT(0)
@@ -4865,7 +4875,7 @@ mod windows_overlay {
             let _ = set_native_border_color(previous, DWM_COLOR_DEFAULT);
         }
         ACTIVE_HIGHLIGHT_HWND.store(0, Ordering::Relaxed);
-        let _ = set_window_location_event_hook_enabled(runtime, false);
+        sync_window_location_hook_state(runtime);
         let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
     }
 
@@ -4994,7 +5004,7 @@ mod windows_overlay {
             let _ = paint_focus_highlight_overlay(runtime, foreground);
             runtime.active_focus_highlight_hwnd = Some(foreground);
             ACTIVE_HIGHLIGHT_HWND.store(foreground.0 as isize, Ordering::Relaxed);
-            let _ = set_window_location_event_hook_enabled(runtime, true);
+            sync_window_location_hook_state(runtime);
         }
     }
 
@@ -5051,6 +5061,13 @@ mod windows_overlay {
 
     const EVENT_OBJECT_LOCATIONCHANGE: u32 = 0x800B;
 
+    unsafe fn sync_window_location_hook_state(runtime: &mut Runtime) {
+        let active_highlight = ACTIVE_HIGHLIGHT_HWND.load(Ordering::Relaxed);
+        let active_pin = ACTIVE_PIN_SOURCE_HWND.load(Ordering::Relaxed);
+        let need_hook = active_highlight != 0 || active_pin != 0;
+        let _ = set_window_location_event_hook_enabled(runtime, need_hook);
+    }
+
     unsafe fn set_window_location_event_hook_enabled(
         runtime: &mut Runtime,
         enabled: bool,
@@ -5092,7 +5109,12 @@ mod windows_overlay {
         }
 
         let active_hwnd = ACTIVE_HIGHLIGHT_HWND.load(Ordering::Relaxed);
-        if active_hwnd == 0 || hwnd.0 as isize != active_hwnd {
+        let pin_source_hwnd = ACTIVE_PIN_SOURCE_HWND.load(Ordering::Relaxed);
+
+        let is_target = (active_hwnd != 0 && hwnd.0 as isize == active_hwnd)
+            || (pin_source_hwnd != 0 && hwnd.0 as isize == pin_source_hwnd);
+
+        if !is_target {
             return;
         }
 
@@ -5168,6 +5190,8 @@ mod windows_overlay {
                 {
                     let _ = DwmUnregisterThumbnail(thumbnail_id);
                 }
+                ACTIVE_PIN_SOURCE_HWND.store(0, Ordering::Relaxed);
+                sync_window_location_hook_state(runtime);
 
                 let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
             }
@@ -5176,7 +5200,7 @@ mod windows_overlay {
             return Ok(());
         };
         if runtime.active_pin_thumbnail.is_some()
-            && runtime.last_pin_update.elapsed() < Duration::from_millis(33)
+            && runtime.last_pin_update.elapsed() < Duration::from_millis(16)
         {
             return Ok(());
         }
@@ -5279,6 +5303,8 @@ mod windows_overlay {
                     last_target_bounds: (i32::MIN, i32::MIN, i32::MIN, i32::MIN),
                     last_source_crop: None,
                 });
+                ACTIVE_PIN_SOURCE_HWND.store(source.0 as isize, Ordering::Relaxed);
+                sync_window_location_hook_state(runtime);
             }
 
             if let Some(active) = runtime.active_pin_thumbnail.as_ref() {
