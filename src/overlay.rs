@@ -6260,38 +6260,7 @@ mod windows_overlay {
         window_preset::focus_window_for_preset(preset)
     }
 
-    fn replay_held_inputs_after_focus() {
-        let held_keys = {
-            let hook_state = HOOK_STATE.lock();
-            hook_state
-                .held_inputs
-                .iter()
-                .filter(|key| {
-                    !matches!(
-                        key.as_str(),
-                        "Ctrl"
-                            | "Alt"
-                            | "Shift"
-                            | "Win"
-                            | "Tab"
-                            | "MouseLeft"
-                            | "MouseRight"
-                            | "MouseMiddle"
-                            | "MouseX1"
-                            | "MouseX2"
-                    )
-                })
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        for key in held_keys {
-            let _ = send_key_event(&MacroStep {
-                action: MacroAction::KeyDown,
-                key,
-                ..MacroStep::default()
-            });
-        }
-    }
+
 
     fn macro_stop_requested(preset_id: u32, stop_immediately_on_retrigger: bool) -> bool {
         if FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id) {

@@ -24,7 +24,7 @@ use windows::Win32::{
 use super::{
     HOOK_STATE, WindowFocusPreset, WindowPreset, calculate_window_bounds, ensure_window_restored,
     find_target_window_hwnd, is_internal_app_window, remove_window_title_bar,
-    replay_held_inputs_after_focus, resolve_window_target, restore_window_title_bar,
+    resolve_window_target, restore_window_title_bar,
     window_belongs_to_current_process,
 };
 
@@ -243,7 +243,6 @@ fn focus_window_for_title(
         let _ = SetActiveWindow(hwnd);
         let _ = SetFocus(Some(hwnd));
         thread::sleep(Duration::from_millis(18));
-        replay_held_inputs_after_focus();
 
         if attach_target {
             let _ = AttachThreadInput(target_thread, current_thread, false);
