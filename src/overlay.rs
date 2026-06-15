@@ -194,6 +194,7 @@ mod windows_overlay {
     const WMAPP_TRAYICON: u32 = WM_APP + 1;
     const WMAPP_PROCESS_QUEUE: u32 = WM_APP + 2;
     const WMAPP_WINDOW_FOCUS_CHANGED: u32 = WM_APP + 3;
+    const WMAPP_WINDOW_LOCATION_CHANGED: u32 = WM_APP + 4;
     const MACRO_PRESET_BASE_ID: i32 = 10000;
     const FOCUS_TRIGGER_TIMER_ID: usize = 2;
     #[derive(Debug, Clone)]
@@ -317,6 +318,7 @@ mod windows_overlay {
     static SEARCH_AREA_OVERLAY_REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
     static UI_CONTEXT: Lazy<Mutex<Option<egui::Context>>> = Lazy::new(|| Mutex::new(None));
     static CONTROLLER_HWND: AtomicIsize = AtomicIsize::new(0);
+    static ACTIVE_HIGHLIGHT_HWND: AtomicIsize = AtomicIsize::new(0);
     static CACHED_APP_UI_HWND: AtomicIsize = AtomicIsize::new(0);
     pub static UI_WINDOW_RECT_LEFT: std::sync::atomic::AtomicI32 =
         std::sync::atomic::AtomicI32::new(0);
@@ -827,6 +829,7 @@ mod windows_overlay {
         keyboard_hook: HHOOK,
         mouse_hook: HHOOK,
         window_focus_event_hook: HWINEVENTHOOK,
+        window_location_event_hook: HWINEVENTHOOK,
         running: Arc<AtomicBool>,
         active_pin_thumbnail: Option<ActivePinThumbnail>,
         timer_interval_ms: u32,
@@ -1317,6 +1320,7 @@ mod windows_overlay {
                 keyboard_hook: HHOOK::default(),
                 mouse_hook: HHOOK::default(),
                 window_focus_event_hook: HWINEVENTHOOK::default(),
+                window_location_event_hook: HWINEVENTHOOK::default(),
                 running,
                 active_pin_thumbnail: None,
                 timer_interval_ms: 500,
@@ -1501,6 +1505,18 @@ mod windows_overlay {
                     update_native_focus_highlight(runtime, foreground);
                 }
                 handle_window_focus_event(hwnd, foreground);
+                LRESULT(0)
+            }
+
+            WMAPP_WINDOW_LOCATION_CHANGED => {
+                let target_hwnd = HWND(wparam.0 as *mut c_void);
+                if let Some(runtime) = runtime_mut(hwnd) {
+                    if runtime.native_focus_highlight_enabled
+                        && runtime.active_focus_highlight_hwnd == Some(target_hwnd)
+                    {
+                        let _ = paint_focus_highlight_overlay(runtime, target_hwnd);
+                    }
+                }
                 LRESULT(0)
             }
 
@@ -1722,6 +1738,7 @@ mod windows_overlay {
                     let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
                     let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
                     let _ = set_window_focus_event_hook_enabled(runtime, false);
+                    let _ = set_window_location_event_hook_enabled(runtime, false);
                     let _ = set_input_hooks_enabled(runtime, false);
                 }
 
@@ -4847,6 +4864,8 @@ mod windows_overlay {
         if let Some(previous) = runtime.active_focus_highlight_hwnd.take() {
             let _ = set_native_border_color(previous, DWM_COLOR_DEFAULT);
         }
+        ACTIVE_HIGHLIGHT_HWND.store(0, Ordering::Relaxed);
+        let _ = set_window_location_event_hook_enabled(runtime, false);
         let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
     }
 
@@ -4913,13 +4932,37 @@ mod windows_overlay {
         let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
         let color = image::Rgba([126, 224, 182, 235]);
 
-        for y in 0..height {
+        // Draw the 4 edges of the border without scanning the entire inner area.
+        // Top edge:
+        for y in 0..height.min(thickness) {
             for x in 0..width {
-                let near_edge = x < thickness
-                    || y < thickness
-                    || x >= width.saturating_sub(thickness)
-                    || y >= height.saturating_sub(thickness);
-                if near_edge {
+                canvas.put_pixel(x, y, color);
+            }
+        }
+        // Bottom edge:
+        if height > thickness {
+            let start_y = height.saturating_sub(thickness);
+            for y in start_y..height {
+                for x in 0..width {
+                    canvas.put_pixel(x, y, color);
+                }
+            }
+        }
+        // Left edge:
+        let vertical_start_y = thickness.min(height);
+        let vertical_end_y = height.saturating_sub(thickness);
+        if vertical_end_y > vertical_start_y {
+            for y in vertical_start_y..vertical_end_y {
+                for x in 0..width.min(thickness) {
+                    canvas.put_pixel(x, y, color);
+                }
+            }
+        }
+        // Right edge:
+        if width > thickness && vertical_end_y > vertical_start_y {
+            let start_x = width.saturating_sub(thickness);
+            for y in vertical_start_y..vertical_end_y {
+                for x in start_x..width {
                     canvas.put_pixel(x, y, color);
                 }
             }
@@ -4950,6 +4993,8 @@ mod windows_overlay {
             let _ = set_native_border_color(foreground, FOCUS_HIGHLIGHT_BORDER_COLOR);
             let _ = paint_focus_highlight_overlay(runtime, foreground);
             runtime.active_focus_highlight_hwnd = Some(foreground);
+            ACTIVE_HIGHLIGHT_HWND.store(foreground.0 as isize, Ordering::Relaxed);
+            let _ = set_window_location_event_hook_enabled(runtime, true);
         }
     }
 
@@ -4998,6 +5043,64 @@ mod windows_overlay {
             let _ = PostMessageW(
                 Some(controller),
                 WMAPP_WINDOW_FOCUS_CHANGED,
+                WPARAM(hwnd.0 as usize),
+                LPARAM(0),
+            );
+        }
+    }
+
+    const EVENT_OBJECT_LOCATIONCHANGE: u32 = 0x800B;
+
+    unsafe fn set_window_location_event_hook_enabled(
+        runtime: &mut Runtime,
+        enabled: bool,
+    ) -> Result<()> {
+        if enabled {
+            if runtime.window_location_event_hook.0.is_null() {
+                runtime.window_location_event_hook = SetWinEventHook(
+                    EVENT_OBJECT_LOCATIONCHANGE,
+                    EVENT_OBJECT_LOCATIONCHANGE,
+                    None,
+                    Some(window_location_event_proc),
+                    0,
+                    0,
+                    WINEVENT_OUTOFCONTEXT,
+                );
+                if runtime.window_location_event_hook.0.is_null() {
+                    bail!("Failed to register window location event hook");
+                }
+            }
+        } else if !runtime.window_location_event_hook.0.is_null() {
+            let _ = UnhookWinEvent(runtime.window_location_event_hook);
+            runtime.window_location_event_hook = HWINEVENTHOOK::default();
+        }
+
+        Ok(())
+    }
+
+    unsafe extern "system" fn window_location_event_proc(
+        _hook: HWINEVENTHOOK,
+        event: u32,
+        hwnd: HWND,
+        id_object: i32,
+        _id_child: i32,
+        _event_thread: u32,
+        _event_time: u32,
+    ) {
+        if event != EVENT_OBJECT_LOCATIONCHANGE || id_object != 0 {
+            return;
+        }
+
+        let active_hwnd = ACTIVE_HIGHLIGHT_HWND.load(Ordering::Relaxed);
+        if active_hwnd == 0 || hwnd.0 as isize != active_hwnd {
+            return;
+        }
+
+        let controller = HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void);
+        if !controller.0.is_null() {
+            let _ = PostMessageW(
+                Some(controller),
+                WMAPP_WINDOW_LOCATION_CHANGED,
                 WPARAM(hwnd.0 as usize),
                 LPARAM(0),
             );
@@ -13870,6 +13973,10 @@ mod windows_overlay {
 
         if !runtime.window_focus_event_hook.0.is_null() {
             let _ = unsafe { UnhookWinEvent(runtime.window_focus_event_hook) };
+        }
+
+        if !runtime.window_location_event_hook.0.is_null() {
+            let _ = unsafe { UnhookWinEvent(runtime.window_location_event_hook) };
         }
 
         {
