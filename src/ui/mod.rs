@@ -4813,7 +4813,7 @@ impl CrosshairApp {
                         expanded_title = Some(title.clone());
                     }
                     if row_response.clicked() {
-                        *target = Some(first_selector.clone());
+                        *target = Some(Self::selector_base_title(&first_selector).to_owned());
                         *match_duplicate_window_titles = has_duplicates;
                         expanded_title = None;
                         changed = true;
