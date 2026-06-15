@@ -1400,6 +1400,10 @@ impl CrosshairApp {
             self.state.vision_settings.use_interception = false;
             changed = true;
         }
+        if self.state.protractor_enabled {
+            self.state.protractor_enabled = false;
+            changed = true;
+        }
         changed
     }
 
@@ -9824,6 +9828,8 @@ impl CrosshairApp {
 
     fn begin_protractor_calibration(&mut self, ctx: &egui::Context) {
         self.protractor_picking_active = true;
+        // Temporarily hide protractor overlay so user can see the screen to pick points
+        let _ = self.overlay_tx.send(OverlayCommand::SetProtractorEnabled(false));
         self.status = Self::tr_lang(
             self.state.ui_language,
             "Calibration: Click point 1/3 on screen. Press Esc to cancel.",
