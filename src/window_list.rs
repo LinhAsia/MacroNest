@@ -237,6 +237,20 @@ mod windows_impl {
         if hwnd.0.is_null() { None } else { Some(hwnd) }
     }
 
+    fn strip_rule_suffix(target: &str) -> &str {
+        if let Some(s) = target.strip_suffix(" [Lowest]") {
+            s
+        } else if let Some(s) = target.strip_suffix(" [Highest]") {
+            s
+        } else if let Some(s) = target.strip_suffix(" [Leftmost]") {
+            s
+        } else if let Some(s) = target.strip_suffix(" [Rightmost]") {
+            s
+        } else {
+            target
+        }
+    }
+
     fn find_window_by_candidate_exact(title_or_selector: &str) -> Option<HWND> {
         if !looks_like_window_selector(title_or_selector) {
             return None;
@@ -257,6 +271,78 @@ mod windows_impl {
         title_or_selector: &str,
         match_duplicate_window_titles: bool,
     ) -> Option<HWND> {
+        let (base_title, rule) = if title_or_selector.ends_with(" [Lowest]") {
+            (title_or_selector.strip_suffix(" [Lowest]").unwrap(), Some("Lowest"))
+        } else if title_or_selector.ends_with(" [Highest]") {
+            (title_or_selector.strip_suffix(" [Highest]").unwrap(), Some("Highest"))
+        } else if title_or_selector.ends_with(" [Leftmost]") {
+            (title_or_selector.strip_suffix(" [Leftmost]").unwrap(), Some("Leftmost"))
+        } else if title_or_selector.ends_with(" [Rightmost]") {
+            (title_or_selector.strip_suffix(" [Rightmost]").unwrap(), Some("Rightmost"))
+        } else {
+            (title_or_selector, None)
+        };
+
+        if let Some(rule) = rule {
+            let mut candidates = Vec::new();
+            unsafe {
+                let mut payload = (base_title, match_duplicate_window_titles, &mut candidates);
+                let _ = EnumWindows(
+                    Some(find_all_windows_by_candidate_proc),
+                    LPARAM((&mut payload) as *mut _ as isize),
+                );
+            }
+
+            if candidates.is_empty() {
+                return None;
+            }
+
+            let mut best_hwnd = None;
+            let mut best_val = match rule {
+                "Lowest" | "Rightmost" => i32::MIN,
+                "Highest" | "Leftmost" => i32::MAX,
+                _ => 0,
+            };
+
+            for hwnd in &candidates {
+                let mut rect = RECT::default();
+                if unsafe { GetWindowRect(*hwnd, &mut rect) }.is_ok() {
+                    match rule {
+                        "Lowest" => {
+                            let y = rect.top;
+                            if y > best_val {
+                                best_val = y;
+                                best_hwnd = Some(*hwnd);
+                            }
+                        }
+                        "Highest" => {
+                            let y = rect.top;
+                            if y < best_val {
+                                best_val = y;
+                                best_hwnd = Some(*hwnd);
+                            }
+                        }
+                        "Leftmost" => {
+                            let x = rect.left;
+                            if x < best_val {
+                                best_val = x;
+                                best_hwnd = Some(*hwnd);
+                            }
+                        }
+                        "Rightmost" => {
+                            let x = rect.left;
+                            if x > best_val {
+                                best_val = x;
+                                best_hwnd = Some(*hwnd);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            return best_hwnd.or_else(|| candidates.first().cloned());
+        }
+
         let mut found = None;
         unsafe {
             let mut payload = (title_or_selector, match_duplicate_window_titles, &mut found);
@@ -273,13 +359,14 @@ mod windows_impl {
         lparam: LPARAM,
     ) -> BOOL {
         let (target_selector, found) = &mut *(lparam.0 as *mut (&str, &mut Option<HWND>));
+        let clean_selector = strip_rule_suffix(*target_selector);
         if !IsWindowVisible(hwnd).as_bool() {
             return true.into();
         }
         let Some(title) = window_title(hwnd) else {
             return true.into();
         };
-        if window_selector(hwnd, &title) == *target_selector {
+        if window_selector(hwnd, &title) == clean_selector {
             **found = Some(hwnd);
             return false.into();
         }
@@ -289,6 +376,7 @@ mod windows_impl {
     unsafe extern "system" fn find_window_by_candidate_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let (target_title, match_duplicate_window_titles, found) =
             &mut *(lparam.0 as *mut (&str, bool, &mut Option<HWND>));
+        let clean_title = strip_rule_suffix(*target_title);
         if !IsWindowVisible(hwnd).as_bool() {
             return true.into();
         }
@@ -296,20 +384,48 @@ mod windows_impl {
             return true.into();
         };
         let mut matches = if *match_duplicate_window_titles {
-            title == selector_base_title(target_title)
-                || window_selector(hwnd, &title) == *target_title
+            title == selector_base_title(clean_title)
+                || window_selector(hwnd, &title) == clean_title
         } else {
-            title == *target_title
-                || window_selector(hwnd, &title) == *target_title
-                || (selector_base_title(target_title) != *target_title
-                    && title == selector_base_title(target_title))
+            title == clean_title
+                || window_selector(hwnd, &title) == clean_title
+                || (selector_base_title(clean_title) != clean_title
+                    && title == selector_base_title(clean_title))
         };
         if !matches {
-            matches = matches_browser_suffix(target_title, &title);
+            matches = matches_browser_suffix(clean_title, &title);
         }
         if matches {
             **found = Some(hwnd);
             return false.into();
+        }
+        true.into()
+    }
+
+    unsafe extern "system" fn find_all_windows_by_candidate_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let (target_title, match_duplicate_window_titles, candidates) =
+            &mut *(lparam.0 as *mut (&str, bool, &mut Vec<HWND>));
+        let clean_title = strip_rule_suffix(*target_title);
+        if !IsWindowVisible(hwnd).as_bool() {
+            return true.into();
+        }
+        let Some(title) = window_title(hwnd) else {
+            return true.into();
+        };
+        let mut matches = if *match_duplicate_window_titles {
+            title == selector_base_title(clean_title)
+                || window_selector(hwnd, &title) == clean_title
+        } else {
+            title == clean_title
+                || window_selector(hwnd, &title) == clean_title
+                || (selector_base_title(clean_title) != clean_title
+                    && title == selector_base_title(clean_title))
+        };
+        if !matches {
+            matches = matches_browser_suffix(clean_title, &title);
+        }
+        if matches {
+            candidates.push(hwnd);
         }
         true.into()
     }

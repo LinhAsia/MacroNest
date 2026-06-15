@@ -4506,6 +4506,17 @@ impl CrosshairApp {
     }
 
     fn simplify_window_title(title: &str) -> String {
+        let title = if let Some(s) = title.strip_suffix(" [Lowest]") {
+            s
+        } else if let Some(s) = title.strip_suffix(" [Highest]") {
+            s
+        } else if let Some(s) = title.strip_suffix(" [Leftmost]") {
+            s
+        } else if let Some(s) = title.strip_suffix(" [Rightmost]") {
+            s
+        } else {
+            title
+        };
         let clean = Self::clean_invisible_chars(title);
         let base = Self::selector_base_title(&clean);
 
@@ -4744,15 +4755,36 @@ impl CrosshairApp {
                 if current == "[Active Window]" {
                     Self::tr_lang(language, "[Active Window]", "[Cửa sổ hiện tại]").to_owned()
                 } else {
-                    let base_title = Self::simplify_window_title(current);
-                    let selected_specific_duplicate = !*match_duplicate_window_titles
-                        && window_groups
-                            .iter()
-                            .any(|(title, selectors)| *title == base_title && selectors.len() > 1);
-                    if selected_specific_duplicate {
-                        current.to_owned()
+                    let mut display = current.to_owned();
+                    let rules = [
+                        (" [Lowest]", "[Lowest on Screen]", "[Dưới cùng màn hình]"),
+                        (" [Highest]", "[Highest on Screen]", "[Trên cùng màn hình]"),
+                        (" [Leftmost]", "[Leftmost on Screen]", "[Bên trái cùng]"),
+                        (" [Rightmost]", "[Rightmost on Screen]", "[Bên phải cùng]"),
+                    ];
+                    let mut matched_rule = false;
+                    for (suffix, en_label, vi_label) in rules {
+                        if current.ends_with(suffix) {
+                            let base = current.strip_suffix(suffix).unwrap();
+                            let label = Self::tr_lang(language, en_label, vi_label);
+                            display = format!("{base} {label}");
+                            matched_rule = true;
+                            break;
+                        }
+                    }
+                    if matched_rule {
+                        display
                     } else {
-                        base_title
+                        let base_title = Self::simplify_window_title(current);
+                        let selected_specific_duplicate = !*match_duplicate_window_titles
+                            && window_groups
+                                .iter()
+                                .any(|(title, selectors)| *title == base_title && selectors.len() > 1);
+                        if selected_specific_duplicate {
+                            current.to_owned()
+                        } else {
+                            base_title
+                        }
                     }
                 }
             })
@@ -4824,6 +4856,30 @@ impl CrosshairApp {
                             (id_source, "duplicate-title-branches", title.as_str()),
                             |ui| {
                                 let mut child_hovered = false;
+
+                                let rules = [
+                                    (" [Lowest]", Self::tr_lang(language, "[Lowest on Screen]", "[Dưới cùng màn hình]")),
+                                    (" [Highest]", Self::tr_lang(language, "[Highest on Screen]", "[Trên cùng màn hình]")),
+                                    (" [Leftmost]", Self::tr_lang(language, "[Leftmost on Screen]", "[Bên trái cùng]")),
+                                    (" [Rightmost]", Self::tr_lang(language, "[Rightmost on Screen]", "[Bên phải cùng]")),
+                                ];
+
+                                for (suffix, label) in rules {
+                                    let rule_selector = format!("{title}{suffix}");
+                                    let is_rule_selected = target.as_deref() == Some(&rule_selector);
+                                    let rule_label = format!("{title} {label}");
+                                    let response = ui.selectable_label(is_rule_selected, &rule_label);
+                                    child_hovered |= response.hovered();
+                                    if response.clicked() {
+                                        *target = Some(rule_selector);
+                                        *match_duplicate_window_titles = false;
+                                        expanded_title = None;
+                                        changed = true;
+                                    }
+                                }
+
+                                ui.separator();
+
                                 for selector in &selectors {
                                     let child_selected = target.as_deref()
                                         == Some(selector.as_str())
