@@ -574,6 +574,7 @@ impl CrosshairApp {
                     None,
                     None,
                     false,
+                    true,
                 );
                 ui.add_space(8.0);
                 live_sync |= Self::render_zoom_rect_editor(
@@ -596,6 +597,7 @@ impl CrosshairApp {
                         (preset.source_width.max(1) as f32) / (preset.source_height.max(1) as f32),
                     ),
                     false,
+                    true,
                 );
             });
             if let Some((target, status)) = next_capture_target.take() {
@@ -651,10 +653,7 @@ impl CrosshairApp {
             let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
             ui.add_space(6.0);
             let preset_snapshot = self.state.pin_presets[index].clone();
-            let preview = if pin_preview_allowed
-                && preset_snapshot.preview_enabled
-                && !preset_snapshot.collapsed
-            {
+            let source_preview = if pin_preview_allowed && !preset_snapshot.collapsed {
                 self.pin_preview_for_target(
                     ui.ctx(),
                     100_000 + preset_snapshot.id,
@@ -663,8 +662,11 @@ impl CrosshairApp {
                     preset_snapshot.match_duplicate_window_titles,
                 )
             } else {
-                self.zoom_preview_cache
-                    .remove(&(100_000 + preset_snapshot.id));
+                None
+            };
+            let preview = if preset_snapshot.preview_enabled {
+                source_preview.clone()
+            } else {
                 None
             };
             let preset = &mut self.state.pin_presets[index];
@@ -901,6 +903,7 @@ impl CrosshairApp {
                         },
                         None,
                         false,
+                        true,
                     );
                     ui.horizontal_wrapped(|ui| {
                         if ui
@@ -981,10 +984,11 @@ impl CrosshairApp {
                         &mut preset.source_width,
                         &mut preset.source_height,
                         screen_size,
-                        preview.as_ref(),
+                        source_preview.as_ref(),
                         None,
                         None,
                         true,
+                        preset.preview_enabled,
                     );
                     if crop_changed {
                         preset.source_crop_initialized = true;
@@ -1709,6 +1713,7 @@ impl CrosshairApp {
         target_preview_source: Option<(i32, i32, i32, i32)>,
         keep_aspect_ratio: Option<f32>,
         use_preview_local_coordinates: bool,
+        show_preview_image: bool,
     ) -> bool {
         let mut changed = false;
         ui.label(RichText::new(label).strong());
@@ -1800,7 +1805,7 @@ impl CrosshairApp {
                 )
             };
 
-        if let Some(preview_frame) = preview {
+        if show_preview_image && let Some(preview_frame) = preview {
             ui.painter().image(
                 preview_frame.texture.id(),
                 preview_content_rect,

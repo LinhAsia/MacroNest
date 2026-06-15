@@ -280,6 +280,7 @@ impl CrosshairApp {
                     None,
                     None,
                     false,
+                    true,
                 );
 
                 if changed {
