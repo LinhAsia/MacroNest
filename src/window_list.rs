@@ -4,15 +4,16 @@
 mod windows_impl {
     use windows::{
         Win32::{
-            Foundation::{HWND, LPARAM, RECT},
+            Foundation::{HWND, LPARAM, POINT, RECT},
             Graphics::Gdi::{
-                BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleDC, CreateDIBSection,
+                BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, ClientToScreen, CreateCompatibleDC, CreateDIBSection,
                 DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetWindowDC, HALFTONE, HGDIOBJ,
                 ReleaseDC, SRCCOPY, SelectObject, SetStretchBltMode, StretchBlt,
             },
             Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
             UI::WindowsAndMessaging::{
                 BringWindowToTop, EnumWindows, GetForegroundWindow, GetSystemMetrics,
+                GetClientRect,
                 GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
                 HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindow, IsWindowVisible,
                 PW_RENDERFULLCONTENT, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
@@ -68,7 +69,7 @@ mod windows_impl {
         max_dimension: u32,
     ) -> Option<WindowPreviewFrame> {
         let hwnd = find_window_handle(title)?;
-        unsafe { capture_window_preview_from_hwnd(hwnd, max_dimension.max(64)) }
+        unsafe { capture_window_preview_from_hwnd(hwnd, max_dimension.max(64), false) }
     }
 
     pub fn capture_window_preview_with_candidates(
@@ -82,7 +83,21 @@ mod windows_impl {
             extra_titles,
             match_duplicate_window_titles,
         )?;
-        unsafe { capture_window_preview_from_hwnd(hwnd, max_dimension.max(64)) }
+        unsafe { capture_window_preview_from_hwnd(hwnd, max_dimension.max(64), false) }
+    }
+
+    pub fn capture_window_client_preview_with_candidates(
+        primary_title: Option<&str>,
+        extra_titles: &[String],
+        match_duplicate_window_titles: bool,
+        max_dimension: u32,
+    ) -> Option<WindowPreviewFrame> {
+        let hwnd = find_window_handle_with_candidates(
+            primary_title,
+            extra_titles,
+            match_duplicate_window_titles,
+        )?;
+        unsafe { capture_window_preview_from_hwnd(hwnd, max_dimension.max(64), true) }
     }
 
     pub fn capture_window_region_with_candidates(
@@ -376,12 +391,48 @@ mod windows_impl {
         if title.is_empty() { None } else { Some(title) }
     }
 
+    unsafe fn client_rect_on_screen(hwnd: HWND) -> Option<RECT> {
+        let mut client_rect = RECT::default();
+        if GetClientRect(hwnd, &mut client_rect).is_err() {
+            return None;
+        }
+        let mut top_left = POINT {
+            x: client_rect.left,
+            y: client_rect.top,
+        };
+        let mut bottom_right = POINT {
+            x: client_rect.right,
+            y: client_rect.bottom,
+        };
+        if !ClientToScreen(hwnd, &mut top_left).as_bool() {
+            return None;
+        }
+        if !ClientToScreen(hwnd, &mut bottom_right).as_bool() {
+            return None;
+        }
+        Some(RECT {
+            left: top_left.x,
+            top: top_left.y,
+            right: bottom_right.x,
+            bottom: bottom_right.y,
+        })
+    }
+
     unsafe fn capture_window_preview_from_hwnd(
         hwnd: HWND,
         max_dimension: u32,
+        client_only: bool,
     ) -> Option<WindowPreviewFrame> {
-        let mut rect = RECT::default();
-        if GetWindowRect(hwnd, &mut rect).is_err() {
+        let rect = if client_only {
+            client_rect_on_screen(hwnd)?
+        } else {
+            let mut rect = RECT::default();
+            if GetWindowRect(hwnd, &mut rect).is_err() {
+                return None;
+            }
+            rect
+        };
+        if rect.right <= rect.left || rect.bottom <= rect.top {
             return None;
         }
         let screen_width = (rect.right - rect.left).max(1);
@@ -722,6 +773,15 @@ mod fallback {
     }
 
     pub fn capture_window_preview_with_candidates(
+        _primary_title: Option<&str>,
+        _extra_titles: &[String],
+        _match_duplicate_window_titles: bool,
+        _max_dimension: u32,
+    ) -> Option<WindowPreviewFrame> {
+        None
+    }
+
+    pub fn capture_window_client_preview_with_candidates(
         _primary_title: Option<&str>,
         _extra_titles: &[String],
         _match_duplicate_window_titles: bool,

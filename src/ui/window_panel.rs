@@ -655,7 +655,7 @@ impl CrosshairApp {
                 && preset_snapshot.preview_enabled
                 && !preset_snapshot.collapsed
             {
-                self.window_preview_for_target(
+                self.pin_preview_for_target(
                     ui.ctx(),
                     100_000 + preset_snapshot.id,
                     preset_snapshot.target_window_title.as_ref(),
@@ -3557,6 +3557,60 @@ impl CrosshairApp {
                     match_duplicate_window_titles,
                     720,
                 ) {
+                    let _ = ui_tx.send(crate::overlay::UiCommand::WindowPreviewLoaded {
+                        cache_id,
+                        source_window_key: target_title,
+                        source_window_extra_keys: extra_titles,
+                        match_duplicate_window_titles,
+                        frame,
+                    });
+                }
+            });
+        }
+
+        self.zoom_preview_cache.get(&cache_id).map(|cache| cache.view.clone())
+    }
+
+    pub(crate) fn pin_preview_for_target(
+        &mut self,
+        ctx: &egui::Context,
+        cache_id: u32,
+        target_window_title: Option<&String>,
+        extra_target_window_titles: &[String],
+        match_duplicate_window_titles: bool,
+    ) -> Option<ZoomPreviewView> {
+        let refresh_every = Duration::from_millis(120);
+        if let Some(cache) = self.zoom_preview_cache.get(&cache_id)
+            && cache.source_window_key == target_window_title.cloned()
+            && cache.source_window_extra_keys == extra_target_window_titles
+            && cache.match_duplicate_window_titles == match_duplicate_window_titles
+            && cache.updated_at.elapsed() < refresh_every
+        {
+            return Some(cache.view.clone());
+        }
+
+        let should_request = if let Some(last_req) = self.window_preview_requested.get(&cache_id) {
+            last_req.elapsed() >= refresh_every
+        } else {
+            true
+        };
+
+        if should_request {
+            self.window_preview_requested.insert(cache_id, Instant::now());
+
+            let ui_tx = self.ui_tx.clone();
+            let target_title = target_window_title.cloned();
+            let extra_titles = extra_target_window_titles.to_vec();
+
+            std::thread::spawn(move || {
+                if let Some(frame) =
+                    crate::window_list::capture_window_client_preview_with_candidates(
+                        target_title.as_deref(),
+                        &extra_titles,
+                        match_duplicate_window_titles,
+                        720,
+                    )
+                {
                     let _ = ui_tx.send(crate::overlay::UiCommand::WindowPreviewLoaded {
                         cache_id,
                         source_window_key: target_title,

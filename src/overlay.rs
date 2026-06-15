@@ -65,7 +65,7 @@ mod windows_overlay {
                 Gdi::{
                     AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO,
                     BITMAPINFOHEADER, BLENDFUNCTION, BeginPaint, CLIP_DEFAULT_PRECIS,
-                    CreateCompatibleDC, CreateDIBSection, CreateFontW, CreateRectRgn,
+                    ClientToScreen, CreateCompatibleDC, CreateDIBSection, CreateFontW, CreateRectRgn,
                     DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CENTER, DT_SINGLELINE, DT_VCENTER,
                     DeleteDC, DeleteObject, DrawTextW, EndPaint, FF_DONTCARE, FW_MEDIUM, GetDC,
                     GetMonitorInfoW, HDC, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO,
@@ -5323,8 +5323,28 @@ mod windows_overlay {
                 return Ok(());
             }
 
-            let mut source_rect = RECT::default();
-            GetWindowRect(source, &mut source_rect)?;
+            let mut client_rect = RECT::default();
+            GetClientRect(source, &mut client_rect)?;
+            let mut client_top_left = POINT {
+                x: client_rect.left,
+                y: client_rect.top,
+            };
+            let mut client_bottom_right = POINT {
+                x: client_rect.right,
+                y: client_rect.bottom,
+            };
+            if !ClientToScreen(source, &mut client_top_left).as_bool() {
+                return Err(anyhow::anyhow!("Failed to map client top-left to screen"));
+            }
+            if !ClientToScreen(source, &mut client_bottom_right).as_bool() {
+                return Err(anyhow::anyhow!("Failed to map client bottom-right to screen"));
+            }
+            let source_rect = RECT {
+                left: client_top_left.x,
+                top: client_top_left.y,
+                right: client_bottom_right.x,
+                bottom: client_bottom_right.y,
+            };
             let base_bounds = if preset.use_custom_bounds {
                 (
                     preset.x,
@@ -5421,7 +5441,7 @@ mod windows_overlay {
                         rcSource: source_rect_crop,
                         opacity: 255,
                         fVisible: true.into(),
-                        fSourceClientAreaOnly: false.into(),
+                        fSourceClientAreaOnly: true.into(),
                         ..Default::default()
                     };
                     if let Some(thumbnail_id) = active.thumbnail_id {
