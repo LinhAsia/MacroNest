@@ -13519,12 +13519,140 @@ mod windows_overlay {
         pub static MACRO_TARGETED_WINDOWS: std::cell::RefCell<HashSet<isize>> = std::cell::RefCell::new(HashSet::new());
     }
 
+    unsafe fn resolve_duplicate_by_rule(
+        base_title: &str,
+        match_duplicate_window_titles: bool,
+        exclude: Option<HWND>,
+        targeted: Option<&HashSet<isize>>,
+        rule: &str,
+    ) -> Option<HWND> {
+        let mut candidates = Vec::new();
+        struct EnumPayload<'a> {
+            base_title: &'a str,
+            match_duplicate_window_titles: bool,
+            exclude: Option<HWND>,
+            targeted: Option<&'a HashSet<isize>>,
+            candidates: &'a mut Vec<HWND>,
+        }
+
+        unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+            let payload = &mut *(lparam.0 as *mut EnumPayload);
+            if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() {
+                return true.into();
+            }
+            if payload.exclude.is_some_and(|ex| ex == hwnd) {
+                return true.into();
+            }
+            if let Some(targeted_set) = payload.targeted {
+                if targeted_set.contains(&(hwnd.0 as isize)) {
+                    return true.into();
+                }
+            }
+
+            if window_matches_selector_with_duplicate_titles(
+                hwnd,
+                payload.base_title,
+                payload.match_duplicate_window_titles,
+            ) {
+                payload.candidates.push(hwnd);
+            }
+            true.into()
+        }
+
+        {
+            let mut payload = EnumPayload {
+                base_title,
+                match_duplicate_window_titles,
+                exclude,
+                targeted,
+                candidates: &mut candidates,
+            };
+
+            let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
+                Some(enum_proc),
+                LPARAM((&mut payload) as *mut _ as isize),
+            );
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let mut best_hwnd = None;
+        let mut best_val = match rule {
+            "Lowest" | "Rightmost" => i32::MIN,
+            "Highest" | "Leftmost" => i32::MAX,
+            _ => 0,
+        };
+
+        for hwnd in &candidates {
+            let mut rect = windows::Win32::Foundation::RECT::default();
+            if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut rect).is_ok() {
+                match rule {
+                    "Lowest" => {
+                        let y = rect.top;
+                        if y > best_val {
+                            best_val = y;
+                            best_hwnd = Some(*hwnd);
+                        }
+                    }
+                    "Highest" => {
+                        let y = rect.top;
+                        if y < best_val {
+                            best_val = y;
+                            best_hwnd = Some(*hwnd);
+                        }
+                    }
+                    "Leftmost" => {
+                        let x = rect.left;
+                        if x < best_val {
+                            best_val = x;
+                            best_hwnd = Some(*hwnd);
+                        }
+                    }
+                    "Rightmost" => {
+                        let x = rect.left;
+                        if x > best_val {
+                            best_val = x;
+                            best_hwnd = Some(*hwnd);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        best_hwnd.or_else(|| candidates.first().cloned())
+    }
+
     unsafe fn find_window_by_selector_excluding_targeted(
         title: &str,
         match_duplicate_window_titles: bool,
         exclude: Option<HWND>,
         targeted: &HashSet<isize>,
     ) -> Option<HWND> {
+        let (base_title, rule) = if title.ends_with(" [Lowest]") {
+            (title.strip_suffix(" [Lowest]").unwrap(), Some("Lowest"))
+        } else if title.ends_with(" [Highest]") {
+            (title.strip_suffix(" [Highest]").unwrap(), Some("Highest"))
+        } else if title.ends_with(" [Leftmost]") {
+            (title.strip_suffix(" [Leftmost]").unwrap(), Some("Leftmost"))
+        } else if title.ends_with(" [Rightmost]") {
+            (title.strip_suffix(" [Rightmost]").unwrap(), Some("Rightmost"))
+        } else {
+            (title, None)
+        };
+
+        if let Some(rule) = rule {
+            return resolve_duplicate_by_rule(
+                base_title,
+                match_duplicate_window_titles,
+                exclude,
+                Some(targeted),
+                rule,
+            );
+        }
+
         let mut found = None;
         let mut payload = (title, match_duplicate_window_titles, exclude, targeted, &mut found);
         let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
@@ -13540,6 +13668,7 @@ mod windows_overlay {
     ) -> windows::core::BOOL {
         let (target, match_duplicate_window_titles, exclude, targeted, found) =
             &mut *(lparam.0 as *mut (&str, bool, Option<HWND>, &HashSet<isize>, &mut Option<HWND>));
+        let clean_target = strip_rule_suffix(*target);
         if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() {
             return true.into();
         }
@@ -13554,7 +13683,7 @@ mod windows_overlay {
 
         if window_matches_selector_with_duplicate_titles(
             hwnd,
-            target,
+            clean_target,
             *match_duplicate_window_titles,
         ) {
             **found = Some(hwnd);
@@ -13774,6 +13903,28 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         exclude: Option<HWND>,
     ) -> Option<HWND> {
+        let (base_title, rule) = if title.ends_with(" [Lowest]") {
+            (title.strip_suffix(" [Lowest]").unwrap(), Some("Lowest"))
+        } else if title.ends_with(" [Highest]") {
+            (title.strip_suffix(" [Highest]").unwrap(), Some("Highest"))
+        } else if title.ends_with(" [Leftmost]") {
+            (title.strip_suffix(" [Leftmost]").unwrap(), Some("Leftmost"))
+        } else if title.ends_with(" [Rightmost]") {
+            (title.strip_suffix(" [Rightmost]").unwrap(), Some("Rightmost"))
+        } else {
+            (title, None)
+        };
+
+        if let Some(rule) = rule {
+            return resolve_duplicate_by_rule(
+                base_title,
+                match_duplicate_window_titles,
+                exclude,
+                None,
+                rule,
+            );
+        }
+
         let mut found = None;
         let mut payload = (title, match_duplicate_window_titles, exclude, &mut found);
         let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
@@ -13788,11 +13939,12 @@ mod windows_overlay {
         lparam: LPARAM,
     ) -> windows::core::BOOL {
         let (target, found) = &mut *(lparam.0 as *mut (&str, &mut Option<HWND>));
+        let clean_target = strip_rule_suffix(*target);
         if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() {
             return true.into();
         }
 
-        if window_matches_selector(hwnd, target) {
+        if window_matches_selector(hwnd, clean_target) {
             **found = Some(hwnd);
             return false.into();
         }
@@ -13806,6 +13958,7 @@ mod windows_overlay {
     ) -> windows::core::BOOL {
         let (target, match_duplicate_window_titles, exclude, found) =
             &mut *(lparam.0 as *mut (&str, bool, Option<HWND>, &mut Option<HWND>));
+        let clean_target = strip_rule_suffix(*target);
         if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() {
             return true.into();
         }
@@ -13816,7 +13969,7 @@ mod windows_overlay {
 
         if window_matches_selector_with_duplicate_titles(
             hwnd,
-            target,
+            clean_target,
             *match_duplicate_window_titles,
         ) {
             **found = Some(hwnd);
@@ -13880,7 +14033,22 @@ mod windows_overlay {
         false
     }
 
+    fn strip_rule_suffix(target: &str) -> &str {
+        if let Some(s) = target.strip_suffix(" [Lowest]") {
+            s
+        } else if let Some(s) = target.strip_suffix(" [Highest]") {
+            s
+        } else if let Some(s) = target.strip_suffix(" [Leftmost]") {
+            s
+        } else if let Some(s) = target.strip_suffix(" [Rightmost]") {
+            s
+        } else {
+            target
+        }
+    }
+
     unsafe fn window_matches_selector(hwnd: HWND, target: &str) -> bool {
+        let target = strip_rule_suffix(target);
         let Some(title) = window_title(hwnd) else {
             return false;
         };
@@ -13892,6 +14060,7 @@ mod windows_overlay {
         target: &str,
         match_duplicate_window_titles: bool,
     ) -> bool {
+        let target = strip_rule_suffix(target);
         let base_title = selector_base_title(target);
         if base_title != target {
             return window_matches_selector(hwnd, target);
