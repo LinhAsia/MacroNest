@@ -4727,6 +4727,7 @@ impl CrosshairApp {
 
     fn render_window_target_combo_with_duplicate_mode(
         ui: &mut egui::Ui,
+        language: UiLanguage,
         id_source: impl std::hash::Hash + Copy,
         label_when_none: &str,
         target: &mut Option<String>,
@@ -4740,15 +4741,19 @@ impl CrosshairApp {
         let selected_text = target
             .as_deref()
             .map(|current| {
-                let base_title = Self::simplify_window_title(current);
-                let selected_specific_duplicate = !*match_duplicate_window_titles
-                    && window_groups
-                        .iter()
-                        .any(|(title, selectors)| *title == base_title && selectors.len() > 1);
-                if selected_specific_duplicate {
-                    current.to_owned()
+                if current == "[Active Window]" {
+                    Self::tr_lang(language, "[Active Window]", "[Cửa sổ hiện tại]").to_owned()
                 } else {
-                    base_title
+                    let base_title = Self::simplify_window_title(current);
+                    let selected_specific_duplicate = !*match_duplicate_window_titles
+                        && window_groups
+                            .iter()
+                            .any(|(title, selectors)| *title == base_title && selectors.len() > 1);
+                    if selected_specific_duplicate {
+                        current.to_owned()
+                    } else {
+                        base_title
+                    }
                 }
             })
             .unwrap_or(label_when_none.to_owned());
@@ -4773,6 +4778,19 @@ impl CrosshairApp {
                         changed = true;
                     }
                 }
+
+                let active_window_label = Self::tr_lang(language, "[Active Window]", "[Cửa sổ hiện tại]");
+                let is_active_selected = target.as_deref() == Some("[Active Window]");
+                if ui
+                    .selectable_label(is_active_selected, active_window_label)
+                    .clicked()
+                {
+                    *target = Some("[Active Window]".to_owned());
+                    *match_duplicate_window_titles = false;
+                    expanded_title = None;
+                    changed = true;
+                }
+                ui.separator();
 
                 for (title, selectors) in window_groups {
                     let has_duplicates = selectors.len() > 1;
@@ -4863,6 +4881,7 @@ impl CrosshairApp {
                 ui.spacing_mut().interact_size.y = 21.0;
                 changed |= Self::render_window_target_combo_with_duplicate_mode(
                     ui,
+                    language,
                     (id_source, "primary"),
                     label_when_none,
                     primary,
@@ -4920,6 +4939,7 @@ impl CrosshairApp {
                         let mut extra_target = Some(extra.clone());
                         if Self::render_window_target_combo_with_duplicate_mode(
                             ui,
+                            language,
                             (id_source, "extra", index),
                             label_when_none,
                             &mut extra_target,

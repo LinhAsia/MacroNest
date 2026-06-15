@@ -5442,7 +5442,7 @@ impl CrosshairApp {
                                                     };
                                                     let mut duplicate_mode = false;
                                                     if Self::render_window_target_combo_with_duplicate_mode(
-                                                        ui,
+                                                        ui, language,
                                                         (group.id, preset.id, "hold-stop-focus-window-preset"),
                                                         &Self::tr_lang(language, "Select window", "Chọn cửa sổ"),
                                                         &mut selected_window,
@@ -8536,7 +8536,7 @@ impl CrosshairApp {
                                                     };
                                                     let mut duplicate_mode = false;
                                                     if Self::render_window_target_combo_with_duplicate_mode(
-                                                        ui,
+                                                        ui, language,
                                                         (group.id, preset.id, "hold-stop-focus-window-preset"),
                                                         &Self::tr_lang(language, "Select window", "Chọn cửa sổ"),
                                                         &mut selected_window,

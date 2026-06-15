@@ -13892,12 +13892,12 @@ mod windows_overlay {
         target: &str,
         match_duplicate_window_titles: bool,
     ) -> bool {
-        if window_matches_selector(hwnd, target) {
-            return true;
+        let base_title = selector_base_title(target);
+        if base_title != target {
+            return window_matches_selector(hwnd, target);
         }
 
-        let base_title = selector_base_title(target);
-        if base_title != target && window_title(hwnd).is_some_and(|title| title == base_title) {
+        if window_matches_selector(hwnd, target) {
             return true;
         }
 
@@ -13905,7 +13905,7 @@ mod windows_overlay {
             let Some(title) = window_title(hwnd) else {
                 return false;
             };
-            if title == selector_base_title(target) {
+            if title == base_title {
                 return true;
             }
         }

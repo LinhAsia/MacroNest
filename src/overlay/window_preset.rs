@@ -187,16 +187,35 @@ fn focus_window_for_title(
     match_duplicate_window_titles: bool,
     prefer_other_if_foreground_matches: bool,
 ) -> Result<()> {
-    let hwnd = find_target_window_hwnd(
-        target_title,
-        extra_target_titles,
-        match_duplicate_window_titles,
-        prefer_other_if_foreground_matches,
-    )
-    .context("Target window was not found")?;
+    let is_active_window = target_title == Some("[Active Window]");
+    let hwnd = if is_active_window {
+        let fg = unsafe { GetForegroundWindow() };
+        if fg.0.is_null() {
+            bail!("No foreground window is available");
+        }
+        fg
+    } else {
+        let is_specific = target_title.is_some_and(|t| {
+            if let Some(prefix) = t.strip_suffix(')')
+                && let Some((_, _)) = prefix.rsplit_once(" (0x")
+            {
+                true
+            } else {
+                false
+            }
+        });
+        let prefer_other = prefer_other_if_foreground_matches && !is_specific;
+        find_target_window_hwnd(
+            target_title,
+            extra_target_titles,
+            match_duplicate_window_titles,
+            prefer_other,
+        )
+        .context("Target window was not found")?
+    };
     unsafe {
         let foreground = GetForegroundWindow();
-        if foreground == hwnd && !IsIconic(hwnd).as_bool() {
+        if !is_active_window && foreground == hwnd && !IsIconic(hwnd).as_bool() {
             return Ok(());
         }
         let current_thread = GetCurrentThreadId();

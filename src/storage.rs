@@ -572,6 +572,18 @@ impl AppPaths {
         let backup_file = self.state_backup_file();
         fs::write(&temp_file, content)?;
         if self.state_file.exists() {
+            if let Ok(entries) = fs::read_dir(&self.root) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                            if file_name.starts_with("state-recovery-") && file_name.ends_with(".json") {
+                                let _ = fs::remove_file(path);
+                            }
+                        }
+                    }
+                }
+            }
             let _ = fs::copy(&self.state_file, self.state_recovery_file());
             let _ = fs::copy(&self.state_file, &backup_file);
         }
