@@ -330,6 +330,7 @@ mod windows_overlay {
         ResizeGrip,
         Body,
         ThicknessSlider,
+        CalibrationButton,
     }
 
     struct ProtractorState {
@@ -340,6 +341,8 @@ mod windows_overlay {
         center_x: i32,
         center_y: i32,
         thickness: f32,
+        calibrating: bool,
+        ui_language: crate::model::UiLanguage,
     }
 
     static PROTRACTOR_STATE: Lazy<Mutex<ProtractorState>> = Lazy::new(|| Mutex::new(ProtractorState {
@@ -350,6 +353,8 @@ mod windows_overlay {
         center_x: 500,
         center_y: 500,
         thickness: 2.0,
+        calibrating: false,
+        ui_language: crate::model::UiLanguage::English,
     }));
 
     static PROTRACTOR_DRAG_TARGET: Lazy<Mutex<Option<ProtractorDragTarget>>> = Lazy::new(|| Mutex::new(None));
@@ -464,6 +469,8 @@ mod windows_overlay {
             center_x: i32,
             center_y: i32,
             thickness: f32,
+            calibrating: bool,
+            ui_language: crate::model::UiLanguage,
         },
     }
 
@@ -600,6 +607,7 @@ mod windows_overlay {
             scale: f32,
         },
         ProtractorCalibrationFailed(String),
+        RequestProtractorCalibration,
     }
 
     pub struct OverlayHandle {
@@ -1523,6 +1531,10 @@ mod windows_overlay {
                         return LRESULT(1isize); // HTCLIENT
                     }
 
+                    if pt.x >= 8 && pt.x <= 88 && pt.y >= 8 && pt.y <= 28 {
+                        return LRESULT(1isize); // HTCLIENT
+                    }
+
                     let rad1 = (needle1 as f32).to_radians();
                     let n1x = cx + (radius as f32 * rad1.cos()) as i32;
                     let n1y = cy + (radius as f32 * rad1.sin()) as i32;
@@ -1599,6 +1611,9 @@ mod windows_overlay {
                     if hit.is_none() && mx >= size - 24 && mx < size - 8 && my >= 8 && my < 24 {
                         hit = Some(ProtractorDragTarget::Close);
                     }
+                    if hit.is_none() && mx >= 8 && mx <= 88 && my >= 8 && my <= 28 {
+                        hit = Some(ProtractorDragTarget::CalibrationButton);
+                    }
                     if hit.is_none() {
                         let rad1 = (needle1 as f32).to_radians();
                         let n1x = cx + (radius as f32 * rad1.cos()) as i32;
@@ -1641,6 +1656,10 @@ mod windows_overlay {
                             let _ = ShowWindow(hwnd, SW_HIDE);
                             if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
                                 let _ = ui_tx.send(UiCommand::SetProtractorEnabled(false));
+                            }
+                        } else if target == ProtractorDragTarget::CalibrationButton {
+                            if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
+                                let _ = ui_tx.send(UiCommand::RequestProtractorCalibration);
                             }
                         } else {
                             let mut mouse_screen = POINT::default();
@@ -1755,6 +1774,7 @@ mod windows_overlay {
                                 }
                             }
                             ProtractorDragTarget::Close => {} // no drag behavior for close button
+                            ProtractorDragTarget::CalibrationButton => {}
                         }
                     }
                     return LRESULT(0);
@@ -4665,6 +4685,8 @@ mod windows_overlay {
                     center_x,
                     center_y,
                     thickness,
+                    calibrating,
+                    ui_language,
                 } => {
                     let enabled = {
                         let mut state = PROTRACTOR_STATE.lock();
@@ -4674,6 +4696,8 @@ mod windows_overlay {
                         state.center_x = center_x;
                         state.center_y = center_y;
                         state.thickness = thickness;
+                        state.calibrating = calibrating;
+                        state.ui_language = ui_language;
                         state.enabled
                     };
                     if enabled {
@@ -5460,10 +5484,124 @@ mod windows_overlay {
         }
     }
 
+    fn draw_skia_line(
+        pixmap: &mut tiny_skia::Pixmap,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        color: [u8; 4],
+        stroke_width: f32,
+    ) {
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.move_to(x0, y0);
+        pb.line_to(x1, y1);
+        if let Some(path) = pb.finish() {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color(tiny_skia::Color::from_rgba8(color[0], color[1], color[2], color[3]));
+            paint.anti_alias = true;
+            let mut stroke = tiny_skia::Stroke::default();
+            stroke.width = stroke_width;
+            pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+        }
+    }
+
+    fn draw_skia_circle_outline(
+        pixmap: &mut tiny_skia::Pixmap,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        color: [u8; 4],
+        stroke_width: f32,
+    ) {
+        let mut pb = tiny_skia::PathBuilder::new();
+        let steps = 180;
+        for i in 0..steps {
+            let angle = (i as f32 / steps as f32) * std::f32::consts::TAU;
+            let px = cx + radius * angle.cos();
+            let py = cy + radius * angle.sin();
+            if i == 0 {
+                pb.move_to(px, py);
+            } else {
+                pb.line_to(px, py);
+            }
+        }
+        pb.close();
+        if let Some(path) = pb.finish() {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color(tiny_skia::Color::from_rgba8(color[0], color[1], color[2], color[3]));
+            paint.anti_alias = true;
+            let mut stroke = tiny_skia::Stroke::default();
+            stroke.width = stroke_width;
+            pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+        }
+    }
+
+    fn draw_skia_circle_fill(
+        pixmap: &mut tiny_skia::Pixmap,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        color: [u8; 4],
+    ) {
+        let mut pb = tiny_skia::PathBuilder::new();
+        let steps = 120;
+        for i in 0..steps {
+            let angle = (i as f32 / steps as f32) * std::f32::consts::TAU;
+            let px = cx + radius * angle.cos();
+            let py = cy + radius * angle.sin();
+            if i == 0 {
+                pb.move_to(px, py);
+            } else {
+                pb.line_to(px, py);
+            }
+        }
+        pb.close();
+        if let Some(path) = pb.finish() {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color(tiny_skia::Color::from_rgba8(color[0], color[1], color[2], color[3]));
+            paint.anti_alias = true;
+            pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+        }
+    }
+
+    fn draw_skia_rect_fill(
+        pixmap: &mut tiny_skia::Pixmap,
+        left: f32,
+        top: f32,
+        width: f32,
+        height: f32,
+        color: [u8; 4],
+    ) {
+        if let Some(rect) = tiny_skia::Rect::from_xywh(left, top, width, height) {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color(tiny_skia::Color::from_rgba8(color[0], color[1], color[2], color[3]));
+            paint.anti_alias = true;
+            pixmap.fill_rect(rect, &paint, tiny_skia::Transform::identity(), None);
+        }
+    }
+
+    fn draw_skia_rect_outline(
+        pixmap: &mut tiny_skia::Pixmap,
+        left: f32,
+        top: f32,
+        width: f32,
+        height: f32,
+        color: [u8; 4],
+        stroke_width: f32,
+    ) {
+        let r = left + width;
+        let b = top + height;
+        draw_skia_line(pixmap, left, top, r, top, color, stroke_width);
+        draw_skia_line(pixmap, r, top, r, b, color, stroke_width);
+        draw_skia_line(pixmap, r, b, left, b, color, stroke_width);
+        draw_skia_line(pixmap, left, b, left, top, color, stroke_width);
+    }
+
     unsafe fn paint_protractor_overlay(runtime: &Runtime) -> Result<()> {
-        let (scale, needle1, needle2, cx_val, cy_val, thickness) = {
+        let (scale, needle1, needle2, cx_val, cy_val, thickness, calibrating, ui_language) = {
             let state = PROTRACTOR_STATE.lock();
-            (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y, state.thickness)
+            (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y, state.thickness, state.calibrating, state.ui_language)
         };
 
         let base_radius = 150.0;
@@ -5487,37 +5625,43 @@ mod windows_overlay {
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
 
-        let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
+        let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
         let cx = half_size;
         let cy = half_size;
 
         // 1. Draw angular sector fill between needles
-        for y in 0..size {
-            for x in 0..size {
-                let dx = x - cx;
-                let dy = y - cy;
-                let dist_sq = dx * dx + dy * dy;
-                if dist_sq <= radius * radius {
-                    let mut angle_deg = (dy as f32).atan2(dx as f32).to_degrees();
-                    if angle_deg < 0.0 { angle_deg += 360.0; }
-                    if angle_between(angle_deg, needle1, needle2) {
-                        blend_rgba_pixel(canvas.as_mut(), width as usize, height as usize, x, y, [0, 160, 255, 40]);
-                    }
-                }
-            }
+        let mut pb_sector = tiny_skia::PathBuilder::new();
+        pb_sector.move_to(cx as f32, cy as f32);
+        let mut s = needle1 % 360.0;
+        if s < 0.0 { s += 360.0; }
+        let mut e = needle2 % 360.0;
+        if e < 0.0 { e += 360.0; }
+        let mut diff = e - s;
+        if diff < 0.0 { diff += 360.0; }
+        let sector_steps = (diff.abs() as i32).max(1);
+        for i in 0..=sector_steps {
+            let deg = s + (diff * (i as f32 / sector_steps as f32));
+            let rad = deg.to_radians();
+            let px = cx as f32 + radius as f32 * rad.cos();
+            let py = cy as f32 + radius as f32 * rad.sin();
+            pb_sector.line_to(px, py);
+        }
+        pb_sector.close();
+        if let Some(path) = pb_sector.finish() {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color(tiny_skia::Color::from_rgba8(0, 160, 255, 40));
+            paint.anti_alias = true;
+            pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
         }
 
         // 2. Draw outer circle
-        draw_ellipse_outline_thick_rgba(
-            canvas.as_mut(),
-            width as usize,
-            height as usize,
-            cx - radius,
-            cy - radius,
-            2 * radius,
-            2 * radius,
+        draw_skia_circle_outline(
+            &mut pixmap,
+            cx as f32,
+            cy as f32,
+            radius as f32,
             [255, 255, 255, 140],
-            (thickness as i32).max(1),
+            thickness,
         );
 
         // 3. Draw tick marks every 5 degrees
@@ -5526,71 +5670,70 @@ mod windows_overlay {
                 let len = if deg % 90 == 0 { (15.0 * scale) as i32 }
                           else if deg % 10 == 0 { (10.0 * scale) as i32 }
                           else { (5.0 * scale) as i32 };
-                let thick = if deg % 10 == 0 { 2 } else { 1 };
+                let thick = if deg % 10 == 0 { 2.0 } else { 1.0 };
                 let color = if deg % 90 == 0 { [255, 255, 255, 200] } else { [255, 255, 255, 100] };
                 
                 let rad = (deg as f32).to_radians();
                 let r_in = radius - len;
-                let x0 = cx + (r_in as f32 * rad.cos()) as i32;
-                let y0 = cy + (r_in as f32 * rad.sin()) as i32;
-                let x1 = cx + (radius as f32 * rad.cos()) as i32;
-                let y1 = cy + (radius as f32 * rad.sin()) as i32;
+                let x0 = cx as f32 + r_in as f32 * rad.cos();
+                let y0 = cy as f32 + r_in as f32 * rad.sin();
+                let x1 = cx as f32 + radius as f32 * rad.cos();
+                let y1 = cy as f32 + radius as f32 * rad.sin();
                 
-                draw_line_thick_rgba(
-                    canvas.as_mut(),
-                    width as usize,
-                    height as usize,
-                    x0,
-                    y0,
-                    x1,
-                    y1,
-                    color,
-                    thick,
-                );
+                draw_skia_line(&mut pixmap, x0, y0, x1, y1, color, thick);
             }
         }
 
         // 4. Center crosshair
-        fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, cx - 3, cy - 3, 6, 6, [255, 92, 141, 255]);
-        draw_line_rgba(canvas.as_mut(), width as usize, height as usize, cx - 12, cy, cx + 12, cy, [255, 255, 255, 180]);
-        draw_line_rgba(canvas.as_mut(), width as usize, height as usize, cx, cy - 12, cx, cy + 12, [255, 255, 255, 180]);
+        draw_skia_circle_fill(&mut pixmap, cx as f32, cy as f32, 3.0, [255, 92, 141, 255]);
+        draw_skia_line(&mut pixmap, cx as f32 - 12.0, cy as f32, cx as f32 + 12.0, cy as f32, [255, 255, 255, 180], 1.0);
+        draw_skia_line(&mut pixmap, cx as f32, cy as f32 - 12.0, cx as f32, cy as f32 + 12.0, [255, 255, 255, 180], 1.0);
 
         // 5. Needle 1 & handle
         let rad1 = (needle1 as f32).to_radians();
-        let n1x = cx + (radius as f32 * rad1.cos()) as i32;
-        let n1y = cy + (radius as f32 * rad1.sin()) as i32;
-        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, cx, cy, n1x, n1y, [0, 220, 255, 240], (thickness as i32).max(1));
-        fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, n1x - 6, n1y - 6, 12, 12, [0, 220, 255, 255]);
-        draw_ellipse_outline_thick_rgba(canvas.as_mut(), width as usize, height as usize, n1x - 6, n1y - 6, 12, 12, [255, 255, 255, 255], 1);
+        let n1x = cx as f32 + radius as f32 * rad1.cos();
+        let n1y = cy as f32 + radius as f32 * rad1.sin();
+        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n1x, n1y, [0, 220, 255, 240], thickness);
+        draw_skia_circle_fill(&mut pixmap, n1x, n1y, 6.0, [0, 220, 255, 255]);
+        draw_skia_circle_outline(&mut pixmap, n1x, n1y, 6.0, [255, 255, 255, 255], 1.0);
 
         // 6. Needle 2 & handle
         let rad2 = (needle2 as f32).to_radians();
-        let n2x = cx + (radius as f32 * rad2.cos()) as i32;
-        let n2y = cy + (radius as f32 * rad2.sin()) as i32;
-        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, cx, cy, n2x, n2y, [255, 92, 141, 240], (thickness as i32).max(1));
-        fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, n2x - 6, n2y - 6, 12, 12, [255, 92, 141, 255]);
-        draw_ellipse_outline_thick_rgba(canvas.as_mut(), width as usize, height as usize, n2x - 6, n2y - 6, 12, 12, [255, 255, 255, 255], 1);
+        let n2x = cx as f32 + radius as f32 * rad2.cos();
+        let n2y = cy as f32 + radius as f32 * rad2.sin();
+        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n2x, n2y, [255, 92, 141, 240], thickness);
+        draw_skia_circle_fill(&mut pixmap, n2x, n2y, 6.0, [255, 92, 141, 255]);
+        draw_skia_circle_outline(&mut pixmap, n2x, n2y, 6.0, [255, 255, 255, 255], 1.0);
 
         // 7. Resize Grip handle
         let rad_g = (-45.0_f32).to_radians();
-        let gx = cx + (radius as f32 * rad_g.cos()) as i32;
-        let gy = cy + (radius as f32 * rad_g.sin()) as i32;
-        fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, gx - 7, gy - 7, 14, 14, [160, 160, 160, 220]);
-        draw_ellipse_outline_thick_rgba(canvas.as_mut(), width as usize, height as usize, gx - 7, gy - 7, 14, 14, [255, 255, 255, 255], 1);
+        let gx = cx as f32 + radius as f32 * rad_g.cos();
+        let gy = cy as f32 + radius as f32 * rad_g.sin();
+        draw_skia_circle_fill(&mut pixmap, gx, gy, 7.0, [160, 160, 160, 220]);
+        draw_skia_circle_outline(&mut pixmap, gx, gy, 7.0, [255, 255, 255, 255], 1.0);
 
         // 8. Close Button
-        fill_rect_rgba(canvas.as_mut(), width as usize, height as usize, size - 24, 8, 16, 16, [255, 80, 80, 220]);
-        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, size - 21, 11, size - 11, 21, [255, 255, 255, 255], 2);
-        draw_line_thick_rgba(canvas.as_mut(), width as usize, height as usize, size - 11, 11, size - 21, 21, [255, 255, 255, 255], 2);
+        draw_skia_rect_fill(&mut pixmap, size as f32 - 24.0, 8.0, 16.0, 16.0, [255, 80, 80, 220]);
+        draw_skia_line(&mut pixmap, size as f32 - 21.0, 11.0, size as f32 - 11.0, 21.0, [255, 255, 255, 255], 2.0);
+        draw_skia_line(&mut pixmap, size as f32 - 11.0, 11.0, size as f32 - 21.0, 21.0, [255, 255, 255, 255], 2.0);
 
-        // 9. Thickness Slider
-        let slider_left = cx - 30;
-        let slider_right = cx + 30;
-        draw_line_rgba(canvas.as_mut(), width as usize, height as usize, slider_left, size - 12, slider_right, size - 12, [200, 200, 200, 180]);
+        // 9. Calibration Button (background/border)
+        let btn_bg_color = if calibrating {
+            [255, 80, 80, 200]
+        } else {
+            [0, 160, 255, 180]
+        };
+        draw_skia_rect_fill(&mut pixmap, 8.0, 8.0, 80.0, 20.0, btn_bg_color);
+        draw_skia_rect_outline(&mut pixmap, 8.0, 8.0, 80.0, 20.0, [255, 255, 255, 255], 1.0);
+
+        // 10. Thickness Slider
+        let slider_left = cx as f32 - 30.0;
+        let slider_right = cx as f32 + 30.0;
+        draw_skia_line(&mut pixmap, slider_left, size as f32 - 12.0, slider_right, size as f32 - 12.0, [200, 200, 200, 180], 1.0);
         let t_frac = ((thickness - 1.0) / 7.0).clamp(0.0, 1.0);
-        let thumb_x = slider_left + (t_frac * 60.0) as i32;
-        fill_ellipse_rgba(canvas.as_mut(), width as usize, height as usize, thumb_x - 4, size - 12 - 4, 8, 8, [0, 220, 255, 255]);
-        draw_ellipse_outline_thick_rgba(canvas.as_mut(), width as usize, height as usize, thumb_x - 4, size - 12 - 4, 8, 8, [255, 255, 255, 255], 1);
+        let thumb_x = slider_left + t_frac * 60.0;
+        draw_skia_circle_fill(&mut pixmap, thumb_x, size as f32 - 12.0, 4.0, [0, 220, 255, 255]);
+        draw_skia_circle_outline(&mut pixmap, thumb_x, size as f32 - 12.0, 4.0, [255, 255, 255, 255], 1.0);
 
         // GDI render & Text setup
         let screen_dc = GetDC(None);
@@ -5630,11 +5773,24 @@ mod windows_overlay {
         }
 
         let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
-        std::ptr::copy_nonoverlapping(
-            canvas.as_raw().as_ptr(),
-            bits as *mut u8,
-            canvas.as_raw().len(),
-        );
+        
+        // Copy tiny-skia pixels to DIB section bits, swapping R and B channels to match BGRA
+        let pixmap_data = pixmap.data();
+        let bits_ptr = bits as *mut u8;
+        let total_pixels = width as usize * height as usize;
+        for i in 0..total_pixels {
+            let offset = i * 4;
+            let r = pixmap_data[offset];
+            let g = pixmap_data[offset + 1];
+            let b = pixmap_data[offset + 2];
+            let a = pixmap_data[offset + 3];
+            unsafe {
+                *bits_ptr.add(offset) = b;
+                *bits_ptr.add(offset + 1) = g;
+                *bits_ptr.add(offset + 2) = r;
+                *bits_ptr.add(offset + 3) = a;
+            }
+        }
 
         // Draw labels
         let angle_diff = (needle2 - needle1).abs();
@@ -5650,7 +5806,7 @@ mod windows_overlay {
         let p2_str = format!("P2: {}, {}", p2_x, p2_y);
 
         let font = CreateFontW(
-            12, // Fixed font size 12 pixels
+            16, // Font size 16 pixels for larger coordinates
             0,
             0,
             0,
@@ -5672,56 +5828,74 @@ mod windows_overlay {
 
         let mut r_angle = RECT {
             left: cx - 80,
-            top: cy - 35,
+            top: cy - 40,
             right: cx + 80,
-            bottom: cy - 23,
+            bottom: cy - 22,
         };
         let mut w_angle = angle_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         let _ = DrawTextW(mem_dc, &mut w_angle, &mut r_angle, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
         let mut r_center = RECT {
             left: cx - 80,
-            top: cy - 21,
+            top: cy - 20,
             right: cx + 80,
-            bottom: cy - 9,
+            bottom: cy - 2,
         };
         let mut w_center = center_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         let _ = DrawTextW(mem_dc, &mut w_center, &mut r_center, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
         let mut r_p1 = RECT {
             left: cx - 80,
-            top: cy + 9,
+            top: cy + 6,
             right: cx + 80,
-            bottom: cy + 21,
+            bottom: cy + 24,
         };
         let mut w_p1 = p1_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         let _ = DrawTextW(mem_dc, &mut w_p1, &mut r_p1, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
         let mut r_p2 = RECT {
             left: cx - 80,
-            top: cy + 23,
+            top: cy + 26,
             right: cx + 80,
-            bottom: cy + 35,
+            bottom: cy + 44,
         };
         let mut w_p2 = p2_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         let _ = DrawTextW(mem_dc, &mut w_p2, &mut r_p2, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
+        // Draw Calibration Button text on top
+        let mut r_calib = RECT {
+            left: 8,
+            top: 8,
+            right: 88,
+            bottom: 28,
+        };
+        let calib_text = if calibrating {
+            match ui_language {
+                crate::model::UiLanguage::Vietnamese => "Huỷ",
+                _ => "Cancel",
+            }
+        } else {
+            match ui_language {
+                crate::model::UiLanguage::Vietnamese => "3 Điểm",
+                _ => "3 Points",
+            }
+        };
+        let mut w_calib = calib_text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+        let _ = DrawTextW(mem_dc, &mut w_calib, &mut r_calib, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+
         let _ = SelectObject(mem_dc, old_font);
         let _ = DeleteObject(HGDIOBJ(font.0));
 
-        // Fix alpha of GDI text drawn
-        let bits_ptr = bits as *mut u8;
-        let total_pixels = width as usize * height as usize;
+        // Fix alpha of GDI text drawn and keep Skia's premultiplied alpha correct
         for i in 0..total_pixels {
             let offset = i * 4;
             let pixel = std::slice::from_raw_parts_mut(bits_ptr.add(offset), 4);
             if pixel[3] == 0 && (pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0) {
-                pixel[3] = 230;
+                let opacity = pixel[0]; // Use intensity from white text rendering as alpha
+                pixel[3] = opacity;
+                pixel[0] = opacity;
+                pixel[1] = opacity;
             }
-            let a = pixel[3] as u32;
-            pixel[0] = ((pixel[0] as u32 * a) / 255) as u8;
-            pixel[1] = ((pixel[1] as u32 * a) / 255) as u8;
-            pixel[2] = ((pixel[2] as u32 * a) / 255) as u8;
         }
 
         let destination = POINT { x: win_x, y: win_y };

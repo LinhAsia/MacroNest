@@ -1229,6 +1229,8 @@ impl CrosshairApp {
             center_x: self.state.protractor_center_x,
             center_y: self.state.protractor_center_y,
             thickness: self.state.protractor_thickness,
+            calibrating: self.protractor_picking_active,
+            ui_language: self.state.ui_language,
         });
     }
 
@@ -4479,30 +4481,6 @@ impl CrosshairApp {
                                             ui.visuals().text_color()
                                         }),
                                 ));
-                            },
-                        );
-
-                        ui.add_space(4.0);
-                        // 3 Points button
-                        ui.allocate_ui_with_layout(
-                            vec2(88.0, 22.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                let is_calibrating = self.protractor_picking_active;
-                                let btn_text = if is_calibrating {
-                                    Self::tr_lang(self.state.ui_language, "Cancel", "Huy")
-                                } else {
-                                    Self::tr_lang(self.state.ui_language, "3 Points", "3 Diem")
-                                };
-
-                                let btn_resp = ui.add_sized([88.0, 20.0], egui::Button::new(btn_text));
-                                if btn_resp.clicked() {
-                                    if is_calibrating {
-                                        self.cancel_protractor_calibration();
-                                    } else {
-                                        self.begin_protractor_calibration(ui.ctx());
-                                    }
-                                }
                             },
                         );
 
@@ -10489,6 +10467,14 @@ impl eframe::App for CrosshairApp {
                     self.persist();
                     ctx.request_repaint();
                 }
+                UiCommand::RequestProtractorCalibration => {
+                    if self.protractor_picking_active {
+                        self.cancel_protractor_calibration();
+                    } else {
+                        self.begin_protractor_calibration(ctx);
+                    }
+                    self.sync_protractor_state();
+                }
                 UiCommand::UpdateProtractorConfig {
                     scale,
                     needle1_angle,
@@ -10507,6 +10493,7 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::ProtractorCalibrationCancelled => {
                     self.protractor_picking_active = false;
+                    self.sync_protractor_state();
                     self.status = Self::tr_lang(
                         self.state.ui_language,
                         "Protractor calibration cancelled.",
@@ -10534,6 +10521,7 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::ProtractorCalibrationFailed(err) => {
                     self.protractor_picking_active = false;
+                    self.sync_protractor_state();
                     self.status = err;
                     ctx.request_repaint();
                 }
