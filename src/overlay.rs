@@ -14928,11 +14928,16 @@ mod windows_overlay {
         prefer_other_if_foreground_matches: bool,
     ) -> HWND {
         unsafe {
+            let target_uses_position_rule = target_title.is_some_and(has_position_rule_suffix)
+                || extra_target_titles
+                    .iter()
+                    .any(|title| has_position_rule_suffix(title));
             let foreground = GetForegroundWindow();
             let targeted = MACRO_TARGETED_WINDOWS.with(|set| set.borrow().clone());
 
             // 1. Try to find a matching window that is NOT yet targeted in this macro execution
-            if !foreground.0.is_null()
+            if !target_uses_position_rule
+                && !foreground.0.is_null()
                 && !targeted.contains(&(foreground.0 as isize))
                 && window_matches_any_selector(
                     foreground,
@@ -14996,7 +15001,8 @@ mod windows_overlay {
             }
 
             // 2. Fallback: If no untargeted matching window is found, search using the original logic
-            if !foreground.0.is_null()
+            if !target_uses_position_rule
+                && !foreground.0.is_null()
                 && window_matches_any_selector(
                     foreground,
                     target_title,
@@ -15277,6 +15283,13 @@ mod windows_overlay {
         } else {
             target
         }
+    }
+
+    fn has_position_rule_suffix(target: &str) -> bool {
+        target.ends_with(" [Lowest]")
+            || target.ends_with(" [Highest]")
+            || target.ends_with(" [Leftmost]")
+            || target.ends_with(" [Rightmost]")
     }
 
     unsafe fn window_matches_selector(hwnd: HWND, target: &str) -> bool {
