@@ -612,6 +612,7 @@ mod windows_overlay {
         },
         NativeProtractorCalibrationFinished {
             result: NativeCaptureResult,
+            was_minimized: bool,
         },
         NativeMouseMoveAbsoluteCaptureFinished {
             target: MouseMoveAbsoluteCaptureTarget,
@@ -1652,11 +1653,10 @@ mod windows_overlay {
                         } else if target == ProtractorDragTarget::CalibrationButton {
                             unsafe {
                                 if let Some(app_hwnd) = find_app_ui_window() {
-                                    use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_RESTORE, IsIconic};
-                                    if IsIconic(app_hwnd).as_bool() {
-                                        let _ = ShowWindow(app_hwnd, SW_RESTORE);
+                                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWMINNOACTIVE, IsIconic, IsWindowVisible};
+                                    if IsIconic(app_hwnd).as_bool() || !IsWindowVisible(app_hwnd).as_bool() {
+                                        let _ = ShowWindow(app_hwnd, SW_SHOWMINNOACTIVE);
                                     }
-                                    let _ = SetForegroundWindow(app_hwnd);
                                 }
                             }
                             if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {

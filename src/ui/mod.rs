@@ -9847,11 +9847,13 @@ impl CrosshairApp {
         self.native_capture_in_progress = true;
         self.protractor_calibration_points = Some(Vec::new());
 
+        let mut was_minimized = false;
         // Hide main app window natively
         #[cfg(windows)]
         unsafe {
             if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE, IsIconic};
+                was_minimized = IsIconic(hwnd).as_bool();
                 let _ = ShowWindow(hwnd, SW_HIDE);
             }
         }
@@ -9887,19 +9889,25 @@ impl CrosshairApp {
                 crate::overlay::native_capture::NativeCaptureResult::Cancelled
             };
 
-            // Restore main app window natively as minimized
+            // Restore main app window natively
             #[cfg(windows)]
             unsafe {
                 if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWMINNOACTIVE};
-                    let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+                    if was_minimized {
+                        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWMINNOACTIVE};
+                        let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+                    } else {
+                        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL, SetForegroundWindow};
+                        let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                        let _ = SetForegroundWindow(hwnd);
+                    }
                 }
             }
 
             // Sleep a tiny bit to let OS display the window so winit event loop is active
             std::thread::sleep(std::time::Duration::from_millis(50));
 
-            let _ = ui_tx.send(UiCommand::NativeProtractorCalibrationFinished { result });
+            let _ = ui_tx.send(UiCommand::NativeProtractorCalibrationFinished { result, was_minimized });
             egui_ctx.request_repaint();
         });
     }
@@ -10417,7 +10425,7 @@ impl eframe::App for CrosshairApp {
                     }
                     ctx.request_repaint();
                 }
-                UiCommand::NativeProtractorCalibrationFinished { result } => {
+                UiCommand::NativeProtractorCalibrationFinished { result, was_minimized } => {
                     self.native_capture_in_progress = false;
 
                     match result {
@@ -10436,10 +10444,13 @@ impl eframe::App for CrosshairApp {
                         }
                     }
 
-                    // Minimize main window to taskbar instead of restoring it to screen
+                    // Conditionally minimize or restore the main window
                     self.state.show_window = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(was_minimized));
+                    if !was_minimized {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    }
 
                     // Restore overlay visibility (was hidden before capture)
                     let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
