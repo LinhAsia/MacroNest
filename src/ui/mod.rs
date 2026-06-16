@@ -1266,6 +1266,7 @@ impl CrosshairApp {
         let _ = self.overlay_tx.send(OverlayCommand::UpdateScreenDrawConfig {
             enabled: self.state.quick_screen_draw_enabled,
             trigger: self.state.quick_screen_draw_hotkey.clone(),
+            pass_trigger_through: self.state.quick_screen_draw_pass_trigger_through,
             color: self.state.quick_screen_draw_color,
             brush_size: self.state.quick_screen_draw_brush_size,
             smoothing: self.state.quick_screen_draw_smoothing,
@@ -4951,7 +4952,7 @@ impl CrosshairApp {
                 );
 
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 192.0),
+                    vec2(92.0, 155.0),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let button_response = self.titlebar_quick_action_button(
@@ -4990,56 +4991,18 @@ impl CrosshairApp {
                         );
 
                         ui.add_space(2.0);
-                        ui.horizontal(|ui| {
-                            ui.add_space(4.0);
-                            let color_changed =
-                                Self::edit_rgba_color(ui, &mut self.state.quick_screen_draw_color)
-                                    .changed();
-                            if color_changed {
-                                self.sync_quick_screen_draw_config();
-                                self.persist();
-                            }
-                            ui.label(RichText::new("Color").size(10.0));
-                        });
-
-                        ui.add_space(2.0);
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Size").size(10.0));
-                            let changed = ui
-                                .add_sized(
-                                    [48.0, 20.0],
-                                    egui::DragValue::new(
-                                        &mut self.state.quick_screen_draw_brush_size,
-                                    )
-                                    .range(2.0..=80.0)
-                                    .speed(1.0),
-                                )
-                                .changed();
-                            if changed {
-                                self.sync_quick_screen_draw_config();
-                                self.persist();
-                            }
-                        });
-
-                        ui.add_space(2.0);
-                        let smoothing_changed = ui
-                            .checkbox(&mut self.state.quick_screen_draw_smoothing, "Smooth")
-                            .changed();
-                        if smoothing_changed {
-                            self.sync_quick_screen_draw_config();
-                            self.persist();
-                        }
-                        let smooth_amount_changed = ui
-                            .add_sized(
-                                [78.0, 18.0],
-                                egui::Slider::new(
-                                    &mut self.state.quick_screen_draw_smoothing_amount,
-                                    0.0..=1.0,
-                                )
-                                .show_value(false),
+                        let pass_changed = ui
+                            .checkbox(
+                                &mut self.state.quick_screen_draw_pass_trigger_through,
+                                RichText::new(Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Pass through",
+                                    "Pass qua",
+                                ))
+                                .size(10.0),
                             )
                             .changed();
-                        if smooth_amount_changed {
+                        if pass_changed {
                             self.sync_quick_screen_draw_config();
                             self.persist();
                         }
@@ -5054,7 +5017,7 @@ impl CrosshairApp {
                         );
                         if ui
                             .add_sized(
-                                [78.0, 22.0],
+                                [76.0, 20.0],
                                 Button::new(if capture_active {
                                     "Capturing..."
                                 } else {
@@ -5072,7 +5035,13 @@ impl CrosshairApp {
                                 );
                             }
                         }
-                        ui.label(RichText::new(trigger_text).size(10.0).weak());
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new(trigger_text)
+                                .size(10.0)
+                                .weak()
+                                .monospace(),
+                        );
                     },
                 );
             });
@@ -11755,7 +11724,7 @@ impl eframe::App for CrosshairApp {
                         se: 0,
                         sw: 0,
                     })
-                    .inner_margin(egui::Margin::symmetric(4, 3)),
+                    .inner_margin(egui::Margin::symmetric(4, 4)),
             )
             .show(ctx, |ui| {
                 let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
@@ -12064,7 +12033,7 @@ impl eframe::App for CrosshairApp {
                         let drag_width = ui.available_width().max(120.0);
                         let drag_response = ui
                             .allocate_ui_with_layout(
-                                vec2(drag_width, 34.0),
+                                vec2(drag_width, 30.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
                                     let accent = if self.state.ui_theme == UiThemeMode::Dark {

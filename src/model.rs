@@ -224,6 +224,47 @@ fn default_protractor_thickness() -> f32 {
     2.0
 }
 
+fn default_quick_key_display_x() -> i32 {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN};
+        GetSystemMetrics(SM_CXSCREEN).max(1) / 2
+    }
+    #[cfg(not(windows))]
+    960
+}
+
+fn default_quick_key_display_y() -> i32 {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CYSCREEN};
+        GetSystemMetrics(SM_CYSCREEN).max(1) / 2
+    }
+    #[cfg(not(windows))]
+    540
+}
+
+fn default_quick_key_display_size() -> f32 {
+    36.0
+}
+
+fn default_screen_draw_color() -> RgbaColor {
+    RgbaColor {
+        r: 0,
+        g: 255,
+        b: 170,
+        a: 255,
+    }
+}
+
+fn default_screen_draw_brush_size() -> f32 {
+    10.0
+}
+
+fn default_screen_draw_smoothing_amount() -> f32 {
+    0.45
+}
+
 fn default_image_search_move_passes() -> u8 {
     3
 }
@@ -1491,6 +1532,7 @@ pub enum CaptureRequest {
     MacroPresetReleaseWaitKey(u32, u32),
     MacroPresetHoldStopInput(u32, u32),
     CommandPresetHotkey(u32),
+    QuickScreenDrawHotkey,
     MacroStepInput {
         group_id: u32,
         preset_id: u32,
@@ -2751,6 +2793,28 @@ pub struct AppState {
     pub quick_actions_copy_y: bool,
     #[serde(default = "default_true")]
     pub quick_actions_copy_color: bool,
+    #[serde(default)]
+    pub quick_key_display_enabled: bool,
+    #[serde(default = "default_quick_key_display_x")]
+    pub quick_key_display_x: i32,
+    #[serde(default = "default_quick_key_display_y")]
+    pub quick_key_display_y: i32,
+    #[serde(default = "default_quick_key_display_size")]
+    pub quick_key_display_size: f32,
+    #[serde(default)]
+    pub quick_screen_draw_enabled: bool,
+    #[serde(default)]
+    pub quick_screen_draw_hotkey: Option<HotkeyBinding>,
+    #[serde(default)]
+    pub quick_screen_draw_pass_trigger_through: bool,
+    #[serde(default = "default_screen_draw_color")]
+    pub quick_screen_draw_color: RgbaColor,
+    #[serde(default = "default_screen_draw_brush_size")]
+    pub quick_screen_draw_brush_size: f32,
+    #[serde(default)]
+    pub quick_screen_draw_smoothing: bool,
+    #[serde(default = "default_screen_draw_smoothing_amount")]
+    pub quick_screen_draw_smoothing_amount: f32,
 }
 
 impl Default for AppState {
@@ -2842,6 +2906,17 @@ impl Default for AppState {
             quick_actions_copy_x: true,
             quick_actions_copy_y: true,
             quick_actions_copy_color: true,
+            quick_key_display_enabled: false,
+            quick_key_display_x: default_quick_key_display_x(),
+            quick_key_display_y: default_quick_key_display_y(),
+            quick_key_display_size: default_quick_key_display_size(),
+            quick_screen_draw_enabled: false,
+            quick_screen_draw_hotkey: None,
+            quick_screen_draw_pass_trigger_through: false,
+            quick_screen_draw_color: default_screen_draw_color(),
+            quick_screen_draw_brush_size: default_screen_draw_brush_size(),
+            quick_screen_draw_smoothing: false,
+            quick_screen_draw_smoothing_amount: default_screen_draw_smoothing_amount(),
         }
     }
 }
