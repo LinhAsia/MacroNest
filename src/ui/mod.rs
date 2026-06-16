@@ -11546,51 +11546,6 @@ impl eframe::App for CrosshairApp {
                             if guides_response.clicked() {
                                 self.titlebar_guides_open = !self.titlebar_guides_open;
                             }
-                            let mut guides_open = self.titlebar_guides_open;
-                            let mut keep_guides_open = false;
-                            let guides_popup_id =
-                                ui.make_persistent_id("titlebar-guides-popup");
-                            let popup_result = egui::Popup::from_response(&guides_response)
-                                .id(guides_popup_id)
-                                .open_bool(&mut guides_open)
-                                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                .align(egui::RectAlign::BOTTOM_END)
-                                .layout(egui::Layout::top_down(egui::Align::Min))
-                                .width(760.0)
-                                .show(|ui| {
-                                    ui.set_min_width(760.0);
-                                    Frame::new()
-                                        .fill(button_fill)
-                                        .stroke(egui::Stroke::new(
-                                            1.0,
-                                            if self.state.ui_theme == UiThemeMode::Dark {
-                                                Color32::from_rgba_premultiplied(96, 118, 148, 196)
-                                            } else {
-                                                Color32::from_rgba_premultiplied(170, 182, 198, 180)
-                                            },
-                                        ))
-                                        .corner_radius(14.0)
-                                        .inner_margin(egui::Margin::symmetric(12, 12))
-                                        .show(ui, |ui| {
-                                            ui.label(
-                                                RichText::new(Self::tr_lang(
-                                                    self.state.ui_language,
-                                                    "Guides",
-                                                    "Huong dan",
-                                                ))
-                                                .strong()
-                                                .size(13.0),
-                                            );
-                                            ui.add_space(8.0);
-                                            self.render_expression_guides_content(ui);
-                                            keep_guides_open = true;
-                                        });
-                                });
-                            let _ = popup_result;
-                            if keep_guides_open {
-                                guides_open = true;
-                            }
-                            self.titlebar_guides_open = guides_open;
                             let taskbar_hidden = crate::platform::is_taskbar_hidden();
                             let quick_actions_button_response =
                                 Self::add_sized_with_show_hover_radius(
@@ -12000,6 +11955,23 @@ impl eframe::App for CrosshairApp {
                     self.render_variable_inspector(ui);
                 });
             self.variable_inspector_open = open;
+        }
+
+        if self.titlebar_guides_open {
+            let mut open = self.titlebar_guides_open;
+            let screen_center = ctx.screen_rect().center();
+            egui::Window::new(Self::tr_lang(self.state.ui_language, "Guides", "Huong dan"))
+                .open(&mut open)
+                .fixed_pos(screen_center)
+                .pivot(egui::Align2::CENTER_CENTER)
+                .default_size(egui::vec2(820.0, 360.0))
+                .resizable(false)
+                .movable(false)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    self.render_expression_guides_content(ui);
+                });
+            self.titlebar_guides_open = open;
         }
 
         if self.startup_show_pending && self.state.show_window {
