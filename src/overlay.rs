@@ -600,13 +600,6 @@ mod windows_overlay {
             thickness: f32,
         },
         RequestProtractorCalibration,
-        ProtractorScreenCaptured {
-            capture: Option<crate::window_list::ScreenCaptureFrame>,
-            left: i32,
-            top: i32,
-            width: i32,
-            height: i32,
-        },
     }
 
     pub struct OverlayHandle {
