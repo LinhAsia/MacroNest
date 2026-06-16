@@ -510,6 +510,7 @@ mod windows_overlay {
     enum ScreenDrawHit {
         Canvas,
         ToolbarBody,
+        Close,
         Color,
         BrushSize,
         Eraser,
@@ -1023,6 +1024,7 @@ mod windows_overlay {
         quick_key_display_center_y: i32,
         quick_key_display_size: f32,
         quick_key_display_text: Option<String>,
+        quick_key_display_hide_at: Option<Instant>,
         tray_menu: HMENU,
         keyboard_hook: HHOOK,
         mouse_hook: HHOOK,
@@ -1577,6 +1579,7 @@ mod windows_overlay {
                 quick_key_display_center_y: GetSystemMetrics(SM_CYSCREEN).max(1) / 2,
                 quick_key_display_size: 36.0,
                 quick_key_display_text: None,
+                quick_key_display_hide_at: None,
                 tray_menu,
                 keyboard_hook: HHOOK::default(),
                 mouse_hook: HHOOK::default(),
@@ -2029,6 +2032,8 @@ mod windows_overlay {
                             reset_all_input_and_locks();
                             let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
                             let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
+                            runtime.quick_key_display_text = None;
+                            runtime.quick_key_display_hide_at = None;
                             let _ = ShowWindow(runtime.key_display_hwnd, SW_HIDE);
                         } else {
                             clear_transient_input_state();
@@ -2420,101 +2425,22 @@ mod windows_overlay {
             WM_LBUTTONDOWN | WM_RBUTTONDOWN => {
                 let point = screen_draw_lparam_point(lparam);
                 let right_button = msg == WM_RBUTTONDOWN;
-                {
-                    let mut state = SCREEN_DRAW_STATE.lock();
-                    if !state.active {
-                        return LRESULT(0);
-                    }
-                    if right_button {
-                        start_screen_draw_stroke(&mut state, point, true);
-                    } else {
-                        match screen_draw_hit(&state, point) {
-                            ScreenDrawHit::Color => {
-                                state.color = next_screen_draw_color(state.color);
-                            }
-                            ScreenDrawHit::BrushSize => {
-                                state.active_control = ScreenDrawControl::BrushSize;
-                                update_screen_draw_brush_slider(&mut state, point.x);
-                                windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd);
-                            }
-                            ScreenDrawHit::Eraser => {
-                                state.eraser = !state.eraser;
-                            }
-                            ScreenDrawHit::Smoothing => {
-                                state.smoothing = !state.smoothing;
-                            }
-                            ScreenDrawHit::SmoothingAmount => {
-                                state.active_control = ScreenDrawControl::SmoothingAmount;
-                                update_screen_draw_smoothing_slider(&mut state, point.x);
-                                windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd);
-                            }
-                            ScreenDrawHit::ToolbarBody => {
-                                state.active_control = ScreenDrawControl::MoveToolbar;
-                                state.drag_offset_x = point.x - state.toolbar_x;
-                                state.drag_offset_y = point.y - state.toolbar_y;
-                                windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd);
-                            }
-                            ScreenDrawHit::Canvas => {
-                                let eraser = state.eraser;
-                                start_screen_draw_stroke(&mut state, point, eraser);
-                                windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd);
-                            }
-                        }
-                    }
+                if screen_draw_handle_button_down(point, right_button) {
+                    let _ = paint_screen_draw_overlay(hwnd);
                 }
-                let _ = paint_screen_draw_overlay(hwnd);
                 LRESULT(0)
             }
             WM_MOUSEMOVE => {
                 let point = screen_draw_lparam_point(lparam);
-                let mut repaint = false;
-                {
-                    let mut state = SCREEN_DRAW_STATE.lock();
-                    if !state.active {
-                        return LRESULT(0);
-                    }
-                    match state.active_control {
-                        ScreenDrawControl::MoveToolbar => {
-                            let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
-                            state.toolbar_x =
-                                (point.x - state.drag_offset_x).clamp(0, (screen_w - 360).max(0));
-                            state.toolbar_y =
-                                (point.y - state.drag_offset_y).clamp(0, (screen_h - 64).max(0));
-                            repaint = true;
-                        }
-                        ScreenDrawControl::BrushSize => {
-                            update_screen_draw_brush_slider(&mut state, point.x);
-                            repaint = true;
-                        }
-                        ScreenDrawControl::SmoothingAmount => {
-                            update_screen_draw_smoothing_slider(&mut state, point.x);
-                            repaint = true;
-                        }
-                        ScreenDrawControl::None => {
-                            if let Some(stroke) = state.current_stroke.as_mut() {
-                                stroke.points.push(point);
-                                repaint = true;
-                            }
-                        }
-                    }
-                }
-                if repaint {
+                if screen_draw_handle_move(point) {
                     let _ = paint_screen_draw_overlay(hwnd);
                 }
                 LRESULT(0)
             }
             WM_LBUTTONUP | WM_RBUTTONUP => {
-                {
-                    let mut state = SCREEN_DRAW_STATE.lock();
-                    if let Some(stroke) = state.current_stroke.take() {
-                        if stroke.points.len() > 1 {
-                            state.strokes.push(stroke);
-                        }
-                    }
-                    state.active_control = ScreenDrawControl::None;
+                if screen_draw_handle_button_up() {
+                    let _ = paint_screen_draw_overlay(hwnd);
                 }
-                let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
-                let _ = paint_screen_draw_overlay(hwnd);
                 LRESULT(0)
             }
             windows::Win32::UI::WindowsAndMessaging::WM_PAINT => {
@@ -5136,11 +5062,33 @@ mod windows_overlay {
                     runtime.quick_key_display_center_x = center_x;
                     runtime.quick_key_display_center_y = center_y;
                     runtime.quick_key_display_size = size.clamp(18.0, 96.0);
+                    if !enabled {
+                        runtime.quick_key_display_text = None;
+                        runtime.quick_key_display_hide_at = None;
+                    }
                     let _ = refresh_quick_key_display(runtime);
                 }
 
                 OverlayCommand::ShowQuickKeyDisplay(text) => {
-                    runtime.quick_key_display_text = text;
+                    match text.and_then(|value| {
+                        let trimmed = value.trim();
+                        if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed.to_owned())
+                        }
+                    }) {
+                        Some(text) => {
+                            runtime.quick_key_display_text = Some(text);
+                            runtime.quick_key_display_hide_at = None;
+                        }
+                        None => {
+                            if runtime.quick_key_display_text.is_some() {
+                                runtime.quick_key_display_hide_at =
+                                    Some(Instant::now() + QUICK_KEY_DISPLAY_HIDE_DELAY);
+                            }
+                        }
+                    }
                     let _ = refresh_quick_key_display(runtime);
                 }
 
@@ -5163,9 +5111,7 @@ mod windows_overlay {
                         state.smoothing = smoothing;
                         state.smoothing_amount = smoothing_amount.clamp(0.0, 1.0);
                         if !enabled && state.active {
-                            state.active = false;
-                            state.strokes.clear();
-                            state.current_stroke = None;
+                            deactivate_screen_draw(&mut state);
                         }
                     }
                     let _ = refresh_screen_draw_overlay(runtime);
@@ -5502,18 +5448,28 @@ mod windows_overlay {
     }
 
     fn refresh_quick_key_display(runtime: &mut Runtime) -> Result<()> {
-        if is_ui_in_foreground()
-            || !runtime.quick_key_display_enabled
-            || runtime
-                .quick_key_display_text
-                .as_ref()
-                .is_none_or(|text| text.trim().is_empty())
-        {
+        if is_ui_in_foreground() || !runtime.quick_key_display_enabled {
+            runtime.quick_key_display_hide_at = None;
+            runtime.quick_key_display_text = None;
             let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
             return Ok(());
         }
 
-        let text = runtime.quick_key_display_text.clone().unwrap_or_default();
+        if let Some(hide_at) = runtime.quick_key_display_hide_at
+            && Instant::now() >= hide_at
+        {
+            runtime.quick_key_display_hide_at = None;
+            runtime.quick_key_display_text = None;
+        }
+
+        let Some(text) = runtime
+            .quick_key_display_text
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+        else {
+            let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
+            return Ok(());
+        };
         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
         let text_len = text.chars().count().max(1) as f32;
         let height = (font_size * 1.12 + 27.0).round().max(52.0) as i32;
@@ -5565,11 +5521,12 @@ mod windows_overlay {
             if !state.enabled {
                 return;
             }
-            state.active = !state.active;
-            state.current_stroke = None;
-            state.active_control = ScreenDrawControl::None;
-            if !state.active {
-                state.strokes.clear();
+            if state.active {
+                deactivate_screen_draw(&mut state);
+            } else {
+                state.active = true;
+                state.current_stroke = None;
+                state.active_control = ScreenDrawControl::None;
             }
             state.active
         };
@@ -5593,6 +5550,13 @@ mod windows_overlay {
         }
     }
 
+    fn deactivate_screen_draw(state: &mut ScreenDrawState) {
+        state.active = false;
+        state.current_stroke = None;
+        state.active_control = ScreenDrawControl::None;
+        state.strokes.clear();
+    }
+
     fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
         let mut state = SCREEN_DRAW_STATE.lock();
         if !state.active {
@@ -5603,6 +5567,9 @@ mod windows_overlay {
             return true;
         }
         match screen_draw_hit(&state, point) {
+            ScreenDrawHit::Close => {
+                deactivate_screen_draw(&mut state);
+            }
             ScreenDrawHit::Color => {
                 state.color = next_screen_draw_color(state.color);
             }
@@ -5694,7 +5661,7 @@ mod windows_overlay {
             }
             WM_MOUSEMOVE => {
                 let repaint = screen_draw_handle_move(point);
-                (repaint, repaint)
+                (false, repaint)
             }
             WM_LBUTTONUP | WM_RBUTTONUP => {
                 let handled = screen_draw_handle_button_up();
@@ -5729,6 +5696,9 @@ mod windows_overlay {
         let y = point.y - state.toolbar_y;
         if x < 0 || y < 0 || x > 332 || y > 76 {
             return ScreenDrawHit::Canvas;
+        }
+        if x >= 294 && x <= 320 && y >= 10 && y <= 30 {
+            return ScreenDrawHit::Close;
         }
         if x >= 14 && x <= 50 && y >= 20 && y <= 56 {
             return ScreenDrawHit::Color;
@@ -6052,6 +6022,37 @@ mod windows_overlay {
             26,
             15,
             RgbaColor { r: 255, g: 255, b: 255, a: 12 },
+        );
+        fill_screen_draw_rounded_rect(
+            pixels,
+            width,
+            height,
+            x + 294,
+            y + 10,
+            26,
+            20,
+            8,
+            RgbaColor { r: 82, g: 96, b: 120, a: 214 },
+        );
+        draw_screen_draw_line(
+            pixels,
+            width,
+            height,
+            POINT { x: x + 301, y: y + 16 },
+            POINT { x: x + 313, y: y + 24 },
+            RgbaColor::WHITE,
+            2.0,
+            false,
+        );
+        draw_screen_draw_line(
+            pixels,
+            width,
+            height,
+            POINT { x: x + 313, y: y + 16 },
+            POINT { x: x + 301, y: y + 24 },
+            RgbaColor::WHITE,
+            2.0,
+            false,
         );
         fill_screen_draw_rounded_rect(
             pixels,
@@ -6559,6 +6560,13 @@ mod windows_overlay {
             return 16;
         }
 
+        if runtime.quick_key_display_enabled
+            && (runtime.quick_key_display_text.is_some()
+                || runtime.quick_key_display_hide_at.is_some())
+        {
+            return 33;
+        }
+
         if is_ui_in_foreground() {
             return 100;
         }
@@ -6593,6 +6601,7 @@ mod windows_overlay {
 
     const DWM_COLOR_DEFAULT: u32 = 0xFFFF_FFFF;
     const FOCUS_HIGHLIGHT_BORDER_COLOR: u32 = 0x00B6_E07E;
+    const QUICK_KEY_DISPLAY_HIDE_DELAY: Duration = Duration::from_millis(700);
 
     unsafe fn set_native_border_color(hwnd: HWND, color: u32) -> bool {
         if hwnd.0.is_null() {

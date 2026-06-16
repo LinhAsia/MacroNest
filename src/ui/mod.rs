@@ -22,14 +22,13 @@ use resvg::usvg;
 use crate::{
     ai, audio, audiosense, hotkey,
     model::{
-        AppPanel, AppState, AudioClipSettings, AudioSensePresetKind, CaptureRequest,
-        CapturedInput, CommandPreset, CrosshairStyle, GeometrySpec, HotkeyBinding, MacroAction,
-        MacroFolder, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode,
-        MasterMacroGroupState, MasterMacroPresetState, MasterPreset,
-        MasterWindowFocusPresetState, MasterWindowPresetState, MasterZoomPresetState,
-        MousePathEvent, MousePathEventKind, ProfileRecord, RgbaColor, SoundLibraryItem, TimerPreset, UiLanguage,
-        UiThemeMode, VideoClipSettings, VietnameseInputMode, WindowAnchor, WindowExpandDirection,
-        WindowPreset,
+        AppPanel, AppState, AudioClipSettings, AudioSensePresetKind, CaptureRequest, CapturedInput,
+        CommandPreset, CrosshairStyle, GeometrySpec, HotkeyBinding, MacroAction, MacroFolder,
+        MacroGroup, MacroPreset, MacroStep, MacroTriggerMode, MasterMacroGroupState,
+        MasterMacroPresetState, MasterPreset, MasterWindowFocusPresetState,
+        MasterWindowPresetState, MasterZoomPresetState, MousePathEvent, MousePathEventKind,
+        ProfileRecord, RgbaColor, SoundLibraryItem, TimerPreset, UiLanguage, UiThemeMode,
+        VideoClipSettings, VietnameseInputMode, WindowAnchor, WindowExpandDirection, WindowPreset,
     },
     overlay::{OverlayCommand, UiCommand},
     profile_code,
@@ -38,9 +37,9 @@ use crate::{
 };
 use vi::{self, TELEX, VNI};
 
+mod audiosense_panel;
 mod command_panel;
 mod crosshair_panel;
-mod audiosense_panel;
 mod geometry_panel;
 mod hud_panel;
 mod macro_panel;
@@ -322,9 +321,7 @@ pub fn configure_fonts(ctx: &egui::Context, load_cjk_fallback: bool) {
     );
     #[cfg(windows)]
     {
-        if load_cjk_fallback
-            && let Ok(font_bytes) = std::fs::read("C:\\Windows\\Fonts\\msyh.ttc")
-        {
+        if load_cjk_fallback && let Ok(font_bytes) = std::fs::read("C:\\Windows\\Fonts\\msyh.ttc") {
             fonts.font_data.insert(
                 "cjk_fallback".to_owned(),
                 Arc::new(FontData::from_owned(font_bytes)),
@@ -883,10 +880,7 @@ impl CrosshairApp {
         startup_state_dirty: bool,
         startup_gate: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
     ) -> Self {
-        let save_name = state
-            .selected_profile
-            .clone()
-            .unwrap_or_default();
+        let save_name = state.selected_profile.clone().unwrap_or_default();
         let initial_active_panel = state.active_panel;
 
         let opencv_installed = paths.opencv_dll.exists();
@@ -1057,7 +1051,9 @@ impl CrosshairApp {
             interception_uninstall_job: None,
             arduino_download_job: None,
             arduino_download_progress: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            arduino_tools_downloaded: paths.avrdude_exe.exists() && paths.avrdude_conf.exists() && paths.arduino_firmware_hex.exists(),
+            arduino_tools_downloaded: paths.avrdude_exe.exists()
+                && paths.avrdude_conf.exists()
+                && paths.arduino_firmware_hex.exists(),
             arduino_flash_status: String::new(),
             arduino_flash_running: false,
             arduino_restore_emulation_after_flash: false,
@@ -1142,8 +1138,6 @@ impl CrosshairApp {
             .overlay_tx
             .send(OverlayCommand::UpdateProfiles(self.state.profiles.clone()));
     }
-
-
 
     fn run_all_startup_overlay_sync(&mut self) {
         let _ = self
@@ -1231,47 +1225,55 @@ impl CrosshairApp {
     }
 
     fn sync_focus_highlight_config(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::SetFocusHighlightConfig {
-            color: self.state.focus_highlight_color,
-            rainbow: self.state.focus_highlight_rainbow,
-        });
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::SetFocusHighlightConfig {
+                color: self.state.focus_highlight_color,
+                rainbow: self.state.focus_highlight_rainbow,
+            });
     }
 
     fn sync_protractor_state(&self) {
+        let _ = self.overlay_tx.send(OverlayCommand::SetProtractorEnabled(
+            self.state.protractor_enabled,
+        ));
         let _ = self
             .overlay_tx
-            .send(OverlayCommand::SetProtractorEnabled(self.state.protractor_enabled));
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateProtractorConfig {
-            scale: self.state.protractor_scale,
-            needle1_angle: self.state.protractor_needle1_angle,
-            needle2_angle: self.state.protractor_needle2_angle,
-            center_x: self.state.protractor_center_x,
-            center_y: self.state.protractor_center_y,
-            thickness: self.state.protractor_thickness,
-            calibrating: self.protractor_picking_active,
-            ui_language: self.state.ui_language,
-        });
+            .send(OverlayCommand::UpdateProtractorConfig {
+                scale: self.state.protractor_scale,
+                needle1_angle: self.state.protractor_needle1_angle,
+                needle2_angle: self.state.protractor_needle2_angle,
+                center_x: self.state.protractor_center_x,
+                center_y: self.state.protractor_center_y,
+                thickness: self.state.protractor_thickness,
+                calibrating: self.protractor_picking_active,
+                ui_language: self.state.ui_language,
+            });
     }
 
     fn sync_quick_key_display_config(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateQuickKeyDisplayConfig {
-            enabled: self.state.quick_key_display_enabled,
-            center_x: self.state.quick_key_display_x,
-            center_y: self.state.quick_key_display_y,
-            size: self.state.quick_key_display_size,
-        });
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateQuickKeyDisplayConfig {
+                enabled: self.state.quick_key_display_enabled,
+                center_x: self.state.quick_key_display_x,
+                center_y: self.state.quick_key_display_y,
+                size: self.state.quick_key_display_size,
+            });
     }
 
     fn sync_quick_screen_draw_config(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateScreenDrawConfig {
-            enabled: self.state.quick_screen_draw_enabled,
-            trigger: self.state.quick_screen_draw_hotkey.clone(),
-            pass_trigger_through: self.state.quick_screen_draw_pass_trigger_through,
-            color: self.state.quick_screen_draw_color,
-            brush_size: self.state.quick_screen_draw_brush_size,
-            smoothing: self.state.quick_screen_draw_smoothing,
-            smoothing_amount: self.state.quick_screen_draw_smoothing_amount,
-        });
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateScreenDrawConfig {
+                enabled: self.state.quick_screen_draw_enabled,
+                trigger: self.state.quick_screen_draw_hotkey.clone(),
+                pass_trigger_through: self.state.quick_screen_draw_pass_trigger_through,
+                color: self.state.quick_screen_draw_color,
+                brush_size: self.state.quick_screen_draw_brush_size,
+                smoothing: self.state.quick_screen_draw_smoothing,
+                smoothing_amount: self.state.quick_screen_draw_smoothing_amount,
+            });
     }
 
     fn sync_vietnamese_input_enabled(&self) {
@@ -1297,24 +1299,16 @@ impl CrosshairApp {
     }
 
     fn sync_groq_settings(&self) {
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateGroqSettings(
-                self.state.groq_settings.clone(),
-            ));
+        let _ = self.overlay_tx.send(OverlayCommand::UpdateGroqSettings(
+            self.state.groq_settings.clone(),
+        ));
     }
 
     fn preload_primary_sound_preset_audio(&self) {
-        let Some(path) = self
-            .state
-            .audio_settings
-            .presets
-            .iter()
-            .find_map(|preset| {
-                let path = preset.clip.file_path.trim();
-                (!path.is_empty()).then(|| path.to_owned())
-            })
-        else {
+        let Some(path) = self.state.audio_settings.presets.iter().find_map(|preset| {
+            let path = preset.clip.file_path.trim();
+            (!path.is_empty()).then(|| path.to_owned())
+        }) else {
             return;
         };
         let _ = audio::preload_preview_audio(&path);
@@ -1448,9 +1442,11 @@ impl CrosshairApp {
     }
 
     fn sync_audio_sense_presets(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateAudioSensePresets(
-            self.state.audio_sense_presets.clone(),
-        ));
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateAudioSensePresets(
+                self.state.audio_sense_presets.clone(),
+            ));
     }
 
     fn sync_timer_preview(&mut self, preset: Option<&TimerPreset>) {
@@ -2054,10 +2050,7 @@ impl CrosshairApp {
 
     fn render_panel_loading_shell(&self, ui: &mut egui::Ui, panel: AppPanel) {
         let title = self.panel_label(panel);
-        let subtitle = self.tr(
-            "Preparing this panel...",
-            "Dang chuan bi panel nay...",
-        );
+        let subtitle = self.tr("Preparing this panel...", "Dang chuan bi panel nay...");
         let detail = self.tr(
             "The window is ready. Content will finish loading in the next moments.",
             "Cua so da hien. Noi dung se tiep tuc hoan thien ngay sau do.",
@@ -2578,12 +2571,15 @@ impl CrosshairApp {
             return Some(cache.view.clone());
         }
 
-        let already_requested = self.video_preview_requested.get(&preset_id)
+        let already_requested = self
+            .video_preview_requested
+            .get(&preset_id)
             .map(|(p, ms)| p == trimmed && *ms == rounded_start_ms)
             .unwrap_or(false);
 
         if !already_requested {
-            self.video_preview_requested.insert(preset_id, (trimmed.to_owned(), rounded_start_ms));
+            self.video_preview_requested
+                .insert(preset_id, (trimmed.to_owned(), rounded_start_ms));
             let is_playing = self.active_video_preview_preset_id == Some(preset_id);
             let video_frame_tx = self.ensure_video_preview_worker_ready();
             let _ = video_frame_tx.send(crate::media::VideoFrameRequest {
@@ -2596,12 +2592,16 @@ impl CrosshairApp {
             });
         }
 
-        self.video_preview_cache.get(&preset_id).map(|cache| cache.view.clone())
+        self.video_preview_cache
+            .get(&preset_id)
+            .map(|cache| cache.view.clone())
     }
 
     fn start_active_video_overlay_preview(&mut self, preset_id: u32, start_ms: u64) {
         let _ = self.overlay_tx.send(OverlayCommand::StopVideoPlayback);
-        let _ = self.overlay_tx.send(OverlayCommand::PlayVideoPresetFrom(preset_id, start_ms));
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::PlayVideoPresetFrom(preset_id, start_ms));
         self.active_video_overlay_preset_id = Some(preset_id);
     }
 
@@ -2636,7 +2636,8 @@ impl CrosshairApp {
         self.active_video_preview_preset_id = Some(preset_id);
         self.active_video_preview_started_at = Some(Instant::now());
         self.active_video_preview_start_ms = next_start_ms;
-        self.video_preview_cursor_ms.insert(preset_id, next_start_ms);
+        self.video_preview_cursor_ms
+            .insert(preset_id, next_start_ms);
         Ok(())
     }
 
@@ -3968,14 +3969,38 @@ impl CrosshairApp {
 
                 let corner = 8.0;
                 for (start, end) in [
-                    (frame_rect.left_top(), pos2(frame_rect.left() + corner, frame_rect.top())),
-                    (frame_rect.left_top(), pos2(frame_rect.left(), frame_rect.top() + corner)),
-                    (frame_rect.right_top(), pos2(frame_rect.right() - corner, frame_rect.top())),
-                    (frame_rect.right_top(), pos2(frame_rect.right(), frame_rect.top() + corner)),
-                    (frame_rect.left_bottom(), pos2(frame_rect.left() + corner, frame_rect.bottom())),
-                    (frame_rect.left_bottom(), pos2(frame_rect.left(), frame_rect.bottom() - corner)),
-                    (frame_rect.right_bottom(), pos2(frame_rect.right() - corner, frame_rect.bottom())),
-                    (frame_rect.right_bottom(), pos2(frame_rect.right(), frame_rect.bottom() - corner)),
+                    (
+                        frame_rect.left_top(),
+                        pos2(frame_rect.left() + corner, frame_rect.top()),
+                    ),
+                    (
+                        frame_rect.left_top(),
+                        pos2(frame_rect.left(), frame_rect.top() + corner),
+                    ),
+                    (
+                        frame_rect.right_top(),
+                        pos2(frame_rect.right() - corner, frame_rect.top()),
+                    ),
+                    (
+                        frame_rect.right_top(),
+                        pos2(frame_rect.right(), frame_rect.top() + corner),
+                    ),
+                    (
+                        frame_rect.left_bottom(),
+                        pos2(frame_rect.left() + corner, frame_rect.bottom()),
+                    ),
+                    (
+                        frame_rect.left_bottom(),
+                        pos2(frame_rect.left(), frame_rect.bottom() - corner),
+                    ),
+                    (
+                        frame_rect.right_bottom(),
+                        pos2(frame_rect.right() - corner, frame_rect.bottom()),
+                    ),
+                    (
+                        frame_rect.right_bottom(),
+                        pos2(frame_rect.right(), frame_rect.bottom() - corner),
+                    ),
                 ] {
                     painter.line_segment([start, end], egui::Stroke::new(2.7, icon_color));
                 }
@@ -3989,12 +4014,18 @@ impl CrosshairApp {
                 let radius = 11.0;
                 painter.circle_stroke(center, radius, egui::Stroke::new(1.8, icon_color));
                 painter.line_segment(
-                    [pos2(center.x - radius, center.y), pos2(center.x + radius, center.y)],
+                    [
+                        pos2(center.x - radius, center.y),
+                        pos2(center.x + radius, center.y),
+                    ],
                     egui::Stroke::new(1.2, icon_color),
                 );
                 let rad = (-45.0_f32).to_radians();
                 painter.line_segment(
-                    [center, pos2(center.x + radius * rad.cos(), center.y + radius * rad.sin())],
+                    [
+                        center,
+                        pos2(center.x + radius * rad.cos(), center.y + radius * rad.sin()),
+                    ],
                     egui::Stroke::new(1.8, icon_color),
                 );
             }
@@ -4003,37 +4034,56 @@ impl CrosshairApp {
                 let radius = 10.0;
                 painter.circle_stroke(center, radius, egui::Stroke::new(1.8, icon_color));
                 painter.circle_filled(center, 2.0, icon_color);
-                painter.line_segment([pos2(center.x - 15.0, center.y), pos2(center.x - 7.0, center.y)], egui::Stroke::new(1.8, icon_color));
-                painter.line_segment([pos2(center.x + 7.0, center.y), pos2(center.x + 15.0, center.y)], egui::Stroke::new(1.8, icon_color));
-                painter.line_segment([pos2(center.x, center.y - 15.0), pos2(center.x, center.y - 7.0)], egui::Stroke::new(1.8, icon_color));
-                painter.line_segment([pos2(center.x, center.y + 7.0), pos2(center.x, center.y + 15.0)], egui::Stroke::new(1.8, icon_color));
+                painter.line_segment(
+                    [
+                        pos2(center.x - 15.0, center.y),
+                        pos2(center.x - 7.0, center.y),
+                    ],
+                    egui::Stroke::new(1.8, icon_color),
+                );
+                painter.line_segment(
+                    [
+                        pos2(center.x + 7.0, center.y),
+                        pos2(center.x + 15.0, center.y),
+                    ],
+                    egui::Stroke::new(1.8, icon_color),
+                );
+                painter.line_segment(
+                    [
+                        pos2(center.x, center.y - 15.0),
+                        pos2(center.x, center.y - 7.0),
+                    ],
+                    egui::Stroke::new(1.8, icon_color),
+                );
+                painter.line_segment(
+                    [
+                        pos2(center.x, center.y + 7.0),
+                        pos2(center.x, center.y + 15.0),
+                    ],
+                    egui::Stroke::new(1.8, icon_color),
+                );
             }
             TitlebarQuickActionKind::GetColor => {
                 let center = rect.center();
                 let start = pos2(center.x - 7.0, center.y + 7.0);
                 let end = pos2(center.x + 7.0, center.y - 7.0);
                 painter.line_segment([start, end], egui::Stroke::new(3.5, icon_color));
-                painter.line_segment([start, pos2(start.x - 3.0, start.y + 3.0)], egui::Stroke::new(1.8, icon_color));
+                painter.line_segment(
+                    [start, pos2(start.x - 3.0, start.y + 3.0)],
+                    egui::Stroke::new(1.8, icon_color),
+                );
                 painter.circle_filled(pos2(end.x + 2.0, end.y - 2.0), 4.5, icon_color);
             }
             TitlebarQuickActionKind::KeyDisplay => {
-                let key_shadow_rect = egui::Rect::from_center_size(
-                    rect.center() + vec2(0.0, 3.0),
-                    vec2(50.0, 28.0),
-                );
-                let key_rect = egui::Rect::from_center_size(
-                    rect.center() + vec2(0.0, 0.5),
-                    vec2(50.0, 26.0),
-                );
+                let key_shadow_rect =
+                    egui::Rect::from_center_size(rect.center() + vec2(0.0, 3.0), vec2(50.0, 28.0));
+                let key_rect =
+                    egui::Rect::from_center_size(rect.center() + vec2(0.0, 0.5), vec2(50.0, 26.0));
                 let top_glow_rect = egui::Rect::from_min_max(
                     pos2(key_rect.left() + 3.0, key_rect.top() + 3.0),
                     pos2(key_rect.right() - 3.0, key_rect.center().y + 2.0),
                 );
-                painter.rect_filled(
-                    key_shadow_rect,
-                    10.0,
-                    icon_color.gamma_multiply(0.28),
-                );
+                painter.rect_filled(key_shadow_rect, 10.0, icon_color.gamma_multiply(0.28));
                 painter.rect_filled(
                     key_rect,
                     10.0,
@@ -4066,7 +4116,10 @@ impl CrosshairApp {
                 painter.line_segment([mid, end], egui::Stroke::new(3.0, icon_color));
                 painter.circle_filled(end, 4.0, icon_color);
                 painter.rect_filled(
-                    egui::Rect::from_min_size(pos2(rect.left() + 14.0, rect.top() + 13.0), vec2(12.0, 7.0)),
+                    egui::Rect::from_min_size(
+                        pos2(rect.left() + 14.0, rect.top() + 13.0),
+                        vec2(12.0, 7.0),
+                    ),
                     2.0,
                     icon_color,
                 );
@@ -4080,7 +4133,7 @@ impl CrosshairApp {
         action_kind: TitlebarQuickActionKind,
         active: bool,
     ) -> egui::Response {
-        let button_size = vec2(92.0, 66.0);
+        let button_size = vec2(96.0, 66.0);
         let corner_radius = 14.0;
         let (frame_fill, frame_stroke, face_fill, face_bottom_fill, face_border, icon_color) =
             match (self.state.ui_theme, active) {
@@ -4121,33 +4174,54 @@ impl CrosshairApp {
         let hovered = response.hovered();
         let pressed = response.is_pointer_button_down_on();
         let rest_offset = if active { 2.0 } else { 0.0 };
-        let press_offset = if pressed { 1.5 } else if hovered { 0.5 } else { 0.0 };
+        let press_offset = if pressed {
+            1.5
+        } else if hovered {
+            0.5
+        } else {
+            0.0
+        };
         let face_offset_y = rest_offset + press_offset;
         let base_rect = outer_rect.shrink2(vec2(2.0, 3.0));
         let face_rect = egui::Rect::from_min_max(
-            pos2(base_rect.left() + 2.0, base_rect.top() + 2.0 + face_offset_y),
-            pos2(base_rect.right() - 2.0, base_rect.bottom() - 6.0 + face_offset_y),
+            pos2(
+                base_rect.left() + 2.0,
+                base_rect.top() + 2.0 + face_offset_y,
+            ),
+            pos2(
+                base_rect.right() - 2.0,
+                base_rect.bottom() - 6.0 + face_offset_y,
+            ),
         );
         let face_bottom_rect = egui::Rect::from_min_max(
             pos2(face_rect.left(), face_rect.bottom() - 9.0),
             face_rect.right_bottom(),
         );
-        ui.painter().rect_filled(base_rect, corner_radius, frame_fill);
+        ui.painter()
+            .rect_filled(base_rect, corner_radius, frame_fill);
         ui.painter().rect_stroke(
             base_rect,
             corner_radius,
             egui::Stroke::new(1.2, frame_stroke),
             StrokeKind::Inside,
         );
-        ui.painter().rect_filled(face_rect, corner_radius - 3.0, face_fill);
-        ui.painter().rect_filled(face_bottom_rect, corner_radius - 3.0, face_bottom_fill);
+        ui.painter()
+            .rect_filled(face_rect, corner_radius - 3.0, face_fill);
+        ui.painter()
+            .rect_filled(face_bottom_rect, corner_radius - 3.0, face_bottom_fill);
         ui.painter().rect_stroke(
             face_rect,
             corner_radius - 3.0,
             egui::Stroke::new(1.2, face_border),
             StrokeKind::Inside,
         );
-        self.paint_titlebar_quick_action_icon(ui.painter(), face_rect, action_kind, active, icon_color);
+        self.paint_titlebar_quick_action_icon(
+            ui.painter(),
+            face_rect,
+            action_kind,
+            active,
+            icon_color,
+        );
         response
     }
 
@@ -4159,16 +4233,18 @@ impl CrosshairApp {
         self.ensure_open_windows_ready(false);
         self.sync_quick_action_window_selection();
         let pin_window_available = !self.quick_action_window_selector.is_empty();
-        let pinned_window_active =
-            pin_window_available && window_list::is_window_topmost(&self.quick_action_window_selector);
+        let pinned_window_active = pin_window_available
+            && window_list::is_window_topmost(&self.quick_action_window_selector);
         let mut keep_menu_open = false;
+        let action_width = 108.0;
+        let action_height = 164.0;
 
         Grid::new("titlebar-quick-actions-grid")
             .num_columns(5)
-            .spacing([8.0, 8.0])
+            .spacing([14.0, 12.0])
             .show(ui, |ui| {
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 155.0),
+                    vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let button_response = self.titlebar_quick_action_button(
@@ -4214,17 +4290,9 @@ impl CrosshairApp {
 
                         ui.add_space(6.0);
                         let taskbar_label = if taskbar_hidden {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Show taskbar",
-                                "Hien taskbar",
-                            )
+                            Self::tr_lang(self.state.ui_language, "Show taskbar", "Hien taskbar")
                         } else {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Hide taskbar",
-                                "An taskbar",
-                            )
+                            Self::tr_lang(self.state.ui_language, "Hide taskbar", "An taskbar")
                         };
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 28.0),
@@ -4232,13 +4300,13 @@ impl CrosshairApp {
                             |ui| {
                                 ui.add(
                                     egui::Label::new(
-                                        RichText::new(taskbar_label)
-                                            .size(11.0)
-                                            .color(if button_response.hovered() {
+                                        RichText::new(taskbar_label).size(11.0).color(
+                                            if button_response.hovered() {
                                                 ui.visuals().strong_text_color()
                                             } else {
                                                 ui.visuals().text_color()
-                                            }),
+                                            },
+                                        ),
                                     )
                                     .wrap(),
                                 );
@@ -4249,7 +4317,7 @@ impl CrosshairApp {
                 );
 
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 155.0),
+                    vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let button_response = self.titlebar_quick_action_button(
@@ -4297,13 +4365,13 @@ impl CrosshairApp {
                             |ui| {
                                 ui.add(
                                     egui::Label::new(
-                                        RichText::new(windows_label)
-                                            .size(11.0)
-                                            .color(if button_response.hovered() {
+                                        RichText::new(windows_label).size(11.0).color(
+                                            if button_response.hovered() {
                                                 ui.visuals().strong_text_color()
                                             } else {
                                                 ui.visuals().text_color()
-                                            }),
+                                            },
+                                        ),
                                     )
                                     .wrap(),
                                 );
@@ -4314,7 +4382,7 @@ impl CrosshairApp {
                 );
 
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 155.0),
+                    vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let button_response = self.titlebar_quick_action_button(
@@ -4364,17 +4432,9 @@ impl CrosshairApp {
                         ui.add_space(6.0);
                         let pin_label = Self::truncate_window_title(
                             if pinned_window_active {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Unpin window",
-                                    "Bo ghim",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Unpin window", "Bo ghim")
                             } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Pin window",
-                                    "Ghim cua so",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Pin window", "Ghim cua so")
                             },
                             14,
                         );
@@ -4382,26 +4442,20 @@ impl CrosshairApp {
                             vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new(pin_label)
-                                            .size(11.0)
-                                            .color(if button_response.hovered() {
-                                                ui.visuals().strong_text_color()
-                                            } else {
-                                                ui.visuals().text_color()
-                                            }),
-                                    )
-                                );
+                                ui.add(egui::Label::new(
+                                    RichText::new(pin_label).size(11.0).color(
+                                        if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        },
+                                    ),
+                                ));
                             },
                         );
                         let selected_window_text = if self.quick_action_window_selector.is_empty() {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Select window",
-                                "Chon cua so",
-                            )
-                            .to_owned()
+                            Self::tr_lang(self.state.ui_language, "Select window", "Chon cua so")
+                                .to_owned()
                         } else {
                             Self::truncate_window_title(
                                 &Self::quick_action_window_display(
@@ -4411,8 +4465,8 @@ impl CrosshairApp {
                                 9,
                             )
                         };
-                        ui.set_min_width(92.0);
-                        ui.set_max_width(92.0);
+                        ui.set_min_width(action_width);
+                        ui.set_max_width(action_width);
                         let selector_popup_id =
                             ui.make_persistent_id("quick-action-window-selector-popup");
                         let mut selector_popup_open = ui
@@ -4422,8 +4476,8 @@ impl CrosshairApp {
                         let selector_button = Button::new(
                             RichText::new(format!("{selected_window_text}  v")).size(10.0),
                         )
-                            .fill(Color32::from_rgba_premultiplied(60, 60, 60, 220));
-                        let selector_response = ui.add_sized([92.0, 22.0], selector_button);
+                        .fill(Color32::from_rgba_premultiplied(60, 60, 60, 220));
+                        let selector_response = ui.add_sized([action_width, 22.0], selector_button);
                         if selector_response.clicked() {
                             selector_popup_open = !selector_popup_open;
                             keep_menu_open = true;
@@ -4472,7 +4526,7 @@ impl CrosshairApp {
                 );
 
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 155.0),
+                    vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let button_response = self.titlebar_quick_action_button(
@@ -4502,23 +4556,20 @@ impl CrosshairApp {
                         }
 
                         ui.add_space(4.0);
-                        let focus_label = Self::tr_lang(
-                            self.state.ui_language,
-                            "Focus highlight",
-                            "Vien focus",
-                        );
+                        let focus_label =
+                            Self::tr_lang(self.state.ui_language, "Focus highlight", "Vien focus");
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 20.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(
-                                    RichText::new(focus_label)
-                                        .size(11.0)
-                                        .color(if button_response.hovered() {
+                                    RichText::new(focus_label).size(11.0).color(
+                                        if button_response.hovered() {
                                             ui.visuals().strong_text_color()
                                         } else {
                                             ui.visuals().text_color()
-                                        }),
+                                        },
+                                    ),
                                 ));
                             },
                         );
@@ -4530,9 +4581,11 @@ impl CrosshairApp {
                             egui::Layout::left_to_right(egui::Align::Center),
                             |ui| {
                                 ui.add_space(4.0);
-                                let color_changed =
-                                    Self::edit_rgba_color(ui, &mut self.state.focus_highlight_color)
-                                        .changed();
+                                let color_changed = Self::edit_rgba_color(
+                                    ui,
+                                    &mut self.state.focus_highlight_color,
+                                )
+                                .changed();
                                 if color_changed {
                                     self.sync_focus_highlight_config();
                                     self.persist();
@@ -4580,7 +4633,7 @@ impl CrosshairApp {
 
                 // Protractor tool
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 155.0),
+                    vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let button_response = self.titlebar_quick_action_button(
@@ -4617,23 +4670,20 @@ impl CrosshairApp {
                         }
 
                         ui.add_space(4.0);
-                        let proto_label = Self::tr_lang(
-                            self.state.ui_language,
-                            "Protractor",
-                            "Thuoc do do",
-                        );
+                        let proto_label =
+                            Self::tr_lang(self.state.ui_language, "Protractor", "Thuoc do do");
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 20.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(
-                                    RichText::new(proto_label)
-                                        .size(11.0)
-                                        .color(if button_response.hovered() {
+                                    RichText::new(proto_label).size(11.0).color(
+                                        if button_response.hovered() {
                                             ui.visuals().strong_text_color()
                                         } else {
                                             ui.visuals().text_color()
-                                        }),
+                                        },
+                                    ),
                                 ));
                             },
                         );
@@ -4641,14 +4691,16 @@ impl CrosshairApp {
                         ui.add_space(4.0);
                     },
                 );
+                ui.end_row();
 
                 // Get Coordinates tool
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 155.0),
+                    vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
-                        let is_active = self.vision_capture_active 
-                            && self.vision_capture_target == Some(VisionCaptureTarget::QuickActionsCoordinates);
+                        let is_active = self.vision_capture_active
+                            && self.vision_capture_target
+                                == Some(VisionCaptureTarget::QuickActionsCoordinates);
                         let button_response = self.titlebar_quick_action_button(
                             ui,
                             TitlebarQuickActionKind::GetCoordinates,
@@ -4663,23 +4715,20 @@ impl CrosshairApp {
                         }
 
                         ui.add_space(4.0);
-                        let coords_label = Self::tr_lang(
-                            self.state.ui_language,
-                            "Get Coordinates",
-                            "Lấy tọa độ",
-                        );
+                        let coords_label =
+                            Self::tr_lang(self.state.ui_language, "Get Coordinates", "Lấy tọa độ");
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 20.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(
-                                    RichText::new(coords_label)
-                                        .size(11.0)
-                                        .color(if button_response.hovered() {
+                                    RichText::new(coords_label).size(11.0).color(
+                                        if button_response.hovered() {
                                             ui.visuals().strong_text_color()
                                         } else {
                                             ui.visuals().text_color()
-                                        }),
+                                        },
+                                    ),
                                 ));
                             },
                         );
@@ -4738,11 +4787,12 @@ impl CrosshairApp {
 
                 // Get Color tool
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 155.0),
+                    vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
-                        let is_active = self.vision_capture_active 
-                            && self.vision_capture_target == Some(VisionCaptureTarget::QuickActionsColor);
+                        let is_active = self.vision_capture_active
+                            && self.vision_capture_target
+                                == Some(VisionCaptureTarget::QuickActionsColor);
                         let button_response = self.titlebar_quick_action_button(
                             ui,
                             TitlebarQuickActionKind::GetColor,
@@ -4757,23 +4807,20 @@ impl CrosshairApp {
                         }
 
                         ui.add_space(4.0);
-                        let color_label = Self::tr_lang(
-                            self.state.ui_language,
-                            "Get Color",
-                            "Lấy mã màu",
-                        );
+                        let color_label =
+                            Self::tr_lang(self.state.ui_language, "Get Color", "Lấy mã màu");
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 20.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(
-                                    RichText::new(color_label)
-                                        .size(11.0)
-                                        .color(if button_response.hovered() {
+                                    RichText::new(color_label).size(11.0).color(
+                                        if button_response.hovered() {
                                             ui.visuals().strong_text_color()
                                         } else {
                                             ui.visuals().text_color()
-                                        }),
+                                        },
+                                    ),
                                 ));
                             },
                         );
@@ -4807,7 +4854,7 @@ impl CrosshairApp {
                 );
 
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 155.0),
+                    vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let is_pick_active = self.vision_capture_active
@@ -4851,11 +4898,13 @@ impl CrosshairApp {
                                         "Hien thi phim",
                                     ))
                                     .size(11.0)
-                                    .color(if button_response.hovered() {
-                                        ui.visuals().strong_text_color()
-                                    } else {
-                                        ui.visuals().text_color()
-                                    }),
+                                    .color(
+                                        if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        },
+                                    ),
                                 ));
                             },
                         );
@@ -4924,21 +4973,15 @@ impl CrosshairApp {
                         if ui
                             .add_sized(
                                 [74.0, 20.0],
-                                Button::new(
-                                    if is_pick_active {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Picking...",
-                                            "Dang chon...",
-                                        )
-                                    } else {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Pick point",
-                                            "Chon diem",
-                                        )
-                                    },
-                                ),
+                                Button::new(if is_pick_active {
+                                    Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Picking...",
+                                        "Dang chon...",
+                                    )
+                                } else {
+                                    Self::tr_lang(self.state.ui_language, "Pick point", "Chon diem")
+                                }),
                             )
                             .clicked()
                         {
@@ -4952,7 +4995,7 @@ impl CrosshairApp {
                 );
 
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 155.0),
+                    vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let button_response = self.titlebar_quick_action_button(
@@ -4978,15 +5021,13 @@ impl CrosshairApp {
                             vec2(92.0, 20.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
-                                ui.add(egui::Label::new(
-                                    RichText::new("Draw")
-                                        .size(11.0)
-                                        .color(if button_response.hovered() {
-                                            ui.visuals().strong_text_color()
-                                        } else {
-                                            ui.visuals().text_color()
-                                        }),
-                                ));
+                                ui.add(egui::Label::new(RichText::new("Draw").size(11.0).color(
+                                    if button_response.hovered() {
+                                        ui.visuals().strong_text_color()
+                                    } else {
+                                        ui.visuals().text_color()
+                                    },
+                                )));
                             },
                         );
 
@@ -5008,13 +5049,11 @@ impl CrosshairApp {
                         }
 
                         ui.add_space(2.0);
-                        let capture_active = self
-                            .capture_target
-                            .as_ref()
-                            .is_some_and(|target| matches!(target, CaptureRequest::QuickScreenDrawHotkey));
-                        let trigger_text = hotkey::format_binding(
-                            self.state.quick_screen_draw_hotkey.as_ref(),
-                        );
+                        let capture_active = self.capture_target.as_ref().is_some_and(|target| {
+                            matches!(target, CaptureRequest::QuickScreenDrawHotkey)
+                        });
+                        let trigger_text =
+                            hotkey::format_binding(self.state.quick_screen_draw_hotkey.as_ref());
                         if ui
                             .add_sized(
                                 [76.0, 20.0],
@@ -5036,12 +5075,7 @@ impl CrosshairApp {
                             }
                         }
                         ui.add_space(2.0);
-                        ui.label(
-                            RichText::new(trigger_text)
-                                .size(10.0)
-                                .weak()
-                                .monospace(),
-                        );
+                        ui.label(RichText::new(trigger_text).size(10.0).weak().monospace());
                     },
                 );
             });
@@ -5089,10 +5123,7 @@ impl CrosshairApp {
         }
     }
 
-    fn add_with_show_hover(
-        ui: &mut egui::Ui,
-        widget: impl egui::Widget,
-    ) -> egui::Response {
+    fn add_with_show_hover(ui: &mut egui::Ui, widget: impl egui::Widget) -> egui::Response {
         let response = ui.add(widget);
         Self::paint_show_hover_outline(ui, &response);
         response
@@ -5179,11 +5210,7 @@ impl CrosshairApp {
         }
     }
 
-    fn paint_show_hover_outline_radius(
-        ui: &mut egui::Ui,
-        response: &egui::Response,
-        radius: u8,
-    ) {
+    fn paint_show_hover_outline_radius(ui: &mut egui::Ui, response: &egui::Response, radius: u8) {
         if response.hovered() {
             let hovered = ui.visuals().widgets.hovered;
             ui.painter().rect_stroke(
@@ -5265,10 +5292,7 @@ impl CrosshairApp {
         base.to_owned()
     }
 
-    fn quick_action_window_display(
-        selector: &str,
-        open_windows: &[String],
-    ) -> String {
+    fn quick_action_window_display(selector: &str, open_windows: &[String]) -> String {
         let simplified = Self::simplify_window_title(selector);
         let duplicate_count = open_windows
             .iter()
@@ -5291,7 +5315,8 @@ impl CrosshairApp {
         open_windows: &[String],
     ) -> bool {
         let mut changed = false;
-        let extras_expanded_id = ui.make_persistent_id((id_source, "extra-target-windows-expanded"));
+        let extras_expanded_id =
+            ui.make_persistent_id((id_source, "extra-target-windows-expanded"));
         let mut extras_expanded = ui
             .ctx()
             .data(|data| data.get_temp::<bool>(extras_expanded_id))
@@ -5412,7 +5437,8 @@ impl CrosshairApp {
                 }
             }
         });
-        ui.ctx().data_mut(|data| data.insert_temp(extras_expanded_id, extras_expanded));
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(extras_expanded_id, extras_expanded));
         changed
     }
 
@@ -5484,9 +5510,9 @@ impl CrosshairApp {
                     } else {
                         let base_title = Self::simplify_window_title(current);
                         let selected_specific_duplicate = !*match_duplicate_window_titles
-                            && window_groups
-                                .iter()
-                                .any(|(title, selectors)| *title == base_title && selectors.len() > 1);
+                            && window_groups.iter().any(|(title, selectors)| {
+                                *title == base_title && selectors.len() > 1
+                            });
                         if selected_specific_duplicate {
                             current.to_owned()
                         } else {
@@ -5518,7 +5544,8 @@ impl CrosshairApp {
                     }
                 }
 
-                let active_window_label = Self::tr_lang(language, "[Active Window]", "[Cửa sổ hiện tại]");
+                let active_window_label =
+                    Self::tr_lang(language, "[Active Window]", "[Cửa sổ hiện tại]");
                 let is_active_selected = target.as_deref() == Some("[Active Window]");
                 if ui
                     .selectable_label(is_active_selected, active_window_label)
@@ -5565,17 +5592,47 @@ impl CrosshairApp {
                                 let mut child_hovered = false;
 
                                 let rules = [
-                                    (" [Lowest]", Self::tr_lang(language, "[Lowest on Screen]", "[Dưới cùng màn hình]")),
-                                    (" [Highest]", Self::tr_lang(language, "[Highest on Screen]", "[Trên cùng màn hình]")),
-                                    (" [Leftmost]", Self::tr_lang(language, "[Leftmost on Screen]", "[Bên trái cùng]")),
-                                    (" [Rightmost]", Self::tr_lang(language, "[Rightmost on Screen]", "[Bên phải cùng]")),
+                                    (
+                                        " [Lowest]",
+                                        Self::tr_lang(
+                                            language,
+                                            "[Lowest on Screen]",
+                                            "[Dưới cùng màn hình]",
+                                        ),
+                                    ),
+                                    (
+                                        " [Highest]",
+                                        Self::tr_lang(
+                                            language,
+                                            "[Highest on Screen]",
+                                            "[Trên cùng màn hình]",
+                                        ),
+                                    ),
+                                    (
+                                        " [Leftmost]",
+                                        Self::tr_lang(
+                                            language,
+                                            "[Leftmost on Screen]",
+                                            "[Bên trái cùng]",
+                                        ),
+                                    ),
+                                    (
+                                        " [Rightmost]",
+                                        Self::tr_lang(
+                                            language,
+                                            "[Rightmost on Screen]",
+                                            "[Bên phải cùng]",
+                                        ),
+                                    ),
                                 ];
 
                                 for (suffix, label) in rules {
                                     let rule_selector = format!("{title}{suffix}");
-                                    let is_rule_selected = target.as_deref() == Some(&rule_selector);
+                                    let is_rule_selected =
+                                        target.as_deref() == Some(&rule_selector);
                                     let rule_label = format!("{title} {label}");
-                                    let response = ui.selectable_label(is_rule_selected, &rule_label);
+                                    let response =
+                                        ui.selectable_label(is_rule_selected, &rule_label);
                                     child_hovered |= response.hovered();
                                     if response.clicked() {
                                         *target = Some(rule_selector);
@@ -5634,7 +5691,8 @@ impl CrosshairApp {
         open_windows: &[String],
     ) -> bool {
         let mut changed = false;
-        let extras_expanded_id = ui.make_persistent_id((id_source, "extra-target-windows-expanded"));
+        let extras_expanded_id =
+            ui.make_persistent_id((id_source, "extra-target-windows-expanded"));
         let mut extras_expanded = ui
             .ctx()
             .data(|data| data.get_temp::<bool>(extras_expanded_id))
@@ -5731,7 +5789,8 @@ impl CrosshairApp {
                 }
             }
         });
-        ui.ctx().data_mut(|data| data.insert_temp(extras_expanded_id, extras_expanded));
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(extras_expanded_id, extras_expanded));
         changed
     }
 
@@ -5827,9 +5886,7 @@ impl CrosshairApp {
                     "Chờ trong khoảng thời gian (Delay - Mili giây), sau đó tiếp tục."
                 }
                 MacroAction::TypeText => "Nhập chuỗi văn bản từ ô nhập liệu.",
-                MacroAction::ApplyWindowPreset => {
-                    "Thay đổi kích thước hoặc áp dụng bố cục cửa sổ."
-                }
+                MacroAction::ApplyWindowPreset => "Thay đổi kích thước hoặc áp dụng bố cục cửa sổ.",
                 MacroAction::FocusWindowPreset => {
                     "Đưa cửa sổ lên phía trước bằng preset focus đã chọn."
                 }
@@ -5888,7 +5945,9 @@ impl CrosshairApp {
                 }
                 MacroAction::ShowHud => "Hiển thị HUD từ tab HUD.",
                 MacroAction::HideHud => "Ẩn HUD (Menu công cụ) đang hiển thị.",
-                MacroAction::HideTaskbar => "Ẩn thanh taskbar của Windows để làm màn hình sạch hơn.",
+                MacroAction::HideTaskbar => {
+                    "Ẩn thanh taskbar của Windows để làm màn hình sạch hơn."
+                }
                 MacroAction::ShowTaskbar => "Hiện lại thanh taskbar của Windows nếu đang bị ẩn.",
                 MacroAction::LockKeys => "Khóa các phím được liệt kê trong ô Nhập.",
                 MacroAction::UnlockKeys => "Mở khóa các phím được liệt kê trong ô Nhập.",
@@ -5902,9 +5961,7 @@ impl CrosshairApp {
                 MacroAction::DisableMacroPreset => {
                     "Tắt một preset macro khác trong cùng nhóm macro."
                 }
-                MacroAction::EnableStep => {
-                    "Bật một hoặc nhiều bước (step) cụ thể trong macro này."
-                }
+                MacroAction::EnableStep => "Bật một hoặc nhiều bước (step) cụ thể trong macro này.",
                 MacroAction::DisableStep => {
                     "Tắt một hoặc nhiều bước (step) cụ thể trong macro này."
                 }
@@ -5963,9 +6020,7 @@ impl CrosshairApp {
                 MacroAction::KeyUp => "Release a held keyboard key.",
                 MacroAction::Wait => "Wait for the number of milliseconds in Delay, then continue.",
                 MacroAction::TypeText => "Type the whole text from the Input field.",
-                MacroAction::ApplyWindowPreset => {
-                    "Resize or apply window layout preset."
-                }
+                MacroAction::ApplyWindowPreset => "Resize or apply window layout preset.",
                 MacroAction::FocusWindowPreset => {
                     "Bring one window forward with the selected focus preset."
                 }
@@ -6026,7 +6081,9 @@ impl CrosshairApp {
                 }
                 MacroAction::ShowHud => "Show one HUD preset from the HUD tab.",
                 MacroAction::HideHud => "Hide the currently visible HUD.",
-                MacroAction::HideTaskbar => "Hide the Windows taskbar for a cleaner fullscreen layout.",
+                MacroAction::HideTaskbar => {
+                    "Hide the Windows taskbar for a cleaner fullscreen layout."
+                }
                 MacroAction::ShowTaskbar => "Show the Windows taskbar again if it is hidden.",
                 MacroAction::LockKeys => "Lock the keys listed in Input.",
                 MacroAction::UnlockKeys => "Unlock the keys listed in Input.",
@@ -6040,12 +6097,8 @@ impl CrosshairApp {
                 MacroAction::DisableMacroPreset => {
                     "Disable one other macro preset from the same macro group."
                 }
-                MacroAction::EnableStep => {
-                    "Enable one or more specific steps in this macro."
-                }
-                MacroAction::DisableStep => {
-                    "Disable one or more specific steps in this macro."
-                }
+                MacroAction::EnableStep => "Enable one or more specific steps in this macro.",
+                MacroAction::DisableStep => "Disable one or more specific steps in this macro.",
                 MacroAction::MouseLeftClick => "Press and release left mouse button.",
                 MacroAction::MouseLeftDown => "Hold left mouse button down.",
                 MacroAction::MouseLeftUp => "Release held left mouse button.",
@@ -6864,9 +6917,8 @@ impl CrosshairApp {
             let mut path_step = MacroStep::default();
             path_step.action = MacroAction::PlayMousePathPreset;
             path_step.key = path_preset_id.to_string();
-            path_step.delay_ms = first_mouse_at
-                .unwrap_or_default()
-                .saturating_sub(if let Some(insert_index) = first_mouse_insert_index {
+            path_step.delay_ms = first_mouse_at.unwrap_or_default().saturating_sub(
+                if let Some(insert_index) = first_mouse_insert_index {
                     if insert_index == 0 {
                         0
                     } else {
@@ -6876,7 +6928,8 @@ impl CrosshairApp {
                     }
                 } else {
                     0
-                });
+                },
+            );
             path_step.wait_for_completion = false;
             let insert_index = first_mouse_insert_index.unwrap_or(built_steps.len());
             built_steps.insert(insert_index, path_step);
@@ -6886,15 +6939,11 @@ impl CrosshairApp {
     }
 
     fn sized_button(ui: &mut egui::Ui, width: f32, label: &str) -> egui::Response {
-        Self::with_emphasized_button_hover(ui, |ui| {
-            ui.add_sized([width, 24.0], Button::new(label))
-        })
+        Self::with_emphasized_button_hover(ui, |ui| ui.add_sized([width, 24.0], Button::new(label)))
     }
 
     fn sound_style_toggle_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
-        Self::with_emphasized_button_hover(ui, |ui| {
-            ui.add_sized([84.0, 24.0], Button::new(label))
-        })
+        Self::with_emphasized_button_hover(ui, |ui| ui.add_sized([84.0, 24.0], Button::new(label)))
     }
 
     fn sound_style_remove_button(ui: &mut egui::Ui) -> egui::Response {
@@ -6907,9 +6956,7 @@ impl CrosshairApp {
     }
 
     fn sound_style_icon_button(ui: &mut egui::Ui, icon: RichText) -> egui::Response {
-        Self::with_emphasized_button_hover(ui, |ui| {
-            ui.add_sized([36.0, 24.0], Button::new(icon))
-        })
+        Self::with_emphasized_button_hover(ui, |ui| ui.add_sized([36.0, 24.0], Button::new(icon)))
     }
 
     fn is_copy_feedback_active(until: Option<Instant>) -> bool {
@@ -7233,12 +7280,15 @@ impl CrosshairApp {
     fn edit_rgba_color(ui: &mut egui::Ui, color: &mut RgbaColor) -> egui::Response {
         let mut changed = false;
         let popup_id = ui.make_persistent_id(color as *const RgbaColor as usize);
-        let mut popup_open = ui.ctx().data(|data| data.get_temp::<bool>(popup_id)).unwrap_or(false);
+        let mut popup_open = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(popup_id))
+            .unwrap_or(false);
 
         // Draw a small color button with preview
         let button_size = egui::vec2(28.0, 18.0);
         let (rect, mut response) = ui.allocate_exact_size(button_size, egui::Sense::click());
-        
+
         if response.clicked() {
             popup_open = !popup_open;
         }
@@ -7246,14 +7296,19 @@ impl CrosshairApp {
         // Paint the preview rectangle
         let c32 = egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, color.a);
         ui.painter().rect_filled(rect, 3.0, c32);
-        
+
         // Paint a hover highlight or a standard border
         let stroke_color = if response.hovered() {
             ui.visuals().widgets.hovered.bg_stroke.color
         } else {
             ui.visuals().widgets.noninteractive.bg_stroke.color
         };
-        ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(1.0, stroke_color), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(
+            rect,
+            3.0,
+            egui::Stroke::new(1.0, stroke_color),
+            egui::StrokeKind::Inside,
+        );
 
         // Create the popup
         let popup_response = egui::Popup::from_response(&response)
@@ -7265,9 +7320,10 @@ impl CrosshairApp {
             .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
             .show(|ui| {
                 ui.set_min_width(220.0);
-                
+
                 // Visual color picker
-                let mut color32 = egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, color.a);
+                let mut color32 =
+                    egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, color.a);
                 if egui::color_picker::color_picker_color32(
                     ui,
                     &mut color32,
@@ -7289,7 +7345,7 @@ impl CrosshairApp {
                     let hex_resp = ui.add(
                         egui::TextEdit::singleline(&mut hex_str)
                             .hint_text("RRGGBB")
-                            .desired_width(120.0)
+                            .desired_width(120.0),
                     );
                     if hex_resp.changed() {
                         let hex = hex_str.trim().trim_start_matches('#');
@@ -7318,7 +7374,8 @@ impl CrosshairApp {
             }
         }
 
-        ui.ctx().data_mut(|data| data.insert_temp(popup_id, popup_open));
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(popup_id, popup_open));
 
         if changed {
             response.mark_changed();
@@ -8713,13 +8770,18 @@ impl CrosshairApp {
                 | MacroAction::StopMacroPreset
                 | MacroAction::EnableMacroPreset
                 | MacroAction::DisableMacroPreset
-        )
-        {
+        ) {
             let remapped = step
                 .key
                 .split(',')
                 .filter_map(|part| part.trim().parse::<u32>().ok())
-                .map(|id| if id == old_preset_id { new_preset_id } else { id })
+                .map(|id| {
+                    if id == old_preset_id {
+                        new_preset_id
+                    } else {
+                        id
+                    }
+                })
                 .collect::<Vec<_>>();
             if !remapped.is_empty() {
                 step.key = remapped
@@ -8811,8 +8873,7 @@ impl CrosshairApp {
                 | MacroAction::StopMacroPreset
                 | MacroAction::EnableMacroPreset
                 | MacroAction::DisableMacroPreset
-        )
-        {
+        ) {
             let remapped = step
                 .key
                 .split(',')
@@ -8832,8 +8893,7 @@ impl CrosshairApp {
             MacroAction::TriggerMacroPreset
                 | MacroAction::TriggerMacroPresetIfEnabled
                 | MacroAction::StopMacroPreset
-        )
-            && step.trigger_macro_group_id == Some(old_group_id)
+        ) && step.trigger_macro_group_id == Some(old_group_id)
         {
             step.trigger_macro_group_id = Some(new_group_id);
         }
@@ -8885,7 +8945,8 @@ impl CrosshairApp {
     ) {
         let message = message.into();
         if message.trim().is_empty() {
-            self.macro_step_inline_feedback.remove(&(preset_id, step_index));
+            self.macro_step_inline_feedback
+                .remove(&(preset_id, step_index));
             return;
         }
         self.macro_step_inline_feedback.insert(
@@ -9390,10 +9451,7 @@ impl CrosshairApp {
                 }
                 self.sync_window_presets();
             }
-            (
-                CaptureRequest::WindowLayoutHotkey(layout_id),
-                CapturedInput::Binding(binding),
-            ) => {
+            (CaptureRequest::WindowLayoutHotkey(layout_id), CapturedInput::Binding(binding)) => {
                 if let Some(layout) = self
                     .state
                     .window_layouts
@@ -9697,8 +9755,7 @@ impl CrosshairApp {
                             .filter(|part| !part.is_empty())
                             .map(str::to_owned)
                             .collect::<Vec<_>>();
-                        let label = if preset.hold_stop_step.action
-                            == MacroAction::StopIfKeyPressed
+                        let label = if preset.hold_stop_step.action == MacroAction::StopIfKeyPressed
                         {
                             "hold-stop stop key"
                         } else {
@@ -9708,13 +9765,11 @@ impl CrosshairApp {
                             self.status = format!("Key {key} is already in that {label} list.");
                         } else if existing.is_empty() {
                             preset.hold_stop_step.key = key.clone();
-                            self.status =
-                                format!("Captured {label} {key} for macro {preset_id}.");
+                            self.status = format!("Captured {label} {key} for macro {preset_id}.");
                         } else {
                             preset.hold_stop_step.key =
                                 format!("{},{}", preset.hold_stop_step.key.trim(), key);
-                            self.status =
-                                format!("Added {label} {key} for macro {preset_id}.");
+                            self.status = format!("Added {label} {key} for macro {preset_id}.");
                         }
                     } else {
                         preset.hold_stop_step.key = binding.key.clone();
@@ -10483,14 +10538,16 @@ impl CrosshairApp {
         #[cfg(windows)]
         unsafe {
             if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
                 let _ = ShowWindow(hwnd, SW_HIDE);
             }
         }
 
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
-        let _ = self.overlay_tx.send(OverlayCommand::SetProtractorEnabled(false));
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::SetProtractorEnabled(false));
         crate::overlay::wake_command_queue();
 
         let ui_tx = self.ui_tx.clone();
@@ -10503,17 +10560,15 @@ impl CrosshairApp {
 
             // Capture virtual screen bounds
             let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
-            let result = if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
-                let mode = crate::overlay::native_capture::NativeCaptureMode::ProtractorCalibration {
-                    ui_language: ui_lang,
-                };
+            let result = if let Some(capture) =
+                crate::window_list::capture_virtual_screen_region(left, top, width, height)
+            {
+                let mode =
+                    crate::overlay::native_capture::NativeCaptureMode::ProtractorCalibration {
+                        ui_language: ui_lang,
+                    };
                 crate::overlay::native_capture::run_capture_overlay(
-                    capture,
-                    left,
-                    top,
-                    width,
-                    height,
-                    mode,
+                    capture, left, top, width, height, mode,
                 )
             } else {
                 crate::overlay::native_capture::NativeCaptureResult::Cancelled
@@ -10524,10 +10579,14 @@ impl CrosshairApp {
             unsafe {
                 if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
                     if was_minimized {
-                        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWMINNOACTIVE};
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SW_SHOWMINNOACTIVE, ShowWindow,
+                        };
                         let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
                     } else {
-                        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL, SetForegroundWindow};
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SW_SHOWNORMAL, SetForegroundWindow, ShowWindow,
+                        };
                         let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
                         let _ = SetForegroundWindow(hwnd);
                     }
@@ -10537,7 +10596,10 @@ impl CrosshairApp {
             // Sleep a tiny bit to let OS display the window so winit event loop is active
             std::thread::sleep(std::time::Duration::from_millis(50));
 
-            let _ = ui_tx.send(UiCommand::NativeProtractorCalibrationFinished { result, was_minimized });
+            let _ = ui_tx.send(UiCommand::NativeProtractorCalibrationFinished {
+                result,
+                was_minimized,
+            });
             egui_ctx.request_repaint();
         });
     }
@@ -10551,7 +10613,8 @@ impl CrosshairApp {
             self.state.ui_language,
             "Protractor calibration cancelled.",
             "Huy can chinh thuoc do do.",
-        ).to_owned();
+        )
+        .to_owned();
     }
 
     pub(crate) fn cancel_protractor_calibration_freeze(&mut self, ctx: &egui::Context) {
@@ -10565,12 +10628,17 @@ impl CrosshairApp {
             self.state.ui_language,
             "Protractor calibration cancelled.",
             "Đã hủy cân chỉnh thước đo góc.",
-        ).to_owned();
+        )
+        .to_owned();
         self.sync_protractor_state();
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 
-    pub(crate) fn finish_protractor_calibration_freeze(&mut self, ctx: &egui::Context, points: Vec<(i32, i32)>) {
+    pub(crate) fn finish_protractor_calibration_freeze(
+        &mut self,
+        ctx: &egui::Context,
+        points: Vec<(i32, i32)>,
+    ) {
         self.protractor_picking_active = false;
         self.protractor_calibration_points = None;
         self.captured_freeze_texture = None;
@@ -10579,7 +10647,8 @@ impl CrosshairApp {
         self.mouse_move_absolute_capture_raise_window = true;
 
         if points.len() == 3 {
-            if let Some(((cx, cy), radius)) = circle_from_3_points(points[0], points[1], points[2]) {
+            if let Some(((cx, cy), radius)) = circle_from_3_points(points[0], points[1], points[2])
+            {
                 let scale = (radius / 150.0).clamp(0.4, 2.5);
                 self.state.protractor_center_x = cx;
                 self.state.protractor_center_y = cy;
@@ -10589,13 +10658,15 @@ impl CrosshairApp {
                     self.state.ui_language,
                     "Protractor calibrated successfully!",
                     "Cân chỉnh thước đo góc thành công!",
-                ).to_owned();
+                )
+                .to_owned();
             } else {
                 self.status = Self::tr_lang(
                     self.state.ui_language,
                     "Points are collinear. Cannot form a circle.",
                     "Các điểm thẳng hàng. Không thể tạo đường tròn.",
-                ).to_owned();
+                )
+                .to_owned();
             }
         }
 
@@ -10623,8 +10694,14 @@ fn circle_from_3_points(
         return None; // collinear or identical
     }
 
-    let ux = ((x1 * x1 + y1 * y1) * (y2 - y3) + (x2 * x2 + y2 * y2) * (y3 - y1) + (x3 * x3 + y3 * y3) * (y1 - y2)) / d;
-    let uy = ((x1 * x1 + y1 * y1) * (x3 - x2) + (x2 * x2 + y2 * y2) * (x1 - x3) + (x3 * x3 + y3 * y3) * (x2 - x1)) / d;
+    let ux = ((x1 * x1 + y1 * y1) * (y2 - y3)
+        + (x2 * x2 + y2 * y2) * (y3 - y1)
+        + (x3 * x3 + y3 * y3) * (y1 - y2))
+        / d;
+    let uy = ((x1 * x1 + y1 * y1) * (x3 - x2)
+        + (x2 * x2 + y2 * y2) * (x1 - x3)
+        + (x3 * x3 + y3 * y3) * (x2 - x1))
+        / d;
 
     let r = ((x1 - ux).powi(2) + (y1 - uy).powi(2)).sqrt();
     Some(((ux.round() as i32, uy.round() as i32), r as f32))
@@ -10798,13 +10875,9 @@ impl eframe::App for CrosshairApp {
                                         .collect();
                                 while let Some(last) = filtered_events.last() {
                                     if last.action == MacroAction::KeyPress
-                                        && last
-                                            .key
-                                            .as_ref()
-                                            .is_some_and(|k| {
-                                                hotkey_keys
-                                                    .contains(&k.trim().to_ascii_lowercase())
-                                            })
+                                        && last.key.as_ref().is_some_and(|k| {
+                                            hotkey_keys.contains(&k.trim().to_ascii_lowercase())
+                                        })
                                     {
                                         filtered_events.pop();
                                         continue;
@@ -10964,12 +11037,19 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::MouseMoveAbsolutePointCaptured { .. } => {}
                 UiCommand::MouseMoveAbsoluteCaptureCancelled => {}
-                UiCommand::NativeVisionCaptureFinished { target, mode, result, capture_frame } => {
+                UiCommand::NativeVisionCaptureFinished {
+                    target,
+                    mode,
+                    result,
+                    capture_frame,
+                } => {
                     // Show main window natively
                     #[cfg(windows)]
                     unsafe {
                         if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+                            use windows::Win32::UI::WindowsAndMessaging::{
+                                SW_SHOWNORMAL, ShowWindow,
+                            };
                             let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
                         }
                     }
@@ -10991,7 +11071,12 @@ impl eframe::App for CrosshairApp {
                                 _ => "Image point capture cancelled.".to_owned(),
                             };
                         }
-                        crate::overlay::NativeCaptureResult::SelectedRegion { x, y, width, height } => {
+                        crate::overlay::NativeCaptureResult::SelectedRegion {
+                            x,
+                            y,
+                            width,
+                            height,
+                        } => {
                             // Process selected region
                             match target {
                                 VisionCaptureTarget::Preset(preset_id) => {
@@ -11011,7 +11096,11 @@ impl eframe::App for CrosshairApp {
                                         ctx, preset_id, x, y, width, height,
                                     );
                                 }
-                                VisionCaptureTarget::OcrStepRegion { group_id, preset_id, step_index } => {
+                                VisionCaptureTarget::OcrStepRegion {
+                                    group_id,
+                                    preset_id,
+                                    step_index,
+                                } => {
                                     self.finish_ocr_step_region_capture_command(
                                         ctx, group_id, preset_id, step_index, x, y, width, height,
                                     );
@@ -11025,13 +11114,11 @@ impl eframe::App for CrosshairApp {
                                 VisionCaptureTarget::Preset(preset_id) => {
                                     if matches!(mode, VisionCaptureMode::SinglePixel) {
                                         self.finish_image_search_single_pixel_capture_from_screen(
-                                            ctx,
-                                            preset_id,
-                                            x,
-                                            y,
+                                            ctx, preset_id, x, y,
                                         );
                                     } else {
-                                        let priority_anchor = matches!(mode, VisionCaptureMode::ColorPriorityAnchor);
+                                        let priority_anchor =
+                                            matches!(mode, VisionCaptureMode::ColorPriorityAnchor);
                                         self.finish_image_search_point_capture_command(
                                             ctx,
                                             preset_id,
@@ -11042,7 +11129,8 @@ impl eframe::App for CrosshairApp {
                                         );
                                     }
                                 }
-                                VisionCaptureTarget::GeometryColor | VisionCaptureTarget::MacroStepGeometryColor { .. } => {
+                                VisionCaptureTarget::GeometryColor
+                                | VisionCaptureTarget::MacroStepGeometryColor { .. } => {
                                     if let Some(col) = color {
                                         self.apply_image_search_color_pick(target, col);
                                     }
@@ -11065,12 +11153,20 @@ impl eframe::App for CrosshairApp {
                                             let _ = clipboard.set_text(formatted.clone());
                                         }
                                         self.status = match self.state.ui_language {
-                                            crate::model::UiLanguage::Vietnamese => format!("Da sao chep toa do vao clipboard: {}", formatted),
-                                            _ => format!("Coordinates copied to clipboard: {}", formatted),
+                                            crate::model::UiLanguage::Vietnamese => format!(
+                                                "Da sao chep toa do vao clipboard: {}",
+                                                formatted
+                                            ),
+                                            _ => format!(
+                                                "Coordinates copied to clipboard: {}",
+                                                formatted
+                                            ),
                                         };
                                     } else {
                                         self.status = match self.state.ui_language {
-                                            crate::model::UiLanguage::Vietnamese => format!("Toa do da chon: X={}, Y={}", x, y),
+                                            crate::model::UiLanguage::Vietnamese => {
+                                                format!("Toa do da chon: X={}, Y={}", x, y)
+                                            }
                                             _ => format!("Coordinates captured: X={}, Y={}", x, y),
                                         };
                                     }
@@ -11078,18 +11174,27 @@ impl eframe::App for CrosshairApp {
                                 VisionCaptureTarget::QuickActionsColor => {
                                     self.clear_image_search_capture_state();
                                     if let Some(col) = color {
-                                        let hex_str = format!("#{:02X}{:02X}{:02X}", col.r, col.g, col.b);
+                                        let hex_str =
+                                            format!("#{:02X}{:02X}{:02X}", col.r, col.g, col.b);
                                         if self.state.quick_actions_copy_color {
                                             if let Ok(mut clipboard) = arboard::Clipboard::new() {
                                                 let _ = clipboard.set_text(hex_str.clone());
                                             }
                                             self.status = match self.state.ui_language {
-                                                crate::model::UiLanguage::Vietnamese => format!("Da sao chep ma mau vao clipboard: {}", hex_str),
-                                                _ => format!("Color code copied to clipboard: {}", hex_str),
+                                                crate::model::UiLanguage::Vietnamese => format!(
+                                                    "Da sao chep ma mau vao clipboard: {}",
+                                                    hex_str
+                                                ),
+                                                _ => format!(
+                                                    "Color code copied to clipboard: {}",
+                                                    hex_str
+                                                ),
                                             };
                                         } else {
                                             self.status = match self.state.ui_language {
-                                                crate::model::UiLanguage::Vietnamese => format!("Mau da chon: {}", hex_str),
+                                                crate::model::UiLanguage::Vietnamese => {
+                                                    format!("Mau da chon: {}", hex_str)
+                                                }
                                                 _ => format!("Color captured: {}", hex_str),
                                             };
                                         }
@@ -11098,7 +11203,8 @@ impl eframe::App for CrosshairApp {
                                             self.state.ui_language,
                                             "Failed to capture screen color.",
                                             "Khong the lay ma mau man hinh.",
-                                        ).to_owned();
+                                        )
+                                        .to_owned();
                                     }
                                 }
                                 _ => {}
@@ -11108,7 +11214,10 @@ impl eframe::App for CrosshairApp {
                     }
                     ctx.request_repaint();
                 }
-                UiCommand::NativeProtractorCalibrationFinished { result, was_minimized } => {
+                UiCommand::NativeProtractorCalibrationFinished {
+                    result,
+                    was_minimized,
+                } => {
                     self.native_capture_in_progress = false;
 
                     match result {
@@ -11122,7 +11231,8 @@ impl eframe::App for CrosshairApp {
                                 self.state.ui_language,
                                 "Protractor calibration cancelled.",
                                 "Huy can chinh thuoc do do.",
-                            ).to_owned();
+                            )
+                            .to_owned();
                             self.sync_protractor_state();
                         }
                     }
@@ -11140,12 +11250,18 @@ impl eframe::App for CrosshairApp {
                     crate::overlay::wake_command_queue();
                     ctx.request_repaint();
                 }
-                UiCommand::NativeMouseMoveAbsoluteCaptureFinished { target, result, capture_frame } => {
+                UiCommand::NativeMouseMoveAbsoluteCaptureFinished {
+                    target,
+                    result,
+                    capture_frame,
+                } => {
                     // Show main window natively
                     #[cfg(windows)]
                     unsafe {
                         if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+                            use windows::Win32::UI::WindowsAndMessaging::{
+                                SW_SHOWNORMAL, ShowWindow,
+                            };
                             let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
                         }
                     }
@@ -11167,7 +11283,8 @@ impl eframe::App for CrosshairApp {
                                 self.state.ui_language,
                                 "Absolute coordinate capture cancelled.",
                                 "Huy lay toa do tuyet doi.",
-                            ).to_owned();
+                            )
+                            .to_owned();
                         }
                     }
                     ctx.request_repaint();
@@ -11211,7 +11328,10 @@ impl eframe::App for CrosshairApp {
                     match_duplicate_window_titles,
                     frame,
                 } => {
-                    let image = ColorImage::from_rgba_unmultiplied([frame.width, frame.height], &frame.rgba);
+                    let image = ColorImage::from_rgba_unmultiplied(
+                        [frame.width, frame.height],
+                        &frame.rgba,
+                    );
                     if let Some(cache) = self.zoom_preview_cache.get_mut(&cache_id) {
                         cache.view.texture.set(image, TextureOptions::LINEAR);
                         cache.updated_at = Instant::now();
@@ -11506,7 +11626,8 @@ impl eframe::App for CrosshairApp {
             if Self::active_panel_needs_audio_sense_devices(self.state.active_panel) {
                 self.ensure_audio_sense_devices_ready(false);
             }
-            if self.state.active_panel == AppPanel::Macros && !self.panel_is_warmed(AppPanel::Macros)
+            if self.state.active_panel == AppPanel::Macros
+                && !self.panel_is_warmed(AppPanel::Macros)
             {
                 self.macro_panel_render_limit = 8;
             }
@@ -11541,16 +11662,25 @@ impl eframe::App for CrosshairApp {
         if !keep_ocr_preview && self.disable_ocr_preview_modes() {
             self.persist();
         }
-        let keep_geometry_preview = viewport_focused && self.state.active_panel == AppPanel::Geometry;
-        if !keep_geometry_preview && (self.geometry_preview_target.is_some() || self.geometry_preset_preview_target.is_some()) {
+        let keep_geometry_preview =
+            viewport_focused && self.state.active_panel == AppPanel::Geometry;
+        if !keep_geometry_preview
+            && (self.geometry_preview_target.is_some()
+                || self.geometry_preset_preview_target.is_some())
+        {
             self.geometry_preview_target = None;
             self.geometry_preview_sent = None;
             self.geometry_preset_preview_target = None;
-            let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
-            let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometryPreset(None));
+            let _ = self
+                .overlay_tx
+                .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+            let _ = self
+                .overlay_tx
+                .send(crate::overlay::OverlayCommand::PreviewGeometryPreset(None));
         }
 
-        let keep_macro_geometry_preview = viewport_focused && self.state.active_panel == AppPanel::Macros;
+        let keep_macro_geometry_preview =
+            viewport_focused && self.state.active_panel == AppPanel::Macros;
         if !keep_macro_geometry_preview
             && (self.draw_geometry_step_preview_target.is_some()
                 || self.show_geometry_preset_preview_target.is_some())
@@ -11559,10 +11689,19 @@ impl eframe::App for CrosshairApp {
             self.draw_geometry_step_preview_sent = None;
             self.show_geometry_preset_preview_target = None;
             self.show_geometry_preset_preview_sent = None;
-            let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
-            let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometryPreset(None));
-        } else if let Some((group_id, preset_id, step_index, is_hold_stop)) = self.draw_geometry_step_preview_target {
-            let preview_spec = self.state.macro_groups.iter()
+            let _ = self
+                .overlay_tx
+                .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+            let _ = self
+                .overlay_tx
+                .send(crate::overlay::OverlayCommand::PreviewGeometryPreset(None));
+        } else if let Some((group_id, preset_id, step_index, is_hold_stop)) =
+            self.draw_geometry_step_preview_target
+        {
+            let preview_spec = self
+                .state
+                .macro_groups
+                .iter()
                 .find(|g| g.id == group_id)
                 .and_then(|g| g.presets.iter().find(|p| p.id == preset_id))
                 .and_then(|p| {
@@ -11589,7 +11728,9 @@ impl eframe::App for CrosshairApp {
                 self.draw_geometry_step_preview_sent = preview_spec.clone();
                 let _ = self
                     .overlay_tx
-                    .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(preview_spec));
+                    .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(
+                        preview_spec,
+                    ));
             }
         }
         if keep_macro_geometry_preview {
@@ -11628,8 +11769,6 @@ impl eframe::App for CrosshairApp {
                 }
             }
         }
-
-
 
         if viewport_focused
             && self.state.show_window
@@ -11739,294 +11878,289 @@ impl eframe::App for CrosshairApp {
                             Color32::from_rgba_premultiplied(214, 223, 235, 110)
                         };
 
-                            let exit_response = Self::hover_if(
-                                Self::add_sized_with_show_hover_radius(
-                                    ui,
-                                    [38.0, 30.0],
-                                    8,
-                                    self.titlebar_button(
-                                        Self::material_icon_text(0xe5cd, 18.0),
-                                        false,
-                                        true,
-                                    ),
+                        let exit_response = Self::hover_if(
+                            Self::add_sized_with_show_hover_radius(
+                                ui,
+                                [38.0, 30.0],
+                                8,
+                                self.titlebar_button(
+                                    Self::material_icon_text(0xe5cd, 18.0),
+                                    false,
+                                    true,
                                 ),
-                                show_icon_tooltips,
-                                self.tr("Exit", "Thoát"),
-                            );
-                            if exit_response.clicked() {
-                                let _ = self.overlay_tx.send(OverlayCommand::Exit);
-                            }
-                            let hide_response = Self::hover_if(
-                                Self::add_sized_with_show_hover_radius(
-                                    ui,
-                                    [38.0, 30.0],
-                                    8,
-                                    self.titlebar_button(
-                                        Self::material_icon_text(0xe8a4, 18.0),
-                                        false,
-                                        false,
-                                    ),
+                            ),
+                            show_icon_tooltips,
+                            self.tr("Exit", "Thoát"),
+                        );
+                        if exit_response.clicked() {
+                            let _ = self.overlay_tx.send(OverlayCommand::Exit);
+                        }
+                        let hide_response = Self::hover_if(
+                            Self::add_sized_with_show_hover_radius(
+                                ui,
+                                [38.0, 30.0],
+                                8,
+                                self.titlebar_button(
+                                    Self::material_icon_text(0xe8a4, 18.0),
+                                    false,
+                                    false,
                                 ),
-                                show_icon_tooltips,
-                                self.tr("Hide to tray", "Ẩn xuống khay"),
-                            );
-                            if hide_response.clicked() {
-                                self.hide_to_tray(ctx);
-                            }
-                            let maximize_response = Self::hover_if(
-                                Self::add_sized_with_show_hover_radius(
-                                    ui,
-                                    [38.0, 30.0],
-                                    8,
-                                    self.titlebar_button(
-                                        if maximized {
-                                            Self::material_icon_text(0xe5cf, 18.0)
-                                        } else {
-                                            Self::material_icon_text(0xe5d0, 18.0)
-                                        },
-                                        maximized,
-                                        false,
-                                    ),
-                                ),
-                                show_icon_tooltips,
-                                self.titlebar_maximize_tooltip(maximized),
-                            );
-                            if maximize_response.clicked() {
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-                            }
-                            let minimize_response = Self::hover_if(
-                                Self::add_sized_with_show_hover_radius(
-                                    ui,
-                                    [38.0, 30.0],
-                                    8,
-                                    self.titlebar_button(
-                                        Self::material_icon_text(0xe15b, 18.0),
-                                        false,
-                                        false,
-                                    ),
-                                ),
-                                show_icon_tooltips,
-                                self.titlebar_minimize_tooltip(),
-                            );
-                            if minimize_response.clicked() {
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                            }
-                            let theme_response = Self::hover_if(
-                                Self::add_sized_with_show_hover_radius(
-                                    ui,
-                                    [38.0, 30.0],
-                                    8,
-                                    self.titlebar_button(self.theme_button_text(), false, false),
-                                ),
-                                show_icon_tooltips,
-                                self.titlebar_theme_tooltip(),
-                            );
-                            if theme_response.clicked() {
-                                self.toggle_theme_mode();
-                            }
-                            let language_response = Self::hover_if(
-                                Self::add_sized_with_show_hover_radius(
-                                    ui,
-                                    [38.0, 30.0],
-                                    8,
-                                    self.titlebar_button(self.language_button_text(), false, false),
-                                ),
-                                show_icon_tooltips,
-                                self.titlebar_language_tooltip(),
-                            );
-                            if language_response.clicked() {
-                                self.cycle_language();
-                            }
-                            let vietnamese_input_texture = self.vietnamese_input_icon_texture(
-                                ctx,
-                                self.state.vietnamese_input_enabled,
-                            );
-                            let vietnamese_input_response = Self::hover_if(
-                                Self::add_sized_with_show_hover_radius(
-                                    ui,
-                                    [38.0, 30.0],
-                                    8,
-                                    if let Some(texture) = vietnamese_input_texture.as_ref() {
-                                        let image = Image::new((texture.id(), vec2(20.0, 20.0)));
-                                        let (fill, stroke) = if self.state.ui_theme
-                                            == UiThemeMode::Dark
-                                        {
-                                            (
-                                                Color32::from_rgba_premultiplied(54, 67, 88, 88),
-                                                Color32::from_rgb(74, 92, 118),
-                                            )
-                                        } else {
-                                            (
-                                                Color32::from_rgba_premultiplied(
-                                                    220, 228, 238, 165,
-                                                ),
-                                                Color32::from_rgb(188, 198, 214),
-                                            )
-                                        };
-                                        Button::image(image)
-                                            .fill(fill)
-                                            .stroke(egui::Stroke::new(1.0, stroke))
-                                            .corner_radius(8.0)
+                            ),
+                            show_icon_tooltips,
+                            self.tr("Hide to tray", "Ẩn xuống khay"),
+                        );
+                        if hide_response.clicked() {
+                            self.hide_to_tray(ctx);
+                        }
+                        let maximize_response = Self::hover_if(
+                            Self::add_sized_with_show_hover_radius(
+                                ui,
+                                [38.0, 30.0],
+                                8,
+                                self.titlebar_button(
+                                    if maximized {
+                                        Self::material_icon_text(0xe5cf, 18.0)
                                     } else {
-                                        self.titlebar_button(
-                                            self.vietnamese_input_button_text(),
-                                            false,
-                                            false,
-                                        )
+                                        Self::material_icon_text(0xe5d0, 18.0)
                                     },
+                                    maximized,
+                                    false,
                                 ),
-                                show_icon_tooltips,
-                                self.titlebar_vietnamese_input_tooltip(),
-                            );
-                            if vietnamese_input_response.clicked() {
-                                self.toggle_vietnamese_input_enabled();
-                            }
-                            let guides_button_response =
-                                Self::add_sized_with_show_hover_radius(
-                                    ui,
-                                    [38.0, 30.0],
-                                    8,
+                            ),
+                            show_icon_tooltips,
+                            self.titlebar_maximize_tooltip(maximized),
+                        );
+                        if maximize_response.clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+                        }
+                        let minimize_response = Self::hover_if(
+                            Self::add_sized_with_show_hover_radius(
+                                ui,
+                                [38.0, 30.0],
+                                8,
+                                self.titlebar_button(
+                                    Self::material_icon_text(0xe15b, 18.0),
+                                    false,
+                                    false,
+                                ),
+                            ),
+                            show_icon_tooltips,
+                            self.titlebar_minimize_tooltip(),
+                        );
+                        if minimize_response.clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                        }
+                        let theme_response = Self::hover_if(
+                            Self::add_sized_with_show_hover_radius(
+                                ui,
+                                [38.0, 30.0],
+                                8,
+                                self.titlebar_button(self.theme_button_text(), false, false),
+                            ),
+                            show_icon_tooltips,
+                            self.titlebar_theme_tooltip(),
+                        );
+                        if theme_response.clicked() {
+                            self.toggle_theme_mode();
+                        }
+                        let language_response = Self::hover_if(
+                            Self::add_sized_with_show_hover_radius(
+                                ui,
+                                [38.0, 30.0],
+                                8,
+                                self.titlebar_button(self.language_button_text(), false, false),
+                            ),
+                            show_icon_tooltips,
+                            self.titlebar_language_tooltip(),
+                        );
+                        if language_response.clicked() {
+                            self.cycle_language();
+                        }
+                        let vietnamese_input_texture = self.vietnamese_input_icon_texture(
+                            ctx,
+                            self.state.vietnamese_input_enabled,
+                        );
+                        let vietnamese_input_response = Self::hover_if(
+                            Self::add_sized_with_show_hover_radius(
+                                ui,
+                                [38.0, 30.0],
+                                8,
+                                if let Some(texture) = vietnamese_input_texture.as_ref() {
+                                    let image = Image::new((texture.id(), vec2(20.0, 20.0)));
+                                    let (fill, stroke) = if self.state.ui_theme == UiThemeMode::Dark
+                                    {
+                                        (
+                                            Color32::from_rgba_premultiplied(54, 67, 88, 88),
+                                            Color32::from_rgb(74, 92, 118),
+                                        )
+                                    } else {
+                                        (
+                                            Color32::from_rgba_premultiplied(220, 228, 238, 165),
+                                            Color32::from_rgb(188, 198, 214),
+                                        )
+                                    };
+                                    Button::image(image)
+                                        .fill(fill)
+                                        .stroke(egui::Stroke::new(1.0, stroke))
+                                        .corner_radius(8.0)
+                                } else {
                                     self.titlebar_button(
-                                        RichText::new("!").size(18.0).strong(),
-                                        self.titlebar_guides_open,
+                                        self.vietnamese_input_button_text(),
                                         false,
-                                    ),
-                                );
-                            let guides_response = Self::hover_if(
-                                guides_button_response,
-                                show_icon_tooltips,
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Guides",
-                                    "Huong dan",
-                                ),
+                                        false,
+                                    )
+                                },
+                            ),
+                            show_icon_tooltips,
+                            self.titlebar_vietnamese_input_tooltip(),
+                        );
+                        if vietnamese_input_response.clicked() {
+                            self.toggle_vietnamese_input_enabled();
+                        }
+                        let guides_button_response = Self::add_sized_with_show_hover_radius(
+                            ui,
+                            [38.0, 30.0],
+                            8,
+                            self.titlebar_button(
+                                RichText::new("!").size(18.0).strong(),
+                                self.titlebar_guides_open,
+                                false,
+                            ),
+                        );
+                        let guides_response = Self::hover_if(
+                            guides_button_response,
+                            show_icon_tooltips,
+                            Self::tr_lang(self.state.ui_language, "Guides", "Huong dan"),
+                        );
+                        if guides_response.clicked() {
+                            self.titlebar_guides_open = !self.titlebar_guides_open;
+                        }
+                        let taskbar_hidden = crate::platform::is_taskbar_hidden();
+                        let quick_actions_button_response = Self::add_sized_with_show_hover_radius(
+                            ui,
+                            [38.0, 30.0],
+                            8,
+                            self.titlebar_button(
+                                Self::material_icon_text(0xf86e, 18.0),
+                                false,
+                                false,
+                            ),
+                        );
+                        let pin_window_available = !self.quick_action_window_selector.is_empty();
+                        let pinned_window_active = pin_window_available
+                            && window_list::is_window_topmost(&self.quick_action_window_selector);
+                        let mut active_count = 0;
+                        if taskbar_hidden {
+                            active_count += 1;
+                        }
+                        if self.state.windows_key_locked {
+                            active_count += 1;
+                        }
+                        if pinned_window_active {
+                            active_count += 1;
+                        }
+                        if self.state.native_focus_highlight_enabled {
+                            active_count += 1;
+                        }
+                        if self.state.protractor_enabled {
+                            active_count += 1;
+                        }
+                        if self.state.quick_key_display_enabled {
+                            active_count += 1;
+                        }
+                        if self.state.quick_screen_draw_enabled {
+                            active_count += 1;
+                        }
+                        if active_count > 0 {
+                            let badge_center =
+                                quick_actions_button_response.rect.right_top() + vec2(-8.0, 8.0);
+                            ui.painter().circle_filled(
+                                badge_center,
+                                7.5,
+                                Color32::from_rgb(255, 60, 60),
                             );
-                            if guides_response.clicked() {
-                                self.titlebar_guides_open = !self.titlebar_guides_open;
-                            }
-                            let taskbar_hidden = crate::platform::is_taskbar_hidden();
-                            let quick_actions_button_response =
-                                Self::add_sized_with_show_hover_radius(
-                                    ui,
-                                    [38.0, 30.0],
-                                    8,
-                                    self.titlebar_button(
-                                        Self::material_icon_text(0xf86e, 18.0),
-                                        false,
-                                        false,
-                                    ),
-                                );
-                            let pin_window_available = !self.quick_action_window_selector.is_empty();
-                            let pinned_window_active = pin_window_available && window_list::is_window_topmost(&self.quick_action_window_selector);
-                            let mut active_count = 0;
-                            if taskbar_hidden {
-                                active_count += 1;
-                            }
-                            if self.state.windows_key_locked {
-                                active_count += 1;
-                            }
-                            if pinned_window_active {
-                                active_count += 1;
-                            }
-                            if self.state.native_focus_highlight_enabled {
-                                active_count += 1;
-                            }
-                            if self.state.protractor_enabled {
-                                active_count += 1;
-                            }
-                            if active_count > 0 {
-                                let badge_center = quick_actions_button_response.rect.right_top()
-                                    + vec2(-8.0, 8.0);
-                                ui.painter().circle_filled(
-                                    badge_center,
-                                    7.5,
-                                    Color32::from_rgb(255, 60, 60),
-                                );
-                                ui.painter().circle_stroke(
-                                    badge_center,
-                                    7.5,
-                                    egui::Stroke::new(1.0, Color32::WHITE),
-                                );
-                                ui.painter().text(
-                                    badge_center,
-                                    egui::Align2::CENTER_CENTER,
-                                    active_count.to_string(),
-                                    egui::FontId::proportional(9.0),
-                                    Color32::WHITE,
-                                );
-                            }
-                            let quick_actions_response = Self::hover_if(
-                                quick_actions_button_response,
-                                show_icon_tooltips,
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Quick actions",
-                                    "Thao tac nhanh",
-                                ),
+                            ui.painter().circle_stroke(
+                                badge_center,
+                                7.5,
+                                egui::Stroke::new(1.0, Color32::WHITE),
                             );
-                            let quick_actions_popup_id =
-                                ui.make_persistent_id("titlebar-quick-actions-popup");
-                            let mut quick_actions_open = ui
-                                .ctx()
-                                .data(|data| data.get_temp::<bool>(quick_actions_popup_id))
-                                .unwrap_or(false);
-                            if quick_actions_response.clicked() {
-                                quick_actions_open = !quick_actions_open;
-                            }
-                            let mut keep_quick_actions_open = false;
-                            let popup_result = egui::Popup::from_response(&quick_actions_response)
-                                .id(quick_actions_popup_id)
-                                .open_bool(&mut quick_actions_open)
-                                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                .align(egui::RectAlign::BOTTOM_END)
-                                .layout(egui::Layout::top_down(egui::Align::Min))
-                                .width(432.0)
-                                .show(|ui| {
-                                    ui.set_min_width(432.0);
-                                    Frame::new()
-                                        .fill(button_fill)
-                                        .stroke(egui::Stroke::new(
-                                            1.0,
-                                            if self.state.ui_theme == UiThemeMode::Dark {
-                                                Color32::from_rgba_premultiplied(96, 118, 148, 196)
-                                            } else {
-                                                Color32::from_rgba_premultiplied(170, 182, 198, 180)
-                                            },
-                                        ))
-                                        .corner_radius(14.0)
-                                        .inner_margin(egui::Margin::symmetric(10, 10))
-                                        .show(ui, |ui| {
-                                            keep_quick_actions_open =
-                                                self.render_titlebar_quick_actions_grid(
-                                                    ui,
-                                                    taskbar_hidden,
-                                                );
-                                        });
-                                });
-                            let _ = popup_result;
-                            if keep_quick_actions_open {
-                                quick_actions_open = true;
-                            }
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(quick_actions_popup_id, quick_actions_open);
+                            ui.painter().text(
+                                badge_center,
+                                egui::Align2::CENTER_CENTER,
+                                active_count.to_string(),
+                                egui::FontId::proportional(9.0),
+                                Color32::WHITE,
+                            );
+                        }
+                        let quick_actions_response = Self::hover_if(
+                            quick_actions_button_response,
+                            show_icon_tooltips,
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Quick actions",
+                                "Thao tac nhanh",
+                            ),
+                        );
+                        let quick_actions_popup_id =
+                            ui.make_persistent_id("titlebar-quick-actions-popup");
+                        let mut quick_actions_open = ui
+                            .ctx()
+                            .data(|data| data.get_temp::<bool>(quick_actions_popup_id))
+                            .unwrap_or(false);
+                        if quick_actions_response.clicked() {
+                            quick_actions_open = !quick_actions_open;
+                        }
+                        let mut keep_quick_actions_open = false;
+                        let popup_result = egui::Popup::from_response(&quick_actions_response)
+                            .id(quick_actions_popup_id)
+                            .open_bool(&mut quick_actions_open)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .align(egui::RectAlign::BOTTOM_END)
+                            .layout(egui::Layout::top_down(egui::Align::Min))
+                            .width(616.0)
+                            .show(|ui| {
+                                ui.set_min_width(616.0);
+                                Frame::new()
+                                    .fill(button_fill)
+                                    .stroke(egui::Stroke::new(
+                                        1.0,
+                                        if self.state.ui_theme == UiThemeMode::Dark {
+                                            Color32::from_rgba_premultiplied(96, 118, 148, 196)
+                                        } else {
+                                            Color32::from_rgba_premultiplied(170, 182, 198, 180)
+                                        },
+                                    ))
+                                    .corner_radius(14.0)
+                                    .inner_margin(egui::Margin::symmetric(10, 10))
+                                    .show(ui, |ui| {
+                                        keep_quick_actions_open = self
+                                            .render_titlebar_quick_actions_grid(ui, taskbar_hidden);
+                                    });
                             });
-                            let settings_response = Self::hover_if(
-                                Self::add_sized_with_show_hover_radius(
-                                    ui,
-                                    [38.0, 30.0],
-                                    8,
-                                    self.titlebar_button(
-                                        Self::material_icon_text(0xe8b8, 18.0),
-                                        false,
-                                        false,
-                                    ),
+                        let _ = popup_result;
+                        if keep_quick_actions_open {
+                            quick_actions_open = true;
+                        }
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(quick_actions_popup_id, quick_actions_open);
+                        });
+                        let settings_response = Self::hover_if(
+                            Self::add_sized_with_show_hover_radius(
+                                ui,
+                                [38.0, 30.0],
+                                8,
+                                self.titlebar_button(
+                                    Self::material_icon_text(0xe8b8, 18.0),
+                                    false,
+                                    false,
                                 ),
-                                show_icon_tooltips,
-                                Self::tr_lang(self.state.ui_language, "Settings", "Settings"),
-                            );
-                            if settings_response.clicked() {
-                                self.settings_popup_open = !self.settings_popup_open;
-                            }
+                            ),
+                            show_icon_tooltips,
+                            Self::tr_lang(self.state.ui_language, "Settings", "Settings"),
+                        );
+                        if settings_response.clicked() {
+                            self.settings_popup_open = !self.settings_popup_open;
+                        }
 
                         ui.add_space(4.0);
 
@@ -12041,56 +12175,35 @@ impl eframe::App for CrosshairApp {
                                     } else {
                                         Color32::from_rgb(34, 122, 88)
                                     };
-                                    ui.horizontal(|ui| {
-                                        if let Some(texture) = self.titlebar_app_icon_texture(ctx)
-                                        {
-                                            let icon_fill = if self.state.ui_theme
-                                                == UiThemeMode::Dark
+                                    ui.with_layout(
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            if let Some(texture) =
+                                                self.titlebar_app_icon_texture(ctx)
                                             {
-                                                Color32::from_rgba_premultiplied(
-                                                    18, 34, 28, 0,
-                                                )
-                                            } else {
-                                                Color32::from_rgba_premultiplied(
-                                                    240, 248, 244, 0,
-                                                )
-                                            };
-                                            egui::Frame::new()
-                                                .fill(icon_fill)
-                                                .stroke(egui::Stroke::NONE)
-                                                .corner_radius(12.0)
-                                                .inner_margin(egui::Margin::same(0))
-                                                .show(ui, |ui| {
-                                                    ui.add(
-                                                        Image::new((
-                                                            texture.id(),
-                                                            vec2(30.0, 30.0),
-                                                        ))
+                                                ui.add(
+                                                    Image::new((texture.id(), vec2(28.0, 28.0)))
                                                         .sense(Sense::hover()),
-                                                    );
-                                                });
-                                        }
-                                        ui.add_space(6.0);
-                                        ui.vertical(|ui| {
-                                            ui.horizontal(|ui| {
-                                                ui.label(
-                                                    RichText::new(self.app_brand_title())
-                                                        .strong()
-                                                        .size(18.0)
-                                                        .color(Color32::WHITE),
                                                 );
-                                                ui.add_space(4.0);
-                                                ui.label(
-                                                    RichText::new(format!(
-                                                        "v{}",
-                                                        self.app_version_label()
-                                                    ))
-                                                    .size(9.0)
-                                                    .color(accent.gamma_multiply(0.95)),
-                                                );
-                                            });
-                                        });
-                                    });
+                                            }
+                                            ui.add_space(8.0);
+                                            ui.label(
+                                                RichText::new(self.app_brand_title())
+                                                    .strong()
+                                                    .size(17.0)
+                                                    .color(Color32::WHITE),
+                                            );
+                                            ui.add_space(4.0);
+                                            ui.label(
+                                                RichText::new(format!(
+                                                    "v{}",
+                                                    self.app_version_label()
+                                                ))
+                                                .size(8.5)
+                                                .color(accent.gamma_multiply(0.95)),
+                                            );
+                                        },
+                                    );
                                     ui.interact(
                                         ui.max_rect(),
                                         ui.id().with("titlebar-drag"),
@@ -12138,21 +12251,25 @@ impl eframe::App for CrosshairApp {
                     }
                     if self.active_audio_editor.is_some() {
                         let text = RichText::new(self.panel_label(AppPanel::Media));
-                        let response = Self::add_with_show_hover_radius(ui, 10, self.top_tab_button(
-                            text,
-                            self.state.active_panel == AppPanel::Media,
-                            false,
-                        ));
+                        let response = Self::add_with_show_hover_radius(
+                            ui,
+                            10,
+                            self.top_tab_button(
+                                text,
+                                self.state.active_panel == AppPanel::Media,
+                                false,
+                            ),
+                        );
                         if response.clicked() {
                             self.state.active_panel = AppPanel::Media;
                         }
                     }
                     let text = RichText::new(self.panel_label(AppPanel::Hud));
-                    let response = Self::add_with_show_hover_radius(ui, 10, self.top_tab_button(
-                        text,
-                        self.state.active_panel == AppPanel::Hud,
-                        false,
-                    ));
+                    let response = Self::add_with_show_hover_radius(
+                        ui,
+                        10,
+                        self.top_tab_button(text, self.state.active_panel == AppPanel::Hud, false),
+                    );
                     if response.clicked() {
                         self.state.active_panel = AppPanel::Hud;
                     }
@@ -12171,7 +12288,8 @@ impl eframe::App for CrosshairApp {
         }
 
         if self.state.active_panel != AppPanel::AudioSense {
-            if self.active_pitch_preview_preset_id.take().is_some() || self.audio_sense_test_active {
+            if self.active_pitch_preview_preset_id.take().is_some() || self.audio_sense_test_active
+            {
                 self.pitch_monitor.stop();
                 self.audio_sense_test_active = false;
             }
@@ -12202,7 +12320,10 @@ impl eframe::App for CrosshairApp {
                     && active_panel != AppPanel::Modes;
                 if panel_shell_active {
                     self.render_panel_loading_shell(ui, active_panel);
-                } else if active_panel == AppPanel::Macros || active_panel == AppPanel::Modes || active_panel == AppPanel::Mouse {
+                } else if active_panel == AppPanel::Macros
+                    || active_panel == AppPanel::Modes
+                    || active_panel == AppPanel::Mouse
+                {
                     if active_panel == AppPanel::Mouse {
                         self.render_mouse_panel(ui);
                     } else {
@@ -12398,8 +12519,3 @@ pub(crate) fn video_duration(clip: &VideoClipSettings) -> Option<u64> {
             .map(|meta| meta.duration_ms)
     }
 }
-
-
-
-
-
