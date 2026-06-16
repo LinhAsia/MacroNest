@@ -356,6 +356,48 @@ fn circle_from_3_points(
     Some(((ux.round() as i32, uy.round() as i32), r as f32))
 }
 
+fn draw_rounded_rect(
+    pixmap: &mut Pixmap,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radius: f32,
+    fill_paint: &Paint,
+    stroke: Option<(&Paint, &Stroke)>,
+) {
+    let mut pb = PathBuilder::new();
+    pb.move_to(x + radius, y);
+    pb.line_to(x + w - radius, y);
+    pb.quad_to(x + w, y, x + w, y + radius);
+    pb.line_to(x + w, y + h - radius);
+    pb.quad_to(x + w, y + h, x + w - radius, y + h);
+    pb.line_to(x + radius, y + h);
+    pb.quad_to(x, y + h, x, y + h - radius);
+    pb.line_to(x, y + radius);
+    pb.quad_to(x, y, x + radius, y);
+    pb.close();
+
+    if let Some(path) = pb.finish() {
+        pixmap.fill_path(
+            &path,
+            fill_paint,
+            tiny_skia::FillRule::Winding,
+            tiny_skia::Transform::identity(),
+            None,
+        );
+        if let Some((stroke_paint, stroke_val)) = stroke {
+            pixmap.stroke_path(
+                &path,
+                stroke_paint,
+                stroke_val,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    }
+}
+
 unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<()> {
     let w = state.width as usize;
     let h = state.height as usize;
@@ -494,6 +536,175 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
                 pixmap.stroke_path(&path, &ch_paint, &stroke, tiny_skia::Transform::identity(), None);
             }
         }
+    }
+
+    // Draw coordinate & color magnifier preview panel
+    let mut center_color = (0u8, 0u8, 0u8, 255u8);
+    let mut panel_x = 0.0f32;
+    let mut panel_y = 0.0f32;
+    let mut preview_panel_visible = false;
+
+    if let Some(curr) = state.current_point {
+        preview_panel_visible = true;
+
+        let panel_w = 200.0f32;
+        let panel_h = 246.0f32;
+        let margin = 18.0f32;
+
+        let pointer_x = curr.0 as f32;
+        let pointer_y = curr.1 as f32;
+        let safe_r = 40.0f32;
+        let safe_left = pointer_x - safe_r;
+        let safe_right = pointer_x + safe_r;
+        let safe_top = pointer_y - safe_r;
+        let safe_bottom = pointer_y + safe_r;
+
+        panel_x = state.width as f32 - panel_w - margin;
+        panel_y = margin;
+
+        let candidates = [
+            (state.width as f32 - panel_w - margin, margin),
+            (margin, margin),
+            (state.width as f32 - panel_w - margin, state.height as f32 - panel_h - margin),
+            (margin, state.height as f32 - panel_h - margin),
+        ];
+
+        for &(cx, cy) in &candidates {
+            let intersects = !(cx + panel_w < safe_left || cx > safe_right || cy + panel_h < safe_top || cy > safe_bottom);
+            if !intersects {
+                panel_x = cx;
+                panel_y = cy;
+                break;
+            }
+        }
+
+        // Draw background
+        let mut bg_paint = Paint::default();
+        bg_paint.set_color_rgba8(12, 18, 28, 255);
+        let mut border_paint = Paint::default();
+        border_paint.set_color_rgba8(110, 156, 210, 255);
+        let border_stroke = Stroke {
+            width: 1.0,
+            ..Default::default()
+        };
+        draw_rounded_rect(&mut pixmap, panel_x, panel_y, panel_w, panel_h, 10.0, &bg_paint, Some((&border_paint, &border_stroke)));
+
+        // Draw magnified preview
+        let content_left = panel_x + 28.0;
+        let preview_y = panel_y + 12.0;
+        let preview_w = 144.0f32;
+        let preview_h = 144.0f32;
+        let sample_size = 17;
+        let cell_size = preview_w / sample_size as f32;
+
+        for dy in 0..sample_size {
+            let sy = curr.1 - 8 + dy as i32;
+            for dx in 0..sample_size {
+                let sx = curr.0 - 8 + dx as i32;
+
+                let mut r = 0u8;
+                let mut g = 0u8;
+                let mut b = 0u8;
+                let mut a = 255u8;
+
+                if sx >= 0 && sx < state.width && sy >= 0 && sy < state.height {
+                    let idx = (sy as usize * state.width as usize + sx as usize) * 4;
+                    if idx + 3 < state.capture_frame.rgba.len() {
+                        r = state.capture_frame.rgba[idx];
+                        g = state.capture_frame.rgba[idx + 1];
+                        b = state.capture_frame.rgba[idx + 2];
+                        a = state.capture_frame.rgba[idx + 3];
+                    }
+                }
+
+                if dx == 8 && dy == 8 {
+                    center_color = (r, g, b, a);
+                }
+
+                let cx = content_left + dx as f32 * cell_size;
+                let cy = preview_y + dy as f32 * cell_size;
+                let cell_rect = Rect::from_xywh(cx, cy, cell_size, cell_size).unwrap();
+                let mut cell_paint = Paint::default();
+                cell_paint.set_color_rgba8(r, g, b, a);
+                pixmap.fill_rect(cell_rect, &cell_paint, tiny_skia::Transform::identity(), None);
+            }
+        }
+
+        // Draw center pixel border highlight
+        let center_cx = content_left + 8.0 * cell_size;
+        let center_cy = preview_y + 8.0 * cell_size;
+        let mut center_pb = PathBuilder::new();
+        center_pb.move_to(center_cx, center_cy);
+        center_pb.line_to(center_cx + cell_size, center_cy);
+        center_pb.line_to(center_cx + cell_size, center_cy + cell_size);
+        center_pb.line_to(center_cx, center_cy + cell_size);
+        center_pb.close();
+        if let Some(center_path) = center_pb.finish() {
+            let mut center_border_paint = Paint::default();
+            center_border_paint.set_color_rgba8(120, 220, 255, 255);
+            let center_border_stroke = Stroke {
+                width: 2.0,
+                ..Default::default()
+            };
+            pixmap.stroke_path(
+                &center_path,
+                &center_border_paint,
+                &center_border_stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+
+        // Draw preview outline border
+        let mut preview_pb = PathBuilder::new();
+        let radius = 6.0f32;
+        preview_pb.move_to(content_left + radius, preview_y);
+        preview_pb.line_to(content_left + preview_w - radius, preview_y);
+        preview_pb.quad_to(content_left + preview_w, preview_y, content_left + preview_w, preview_y + radius);
+        preview_pb.line_to(content_left + preview_w, preview_y + preview_h - radius);
+        preview_pb.quad_to(content_left + preview_w, preview_y + preview_h, content_left + preview_w - radius, preview_y + preview_h);
+        preview_pb.line_to(content_left + radius, preview_y + preview_h);
+        preview_pb.quad_to(content_left, preview_y + preview_h, content_left, preview_y + preview_h - radius);
+        preview_pb.line_to(content_left, preview_y + radius);
+        preview_pb.quad_to(content_left, preview_y, content_left + radius, preview_y);
+        preview_pb.close();
+        if let Some(preview_path) = preview_pb.finish() {
+            let mut preview_border_paint = Paint::default();
+            preview_border_paint.set_color_rgba8(146, 192, 248, 255);
+            let preview_border_stroke = Stroke {
+                width: 1.0,
+                ..Default::default()
+            };
+            pixmap.stroke_path(
+                &preview_path,
+                &preview_border_paint,
+                &preview_border_stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+
+        // Draw swatch
+        let swatch_x = panel_x + 12.0;
+        let swatch_y = panel_y + 168.0;
+        let mut swatch_fill_paint = Paint::default();
+        swatch_fill_paint.set_color_rgba8(center_color.0, center_color.1, center_color.2, 255);
+        let mut swatch_border_paint = Paint::default();
+        swatch_border_paint.set_color_rgba8(255, 255, 255, 255);
+        let swatch_border_stroke = Stroke {
+            width: 1.0,
+            ..Default::default()
+        };
+        draw_rounded_rect(
+            &mut pixmap,
+            swatch_x,
+            swatch_y,
+            26.0,
+            26.0,
+            6.0,
+            &swatch_fill_paint,
+            Some((&swatch_border_paint, &swatch_border_stroke)),
+        );
     }
 
     // 4. Copy Pixmap to GDI window HDC
@@ -677,6 +888,91 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
         let _ = SelectObject(hdc, old_tp);
         let _ = DeleteObject(HGDIOBJ(t_brush.0));
         let _ = DeleteObject(HGDIOBJ(t_pen.0));
+    }
+
+    // Draw preview panel text if panel is visible
+    if preview_panel_visible {
+        let vietnamese = match state.mode {
+            NativeCaptureMode::ProtractorCalibration { ui_language } => ui_language == crate::model::UiLanguage::Vietnamese,
+            NativeCaptureMode::RegionSelect { vietnamese, .. } => vietnamese,
+            NativeCaptureMode::PointClick { vietnamese, .. } => vietnamese,
+        };
+
+        // Create Hex Code Font (18px bold)
+        let hex_font = CreateFontW(
+            18, 0, 0, 0,
+            700, // FW_BOLD
+            0, 0, 0,
+            FONT_CHARSET(0),
+            FONT_OUTPUT_PRECISION(0),
+            FONT_CLIP_PRECISION(0),
+            FONT_QUALITY(0),
+            0,
+            w!("Segoe UI"),
+        );
+
+        // Create Label Font (13px normal)
+        let label_font = CreateFontW(
+            13, 0, 0, 0,
+            400, // FW_NORMAL
+            0, 0, 0,
+            FONT_CHARSET(0),
+            FONT_OUTPUT_PRECISION(0),
+            FONT_CLIP_PRECISION(0),
+            FONT_QUALITY(0),
+            0,
+            w!("Segoe UI"),
+        );
+
+        let _ = SetBkMode(hdc, TRANSPARENT);
+
+        // 1. Draw Hex code
+        let hex_str = format!("#{:02X}{:02X}{:02X}", center_color.0, center_color.1, center_color.2);
+        let mut hex_u16: Vec<u16> = hex_str.encode_utf16().collect();
+        let mut hex_rect = RECT {
+            left: (panel_x + 48.0) as i32,
+            top: (panel_y + 171.0) as i32,
+            right: (panel_x + 192.0) as i32,
+            bottom: (panel_y + 194.0) as i32,
+        };
+        let old_f = SelectObject(hdc, HGDIOBJ(hex_font.0));
+        let _ = SetTextColor(hdc, rgb(255, 255, 255));
+        let _ = DrawTextW(hdc, &mut hex_u16, &mut hex_rect, DT_SINGLELINE | DT_VCENTER);
+
+        // 2. Draw Coordinates
+        if let Some(curr) = state.current_point {
+            let abs_x = curr.0 + state.left;
+            let abs_y = curr.1 + state.top;
+            let coords_str = format!("X: {abs_x}  Y: {abs_y}");
+            let mut coords_u16: Vec<u16> = coords_str.encode_utf16().collect();
+            let mut coords_rect = RECT {
+                left: (panel_x + 12.0) as i32,
+                top: (panel_y + 202.0) as i32,
+                right: (panel_x + 192.0) as i32,
+                bottom: (panel_y + 220.0) as i32,
+            };
+            let _ = SelectObject(hdc, HGDIOBJ(label_font.0));
+            let _ = SetTextColor(hdc, rgb(188, 206, 230));
+            let _ = DrawTextW(hdc, &mut coords_u16, &mut coords_rect, DT_SINGLELINE | DT_VCENTER);
+        }
+
+        // 3. Draw Center Pixel label
+        let center_pixel_text = if vietnamese { "Pixel trung tam" } else { "Center pixel" };
+        let mut center_u16: Vec<u16> = center_pixel_text.encode_utf16().collect();
+        let mut center_rect = RECT {
+            left: (panel_x + 12.0) as i32,
+            top: (panel_y + 222.0) as i32,
+            right: (panel_x + 192.0) as i32,
+            bottom: (panel_y + 240.0) as i32,
+        };
+        let _ = SelectObject(hdc, HGDIOBJ(label_font.0));
+        let _ = SetTextColor(hdc, rgb(188, 206, 230));
+        let _ = DrawTextW(hdc, &mut center_u16, &mut center_rect, DT_SINGLELINE | DT_VCENTER);
+
+        // Cleanup
+        let _ = SelectObject(hdc, old_f);
+        let _ = DeleteObject(HGDIOBJ(hex_font.0));
+        let _ = DeleteObject(HGDIOBJ(label_font.0));
     }
 
     // Restore font and delete
