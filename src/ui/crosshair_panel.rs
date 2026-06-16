@@ -597,9 +597,10 @@ impl CrosshairApp {
                         grid_changed = true;
                     }
                     if clear_clicked {
-                        grid = vec![vec!['.'; grid_size as usize]; grid_size as usize];
+                        grid = vec![vec!['.'; grid.len()]; grid.len()];
                         grid_changed = true;
                     }
+                    let grid_size = grid.len() as i32;
                     ui.data_mut(|data| data.insert_temp(size_id, pending_size));
 
                     // ---- Paint color picker (edits style.color directly so the render matches) ----
