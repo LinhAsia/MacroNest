@@ -11292,22 +11292,43 @@ impl eframe::App for CrosshairApp {
                                         false,
                                     ),
                                 );
+                            let pin_window_available = !self.quick_action_window_selector.is_empty();
+                            let pinned_window_active = pin_window_available && window_list::is_window_topmost(&self.quick_action_window_selector);
+                            let mut active_count = 0;
                             if taskbar_hidden {
-                                let slash_color = Color32::from_rgb(245, 245, 245);
-                                let slash_rect =
-                                    quick_actions_button_response.rect.shrink2(vec2(7.0, 6.0));
-                                ui.painter().line_segment(
-                                    [slash_rect.left_top(), slash_rect.right_bottom()],
-                                    egui::Stroke::new(2.0, slash_color),
-                                );
+                                active_count += 1;
                             }
                             if self.state.windows_key_locked {
+                                active_count += 1;
+                            }
+                            if pinned_window_active {
+                                active_count += 1;
+                            }
+                            if self.state.native_focus_highlight_enabled {
+                                active_count += 1;
+                            }
+                            if self.state.protractor_enabled {
+                                active_count += 1;
+                            }
+                            if active_count > 0 {
                                 let badge_center = quick_actions_button_response.rect.right_top()
-                                    + vec2(-7.0, 7.0);
+                                    + vec2(-8.0, 8.0);
                                 ui.painter().circle_filled(
                                     badge_center,
-                                    3.0,
-                                    Color32::from_rgb(255, 92, 92),
+                                    7.5,
+                                    Color32::from_rgb(255, 60, 60),
+                                );
+                                ui.painter().circle_stroke(
+                                    badge_center,
+                                    7.5,
+                                    egui::Stroke::new(1.0, Color32::WHITE),
+                                );
+                                ui.painter().text(
+                                    badge_center,
+                                    egui::Align2::CENTER_CENTER,
+                                    active_count.to_string(),
+                                    egui::FontId::proportional(9.0),
+                                    Color32::WHITE,
                                 );
                             }
                             let quick_actions_response = Self::hover_if(
