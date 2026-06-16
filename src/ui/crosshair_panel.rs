@@ -548,23 +548,124 @@ impl CrosshairApp {
                 }
 
                 ui.label(Self::tr_lang(language, "Custom pixels", "Tự vẽ tâm ngắm"));
-                ui.vertical(|ui| {
-                    let mut text = style.custom_pixels.clone().unwrap_or_default();
-                    let response = ui.add(
-                        egui::TextEdit::multiline(&mut text)
-                            .hint_text("Use # for color, @ for outline, . or space for empty.\nExample:\n..#..\n..#..\n##.##\n..#..\n..#..")
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(340.0)
-                            .desired_rows(6)
-                    );
-                    if response.changed() {
-                        style.custom_pixels = if text.trim().is_empty() {
-                            None
-                        } else {
-                            Some(text)
-                        };
-                        changed = true;
-                    }
+                ui.horizontal(|ui| {
+                    let mut text_changed = false;
+                    let mut grid_changed = false;
+
+                    ui.vertical(|ui| {
+                        let mut text = style.custom_pixels.clone().unwrap_or_default();
+                        let hint = Self::tr_lang(
+                            language,
+                            "Use # for color, @ for outline, . or space for empty.\nExample:\n..#..\n..#..\n##.##\n..#..\n..#..",
+                            "Dùng # cho màu tâm, @ cho màu viền, . hoặc khoảng trắng để trống.\nVí dụ:\n..#..\n..#..\n##.##\n..#..\n..#.."
+                        );
+                        let response = ui.add(
+                            egui::TextEdit::multiline(&mut text)
+                                .hint_text(hint)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(180.0)
+                                .desired_rows(12)
+                        );
+                        if response.changed() {
+                            style.custom_pixels = if text.trim().is_empty() {
+                                None
+                            } else {
+                                Some(text)
+                            };
+                            text_changed = true;
+                        }
+                        
+                        if ui.button(Self::tr_lang(language, "Clear", "Xóa sạch")).clicked() {
+                            style.custom_pixels = None;
+                            text_changed = true;
+                        }
+                    });
+
+                    ui.add_space(12.0);
+
+                    ui.vertical(|ui| {
+                        let grid_size = 15;
+                        let mut grid = vec![vec!['.'; grid_size]; grid_size];
+                        if let Some(ref pixels) = style.custom_pixels {
+                            let lines: Vec<&str> = pixels.lines().collect();
+                            for r in 0..grid_size.min(lines.len()) {
+                                let chars: Vec<char> = lines[r].chars().collect();
+                                for c in 0..grid_size.min(chars.len()) {
+                                    grid[r][c] = chars[c];
+                                }
+                            }
+                        }
+
+                        egui::Grid::new("pixel-editor-grid")
+                            .spacing([2.0, 2.0])
+                            .show(ui, |ui| {
+                                for r in 0..grid_size {
+                                    for c in 0..grid_size {
+                                        let cell_char = grid[r][c];
+                                        let (fill, hover_text) = match cell_char {
+                                            '#' | 'x' | 'X' | '1' => (
+                                                Color32::from_rgba_unmultiplied(
+                                                    style.color.r,
+                                                    style.color.g,
+                                                    style.color.b,
+                                                    style.color.a,
+                                                ),
+                                                Self::tr_lang(language, "Crosshair Pixel", "Pixel màu tâm"),
+                                            ),
+                                            '@' | 'o' | 'O' | '2' => (
+                                                Color32::from_rgba_unmultiplied(
+                                                    style.outline_color.r,
+                                                    style.outline_color.g,
+                                                    style.outline_color.b,
+                                                    style.outline_color.a,
+                                                ),
+                                                Self::tr_lang(language, "Outline Pixel", "Pixel màu viền"),
+                                            ),
+                                            _ => (
+                                                if (r + c) % 2 == 0 {
+                                                    Color32::from_gray(35)
+                                                } else {
+                                                    Color32::from_gray(55)
+                                                },
+                                                Self::tr_lang(language, "Empty Pixel (Transparent)", "Pixel rỗng (Trong suốt)"),
+                                            ),
+                                        };
+
+                                        let stroke_color = if cell_char == '.' || cell_char == ' ' {
+                                            Color32::from_gray(65)
+                                        } else {
+                                            Color32::from_gray(95)
+                                        };
+
+                                        let btn = egui::Button::new("")
+                                            .fill(fill)
+                                            .stroke(egui::Stroke::new(1.0, stroke_color));
+                                        let response = ui.add_sized([15.0, 15.0], btn);
+                                        if response.clicked() {
+                                            grid[r][c] = match cell_char {
+                                                '#' | 'x' | 'X' | '1' => '@',
+                                                '@' | 'o' | 'O' | '2' => '.',
+                                                _ => '#',
+                                            };
+                                            grid_changed = true;
+                                        }
+                                        response.on_hover_text(hover_text);
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+
+                        if grid_changed {
+                            let mut lines = Vec::new();
+                            for row in &grid {
+                                let line_str: String = row.iter().collect();
+                                lines.push(line_str);
+                            }
+                            style.custom_pixels = Some(lines.join("\n"));
+                        }
+                    });
+
+                    changed |= text_changed || grid_changed;
                 });
                 ui.end_row();
             });
