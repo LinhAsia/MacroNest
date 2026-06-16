@@ -5052,17 +5052,55 @@ impl CrosshairApp {
                         let capture_active = self.capture_target.as_ref().is_some_and(|target| {
                             matches!(target, CaptureRequest::QuickScreenDrawHotkey)
                         });
-                        let trigger_text =
-                            hotkey::format_binding(self.state.quick_screen_draw_hotkey.as_ref());
+                        let preview_binding = if capture_active {
+                            self.capture_hotkey_combo_keys
+                                .as_ref()
+                                .map(|keys| Self::hotkey_binding_from_combo_keys(keys.clone()))
+                                .or_else(|| self.state.quick_screen_draw_hotkey.clone())
+                        } else {
+                            self.state.quick_screen_draw_hotkey.clone()
+                        };
+                        let capture_time = ui.ctx().input(|input| input.time) as f32;
+                        let pulse = if capture_active {
+                            0.5 + 0.5 * (capture_time * 6.0).sin().abs()
+                        } else {
+                            0.0
+                        };
+                        let capture_fill = if capture_active {
+                            Color32::from_rgba_premultiplied(
+                                (88.0 + pulse * 28.0) as u8,
+                                (84.0 + pulse * 28.0) as u8,
+                                (44.0 + pulse * 10.0) as u8,
+                                255,
+                            )
+                        } else {
+                            ui.visuals().widgets.inactive.bg_fill
+                        };
+                        let capture_stroke = if capture_active {
+                            Color32::from_rgb(255, 232, 96)
+                        } else {
+                            ui.visuals().widgets.inactive.bg_stroke.color
+                        };
                         if ui
                             .add_sized(
-                                [76.0, 20.0],
-                                Button::new(if capture_active {
-                                    "Capturing..."
-                                } else {
-                                    "Capture key"
-                                }),
+                                [28.0, 22.0],
+                                Button::new(Self::material_icon_text(0xe312, 14.0))
+                                    .fill(capture_fill)
+                                    .stroke(egui::Stroke::new(1.0, capture_stroke)),
                             )
+                            .on_hover_text(if capture_active {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Cancel capture",
+                                    "Huy bat phim",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Capture draw hotkey",
+                                    "Bat phim ve",
+                                )
+                            })
                             .clicked()
                         {
                             if capture_active {
@@ -5074,8 +5112,57 @@ impl CrosshairApp {
                                 );
                             }
                         }
-                        ui.add_space(2.0);
-                        ui.label(RichText::new(trigger_text).size(10.0).weak().monospace());
+
+                        ui.add_space(4.0);
+                        if let Some(binding) = preview_binding.as_ref() {
+                            let label = Self::format_binding_ui(
+                                self.state.ui_language,
+                                Some(binding),
+                            );
+                            let chip = if capture_active
+                                && self.capture_hotkey_combo_keys.is_some()
+                            {
+                                Button::new(RichText::new(label).monospace())
+                                    .min_size(vec2(0.0, 22.0))
+                                    .fill(Color32::from_rgba_premultiplied(72, 156, 116, 120))
+                                    .stroke(egui::Stroke::new(
+                                        1.0,
+                                        Color32::from_rgb(126, 224, 182),
+                                    ))
+                            } else {
+                                Button::new(RichText::new(label).monospace())
+                                    .min_size(vec2(0.0, 22.0))
+                            };
+                            let chip_response = ui.add(chip).on_hover_text(if capture_active {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Captured key preview",
+                                    "Xem truoc phim dang bat",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Click to clear this hotkey",
+                                    "Bam de xoa phim tat nay",
+                                )
+                            });
+                            if chip_response.clicked() && !capture_active {
+                                self.state.quick_screen_draw_hotkey = None;
+                                self.sync_quick_screen_draw_config();
+                                self.persist();
+                                self.status = "Cleared screen draw toggle key.".to_owned();
+                            }
+                        } else {
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Not set",
+                                    "Chua gan",
+                                ))
+                                .size(10.0)
+                                .weak(),
+                            );
+                        }
                     },
                 );
             });

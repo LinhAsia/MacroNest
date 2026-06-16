@@ -551,6 +551,11 @@ mod windows_overlay {
         drag_offset_y: i32,
         current_stroke: Option<ScreenDrawStroke>,
         strokes: Vec<ScreenDrawStroke>,
+        canvas_width: usize,
+        canvas_height: usize,
+        committed_rgba: Vec<u8>,
+        frame_rgba: Vec<u8>,
+        committed_dirty: bool,
     }
 
     impl Default for ScreenDrawState {
@@ -577,6 +582,11 @@ mod windows_overlay {
                 drag_offset_y: 0,
                 current_stroke: None,
                 strokes: Vec::new(),
+                canvas_width: 0,
+                canvas_height: 0,
+                committed_rgba: Vec::new(),
+                frame_rgba: Vec::new(),
+                committed_dirty: true,
             }
         }
     }
@@ -1024,6 +1034,7 @@ mod windows_overlay {
         quick_key_display_center_y: i32,
         quick_key_display_size: f32,
         quick_key_display_text: Option<String>,
+        quick_key_display_entries: Vec<String>,
         quick_key_display_hide_at: Option<Instant>,
         tray_menu: HMENU,
         keyboard_hook: HHOOK,
@@ -1579,6 +1590,7 @@ mod windows_overlay {
                 quick_key_display_center_y: GetSystemMetrics(SM_CYSCREEN).max(1) / 2,
                 quick_key_display_size: 36.0,
                 quick_key_display_text: None,
+                quick_key_display_entries: Vec::new(),
                 quick_key_display_hide_at: None,
                 tray_menu,
                 keyboard_hook: HHOOK::default(),
@@ -2032,6 +2044,7 @@ mod windows_overlay {
                             reset_all_input_and_locks();
                             let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
                             let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
+                            runtime.quick_key_display_entries.clear();
                             runtime.quick_key_display_text = None;
                             runtime.quick_key_display_hide_at = None;
                             let _ = ShowWindow(runtime.key_display_hwnd, SW_HIDE);
@@ -4624,6 +4637,26 @@ mod windows_overlay {
         }
     }
 
+    fn quick_key_display_parts(label: &str) -> Vec<String> {
+        label
+            .split('+')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    }
+
+    fn quick_key_display_should_replace(previous: &str, next: &str) -> bool {
+        let previous_parts = quick_key_display_parts(previous);
+        let next_parts = quick_key_display_parts(next);
+        !previous_parts.is_empty()
+            && next_parts.len() >= previous_parts.len()
+            && previous_parts
+                .iter()
+                .zip(next_parts.iter())
+                .all(|(left, right)| left.eq_ignore_ascii_case(right))
+    }
+
     fn quick_key_display_text_for_event(
         key_name: &str,
         is_key_down: bool,
@@ -4686,8 +4719,43 @@ mod windows_overlay {
         }
     }
 
+    fn push_quick_key_display_entry(runtime: &mut Runtime, text: String) {
+        const QUICK_KEY_DISPLAY_MAX_ENTRIES: usize = 4;
+
+        let should_append_duplicate = runtime.quick_key_display_hide_at.is_some();
+        match runtime.quick_key_display_entries.last_mut() {
+            Some(last)
+                if last.eq_ignore_ascii_case(&text) && !should_append_duplicate => {}
+            Some(last)
+                if !should_append_duplicate && quick_key_display_should_replace(last, &text) =>
+            {
+                *last = text;
+            }
+            _ => {
+                runtime.quick_key_display_entries.push(text);
+                if runtime.quick_key_display_entries.len() > QUICK_KEY_DISPLAY_MAX_ENTRIES {
+                    let drop_count =
+                        runtime.quick_key_display_entries.len() - QUICK_KEY_DISPLAY_MAX_ENTRIES;
+                    runtime.quick_key_display_entries.drain(0..drop_count);
+                }
+            }
+        }
+
+        runtime.quick_key_display_text = if runtime.quick_key_display_entries.is_empty() {
+            None
+        } else {
+            Some(runtime.quick_key_display_entries.join("   "))
+        };
+    }
+
     fn update_quick_key_display_key(key_name: &str, is_key_down: bool, is_key_up: bool) {
-        let display = quick_key_display_text_for_event(key_name, is_key_down, is_key_up);
+        let display = if is_key_down {
+            quick_key_display_text_for_event(key_name, is_key_down, false)
+        } else if is_key_up {
+            None
+        } else {
+            quick_key_display_text_for_event(key_name, is_key_down, is_key_up)
+        };
         send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(display));
     }
 
@@ -5063,6 +5131,7 @@ mod windows_overlay {
                     runtime.quick_key_display_center_y = center_y;
                     runtime.quick_key_display_size = size.clamp(18.0, 96.0);
                     if !enabled {
+                        runtime.quick_key_display_entries.clear();
                         runtime.quick_key_display_text = None;
                         runtime.quick_key_display_hide_at = None;
                     }
@@ -5079,11 +5148,11 @@ mod windows_overlay {
                         }
                     }) {
                         Some(text) => {
-                            runtime.quick_key_display_text = Some(text);
+                            push_quick_key_display_entry(runtime, text);
                             runtime.quick_key_display_hide_at = None;
                         }
                         None => {
-                            if runtime.quick_key_display_text.is_some() {
+                            if !runtime.quick_key_display_entries.is_empty() {
                                 runtime.quick_key_display_hide_at =
                                     Some(Instant::now() + QUICK_KEY_DISPLAY_HIDE_DELAY);
                             }
@@ -5449,6 +5518,7 @@ mod windows_overlay {
 
     fn refresh_quick_key_display(runtime: &mut Runtime) -> Result<()> {
         if is_ui_in_foreground() || !runtime.quick_key_display_enabled {
+            runtime.quick_key_display_entries.clear();
             runtime.quick_key_display_hide_at = None;
             runtime.quick_key_display_text = None;
             let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
@@ -5458,6 +5528,7 @@ mod windows_overlay {
         if let Some(hide_at) = runtime.quick_key_display_hide_at
             && Instant::now() >= hide_at
         {
+            runtime.quick_key_display_entries.clear();
             runtime.quick_key_display_hide_at = None;
             runtime.quick_key_display_text = None;
         }
@@ -5555,6 +5626,11 @@ mod windows_overlay {
         state.current_stroke = None;
         state.active_control = ScreenDrawControl::None;
         state.strokes.clear();
+        state.canvas_width = 0;
+        state.canvas_height = 0;
+        state.committed_rgba.clear();
+        state.frame_rgba.clear();
+        state.committed_dirty = true;
     }
 
     fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
@@ -5637,9 +5713,29 @@ mod windows_overlay {
             return false;
         }
         if let Some(stroke) = state.current_stroke.take()
-            && stroke.points.len() > 1
         {
-            state.strokes.push(stroke);
+            if !stroke.points.is_empty() {
+                if state.canvas_width > 0
+                    && state.canvas_height > 0
+                    && !state.committed_rgba.is_empty()
+                    && !state.committed_dirty
+                {
+                    let canvas_width = state.canvas_width as u32;
+                    let canvas_height = state.canvas_height as u32;
+                    if let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
+                        state.committed_rgba.as_mut_slice(),
+                        canvas_width,
+                        canvas_height,
+                    ) {
+                        render_screen_draw_stroke_skia(&mut pixmap, &stroke);
+                    } else {
+                        state.committed_dirty = true;
+                    }
+                } else {
+                    state.committed_dirty = true;
+                }
+                state.strokes.push(stroke);
+            }
         }
         state.active_control = ScreenDrawControl::None;
         true
@@ -5758,29 +5854,148 @@ mod windows_overlay {
         PALETTE[(index + 1) % PALETTE.len()]
     }
 
+    fn ensure_screen_draw_canvas(
+        state: &mut ScreenDrawState,
+        width: usize,
+        height: usize,
+    ) -> bool {
+        if state.canvas_width == width
+            && state.canvas_height == height
+            && state.committed_rgba.len() == width * height * 4
+        {
+            return true;
+        }
+
+        let byte_len = width.saturating_mul(height).saturating_mul(4);
+        state.canvas_width = width;
+        state.canvas_height = height;
+        state.committed_rgba.clear();
+        state.committed_rgba.resize(byte_len, 0);
+        state.frame_rgba.clear();
+        state.frame_rgba.resize(byte_len, 0);
+        state.committed_dirty = true;
+        true
+    }
+
+    fn render_screen_draw_stroke_skia(
+        pixmap: &mut tiny_skia::PixmapMut,
+        stroke: &ScreenDrawStroke,
+    ) {
+        let points = if stroke.smoothing {
+            smoothed_screen_draw_points(&stroke.points, stroke.smoothing_amount)
+        } else {
+            stroke.points.clone()
+        };
+        if points.is_empty() {
+            return;
+        }
+
+        let mut paint = tiny_skia::Paint::default();
+        paint.anti_alias = true;
+        if stroke.eraser {
+            paint.blend_mode = tiny_skia::BlendMode::Clear;
+        } else {
+            paint.set_color(tiny_skia::Color::from_rgba8(
+                stroke.color.r,
+                stroke.color.g,
+                stroke.color.b,
+                stroke.color.a,
+            ));
+        }
+
+        if points.len() == 1 {
+            let mut pb = tiny_skia::PathBuilder::new();
+            pb.push_circle(
+                points[0].x as f32,
+                points[0].y as f32,
+                (stroke.brush_size.max(1.0) * 0.5).max(0.75),
+            );
+            if let Some(path) = pb.finish() {
+                pixmap.fill_path(
+                    &path,
+                    &paint,
+                    tiny_skia::FillRule::Winding,
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
+            }
+            return;
+        }
+
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.move_to(points[0].x as f32, points[0].y as f32);
+        for point in points.iter().skip(1) {
+            pb.line_to(point.x as f32, point.y as f32);
+        }
+        if let Some(path) = pb.finish() {
+            let stroke_style = tiny_skia::Stroke {
+                width: stroke.brush_size.max(1.0),
+                line_cap: tiny_skia::LineCap::Round,
+                line_join: tiny_skia::LineJoin::Round,
+                ..Default::default()
+            };
+            pixmap.stroke_path(
+                &path,
+                &paint,
+                &stroke_style,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    }
+
+    fn rebuild_screen_draw_canvas(state: &mut ScreenDrawState) {
+        if state.canvas_width == 0 || state.canvas_height == 0 || state.committed_rgba.is_empty() {
+            return;
+        }
+        state.committed_rgba.fill(0);
+        if let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
+            state.committed_rgba.as_mut_slice(),
+            state.canvas_width as u32,
+            state.canvas_height as u32,
+        ) {
+            for stroke in &state.strokes {
+                render_screen_draw_stroke_skia(&mut pixmap, stroke);
+            }
+            state.committed_dirty = false;
+        }
+    }
+
     unsafe fn paint_screen_draw_overlay(hwnd: HWND) -> Result<()> {
         let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
         if screen_w <= 0 || screen_h <= 0 {
             let _ = ShowWindow(hwnd, SW_HIDE);
             return Ok(());
         }
-        let state_guard = SCREEN_DRAW_STATE.lock();
+        let mut state_guard = SCREEN_DRAW_STATE.lock();
         if !state_guard.active {
             let _ = ShowWindow(hwnd, SW_HIDE);
             return Ok(());
         }
-        let state = &*state_guard;
         let width = screen_w as usize;
         let height = screen_h as usize;
-        let mut pixels = vec![0u8; width * height * 4];
-        for stroke in &state.strokes {
-            draw_screen_draw_stroke(&mut pixels, width, height, stroke);
+        ensure_screen_draw_canvas(&mut state_guard, width, height);
+        if state_guard.committed_dirty {
+            rebuild_screen_draw_canvas(&mut state_guard);
         }
-        if let Some(stroke) = state.current_stroke.as_ref() {
-            draw_screen_draw_stroke(&mut pixels, width, height, stroke);
+        {
+            let ScreenDrawState {
+                committed_rgba,
+                frame_rgba,
+                ..
+            } = &mut *state_guard;
+            frame_rgba.copy_from_slice(committed_rgba.as_slice());
         }
-        draw_screen_draw_toolbar(&mut pixels, width, height, state);
-        drop(state_guard);
+        if let Some(stroke) = state_guard.current_stroke.clone()
+            && let Some(mut pixmap) =
+                tiny_skia::PixmapMut::from_bytes(
+                    state_guard.frame_rgba.as_mut_slice(),
+                    width as u32,
+                    height as u32,
+                )
+        {
+            render_screen_draw_stroke_skia(&mut pixmap, &stroke);
+        }
 
         let _ = SetWindowPos(
             hwnd,
@@ -5822,7 +6037,20 @@ mod windows_overlay {
             bail!("Failed to map screen draw DIB");
         }
         let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
-        std::ptr::copy_nonoverlapping(pixels.as_ptr(), bits as *mut u8, pixels.len());
+        let pixels =
+            std::slice::from_raw_parts_mut(bits as *mut u8, state_guard.frame_rgba.len());
+        for (src, dst) in state_guard
+            .frame_rgba
+            .chunks_exact(4)
+            .zip(pixels.chunks_exact_mut(4))
+        {
+            dst[0] = src[2];
+            dst[1] = src[1];
+            dst[2] = src[0];
+            dst[3] = src[3];
+        }
+        draw_screen_draw_toolbar(pixels, width, height, &state_guard);
+        drop(state_guard);
         let blend = BLENDFUNCTION {
             BlendOp: AC_SRC_OVER as u8,
             BlendFlags: 0,
@@ -5846,43 +6074,6 @@ mod windows_overlay {
         let _ = ReleaseDC(None, screen_dc);
         let _ = ShowWindow(hwnd, SW_SHOWNA);
         Ok(())
-    }
-
-    fn draw_screen_draw_stroke(
-        pixels: &mut [u8],
-        width: usize,
-        height: usize,
-        stroke: &ScreenDrawStroke,
-    ) {
-        let points = if stroke.smoothing {
-            smoothed_screen_draw_points(&stroke.points, stroke.smoothing_amount)
-        } else {
-            stroke.points.clone()
-        };
-        for pair in points.windows(2) {
-            draw_screen_draw_line(
-                pixels,
-                width,
-                height,
-                pair[0],
-                pair[1],
-                stroke.color,
-                stroke.brush_size,
-                stroke.eraser,
-            );
-        }
-        if points.len() == 1 {
-            draw_screen_draw_circle(
-                pixels,
-                width,
-                height,
-                points[0].x,
-                points[0].y,
-                stroke.brush_size,
-                stroke.color,
-                stroke.eraser,
-            );
-        }
     }
 
     fn smoothed_screen_draw_points(points: &[POINT], amount: f32) -> Vec<POINT> {
