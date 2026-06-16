@@ -1043,14 +1043,19 @@ mod windows_impl {
         .is_ok();
 
         let rgba = if copied {
-            let len = (width as usize) * (height as usize) * 4;
-            let pixels = std::slice::from_raw_parts(bits as *const u8, len);
+            let pixel_count = (width as usize) * (height as usize);
+            let len = pixel_count * 4;
             let mut rgba = vec![0u8; len];
-            for (dst, src) in rgba.chunks_exact_mut(4).zip(pixels.chunks_exact(4)) {
-                dst[0] = src[2];
-                dst[1] = src[1];
-                dst[2] = src[0];
-                dst[3] = 255;
+            unsafe {
+                let src_ptr = bits as *const u32;
+                let dst_ptr = rgba.as_mut_ptr() as *mut u32;
+                for i in 0..pixel_count {
+                    let pixel = *src_ptr.add(i);
+                    let b = pixel & 0xFF;
+                    let g = (pixel >> 8) & 0xFF;
+                    let r = (pixel >> 16) & 0xFF;
+                    *dst_ptr.add(i) = r | (g << 8) | (b << 16) | (255 << 24);
+                }
             }
             rgba
         } else {
