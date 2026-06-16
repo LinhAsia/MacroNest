@@ -107,16 +107,28 @@ pub(crate) fn bump_image_search_wait_generation(preset_id: u32) {
 }
 
 pub(crate) fn vision_preset_by_id(spec: &str) -> Result<VisionPreset> {
-    let preset_id = spec
-        .trim()
-        .parse::<u32>()
-        .context("Vision preset id is invalid")?;
-    HOOK_STATE
-        .lock()
-        .vision_presets
-        .iter()
-        .find(|preset| preset.id == preset_id)
-        .cloned()
+    let spec = spec.trim();
+    if spec.is_empty() {
+        bail!("Vision preset id is invalid");
+    }
+
+    let hook_state = HOOK_STATE.lock();
+    let by_id = spec.parse::<u32>().ok().and_then(|preset_id| {
+        hook_state
+            .vision_presets
+            .iter()
+            .find(|preset| preset.id == preset_id)
+            .cloned()
+    });
+
+    by_id
+        .or_else(|| {
+            hook_state
+                .vision_presets
+                .iter()
+                .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
+                .cloned()
+        })
         .context("Vision preset was not found")
 }
 
@@ -1054,10 +1066,7 @@ pub(crate) fn run_vision_once_with_options(
         } else {
             preset.pixel_counter_variable_name.clone()
         };
-        {
-            let mut vars = super::RUNTIME_VARIABLES.lock();
-            vars.insert(var_name.clone(), count as f64);
-        }
+        set_variable_value(&var_name, count as f64);
         set_found_var(count > 0);
 
         return Ok(VisionRunOutcome {
@@ -1097,10 +1106,7 @@ pub(crate) fn run_vision_once_with_options(
             preset.pixel_counter_variable_name.clone()
         };
 
-        {
-            let mut vars = super::TEXT_VARIABLES.lock();
-            vars.insert(var_name.clone(), hex_color.clone());
-        }
+        set_text_variable_value(&var_name, &hex_color);
 
         return Ok(VisionRunOutcome {
             matched: true,
@@ -1633,4 +1639,3 @@ pub(crate) fn trigger_vision_move_with_options(
         thread::sleep(Duration::from_millis(25));
     }
 }
-

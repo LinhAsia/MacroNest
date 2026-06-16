@@ -4541,14 +4541,15 @@ impl CrosshairApp {
                                                             )
                                                             .size()
                                                             .x;
-                                                        let vars_map =
-                                                            crate::overlay::RUNTIME_VARIABLES.lock();
                                                         let badge_texts: Vec<(String, bool)> = referenced_vars
                                                             .iter()
                                                             .map(|var_name| {
-                                                                let val = vars_map.get(var_name).copied();
+                                                                let val =
+                                                                    crate::overlay::resolve_text_variable_value(
+                                                                        var_name,
+                                                                    );
                                                                 let val_str = val
-                                                                    .map(|v| v.to_string())
+                                                                    .clone()
                                                                     .unwrap_or_else(|| "?".to_string());
                                                                 (format!("{} = {}", var_name, val_str), val.is_some())
                                                             })
@@ -4571,7 +4572,6 @@ impl CrosshairApp {
                                                             .iter()
                                                             .copied()
                                                             .sum();
-                                                        drop(vars_map);
                                                         let badge_gap_width = if referenced_vars.is_empty() {
                                                             0.0
                                                         } else {
@@ -12246,6 +12246,12 @@ impl CrosshairApp {
         step: &MacroStep,
         vars: &mut std::collections::HashSet<String>,
     ) {
+        if step.action == MacroAction::ScanVisionOnce {
+            let name = step.if_variable_name.trim();
+            if !name.is_empty() {
+                vars.insert(name.to_string());
+            }
+        }
         if step.action == MacroAction::SetVariable {
             let name = step.if_variable_name.trim();
             if !name.is_empty() {
