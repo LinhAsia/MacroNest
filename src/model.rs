@@ -2745,6 +2745,12 @@ pub struct AppState {
     pub ocr_test_error: Option<String>,
     #[serde(skip)]
     pub ocr_test_result: Option<crate::ocr::OcrResult>,
+    #[serde(default = "default_true")]
+    pub quick_actions_copy_x: bool,
+    #[serde(default = "default_true")]
+    pub quick_actions_copy_y: bool,
+    #[serde(default = "default_true")]
+    pub quick_actions_copy_color: bool,
 }
 
 impl Default for AppState {
@@ -2833,6 +2839,9 @@ impl Default for AppState {
             ocr_test_running: false,
             ocr_test_error: None,
             ocr_test_result: None,
+            quick_actions_copy_x: true,
+            quick_actions_copy_y: true,
+            quick_actions_copy_color: true,
         }
     }
 }
