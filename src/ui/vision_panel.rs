@@ -1342,6 +1342,12 @@ impl CrosshairApp {
             mode,
             VisionCaptureMode::ColorSample | VisionCaptureMode::ColorPriorityAnchor | VisionCaptureMode::SinglePixel
         );
+        let use_natural_point_click_preview = matches!(
+            target,
+            VisionCaptureTarget::QuickActionsCoordinates
+                | VisionCaptureTarget::QuickActionsColor
+                | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+        );
         let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
 
         std::thread::spawn(move || {
@@ -1352,7 +1358,10 @@ impl CrosshairApp {
             let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
             let (result, capture_frame) = if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
                 let native_mode = if is_point_click {
-                    crate::overlay::native_capture::NativeCaptureMode::PointClick { vietnamese }
+                    crate::overlay::native_capture::NativeCaptureMode::PointClick {
+                        vietnamese,
+                        dim_background: !use_natural_point_click_preview,
+                    }
                 } else {
                     crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
                         is_template,
@@ -1535,7 +1544,9 @@ impl CrosshairApp {
                             self.status =
                                 "Geometry color picking does not support area captures.".to_owned();
                         }
-                        VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => {
+                        VisionCaptureTarget::QuickActionsCoordinates
+                        | VisionCaptureTarget::QuickActionsColor
+                        | VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
                             self.cancel_image_search_capture(ctx);
                         }
                     }
@@ -1616,6 +1627,19 @@ impl CrosshairApp {
                     }
                     VisionCaptureTarget::QuickActionsColor => {
                         self.finish_image_search_color_pick_from_screen(ctx, screen_x, screen_y);
+                    }
+                    VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
+                        self.clear_image_search_capture_state();
+                        self.state.quick_key_display_x = screen_x;
+                        self.state.quick_key_display_y = screen_y;
+                        self.sync_quick_key_display_config();
+                        self.persist();
+                        self.status = match self.state.ui_language {
+                            crate::model::UiLanguage::Vietnamese => {
+                                format!("Da dat vi tri hien thi phim: X={}, Y={}", screen_x, screen_y)
+                            }
+                            _ => format!("Key display position set: X={}, Y={}", screen_x, screen_y),
+                        };
                     }
                 }
             }
@@ -1816,6 +1840,7 @@ impl CrosshairApp {
             VisionCaptureTarget::MacroStepGeometryColor { .. } => Some("Macro Step Geometry Color".to_owned()),
             VisionCaptureTarget::QuickActionsCoordinates => Some("Quick Actions Coordinates".to_owned()),
             VisionCaptureTarget::QuickActionsColor => Some("Quick Actions Color".to_owned()),
+            VisionCaptureTarget::QuickActionsKeyDisplayPosition => Some("Quick Actions Key Display Position".to_owned()),
         }
     }
 
@@ -1833,6 +1858,7 @@ impl CrosshairApp {
             VisionCaptureTarget::MacroStepGeometryColor { .. } => false,
             VisionCaptureTarget::QuickActionsCoordinates => false,
             VisionCaptureTarget::QuickActionsColor => false,
+            VisionCaptureTarget::QuickActionsKeyDisplayPosition => false,
         }
     }
 
@@ -1933,7 +1959,9 @@ impl CrosshairApp {
                         "Geometry color picking does not support template captures.".to_owned(),
                         false,
                     ),
-                    VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => (
+                    VisionCaptureTarget::QuickActionsCoordinates
+                    | VisionCaptureTarget::QuickActionsColor
+                    | VisionCaptureTarget::QuickActionsKeyDisplayPosition => (
                         "Quick Actions do not support template captures.".to_owned(),
                         false,
                     ),
@@ -2008,7 +2036,9 @@ impl CrosshairApp {
                             self.status =
                                 "Geometry color picking does not support search regions.".to_owned();
                         }
-                        VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => {
+                        VisionCaptureTarget::QuickActionsCoordinates
+                        | VisionCaptureTarget::QuickActionsColor
+                        | VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
                             self.status = "Quick Actions do not support search regions.".to_owned();
                         }
                     }
@@ -2267,6 +2297,9 @@ impl CrosshairApp {
                     }
                 }
             }
+            VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
+                "Key display position does not support color picking.".to_owned()
+            }
         }
     }
 
@@ -2304,7 +2337,9 @@ impl CrosshairApp {
             VisionCaptureTarget::MacroStepGeometryColor { .. } => {
                 "Geometry color picking does not support priority anchors.".to_owned()
             }
-            VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => {
+            VisionCaptureTarget::QuickActionsCoordinates
+            | VisionCaptureTarget::QuickActionsColor
+            | VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
                 "Quick Actions do not support priority anchors.".to_owned()
             }
         }
@@ -2647,7 +2682,9 @@ impl CrosshairApp {
                 self.status =
                     "Geometry color picking does not support search regions.".to_owned();
             }
-            VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => {
+            VisionCaptureTarget::QuickActionsCoordinates
+            | VisionCaptureTarget::QuickActionsColor
+            | VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
                 self.status = "Quick Actions do not support search regions.".to_owned();
             }
         }
@@ -2833,6 +2870,9 @@ impl CrosshairApp {
                     }
                 }
             }
+            VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
+                "Key display position does not support color picking.".to_owned()
+            }
         };
         self.persist();
         self.status = status;
@@ -2902,7 +2942,9 @@ impl CrosshairApp {
                 self.status =
                     "Geometry color picking does not support priority anchors.".to_owned();
             }
-            VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => {
+            VisionCaptureTarget::QuickActionsCoordinates
+            | VisionCaptureTarget::QuickActionsColor
+            | VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
                 self.status = "Quick Actions do not support priority anchors.".to_owned();
             }
         }
