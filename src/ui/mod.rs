@@ -767,7 +767,7 @@ pub struct CrosshairApp {
     vision_color_pick_preview_color: Option<RgbaColor>,
     vietnamese_input_enabled_texture: Option<TextureHandle>,
     vietnamese_input_disabled_texture: Option<TextureHandle>,
-    titlebar_brand_texture: Option<TextureHandle>,
+    titlebar_app_icon_texture: Option<TextureHandle>,
     guides_author_logo_texture: Option<TextureHandle>,
     active_mouse_record_preset_id: Option<u32>,
     active_macro_record_preset_id: Option<u32>,
@@ -1014,7 +1014,7 @@ impl CrosshairApp {
             vision_color_pick_preview_color: None,
             vietnamese_input_enabled_texture: None,
             vietnamese_input_disabled_texture: None,
-            titlebar_brand_texture: None,
+            titlebar_app_icon_texture: None,
             guides_author_logo_texture: None,
             active_mouse_record_preset_id: None,
             active_macro_record_preset_id: None,
@@ -3104,15 +3104,15 @@ impl CrosshairApp {
         cache.clone()
     }
 
-    fn titlebar_brand_texture(&mut self, ctx: &egui::Context) -> Option<TextureHandle> {
-        if self.titlebar_brand_texture.is_none() {
-            self.titlebar_brand_texture = Self::load_svg_texture(
+    fn titlebar_app_icon_texture(&mut self, ctx: &egui::Context) -> Option<TextureHandle> {
+        if self.titlebar_app_icon_texture.is_none() {
+            self.titlebar_app_icon_texture = Self::load_svg_texture(
                 ctx,
-                "titlebar-brand-banner",
-                include_bytes!("../../assets/banner-v4.svg").as_slice(),
+                "titlebar-app-icon",
+                include_bytes!("../../assets/app-icon.svg").as_slice(),
             );
         }
-        self.titlebar_brand_texture.clone()
+        self.titlebar_app_icon_texture.clone()
     }
 
     fn guides_author_logo_texture(&mut self, ctx: &egui::Context) -> Option<TextureHandle> {
@@ -11714,52 +11714,57 @@ impl eframe::App for CrosshairApp {
                                     } else {
                                         Color32::from_rgb(34, 122, 88)
                                     };
-                                    egui::Frame::new()
-                                        .fill(button_fill)
-                                        .stroke(egui::Stroke::new(1.0, accent.gamma_multiply(0.45)))
-                                        .corner_radius(8.0)
-                                        .inner_margin(egui::Margin::symmetric(8, 2))
-                                        .show(ui, |ui| {
-                                            if let Some(texture) = self.titlebar_brand_texture(ctx)
+                                    ui.horizontal(|ui| {
+                                        if let Some(texture) = self.titlebar_app_icon_texture(ctx)
+                                        {
+                                            let icon_fill = if self.state.ui_theme
+                                                == UiThemeMode::Dark
                                             {
-                                                ui.add(
-                                                    Image::new((
-                                                        texture.id(),
-                                                        vec2(126.0, 27.0),
-                                                    ))
-                                                    .sense(Sense::hover()),
-                                                );
+                                                Color32::from_rgba_premultiplied(
+                                                    18, 34, 28, 0,
+                                                )
                                             } else {
-                                                ui.horizontal(|ui| {
-                                                    ui.label(
-                                                        RichText::new(self.app_brand_title())
-                                                            .strong()
-                                                            .size(14.0),
-                                                    );
-                                                    ui.add_space(4.0);
-                                                    ui.label(
-                                                        RichText::new(format!(
-                                                            "v{}",
-                                                            self.app_version_label()
+                                                Color32::from_rgba_premultiplied(
+                                                    240, 248, 244, 0,
+                                                )
+                                            };
+                                            egui::Frame::new()
+                                                .fill(icon_fill)
+                                                .stroke(egui::Stroke::NONE)
+                                                .corner_radius(14.0)
+                                                .inner_margin(egui::Margin::symmetric(2, 2))
+                                                .show(ui, |ui| {
+                                                    ui.add(
+                                                        Image::new((
+                                                            texture.id(),
+                                                            vec2(34.0, 34.0),
                                                         ))
-                                                        .size(9.0)
-                                                        .color(
-                                                            if self.state.ui_theme
-                                                                == UiThemeMode::Dark
-                                                            {
-                                                                Color32::from_rgb(
-                                                                    175, 194, 221,
-                                                                )
-                                                            } else {
-                                                                Color32::from_rgb(
-                                                                    80, 96, 128,
-                                                                )
-                                                            },
-                                                        ),
+                                                        .sense(Sense::hover()),
                                                     );
                                                 });
-                                            }
+                                        }
+                                        ui.add_space(6.0);
+                                        ui.vertical(|ui| {
+                                            ui.add_space(1.0);
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    RichText::new(self.app_brand_title())
+                                                        .strong()
+                                                        .size(18.0)
+                                                        .color(Color32::WHITE),
+                                                );
+                                                ui.add_space(4.0);
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "v{}",
+                                                        self.app_version_label()
+                                                    ))
+                                                    .size(9.0)
+                                                    .color(accent.gamma_multiply(0.95)),
+                                                );
+                                            });
                                         });
+                                    });
                                     ui.interact(
                                         ui.max_rect(),
                                         ui.id().with("titlebar-drag"),

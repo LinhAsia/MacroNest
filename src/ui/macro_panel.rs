@@ -364,31 +364,23 @@ impl CrosshairApp {
         ui.horizontal(|ui| {
             if let Some(texture) = self.guides_author_logo_texture(ctx) {
                 ui.add(
-                    egui::Image::new((texture.id(), vec2(28.0, 28.0))).sense(Sense::hover()),
+                    egui::Image::new((texture.id(), vec2(34.0, 34.0))).sense(Sense::hover()),
                 );
             }
-            ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new(Self::tr_lang(
-                        language,
-                        "App made by",
-                        "App duoc tao boi",
-                    ))
-                    .strong()
-                    .size(14.0),
-                );
-                ui.horizontal(|ui| {
-                    ui.label(Self::tr_lang(
-                        language,
-                        "Created by",
-                        "Tac gia",
-                    ));
-                    ui.hyperlink_to(
-                        "NBaoLinh",
-                        "https://github.com/NBaoLinh/MacroNest/releases/latest",
-                    );
-                });
-            });
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(Self::tr_lang(
+                    language,
+                    "App made by",
+                    "App duoc tao boi",
+                ))
+                .strong()
+                .size(14.0),
+            );
+            ui.hyperlink_to(
+                "NBaoLinh",
+                "https://github.com/NBaoLinh/MacroNest/releases/latest",
+            );
         });
         ui.add_space(8.0);
         egui::Frame::group(ui.style())
