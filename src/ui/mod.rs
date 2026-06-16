@@ -9838,7 +9838,7 @@ impl CrosshairApp {
         self.persist();
     }
 
-    fn begin_protractor_calibration(&mut self, ctx: &egui::Context) {
+    fn begin_protractor_calibration(&mut self, ctx: &egui::Context, was_minimized: bool) {
         if self.protractor_picking_active || self.native_capture_in_progress {
             return;
         }
@@ -9847,13 +9847,11 @@ impl CrosshairApp {
         self.native_capture_in_progress = true;
         self.protractor_calibration_points = Some(Vec::new());
 
-        let mut was_minimized = false;
         // Hide main app window natively
         #[cfg(windows)]
         unsafe {
             if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE, IsIconic};
-                was_minimized = IsIconic(hwnd).as_bool();
+                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
                 let _ = ShowWindow(hwnd, SW_HIDE);
             }
         }
@@ -10688,9 +10686,9 @@ impl eframe::App for CrosshairApp {
                     self.persist();
                     ctx.request_repaint();
                 }
-                UiCommand::RequestProtractorCalibration => {
+                UiCommand::RequestProtractorCalibration { was_minimized } => {
                     if !self.protractor_picking_active {
-                        self.begin_protractor_calibration(ctx);
+                        self.begin_protractor_calibration(ctx, was_minimized);
                     }
                 }
                 UiCommand::UpdateProtractorConfig {
