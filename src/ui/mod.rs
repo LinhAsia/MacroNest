@@ -4030,7 +4030,7 @@ impl CrosshairApp {
             .spacing([8.0, 8.0])
             .show(ui, |ui| {
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 116.0),
+                    vec2(92.0, 155.0),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let button_response = self.titlebar_quick_action_button(
@@ -4111,7 +4111,7 @@ impl CrosshairApp {
                 );
 
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 116.0),
+                    vec2(92.0, 155.0),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let button_response = self.titlebar_quick_action_button(
@@ -4176,7 +4176,7 @@ impl CrosshairApp {
                 );
 
                 ui.allocate_ui_with_layout(
-                    vec2(92.0, 116.0),
+                    vec2(92.0, 155.0),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         let button_response = self.titlebar_quick_action_button(
@@ -6690,13 +6690,97 @@ impl CrosshairApp {
     }
 
     fn edit_rgba_color(ui: &mut egui::Ui, color: &mut RgbaColor) -> egui::Response {
-        let mut rgba = [color.r, color.g, color.b, color.a];
-        let response = ui.color_edit_button_srgba_unmultiplied(&mut rgba);
-        if response.changed() {
-            color.r = rgba[0];
-            color.g = rgba[1];
-            color.b = rgba[2];
-            color.a = rgba[3];
+        let mut changed = false;
+        let popup_id = ui.make_persistent_id(color as *const RgbaColor as usize);
+        let mut popup_open = ui.ctx().data(|data| data.get_temp::<bool>(popup_id)).unwrap_or(false);
+
+        // Draw a small color button with preview
+        let button_size = egui::vec2(28.0, 18.0);
+        let (rect, mut response) = ui.allocate_exact_size(button_size, egui::Sense::click());
+        
+        if response.clicked() {
+            popup_open = !popup_open;
+        }
+
+        // Paint the preview rectangle
+        let c32 = egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, color.a);
+        ui.painter().rect_filled(rect, 3.0, c32);
+        
+        // Paint a hover highlight or a standard border
+        let stroke_color = if response.hovered() {
+            ui.visuals().widgets.hovered.bg_stroke.color
+        } else {
+            ui.visuals().widgets.noninteractive.bg_stroke.color
+        };
+        ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(1.0, stroke_color), egui::StrokeKind::Inside);
+
+        // Create the popup
+        let popup_response = egui::Popup::from_response(&response)
+            .id(popup_id)
+            .open_bool(&mut popup_open)
+            .align(egui::RectAlign::BOTTOM_START)
+            .layout(egui::Layout::top_down_justified(egui::Align::Min))
+            .width(220.0)
+            .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+            .show(|ui| {
+                ui.set_min_width(220.0);
+                
+                // Visual color picker
+                let mut color32 = egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, color.a);
+                if egui::color_picker::color_picker_color32(
+                    ui,
+                    &mut color32,
+                    egui::color_picker::Alpha::Opaque,
+                ) {
+                    color.r = color32.r();
+                    color.g = color32.g();
+                    color.b = color32.b();
+                    color.a = color32.a();
+                    changed = true;
+                }
+
+                ui.add_space(4.0);
+
+                // Manual HEX text input
+                ui.horizontal(|ui| {
+                    ui.label("#");
+                    let mut hex_str = format!("{:02X}{:02X}{:02X}", color.r, color.g, color.b);
+                    let hex_resp = ui.add(
+                        egui::TextEdit::singleline(&mut hex_str)
+                            .hint_text("RRGGBB")
+                            .desired_width(120.0)
+                    );
+                    if hex_resp.changed() {
+                        let hex = hex_str.trim().trim_start_matches('#');
+                        if hex.len() == 6 {
+                            if let Ok(color_val) = u32::from_str_radix(hex, 16) {
+                                color.r = ((color_val >> 16) & 0xFF) as u8;
+                                color.g = ((color_val >> 8) & 0xFF) as u8;
+                                color.b = (color_val & 0xFF) as u8;
+                                changed = true;
+                            }
+                        }
+                    }
+                });
+            });
+
+        // Close popup if cursor hovers away from both the button and the popup
+        if popup_open {
+            if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
+                let mut keep_open_rect = response.rect.expand(15.0);
+                if let Some(ref popup) = popup_response {
+                    keep_open_rect = keep_open_rect.union(popup.response.rect.expand(15.0));
+                }
+                if !keep_open_rect.contains(pointer_pos) {
+                    popup_open = false;
+                }
+            }
+        }
+
+        ui.ctx().data_mut(|data| data.insert_temp(popup_id, popup_open));
+
+        if changed {
+            response.mark_changed();
         }
         response
     }

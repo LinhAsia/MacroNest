@@ -1920,6 +1920,16 @@ mod windows_overlay {
 
                     let _ = refresh_search_area_overlay(runtime);
                     let _ = refresh_timer_overlays(runtime);
+
+                    if runtime.native_focus_highlight_enabled
+                        && runtime.focus_highlight_rainbow
+                        && runtime.active_focus_highlight_hwnd.is_some()
+                    {
+                        let target_hwnd = runtime.active_focus_highlight_hwnd.unwrap();
+                        runtime.focus_highlight_rainbow_hue = (runtime.focus_highlight_rainbow_hue + 0.015) % 1.0;
+                        let _ = paint_focus_highlight_overlay(runtime, target_hwnd);
+                    }
+
                     refresh_overlay_timer(hwnd, runtime);
                 }
 
