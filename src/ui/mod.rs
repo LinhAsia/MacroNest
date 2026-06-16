@@ -767,6 +767,8 @@ pub struct CrosshairApp {
     vision_color_pick_preview_color: Option<RgbaColor>,
     vietnamese_input_enabled_texture: Option<TextureHandle>,
     vietnamese_input_disabled_texture: Option<TextureHandle>,
+    titlebar_brand_texture: Option<TextureHandle>,
+    guides_author_logo_texture: Option<TextureHandle>,
     active_mouse_record_preset_id: Option<u32>,
     active_macro_record_preset_id: Option<u32>,
     active_hud_preview_preset_id: Option<u32>,
@@ -1012,6 +1014,8 @@ impl CrosshairApp {
             vision_color_pick_preview_color: None,
             vietnamese_input_enabled_texture: None,
             vietnamese_input_disabled_texture: None,
+            titlebar_brand_texture: None,
+            guides_author_logo_texture: None,
             active_mouse_record_preset_id: None,
             active_macro_record_preset_id: None,
             active_hud_preview_preset_id: None,
@@ -3098,6 +3102,33 @@ impl CrosshairApp {
             *cache = Self::load_svg_texture(ctx, name, svg);
         }
         cache.clone()
+    }
+
+    fn titlebar_brand_texture(&mut self, ctx: &egui::Context) -> Option<TextureHandle> {
+        if self.titlebar_brand_texture.is_none() {
+            self.titlebar_brand_texture = Self::load_svg_texture(
+                ctx,
+                "titlebar-brand-banner",
+                include_bytes!("../../assets/banner-v4.svg").as_slice(),
+            );
+        }
+        self.titlebar_brand_texture.clone()
+    }
+
+    fn guides_author_logo_texture(&mut self, ctx: &egui::Context) -> Option<TextureHandle> {
+        if self.guides_author_logo_texture.is_none() {
+            self.guides_author_logo_texture = Self::load_svg_texture(
+                ctx,
+                "guides-author-logo",
+                br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#FAF7F2"/>
+  <path d="M180 90V370L400 420Z" fill="#2563EB"/>
+  <path d="M250 140V300H340V330H220V140Z" fill="#FAF7F2"/>
+  <path d="M180 370L400 420L340 330Z" fill="#1D4ED8"/>
+</svg>"##,
+            );
+        }
+        self.guides_author_logo_texture.clone()
     }
 
     fn tr_lang(
@@ -11687,31 +11718,47 @@ impl eframe::App for CrosshairApp {
                                         .fill(button_fill)
                                         .stroke(egui::Stroke::new(1.0, accent.gamma_multiply(0.45)))
                                         .corner_radius(8.0)
-                                        .inner_margin(egui::Margin::symmetric(10, 4))
+                                        .inner_margin(egui::Margin::symmetric(8, 2))
                                         .show(ui, |ui| {
-                                            ui.horizontal(|ui| {
-                                                ui.label(
-                                                    RichText::new(self.app_brand_title())
-                                                        .strong()
-                                                        .size(14.0),
-                                                );
-                                                ui.add_space(4.0);
-                                                ui.label(
-                                                    RichText::new(format!(
-                                                        "v{}",
-                                                        self.app_version_label()
+                                            if let Some(texture) = self.titlebar_brand_texture(ctx)
+                                            {
+                                                ui.add(
+                                                    Image::new((
+                                                        texture.id(),
+                                                        vec2(126.0, 27.0),
                                                     ))
-                                                    .size(9.0)
-                                                    .color(
-                                                        if self.state.ui_theme == UiThemeMode::Dark
-                                                        {
-                                                            Color32::from_rgb(175, 194, 221)
-                                                        } else {
-                                                            Color32::from_rgb(80, 96, 128)
-                                                        },
-                                                    ),
+                                                    .sense(Sense::hover()),
                                                 );
-                                            });
+                                            } else {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        RichText::new(self.app_brand_title())
+                                                            .strong()
+                                                            .size(14.0),
+                                                    );
+                                                    ui.add_space(4.0);
+                                                    ui.label(
+                                                        RichText::new(format!(
+                                                            "v{}",
+                                                            self.app_version_label()
+                                                        ))
+                                                        .size(9.0)
+                                                        .color(
+                                                            if self.state.ui_theme
+                                                                == UiThemeMode::Dark
+                                                            {
+                                                                Color32::from_rgb(
+                                                                    175, 194, 221,
+                                                                )
+                                                            } else {
+                                                                Color32::from_rgb(
+                                                                    80, 96, 128,
+                                                                )
+                                                            },
+                                                        ),
+                                                    );
+                                                });
+                                            }
                                         });
                                     ui.interact(
                                         ui.max_rect(),
@@ -11969,7 +12016,7 @@ impl eframe::App for CrosshairApp {
                 .movable(false)
                 .collapsible(false)
                 .show(ctx, |ui| {
-                    self.render_expression_guides_content(ui);
+                    self.render_expression_guides_content(ui, ctx);
                 });
             self.titlebar_guides_open = open;
         }
