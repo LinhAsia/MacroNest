@@ -33,7 +33,9 @@ impl RgbaColor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CrosshairStyle {
     pub enabled: bool,
+    #[serde(default = "default_x_offset")]
     pub x_offset: i32,
+    #[serde(default = "default_y_offset")]
     pub y_offset: i32,
     #[serde(default = "default_crosshair_length")]
     pub horizontal_length: f32,
@@ -51,14 +53,16 @@ pub struct CrosshairStyle {
     pub color: RgbaColor,
     pub custom_asset: Option<String>,
     pub custom_scale: f32,
+    #[serde(default)]
+    pub custom_pixels: Option<String>,
 }
 
 impl Default for CrosshairStyle {
     fn default() -> Self {
         Self {
             enabled: true,
-            x_offset: 0,
-            y_offset: 0,
+            x_offset: default_x_offset(),
+            y_offset: default_y_offset(),
             horizontal_length: 10.0,
             vertical_length: 10.0,
             arm_length: 10.0,
@@ -73,6 +77,7 @@ impl Default for CrosshairStyle {
             color: RgbaColor::WHITE,
             custom_asset: None,
             custom_scale: 96.0,
+            custom_pixels: None,
         }
     }
 }
@@ -100,6 +105,26 @@ impl Default for ProfileRecord {
             extra_target_window_titles: Vec::new(),
         }
     }
+}
+
+fn default_x_offset() -> i32 {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN};
+        (GetSystemMetrics(SM_CXSCREEN).max(1) - 1) / 2
+    }
+    #[cfg(not(windows))]
+    959
+}
+
+fn default_y_offset() -> i32 {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CYSCREEN};
+        (GetSystemMetrics(SM_CYSCREEN).max(1) - 1) / 2
+    }
+    #[cfg(not(windows))]
+    539
 }
 
 fn default_crosshair_length() -> f32 {

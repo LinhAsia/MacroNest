@@ -1504,6 +1504,8 @@ impl CrosshairApp {
 
     fn add_profile(&mut self) {
         let name = self.unique_profile_name("Profile");
+        let default_style = CrosshairStyle::default();
+        self.state.active_style = default_style.clone();
         self.state.profiles.push(ProfileRecord {
             name: name.clone(),
             enabled: self.state.active_style.enabled,

@@ -26,10 +26,103 @@ pub fn render_crosshair(
     style: &CrosshairStyle,
     custom_asset: Option<&Path>,
 ) -> Result<RenderedCrosshair> {
+    if let Some(ref pixels_str) = style.custom_pixels {
+        if !pixels_str.trim().is_empty() {
+            return render_custom_pixels(style, pixels_str);
+        }
+    }
     if let Some(asset) = custom_asset {
         return render_custom_asset(style, asset);
     }
     render_builtin(style)
+}
+
+fn render_custom_pixels(style: &CrosshairStyle, pixels_str: &str) -> Result<RenderedCrosshair> {
+    let lines: Vec<&str> = pixels_str.lines().collect();
+    if lines.is_empty() {
+        return render_builtin(style);
+    }
+
+    let height = lines.len();
+    let width = lines.iter().map(|line| line.len()).max().unwrap_or(0);
+    if width == 0 || height == 0 {
+        return render_builtin(style);
+    }
+
+    // Reuse thickness as the scale of each pixel in the custom grid.
+    let pixel_scale = style.thickness.max(1.0);
+
+    let outline_thickness = if style.outline_enabled {
+        style.outline_thickness.max(0.0)
+    } else {
+        0.0
+    };
+
+    // Pad the canvas to prevent clipping of borders at boundaries
+    let pad = (outline_thickness + 2.0).ceil();
+    let canvas_width = ((width as f32 * pixel_scale) + pad * 2.0).ceil() as u32;
+    let canvas_height = ((height as f32 * pixel_scale) + pad * 2.0).ceil() as u32;
+
+    let mut pixmap = Pixmap::new(canvas_width, canvas_height).context("Failed to create custom pixels pixmap")?;
+
+    let fill_color = style.color.with_alpha(style.opacity);
+    let outline_color = style.outline_color.with_alpha(style.opacity);
+
+    // Pass 1: Draw the outlines for '#' / 'x' pixels if outline is enabled
+    if style.outline_enabled && outline_thickness > 0.0 {
+        for (r, line) in lines.iter().enumerate() {
+            for (c, ch) in line.chars().enumerate() {
+                if ch == '#' || ch == 'x' || ch == 'X' || ch == '1' {
+                    let center_x = pad + (c as f32 + 0.5) * pixel_scale;
+                    let center_y = pad + (r as f32 + 0.5) * pixel_scale;
+                    let out_size = pixel_scale + outline_thickness * 2.0;
+                    fill_rect(
+                        &mut pixmap,
+                        center_x - out_size / 2.0,
+                        center_y - out_size / 2.0,
+                        out_size,
+                        out_size,
+                        outline_color,
+                    )?;
+                }
+            }
+        }
+    }
+
+    // Pass 2: Draw the pixels themselves
+    for (r, line) in lines.iter().enumerate() {
+        for (c, ch) in line.chars().enumerate() {
+            let center_x = pad + (c as f32 + 0.5) * pixel_scale;
+            let center_y = pad + (r as f32 + 0.5) * pixel_scale;
+            if ch == '#' || ch == 'x' || ch == 'X' || ch == '1' {
+                fill_rect(
+                    &mut pixmap,
+                    center_x - pixel_scale / 2.0,
+                    center_y - pixel_scale / 2.0,
+                    pixel_scale,
+                    pixel_scale,
+                    fill_color,
+                )?;
+            } else if ch == '@' || ch == 'o' || ch == 'O' || ch == '2' {
+                fill_rect(
+                    &mut pixmap,
+                    center_x - pixel_scale / 2.0,
+                    center_y - pixel_scale / 2.0,
+                    pixel_scale,
+                    pixel_scale,
+                    outline_color,
+                )?;
+            }
+        }
+    }
+
+    Ok(RenderedCrosshair {
+        width: canvas_width,
+        height: canvas_height,
+        center_x: (canvas_width / 2) as i32,
+        center_y: (canvas_height / 2) as i32,
+        rgba: pixmap.data().to_vec(),
+    })
 }
 
 fn render_builtin(style: &CrosshairStyle) -> Result<RenderedCrosshair> {
