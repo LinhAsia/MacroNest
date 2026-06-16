@@ -9947,6 +9947,7 @@ impl CrosshairApp {
                 self.state.protractor_center_x = cx;
                 self.state.protractor_center_y = cy;
                 self.state.protractor_scale = scale;
+                self.state.protractor_enabled = true;
                 self.status = Self::tr_lang(
                     self.state.ui_language,
                     "Protractor calibrated successfully!",
@@ -10418,21 +10419,6 @@ impl eframe::App for CrosshairApp {
                     ctx.request_repaint();
                 }
                 UiCommand::NativeProtractorCalibrationFinished { result } => {
-                    // Show main window natively
-                    #[cfg(windows)]
-                    unsafe {
-                        if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                            use windows::Win32::UI::WindowsAndMessaging::{
-                                ShowWindow, SW_SHOWNORMAL, SetForegroundWindow,
-                            };
-                            let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
-                            let _ = SetForegroundWindow(hwnd);
-                        }
-                    }
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-
                     self.native_capture_in_progress = false;
 
                     match result {
@@ -10451,10 +10437,8 @@ impl eframe::App for CrosshairApp {
                         }
                     }
 
-                    // Restore overlay visibility (was hidden before capture)
-                    let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
-                    crate::overlay::wake_command_queue();
-                    ctx.request_repaint();
+                    // Hide main window to tray instead of restoring it to screen
+                    self.hide_to_tray(ctx);
                 }
                 UiCommand::NativeMouseMoveAbsoluteCaptureFinished { target, result, capture_frame } => {
                     // Show main window natively
