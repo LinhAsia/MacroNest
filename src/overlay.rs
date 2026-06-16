@@ -15805,78 +15805,403 @@ mod windows_overlay {
             let _ = ReleaseDC(None, screen_dc);
             bail!("Failed to create search area DIB");
         }
-
         let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
         let pixel_len = (width as usize) * (height as usize) * 4;
         let pixels = std::slice::from_raw_parts_mut(bits as *mut u8, pixel_len);
         pixels.fill(0);
+
+        let mut pixmap = tiny_skia::Pixmap::new(width as u32, height as u32).unwrap();
+
         for region in regions {
             let rel_left = region.left - min_x;
             let rel_top = region.top - min_y;
             let outline = [92, 220, 255, 210];
             if region.is_circle {
-                draw_ellipse_outline_rgba(
-                    pixels,
-                    width as usize,
-                    height as usize,
-                    rel_left,
-                    rel_top,
-                    region.width,
-                    region.height,
-                    outline,
-                );
+                let rect = tiny_skia::Rect::from_xywh(
+                    rel_left as f32,
+                    rel_top as f32,
+                    region.width as f32,
+                    region.height as f32,
+                ).unwrap();
+                let mut pb = tiny_skia::PathBuilder::new();
+                pb.push_oval(rect);
+                if let Some(path) = pb.finish() {
+                    let mut paint = tiny_skia::Paint::default();
+                    paint.set_color(tiny_skia::Color::from_rgba8(outline[0], outline[1], outline[2], outline[3]));
+                    paint.anti_alias = true;
+                    let stroke = tiny_skia::Stroke {
+                        width: 1.0,
+                        ..Default::default()
+                    };
+                    pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+                }
+
                 let center_x = rel_left + region.width / 2;
                 let center_y = rel_top + region.height / 2;
                 let rx = region.width as f32 / 2.0;
                 let ry = region.height as f32 / 2.0;
                 if let Some(angle_deg) = region.angle_offset_deg {
                     // 1. Draw START ANGLE (0% - Orange Line)
-
                     let rad0 = angle_deg.to_radians();
                     let x0 = center_x as f32 + rx * rad0.sin();
                     let y0 = center_y as f32 - ry * rad0.cos();
-                    draw_line_rgba(
-                        pixels,
-                        width as usize,
-                        height as usize,
-                        center_x,
-                        center_y,
-                        x0 as i32,
-                        y0 as i32,
-                        [255, 120, 0, 255],
-                    );
-                    // 2. Draw END ANGLE (100% - Bright Green Line) based on SPAN!
+                    let mut pb_line = tiny_skia::PathBuilder::new();
+                    pb_line.move_to(center_x as f32, center_y as f32);
+                    pb_line.line_to(x0, y0);
+                    if let Some(path) = pb_line.finish() {
+                        let mut paint = tiny_skia::Paint::default();
+                        paint.set_color(tiny_skia::Color::from_rgba8(255, 120, 0, 255));
+                        paint.anti_alias = true;
+                        let stroke = tiny_skia::Stroke {
+                            width: 1.0,
+                            ..Default::default()
+                        };
+                        pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+                    }
 
+                    // 2. Draw END ANGLE (100% - Bright Green Line) based on SPAN!
                     if let Some(span) = region.angle_span_deg {
                         if span < 360.0 {
                             let end_deg = (angle_deg + span) % 360.0;
                             let rad1 = end_deg.to_radians();
                             let x1 = center_x as f32 + rx * rad1.sin();
                             let y1 = center_y as f32 - ry * rad1.cos();
-                            draw_line_rgba(
-                                pixels,
-                                width as usize,
-                                height as usize,
-                                center_x,
-                                center_y,
-                                x1 as i32,
-                                y1 as i32,
-                                [50, 255, 50, 255],
-                            );
+                            let mut pb_line = tiny_skia::PathBuilder::new();
+                            pb_line.move_to(center_x as f32, center_y as f32);
+                            pb_line.line_to(x1, y1);
+                            if let Some(path) = pb_line.finish() {
+                                let mut paint = tiny_skia::Paint::default();
+                                paint.set_color(tiny_skia::Color::from_rgba8(50, 255, 50, 255));
+                                paint.anti_alias = true;
+                                let stroke = tiny_skia::Stroke {
+                                    width: 1.0,
+                                    ..Default::default()
+                                };
+                                pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+                            }
                         }
                     }
                 }
             } else {
-                draw_rect_outline_rgba(
-                    pixels,
-                    width as usize,
-                    height as usize,
-                    rel_left,
-                    rel_top,
-                    region.width,
-                    region.height,
-                    outline,
-                );
+                let rect = tiny_skia::Rect::from_xywh(
+                    rel_left as f32,
+                    rel_top as f32,
+                    region.width as f32,
+                    region.height as f32,
+                ).unwrap();
+                let path = tiny_skia::PathBuilder::from_rect(rect);
+                let mut paint = tiny_skia::Paint::default();
+                paint.set_color(tiny_skia::Color::from_rgba8(outline[0], outline[1], outline[2], outline[3]));
+                paint.anti_alias = true;
+                let stroke = tiny_skia::Stroke {
+                    width: 1.0,
+                    ..Default::default()
+                };
+                pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+            }
+        }
+
+        for region in preview_regions {
+            let rel_left = region.left - min_x;
+            let rel_top = region.top - min_y;
+            let outline = [255, 216, 96, 230];
+            let rect = tiny_skia::Rect::from_xywh(
+                rel_left as f32,
+                rel_top as f32,
+                region.width as f32,
+                region.height as f32,
+            ).unwrap();
+            let path = tiny_skia::PathBuilder::from_rect(rect);
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color(tiny_skia::Color::from_rgba8(outline[0], outline[1], outline[2], outline[3]));
+            paint.anti_alias = true;
+            let stroke = tiny_skia::Stroke {
+                width: 1.0,
+                ..Default::default()
+            };
+            pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+        }
+
+        let mut geometry_texts = Vec::new();
+        for shape in static_geometry_shapes.iter().chain(dynamic_geometry_shapes.iter()) {
+            match &shape.draw {
+                GeometryRenderDraw::Point {
+                    x,
+                    y,
+                    radius,
+                    fill,
+                } => {
+                    let left = x - min_x - radius;
+                    let top = y - min_y - radius;
+                    let size = radius.saturating_mul(2).max(1);
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    if let Some(rect) = tiny_skia::Rect::from_xywh(left as f32, top as f32, size as f32, size as f32) {
+                        pb.push_oval(rect);
+                        if let Some(path) = pb.finish() {
+                            let mut paint = tiny_skia::Paint::default();
+                            paint.set_color(tiny_skia::Color::from_rgba8(fill[0], fill[1], fill[2], fill[3]));
+                            paint.anti_alias = true;
+                            pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+                        }
+                    }
+                }
+                GeometryRenderDraw::Line {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    stroke,
+                    thickness,
+                } => {
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    pb.move_to((x1 - min_x) as f32, (y1 - min_y) as f32);
+                    pb.line_to((x2 - min_x) as f32, (y2 - min_y) as f32);
+                    if let Some(path) = pb.finish() {
+                        let mut paint = tiny_skia::Paint::default();
+                        paint.set_color(tiny_skia::Color::from_rgba8(stroke[0], stroke[1], stroke[2], stroke[3]));
+                        paint.anti_alias = true;
+                        let skia_stroke = tiny_skia::Stroke {
+                            width: *thickness as f32,
+                            ..Default::default()
+                        };
+                        pixmap.stroke_path(&path, &paint, &skia_stroke, tiny_skia::Transform::identity(), None);
+                    }
+                }
+                GeometryRenderDraw::Circle {
+                    cx,
+                    cy,
+                    radius,
+                    stroke,
+                    fill,
+                    thickness,
+                } => {
+                    let left = cx - min_x - radius;
+                    let top = cy - min_y - radius;
+                    let size = radius.saturating_mul(2).max(1);
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    if let Some(rect) = tiny_skia::Rect::from_xywh(left as f32, top as f32, size as f32, size as f32) {
+                        pb.push_oval(rect);
+                        if let Some(path) = pb.finish() {
+                            let mut paint = tiny_skia::Paint::default();
+                            paint.anti_alias = true;
+                            if let Some(fill_color) = fill {
+                                paint.set_color(tiny_skia::Color::from_rgba8(fill_color[0], fill_color[1], fill_color[2], fill_color[3]));
+                                pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+                            }
+                            paint.set_color(tiny_skia::Color::from_rgba8(stroke[0], stroke[1], stroke[2], stroke[3]));
+                            let skia_stroke = tiny_skia::Stroke {
+                                width: *thickness as f32,
+                                ..Default::default()
+                            };
+                            pixmap.stroke_path(&path, &paint, &skia_stroke, tiny_skia::Transform::identity(), None);
+                        }
+                    }
+                }
+                GeometryRenderDraw::Arrow {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    stroke,
+                    thickness,
+                    head_size,
+                } => {
+                    let rel_x1 = (x1 - min_x) as f32;
+                    let rel_y1 = (y1 - min_y) as f32;
+                    let rel_x2 = (x2 - min_x) as f32;
+                    let rel_y2 = (y2 - min_y) as f32;
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    pb.move_to(rel_x1, rel_y1);
+                    pb.line_to(rel_x2, rel_y2);
+
+                    let dx = rel_x2 - rel_x1;
+                    let dy = rel_y2 - rel_y1;
+                    let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                    let ux = dx / len;
+                    let uy = dy / len;
+                    let angle = 28.0_f32.to_radians();
+                    let sin_a = angle.sin();
+                    let cos_a = angle.cos();
+                    for side in [-1.0_f32, 1.0_f32] {
+                        let rx = ux * cos_a - side * uy * sin_a;
+                        let ry = uy * cos_a + side * ux * sin_a;
+                        let hx = rel_x2 - rx * *head_size as f32;
+                        let hy = rel_y2 - ry * *head_size as f32;
+                        pb.move_to(rel_x2, rel_y2);
+                        pb.line_to(hx, hy);
+                    }
+                    if let Some(path) = pb.finish() {
+                        let mut paint = tiny_skia::Paint::default();
+                        paint.set_color(tiny_skia::Color::from_rgba8(stroke[0], stroke[1], stroke[2], stroke[3]));
+                        paint.anti_alias = true;
+                        let skia_stroke = tiny_skia::Stroke {
+                            width: *thickness as f32,
+                            ..Default::default()
+                        };
+                        pixmap.stroke_path(&path, &paint, &skia_stroke, tiny_skia::Transform::identity(), None);
+                    }
+                }
+                GeometryRenderDraw::Polyline {
+                    points,
+                    stroke,
+                    thickness,
+                } => {
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    let mut first = true;
+                    for pt in points {
+                        let px = (pt.0 - min_x) as f32;
+                        let py = (pt.1 - min_y) as f32;
+                        if first {
+                            pb.move_to(px, py);
+                            first = false;
+                        } else {
+                            pb.line_to(px, py);
+                        }
+                    }
+                    if let Some(path) = pb.finish() {
+                        let mut paint = tiny_skia::Paint::default();
+                        paint.set_color(tiny_skia::Color::from_rgba8(stroke[0], stroke[1], stroke[2], stroke[3]));
+                        paint.anti_alias = true;
+                        let skia_stroke = tiny_skia::Stroke {
+                            width: *thickness as f32,
+                            ..Default::default()
+                        };
+                        pixmap.stroke_path(&path, &paint, &skia_stroke, tiny_skia::Transform::identity(), None);
+                    }
+                }
+                GeometryRenderDraw::Polygon {
+                    points,
+                    stroke,
+                    thickness,
+                    fill,
+                } => {
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    let mut first = true;
+                    for pt in points {
+                        let px = (pt.0 - min_x) as f32;
+                        let py = (pt.1 - min_y) as f32;
+                        if first {
+                            pb.move_to(px, py);
+                            first = false;
+                        } else {
+                            pb.line_to(px, py);
+                        }
+                    }
+                    pb.close();
+                    if let Some(path) = pb.finish() {
+                        let mut paint = tiny_skia::Paint::default();
+                        paint.anti_alias = true;
+                        if let Some(fill_color) = fill {
+                            paint.set_color(tiny_skia::Color::from_rgba8(fill_color[0], fill_color[1], fill_color[2], fill_color[3]));
+                            pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+                        }
+                        paint.set_color(tiny_skia::Color::from_rgba8(stroke[0], stroke[1], stroke[2], stroke[3]));
+                        let skia_stroke = tiny_skia::Stroke {
+                            width: *thickness as f32,
+                            ..Default::default()
+                        };
+                        pixmap.stroke_path(&path, &paint, &skia_stroke, tiny_skia::Transform::identity(), None);
+                    }
+                }
+                GeometryRenderDraw::Label(text) => geometry_texts.push(text.clone()),
+                GeometryRenderDraw::Svg { .. } => {}
+            }
+        }
+
+        // Copy Skia pixmap to DIB section pixels buffer
+        let pixmap_data = pixmap.data();
+        let total_pixels = width as usize * height as usize;
+        for i in 0..total_pixels {
+            let offset = i * 4;
+            let r = pixmap_data[offset];
+            let g = pixmap_data[offset + 1];
+            let b = pixmap_data[offset + 2];
+            let a = pixmap_data[offset + 3];
+            pixels[offset] = b;
+            pixels[offset + 1] = g;
+            pixels[offset + 2] = r;
+            pixels[offset + 3] = a;
+        }
+
+        // Draw SVG images directly on top of pixels
+        for shape in static_geometry_shapes.iter().chain(dynamic_geometry_shapes.iter()) {
+            if let GeometryRenderDraw::Svg {
+                x,
+                y,
+                width: target_w,
+                height: target_h,
+                opacity,
+                rotation,
+                code,
+            } = &shape.draw
+            {
+                if !code.trim().is_empty() {
+                    let opacity_key = (opacity * 1000.0).round() as u32;
+                    let rotation_key = (rotation * 1000.0).round() as i32;
+                    let cache_key = (code.clone(), *target_w, *target_h, opacity_key, rotation_key);
+                    let mut cache = GEOMETRY_SVG_CACHE.lock();
+                    let rendered = if let Some(cached) = cache.get(&cache_key) {
+                        Some(cached)
+                    } else {
+                        match crate::render::render_svg_image(code, *target_w, *target_h, *opacity, *rotation) {
+                            Ok(img) => {
+                                cache.insert(cache_key.clone(), img);
+                                cache.get(&cache_key)
+                            }
+                            Err(e) => {
+                                eprintln!("Overlay Svg paint: failed to render inline SVG: {e}");
+                                None
+                            }
+                        }
+                    };
+                    
+                    if let Some(img) = rendered {
+                        let img_w = img.width as usize;
+                        let img_h = img.height as usize;
+                        let offset_x = (img.orig_width as i32 - img.width as i32) / 2;
+                        let offset_y = (img.orig_height as i32 - img.height as i32) / 2;
+                        let rel_x = x + offset_x - min_x;
+                        let rel_y = y + offset_y - min_y;
+                        for py in 0..img_h {
+                            let screen_y = rel_y + py as i32;
+                            if screen_y < 0 || screen_y >= height as i32 {
+                                continue;
+                            }
+                            for px in 0..img_w {
+                                let screen_x = rel_x + px as i32;
+                                if screen_x < 0 || screen_x >= width as i32 {
+                                    continue;
+                                }
+                                let img_idx = (py * img_w + px) * 4;
+                                if img_idx + 3 >= img.rgba.len() {
+                                    continue;
+                                }
+                                let alpha = img.rgba[img_idx + 3] as u32;
+                                if alpha > 0 {
+                                    let dest_idx = ((screen_y as usize) * (width as usize) + (screen_x as usize)) * 4;
+                                    if dest_idx + 3 < pixels.len() {
+                                        let src_r = img.rgba[img_idx] as u32;
+                                        let src_g = img.rgba[img_idx + 1] as u32;
+                                        let src_b = img.rgba[img_idx + 2] as u32;
+                                        
+                                        let dest_b = pixels[dest_idx] as u32;
+                                        let dest_g = pixels[dest_idx + 1] as u32;
+                                        let dest_r = pixels[dest_idx + 2] as u32;
+                                        
+                                        let out_r = (src_r * alpha + dest_r * (255 - alpha)) / 255;
+                                        let out_g = (src_g * alpha + dest_g * (255 - alpha)) / 255;
+                                        let out_b = (src_b * alpha + dest_b * (255 - alpha)) / 255;
+                                        
+                                        pixels[dest_idx] = out_b as u8;
+                                        pixels[dest_idx + 1] = out_g as u8;
+                                        pixels[dest_idx + 2] = out_r as u8;
+                                        pixels[dest_idx + 3] = pixels[dest_idx + 3].max(alpha as u8);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -15895,17 +16220,6 @@ mod windows_overlay {
         for region in preview_regions {
             let rel_left = region.left - min_x;
             let rel_top = region.top - min_y;
-            let outline = [255, 216, 96, 230];
-            draw_rect_outline_rgba(
-                pixels,
-                width as usize,
-                height as usize,
-                rel_left,
-                rel_top,
-                region.width,
-                region.height,
-                outline,
-            );
             let mut text_rect = RECT {
                 left: rel_left,
                 top: rel_top - 18,
@@ -15955,269 +16269,6 @@ mod windows_overlay {
             }
 
             occupied_label_rects.push(text_rect);
-        }
-
-        let mut geometry_texts = Vec::new();
-        for shape in static_geometry_shapes.iter().chain(dynamic_geometry_shapes.iter()) {
-            match &shape.draw {
-                GeometryRenderDraw::Point {
-                    x,
-                    y,
-                    radius,
-                    fill,
-                } => {
-                    let left = x - min_x - radius;
-                    let top = y - min_y - radius;
-                    let size = radius.saturating_mul(2).max(1);
-                    fill_ellipse_rgba(
-                        pixels,
-                        width as usize,
-                        height as usize,
-                        left,
-                        top,
-                        size,
-                        size,
-                        *fill,
-                    );
-                }
-                GeometryRenderDraw::Line {
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    stroke,
-                    thickness,
-                } => {
-                    draw_line_thick_rgba(
-                        pixels,
-                        width as usize,
-                        height as usize,
-                        x1 - min_x,
-                        y1 - min_y,
-                        x2 - min_x,
-                        y2 - min_y,
-                        *stroke,
-                        *thickness,
-                    );
-                }
-                GeometryRenderDraw::Circle {
-                    cx,
-                    cy,
-                    radius,
-                    stroke,
-                    fill,
-                    thickness,
-                } => {
-                    let left = cx - min_x - radius;
-                    let top = cy - min_y - radius;
-                    let size = radius.saturating_mul(2).max(1);
-                    if let Some(fill_color) = fill {
-                        fill_ellipse_rgba(
-                            pixels,
-                            width as usize,
-                            height as usize,
-                            left,
-                            top,
-                            size,
-                            size,
-                            *fill_color,
-                        );
-                    }
-                    draw_ellipse_outline_thick_rgba(
-                        pixels,
-                        width as usize,
-                        height as usize,
-                        left,
-                        top,
-                        size,
-                        size,
-                        *stroke,
-                        *thickness,
-                    );
-                }
-                GeometryRenderDraw::Arrow {
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    stroke,
-                    thickness,
-                    head_size,
-                } => {
-                    let rel_x1 = x1 - min_x;
-                    let rel_y1 = y1 - min_y;
-                    let rel_x2 = x2 - min_x;
-                    let rel_y2 = y2 - min_y;
-                    draw_line_thick_rgba(
-                        pixels,
-                        width as usize,
-                        height as usize,
-                        rel_x1,
-                        rel_y1,
-                        rel_x2,
-                        rel_y2,
-                        *stroke,
-                        *thickness,
-                    );
-                    draw_arrow_head_rgba(
-                        pixels,
-                        width as usize,
-                        height as usize,
-                        rel_x1,
-                        rel_y1,
-                        rel_x2,
-                        rel_y2,
-                        *stroke,
-                        *thickness,
-                        *head_size,
-                    );
-                }
-                GeometryRenderDraw::Polyline {
-                    points,
-                    stroke,
-                    thickness,
-                } => {
-                    for segment in points.windows(2) {
-                        if let [from, to] = segment {
-                            draw_line_thick_rgba(
-                                pixels,
-                                width as usize,
-                                height as usize,
-                                from.0 - min_x,
-                                from.1 - min_y,
-                                to.0 - min_x,
-                                to.1 - min_y,
-                                *stroke,
-                                *thickness,
-                            );
-                        }
-                    }
-                }
-                GeometryRenderDraw::Polygon {
-                    points,
-                    stroke,
-                    fill,
-                    thickness,
-                } => {
-                    if let Some(fill_color) = fill {
-                        fill_polygon_rgba(
-                            pixels,
-                            width as usize,
-                            height as usize,
-                            points,
-                            min_x,
-                            min_y,
-                            *fill_color,
-                        );
-                    }
-                    for segment in points.windows(2) {
-                        if let [from, to] = segment {
-                            draw_line_thick_rgba(
-                                pixels,
-                                width as usize,
-                                height as usize,
-                                from.0 - min_x,
-                                from.1 - min_y,
-                                to.0 - min_x,
-                                to.1 - min_y,
-                                *stroke,
-                                *thickness,
-                            );
-                        }
-                    }
-                    if let (Some(first), Some(last)) = (points.first(), points.last()) {
-                        draw_line_thick_rgba(
-                            pixels,
-                            width as usize,
-                            height as usize,
-                            last.0 - min_x,
-                            last.1 - min_y,
-                            first.0 - min_x,
-                            first.1 - min_y,
-                            *stroke,
-                            *thickness,
-                        );
-                    }
-                }
-                GeometryRenderDraw::Label(text) => geometry_texts.push(text.clone()),
-                GeometryRenderDraw::Svg {
-                    x,
-                    y,
-                    width: target_w,
-                    height: target_h,
-                    opacity,
-                    rotation,
-                    code,
-                } => {
-                    if !code.trim().is_empty() {
-                        let opacity_key = (opacity * 1000.0).round() as u32;
-                        let rotation_key = (rotation * 1000.0).round() as i32;
-                        let cache_key = (code.clone(), *target_w, *target_h, opacity_key, rotation_key);
-                        let mut cache = GEOMETRY_SVG_CACHE.lock();
-                        let rendered = if let Some(cached) = cache.get(&cache_key) {
-                            Some(cached)
-                        } else {
-                            match crate::render::render_svg_image(code, *target_w, *target_h, *opacity, *rotation) {
-                                Ok(img) => {
-                                    cache.insert(cache_key.clone(), img);
-                                    cache.get(&cache_key)
-                                }
-                                Err(e) => {
-                                    eprintln!("Overlay Svg paint: failed to render inline SVG: {e}");
-                                    None
-                                }
-                            }
-                        };
-                        
-                        if let Some(img) = rendered {
-                            let img_w = img.width as usize;
-                            let img_h = img.height as usize;
-                            let offset_x = (img.orig_width as i32 - img.width as i32) / 2;
-                            let offset_y = (img.orig_height as i32 - img.height as i32) / 2;
-                            let rel_x = x + offset_x - min_x;
-                            let rel_y = y + offset_y - min_y;
-                            for py in 0..img_h {
-                                let screen_y = rel_y + py as i32;
-                                if screen_y < 0 || screen_y >= height as i32 {
-                                    continue;
-                                }
-                                for px in 0..img_w {
-                                    let screen_x = rel_x + px as i32;
-                                    if screen_x < 0 || screen_x >= width as i32 {
-                                        continue;
-                                    }
-                                    let img_idx = (py * img_w + px) * 4;
-                                    if img_idx + 3 >= img.rgba.len() {
-                                        continue;
-                                    }
-                                    let alpha = img.rgba[img_idx + 3] as u32;
-                                    if alpha > 0 {
-                                        let dest_idx = ((screen_y as usize) * (width as usize) + (screen_x as usize)) * 4;
-                                        if dest_idx + 3 < pixels.len() {
-                                            let src_r = img.rgba[img_idx] as u32;
-                                            let src_g = img.rgba[img_idx + 1] as u32;
-                                            let src_b = img.rgba[img_idx + 2] as u32;
-                                            
-                                            let dest_b = pixels[dest_idx] as u32;
-                                            let dest_g = pixels[dest_idx + 1] as u32;
-                                            let dest_r = pixels[dest_idx + 2] as u32;
-                                            
-                                            let out_r = (src_r * alpha + dest_r * (255 - alpha)) / 255;
-                                            let out_g = (src_g * alpha + dest_g * (255 - alpha)) / 255;
-                                            let out_b = (src_b * alpha + dest_b * (255 - alpha)) / 255;
-                                            
-                                            pixels[dest_idx] = out_b as u8;
-                                            pixels[dest_idx + 1] = out_g as u8;
-                                            pixels[dest_idx + 2] = out_r as u8;
-                                            pixels[dest_idx + 3] = pixels[dest_idx + 3].max(alpha as u8);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         let rects_to_fix = occupied_label_rects.clone();
