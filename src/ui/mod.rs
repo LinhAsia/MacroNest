@@ -9887,13 +9887,12 @@ impl CrosshairApp {
                 crate::overlay::native_capture::NativeCaptureResult::Cancelled
             };
 
-            // Restore main app window natively
+            // Restore main app window natively as minimized
             #[cfg(windows)]
             unsafe {
                 if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL, SetForegroundWindow};
-                    let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
-                    let _ = SetForegroundWindow(hwnd);
+                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWMINNOACTIVE};
+                    let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
                 }
             }
 
@@ -10437,8 +10436,15 @@ impl eframe::App for CrosshairApp {
                         }
                     }
 
-                    // Hide main window to tray instead of restoring it to screen
-                    self.hide_to_tray(ctx);
+                    // Minimize main window to taskbar instead of restoring it to screen
+                    self.state.show_window = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+
+                    // Restore overlay visibility (was hidden before capture)
+                    let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
+                    crate::overlay::wake_command_queue();
+                    ctx.request_repaint();
                 }
                 UiCommand::NativeMouseMoveAbsoluteCaptureFinished { target, result, capture_frame } => {
                     // Show main window natively
