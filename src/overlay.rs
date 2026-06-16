@@ -6030,7 +6030,7 @@ mod windows_overlay {
         let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
         let mut hue = runtime.focus_highlight_rainbow_hue;
         let color = if runtime.focus_highlight_rainbow {
-            let rgb = hsv_to_rgb(hue, 0.85, 0.95);
+            let rgb = hsv_to_rgb(hue * 360.0, 0.85, 0.95);
             image::Rgba(rgb)
         } else {
             image::Rgba([
