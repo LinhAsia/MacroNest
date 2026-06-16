@@ -10410,8 +10410,11 @@ impl eframe::App for CrosshairApp {
                     #[cfg(windows)]
                     unsafe {
                         if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+                            use windows::Win32::UI::WindowsAndMessaging::{
+                                ShowWindow, SW_SHOWNORMAL, SetForegroundWindow,
+                            };
                             let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                            let _ = SetForegroundWindow(hwnd);
                         }
                     }
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
@@ -10432,8 +10435,13 @@ impl eframe::App for CrosshairApp {
                                 "Protractor calibration cancelled.",
                                 "Huy can chinh thuoc do do.",
                             ).to_owned();
+                            self.sync_protractor_state();
                         }
                     }
+
+                    // Restore overlay visibility (was hidden before capture)
+                    let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
+                    crate::overlay::wake_command_queue();
                     ctx.request_repaint();
                 }
                 UiCommand::NativeMouseMoveAbsoluteCaptureFinished { target, result, capture_frame } => {
