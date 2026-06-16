@@ -2244,9 +2244,9 @@ if arduino_changed {
 
             // Capture virtual screen bounds
             let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
-            if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
+            let (result, capture_frame) = if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
                 let mode = crate::overlay::native_capture::NativeCaptureMode::PointClick { vietnamese };
-                let result = crate::overlay::native_capture::run_capture_overlay(
+                let res = crate::overlay::native_capture::run_capture_overlay(
                     capture.clone(),
                     left,
                     top,
@@ -2254,18 +2254,29 @@ if arduino_changed {
                     height,
                     mode,
                 );
-                let _ = ui_tx.send(UiCommand::NativeMouseMoveAbsoluteCaptureFinished {
-                    target,
-                    result,
-                    capture_frame: Some(capture),
-                });
+                (res, Some(capture))
             } else {
-                let _ = ui_tx.send(UiCommand::NativeMouseMoveAbsoluteCaptureFinished {
-                    target,
-                    result: crate::overlay::native_capture::NativeCaptureResult::Cancelled,
-                    capture_frame: None,
-                });
+                (crate::overlay::native_capture::NativeCaptureResult::Cancelled, None)
+            };
+
+            // Restore main app window natively
+            #[cfg(windows)]
+            unsafe {
+                if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL, SetForegroundWindow};
+                    let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                    let _ = SetForegroundWindow(hwnd);
+                }
             }
+
+            // Sleep a tiny bit to let OS display the window so winit event loop is active
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            let _ = ui_tx.send(UiCommand::NativeMouseMoveAbsoluteCaptureFinished {
+                target,
+                result,
+                capture_frame,
+            });
             egui_ctx.request_repaint();
         });
     }
