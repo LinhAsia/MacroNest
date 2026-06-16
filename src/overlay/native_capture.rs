@@ -43,6 +43,7 @@ pub enum NativeCaptureMode {
     },
     PointClick {
         vietnamese: bool,
+        dim_background: bool,
     },
 }
 
@@ -408,11 +409,21 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
     // 1. Draw the screenshot onto the pixmap
     pixmap.data_mut().copy_from_slice(&state.capture_frame.rgba);
 
-    // 2. Draw a dark overlay over the whole screen
-    let mut paint = Paint::default();
-    paint.set_color_rgba8(0, 0, 0, 128); // 50% opacity
-    let screen_rect = Rect::from_xywh(0.0, 0.0, state.width as f32, state.height as f32).unwrap();
-    pixmap.fill_rect(screen_rect, &paint, tiny_skia::Transform::identity(), None);
+    // 2. Draw a dark overlay over the whole screen when the capture flow asks for it.
+    let should_dim_background = !matches!(
+        state.mode,
+        NativeCaptureMode::PointClick {
+            dim_background: false,
+            ..
+        }
+    );
+    if should_dim_background {
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(0, 0, 0, 128); // 50% opacity
+        let screen_rect =
+            Rect::from_xywh(0.0, 0.0, state.width as f32, state.height as f32).unwrap();
+        pixmap.fill_rect(screen_rect, &paint, tiny_skia::Transform::identity(), None);
+    }
 
     // 3. Render specific overlay elements based on capture mode
     match state.mode {
@@ -771,7 +782,7 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
                 }
             }
         }
-        NativeCaptureMode::PointClick { vietnamese } => {
+        NativeCaptureMode::PointClick { vietnamese, .. } => {
             if vietnamese {
                 "Nhấp chuột vào một điểm trên màn hình để lấy tọa độ/màu sắc. Nhấn Esc để hủy."
             } else {

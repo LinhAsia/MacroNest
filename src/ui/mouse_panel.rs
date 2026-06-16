@@ -2245,7 +2245,10 @@ if arduino_changed {
             // Capture virtual screen bounds
             let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
             let (result, capture_frame) = if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
-                let mode = crate::overlay::native_capture::NativeCaptureMode::PointClick { vietnamese };
+                let mode = crate::overlay::native_capture::NativeCaptureMode::PointClick {
+                    vietnamese,
+                    dim_background: true,
+                };
                 let res = crate::overlay::native_capture::run_capture_overlay(
                     capture.clone(),
                     left,

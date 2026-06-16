@@ -109,6 +109,8 @@ enum TitlebarQuickActionKind {
     Protractor,
     GetCoordinates,
     GetColor,
+    KeyDisplay,
+    ScreenDraw,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +143,7 @@ pub(crate) enum VisionCaptureTarget {
     },
     QuickActionsCoordinates,
     QuickActionsColor,
+    QuickActionsKeyDisplayPosition,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1171,6 +1174,8 @@ impl CrosshairApp {
         self.sync_native_focus_highlight_enabled();
         self.sync_focus_highlight_config();
         self.sync_protractor_state();
+        self.sync_quick_key_display_config();
+        self.sync_quick_screen_draw_config();
         self.sync_vietnamese_input_enabled();
         self.sync_macro_master_hotkey();
         self.startup_overlay_sync_pending = false;
@@ -1245,6 +1250,26 @@ impl CrosshairApp {
             thickness: self.state.protractor_thickness,
             calibrating: self.protractor_picking_active,
             ui_language: self.state.ui_language,
+        });
+    }
+
+    fn sync_quick_key_display_config(&self) {
+        let _ = self.overlay_tx.send(OverlayCommand::UpdateQuickKeyDisplayConfig {
+            enabled: self.state.quick_key_display_enabled,
+            center_x: self.state.quick_key_display_x,
+            center_y: self.state.quick_key_display_y,
+            size: self.state.quick_key_display_size,
+        });
+    }
+
+    fn sync_quick_screen_draw_config(&self) {
+        let _ = self.overlay_tx.send(OverlayCommand::UpdateScreenDrawConfig {
+            enabled: self.state.quick_screen_draw_enabled,
+            trigger: self.state.quick_screen_draw_hotkey.clone(),
+            color: self.state.quick_screen_draw_color,
+            brush_size: self.state.quick_screen_draw_brush_size,
+            smoothing: self.state.quick_screen_draw_smoothing,
+            smoothing_amount: self.state.quick_screen_draw_smoothing_amount,
         });
     }
 
@@ -3990,6 +4015,61 @@ impl CrosshairApp {
                 painter.line_segment([start, pos2(start.x - 3.0, start.y + 3.0)], egui::Stroke::new(1.8, icon_color));
                 painter.circle_filled(pos2(end.x + 2.0, end.y - 2.0), 4.5, icon_color);
             }
+            TitlebarQuickActionKind::KeyDisplay => {
+                let key_shadow_rect = egui::Rect::from_center_size(
+                    rect.center() + vec2(0.0, 3.0),
+                    vec2(50.0, 28.0),
+                );
+                let key_rect = egui::Rect::from_center_size(
+                    rect.center() + vec2(0.0, 0.5),
+                    vec2(50.0, 26.0),
+                );
+                let top_glow_rect = egui::Rect::from_min_max(
+                    pos2(key_rect.left() + 3.0, key_rect.top() + 3.0),
+                    pos2(key_rect.right() - 3.0, key_rect.center().y + 2.0),
+                );
+                painter.rect_filled(
+                    key_shadow_rect,
+                    10.0,
+                    icon_color.gamma_multiply(0.28),
+                );
+                painter.rect_filled(
+                    key_rect,
+                    10.0,
+                    Color32::from_rgba_premultiplied(255, 255, 255, 32),
+                );
+                painter.rect_filled(
+                    top_glow_rect,
+                    7.0,
+                    Color32::from_rgba_premultiplied(255, 255, 255, 24),
+                );
+                painter.rect_stroke(
+                    key_rect,
+                    10.0,
+                    egui::Stroke::new(1.8, icon_color),
+                    StrokeKind::Inside,
+                );
+                painter.text(
+                    key_rect.center() + vec2(0.0, -0.5),
+                    egui::Align2::CENTER_CENTER,
+                    "A",
+                    egui::FontId::proportional(15.5),
+                    icon_color,
+                );
+            }
+            TitlebarQuickActionKind::ScreenDraw => {
+                let start = pos2(rect.left() + 17.0, rect.center().y + 5.0);
+                let mid = pos2(rect.center().x - 1.0, rect.center().y - 6.0);
+                let end = pos2(rect.right() - 15.0, rect.center().y + 1.0);
+                painter.line_segment([start, mid], egui::Stroke::new(3.0, icon_color));
+                painter.line_segment([mid, end], egui::Stroke::new(3.0, icon_color));
+                painter.circle_filled(end, 4.0, icon_color);
+                painter.rect_filled(
+                    egui::Rect::from_min_size(pos2(rect.left() + 14.0, rect.top() + 13.0), vec2(12.0, 7.0)),
+                    2.0,
+                    icon_color,
+                );
+            }
         }
     }
 
@@ -4722,6 +4802,277 @@ impl CrosshairApp {
                         );
 
                         ui.add_space(26.0);
+                    },
+                );
+
+                ui.allocate_ui_with_layout(
+                    vec2(92.0, 155.0),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let is_pick_active = self.vision_capture_active
+                            && self.vision_capture_target
+                                == Some(VisionCaptureTarget::QuickActionsKeyDisplayPosition);
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::KeyDisplay,
+                            self.state.quick_key_display_enabled,
+                        );
+                        if button_response.clicked() {
+                            self.state.quick_key_display_enabled =
+                                !self.state.quick_key_display_enabled;
+                            self.sync_quick_key_display_config();
+                            self.persist();
+                            self.status = if self.state.quick_key_display_enabled {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Key display enabled.",
+                                    "Da bat hien thi phim.",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Key display disabled.",
+                                    "Da tat hien thi phim.",
+                                )
+                            }
+                            .to_owned();
+                        }
+
+                        ui.add_space(4.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 20.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Key display",
+                                        "Hien thi phim",
+                                    ))
+                                    .size(11.0)
+                                    .color(if button_response.hovered() {
+                                        ui.visuals().strong_text_color()
+                                    } else {
+                                        ui.visuals().text_color()
+                                    }),
+                                ));
+                            },
+                        );
+
+                        ui.add_space(2.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 20.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(1.0);
+                                ui.label(RichText::new("X").size(10.0));
+                                let x_changed = ui
+                                    .add_sized(
+                                        [26.0, 20.0],
+                                        egui::DragValue::new(&mut self.state.quick_key_display_x)
+                                            .speed(1.0),
+                                    )
+                                    .changed();
+                                ui.label(RichText::new("Y").size(10.0));
+                                let y_changed = ui
+                                    .add_sized(
+                                        [26.0, 20.0],
+                                        egui::DragValue::new(&mut self.state.quick_key_display_y)
+                                            .speed(1.0),
+                                    )
+                                    .changed();
+                                if x_changed || y_changed {
+                                    self.sync_quick_key_display_config();
+                                    self.persist();
+                                }
+                            },
+                        );
+
+                        ui.add_space(2.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 20.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(4.0);
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Size",
+                                        "Co",
+                                    ))
+                                    .size(10.0),
+                                );
+                                let size_changed = ui
+                                    .add_sized(
+                                        [40.0, 20.0],
+                                        egui::DragValue::new(
+                                            &mut self.state.quick_key_display_size,
+                                        )
+                                        .range(18.0..=96.0)
+                                        .speed(1.0),
+                                    )
+                                    .changed();
+                                if size_changed {
+                                    self.sync_quick_key_display_config();
+                                    self.persist();
+                                }
+                            },
+                        );
+
+                        ui.add_space(2.0);
+                        if ui
+                            .add_sized(
+                                [74.0, 20.0],
+                                Button::new(
+                                    if is_pick_active {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Picking...",
+                                            "Dang chon...",
+                                        )
+                                    } else {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Pick point",
+                                            "Chon diem",
+                                        )
+                                    },
+                                ),
+                            )
+                            .clicked()
+                        {
+                            self.begin_image_search_capture(
+                                ui.ctx(),
+                                VisionCaptureTarget::QuickActionsKeyDisplayPosition,
+                                VisionCaptureMode::SinglePixel,
+                            );
+                        }
+                    },
+                );
+
+                ui.allocate_ui_with_layout(
+                    vec2(92.0, 192.0),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::ScreenDraw,
+                            self.state.quick_screen_draw_enabled,
+                        );
+                        if button_response.clicked() {
+                            self.state.quick_screen_draw_enabled =
+                                !self.state.quick_screen_draw_enabled;
+                            self.sync_quick_screen_draw_config();
+                            self.persist();
+                            self.status = if self.state.quick_screen_draw_enabled {
+                                "Screen draw hotkey enabled."
+                            } else {
+                                "Screen draw hotkey disabled."
+                            }
+                            .to_owned();
+                        }
+
+                        ui.add_space(4.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 20.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new("Draw")
+                                        .size(11.0)
+                                        .color(if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        }),
+                                ));
+                            },
+                        );
+
+                        ui.add_space(2.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(4.0);
+                            let color_changed =
+                                Self::edit_rgba_color(ui, &mut self.state.quick_screen_draw_color)
+                                    .changed();
+                            if color_changed {
+                                self.sync_quick_screen_draw_config();
+                                self.persist();
+                            }
+                            ui.label(RichText::new("Color").size(10.0));
+                        });
+
+                        ui.add_space(2.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Size").size(10.0));
+                            let changed = ui
+                                .add_sized(
+                                    [48.0, 20.0],
+                                    egui::DragValue::new(
+                                        &mut self.state.quick_screen_draw_brush_size,
+                                    )
+                                    .range(2.0..=80.0)
+                                    .speed(1.0),
+                                )
+                                .changed();
+                            if changed {
+                                self.sync_quick_screen_draw_config();
+                                self.persist();
+                            }
+                        });
+
+                        ui.add_space(2.0);
+                        let smoothing_changed = ui
+                            .checkbox(&mut self.state.quick_screen_draw_smoothing, "Smooth")
+                            .changed();
+                        if smoothing_changed {
+                            self.sync_quick_screen_draw_config();
+                            self.persist();
+                        }
+                        let smooth_amount_changed = ui
+                            .add_sized(
+                                [78.0, 18.0],
+                                egui::Slider::new(
+                                    &mut self.state.quick_screen_draw_smoothing_amount,
+                                    0.0..=1.0,
+                                )
+                                .show_value(false),
+                            )
+                            .changed();
+                        if smooth_amount_changed {
+                            self.sync_quick_screen_draw_config();
+                            self.persist();
+                        }
+
+                        ui.add_space(2.0);
+                        let capture_active = self
+                            .capture_target
+                            .as_ref()
+                            .is_some_and(|target| matches!(target, CaptureRequest::QuickScreenDrawHotkey));
+                        let trigger_text = hotkey::format_binding(
+                            self.state.quick_screen_draw_hotkey.as_ref(),
+                        );
+                        if ui
+                            .add_sized(
+                                [78.0, 22.0],
+                                Button::new(if capture_active {
+                                    "Capturing..."
+                                } else {
+                                    "Capture key"
+                                }),
+                            )
+                            .clicked()
+                        {
+                            if capture_active {
+                                self.cancel_capture();
+                            } else {
+                                self.begin_capture(
+                                    CaptureRequest::QuickScreenDrawHotkey,
+                                    "Press the key that toggles screen drawing.".to_owned(),
+                                );
+                            }
+                        }
+                        ui.label(RichText::new(trigger_text).size(10.0).weak());
                     },
                 );
             });
@@ -8838,6 +9189,7 @@ impl CrosshairApp {
                 | CaptureRequest::MouseSensitivityPresetHotkey(_)
                 | CaptureRequest::ZoomPresetHotkey(_)
                 | CaptureRequest::VisionPresetHotkey(_)
+                | CaptureRequest::QuickScreenDrawHotkey
                 | CaptureRequest::MacrosMasterHotkey
                 | CaptureRequest::MacroStepInput { .. }
         )
@@ -9178,6 +9530,12 @@ impl CrosshairApp {
                     UiLanguage::Vietnamese => "Đã gán hotkey bật/tắt macro.".to_owned(),
                     _ => "Captured the macro master hotkey.".to_owned(),
                 };
+            }
+            (CaptureRequest::QuickScreenDrawHotkey, CapturedInput::Binding(binding)) => {
+                self.state.quick_screen_draw_hotkey = Some(binding);
+                self.sync_quick_screen_draw_config();
+                self.persist();
+                self.status = "Captured screen draw toggle key.".to_owned();
             }
             (CaptureRequest::PinPresetHotkey(preset_id), CapturedInput::Binding(binding)) => {
                 if let Some(preset) = self
@@ -11397,7 +11755,7 @@ impl eframe::App for CrosshairApp {
                         se: 0,
                         sw: 0,
                     })
-                    .inner_margin(egui::Margin::symmetric(10, 3)),
+                    .inner_margin(egui::Margin::symmetric(4, 3)),
             )
             .show(ctx, |ui| {
                 let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
@@ -11701,12 +12059,12 @@ impl eframe::App for CrosshairApp {
                                 self.settings_popup_open = !self.settings_popup_open;
                             }
 
-                        ui.add_space(8.0);
+                        ui.add_space(4.0);
 
                         let drag_width = ui.available_width().max(120.0);
                         let drag_response = ui
                             .allocate_ui_with_layout(
-                                vec2(drag_width, 30.0),
+                                vec2(drag_width, 34.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
                                     let accent = if self.state.ui_theme == UiThemeMode::Dark {
@@ -11731,13 +12089,13 @@ impl eframe::App for CrosshairApp {
                                             egui::Frame::new()
                                                 .fill(icon_fill)
                                                 .stroke(egui::Stroke::NONE)
-                                                .corner_radius(14.0)
-                                                .inner_margin(egui::Margin::symmetric(2, 2))
+                                                .corner_radius(12.0)
+                                                .inner_margin(egui::Margin::same(0))
                                                 .show(ui, |ui| {
                                                     ui.add(
                                                         Image::new((
                                                             texture.id(),
-                                                            vec2(34.0, 34.0),
+                                                            vec2(30.0, 30.0),
                                                         ))
                                                         .sense(Sense::hover()),
                                                     );
@@ -11745,7 +12103,6 @@ impl eframe::App for CrosshairApp {
                                         }
                                         ui.add_space(6.0);
                                         ui.vertical(|ui| {
-                                            ui.add_space(1.0);
                                             ui.horizontal(|ui| {
                                                 ui.label(
                                                     RichText::new(self.app_brand_title())
