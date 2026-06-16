@@ -603,7 +603,9 @@ mod windows_overlay {
             center_y: i32,
             thickness: f32,
         },
-        RequestProtractorCalibration,
+        RequestProtractorCalibration {
+            was_minimized: bool,
+        },
         NativeVisionCaptureFinished {
             target: VisionCaptureTarget,
             mode: VisionCaptureMode,
@@ -1651,16 +1653,19 @@ mod windows_overlay {
                                 let _ = ui_tx.send(UiCommand::SetProtractorEnabled(false));
                             }
                         } else if target == ProtractorDragTarget::CalibrationButton {
+                            let mut was_minimized = false;
                             unsafe {
                                 if let Some(app_hwnd) = find_app_ui_window() {
-                                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWMINNOACTIVE, IsIconic, IsWindowVisible};
-                                    if IsIconic(app_hwnd).as_bool() || !IsWindowVisible(app_hwnd).as_bool() {
-                                        let _ = ShowWindow(app_hwnd, SW_SHOWMINNOACTIVE);
+                                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_RESTORE, SetForegroundWindow, IsIconic};
+                                    was_minimized = IsIconic(app_hwnd).as_bool();
+                                    if was_minimized {
+                                        let _ = ShowWindow(app_hwnd, SW_RESTORE);
                                     }
+                                    let _ = SetForegroundWindow(app_hwnd);
                                 }
                             }
                             if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
-                                let _ = ui_tx.send(UiCommand::RequestProtractorCalibration);
+                                let _ = ui_tx.send(UiCommand::RequestProtractorCalibration { was_minimized });
                             }
                         } else {
                             let mut mouse_screen = POINT::default();
