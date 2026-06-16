@@ -357,15 +357,15 @@ impl CrosshairApp {
         }
     }
 
-    fn render_expression_help_box(ui: &mut egui::Ui, language: UiLanguage) {
+    pub(crate) fn render_expression_guides_content(&self, ui: &mut egui::Ui) {
+        let language = self.state.ui_language;
         let fill = Color32::from_rgba_unmultiplied(0, 170, 255, 18);
         let stroke = egui::Stroke::new(1.0, Color32::from_rgb(0, 170, 255));
         egui::Frame::group(ui.style())
             .fill(fill)
             .stroke(stroke)
-            .inner_margin(egui::Margin::symmetric(8, 6))
+            .inner_margin(egui::Margin::symmetric(10, 8))
             .show(ui, |ui| {
-                ui.set_min_width(760.0);
                 ui.horizontal(|ui| {
                     ui.label(
                         Self::material_icon_text(0xe88f, 14.0)
@@ -381,109 +381,111 @@ impl CrosshairApp {
                         .color(Color32::from_rgb(0, 170, 255)),
                     );
                 });
-                ui.add_space(2.0);
+                ui.add_space(4.0);
                 ui.label(Self::tr_lang(
                     language,
-                    "You can write math expressions and use variables in {}. Math operators + - * / and parentheses () are supported. Example: {100 + (A - B) * 2}",
-                    "Ban co the viet bieu thuc toan va dung bien trong {}. Ho tro cac phep toan + - * / va dau ngoac (). Vi du: {100 + (A - B) * 2}",
+                    "To return a value, put variables or math inside {}. Plain text outside {} stays as normal text.",
+                    "De tra ve gia tri, hay dat bien hoac phep tinh vao trong {}. Text nam ngoai {} se duoc giu nguyen.",
                 ));
+                ui.label(
+                    egui::RichText::new(Self::tr_lang(
+                        language,
+                        "Examples: {A}, {100 + B}, HP: {player_hp}",
+                        "Vi du: {A}, {100 + B}, HP: {player_hp}",
+                    ))
+                    .monospace(),
+                );
                 ui.add_space(4.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("expression_help_scroll")
-                    .max_height(92.0)
-                    .auto_shrink([false, false])
+                ui.label(
+                    egui::RichText::new(Self::tr_lang(
+                        language,
+                        "Supported math and values",
+                        "Phep tinh va gia tri ho tro",
+                    ))
+                    .strong(),
+                );
+                egui::Grid::new("expression-help-columns")
+                    .num_columns(3)
+                    .min_col_width(220.0)
+                    .spacing([18.0, 0.0])
                     .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new(Self::tr_lang(
-                                language,
-                                "Available expressions:",
-                                "Ham ho tro:",
-                            ))
-                            .strong(),
-                        );
-                        egui::Grid::new("expression-help-columns")
-                            .num_columns(3)
-                            .min_col_width(220.0)
-                            .spacing([18.0, 0.0])
-                            .show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(Self::tr_lang(language, "Functions", "Ham"))
-                                            .strong(),
-                                    );
-                                    ui.label(egui::RichText::new("- random(min, max)").monospace());
-                                    ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
-                                    ui.label(egui::RichText::new("- min(a, b)").monospace());
-                                    ui.label(egui::RichText::new("- max(a, b)").monospace());
-                                    ui.label(egui::RichText::new("- abs(a)").monospace());
-                                    ui.label(egui::RichText::new("- atan(a)").monospace());
-                                    ui.label(egui::RichText::new("- atan2(y, x)").monospace());
-                                    ui.label(egui::RichText::new("- sqrt(a)").monospace());
-                                    ui.label(egui::RichText::new("- pow(a, b)").monospace());
-                                    ui.label(egui::RichText::new("- round(a, digits)").monospace());
-                                    ui.label(egui::RichText::new("- ceil(a) / floor(a)").monospace());
-                                    ui.label(egui::RichText::new("- factorial(n)").monospace());
-                                    ui.label(egui::RichText::new("- gcd(a, b, ...) / lcm(a, b, ...)").monospace());
-                                    ui.label(egui::RichText::new("- isqrt(n)").monospace());
-                                    ui.label(egui::RichText::new("- comb(n, k) / perm(n, k)").monospace());
-                                    ui.label(egui::RichText::new("- sin(angleDeg) * 1000").monospace());
-                                    ui.label(egui::RichText::new("- cos(angleDeg) * 1000").monospace());
-                                    ui.label(egui::RichText::new("- degrees(rad) / radians(deg)").monospace());
-                                    ui.label(egui::RichText::new("- pi").monospace());
-                                    ui.label(egui::RichText::new("- myVar.toNumber").monospace());
-                                });
-                                ui.vertical(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(Self::tr_lang(
-                                            language,
-                                            "Numeric values",
-                                            "Gia tri so",
-                                        ))
-                                        .strong(),
-                                    );
-                                    ui.label(egui::RichText::new("- screen.width").monospace());
-                                    ui.label(egui::RichText::new("- screen.height").monospace());
-                                    ui.label(egui::RichText::new("- mouse.x").monospace());
-                                    ui.label(egui::RichText::new("- mouse.y").monospace());
-                                    ui.label(egui::RichText::new("- mouse.sensitivity").monospace());
-                                    ui.label(egui::RichText::new("- volume.level").monospace());
-                                    ui.label(egui::RichText::new("- window.x / left").monospace());
-                                    ui.label(egui::RichText::new("- window.y / top").monospace());
-                                    ui.label(egui::RichText::new("- window.right").monospace());
-                                    ui.label(egui::RichText::new("- window.bottom").monospace());
-                                    ui.label(egui::RichText::new("- window.width").monospace());
-                                    ui.label(egui::RichText::new("- window.height").monospace());
-                                    ui.label(egui::RichText::new("- window.centerX / centerY").monospace());
-                                });
-                                ui.vertical(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(Self::tr_lang(
-                                            language,
-                                            "System and text",
-                                            "He thong va text",
-                                        ))
-                                        .strong(),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new("- system.year / month / day").monospace(),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new("- system.hour / minute / second").monospace(),
-                                    );
-                                    ui.label(egui::RichText::new("- system.millisecond").monospace());
-                                    ui.label(egui::RichText::new("- system.date").monospace());
-                                    ui.label(egui::RichText::new("- system.time").monospace());
-                                    ui.label(egui::RichText::new("- window.title").monospace());
-                                    ui.label(egui::RichText::new("- clipboard.text").monospace());
-                                    ui.label(
-                                        egui::RichText::new("- timer1.hour ... total_sec").monospace(),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new("- TimerName.hour ... total_sec").monospace(),
-                                    );
-                                });
-                                ui.end_row();
-                            });
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new(Self::tr_lang(language, "Functions", "Ham"))
+                                    .strong(),
+                            );
+                            ui.label(egui::RichText::new("- random(min, max)").monospace());
+                            ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
+                            ui.label(egui::RichText::new("- min(a, b)").monospace());
+                            ui.label(egui::RichText::new("- max(a, b)").monospace());
+                            ui.label(egui::RichText::new("- abs(a)").monospace());
+                            ui.label(egui::RichText::new("- atan(a)").monospace());
+                            ui.label(egui::RichText::new("- atan2(y, x)").monospace());
+                            ui.label(egui::RichText::new("- sqrt(a)").monospace());
+                            ui.label(egui::RichText::new("- pow(a, b)").monospace());
+                            ui.label(egui::RichText::new("- round(a, digits)").monospace());
+                            ui.label(egui::RichText::new("- ceil(a) / floor(a)").monospace());
+                            ui.label(egui::RichText::new("- factorial(n)").monospace());
+                            ui.label(egui::RichText::new("- gcd(a, b, ...) / lcm(a, b, ...)").monospace());
+                            ui.label(egui::RichText::new("- isqrt(n)").monospace());
+                            ui.label(egui::RichText::new("- comb(n, k) / perm(n, k)").monospace());
+                            ui.label(egui::RichText::new("- sin(angleDeg) * 1000").monospace());
+                            ui.label(egui::RichText::new("- cos(angleDeg) * 1000").monospace());
+                            ui.label(egui::RichText::new("- degrees(rad) / radians(deg)").monospace());
+                            ui.label(egui::RichText::new("- pi").monospace());
+                            ui.label(egui::RichText::new("- myVar.toNumber").monospace());
+                        });
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new(Self::tr_lang(
+                                    language,
+                                    "Numeric values",
+                                    "Gia tri so",
+                                ))
+                                .strong(),
+                            );
+                            ui.label(egui::RichText::new("- screen.width").monospace());
+                            ui.label(egui::RichText::new("- screen.height").monospace());
+                            ui.label(egui::RichText::new("- mouse.x").monospace());
+                            ui.label(egui::RichText::new("- mouse.y").monospace());
+                            ui.label(egui::RichText::new("- mouse.sensitivity").monospace());
+                            ui.label(egui::RichText::new("- volume.level").monospace());
+                            ui.label(egui::RichText::new("- window.x / left").monospace());
+                            ui.label(egui::RichText::new("- window.y / top").monospace());
+                            ui.label(egui::RichText::new("- window.right").monospace());
+                            ui.label(egui::RichText::new("- window.bottom").monospace());
+                            ui.label(egui::RichText::new("- window.width").monospace());
+                            ui.label(egui::RichText::new("- window.height").monospace());
+                            ui.label(egui::RichText::new("- window.centerX / centerY").monospace());
+                        });
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new(Self::tr_lang(
+                                    language,
+                                    "System and text",
+                                    "He thong va text",
+                                ))
+                                .strong(),
+                            );
+                            ui.label(
+                                egui::RichText::new("- system.year / month / day").monospace(),
+                            );
+                            ui.label(
+                                egui::RichText::new("- system.hour / minute / second").monospace(),
+                            );
+                            ui.label(egui::RichText::new("- system.millisecond").monospace());
+                            ui.label(egui::RichText::new("- system.date").monospace());
+                            ui.label(egui::RichText::new("- system.time").monospace());
+                            ui.label(egui::RichText::new("- window.title").monospace());
+                            ui.label(egui::RichText::new("- clipboard.text").monospace());
+                            ui.label(
+                                egui::RichText::new("- timer1.hour ... total_sec").monospace(),
+                            );
+                            ui.label(
+                                egui::RichText::new("- TimerName.hour ... total_sec").monospace(),
+                            );
+                        });
+                        ui.end_row();
                     });
             });
     }
@@ -3056,8 +3058,8 @@ impl CrosshairApp {
                     })
                         .on_hover_text(Self::tr_lang(
                             language,
-                            "Global & Local Variables Manager (Real-time)",
-                            "Trinh quan ly bien toan cuc va cuc bo (Real-time)",
+                            "Variable manager",
+                            "Quan ly bien",
                         ))
                         .clicked()
                     {
@@ -3466,7 +3468,7 @@ impl CrosshairApp {
                 )
                 .on_hover_text(Self::tr_lang(
                     language,
-                    "Global & Local Variables Manager (Real-time)",
+                    "Variable manager",
                     "Trình quản lý biến toàn cục & cục bộ (Real-time)",
                 ))
                 .clicked()
@@ -12499,32 +12501,42 @@ impl CrosshairApp {
         let language = self.state.ui_language;
         ui.vertical(|ui| {
             ui.add_space(4.0);
-            Self::render_expression_help_box(ui, language);
-            ui.add_space(6.0);
-
-            let mut all_vars_set = std::collections::HashSet::new();
-            for v in self.collect_all_macro_referenced_variables() {
-                all_vars_set.insert(v);
-            }
             let constant_names: std::collections::HashSet<&str> = self
                 .state
                 .global_constants
                 .iter()
                 .map(|(name, _)| name.as_str())
                 .collect();
+            let mut vars_list: Vec<(String, String)> = Vec::new();
             {
-                let vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                for k in vars.keys() {
-                    if !constant_names.contains(k.as_str()) {
-                        all_vars_set.insert(k.clone());
+                let runtime_vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                for (name, value) in runtime_vars.iter() {
+                    if !constant_names.contains(name.as_str()) {
+                        vars_list.push((name.clone(), value.to_string()));
                     }
                 }
             }
-            let mut vars_list: Vec<String> = all_vars_set.into_iter().collect();
-            vars_list.sort();
+            {
+                let text_vars = crate::overlay::TEXT_VARIABLES.lock();
+                for (name, value) in text_vars.iter() {
+                    if !constant_names.contains(name.as_str()) {
+                        vars_list.push((name.clone(), value.clone()));
+                    }
+                }
+            }
+            vars_list.sort_by(|a, b| a.0.cmp(&b.0));
 
             ui.columns(2, |columns| {
                 columns[0].vertical(|ui| {
+                    ui.label(
+                        RichText::new(Self::tr_lang(
+                            language,
+                            "Fixed Variables",
+                            "Bien co dinh",
+                        ))
+                        .strong(),
+                    );
+                    ui.add_space(4.0);
                     let id_const_name = ui.id().with("new_const_name");
                     let id_const_val = ui.id().with("new_const_val");
                     let mut name_buf = ui.memory(|mem| {
@@ -12592,7 +12604,7 @@ impl CrosshairApp {
                     if !self.state.global_constants.is_empty() {
                         egui::ScrollArea::vertical()
                             .id_salt("global_constants_scroll")
-                            .max_height(160.0)
+                            .max_height(300.0)
                             .show(ui, |ui| {
                                 egui::Grid::new("global_constants_grid")
                                     .num_columns(3)
@@ -12600,7 +12612,6 @@ impl CrosshairApp {
                                     .striped(true)
                                     .show(ui, |ui| {
                                         let mut to_remove_idx = None;
-                                        let mut to_update = None;
                                         for (idx, (name, val)) in
                                             self.state.global_constants.iter().enumerate()
                                         {
@@ -12609,28 +12620,12 @@ impl CrosshairApp {
                                                     .monospace()
                                                     .color(Color32::from_rgb(0, 180, 216)),
                                             );
-                                            let id_editing = ui.id().with(("var-edit", name));
-                                            let mut val_str = ui
-                                                .memory(|mem| mem.data.get_temp::<String>(id_editing))
-                                                .unwrap_or_else(|| val.to_string());
-                                            let response = ui.add(
-                                                egui::TextEdit::singleline(&mut val_str)
-                                                    .desired_width(70.0)
-                                                    .font(egui::TextStyle::Monospace),
+                                            ui.add_sized(
+                                                [70.0, 20.0],
+                                                egui::Label::new(
+                                                    RichText::new(val.to_string()).monospace(),
+                                                ),
                                             );
-                                            if response.changed() {
-                                                ui.memory_mut(|mem| {
-                                                    mem.data.insert_temp(id_editing, val_str.clone())
-                                                });
-                                            }
-                                            if response.lost_focus() || response.clicked_elsewhere() {
-                                                if let Ok(new_val) = val_str.trim().parse::<i32>() {
-                                                    to_update = Some((name.clone(), new_val));
-                                                }
-                                                ui.memory_mut(|mem| {
-                                                    mem.data.remove_temp::<String>(id_editing)
-                                                });
-                                            }
                                             if ui
                                                 .button(Self::material_icon_text(0xe872, 14.0))
                                                 .on_hover_text(Self::tr_lang(language, "Delete", "Delete"))
@@ -12645,103 +12640,75 @@ impl CrosshairApp {
                                             let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
                                             vars.remove(&removed_name);
                                             self.persist();
-                                        } else if let Some((name_to_up, new_val)) = to_update {
-                                            if let Some(pos) = self
-                                                .state
-                                                .global_constants
-                                                .iter()
-                                                .position(|(n, _)| n == &name_to_up)
-                                            {
-                                                self.state.global_constants[pos].1 = new_val;
-                                                let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                                vars.insert(name_to_up, new_val as f64);
-                                                self.persist();
-                                            }
                                         }
                                     });
                             });
+                    } else {
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "No fixed variables yet.",
+                                "Chua co bien co dinh.",
+                            ))
+                            .weak(),
+                        );
                     }
                 });
 
                 columns[1].vertical(|ui| {
-                    ui.set_row_height(24.0);
-                    let id_name = ui.id().with("new_dyn_var_name");
-                    let id_val = ui.id().with("new_dyn_var_val");
-                    let mut name_buf =
-                        ui.memory(|mem| mem.data.get_temp::<String>(id_name).unwrap_or_default());
-                    let mut val_buf =
-                        ui.memory(|mem| mem.data.get_temp::<String>(id_val).unwrap_or_default());
-                    let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
-                    let hint_color = if is_dark_theme {
-                        Color32::from_rgba_premultiplied(140, 140, 140, 150)
-                    } else {
-                        Color32::from_rgba_premultiplied(100, 100, 100, 150)
-                    };
-                    ui.horizontal(|ui| {
-                        ui.add_sized(
-                            [100.0, 20.0],
-                            egui::TextEdit::singleline(&mut name_buf).hint_text(
-                                RichText::new(Self::tr_lang(language, "Var Name", "Var Name"))
-                                    .color(hint_color)
-                                    .weak(),
-                            ),
-                        );
-                        ui.label("=");
-                        ui.add_sized(
-                            [70.0, 20.0],
-                            egui::TextEdit::singleline(&mut val_buf).hint_text(
-                                RichText::new(Self::tr_lang(language, "Value", "Value"))
-                                    .color(hint_color)
-                                    .weak(),
-                            ),
-                        );
-                        if ui.button(Self::tr_lang(language, "Set", "Set")).clicked() {
-                            let name_trimmed = name_buf.trim().to_string();
-                            if !name_trimmed.is_empty() {
-                                let parsed_val = val_buf.trim().parse::<f64>().unwrap_or(0.0);
-                                let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                vars.insert(name_trimmed, parsed_val);
-                                name_buf.clear();
-                                val_buf.clear();
-                            }
-                        }
-                    });
-                    ui.memory_mut(|mem| {
-                        mem.data.insert_temp(id_name, name_buf);
-                        mem.data.insert_temp(id_val, val_buf);
-                    });
-
+                    ui.label(
+                        RichText::new(Self::tr_lang(
+                            language,
+                            "Runtime Variables",
+                            "Bien runtime",
+                        ))
+                        .strong(),
+                    );
+                    ui.label(
+                        RichText::new(Self::tr_lang(
+                            language,
+                            "These values change while macros are running.",
+                            "Cac gia tri nay thay doi khi macro dang chay.",
+                        ))
+                        .size(11.0)
+                        .weak(),
+                    );
                     ui.add_space(6.0);
                     if !vars_list.is_empty() {
                         egui::ScrollArea::vertical()
                             .id_salt("macro_vars_scroll")
-                            .max_height(160.0)
+                            .max_height(300.0)
                             .show(ui, |ui| {
                                 egui::Grid::new("macro_vars_grid")
                                     .num_columns(2)
                                     .spacing([8.0, 6.0])
                                     .striped(true)
                                     .show(ui, |ui| {
-                                        for name in &vars_list {
+                                        for (name, value) in &vars_list {
                                             ui.label(
                                                 RichText::new(name)
                                                     .monospace()
                                                     .color(Color32::from_rgb(243, 156, 18)),
                                             );
-                                            let runtime_val = {
-                                                let vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                                vars.get(name).copied().unwrap_or(0.0)
-                                            };
                                             ui.add_sized(
-                                                [70.0, 20.0],
+                                                [180.0, 20.0],
                                                 egui::Label::new(
-                                                    RichText::new(runtime_val.to_string()).monospace(),
+                                                    RichText::new(value).monospace(),
                                                 ),
                                             );
                                             ui.end_row();
                                         }
                                     });
                             });
+                    } else {
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "No runtime variables yet.",
+                                "Chua co bien runtime.",
+                            ))
+                            .weak(),
+                        );
                     }
                 });
             });
