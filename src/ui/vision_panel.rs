@@ -1535,6 +1535,9 @@ impl CrosshairApp {
                             self.status =
                                 "Geometry color picking does not support area captures.".to_owned();
                         }
+                        VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => {
+                            self.cancel_image_search_capture(ctx);
+                        }
                     }
                 } else {
                     self.cancel_image_search_capture(ctx);
@@ -1582,6 +1585,36 @@ impl CrosshairApp {
                         self.finish_image_search_color_pick_from_screen(ctx, screen_x, screen_y);
                     }
                     VisionCaptureTarget::MacroStepGeometryColor { .. } => {
+                        self.finish_image_search_color_pick_from_screen(ctx, screen_x, screen_y);
+                    }
+                    VisionCaptureTarget::QuickActionsCoordinates => {
+                        self.clear_image_search_capture_state();
+                        let copy_x = self.state.quick_actions_copy_x;
+                        let copy_y = self.state.quick_actions_copy_y;
+                        let mut parts = Vec::new();
+                        if copy_x {
+                            parts.push(screen_x.to_string());
+                        }
+                        if copy_y {
+                            parts.push(screen_y.to_string());
+                        }
+                        let formatted = parts.join(", ");
+                        if !formatted.is_empty() {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                let _ = clipboard.set_text(formatted.clone());
+                            }
+                            self.status = match self.state.ui_language {
+                                crate::model::UiLanguage::Vietnamese => format!("Da sao chep toa do vao clipboard: {}", formatted),
+                                _ => format!("Coordinates copied to clipboard: {}", formatted),
+                            };
+                        } else {
+                            self.status = match self.state.ui_language {
+                                crate::model::UiLanguage::Vietnamese => format!("Toa do da chon: X={}, Y={}", screen_x, screen_y),
+                                _ => format!("Coordinates captured: X={}, Y={}", screen_x, screen_y),
+                            };
+                        }
+                    }
+                    VisionCaptureTarget::QuickActionsColor => {
                         self.finish_image_search_color_pick_from_screen(ctx, screen_x, screen_y);
                     }
                 }
@@ -1781,6 +1814,8 @@ impl CrosshairApp {
             VisionCaptureTarget::GeometryColor => Some("Geometry Color".to_owned()),
             VisionCaptureTarget::OcrStepRegion { .. } => Some("Custom OCR".to_owned()),
             VisionCaptureTarget::MacroStepGeometryColor { .. } => Some("Macro Step Geometry Color".to_owned()),
+            VisionCaptureTarget::QuickActionsCoordinates => Some("Quick Actions Coordinates".to_owned()),
+            VisionCaptureTarget::QuickActionsColor => Some("Quick Actions Color".to_owned()),
         }
     }
 
@@ -1796,6 +1831,8 @@ impl CrosshairApp {
             VisionCaptureTarget::OcrPreset(_) => false,
             VisionCaptureTarget::OcrStepRegion { .. } => false,
             VisionCaptureTarget::MacroStepGeometryColor { .. } => false,
+            VisionCaptureTarget::QuickActionsCoordinates => false,
+            VisionCaptureTarget::QuickActionsColor => false,
         }
     }
 
@@ -1896,6 +1933,10 @@ impl CrosshairApp {
                         "Geometry color picking does not support template captures.".to_owned(),
                         false,
                     ),
+                    VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => (
+                        "Quick Actions do not support template captures.".to_owned(),
+                        false,
+                    ),
                 };
                 if sync_required {
                     self.sync_vision_presets();
@@ -1966,6 +2007,9 @@ impl CrosshairApp {
                         VisionCaptureTarget::MacroStepGeometryColor { .. } => {
                             self.status =
                                 "Geometry color picking does not support search regions.".to_owned();
+                        }
+                        VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => {
+                            self.status = "Quick Actions do not support search regions.".to_owned();
                         }
                     }
                 } else {
@@ -2203,6 +2247,26 @@ impl CrosshairApp {
                     color.r, color.g, color.b
                 )
             }
+            VisionCaptureTarget::QuickActionsCoordinates => {
+                "Quick Actions Coordinates do not support color picking.".to_owned()
+            }
+            VisionCaptureTarget::QuickActionsColor => {
+                let hex_str = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
+                if self.state.quick_actions_copy_color {
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(hex_str.clone());
+                    }
+                    match self.state.ui_language {
+                        crate::model::UiLanguage::Vietnamese => format!("Da sao chep ma mau vao clipboard: {}", hex_str),
+                        _ => format!("Color code copied to clipboard: {}", hex_str),
+                    }
+                } else {
+                    match self.state.ui_language {
+                        crate::model::UiLanguage::Vietnamese => format!("Mau da chon: {}", hex_str),
+                        _ => format!("Color captured: {}", hex_str),
+                    }
+                }
+            }
         }
     }
 
@@ -2239,6 +2303,9 @@ impl CrosshairApp {
             }
             VisionCaptureTarget::MacroStepGeometryColor { .. } => {
                 "Geometry color picking does not support priority anchors.".to_owned()
+            }
+            VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => {
+                "Quick Actions do not support priority anchors.".to_owned()
             }
         }
     }
@@ -2580,6 +2647,9 @@ impl CrosshairApp {
                 self.status =
                     "Geometry color picking does not support search regions.".to_owned();
             }
+            VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => {
+                self.status = "Quick Actions do not support search regions.".to_owned();
+            }
         }
         ctx.request_repaint();
     }
@@ -2743,6 +2813,26 @@ impl CrosshairApp {
                     color.r, color.g, color.b
                 )
             }
+            VisionCaptureTarget::QuickActionsCoordinates => {
+                "Quick Actions Coordinates do not support color picking.".to_owned()
+            }
+            VisionCaptureTarget::QuickActionsColor => {
+                let hex_str = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
+                if self.state.quick_actions_copy_color {
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(hex_str.clone());
+                    }
+                    match self.state.ui_language {
+                        crate::model::UiLanguage::Vietnamese => format!("Da sao chep ma mau vao clipboard: {}", hex_str),
+                        _ => format!("Color code copied to clipboard: {}", hex_str),
+                    }
+                } else {
+                    match self.state.ui_language {
+                        crate::model::UiLanguage::Vietnamese => format!("Mau da chon: {}", hex_str),
+                        _ => format!("Color captured: {}", hex_str),
+                    }
+                }
+            }
         };
         self.persist();
         self.status = status;
@@ -2811,6 +2901,9 @@ impl CrosshairApp {
             VisionCaptureTarget::MacroStepGeometryColor { .. } => {
                 self.status =
                     "Geometry color picking does not support priority anchors.".to_owned();
+            }
+            VisionCaptureTarget::QuickActionsCoordinates | VisionCaptureTarget::QuickActionsColor => {
+                self.status = "Quick Actions do not support priority anchors.".to_owned();
             }
         }
         ctx.request_repaint();

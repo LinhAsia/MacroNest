@@ -107,6 +107,8 @@ enum TitlebarQuickActionKind {
     WindowPin,
     FocusHighlight,
     Protractor,
+    GetCoordinates,
+    GetColor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,6 +139,8 @@ pub(crate) enum VisionCaptureTarget {
         is_fill: bool,
         is_hold_stop: bool,
     },
+    QuickActionsCoordinates,
+    QuickActionsColor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -3935,6 +3939,24 @@ impl CrosshairApp {
                     egui::Stroke::new(1.8, icon_color),
                 );
             }
+            TitlebarQuickActionKind::GetCoordinates => {
+                let center = rect.center();
+                let radius = 10.0;
+                painter.circle_stroke(center, radius, egui::Stroke::new(1.8, icon_color));
+                painter.circle_filled(center, 2.0, icon_color);
+                painter.line_segment([pos2(center.x - 15.0, center.y), pos2(center.x - 7.0, center.y)], egui::Stroke::new(1.8, icon_color));
+                painter.line_segment([pos2(center.x + 7.0, center.y), pos2(center.x + 15.0, center.y)], egui::Stroke::new(1.8, icon_color));
+                painter.line_segment([pos2(center.x, center.y - 15.0), pos2(center.x, center.y - 7.0)], egui::Stroke::new(1.8, icon_color));
+                painter.line_segment([pos2(center.x, center.y + 7.0), pos2(center.x, center.y + 15.0)], egui::Stroke::new(1.8, icon_color));
+            }
+            TitlebarQuickActionKind::GetColor => {
+                let center = rect.center();
+                let start = pos2(center.x - 7.0, center.y + 7.0);
+                let end = pos2(center.x + 7.0, center.y - 7.0);
+                painter.line_segment([start, end], egui::Stroke::new(3.5, icon_color));
+                painter.line_segment([start, pos2(start.x - 3.0, start.y + 3.0)], egui::Stroke::new(1.8, icon_color));
+                painter.circle_filled(pos2(end.x + 2.0, end.y - 2.0), 4.5, icon_color);
+            }
         }
     }
 
@@ -4503,6 +4525,170 @@ impl CrosshairApp {
                         );
 
                         ui.add_space(4.0);
+                    },
+                );
+
+                // Get Coordinates tool
+                ui.allocate_ui_with_layout(
+                    vec2(92.0, 155.0),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let is_active = self.vision_capture_active 
+                            && self.vision_capture_target == Some(VisionCaptureTarget::QuickActionsCoordinates);
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::GetCoordinates,
+                            is_active,
+                        );
+                        if button_response.clicked() {
+                            self.begin_image_search_capture(
+                                ui.ctx(),
+                                VisionCaptureTarget::QuickActionsCoordinates,
+                                VisionCaptureMode::SinglePixel,
+                            );
+                        }
+
+                        ui.add_space(4.0);
+                        let coords_label = Self::tr_lang(
+                            self.state.ui_language,
+                            "Get Coordinates",
+                            "Lấy tọa độ",
+                        );
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 20.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(coords_label)
+                                        .size(11.0)
+                                        .color(if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        }),
+                                ));
+                            },
+                        );
+
+                        ui.add_space(4.0);
+                        // Checkbox Copy X
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 22.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(4.0);
+                                let copy_x_changed = ui
+                                    .checkbox(
+                                        &mut self.state.quick_actions_copy_x,
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Copy X",
+                                            "Sao chép X",
+                                        ))
+                                        .size(10.0),
+                                    )
+                                    .changed();
+                                if copy_x_changed {
+                                    self.persist();
+                                }
+                            },
+                        );
+
+                        ui.add_space(2.0);
+                        // Checkbox Copy Y
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 22.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(4.0);
+                                let copy_y_changed = ui
+                                    .checkbox(
+                                        &mut self.state.quick_actions_copy_y,
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Copy Y",
+                                            "Sao chép Y",
+                                        ))
+                                        .size(10.0),
+                                    )
+                                    .changed();
+                                if copy_y_changed {
+                                    self.persist();
+                                }
+                            },
+                        );
+
+                        ui.add_space(4.0);
+                    },
+                );
+
+                // Get Color tool
+                ui.allocate_ui_with_layout(
+                    vec2(92.0, 155.0),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let is_active = self.vision_capture_active 
+                            && self.vision_capture_target == Some(VisionCaptureTarget::QuickActionsColor);
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::GetColor,
+                            is_active,
+                        );
+                        if button_response.clicked() {
+                            self.begin_image_search_capture(
+                                ui.ctx(),
+                                VisionCaptureTarget::QuickActionsColor,
+                                VisionCaptureMode::ColorSample,
+                            );
+                        }
+
+                        ui.add_space(4.0);
+                        let color_label = Self::tr_lang(
+                            self.state.ui_language,
+                            "Get Color",
+                            "Lấy mã màu",
+                        );
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 20.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(color_label)
+                                        .size(11.0)
+                                        .color(if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        }),
+                                ));
+                            },
+                        );
+
+                        ui.add_space(4.0);
+                        // Checkbox Copy Color
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 22.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(4.0);
+                                let copy_color_changed = ui
+                                    .checkbox(
+                                        &mut self.state.quick_actions_copy_color,
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Copy hex",
+                                            "Sao chép màu",
+                                        ))
+                                        .size(10.0),
+                                    )
+                                    .changed();
+                                if copy_color_changed {
+                                    self.persist();
+                                }
+                            },
+                        );
+
+                        ui.add_space(26.0);
                     },
                 );
             });
@@ -10501,6 +10687,59 @@ impl eframe::App for CrosshairApp {
                                         self.apply_image_search_color_pick(target, col);
                                     }
                                     self.clear_image_search_capture_state();
+                                }
+                                VisionCaptureTarget::QuickActionsCoordinates => {
+                                    self.clear_image_search_capture_state();
+                                    let copy_x = self.state.quick_actions_copy_x;
+                                    let copy_y = self.state.quick_actions_copy_y;
+                                    let mut parts = Vec::new();
+                                    if copy_x {
+                                        parts.push(x.to_string());
+                                    }
+                                    if copy_y {
+                                        parts.push(y.to_string());
+                                    }
+                                    let formatted = parts.join(", ");
+                                    if !formatted.is_empty() {
+                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                            let _ = clipboard.set_text(formatted.clone());
+                                        }
+                                        self.status = match self.state.ui_language {
+                                            crate::model::UiLanguage::Vietnamese => format!("Da sao chep toa do vao clipboard: {}", formatted),
+                                            _ => format!("Coordinates copied to clipboard: {}", formatted),
+                                        };
+                                    } else {
+                                        self.status = match self.state.ui_language {
+                                            crate::model::UiLanguage::Vietnamese => format!("Toa do da chon: X={}, Y={}", x, y),
+                                            _ => format!("Coordinates captured: X={}, Y={}", x, y),
+                                        };
+                                    }
+                                }
+                                VisionCaptureTarget::QuickActionsColor => {
+                                    self.clear_image_search_capture_state();
+                                    if let Some(col) = color {
+                                        let hex_str = format!("#{:02X}{:02X}{:02X}", col.r, col.g, col.b);
+                                        if self.state.quick_actions_copy_color {
+                                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                                let _ = clipboard.set_text(hex_str.clone());
+                                            }
+                                            self.status = match self.state.ui_language {
+                                                crate::model::UiLanguage::Vietnamese => format!("Da sao chep ma mau vao clipboard: {}", hex_str),
+                                                _ => format!("Color code copied to clipboard: {}", hex_str),
+                                            };
+                                        } else {
+                                            self.status = match self.state.ui_language {
+                                                crate::model::UiLanguage::Vietnamese => format!("Mau da chon: {}", hex_str),
+                                                _ => format!("Color captured: {}", hex_str),
+                                            };
+                                        }
+                                    } else {
+                                        self.status = Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Failed to capture screen color.",
+                                            "Khong the lay ma mau man hinh.",
+                                        ).to_owned();
+                                    }
                                 }
                                 _ => {}
                             }
