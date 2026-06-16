@@ -227,8 +227,6 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static MACRO_RECORDING: Lazy<Mutex<Option<MacroRecordingSession>>> =
         Lazy::new(|| Mutex::new(None));
-    static QUICK_KEY_DISPLAY_HELD_KEYS: Lazy<Mutex<Vec<String>>> =
-        Lazy::new(|| Mutex::new(Vec::new()));
     static SCREEN_DRAW_STATE: Lazy<Mutex<ScreenDrawState>> =
         Lazy::new(|| Mutex::new(ScreenDrawState::default()));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
@@ -492,6 +490,7 @@ mod windows_overlay {
         UpdateScreenDrawConfig {
             enabled: bool,
             trigger: Option<HotkeyBinding>,
+            pass_trigger_through: bool,
             color: RgbaColor,
             brush_size: f32,
             smoothing: bool,
@@ -538,6 +537,7 @@ mod windows_overlay {
         enabled: bool,
         active: bool,
         trigger: Option<HotkeyBinding>,
+        pass_trigger_through: bool,
         color: RgbaColor,
         brush_size: f32,
         eraser: bool,
@@ -558,6 +558,7 @@ mod windows_overlay {
                 enabled: false,
                 active: false,
                 trigger: None,
+                pass_trigger_through: false,
                 color: RgbaColor {
                     r: 0,
                     g: 255,
@@ -2740,6 +2741,30 @@ mod windows_overlay {
                 }
             }
 
+            let mouse_data = ((info.mouseData >> 16) & 0xFFFF) as u16;
+            let screen_draw_event_key = mouse_binding_name_from_message(message, mouse_data);
+            if screen_draw_active() {
+                if screen_draw_event_key.is_some() {
+                    update_held_mouse_button(message, mouse_data);
+                    if !is_ui_in_foreground()
+                        && let Some(key_name) = screen_draw_event_key
+                    {
+                        let is_key_down = !matches!(
+                            message,
+                            WM_LBUTTONUP
+                                | WM_RBUTTONUP
+                                | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
+                                | WM_XBUTTONUP
+                        );
+                        let is_key_up = !is_key_down && message != WM_MOUSEWHEEL;
+                        update_quick_key_display_key(key_name, is_key_down, is_key_up);
+                    }
+                }
+                if process_screen_draw_mouse_event(message, info.pt) {
+                    return LRESULT(1);
+                }
+            }
+
             // 1. Immediately bypass WM_MOUSEMOVE to keep mouse movement extremely smooth and lock-free!
 
             if message == WM_MOUSEMOVE && !is_vision_capture_mouse_blocked() {
@@ -2898,7 +2923,6 @@ mod windows_overlay {
                 return CallNextHookEx(None, code, wparam, lparam);
             }
 
-            let mouse_data = ((info.mouseData >> 16) & 0xFFFF) as u16;
             let event = match wparam.0 as u32 {
                 WM_LBUTTONDOWN => Some((binding_from_trigger_event("MouseLeft"), true)),
                 WM_LBUTTONUP => Some((binding_from_trigger_event("MouseLeft"), false)),
@@ -2943,6 +2967,18 @@ mod windows_overlay {
                     ((info.mouseData >> 16) & 0xFFFF) as u16,
                 );
                 update_held_mouse_button(message, ((info.mouseData >> 16) & 0xFFFF) as u16);
+                if !is_ui_in_foreground()
+                    && let Some(key_name) = event_key_name
+                {
+                    let is_key_up = matches!(
+                        message,
+                        WM_LBUTTONUP
+                            | WM_RBUTTONUP
+                            | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
+                            | WM_XBUTTONUP
+                    );
+                    update_quick_key_display_key(key_name, is_down, is_key_up);
+                }
                 if let Some(key_name) = event_key_name
                     && consume_suppressed_mouse_trigger(key_name)
                 {
@@ -4649,19 +4685,83 @@ mod windows_overlay {
                 .any(|key_name| is_keyboard_arrow_mouse_key(key_name))
     }
 
-    fn update_quick_key_display_key(key_name: &str, is_key_down: bool, is_key_up: bool) {
-        let mut held_keys = QUICK_KEY_DISPLAY_HELD_KEYS.lock();
-        if is_key_down {
-            held_keys.retain(|existing| existing != key_name);
-            held_keys.push(key_name.to_owned());
-        } else if is_key_up {
-            held_keys.retain(|existing| existing != key_name);
-        } else {
-            return;
+    fn quick_key_display_label(key_name: &str) -> String {
+        match key_name {
+            "MouseLeft" => "LMB".to_owned(),
+            "MouseRight" => "RMB".to_owned(),
+            "MouseMiddle" => "MMB".to_owned(),
+            "MouseX1" => "Mouse 4".to_owned(),
+            "MouseX2" => "Mouse 5".to_owned(),
+            "MouseWheelUp" => "Wheel Up".to_owned(),
+            "MouseWheelDown" => "Wheel Down".to_owned(),
+            _ => key_name.to_owned(),
+        }
+    }
+
+    fn quick_key_display_text_for_event(
+        key_name: &str,
+        is_key_down: bool,
+        is_key_up: bool,
+    ) -> Option<String> {
+        if !is_key_down && !is_key_up {
+            return None;
         }
 
-        let display = held_keys.last().cloned();
-        drop(held_keys);
+        let mut combo_keys = {
+            let hook_state = HOOK_STATE.lock();
+            hook_state
+                .held_inputs
+                .iter()
+                .cloned()
+                .chain(hook_state.held_mouse_buttons.iter().cloned())
+                .collect::<Vec<_>>()
+        };
+        if is_key_down {
+            combo_keys.push(key_name.to_owned());
+        } else if is_key_up {
+            combo_keys.retain(|existing| !existing.eq_ignore_ascii_case(key_name));
+        }
+        combo_keys.retain(|key| !key.trim().is_empty());
+        combo_keys.sort_by(|a, b| {
+            let rank_a = hotkey_binding_rank(a);
+            let rank_b = hotkey_binding_rank(b);
+            rank_a
+                .cmp(&rank_b)
+                .then_with(|| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()))
+        });
+        combo_keys.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        if combo_keys.is_empty() {
+            return None;
+        }
+
+        let key = combo_keys
+            .iter()
+            .rev()
+            .find(|key| !hotkey::is_modifier_key_name(key))
+            .cloned()
+            .or_else(|| combo_keys.last().cloned())
+            .unwrap_or_default();
+        let binding = HotkeyBinding {
+            ctrl: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Ctrl")),
+            alt: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Alt")),
+            shift: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Shift")),
+            win: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Win")),
+            key,
+            combo_keys,
+        };
+        let labels = hotkey::binding_key_names(&binding)
+            .into_iter()
+            .map(|key| quick_key_display_label(&key))
+            .collect::<Vec<_>>();
+        if labels.is_empty() {
+            None
+        } else {
+            Some(labels.join("+"))
+        }
+    }
+
+    fn update_quick_key_display_key(key_name: &str, is_key_down: bool, is_key_up: bool) {
+        let display = quick_key_display_text_for_event(key_name, is_key_down, is_key_up);
         send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(display));
     }
 
@@ -4669,13 +4769,16 @@ mod windows_overlay {
         if is_repeat {
             return false;
         }
-        let matches_trigger = {
+        let (matches_trigger, pass_trigger_through) = {
             let state = SCREEN_DRAW_STATE.lock();
-            state.enabled
-                && state
-                    .trigger
-                    .as_ref()
-                    .is_some_and(|trigger| hotkey::binding_matches(trigger, binding))
+            (
+                state.enabled
+                    && state
+                        .trigger
+                        .as_ref()
+                        .is_some_and(|trigger| hotkey::binding_matches(trigger, binding)),
+                state.pass_trigger_through,
+            )
         };
         if !matches_trigger {
             return false;
@@ -4689,7 +4792,7 @@ mod windows_overlay {
             let hwnd = HWND(hwnd_raw as *mut c_void);
             toggle_screen_draw_overlay(hwnd);
         }
-        true
+        !pass_trigger_through
     }
 
     fn apply_keyboard_arrow_mouse_movement() {
@@ -5044,6 +5147,7 @@ mod windows_overlay {
                 OverlayCommand::UpdateScreenDrawConfig {
                     enabled,
                     trigger,
+                    pass_trigger_through,
                     color,
                     brush_size,
                     smoothing,
@@ -5053,6 +5157,7 @@ mod windows_overlay {
                         let mut state = SCREEN_DRAW_STATE.lock();
                         state.enabled = enabled;
                         state.trigger = trigger;
+                        state.pass_trigger_through = pass_trigger_through;
                         state.color = color;
                         state.brush_size = brush_size.clamp(2.0, 80.0);
                         state.smoothing = smoothing;
@@ -5476,6 +5581,142 @@ mod windows_overlay {
         }
     }
 
+    fn screen_draw_active() -> bool {
+        SCREEN_DRAW_STATE.lock().active
+    }
+
+    fn screen_draw_local_point_from_screen(point: POINT) -> POINT {
+        let (screen_x, screen_y, _, _) = window_list::virtual_screen_bounds();
+        POINT {
+            x: point.x - screen_x,
+            y: point.y - screen_y,
+        }
+    }
+
+    fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if !state.active {
+            return false;
+        }
+        if right_button {
+            start_screen_draw_stroke(&mut state, point, true);
+            return true;
+        }
+        match screen_draw_hit(&state, point) {
+            ScreenDrawHit::Color => {
+                state.color = next_screen_draw_color(state.color);
+            }
+            ScreenDrawHit::BrushSize => {
+                state.active_control = ScreenDrawControl::BrushSize;
+                update_screen_draw_brush_slider(&mut state, point.x);
+            }
+            ScreenDrawHit::Eraser => {
+                state.eraser = !state.eraser;
+            }
+            ScreenDrawHit::Smoothing => {
+                state.smoothing = !state.smoothing;
+            }
+            ScreenDrawHit::SmoothingAmount => {
+                state.active_control = ScreenDrawControl::SmoothingAmount;
+                update_screen_draw_smoothing_slider(&mut state, point.x);
+            }
+            ScreenDrawHit::ToolbarBody => {
+                state.active_control = ScreenDrawControl::MoveToolbar;
+                state.drag_offset_x = point.x - state.toolbar_x;
+                state.drag_offset_y = point.y - state.toolbar_y;
+            }
+            ScreenDrawHit::Canvas => {
+                let eraser = state.eraser;
+                start_screen_draw_stroke(&mut state, point, eraser);
+            }
+        }
+        true
+    }
+
+    fn screen_draw_handle_move(point: POINT) -> bool {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if !state.active {
+            return false;
+        }
+        match state.active_control {
+            ScreenDrawControl::MoveToolbar => {
+                let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
+                state.toolbar_x = (point.x - state.drag_offset_x).clamp(0, (screen_w - 332).max(0));
+                state.toolbar_y = (point.y - state.drag_offset_y).clamp(0, (screen_h - 78).max(0));
+                true
+            }
+            ScreenDrawControl::BrushSize => {
+                update_screen_draw_brush_slider(&mut state, point.x);
+                true
+            }
+            ScreenDrawControl::SmoothingAmount => {
+                update_screen_draw_smoothing_slider(&mut state, point.x);
+                true
+            }
+            ScreenDrawControl::None => {
+                if let Some(stroke) = state.current_stroke.as_mut() {
+                    stroke.points.push(point);
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    fn screen_draw_handle_button_up() -> bool {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if !state.active {
+            return false;
+        }
+        if let Some(stroke) = state.current_stroke.take()
+            && stroke.points.len() > 1
+        {
+            state.strokes.push(stroke);
+        }
+        state.active_control = ScreenDrawControl::None;
+        true
+    }
+
+    fn process_screen_draw_mouse_event(message: u32, screen_point: POINT) -> bool {
+        if !screen_draw_active() {
+            return false;
+        }
+        let point = screen_draw_local_point_from_screen(screen_point);
+        let (handled, repaint) = match message {
+            WM_LBUTTONDOWN => {
+                let handled = screen_draw_handle_button_down(point, false);
+                (handled, handled)
+            }
+            WM_RBUTTONDOWN => {
+                let handled = screen_draw_handle_button_down(point, true);
+                (handled, handled)
+            }
+            WM_MOUSEMOVE => {
+                let repaint = screen_draw_handle_move(point);
+                (repaint, repaint)
+            }
+            WM_LBUTTONUP | WM_RBUTTONUP => {
+                let handled = screen_draw_handle_button_up();
+                (handled, handled)
+            }
+            WM_MBUTTONDOWN
+            | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
+            | WM_XBUTTONDOWN
+            | WM_XBUTTONUP
+            | WM_MOUSEWHEEL => (true, false),
+            _ => (false, false),
+        };
+        if repaint {
+            let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
+            if hwnd_raw != 0 {
+                let hwnd = HWND(hwnd_raw as *mut c_void);
+                let _ = unsafe { paint_screen_draw_overlay(hwnd) };
+            }
+        }
+        handled
+    }
+
     fn screen_draw_lparam_point(lparam: LPARAM) -> POINT {
         POINT {
             x: (lparam.0 & 0xFFFF) as i16 as i32,
@@ -5486,36 +5727,36 @@ mod windows_overlay {
     fn screen_draw_hit(state: &ScreenDrawState, point: POINT) -> ScreenDrawHit {
         let x = point.x - state.toolbar_x;
         let y = point.y - state.toolbar_y;
-        if x < 0 || y < 0 || x > 360 || y > 64 {
+        if x < 0 || y < 0 || x > 332 || y > 76 {
             return ScreenDrawHit::Canvas;
         }
-        if x >= 16 && x <= 48 && y >= 18 && y <= 50 {
+        if x >= 14 && x <= 50 && y >= 20 && y <= 56 {
             return ScreenDrawHit::Color;
         }
-        if x >= 64 && x <= 150 && y >= 18 && y <= 50 {
+        if x >= 68 && x <= 158 && y >= 22 && y <= 54 {
             return ScreenDrawHit::BrushSize;
         }
-        if x >= 164 && x <= 200 && y >= 18 && y <= 50 {
+        if x >= 172 && x <= 208 && y >= 20 && y <= 56 {
             return ScreenDrawHit::Eraser;
         }
-        if x >= 214 && x <= 242 && y >= 18 && y <= 50 {
+        if x >= 224 && x <= 252 && y >= 24 && y <= 52 {
             return ScreenDrawHit::Smoothing;
         }
-        if x >= 256 && x <= 340 && y >= 18 && y <= 50 {
+        if x >= 264 && x <= 318 && y >= 22 && y <= 54 {
             return ScreenDrawHit::SmoothingAmount;
         }
         ScreenDrawHit::ToolbarBody
     }
 
     fn update_screen_draw_brush_slider(state: &mut ScreenDrawState, x: i32) {
-        let left = state.toolbar_x + 64;
-        let t = ((x - left) as f32 / 86.0).clamp(0.0, 1.0);
+        let left = state.toolbar_x + 68;
+        let t = ((x - left) as f32 / 90.0).clamp(0.0, 1.0);
         state.brush_size = 2.0 + t * 78.0;
     }
 
     fn update_screen_draw_smoothing_slider(state: &mut ScreenDrawState, x: i32) {
-        let left = state.toolbar_x + 256;
-        state.smoothing_amount = ((x - left) as f32 / 84.0).clamp(0.0, 1.0);
+        let left = state.toolbar_x + 264;
+        state.smoothing_amount = ((x - left) as f32 / 54.0).clamp(0.0, 1.0);
     }
 
     fn start_screen_draw_stroke(state: &mut ScreenDrawState, point: POINT, force_eraser: bool) {
@@ -5779,45 +6020,136 @@ mod windows_overlay {
     ) {
         let x = state.toolbar_x;
         let y = state.toolbar_y;
-        fill_screen_draw_rect(pixels, width, height, x, y, 360, 64, RgbaColor { r: 24, g: 34, b: 48, a: 220 });
-        stroke_screen_draw_rect(pixels, width, height, x, y, 360, 64, RgbaColor { r: 126, g: 224, b: 182, a: 235 });
-        fill_screen_draw_rect(pixels, width, height, x + 16, y + 18, 32, 32, state.color);
-        stroke_screen_draw_rect(pixels, width, height, x + 16, y + 18, 32, 32, RgbaColor::WHITE);
+        fill_screen_draw_rounded_rect(
+            pixels,
+            width,
+            height,
+            x + 2,
+            y + 4,
+            332,
+            72,
+            16,
+            RgbaColor { r: 0, g: 0, b: 0, a: 72 },
+        );
+        fill_screen_draw_rounded_rect(
+            pixels,
+            width,
+            height,
+            x,
+            y,
+            332,
+            72,
+            16,
+            RgbaColor { r: 28, g: 36, b: 48, a: 232 },
+        );
+        fill_screen_draw_rounded_rect(
+            pixels,
+            width,
+            height,
+            x + 1,
+            y + 1,
+            330,
+            26,
+            15,
+            RgbaColor { r: 255, g: 255, b: 255, a: 12 },
+        );
+        fill_screen_draw_rounded_rect(
+            pixels,
+            width,
+            height,
+            x + 14,
+            y + 20,
+            36,
+            36,
+            10,
+            state.color,
+        );
+        fill_screen_draw_rounded_rect(
+            pixels,
+            width,
+            height,
+            x + 13,
+            y + 19,
+            38,
+            38,
+            11,
+            RgbaColor { r: 236, g: 244, b: 255, a: 84 },
+        );
+        fill_screen_draw_rounded_rect(
+            pixels,
+            width,
+            height,
+            x + 15,
+            y + 21,
+            34,
+            34,
+            10,
+            state.color,
+        );
 
         draw_screen_draw_slider(
             pixels,
             width,
             height,
-            x + 64,
-            y + 32,
-            86,
+            x + 68,
+            y + 38,
+            90,
             ((state.brush_size - 2.0) / 78.0).clamp(0.0, 1.0),
         );
 
         let eraser_fill = if state.eraser {
-            RgbaColor { r: 92, g: 180, b: 148, a: 255 }
+            RgbaColor { r: 100, g: 188, b: 156, a: 255 }
         } else {
-            RgbaColor { r: 64, g: 78, b: 98, a: 255 }
+            RgbaColor { r: 76, g: 90, b: 112, a: 220 }
         };
-        fill_screen_draw_rect(pixels, width, height, x + 164, y + 18, 36, 32, eraser_fill);
-        stroke_screen_draw_rect(pixels, width, height, x + 164, y + 18, 36, 32, RgbaColor::WHITE);
-        draw_screen_draw_line(pixels, width, height, POINT { x: x + 172, y: y + 40 }, POINT { x: x + 192, y: y + 26 }, RgbaColor::WHITE, 3.0, false);
+        fill_screen_draw_rounded_rect(pixels, width, height, x + 172, y + 20, 36, 36, 10, eraser_fill);
+        draw_screen_draw_line(
+            pixels,
+            width,
+            height,
+            POINT { x: x + 180, y: y + 46 },
+            POINT { x: x + 200, y: y + 30 },
+            RgbaColor::WHITE,
+            3.0,
+            false,
+        );
 
         let smooth_fill = if state.smoothing {
-            RgbaColor { r: 92, g: 180, b: 148, a: 255 }
+            RgbaColor { r: 100, g: 188, b: 156, a: 255 }
         } else {
-            RgbaColor { r: 64, g: 78, b: 98, a: 255 }
+            RgbaColor { r: 76, g: 90, b: 112, a: 220 }
         };
-        fill_screen_draw_rect(pixels, width, height, x + 214, y + 22, 22, 22, smooth_fill);
-        stroke_screen_draw_rect(pixels, width, height, x + 214, y + 22, 22, 22, RgbaColor::WHITE);
+        fill_screen_draw_rounded_rect(pixels, width, height, x + 224, y + 24, 28, 28, 8, smooth_fill);
+        if state.smoothing {
+            draw_screen_draw_line(
+                pixels,
+                width,
+                height,
+                POINT { x: x + 230, y: y + 38 },
+                POINT { x: x + 237, y: y + 45 },
+                RgbaColor::WHITE,
+                2.0,
+                false,
+            );
+            draw_screen_draw_line(
+                pixels,
+                width,
+                height,
+                POINT { x: x + 237, y: y + 45 },
+                POINT { x: x + 247, y: y + 31 },
+                RgbaColor::WHITE,
+                2.0,
+                false,
+            );
+        }
 
         draw_screen_draw_slider(
             pixels,
             width,
             height,
-            x + 256,
-            y + 32,
-            84,
+            x + 264,
+            y + 38,
+            54,
             state.smoothing_amount.clamp(0.0, 1.0),
         );
     }
@@ -5831,9 +6163,82 @@ mod windows_overlay {
         slider_width: i32,
         value: f32,
     ) {
-        fill_screen_draw_rect(pixels, width, height, x, y - 2, slider_width, 4, RgbaColor { r: 164, g: 180, b: 202, a: 210 });
+        fill_screen_draw_rounded_rect(
+            pixels,
+            width,
+            height,
+            x,
+            y - 3,
+            slider_width,
+            6,
+            3,
+            RgbaColor { r: 90, g: 108, b: 132, a: 224 },
+        );
+        fill_screen_draw_rounded_rect(
+            pixels,
+            width,
+            height,
+            x,
+            y - 3,
+            (value.clamp(0.0, 1.0) * slider_width as f32).round() as i32,
+            6,
+            3,
+            RgbaColor { r: 120, g: 214, b: 176, a: 224 },
+        );
         let knob_x = x + (value.clamp(0.0, 1.0) * slider_width as f32).round() as i32;
-        draw_screen_draw_circle(pixels, width, height, knob_x, y, 12.0, RgbaColor::WHITE, false);
+        draw_screen_draw_circle(
+            pixels,
+            width,
+            height,
+            knob_x,
+            y,
+            12.0,
+            RgbaColor {
+                r: 244,
+                g: 248,
+                b: 255,
+                a: 255,
+            },
+            false,
+        );
+    }
+
+    fn fill_screen_draw_rounded_rect(
+        pixels: &mut [u8],
+        width: usize,
+        height: usize,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        radius: i32,
+        color: RgbaColor,
+    ) {
+        let radius = radius.max(0);
+        let inner_left = x + radius;
+        let inner_right = x + w - radius - 1;
+        let inner_top = y + radius;
+        let inner_bottom = y + h - radius - 1;
+        for py in y.max(0)..(y + h).min(height as i32) {
+            for px in x.max(0)..(x + w).min(width as i32) {
+                let inside = if radius <= 0
+                    || (px >= inner_left && px <= inner_right)
+                    || (py >= inner_top && py <= inner_bottom)
+                {
+                    true
+                } else {
+                    let corner_x = if px < inner_left { inner_left } else { inner_right };
+                    let corner_y = if py < inner_top { inner_top } else { inner_bottom };
+                    let dx = px - corner_x;
+                    let dy = py - corner_y;
+                    dx * dx + dy * dy <= radius * radius
+                };
+                if inside {
+                    let index = ((py as usize * width) + px as usize) * 4;
+                    blend_screen_draw_pixel(&mut pixels[index..index + 4], color);
+                }
+            }
+        }
     }
 
     fn fill_screen_draw_rect(
