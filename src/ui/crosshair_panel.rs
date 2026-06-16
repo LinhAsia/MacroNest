@@ -546,6 +546,27 @@ impl CrosshairApp {
                     dragging |= response.dragged();
                     ui.end_row();
                 }
+
+                ui.label(Self::tr_lang(language, "Custom pixels", "Tự vẽ tâm ngắm"));
+                ui.vertical(|ui| {
+                    let mut text = style.custom_pixels.clone().unwrap_or_default();
+                    let response = ui.add(
+                        egui::TextEdit::multiline(&mut text)
+                            .hint_text("Use # for color, @ for outline, . or space for empty.\nExample:\n..#..\n..#..\n##.##\n..#..\n..#..")
+                            .font(egui::TextStyle::Monospace)
+                            .desired_width(340.0)
+                            .desired_rows(6)
+                    );
+                    if response.changed() {
+                        style.custom_pixels = if text.trim().is_empty() {
+                            None
+                        } else {
+                            Some(text)
+                        };
+                        changed = true;
+                    }
+                });
+                ui.end_row();
             });
         (changed, dragging)
     }
