@@ -9312,8 +9312,8 @@ impl CrosshairApp {
         )
     }
 
-    fn capture_request_registers_on_press(&self, _target: &CaptureRequest) -> bool {
-        true
+    fn capture_request_registers_on_press(&self, target: &CaptureRequest) -> bool {
+        !matches!(target, CaptureRequest::QuickScreenDrawHotkey)
     }
 
     fn split_key_list(value: &str) -> Vec<String> {

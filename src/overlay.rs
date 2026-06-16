@@ -1033,7 +1033,6 @@ mod windows_overlay {
         quick_key_display_center_x: i32,
         quick_key_display_center_y: i32,
         quick_key_display_size: f32,
-        quick_key_display_text: Option<String>,
         quick_key_display_entries: Vec<String>,
         quick_key_display_hide_at: Option<Instant>,
         tray_menu: HMENU,
@@ -1589,7 +1588,6 @@ mod windows_overlay {
                 quick_key_display_center_x: GetSystemMetrics(SM_CXSCREEN).max(1) / 2,
                 quick_key_display_center_y: GetSystemMetrics(SM_CYSCREEN).max(1) / 2,
                 quick_key_display_size: 36.0,
-                quick_key_display_text: None,
                 quick_key_display_entries: Vec::new(),
                 quick_key_display_hide_at: None,
                 tray_menu,
@@ -2045,7 +2043,6 @@ mod windows_overlay {
                             let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
                             let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
                             runtime.quick_key_display_entries.clear();
-                            runtime.quick_key_display_text = None;
                             runtime.quick_key_display_hide_at = None;
                             let _ = ShowWindow(runtime.key_display_hwnd, SW_HIDE);
                         } else {
@@ -2088,7 +2085,7 @@ mod windows_overlay {
                         }
 
                         if runtime.quick_key_display_enabled
-                            || runtime.quick_key_display_text.is_some()
+                            || !runtime.quick_key_display_entries.is_empty()
                         {
                             let _ = refresh_quick_key_display(runtime);
                         }
@@ -4637,6 +4634,20 @@ mod windows_overlay {
         }
     }
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum QuickKeyDisplayPalette {
+        Keyboard,
+        Mouse,
+        Wheel,
+    }
+
+    #[derive(Clone)]
+    struct QuickKeyDisplayTextRun {
+        text: String,
+        rect: RECT,
+        color: COLORREF,
+    }
+
     fn quick_key_display_parts(label: &str) -> Vec<String> {
         label
             .split('+')
@@ -4740,12 +4751,95 @@ mod windows_overlay {
                 }
             }
         }
+    }
 
-        runtime.quick_key_display_text = if runtime.quick_key_display_entries.is_empty() {
-            None
+    fn quick_key_display_palette(label: &str) -> QuickKeyDisplayPalette {
+        let lower = label.to_ascii_lowercase();
+        if lower.contains("wheel") {
+            QuickKeyDisplayPalette::Wheel
+        } else if matches!(
+            lower.as_str(),
+            "lmb" | "rmb" | "mmb" | "mouse 4" | "mouse 5"
+        ) || lower.contains("mouse")
+        {
+            QuickKeyDisplayPalette::Mouse
         } else {
-            Some(runtime.quick_key_display_entries.join("   "))
-        };
+            QuickKeyDisplayPalette::Keyboard
+        }
+    }
+
+    fn quick_key_display_keycap_width(label: &str, font_size: f32, cap_height: i32) -> i32 {
+        let length = label.chars().count().max(1) as f32;
+        let char_width = if length <= 2.0 { 0.84 } else { 0.66 };
+        ((length * font_size * char_width) + (cap_height as f32 * 0.74))
+            .round()
+            .max((cap_height as f32 * 0.92).round()) as i32
+    }
+
+    fn quick_key_display_layout_size(entries: &[String], font_size: f32) -> (i32, i32) {
+        let cap_height = (font_size * 1.12 + 18.0).round().max(44.0) as i32;
+        let outer_pad_x = (font_size * 0.46).round().max(16.0) as i32;
+        let outer_pad_y = (font_size * 0.34).round().max(10.0) as i32;
+        let combo_gap = (font_size * 0.14).round().max(4.0) as i32;
+        let plus_width = (font_size * 0.48).round().max(10.0) as i32;
+        let entry_gap = (font_size * 0.52).round().max(18.0) as i32;
+
+        let mut width = outer_pad_x * 2;
+        for (entry_index, entry) in entries.iter().enumerate() {
+            let parts = quick_key_display_parts(entry);
+            for (part_index, part) in parts.iter().enumerate() {
+                width += quick_key_display_keycap_width(part, font_size, cap_height);
+                if part_index + 1 < parts.len() {
+                    width += combo_gap * 2 + plus_width;
+                }
+            }
+            if entry_index + 1 < entries.len() {
+                width += entry_gap;
+            }
+        }
+
+        let height = cap_height + outer_pad_y * 2 + 6;
+        (width.max(cap_height), height.max(cap_height))
+    }
+
+    fn quick_key_display_colorref(r: u8, g: u8, b: u8) -> COLORREF {
+        COLORREF((r as u32) | ((g as u32) << 8) | ((b as u32) << 16))
+    }
+
+    fn quick_key_display_alpha(color: [u8; 4], alpha_scale: f32) -> [u8; 4] {
+        [
+            color[0],
+            color[1],
+            color[2],
+            ((color[3] as f32) * alpha_scale.clamp(0.0, 1.0))
+                .round()
+                .clamp(0.0, 255.0) as u8,
+        ]
+    }
+
+    fn quick_key_display_palette_colors(
+        palette: QuickKeyDisplayPalette,
+    ) -> ([u8; 4], [u8; 4], [u8; 4], [u8; 4]) {
+        match palette {
+            QuickKeyDisplayPalette::Keyboard => (
+                [24, 33, 44, 244],
+                [34, 47, 60, 214],
+                [112, 235, 192, 196],
+                [241, 255, 248, 255],
+            ),
+            QuickKeyDisplayPalette::Mouse => (
+                [33, 30, 24, 244],
+                [56, 47, 35, 220],
+                [255, 206, 120, 204],
+                [255, 247, 230, 255],
+            ),
+            QuickKeyDisplayPalette::Wheel => (
+                [22, 29, 40, 244],
+                [32, 44, 62, 220],
+                [132, 204, 255, 204],
+                [240, 248, 255, 255],
+            ),
+        }
     }
 
     fn update_quick_key_display_key(key_name: &str, is_key_down: bool, is_key_up: bool) {
@@ -5132,7 +5226,6 @@ mod windows_overlay {
                     runtime.quick_key_display_size = size.clamp(18.0, 96.0);
                     if !enabled {
                         runtime.quick_key_display_entries.clear();
-                        runtime.quick_key_display_text = None;
                         runtime.quick_key_display_hide_at = None;
                     }
                     let _ = refresh_quick_key_display(runtime);
@@ -5520,7 +5613,6 @@ mod windows_overlay {
         if is_ui_in_foreground() || !runtime.quick_key_display_enabled {
             runtime.quick_key_display_entries.clear();
             runtime.quick_key_display_hide_at = None;
-            runtime.quick_key_display_text = None;
             let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
             return Ok(());
         }
@@ -5530,50 +5622,28 @@ mod windows_overlay {
         {
             runtime.quick_key_display_entries.clear();
             runtime.quick_key_display_hide_at = None;
-            runtime.quick_key_display_text = None;
         }
 
-        let Some(text) = runtime
-            .quick_key_display_text
-            .clone()
-            .filter(|value| !value.trim().is_empty())
-        else {
+        if runtime.quick_key_display_entries.is_empty() {
             let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
             return Ok(());
-        };
+        }
         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
-        let text_len = text.chars().count().max(1) as f32;
-        let height = (font_size * 1.12 + 27.0).round().max(52.0) as i32;
-        let width = ((font_size * 0.76 * text_len) + font_size + 24.0)
-            .round()
-            .max((height as f32 * 1.08).round()) as i32;
-        let display = HudDisplayState {
-            owner_preset_id: None,
-            preset_id: None,
-            text,
-            text_color: RgbaColor {
-                r: 248,
-                g: 252,
-                b: 255,
-                a: 255,
-            },
-            background_color: RgbaColor {
-                r: 20,
-                g: 28,
-                b: 40,
-                a: 255,
-            },
-            background_opacity: 0.82,
-            rounded_background: true,
-            font_size,
-            x: runtime.quick_key_display_center_x - (width / 2),
-            y: runtime.quick_key_display_center_y - (height / 2),
-            width,
-            height,
-            auto_hide_on_owner_completion: false,
-            expires_at: None,
-        };
-        unsafe { paint_quick_key_display(runtime.key_display_hwnd, &display) }
+        let entries = runtime.quick_key_display_entries.clone();
+        let (width, height) = quick_key_display_layout_size(&entries, font_size);
+        let x = runtime.quick_key_display_center_x - (width / 2);
+        let y = runtime.quick_key_display_center_y - (height / 2);
+        unsafe {
+            paint_quick_key_display(
+                runtime.key_display_hwnd,
+                &entries,
+                font_size,
+                x,
+                y,
+                width,
+                height,
+            )
+        }
     }
 
     fn refresh_screen_draw_overlay(runtime: &mut Runtime) -> Result<()> {
@@ -5698,8 +5768,7 @@ mod windows_overlay {
             }
             ScreenDrawControl::None => {
                 if let Some(stroke) = state.current_stroke.as_mut() {
-                    stroke.points.push(point);
-                    true
+                    append_screen_draw_point(stroke, point)
                 } else {
                     false
                 }
@@ -5738,6 +5807,23 @@ mod windows_overlay {
             }
         }
         state.active_control = ScreenDrawControl::None;
+        true
+    }
+
+    fn append_screen_draw_point(stroke: &mut ScreenDrawStroke, point: POINT) -> bool {
+        let Some(last) = stroke.points.last().copied() else {
+            stroke.points.push(point);
+            return true;
+        };
+
+        let dx = (point.x - last.x) as f32;
+        let dy = (point.y - last.y) as f32;
+        let min_distance = if stroke.smoothing { 1.6 } else { 0.9 };
+        if dx * dx + dy * dy < min_distance * min_distance {
+            return false;
+        }
+
+        stroke.points.push(point);
         true
     }
 
@@ -5881,10 +5967,14 @@ mod windows_overlay {
         pixmap: &mut tiny_skia::PixmapMut,
         stroke: &ScreenDrawStroke,
     ) {
+        let filtered_points = filtered_screen_draw_points(
+            &stroke.points,
+            if stroke.smoothing { 1.2 } else { 0.6 },
+        );
         let points = if stroke.smoothing {
-            smoothed_screen_draw_points(&stroke.points, stroke.smoothing_amount)
+            smoothed_screen_draw_points(&filtered_points, stroke.smoothing_amount)
         } else {
-            stroke.points.clone()
+            filtered_points
         };
         if points.is_empty() {
             return;
@@ -5924,8 +6014,23 @@ mod windows_overlay {
 
         let mut pb = tiny_skia::PathBuilder::new();
         pb.move_to(points[0].x as f32, points[0].y as f32);
-        for point in points.iter().skip(1) {
-            pb.line_to(point.x as f32, point.y as f32);
+        if stroke.smoothing && points.len() >= 3 {
+            for index in 1..points.len() - 1 {
+                let current = points[index];
+                let next = points[index + 1];
+                pb.quad_to(
+                    current.x as f32,
+                    current.y as f32,
+                    (current.x + next.x) as f32 * 0.5,
+                    (current.y + next.y) as f32 * 0.5,
+                );
+            }
+            let last = *points.last().unwrap_or(&points[0]);
+            pb.line_to(last.x as f32, last.y as f32);
+        } else {
+            for point in points.iter().skip(1) {
+                pb.line_to(point.x as f32, point.y as f32);
+            }
         }
         if let Some(path) = pb.finish() {
             let stroke_style = tiny_skia::Stroke {
@@ -6080,7 +6185,7 @@ mod windows_overlay {
         if points.len() < 3 {
             return points.to_vec();
         }
-        let radius = (1.0 + amount.clamp(0.0, 1.0) * 5.0).round() as usize;
+        let radius = (1.0 + amount.clamp(0.0, 1.0) * 2.0).round() as usize;
         let mut result = Vec::with_capacity(points.len());
         for index in 0..points.len() {
             let start = index.saturating_sub(radius);
@@ -6098,6 +6203,25 @@ mod windows_overlay {
             });
         }
         result
+    }
+
+    fn filtered_screen_draw_points(points: &[POINT], min_distance: f32) -> Vec<POINT> {
+        if points.len() < 2 {
+            return points.to_vec();
+        }
+        let min_distance_sq = min_distance.max(0.25).powi(2);
+        let mut filtered = Vec::with_capacity(points.len());
+        for point in points {
+            let should_push = filtered.last().is_none_or(|last: &POINT| {
+                let dx = (point.x - last.x) as f32;
+                let dy = (point.y - last.y) as f32;
+                dx * dx + dy * dy >= min_distance_sq
+            });
+            if should_push {
+                filtered.push(*point);
+            }
+        }
+        filtered
     }
 
     fn draw_screen_draw_line(
@@ -6752,7 +6876,7 @@ mod windows_overlay {
         }
 
         if runtime.quick_key_display_enabled
-            && (runtime.quick_key_display_text.is_some()
+            && (!runtime.quick_key_display_entries.is_empty()
                 || runtime.quick_key_display_hide_at.is_some())
         {
             return 33;
@@ -8296,11 +8420,19 @@ mod windows_overlay {
         dst[3] = (src_a as u32 + (dst_a * inv_alpha) / 255).min(255) as u8;
     }
 
-    unsafe fn paint_quick_key_display(hwnd: HWND, display: &HudDisplayState) -> Result<()> {
-        let window_x = display.x.max(0);
-        let window_y = display.y.max(0);
-        let width = display.width.max(1);
-        let height = display.height.max(1);
+    unsafe fn paint_quick_key_display(
+        hwnd: HWND,
+        entries: &[String],
+        font_size: f32,
+        window_x: i32,
+        window_y: i32,
+        width: i32,
+        height: i32,
+    ) -> Result<()> {
+        let window_x = window_x.max(0);
+        let window_y = window_y.max(0);
+        let width = width.max(1);
+        let height = height.max(1);
         let screen_dc = GetDC(None);
         let mem_dc = CreateCompatibleDC(Some(screen_dc));
         let bitmap_info = BITMAPINFO {
@@ -8331,73 +8463,124 @@ mod windows_overlay {
 
         let mut pixmap = tiny_skia::Pixmap::new(width as u32, height as u32)
             .ok_or_else(|| anyhow::anyhow!("Failed to allocate quick key display pixmap"))?;
-        let body_height = (height as f32 - 3.0).max(1.0);
-        let radius = (body_height * 0.34).clamp(12.0, 20.0);
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            1.0,
-            3.0,
-            width as f32 - 2.0,
-            body_height,
-            radius,
-            [4, 8, 14, 72],
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            0.0,
-            0.0,
-            width as f32,
-            body_height,
-            radius,
-            [35, 43, 56, 236],
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            2.0,
-            2.0,
-            width as f32 - 4.0,
-            (body_height - 5.0).max(1.0),
-            (radius - 2.0).max(2.0),
-            [58, 70, 90, 216],
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            4.0,
-            4.0,
-            width as f32 - 8.0,
-            ((body_height - 10.0) * 0.52).max(1.0),
-            (radius - 4.0).max(2.0),
-            [255, 255, 255, 28],
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            3.0,
-            body_height * 0.62,
-            width as f32 - 6.0,
-            (body_height * 0.20).max(1.0),
-            (radius - 5.0).max(2.0),
-            [12, 16, 24, 42],
-        );
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            0.5,
-            0.5,
-            width as f32 - 1.0,
-            body_height,
-            radius,
-            1.2,
-            [210, 224, 242, 112],
-        );
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            2.5,
-            2.5,
-            width as f32 - 5.0,
-            (body_height - 4.0).max(1.0),
-            (radius - 2.0).max(2.0),
-            1.0,
-            [255, 255, 255, 40],
-        );
+        let cap_height = (font_size * 1.12 + 18.0).round().max(44.0) as i32;
+        let cap_radius = (cap_height as f32 * 0.26).clamp(11.0, 18.0);
+        let outer_pad_x = (font_size * 0.46).round().max(16.0) as i32;
+        let outer_pad_y = (font_size * 0.34).round().max(10.0) as i32;
+        let combo_gap = (font_size * 0.14).round().max(4.0) as i32;
+        let plus_width = (font_size * 0.48).round().max(10.0) as i32;
+        let entry_gap = (font_size * 0.52).round().max(18.0) as i32;
+
+        let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
+        let mut cursor_x = outer_pad_x;
+        let cap_y = outer_pad_y;
+        let entry_count = entries.len().max(1) as f32;
+        for (entry_index, entry) in entries.iter().enumerate() {
+            let alpha_scale = 0.56 + (((entry_index + 1) as f32 / entry_count) * 0.44);
+            let parts = quick_key_display_parts(entry);
+            for (part_index, part) in parts.iter().enumerate() {
+                let palette = quick_key_display_palette(part);
+                let (base_fill, inner_fill, border, text_color) =
+                    quick_key_display_palette_colors(palette);
+                let cap_width = quick_key_display_keycap_width(part, font_size, cap_height);
+
+                fill_skia_rounded_rect(
+                    &mut pixmap,
+                    cursor_x as f32,
+                    (cap_y + 4) as f32,
+                    cap_width as f32,
+                    cap_height as f32,
+                    cap_radius,
+                    quick_key_display_alpha([2, 5, 10, 80], alpha_scale * 0.8),
+                );
+                fill_skia_rounded_rect(
+                    &mut pixmap,
+                    cursor_x as f32,
+                    cap_y as f32,
+                    cap_width as f32,
+                    cap_height as f32,
+                    cap_radius,
+                    quick_key_display_alpha(base_fill, alpha_scale),
+                );
+                fill_skia_rounded_rect(
+                    &mut pixmap,
+                    (cursor_x + 2) as f32,
+                    (cap_y + 2) as f32,
+                    (cap_width - 4).max(1) as f32,
+                    (cap_height - 5).max(1) as f32,
+                    (cap_radius - 2.0).max(2.0),
+                    quick_key_display_alpha(inner_fill, alpha_scale * 0.92),
+                );
+                fill_skia_rounded_rect(
+                    &mut pixmap,
+                    (cursor_x + 3) as f32,
+                    (cap_y + 3) as f32,
+                    (cap_width - 6).max(1) as f32,
+                    ((cap_height as f32 - 8.0) * 0.46).max(1.0),
+                    (cap_radius - 3.0).max(2.0),
+                    quick_key_display_alpha([255, 255, 255, 20], alpha_scale),
+                );
+                fill_skia_rounded_rect(
+                    &mut pixmap,
+                    (cursor_x + 2) as f32,
+                    (cap_y + cap_height - 12) as f32,
+                    (cap_width - 4).max(1) as f32,
+                    7.0,
+                    (cap_radius - 4.0).max(2.0),
+                    quick_key_display_alpha([6, 9, 14, 48], alpha_scale),
+                );
+                stroke_skia_rounded_rect(
+                    &mut pixmap,
+                    cursor_x as f32 + 0.5,
+                    cap_y as f32 + 0.5,
+                    (cap_width - 1).max(1) as f32,
+                    (cap_height - 1).max(1) as f32,
+                    cap_radius,
+                    1.1,
+                    quick_key_display_alpha(border, alpha_scale),
+                );
+                stroke_skia_rounded_rect(
+                    &mut pixmap,
+                    (cursor_x + 2) as f32 + 0.5,
+                    (cap_y + 2) as f32 + 0.5,
+                    (cap_width - 5).max(1) as f32,
+                    (cap_height - 6).max(1) as f32,
+                    (cap_radius - 2.0).max(2.0),
+                    0.9,
+                    quick_key_display_alpha([255, 255, 255, 34], alpha_scale),
+                );
+
+                text_runs.push(QuickKeyDisplayTextRun {
+                    text: part.clone(),
+                    rect: RECT {
+                        left: cursor_x + 8,
+                        top: cap_y,
+                        right: cursor_x + cap_width - 8,
+                        bottom: cap_y + cap_height,
+                    },
+                    color: quick_key_display_colorref(text_color[0], text_color[1], text_color[2]),
+                });
+                cursor_x += cap_width;
+
+                if part_index + 1 < parts.len() {
+                    cursor_x += combo_gap;
+                    text_runs.push(QuickKeyDisplayTextRun {
+                        text: "+".to_owned(),
+                        rect: RECT {
+                            left: cursor_x,
+                            top: cap_y,
+                            right: cursor_x + plus_width,
+                            bottom: cap_y + cap_height,
+                        },
+                        color: quick_key_display_colorref(226, 235, 244),
+                    });
+                    cursor_x += plus_width + combo_gap;
+                }
+            }
+            if entry_index + 1 < entries.len() {
+                cursor_x += entry_gap;
+            }
+        }
 
         let pixmap_data = pixmap.data();
         let total_pixels = width as usize * height as usize;
@@ -8432,7 +8615,7 @@ mod windows_overlay {
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
         let font = CreateFontW(
-            -(display.font_size.round() as i32).max(1),
+            -(font_size.round() as i32).max(1),
             0,
             0,
             0,
@@ -8449,31 +8632,21 @@ mod windows_overlay {
         );
         let old_font = SelectObject(text_mem_dc, HGDIOBJ(font.0));
         let _ = SetBkMode(text_mem_dc, TRANSPARENT);
-        let _ = SetTextColor(text_mem_dc, COLORREF(0x00FFFFFF));
-
-        let mut wide = display
-            .text
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let mut measured_rect = RECT::default();
-        let _ = DrawTextW(
-            text_mem_dc,
-            &mut wide,
-            &mut measured_rect,
-            DT_CALCRECT | DT_SINGLELINE,
-        );
-        let text_width = (measured_rect.right - measured_rect.left).max(1);
-        let text_height = (measured_rect.bottom - measured_rect.top).max(1);
-        let text_left = ((width - text_width) / 2).max(0);
-        let text_top = (((height - 3) - text_height) / 2).max(0);
-        let mut text_rect = RECT {
-            left: text_left,
-            top: text_top,
-            right: (text_left + text_width).min(width),
-            bottom: (text_top + text_height).min(height),
-        };
-        let _ = DrawTextW(text_mem_dc, &mut wide, &mut text_rect, DT_CENTER | DT_SINGLELINE);
+        for run in &text_runs {
+            let _ = SetTextColor(text_mem_dc, run.color);
+            let mut wide = run
+                .text
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let mut rect = run.rect;
+            let _ = DrawTextW(
+                text_mem_dc,
+                &mut wide,
+                &mut rect,
+                DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+            );
+        }
 
         for i in 0..total_pixels {
             let offset = i * 4;
@@ -8484,11 +8657,13 @@ mod windows_overlay {
             if text_a == 0 {
                 continue;
             }
-            let src_a = ((text_a as u32 * display.text_color.a.max(1) as u32) / 255) as u8;
-            let src_b = ((display.text_color.b as u32 * src_a as u32) / 255) as u8;
-            let src_g = ((display.text_color.g as u32 * src_a as u32) / 255) as u8;
-            let src_r = ((display.text_color.r as u32 * src_a as u32) / 255) as u8;
-            blend_premultiplied_bgra(&mut pixels[offset..offset + 4], src_b, src_g, src_r, src_a);
+            blend_premultiplied_bgra(
+                &mut pixels[offset..offset + 4],
+                text_b,
+                text_g,
+                text_r,
+                text_a,
+            );
         }
 
         let size = SIZE {
