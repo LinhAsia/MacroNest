@@ -109,7 +109,7 @@ enum TitlebarQuickActionKind {
     Protractor,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VisionCaptureMode {
     Template,
     SearchRegion,
@@ -139,7 +139,7 @@ pub(crate) enum VisionCaptureTarget {
     },
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum MouseCaptureKind {
     #[default]
     MoveMouseAbsolute,
@@ -151,7 +151,7 @@ pub(crate) enum MouseCaptureKind {
     ExtraCondPixelColor,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MouseMoveAbsoluteCaptureTarget {
     group_id: Option<u32>,
     preset_id: u32,
@@ -856,6 +856,7 @@ pub struct CrosshairApp {
     drag_start_layout_cell: Option<(u32, usize, usize)>,
     protractor_picking_active: bool,
     protractor_calibration_points: Option<Vec<(i32, i32)>>,
+    native_capture_in_progress: bool,
 }
 
 impl CrosshairApp {
@@ -944,6 +945,7 @@ impl CrosshairApp {
             vision_capture_mode: None,
             protractor_picking_active: false,
             protractor_calibration_points: None,
+            native_capture_in_progress: false,
             vision_capture_anchor: None,
             vision_capture_current: None,
             vision_capture_screen_region_preview: None,
@@ -9837,20 +9839,13 @@ impl CrosshairApp {
     }
 
     fn begin_protractor_calibration(&mut self, ctx: &egui::Context) {
-        if self.protractor_picking_active {
+        if self.protractor_picking_active || self.native_capture_in_progress {
             return;
         }
 
         self.protractor_picking_active = true;
+        self.native_capture_in_progress = true;
         self.protractor_calibration_points = Some(Vec::new());
-
-        let viewport = ctx.input(|input| input.viewport().clone());
-        self.mouse_move_absolute_restore_inner_size = viewport
-            .inner_rect
-            .map(|rect| rect.size())
-            .or(Some(Self::desired_window_size()));
-        self.mouse_move_absolute_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
-        self.enforce_square_window_frames = 0;
 
         // Hide main app window natively
         #[cfg(windows)]
@@ -9863,70 +9858,39 @@ impl CrosshairApp {
 
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
-        // Tell overlay to hide protractor
         let _ = self.overlay_tx.send(OverlayCommand::SetProtractorEnabled(false));
         crate::overlay::wake_command_queue();
 
-        // Sleep to let OS process window hide and refresh desktop (40ms is imperceptible but enough)
-        std::thread::sleep(std::time::Duration::from_millis(40));
+        let ui_tx = self.ui_tx.clone();
+        let egui_ctx = ctx.clone();
+        let ui_lang = self.state.ui_language;
 
-        // Capture virtual screen bounds
-        let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
-        if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
-            let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                [capture.width, capture.height],
-                &capture.rgba,
-            );
-            let texture = ctx.load_texture(
-                "screen-freeze-frame",
-                color_image,
-                egui::TextureOptions::NEAREST,
-            );
-            self.captured_freeze_texture = Some(texture);
-            self.captured_freeze_frame = Some(capture);
-            self.captured_freeze_pos = egui::pos2(left as f32, top as f32);
-        } else {
-            // Restore window if capture failed
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            #[cfg(windows)]
-            unsafe {
-                if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
-                    let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
-                }
+        std::thread::spawn(move || {
+            // Sleep to let OS process window hide
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            // Capture virtual screen bounds
+            let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+            if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
+                let mode = crate::overlay::native_capture::NativeCaptureMode::ProtractorCalibration {
+                    ui_language: ui_lang,
+                };
+                let result = crate::overlay::native_capture::run_capture_overlay(
+                    capture,
+                    left,
+                    top,
+                    width,
+                    height,
+                    mode,
+                );
+                let _ = ui_tx.send(UiCommand::NativeProtractorCalibrationFinished { result });
+            } else {
+                let _ = ui_tx.send(UiCommand::NativeProtractorCalibrationFinished {
+                    result: crate::overlay::native_capture::NativeCaptureResult::Cancelled,
+                });
             }
-            self.protractor_picking_active = false;
-            self.protractor_calibration_points = None;
-            return;
-        }
-
-        // Resize window to virtual screen dimensions
-        let ppp = ctx.pixels_per_point().max(0.5);
-        let pos = egui::pos2(left as f32 / ppp, top as f32 / ppp);
-        let size = egui::vec2(width as f32 / ppp, height as f32 / ppp);
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-
-        // Show window again using native Win32 API
-        #[cfg(windows)]
-        unsafe {
-            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
-                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
-            }
-        }
-
-        self.mouse_move_absolute_capture_wait_for_mouse_release = true; // Wait for initial release if mouse is pressed
-        self.status = Self::tr_lang(
-            self.state.ui_language,
-            "Calibration: Click point 1/3 on screen. Press Esc to cancel.",
-            "Cân chỉnh: Click điểm 1/3 trên màn hình. Nhấn Esc để hủy.",
-        ).to_owned();
-
-        ctx.request_repaint();
+            egui_ctx.request_repaint();
+        });
     }
 
     fn cancel_protractor_calibration(&mut self) {
@@ -9990,116 +9954,8 @@ impl CrosshairApp {
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 
-    pub(crate) fn render_protractor_calibration_overlay(&mut self, ctx: &egui::Context) -> bool {
-        if self.protractor_calibration_points.is_none() {
-            return false;
-        }
-
-        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) || Self::is_vk_down(0x1B) {
-            self.cancel_protractor_calibration_freeze(ctx);
-            return true;
-        }
-
-        ctx.request_repaint_after(std::time::Duration::from_millis(16));
-        egui::CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(egui::Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::NONE)
-                    .inner_margin(egui::Margin::same(0)),
-            )
-            .show(ctx, |ui| {
-                let max_rect = ui.max_rect();
-
-                if let Some(ref texture) = self.captured_freeze_texture {
-                    ui.painter().image(
-                        texture.id(),
-                        max_rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
-                }
-
-                let status_text = &self.status;
-                if !status_text.is_empty() {
-                    let text_width = ui.painter().layout_no_wrap(status_text.clone(), egui::FontId::proportional(14.0), egui::Color32::WHITE).size().x;
-                    let padding = 24.0;
-                    let top_bar_rect = egui::Rect::from_center_size(
-                        egui::pos2(max_rect.center().x, max_rect.top() + 40.0),
-                        egui::vec2(text_width + padding * 2.0, 36.0),
-                    );
-                    ui.painter().rect_filled(
-                        top_bar_rect,
-                        18.0,
-                        egui::Color32::from_rgb(12, 18, 28),
-                    );
-                    ui.painter().rect_stroke(
-                        top_bar_rect,
-                        18.0,
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(110, 156, 210)),
-                        egui::StrokeKind::Outside,
-                    );
-                    ui.painter().text(
-                        top_bar_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        status_text,
-                        egui::FontId::proportional(14.0),
-                        egui::Color32::WHITE,
-                    );
-                }
-
-                let ppp = ctx.pixels_per_point().max(0.5);
-                let left = self.captured_freeze_pos.x as i32;
-                let top = self.captured_freeze_pos.y as i32;
-                let points = self.protractor_calibration_points.as_mut().unwrap();
-                for (idx, pt) in points.iter().enumerate() {
-                    let rx = (pt.0 - left) as f32 / ppp;
-                    let ry = (pt.1 - top) as f32 / ppp;
-                    let pt_pos = egui::pos2(rx, ry);
-
-                    ui.painter().circle_filled(pt_pos, 6.0, egui::Color32::from_rgb(255, 50, 50));
-                    ui.painter().circle_stroke(pt_pos, 10.0, egui::Stroke::new(2.0, egui::Color32::WHITE));
-                    ui.painter().text(
-                        pt_pos + egui::vec2(12.0, -12.0),
-                        egui::Align2::LEFT_BOTTOM,
-                        format!("{}", idx + 1),
-                        egui::FontId::proportional(16.0),
-                        egui::Color32::from_rgb(255, 50, 50),
-                    );
-                }
-
-                if self.mouse_move_absolute_capture_wait_for_mouse_release {
-                    if !Self::is_vk_down(0x01) {
-                        self.mouse_move_absolute_capture_wait_for_mouse_release = false;
-                    }
-                } else if Self::is_vk_down(0x01) {
-                    use windows::Win32::Foundation::POINT;
-                    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
-                    let mut point = POINT::default();
-                    if unsafe { GetCursorPos(&mut point) }.is_ok() {
-                        points.push((point.x, point.y));
-                        self.mouse_move_absolute_capture_wait_for_mouse_release = true;
-
-                        if points.len() == 1 {
-                            self.status = Self::tr_lang(
-                                self.state.ui_language,
-                                "Calibration: Click point 2/3 on screen. Press Esc to cancel.",
-                                "Cân chỉnh: Click điểm 2/3 trên màn hình. Nhấn Esc để hủy.",
-                            ).to_owned();
-                        } else if points.len() == 2 {
-                            self.status = Self::tr_lang(
-                                self.state.ui_language,
-                                "Calibration: Click point 3/3 on screen. Press Esc to cancel.",
-                                "Cân chỉnh: Click điểm 3/3 trên màn hình. Nhấn Esc để hủy.",
-                            ).to_owned();
-                        } else if points.len() == 3 {
-                            let pts = points.clone();
-                            self.finish_protractor_calibration_freeze(ctx, pts);
-                        }
-                    }
-                }
-            });
-        true
+    pub(crate) fn render_protractor_calibration_overlay(&mut self, _ctx: &egui::Context) -> bool {
+        false
     }
 }
 
@@ -10458,6 +10314,160 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::MouseMoveAbsolutePointCaptured { .. } => {}
                 UiCommand::MouseMoveAbsoluteCaptureCancelled => {}
+                UiCommand::NativeVisionCaptureFinished { target, mode, result, capture_frame } => {
+                    // Show main window natively
+                    #[cfg(windows)]
+                    unsafe {
+                        if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+                            let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                        }
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+
+                    // Clear native capture flag
+                    self.native_capture_in_progress = false;
+                    self.captured_freeze_frame = capture_frame;
+
+                    match result {
+                        crate::overlay::NativeCaptureResult::Cancelled => {
+                            self.clear_image_search_capture_state();
+                            self.status = match mode {
+                                VisionCaptureMode::Template | VisionCaptureMode::SearchRegion => {
+                                    "Image area capture cancelled.".to_owned()
+                                }
+                                _ => "Image point capture cancelled.".to_owned(),
+                            };
+                        }
+                        crate::overlay::NativeCaptureResult::SelectedRegion { x, y, width, height } => {
+                            // Process selected region
+                            match target {
+                                VisionCaptureTarget::Preset(preset_id) => {
+                                    let template_mode = matches!(mode, VisionCaptureMode::Template);
+                                    self.finish_image_search_region_capture_command(
+                                        ctx,
+                                        preset_id,
+                                        template_mode,
+                                        x,
+                                        y,
+                                        width,
+                                        height,
+                                    );
+                                }
+                                VisionCaptureTarget::OcrPreset(preset_id) => {
+                                    self.finish_ocr_region_capture_command(
+                                        ctx, preset_id, x, y, width, height,
+                                    );
+                                }
+                                VisionCaptureTarget::OcrStepRegion { group_id, preset_id, step_index } => {
+                                    self.finish_ocr_step_region_capture_command(
+                                        ctx, group_id, preset_id, step_index, x, y, width, height,
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+                        crate::overlay::NativeCaptureResult::ClickedPoint { x, y, color } => {
+                            // Process clicked point
+                            match target {
+                                VisionCaptureTarget::Preset(preset_id) => {
+                                    if matches!(mode, VisionCaptureMode::SinglePixel) {
+                                        self.finish_image_search_single_pixel_capture_from_screen(
+                                            ctx,
+                                            preset_id,
+                                            x,
+                                            y,
+                                        );
+                                    } else {
+                                        let priority_anchor = matches!(mode, VisionCaptureMode::ColorPriorityAnchor);
+                                        self.finish_image_search_point_capture_command(
+                                            ctx,
+                                            preset_id,
+                                            priority_anchor,
+                                            x,
+                                            y,
+                                            color,
+                                        );
+                                    }
+                                }
+                                VisionCaptureTarget::GeometryColor | VisionCaptureTarget::MacroStepGeometryColor { .. } => {
+                                    if let Some(col) = color {
+                                        self.apply_image_search_color_pick(target, col);
+                                    }
+                                    self.clear_image_search_capture_state();
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                    ctx.request_repaint();
+                }
+                UiCommand::NativeProtractorCalibrationFinished { result } => {
+                    // Show main window natively
+                    #[cfg(windows)]
+                    unsafe {
+                        if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+                            let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                        }
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+
+                    self.native_capture_in_progress = false;
+
+                    match result {
+                        crate::overlay::NativeCaptureResult::ProtractorPoints(points) => {
+                            self.finish_protractor_calibration_freeze(ctx, points);
+                        }
+                        _ => {
+                            self.protractor_picking_active = false;
+                            self.protractor_calibration_points = None;
+                            self.status = Self::tr_lang(
+                                self.state.ui_language,
+                                "Protractor calibration cancelled.",
+                                "Huy can chinh thuoc do do.",
+                            ).to_owned();
+                        }
+                    }
+                    ctx.request_repaint();
+                }
+                UiCommand::NativeMouseMoveAbsoluteCaptureFinished { target, result, capture_frame } => {
+                    // Show main window natively
+                    #[cfg(windows)]
+                    unsafe {
+                        if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+                            let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                        }
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+
+                    self.native_capture_in_progress = false;
+                    self.captured_freeze_frame = capture_frame;
+
+                    match result {
+                        crate::overlay::NativeCaptureResult::ClickedPoint { x, y, color } => {
+                            self.finish_mouse_move_absolute_capture(ctx, target, x, y, color);
+                        }
+                        _ => {
+                            self.mouse_move_absolute_capture_target = None;
+                            self.mouse_move_absolute_capture_wait_for_mouse_release = false;
+                            self.status = Self::tr_lang(
+                                self.state.ui_language,
+                                "Absolute coordinate capture cancelled.",
+                                "Huy lay toa do tuyet doi.",
+                            ).to_owned();
+                        }
+                    }
+                    ctx.request_repaint();
+                }
                 UiCommand::UpdateCheckStarted => {
                     self.update_status = UpdateStatus::Checking;
                 }

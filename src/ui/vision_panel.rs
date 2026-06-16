@@ -910,142 +910,8 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn render_image_search_capture_overlay(&mut self, ctx: &egui::Context) -> bool {
-        if !self.vision_capture_active {
-            return false;
-        }
-
-        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) || Self::is_vk_down(0x1B) {
-            self.cancel_image_search_capture(ctx);
-            return true;
-        }
-
-        ctx.request_repaint_after(Duration::from_millis(16));
-        egui::CentralPanel::default()
-            .frame(
-                Frame::new()
-                    .fill(Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::NONE)
-                    .inner_margin(Margin::same(0)),
-            )
-            .show(ctx, |ui| {
-                let max_rect = ui.max_rect();
-
-                if let Some(ref texture) = self.captured_freeze_texture {
-                    ui.painter().image(
-                        texture.id(),
-                        max_rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
-                }
-
-                let capture_mode = self
-                    .vision_capture_mode
-                    .unwrap_or(VisionCaptureMode::Template);
-
-                let is_region_mode = matches!(
-                    capture_mode,
-                    VisionCaptureMode::Template | VisionCaptureMode::SearchRegion
-                );
-                let dim_color = Color32::TRANSPARENT;
-
-                let ppp = ctx.pixels_per_point().max(0.5);
-                let (left, top, _, _) = crate::window_list::virtual_screen_bounds();
-
-                let mut selection_rect_logical = None;
-                if is_region_mode && let Some((x, y, w, h)) = self.vision_capture_screen_region_preview {
-                    let rx = (x - left) as f32 / ppp;
-                    let ry = (y - top) as f32 / ppp;
-                    let rw = w as f32 / ppp;
-                    let rh = h as f32 / ppp;
-                    selection_rect_logical = Some(egui::Rect::from_min_size(egui::pos2(rx, ry), egui::vec2(rw, rh)));
-                }
-
-                if let Some(sel_rect) = selection_rect_logical {
-                    ui.painter().rect_filled(
-                        egui::Rect::from_min_max(max_rect.left_top(), egui::pos2(max_rect.right(), sel_rect.min.y)),
-                        0.0,
-                        dim_color,
-                    );
-                    ui.painter().rect_filled(
-                        egui::Rect::from_min_max(egui::pos2(max_rect.left(), sel_rect.max.y), max_rect.right_bottom()),
-                        0.0,
-                        dim_color,
-                    );
-                    ui.painter().rect_filled(
-                        egui::Rect::from_min_max(egui::pos2(max_rect.left(), sel_rect.min.y), egui::pos2(sel_rect.min.x, sel_rect.max.y)),
-                        0.0,
-                        dim_color,
-                    );
-                    ui.painter().rect_filled(
-                        egui::Rect::from_min_max(egui::pos2(sel_rect.max.x, sel_rect.min.y), egui::pos2(max_rect.right(), sel_rect.max.y)),
-                        0.0,
-                        dim_color,
-                    );
-
-                    ui.painter().rect_stroke(
-                        sel_rect,
-                        0.0,
-                        egui::Stroke::new(1.5, Color32::from_rgb(0, 160, 255)),
-                        egui::StrokeKind::Outside,
-                    );
-                } else {
-                    ui.painter().rect_filled(max_rect, 0.0, dim_color);
-                }
-
-                let status_text = &self.status;
-                if !status_text.is_empty() {
-                    let text_width = ui.painter().layout_no_wrap(status_text.clone(), egui::FontId::proportional(14.0), Color32::WHITE).size().x;
-                    let padding = 24.0;
-                    let top_bar_rect = egui::Rect::from_center_size(
-                        egui::pos2(max_rect.center().x, max_rect.top() + 40.0),
-                        egui::vec2(text_width + padding * 2.0, 36.0),
-                    );
-                    ui.painter().rect_filled(
-                        top_bar_rect,
-                        18.0,
-                        Color32::from_rgb(12, 18, 28),
-                    );
-                    ui.painter().rect_stroke(
-                        top_bar_rect,
-                        18.0,
-                        egui::Stroke::new(1.0, Color32::from_rgb(110, 156, 210)),
-                        egui::StrokeKind::Outside,
-                    );
-                    ui.painter().text(
-                        top_bar_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        status_text,
-                        egui::FontId::proportional(14.0),
-                        Color32::WHITE,
-                    );
-                }
-
-                let pointer = self.precise_image_search_capture_pointer(ctx);
-                let screen_point = Self::current_screen_cursor_pos();
-                if pointer.is_some() {
-                    let sampled_color = match capture_mode {
-                        VisionCaptureMode::ColorPriorityAnchor => None,
-                        VisionCaptureMode::Template => {
-                            screen_point.and_then(|(screen_x, screen_y)| {
-                                self.update_image_search_cursor_preview(ctx, screen_x, screen_y, 29)
-                            })
-                        }
-                        _ => screen_point.and_then(|(screen_x, screen_y)| {
-                            self.update_image_search_cursor_preview(ctx, screen_x, screen_y, 17)
-                        }),
-                    };
-                    self.render_image_search_cursor_preview_panel(
-                        ui.painter(),
-                        max_rect,
-                        pointer,
-                        sampled_color,
-                        screen_point,
-                    );
-                }
-            });
-        true
+    pub(crate) fn render_image_search_capture_overlay(&mut self, _ctx: &egui::Context) -> bool {
+        false
     }
 
     pub(crate) fn sync_vision_presets(&self) {
@@ -1447,18 +1313,16 @@ impl CrosshairApp {
         target: VisionCaptureTarget,
         mode: VisionCaptureMode,
     ) {
-        if self.vision_capture_active {
+        if self.vision_capture_active || self.native_capture_in_progress {
             return;
         }
-        let viewport = ctx.input(|input| input.viewport().clone());
-        self.vision_restore_inner_size = viewport
-            .inner_rect
-            .map(|rect| rect.size())
-            .or(Some(Self::desired_window_size()));
-        self.vision_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
-        self.enforce_square_window_frames = 0;
 
-        // Hide window synchronously using native Win32 API to ensure it disappears instantly from the screen before screenshot
+        self.vision_capture_target = Some(target);
+        self.vision_capture_mode = Some(mode);
+        self.vision_capture_active = true;
+        self.native_capture_in_progress = true;
+
+        // Hide main app window natively
         #[cfg(windows)]
         unsafe {
             if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
@@ -1471,76 +1335,55 @@ impl CrosshairApp {
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
         crate::overlay::wake_command_queue();
 
-        // Sleep to let OS process window hide and refresh desktop
-        std::thread::sleep(std::time::Duration::from_millis(150));
-
-        // Capture virtual screen bounds
-        let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
-        if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
-            let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                [capture.width, capture.height],
-                &capture.rgba,
-            );
-            let texture = ctx.load_texture(
-                "screen-freeze-frame",
-                color_image,
-                egui::TextureOptions::NEAREST,
-            );
-            self.captured_freeze_texture = Some(texture);
-            self.captured_freeze_frame = Some(capture);
-            self.captured_freeze_pos = egui::pos2(left as f32, top as f32);
-        }
-
-        // Resize window to virtual screen dimensions
-        let ppp = ctx.pixels_per_point().max(0.5);
-        let pos = egui::pos2(left as f32 / ppp, top as f32 / ppp);
-        let size = egui::vec2(width as f32 / ppp, height as f32 / ppp);
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-
-        // Show window again using native Win32 API
-        #[cfg(windows)]
-        unsafe {
-            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
-                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
-            }
-        }
-
-        // Setup vision capture state
-        self.vision_capture_target = Some(target);
-        self.vision_capture_mode = Some(mode);
-        self.vision_capture_active = true;
-        self.vision_capture_anchor = None;
-        self.vision_capture_current = None;
-        self.vision_capture_screen_region_preview = None;
-        self.status = match mode {
-            VisionCaptureMode::Template => {
-                "Drag on screen to pick an image template. Press Esc to cancel.".to_owned()
-            }
-            VisionCaptureMode::SearchRegion => {
-                "Drag on screen to pick the image search area. Press Esc to cancel.".to_owned()
-            }
-            VisionCaptureMode::ColorSample => {
-                "Click a pixel on screen to pick a target color. Press Esc to cancel.".to_owned()
-            }
-            VisionCaptureMode::ColorPriorityAnchor => {
-                "Click a point on screen to set the color priority anchor. Press Esc to cancel.".to_owned()
-            }
-            VisionCaptureMode::SinglePixel => {
-                "Click a pixel on screen to pick the search coordinate. Press Esc to cancel.".to_owned()
-            }
-        };
-        let is_region_mode = matches!(
+        let ui_tx = self.ui_tx.clone();
+        let egui_ctx = ctx.clone();
+        let is_template = matches!(mode, VisionCaptureMode::Template);
+        let is_point_click = matches!(
             mode,
-            VisionCaptureMode::Template | VisionCaptureMode::SearchRegion
+            VisionCaptureMode::ColorSample | VisionCaptureMode::ColorPriorityAnchor | VisionCaptureMode::SinglePixel
         );
-        self.set_image_search_capture_mouse_blocked(true, is_region_mode);
+        let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
 
-        ctx.request_repaint();
+        std::thread::spawn(move || {
+            // Sleep to let OS process window hide
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            // Capture virtual screen bounds
+            let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+            if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
+                let native_mode = if is_point_click {
+                    crate::overlay::native_capture::NativeCaptureMode::PointClick { vietnamese }
+                } else {
+                    crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
+                        is_template,
+                        vietnamese,
+                    }
+                };
+
+                let result = crate::overlay::native_capture::run_capture_overlay(
+                    capture.clone(),
+                    left,
+                    top,
+                    width,
+                    height,
+                    native_mode,
+                );
+                let _ = ui_tx.send(UiCommand::NativeVisionCaptureFinished {
+                    target,
+                    mode,
+                    result,
+                    capture_frame: Some(capture),
+                });
+            } else {
+                let _ = ui_tx.send(UiCommand::NativeVisionCaptureFinished {
+                    target,
+                    mode,
+                    result: crate::overlay::native_capture::NativeCaptureResult::Cancelled,
+                    capture_frame: None,
+                });
+            }
+            egui_ctx.request_repaint();
+        });
     }
 
     pub(crate) fn handle_image_search_capture_mouse_down(

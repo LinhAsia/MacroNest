@@ -30,14 +30,18 @@ mod windows_overlay {
     pub mod vision;
     #[path = "../audio_sense.rs"]
     pub mod audio_sense;
+    #[path = "../native_capture.rs"]
+    pub mod native_capture;
 
     pub use math_expr::*;
     pub use drawing::*;
     pub use arduino::*;
     pub use vision::*;
     pub use audio_sense::*;
+    pub use native_capture::*;
 
     use super::{MacroRecordingEvent, MacroRecordingSession};
+    use crate::ui::{VisionCaptureTarget, VisionCaptureMode, MouseMoveAbsoluteCaptureTarget};
     use std::{
         collections::{HashMap, HashSet},
         ffi::{CString, c_void},
@@ -600,6 +604,20 @@ mod windows_overlay {
             thickness: f32,
         },
         RequestProtractorCalibration,
+        NativeVisionCaptureFinished {
+            target: VisionCaptureTarget,
+            mode: VisionCaptureMode,
+            result: NativeCaptureResult,
+            capture_frame: Option<crate::window_list::ScreenCaptureFrame>,
+        },
+        NativeProtractorCalibrationFinished {
+            result: NativeCaptureResult,
+        },
+        NativeMouseMoveAbsoluteCaptureFinished {
+            target: MouseMoveAbsoluteCaptureTarget,
+            result: NativeCaptureResult,
+            capture_frame: Option<crate::window_list::ScreenCaptureFrame>,
+        },
     }
 
     pub struct OverlayHandle {

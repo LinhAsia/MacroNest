@@ -1,6 +1,6 @@
 use crate::hotkey;
 use crate::model::*;
-use crate::overlay::OverlayCommand;
+use crate::overlay::{OverlayCommand, UiCommand};
 use crate::ui::{CrosshairApp, MouseCaptureKind, MouseMoveAbsoluteCaptureTarget};
 use crate::window_list;
 use eframe::egui::{
@@ -2214,18 +2214,14 @@ if arduino_changed {
         ctx: &egui::Context,
         target: MouseMoveAbsoluteCaptureTarget,
     ) {
-        if self.mouse_move_absolute_capture_target.is_some() {
+        if self.mouse_move_absolute_capture_target.is_some() || self.native_capture_in_progress {
             return;
         }
-        let viewport = ctx.input(|input| input.viewport().clone());
-        self.mouse_move_absolute_restore_inner_size = viewport
-            .inner_rect
-            .map(|rect| rect.size())
-            .or(Some(Self::desired_window_size()));
-        self.mouse_move_absolute_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
-        self.enforce_square_window_frames = 0;
 
-        // Hide window synchronously using native Win32 API to ensure it disappears instantly from the screen before screenshot
+        self.mouse_move_absolute_capture_target = Some(target);
+        self.native_capture_in_progress = true;
+
+        // Hide main app window natively
         #[cfg(windows)]
         unsafe {
             if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
@@ -2238,59 +2234,40 @@ if arduino_changed {
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
         crate::overlay::wake_command_queue();
 
-        // Sleep to let OS process window hide and refresh desktop
-        std::thread::sleep(Duration::from_millis(150));
+        let ui_tx = self.ui_tx.clone();
+        let egui_ctx = ctx.clone();
+        let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
 
-        // Capture virtual screen bounds
-        let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
-        if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
-            let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                [capture.width, capture.height],
-                &capture.rgba,
-            );
-            let texture = ctx.load_texture(
-                "screen-freeze-frame",
-                color_image,
-                egui::TextureOptions::NEAREST,
-            );
-            self.captured_freeze_texture = Some(texture);
-            self.captured_freeze_frame = Some(capture);
-            self.captured_freeze_pos = egui::pos2(left as f32, top as f32);
-        }
+        std::thread::spawn(move || {
+            // Sleep to let OS process window hide
+            std::thread::sleep(std::time::Duration::from_millis(50));
 
-        // Resize window to virtual screen dimensions
-        let ppp = ctx.pixels_per_point().max(0.5);
-        let pos = egui::pos2(left as f32 / ppp, top as f32 / ppp);
-        let size = egui::vec2(width as f32 / ppp, height as f32 / ppp);
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-
-        // Show window again using native Win32 API
-        #[cfg(windows)]
-        unsafe {
-            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
-                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+            // Capture virtual screen bounds
+            let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+            if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
+                let mode = crate::overlay::native_capture::NativeCaptureMode::PointClick { vietnamese };
+                let result = crate::overlay::native_capture::run_capture_overlay(
+                    capture.clone(),
+                    left,
+                    top,
+                    width,
+                    height,
+                    mode,
+                );
+                let _ = ui_tx.send(UiCommand::NativeMouseMoveAbsoluteCaptureFinished {
+                    target,
+                    result,
+                    capture_frame: Some(capture),
+                });
+            } else {
+                let _ = ui_tx.send(UiCommand::NativeMouseMoveAbsoluteCaptureFinished {
+                    target,
+                    result: crate::overlay::native_capture::NativeCaptureResult::Cancelled,
+                    capture_frame: None,
+                });
             }
-        }
-
-        // Setup mouse absolute capture state
-        let uses_blocked_click = Self::mouse_move_absolute_capture_uses_blocked_click(target);
-        self.mouse_move_absolute_capture_target = Some(target);
-        self.mouse_move_absolute_capture_wait_for_mouse_release = !uses_blocked_click;
-        self.status = Self::tr_lang(
-            self.state.ui_language,
-            "Click anywhere on screen to capture X/Y. Press Esc to cancel.",
-            "Bấm vào bất kỳ vị trí nào trên màn hình để lấy X/Y. Nhấn Esc để hủy.",
-        ).to_owned();
-        if uses_blocked_click {
-            self.set_image_search_capture_mouse_blocked(true, false);
-        }
-
-        ctx.request_repaint();
+            egui_ctx.request_repaint();
+        });
     }
 
     pub(crate) fn cancel_mouse_move_absolute_capture(&mut self, ctx: &egui::Context) {
