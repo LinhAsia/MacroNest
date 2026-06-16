@@ -846,6 +846,7 @@ pub struct CrosshairApp {
 
     macro_referenced_variables_cache: Option<Vec<String>>,
     variable_inspector_open: bool,
+    titlebar_guides_open: bool,
     ocr_lang_pack_open: bool,
     ocr_lang_settings_focus: Option<String>,
     ocr_lang_operation: Option<(String, OcrLanguageOperationKind, Instant)>,
@@ -1092,6 +1093,7 @@ impl CrosshairApp {
             macro_referenced_variables_cache: None,
 
             variable_inspector_open: false,
+            titlebar_guides_open: false,
             ocr_lang_pack_open: false,
             ocr_lang_settings_focus: None,
             ocr_lang_operation: None,
@@ -11521,6 +11523,74 @@ impl eframe::App for CrosshairApp {
                             if vietnamese_input_response.clicked() {
                                 self.toggle_vietnamese_input_enabled();
                             }
+                            let guides_button_response =
+                                Self::add_sized_with_show_hover_radius(
+                                    ui,
+                                    [38.0, 30.0],
+                                    8,
+                                    self.titlebar_button(
+                                        RichText::new("!").size(18.0).strong(),
+                                        self.titlebar_guides_open,
+                                        false,
+                                    ),
+                                );
+                            let guides_response = Self::hover_if(
+                                guides_button_response,
+                                show_icon_tooltips,
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Guides",
+                                    "Huong dan",
+                                ),
+                            );
+                            if guides_response.clicked() {
+                                self.titlebar_guides_open = !self.titlebar_guides_open;
+                            }
+                            let mut guides_open = self.titlebar_guides_open;
+                            let mut keep_guides_open = false;
+                            let guides_popup_id =
+                                ui.make_persistent_id("titlebar-guides-popup");
+                            let popup_result = egui::Popup::from_response(&guides_response)
+                                .id(guides_popup_id)
+                                .open_bool(&mut guides_open)
+                                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                .align(egui::RectAlign::BOTTOM_END)
+                                .layout(egui::Layout::top_down(egui::Align::Min))
+                                .width(760.0)
+                                .show(|ui| {
+                                    ui.set_min_width(760.0);
+                                    Frame::new()
+                                        .fill(button_fill)
+                                        .stroke(egui::Stroke::new(
+                                            1.0,
+                                            if self.state.ui_theme == UiThemeMode::Dark {
+                                                Color32::from_rgba_premultiplied(96, 118, 148, 196)
+                                            } else {
+                                                Color32::from_rgba_premultiplied(170, 182, 198, 180)
+                                            },
+                                        ))
+                                        .corner_radius(14.0)
+                                        .inner_margin(egui::Margin::symmetric(12, 12))
+                                        .show(ui, |ui| {
+                                            ui.label(
+                                                RichText::new(Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Guides",
+                                                    "Huong dan",
+                                                ))
+                                                .strong()
+                                                .size(13.0),
+                                            );
+                                            ui.add_space(8.0);
+                                            self.render_expression_guides_content(ui);
+                                            keep_guides_open = true;
+                                        });
+                                });
+                            let _ = popup_result;
+                            if keep_guides_open {
+                                guides_open = true;
+                            }
+                            self.titlebar_guides_open = guides_open;
                             let taskbar_hidden = crate::platform::is_taskbar_hidden();
                             let quick_actions_button_response =
                                 Self::add_sized_with_show_hover_radius(
