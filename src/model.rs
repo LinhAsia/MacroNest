@@ -55,6 +55,8 @@ pub struct CrosshairStyle {
     pub custom_scale: f32,
     #[serde(default)]
     pub custom_pixels: Option<String>,
+    #[serde(default = "default_custom_pixels_grid_size")]
+    pub custom_pixels_grid_size: u8,
 }
 
 impl Default for CrosshairStyle {
@@ -78,6 +80,7 @@ impl Default for CrosshairStyle {
             custom_asset: None,
             custom_scale: 96.0,
             custom_pixels: None,
+            custom_pixels_grid_size: default_custom_pixels_grid_size(),
         }
     }
 }
@@ -129,6 +132,10 @@ fn default_y_offset() -> i32 {
 
 fn default_crosshair_length() -> f32 {
     10.0
+}
+
+fn default_custom_pixels_grid_size() -> u8 {
+    15
 }
 
 fn default_true() -> bool {
