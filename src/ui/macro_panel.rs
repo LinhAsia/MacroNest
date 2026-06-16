@@ -357,10 +357,40 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn render_expression_guides_content(&self, ui: &mut egui::Ui) {
+    pub(crate) fn render_expression_guides_content(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let language = self.state.ui_language;
         let fill = Color32::from_rgba_unmultiplied(0, 170, 255, 18);
         let stroke = egui::Stroke::new(1.0, Color32::from_rgb(0, 170, 255));
+        ui.horizontal(|ui| {
+            if let Some(texture) = self.guides_author_logo_texture(ctx) {
+                ui.add(
+                    egui::Image::new((texture.id(), vec2(28.0, 28.0))).sense(Sense::hover()),
+                );
+            }
+            ui.vertical(|ui| {
+                ui.label(
+                    egui::RichText::new(Self::tr_lang(
+                        language,
+                        "App made by",
+                        "App duoc tao boi",
+                    ))
+                    .strong()
+                    .size(14.0),
+                );
+                ui.horizontal(|ui| {
+                    ui.label(Self::tr_lang(
+                        language,
+                        "Created by",
+                        "Tac gia",
+                    ));
+                    ui.hyperlink_to(
+                        "NBaoLinh",
+                        "https://github.com/NBaoLinh/MacroNest/releases/latest",
+                    );
+                });
+            });
+        });
+        ui.add_space(8.0);
         egui::Frame::group(ui.style())
             .fill(fill)
             .stroke(stroke)
@@ -402,7 +432,7 @@ impl CrosshairApp {
                         "Supported math and values",
                         "Phep tinh va gia tri ho tro",
                     ))
-                    .strong(),
+                        .strong(),
                 );
                 egui::Grid::new("expression-help-columns")
                     .num_columns(3)
@@ -487,6 +517,36 @@ impl CrosshairApp {
                         });
                         ui.end_row();
                     });
+            });
+        ui.add_space(10.0);
+        let note_fill = Color32::from_rgba_unmultiplied(255, 194, 70, 16);
+        let note_stroke = egui::Stroke::new(1.0, Color32::from_rgb(255, 194, 70));
+        egui::Frame::group(ui.style())
+            .fill(note_fill)
+            .stroke(note_stroke)
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        Self::material_icon_text(0xe002, 14.0)
+                            .color(Color32::from_rgb(255, 194, 70)),
+                    );
+                    ui.label(
+                        egui::RichText::new(Self::tr_lang(
+                            language,
+                            "IMPORTANT NOTE",
+                            "LUU Y QUAN TRONG",
+                        ))
+                        .strong()
+                        .color(Color32::from_rgb(255, 194, 70)),
+                    );
+                });
+                ui.add_space(4.0);
+                ui.label(Self::tr_lang(
+                    language,
+                    "When the MacroNest window is currently focused, some macros, triggers, or actions may not behave the same as they do in your target app. This is intentional so the editor stays easier and safer to use while you are configuring things inside MacroNest.",
+                    "Khi cua so MacroNest dang duoc focus, mot so macro, trigger, hoac action co the se khong hoat dong giong nhu luc chay tren app muc tieu. Day la chu y co chu dich de viec chinh sua trong MacroNest duoc de dung va an toan hon.",
+                ));
             });
     }
 
