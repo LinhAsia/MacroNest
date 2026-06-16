@@ -546,11 +546,11 @@ impl CrosshairApp {
                     dragging |= response.dragged();
                     ui.end_row();
                 }
-
-                ui.label(Self::tr_lang(language, "Custom pixels", "Tự vẽ tâm ngắm"));
+                ui.label(Self::tr_lang(language, "Custom pixels", "Tu ve tam ngam"));
                 ui.vertical(|ui| {
-                    let mut grid_changed = false;
-                    let grid_size = 15_i32;
+                    let grid_size = style.custom_pixels_grid_size.max(1).min(31) as i32;
+
+                    // ---- Build grid from stored string ----
                     let mut grid = vec![vec!['.'; grid_size as usize]; grid_size as usize];
                     if let Some(ref pixels) = style.custom_pixels {
                         let lines: Vec<&str> = pixels.lines().collect();
@@ -561,39 +561,83 @@ impl CrosshairApp {
                             }
                         }
                     }
+                    let mut grid_changed = false;
 
-                    let mut current_tool = ui.data_mut(|data| data.get_temp::<char>(ui.id().with("selected-tool")).unwrap_or('#'));
-
-                    // Tool selector row
+                    // ---- Size slider ----
+                    let size_id = ui.id().with("grid-size");
+                    let mut pending_size = ui
+                        .data(|data| data.get_temp::<u8>(size_id))
+                        .unwrap_or(style.custom_pixels_grid_size.max(1).min(31));
+                    let mut size_changed = false;
+                    let mut clear_clicked = false;
                     ui.horizontal(|ui| {
-                        if ui.selectable_label(current_tool == '#', Self::tr_lang(language, "Crosshair", "Màu tâm")).clicked() {
-                            current_tool = '#';
+                        ui.label(Self::tr_lang(language, "Size", "Kich thuoc"));
+                        let size_response = ui.add(
+                            egui::Slider::new(&mut pending_size, 3u8..=31u8)
+                                .step_by(2.0)
+                                .suffix(" px"),
+                        );
+                        size_changed = size_response.changed();
+                        clear_clicked = ui
+                            .button(Self::tr_lang(language, "Clear", "Xoa sach"))
+                            .clicked();
+                    });
+                    if size_changed {
+                        let new_size = pending_size.max(3).min(31) as i32;
+                        let mut new_grid = vec![vec!['.'; new_size as usize]; new_size as usize];
+                        let copy_r = grid_size.min(new_size);
+                        let copy_c = grid_size.min(new_size);
+                        for r in 0..copy_r {
+                            for c in 0..copy_c {
+                                new_grid[r as usize][c as usize] = grid[r as usize][c as usize];
+                            }
                         }
-                        if ui.selectable_label(current_tool == '@', Self::tr_lang(language, "Outline", "Màu viền")).clicked() {
-                            current_tool = '@';
-                        }
-                        if ui.selectable_label(current_tool == '.', Self::tr_lang(language, "Erase", "Tẩy")).clicked() {
-                            current_tool = '.';
-                        }
-                        ui.add_space(8.0);
-                        if ui.button(Self::tr_lang(language, "Clear", "Xóa sạch")).clicked() {
-                            grid = vec![vec!['.'; grid_size as usize]; grid_size as usize];
-                            grid_changed = true;
+                        grid = new_grid;
+                        style.custom_pixels_grid_size = pending_size;
+                        grid_changed = true;
+                    }
+                    if clear_clicked {
+                        grid = vec![vec!['.'; grid_size as usize]; grid_size as usize];
+                        grid_changed = true;
+                    }
+                    ui.data_mut(|data| data.insert_temp(size_id, pending_size));
+
+                    // ---- Paint color picker (edits style.color directly so the render matches) ----
+                    let mut paint_rgba = [style.color.r, style.color.g, style.color.b, style.color.a];
+                    ui.horizontal(|ui| {
+                        ui.label(Self::tr_lang(language, "Paint color", "Mau ve"));
+                        if ui.color_edit_button_srgba_unmultiplied(&mut paint_rgba).changed() {
+                            style.color.r = paint_rgba[0];
+                            style.color.g = paint_rgba[1];
+                            style.color.b = paint_rgba[2];
+                            style.color.a = paint_rgba[3];
+                            changed = true;
                         }
                     });
-                    ui.data_mut(|data| data.insert_temp(ui.id().with("selected-tool"), current_tool));
+
+                    let paint_egui_color = Color32::from_rgba_unmultiplied(
+                        paint_rgba[0],
+                        paint_rgba[1],
+                        paint_rgba[2],
+                        paint_rgba[3],
+                    );
 
                     ui.add_space(6.0);
 
-                    // Canvas allocation
-                    let cell_size = 16.0;
-                    let canvas_size = vec2(grid_size as f32 * cell_size, grid_size as f32 * cell_size);
-                    let (rect, response) = ui.allocate_exact_size(canvas_size, egui::Sense::click_and_drag());
+                    // ---- Canvas allocation ----
+                    let cell_size = 16.0_f32;
+                    let canvas_size =
+                        vec2(grid_size as f32 * cell_size, grid_size as f32 * cell_size);
+                    let (rect, response) =
+                        ui.allocate_exact_size(canvas_size, egui::Sense::click_and_drag());
 
+                    // ---- Handle mouse input ----
                     if response.hovered() || response.dragged() || response.clicked() {
                         let pointer_down = ui.input(|input| input.pointer.any_down());
                         if pointer_down {
-                            if let Some(mouse_pos) = ui.input(|input| input.pointer.interact_pos()) {
+                            if let Some(mouse_pos) =
+                                ui.input(|input| input.pointer.interact_pos())
+                            {
                                 if rect.contains(mouse_pos) {
                                     let relative_pos = mouse_pos - rect.min;
                                     let c = (relative_pos.x / cell_size).floor() as i32;
@@ -601,14 +645,10 @@ impl CrosshairApp {
                                     if c >= 0 && c < grid_size && r >= 0 && r < grid_size {
                                         let r = r as usize;
                                         let c = c as usize;
-                                        
-                                        let is_right_click = ui.input(|input| input.pointer.button_down(egui::PointerButton::Secondary));
-                                        let new_char = if is_right_click {
-                                            '.'
-                                        } else {
-                                            current_tool
-                                        };
-                                        
+                                        let is_right_click = ui.input(|input| {
+                                            input.pointer.button_down(egui::PointerButton::Secondary)
+                                        });
+                                        let new_char = if is_right_click { '.' } else { '#' };
                                         if grid[r][c] != new_char {
                                             grid[r][c] = new_char;
                                             grid_changed = true;
@@ -619,25 +659,21 @@ impl CrosshairApp {
                         }
                     }
 
-                    // Render grid cells and grid lines
+                    // ---- Render grid ----
                     let painter = ui.painter_at(rect);
-                    let grid_color = Color32::from_gray(if style.outline_enabled { 70 } else { 55 });
+                    let center_r = (grid_size / 2) as usize;
+                    let center_c = (grid_size / 2) as usize;
 
                     // 1. Draw cells
-                    for r in 0..grid_size {
-                        for c in 0..grid_size {
+                    for r in 0..grid_size as usize {
+                        for c in 0..grid_size as usize {
                             let cell_rect = egui::Rect::from_min_size(
                                 rect.min + vec2(c as f32 * cell_size, r as f32 * cell_size),
                                 vec2(cell_size, cell_size),
                             );
-                            let cell_char = grid[r as usize][c as usize];
+                            let cell_char = grid[r][c];
                             let fill = match cell_char {
-                                '#' | 'x' | 'X' | '1' => Color32::from_rgba_unmultiplied(
-                                    style.color.r,
-                                    style.color.g,
-                                    style.color.b,
-                                    style.color.a,
-                                ),
+                                '#' | 'x' | 'X' | '1' => paint_egui_color,
                                 '@' | 'o' | 'O' | '2' => Color32::from_rgba_unmultiplied(
                                     style.outline_color.r,
                                     style.outline_color.g,
@@ -648,7 +684,7 @@ impl CrosshairApp {
                                     if (r + c) % 2 == 0 {
                                         Color32::from_gray(35)
                                     } else {
-                                        Color32::from_gray(55)
+                                        Color32::from_gray(50)
                                     }
                                 }
                             };
@@ -656,29 +692,88 @@ impl CrosshairApp {
                         }
                     }
 
-                    // 2. Draw grid lines
+                    // 2. Center marker: small crosshair lines at center cell
+                    {
+                        let marker_color = Color32::from_rgba_unmultiplied(255, 80, 80, 200);
+                        let stroke = egui::Stroke::new(1.0, marker_color);
+                        let cx = rect.min.x + center_c as f32 * cell_size + cell_size * 0.5;
+                        let cy = rect.min.y + center_r as f32 * cell_size + cell_size * 0.5;
+                        let arm = cell_size * 0.35;
+                        // Horizontal tick
+                        painter.line_segment(
+                            [egui::pos2(cx - arm, cy), egui::pos2(cx + arm, cy)],
+                            stroke,
+                        );
+                        // Vertical tick
+                        painter.line_segment(
+                            [egui::pos2(cx, cy - arm), egui::pos2(cx, cy + arm)],
+                            stroke,
+                        );
+                        // Highlight the center cell border
+                        let center_cell_rect = egui::Rect::from_min_size(
+                            rect.min
+                                + vec2(center_c as f32 * cell_size, center_r as f32 * cell_size),
+                            vec2(cell_size, cell_size),
+                        );
+                        painter.rect_stroke(
+                            center_cell_rect,
+                            0.0,
+                            egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 80, 80, 160)),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+
+                    // 3. Draw grid lines
+                    let grid_color = Color32::from_gray(70);
                     for i in 0..=grid_size {
                         let offset = i as f32 * cell_size;
                         painter.line_segment(
-                            [rect.min + vec2(offset, 0.0), rect.min + vec2(offset, canvas_size.y)],
+                            [
+                                rect.min + vec2(offset, 0.0),
+                                rect.min + vec2(offset, canvas_size.y),
+                            ],
                             egui::Stroke::new(0.5, grid_color),
                         );
                         painter.line_segment(
-                            [rect.min + vec2(0.0, offset), rect.min + vec2(canvas_size.x, offset)],
+                            [
+                                rect.min + vec2(0.0, offset),
+                                rect.min + vec2(canvas_size.x, offset),
+                            ],
                             egui::Stroke::new(0.5, grid_color),
                         );
                     }
 
-                    // 3. Draw outer border
-                    painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, Color32::from_gray(100)), egui::StrokeKind::Inside);
+                    // 4. Outer border
+                    painter.rect_stroke(
+                        rect,
+                        0.0,
+                        egui::Stroke::new(1.0, Color32::from_gray(100)),
+                        egui::StrokeKind::Inside,
+                    );
 
+                    // ---- Hint text ----
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(Self::tr_lang(
+                            language,
+                            "Left-click: paint  |  Right-click: erase  |  Red marker = center",
+                            "Trai: ve  |  Phai: xoa  |  Vach do = tam",
+                        ))
+                        .small()
+                        .color(Color32::from_gray(140)),
+                    );
+
+                    // ---- Sync grid back to style ----
                     if grid_changed {
-                        let mut lines = Vec::new();
-                        for row in &grid {
-                            let line_str: String = row.iter().collect();
-                            lines.push(line_str);
+                        // Check if any pixel is non-empty
+                        let has_pixels = grid.iter().any(|row| row.iter().any(|&ch| ch != '.'));
+                        if has_pixels {
+                            let lines: Vec<String> =
+                                grid.iter().map(|row| row.iter().collect()).collect();
+                            style.custom_pixels = Some(lines.join("\n"));
+                        } else {
+                            style.custom_pixels = None;
                         }
-                        style.custom_pixels = Some(lines.join("\n"));
                         changed = true;
                     }
                 });
