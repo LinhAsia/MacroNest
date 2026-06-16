@@ -9837,12 +9837,8 @@ impl CrosshairApp {
     }
 
     fn begin_protractor_calibration(&mut self, ctx: &egui::Context) {
-        if self.protractor_calibration_points.is_some() {
-            return;
-        }
-
         self.protractor_picking_active = true;
-        self.protractor_calibration_points = Some(Vec::new());
+        self.protractor_calibration_points = None; // Stays None until screen capture is completed and processed
 
         let viewport = ctx.input(|input| input.viewport().clone());
         self.mouse_move_absolute_restore_inner_size = viewport
@@ -9867,53 +9863,26 @@ impl CrosshairApp {
         let _ = self.overlay_tx.send(OverlayCommand::SetProtractorEnabled(false));
         crate::overlay::wake_command_queue();
 
-        // Sleep to let OS process window hide and refresh desktop
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        // Spawn a background thread to perform the sleep and screen capture, avoiding blocking the main thread!
+        let ctx_clone = ctx.clone();
+        std::thread::spawn(move || {
+            // Sleep to let OS process window hide and refresh desktop
+            std::thread::sleep(std::time::Duration::from_millis(150));
 
-        // Capture virtual screen bounds
-        let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
-        if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
-            let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                [capture.width, capture.height],
-                &capture.rgba,
-            );
-            let texture = ctx.load_texture(
-                "screen-freeze-frame",
-                color_image,
-                egui::TextureOptions::NEAREST,
-            );
-            self.captured_freeze_texture = Some(texture);
-            self.captured_freeze_frame = Some(capture);
-            self.captured_freeze_pos = egui::pos2(left as f32, top as f32);
-        }
-
-        // Resize window to virtual screen dimensions
-        let ppp = ctx.pixels_per_point().max(0.5);
-        let pos = egui::pos2(left as f32 / ppp, top as f32 / ppp);
-        let size = egui::vec2(width as f32 / ppp, height as f32 / ppp);
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-
-        // Show window again using native Win32 API
-        #[cfg(windows)]
-        unsafe {
-            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
-                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+            // Capture virtual screen bounds
+            let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+            if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
+                if let Some(ui_tx) = &crate::overlay::HOOK_STATE.lock().ui_tx {
+                    let _ = ui_tx.send(UiCommand::ProtractorScreenCaptured {
+                        capture,
+                        left,
+                        top,
+                        width,
+                        height,
+                    });
+                }
             }
-        }
-
-        self.mouse_move_absolute_capture_wait_for_mouse_release = true; // Wait for initial release if mouse is pressed
-        self.status = Self::tr_lang(
-            self.state.ui_language,
-            "Calibration: Click point 1/3 on screen. Press Esc to cancel.",
-            "Cân chỉnh: Click điểm 1/3 trên màn hình. Nhấn Esc để hủy.",
-        ).to_owned();
-
-        ctx.request_repaint();
+        });
     }
 
     fn cancel_protractor_calibration(&mut self) {
@@ -10647,6 +10616,51 @@ impl eframe::App for CrosshairApp {
                 UiCommand::RequestProtractorCalibration => {
                     if !self.protractor_picking_active {
                         self.begin_protractor_calibration(ctx);
+                    }
+                }
+                UiCommand::ProtractorScreenCaptured { capture, left, top, width, height } => {
+                    if self.protractor_picking_active && self.protractor_calibration_points.is_none() {
+                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                            [capture.width, capture.height],
+                            &capture.rgba,
+                        );
+                        let texture = ctx.load_texture(
+                            "screen-freeze-frame",
+                            color_image,
+                            egui::TextureOptions::NEAREST,
+                        );
+                        self.captured_freeze_texture = Some(texture);
+                        self.captured_freeze_frame = Some(capture);
+                        self.captured_freeze_pos = egui::pos2(left as f32, top as f32);
+
+                        // Resize window to virtual screen dimensions
+                        let ppp = ctx.pixels_per_point().max(0.5);
+                        let pos = egui::pos2(left as f32 / ppp, top as f32 / ppp);
+                        let size = egui::vec2(width as f32 / ppp, height as f32 / ppp);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+
+                        // Show window again using native Win32 API
+                        #[cfg(windows)]
+                        unsafe {
+                            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+                                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                            }
+                        }
+
+                        self.mouse_move_absolute_capture_wait_for_mouse_release = true; // Wait for initial release if mouse is pressed
+                        self.protractor_calibration_points = Some(Vec::new());
+                        self.status = Self::tr_lang(
+                            self.state.ui_language,
+                            "Calibration: Click point 1/3 on screen. Press Esc to cancel.",
+                            "Cân chỉnh: Click điểm 1/3 trên màn hình. Nhấn Esc để hủy.",
+                        ).to_owned();
+
+                        ctx.request_repaint();
                     }
                 }
                 UiCommand::UpdateProtractorConfig {

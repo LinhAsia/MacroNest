@@ -600,6 +600,13 @@ mod windows_overlay {
             thickness: f32,
         },
         RequestProtractorCalibration,
+        ProtractorScreenCaptured {
+            capture: crate::window_list::ScreenCaptureFrame,
+            left: i32,
+            top: i32,
+            width: i32,
+            height: i32,
+        },
     }
 
     pub struct OverlayHandle {
@@ -665,7 +672,7 @@ mod windows_overlay {
     }
 
     pub(crate) struct HookState {
-        ui_tx: Option<Sender<UiCommand>>,
+        pub(crate) ui_tx: Option<Sender<UiCommand>>,
         window_presets: Vec<WindowPreset>,
         window_focus_presets: Vec<WindowFocusPreset>,
         window_layouts: Vec<crate::model::WindowLayout>,
