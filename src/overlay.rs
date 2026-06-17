@@ -10069,6 +10069,78 @@ mod windows_overlay {
         image::Rgba([b, g, r, a])
     }
 
+    fn cyber_skia_rgba(r: u8, g: u8, b: u8, a: u8) -> [u8; 4] {
+        [b, g, r, a]
+    }
+
+    fn build_cyber_frame_path(
+        width: f32,
+        height: f32,
+        inset: f32,
+        corner_cut: f32,
+        notch_half: f32,
+        notch_raise: f32,
+    ) -> Option<tiny_skia::Path> {
+        if width <= inset * 2.0 + corner_cut * 2.0 + notch_half * 2.0 + 10.0
+            || height <= inset * 2.0 + corner_cut * 2.0 + notch_raise + 10.0
+        {
+            return None;
+        }
+
+        let left = inset;
+        let right = width - inset - 1.0;
+        let top = inset + notch_raise;
+        let peak = inset;
+        let bottom = height - inset - 1.0;
+        let mid_x = width * 0.5;
+        let notch_left = mid_x - notch_half;
+        let notch_peak_left = mid_x - notch_half * 0.38;
+        let notch_peak_right = mid_x + notch_half * 0.38;
+        let notch_right = mid_x + notch_half;
+
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.move_to(left, top + corner_cut);
+        pb.line_to(left + corner_cut, top);
+        pb.line_to(notch_left, top);
+        pb.line_to(notch_peak_left, peak);
+        pb.line_to(notch_peak_right, peak);
+        pb.line_to(notch_right, top);
+        pb.line_to(right - corner_cut, top);
+        pb.line_to(right, top + corner_cut);
+        pb.line_to(right, bottom - corner_cut);
+        pb.line_to(right - corner_cut, bottom);
+        pb.line_to(left + corner_cut, bottom);
+        pb.line_to(left, bottom - corner_cut);
+        pb.close();
+        pb.finish()
+    }
+
+    fn stroke_skia_path(
+        pixmap: &mut tiny_skia::Pixmap,
+        path: &tiny_skia::Path,
+        color: [u8; 4],
+        stroke_width: f32,
+    ) {
+        let mut paint = tiny_skia::Paint::default();
+        paint.set_color(tiny_skia::Color::from_rgba8(
+            color[0], color[1], color[2], color[3],
+        ));
+        paint.anti_alias = true;
+        let stroke = tiny_skia::Stroke {
+            width: stroke_width,
+            line_cap: tiny_skia::LineCap::Round,
+            line_join: tiny_skia::LineJoin::Round,
+            ..Default::default()
+        };
+        pixmap.stroke_path(
+            path,
+            &paint,
+            &stroke,
+            tiny_skia::Transform::identity(),
+            None,
+        );
+    }
+
     fn draw_hud_frame_layer(
         canvas: &mut RgbaImage,
         inset: i32,
@@ -10501,75 +10573,184 @@ mod windows_overlay {
         let trim = cyber_color(130, 246, 255, 238);
         let glow = cyber_color(220, 252, 255, 248);
         let glow_soft = cyber_color(96, 190, 255, 184);
+        let width = canvas.width();
+        let height = canvas.height();
 
         if width_i < 160 || height_i < 120 {
             draw_focus_highlight_basic_border(canvas, thickness, frame);
             return;
         }
 
-        draw_focus_highlight_basic_border(canvas, thickness, deep);
-        draw_hud_frame_layer(canvas, 0, 18, 92, 14, 1, frame_outer);
-        draw_hud_frame_layer(canvas, 4, 14, 76, 10, 1, frame);
-        draw_hud_frame_layer(canvas, 8, 10, 58, 7, 1, trim);
+        let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
+        let deep_skia = cyber_skia_rgba(6, 18, 44, 176);
+        let frame_skia = cyber_skia_rgba(44, 184, 255, 245);
+        let frame_outer_skia = cyber_skia_rgba(46, 126, 255, 188);
+        let trim_skia = cyber_skia_rgba(130, 246, 255, 238);
+        let glow_skia = cyber_skia_rgba(220, 252, 255, 248);
+        let glow_soft_skia = cyber_skia_rgba(96, 190, 255, 184);
+        let width_f = width_i as f32;
+        let height_f = height_i as f32;
 
-        fill_canvas_rect(canvas, 0, 20, 18, 26, frame_outer);
-        fill_canvas_rect(canvas, 5, 16, 18, 10, frame);
-        fill_canvas_rect(canvas, 0, height_i - 22, 20, 12, glow_soft);
-        fill_canvas_rect(canvas, 14, height_i - 18, 14, 6, frame_outer);
-        fill_canvas_rect(canvas, width_i - 12, height_i / 2 - 22, 4, 8, trim);
-        fill_canvas_rect(canvas, width_i - 12, height_i / 2 - 10, 4, 8, trim);
-        fill_canvas_rect(canvas, width_i - 12, height_i / 2 + 2, 4, 8, trim);
+        if let Some(path) = build_cyber_frame_path(width_f, height_f, 1.0, 18.0, 92.0, 14.0) {
+            stroke_skia_path(&mut pixmap, &path, frame_outer_skia, 5.0);
+        }
+        if let Some(path) = build_cyber_frame_path(width_f, height_f, 5.0, 14.0, 76.0, 10.0) {
+            stroke_skia_path(&mut pixmap, &path, frame_skia, 3.2);
+        }
+        if let Some(path) = build_cyber_frame_path(width_f, height_f, 9.0, 10.0, 58.0, 7.0) {
+            stroke_skia_path(&mut pixmap, &path, trim_skia, 1.8);
+        }
 
-        let center_x = width_i / 2;
-        fill_canvas_rect(canvas, center_x - 38, 7, 22, 2, glow_soft);
-        fill_canvas_rect(canvas, center_x - 10, 4, 20, 2, glow);
-        fill_canvas_rect(canvas, center_x + 16, 7, 30, 2, frame);
-        fill_canvas_rect(canvas, center_x - 12, height_i - 10, 8, 2, glow_soft);
-        fill_canvas_rect(canvas, center_x + 2, height_i - 10, 16, 2, glow);
-        draw_canvas_circle(canvas, center_x + 30, height_i - 16, 2, glow);
+        draw_skia_rect_fill(&mut pixmap, 0.0, 18.0, 18.0, 30.0, frame_outer_skia);
+        draw_skia_rect_fill(&mut pixmap, 6.0, 14.0, 18.0, 11.0, frame_skia);
+        draw_skia_rect_fill(
+            &mut pixmap,
+            0.0,
+            height_f - 25.0,
+            22.0,
+            14.0,
+            glow_soft_skia,
+        );
+        draw_skia_rect_fill(
+            &mut pixmap,
+            14.0,
+            height_f - 19.0,
+            16.0,
+            7.0,
+            frame_outer_skia,
+        );
+        draw_skia_rect_fill(
+            &mut pixmap,
+            width_f - 13.0,
+            height_f * 0.5 - 24.0,
+            5.0,
+            9.0,
+            trim_skia,
+        );
+        draw_skia_rect_fill(
+            &mut pixmap,
+            width_f - 13.0,
+            height_f * 0.5 - 11.0,
+            5.0,
+            9.0,
+            trim_skia,
+        );
+        draw_skia_rect_fill(
+            &mut pixmap,
+            width_f - 13.0,
+            height_f * 0.5 + 2.0,
+            5.0,
+            9.0,
+            trim_skia,
+        );
 
-        fill_canvas_rect(canvas, 2, height_i / 2 - 6, 3, 5, glow_soft);
-        fill_canvas_rect(canvas, 2, height_i / 2 + 3, 6, 2, glow);
-        fill_canvas_rect(canvas, width_i - 5, height_i / 2 - 8, 3, 6, glow);
-        fill_canvas_rect(canvas, width_i - 8, height_i / 2 + 2, 6, 2, glow_soft);
+        let center_x = width_f * 0.5;
+        draw_skia_rect_fill(&mut pixmap, center_x - 42.0, 6.0, 24.0, 2.5, glow_soft_skia);
+        draw_skia_rect_fill(&mut pixmap, center_x - 10.0, 3.0, 20.0, 3.0, glow_skia);
+        draw_skia_rect_fill(&mut pixmap, center_x + 18.0, 6.0, 34.0, 2.5, frame_skia);
+        draw_skia_rect_fill(
+            &mut pixmap,
+            center_x - 16.0,
+            height_f - 12.0,
+            10.0,
+            2.5,
+            glow_soft_skia,
+        );
+        draw_skia_rect_fill(
+            &mut pixmap,
+            center_x + 2.0,
+            height_f - 12.0,
+            20.0,
+            2.5,
+            glow_skia,
+        );
+        draw_skia_circle_fill(
+            &mut pixmap,
+            center_x + 34.0,
+            height_f - 16.0,
+            2.2,
+            glow_skia,
+        );
 
-        let side_span = 26;
-        draw_canvas_line(
-            canvas,
+        draw_skia_rect_fill(
+            &mut pixmap,
+            2.0,
+            height_f * 0.5 - 8.0,
+            4.0,
+            7.0,
+            glow_soft_skia,
+        );
+        draw_skia_rect_fill(&mut pixmap, 2.0, height_f * 0.5 + 3.0, 8.0, 2.5, glow_skia);
+        draw_skia_rect_fill(
+            &mut pixmap,
+            width_f - 6.0,
+            height_f * 0.5 - 10.0,
+            4.0,
+            8.0,
+            glow_skia,
+        );
+        draw_skia_rect_fill(
+            &mut pixmap,
+            width_f - 10.0,
+            height_f * 0.5 + 2.0,
+            8.0,
+            2.5,
+            glow_soft_skia,
+        );
+
+        let side_span = 26.0;
+        draw_skia_line(
+            &mut pixmap,
             side_span,
-            thickness_i / 2 + 2,
-            center_x - 28,
-            thickness_i / 2 + 2,
-            1,
-            glow_soft,
+            thickness_i as f32 / 2.0 + 2.0,
+            center_x - 28.0,
+            thickness_i as f32 / 2.0 + 2.0,
+            glow_soft_skia,
+            1.6,
         );
-        draw_canvas_line(
-            canvas,
-            center_x + 30,
-            height_i - thickness_i / 2 - 3,
-            width_i - side_span,
-            height_i - thickness_i / 2 - 3,
-            1,
-            glow_soft,
+        draw_skia_line(
+            &mut pixmap,
+            center_x + 30.0,
+            height_f - thickness_i as f32 / 2.0 - 3.0,
+            width_f - side_span,
+            height_f - thickness_i as f32 / 2.0 - 3.0,
+            glow_soft_skia,
+            1.6,
         );
-        draw_canvas_line(
-            canvas,
-            thickness_i / 2 + 2,
+        draw_skia_line(
+            &mut pixmap,
+            thickness_i as f32 / 2.0 + 2.0,
             side_span,
-            thickness_i / 2 + 2,
-            height_i / 2 - 16,
-            1,
-            glow_soft,
+            thickness_i as f32 / 2.0 + 2.0,
+            height_f * 0.5 - 16.0,
+            glow_soft_skia,
+            1.6,
         );
-        draw_canvas_line(
-            canvas,
-            width_i - thickness_i / 2 - 3,
-            height_i / 2 + 16,
-            width_i - thickness_i / 2 - 3,
-            height_i - side_span,
-            1,
-            glow_soft,
+        draw_skia_line(
+            &mut pixmap,
+            width_f - thickness_i as f32 / 2.0 - 3.0,
+            height_f * 0.5 + 16.0,
+            width_f - thickness_i as f32 / 2.0 - 3.0,
+            height_f - side_span,
+            glow_soft_skia,
+            1.6,
         );
+
+        draw_skia_rect_fill(&mut pixmap, 32.0, 12.0, 40.0, 2.0, deep_skia);
+        draw_skia_rect_fill(&mut pixmap, width_f - 74.0, 12.0, 42.0, 2.0, deep_skia);
+        draw_skia_rect_fill(&mut pixmap, 24.0, height_f - 16.0, 34.0, 2.0, deep_skia);
+        draw_skia_rect_fill(
+            &mut pixmap,
+            width_f - 56.0,
+            height_f - 16.0,
+            28.0,
+            2.0,
+            deep_skia,
+        );
+
+        if let Some(image) = RgbaImage::from_raw(width, height, pixmap.data().to_vec()) {
+            *canvas = image;
+        }
 
         let panel_size = ((width_i.min(height_i) as f32) * 0.18).round() as i32;
         let girl_size = panel_size.clamp(54, 84);
