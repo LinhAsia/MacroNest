@@ -202,6 +202,8 @@ mod windows_overlay {
     const WMAPP_WINDOW_LOCATION_CHANGED: u32 = WM_APP + 4;
     const MACRO_PRESET_BASE_ID: i32 = 10000;
     const FOCUS_TRIGGER_TIMER_ID: usize = 2;
+    const SCREEN_DRAW_TIMER_ID: usize = 3;
+    const SCREEN_DRAW_REFRESH_INTERVAL_MS: u32 = 16;
     #[derive(Debug, Clone)]
     struct VisionRunOutcome {
         matched: bool,
@@ -556,6 +558,7 @@ mod windows_overlay {
         committed_rgba: Vec<u8>,
         frame_rgba: Vec<u8>,
         committed_dirty: bool,
+        pending_repaint: bool,
     }
 
     impl Default for ScreenDrawState {
@@ -587,6 +590,7 @@ mod windows_overlay {
                 committed_rgba: Vec::new(),
                 frame_rgba: Vec::new(),
                 committed_dirty: true,
+                pending_repaint: false,
             }
         }
     }
@@ -2436,22 +2440,35 @@ mod windows_overlay {
                 let point = screen_draw_lparam_point(lparam);
                 let right_button = msg == WM_RBUTTONDOWN;
                 if screen_draw_handle_button_down(point, right_button) {
+                    set_screen_draw_refresh_timer(hwnd, screen_draw_active());
                     let _ = paint_screen_draw_overlay(hwnd);
                 }
                 LRESULT(0)
             }
             WM_MOUSEMOVE => {
                 let point = screen_draw_lparam_point(lparam);
-                if screen_draw_handle_move(point) {
-                    let _ = paint_screen_draw_overlay(hwnd);
-                }
+                let _ = screen_draw_handle_move(point);
                 LRESULT(0)
             }
             WM_LBUTTONUP | WM_RBUTTONUP => {
                 if screen_draw_handle_button_up() {
+                    set_screen_draw_refresh_timer(hwnd, screen_draw_active());
                     let _ = paint_screen_draw_overlay(hwnd);
                 }
                 LRESULT(0)
+            }
+            WM_TIMER => {
+                if _wparam.0 == SCREEN_DRAW_TIMER_ID {
+                    let should_paint = {
+                        let state = SCREEN_DRAW_STATE.lock();
+                        state.active && state.pending_repaint
+                    };
+                    if should_paint {
+                        let _ = paint_screen_draw_overlay(hwnd);
+                    }
+                    return LRESULT(0);
+                }
+                DefWindowProcW(hwnd, msg, _wparam, lparam)
             }
             windows::Win32::UI::WindowsAndMessaging::WM_PAINT => {
                 let mut paint = PAINTSTRUCT::default();
@@ -5276,6 +5293,12 @@ mod windows_overlay {
                             deactivate_screen_draw(&mut state);
                         }
                     }
+                    unsafe {
+                        set_screen_draw_refresh_timer(
+                            runtime.screen_draw_hwnd,
+                            SCREEN_DRAW_STATE.lock().active,
+                        );
+                    }
                     let _ = refresh_screen_draw_overlay(runtime);
                 }
 
@@ -5668,13 +5691,16 @@ mod windows_overlay {
                 state.active = true;
                 state.current_stroke = None;
                 state.active_control = ScreenDrawControl::None;
+                state.pending_repaint = true;
             }
             state.active
         };
 
         if active {
+            set_screen_draw_refresh_timer(hwnd, true);
             let _ = paint_screen_draw_overlay(hwnd);
         } else {
+            set_screen_draw_refresh_timer(hwnd, false);
             let _ = ShowWindow(hwnd, SW_HIDE);
         }
     }
@@ -5691,6 +5717,23 @@ mod windows_overlay {
         }
     }
 
+    unsafe fn set_screen_draw_refresh_timer(hwnd: HWND, active: bool) {
+        if active {
+            let _ = SetTimer(
+                Some(hwnd),
+                SCREEN_DRAW_TIMER_ID,
+                SCREEN_DRAW_REFRESH_INTERVAL_MS,
+                None,
+            );
+        } else {
+            let _ = KillTimer(Some(hwnd), SCREEN_DRAW_TIMER_ID);
+        }
+    }
+
+    fn mark_screen_draw_repaint_pending(state: &mut ScreenDrawState) {
+        state.pending_repaint = true;
+    }
+
     fn deactivate_screen_draw(state: &mut ScreenDrawState) {
         state.active = false;
         state.current_stroke = None;
@@ -5701,6 +5744,7 @@ mod windows_overlay {
         state.committed_rgba.clear();
         state.frame_rgba.clear();
         state.committed_dirty = true;
+        state.pending_repaint = false;
     }
 
     fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
@@ -5710,6 +5754,7 @@ mod windows_overlay {
         }
         if right_button {
             start_screen_draw_stroke(&mut state, point, true);
+            mark_screen_draw_repaint_pending(&mut state);
             return true;
         }
         match screen_draw_hit(&state, point) {
@@ -5743,6 +5788,9 @@ mod windows_overlay {
                 start_screen_draw_stroke(&mut state, point, eraser);
             }
         }
+        if state.active {
+            mark_screen_draw_repaint_pending(&mut state);
+        }
         true
     }
 
@@ -5756,19 +5804,26 @@ mod windows_overlay {
                 let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
                 state.toolbar_x = (point.x - state.drag_offset_x).clamp(0, (screen_w - 332).max(0));
                 state.toolbar_y = (point.y - state.drag_offset_y).clamp(0, (screen_h - 78).max(0));
+                mark_screen_draw_repaint_pending(&mut state);
                 true
             }
             ScreenDrawControl::BrushSize => {
                 update_screen_draw_brush_slider(&mut state, point.x);
+                mark_screen_draw_repaint_pending(&mut state);
                 true
             }
             ScreenDrawControl::SmoothingAmount => {
                 update_screen_draw_smoothing_slider(&mut state, point.x);
+                mark_screen_draw_repaint_pending(&mut state);
                 true
             }
             ScreenDrawControl::None => {
                 if let Some(stroke) = state.current_stroke.as_mut() {
-                    append_screen_draw_point(stroke, point)
+                    let changed = append_screen_draw_point(stroke, point);
+                    if changed {
+                        mark_screen_draw_repaint_pending(&mut state);
+                    }
+                    changed
                 } else {
                     false
                 }
@@ -5807,6 +5862,9 @@ mod windows_overlay {
             }
         }
         state.active_control = ScreenDrawControl::None;
+        if state.active {
+            mark_screen_draw_repaint_pending(&mut state);
+        }
         true
     }
 
@@ -5856,11 +5914,16 @@ mod windows_overlay {
             | WM_MOUSEWHEEL => (true, false),
             _ => (false, false),
         };
-        if repaint {
+        if handled || repaint {
             let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
             if hwnd_raw != 0 {
                 let hwnd = HWND(hwnd_raw as *mut c_void);
-                let _ = unsafe { paint_screen_draw_overlay(hwnd) };
+                unsafe {
+                    set_screen_draw_refresh_timer(hwnd, screen_draw_active());
+                    if message != WM_MOUSEMOVE {
+                        let _ = paint_screen_draw_overlay(hwnd);
+                    }
+                }
             }
         }
         handled
@@ -6155,6 +6218,7 @@ mod windows_overlay {
             dst[3] = src[3];
         }
         draw_screen_draw_toolbar(pixels, width, height, &state_guard);
+        state_guard.pending_repaint = false;
         drop(state_guard);
         let blend = BLENDFUNCTION {
             BlendOp: AC_SRC_OVER as u8,
