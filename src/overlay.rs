@@ -5419,7 +5419,14 @@ mod windows_overlay {
         if is_repeat {
             return false;
         }
-        let (matches_trigger, pass_trigger_through, active, capturing_region, trigger_latched) = {
+        let (
+            matches_trigger,
+            pass_trigger_through,
+            active,
+            capturing_region,
+            trigger_latched,
+            trigger,
+        ) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
                 state.enabled
@@ -5431,13 +5438,22 @@ mod windows_overlay {
                 state.active,
                 state.capturing_region,
                 state.trigger_latched,
+                state.trigger.clone(),
             )
         };
         if !matches_trigger {
             return false;
         }
         if trigger_latched {
-            return !pass_trigger_through;
+            let latch_still_down = trigger
+                .as_ref()
+                .is_some_and(screen_draw_trigger_binding_is_down);
+            if latch_still_down {
+                return !pass_trigger_through;
+            }
+            let mut state = SCREEN_DRAW_STATE.lock();
+            state.trigger_latched = false;
+            state.trigger_pressed_at = None;
         }
 
         if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
@@ -7007,9 +7023,17 @@ mod windows_overlay {
         if state.capture_session_id != session_id {
             return;
         }
+        let trigger_still_down = state
+            .capture_trigger
+            .as_ref()
+            .is_some_and(screen_draw_trigger_binding_is_down);
         state.capturing_region = false;
         state.capture_trigger = None;
         state.capture_trigger_release_point = None;
+        if !trigger_still_down {
+            state.trigger_latched = false;
+            state.trigger_pressed_at = None;
+        }
         let active = state.active;
         if active {
             state.pending_repaint = true;
