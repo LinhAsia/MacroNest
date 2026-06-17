@@ -394,6 +394,14 @@ pub enum UiThemeMode {
     Light,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum FocusHighlightDecoration {
+    #[default]
+    Plain,
+    Rainbow,
+    FloralWood,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct HotkeyBinding {
     pub ctrl: bool,
@@ -2823,7 +2831,9 @@ pub struct AppState {
     #[serde(default = "default_focus_highlight_color")]
     pub focus_highlight_color: RgbaColor,
     #[serde(default)]
-    pub focus_highlight_rainbow: bool,
+    pub focus_highlight_decoration: FocusHighlightDecoration,
+    #[serde(default, alias = "focus_highlight_rainbow", skip_serializing)]
+    pub focus_highlight_rainbow_legacy: bool,
     #[serde(default)]
     pub protractor_enabled: bool,
     #[serde(default = "default_protractor_scale")]
@@ -2967,7 +2977,8 @@ impl Default for AppState {
             windows_key_locked: false,
             native_focus_highlight_enabled: false,
             focus_highlight_color: default_focus_highlight_color(),
-            focus_highlight_rainbow: false,
+            focus_highlight_decoration: FocusHighlightDecoration::Plain,
+            focus_highlight_rainbow_legacy: false,
             protractor_enabled: false,
             protractor_scale: 1.0,
             protractor_needle1_angle: 0.0,

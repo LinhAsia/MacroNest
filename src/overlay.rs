@@ -487,7 +487,7 @@ mod windows_overlay {
         UpdateOcrPresets(Vec<crate::model::OcrPreset>),
         SetFocusHighlightConfig {
             color: crate::model::RgbaColor,
-            rainbow: bool,
+            decoration: crate::model::FocusHighlightDecoration,
         },
         SetProtractorEnabled(bool),
         UpdateProtractorConfig {
@@ -1207,7 +1207,7 @@ mod windows_overlay {
         ui_foreground: bool,
         native_focus_highlight_enabled: bool,
         focus_highlight_color: crate::model::RgbaColor,
-        focus_highlight_rainbow: bool,
+        focus_highlight_decoration: crate::model::FocusHighlightDecoration,
         focus_highlight_rainbow_hue: f32,
         protractor_hwnd: HWND,
         active_focus_highlight_hwnd: Option<HWND>,
@@ -1965,7 +1965,7 @@ mod windows_overlay {
                     b: 182,
                     a: 235,
                 },
-                focus_highlight_rainbow: false,
+                focus_highlight_decoration: crate::model::FocusHighlightDecoration::Plain,
                 focus_highlight_rainbow_hue: 0.0,
                 protractor_hwnd,
                 active_focus_highlight_hwnd: None,
@@ -2505,7 +2505,9 @@ mod windows_overlay {
                     let _ = refresh_timer_overlays(runtime);
 
                     if runtime.native_focus_highlight_enabled
-                        && runtime.focus_highlight_rainbow
+                        && focus_highlight_decoration_is_animated(
+                            runtime.focus_highlight_decoration,
+                        )
                         && runtime.active_focus_highlight_hwnd.is_some()
                     {
                         let target_hwnd = runtime.active_focus_highlight_hwnd.unwrap();
@@ -6171,9 +6173,9 @@ mod windows_overlay {
                     }
                 }
 
-                OverlayCommand::SetFocusHighlightConfig { color, rainbow } => {
+                OverlayCommand::SetFocusHighlightConfig { color, decoration } => {
                     runtime.focus_highlight_color = color;
-                    runtime.focus_highlight_rainbow = rainbow;
+                    runtime.focus_highlight_decoration = decoration;
                     if let Some(target) = runtime.active_focus_highlight_hwnd {
                         let _ = paint_focus_highlight_overlay(runtime, target);
                     }
@@ -8648,7 +8650,7 @@ mod windows_overlay {
 
     fn desired_timer_interval_ms(runtime: &Runtime) -> u32 {
         if runtime.native_focus_highlight_enabled
-            && runtime.focus_highlight_rainbow
+            && focus_highlight_decoration_is_animated(runtime.focus_highlight_decoration)
             && runtime.active_focus_highlight_hwnd.is_some()
         {
             return 30;
@@ -9680,6 +9682,243 @@ mod windows_overlay {
         }
     }
 
+    fn focus_highlight_decoration_is_animated(
+        decoration: crate::model::FocusHighlightDecoration,
+    ) -> bool {
+        matches!(decoration, crate::model::FocusHighlightDecoration::Rainbow)
+    }
+
+    fn focus_highlight_decoration_metrics(
+        decoration: crate::model::FocusHighlightDecoration,
+    ) -> (i32, u32) {
+        match decoration {
+            crate::model::FocusHighlightDecoration::FloralWood => (18, 10),
+            crate::model::FocusHighlightDecoration::Plain
+            | crate::model::FocusHighlightDecoration::Rainbow => (5, 4),
+        }
+    }
+
+    fn put_canvas_pixel(canvas: &mut RgbaImage, x: i32, y: i32, color: image::Rgba<u8>) {
+        if x < 0 || y < 0 {
+            return;
+        }
+        let (x, y) = (x as u32, y as u32);
+        if x >= canvas.width() || y >= canvas.height() {
+            return;
+        }
+        canvas.put_pixel(x, y, color);
+    }
+
+    fn fill_canvas_rect(
+        canvas: &mut RgbaImage,
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+        color: image::Rgba<u8>,
+    ) {
+        if width <= 0 || height <= 0 {
+            return;
+        }
+        for y in top..(top + height) {
+            for x in left..(left + width) {
+                put_canvas_pixel(canvas, x, y, color);
+            }
+        }
+    }
+
+    fn draw_canvas_circle(
+        canvas: &mut RgbaImage,
+        cx: i32,
+        cy: i32,
+        radius: i32,
+        color: image::Rgba<u8>,
+    ) {
+        if radius <= 0 {
+            return;
+        }
+        let radius_sq = radius * radius;
+        for y in (cy - radius)..=(cy + radius) {
+            for x in (cx - radius)..=(cx + radius) {
+                let dx = x - cx;
+                let dy = y - cy;
+                if dx * dx + dy * dy <= radius_sq {
+                    put_canvas_pixel(canvas, x, y, color);
+                }
+            }
+        }
+    }
+
+    fn draw_canvas_ellipse(
+        canvas: &mut RgbaImage,
+        cx: i32,
+        cy: i32,
+        radius_x: i32,
+        radius_y: i32,
+        color: image::Rgba<u8>,
+    ) {
+        if radius_x <= 0 || radius_y <= 0 {
+            return;
+        }
+        let rx_sq = (radius_x * radius_x) as i64;
+        let ry_sq = (radius_y * radius_y) as i64;
+        let limit = rx_sq * ry_sq;
+        for y in (cy - radius_y)..=(cy + radius_y) {
+            for x in (cx - radius_x)..=(cx + radius_x) {
+                let dx = (x - cx) as i64;
+                let dy = (y - cy) as i64;
+                if dx * dx * ry_sq + dy * dy * rx_sq <= limit {
+                    put_canvas_pixel(canvas, x, y, color);
+                }
+            }
+        }
+    }
+
+    fn draw_focus_highlight_basic_border(
+        canvas: &mut RgbaImage,
+        thickness: u32,
+        color: image::Rgba<u8>,
+    ) {
+        let width = canvas.width();
+        let height = canvas.height();
+        for y in 0..height.min(thickness) {
+            for x in 0..width {
+                canvas.put_pixel(x, y, color);
+            }
+        }
+        if height > thickness {
+            let start_y = height.saturating_sub(thickness);
+            for y in start_y..height {
+                for x in 0..width {
+                    canvas.put_pixel(x, y, color);
+                }
+            }
+        }
+        let vertical_start_y = thickness.min(height);
+        let vertical_end_y = height.saturating_sub(thickness);
+        if vertical_end_y > vertical_start_y {
+            for y in vertical_start_y..vertical_end_y {
+                for x in 0..width.min(thickness) {
+                    canvas.put_pixel(x, y, color);
+                }
+            }
+        }
+        if width > thickness && vertical_end_y > vertical_start_y {
+            let start_x = width.saturating_sub(thickness);
+            for y in vertical_start_y..vertical_end_y {
+                for x in start_x..width {
+                    canvas.put_pixel(x, y, color);
+                }
+            }
+        }
+    }
+
+    fn wood_tone(primary: u32, secondary: u32, depth: u32) -> image::Rgba<u8> {
+        let grain =
+            (((primary as i32 * 13 + secondary as i32 * 7 + depth as i32 * 5) % 31) - 15) * 2;
+        let ring = if (primary / 22 + secondary / 11 + depth / 3) % 2 == 0 {
+            12
+        } else {
+            -10
+        };
+        let r = (126 + grain + ring).clamp(76, 172) as u8;
+        let g = (86 + grain / 2 + ring / 2).clamp(50, 122) as u8;
+        let b = (52 + grain / 3 + ring / 3).clamp(28, 82) as u8;
+        image::Rgba([r, g, b, 245])
+    }
+
+    fn draw_flower_corner(
+        canvas: &mut RgbaImage,
+        cx: i32,
+        cy: i32,
+        x_dir: i32,
+        y_dir: i32,
+        accent: image::Rgba<u8>,
+    ) {
+        let petal = image::Rgba([
+            accent[0].saturating_add((255 - accent[0]) / 3),
+            accent[1].saturating_add((255 - accent[1]) / 3),
+            accent[2].saturating_add((255 - accent[2]) / 3),
+            240,
+        ]);
+        let center = image::Rgba([250, 214, 116, 245]);
+        let leaf = image::Rgba([72, 150, 86, 235]);
+
+        draw_canvas_ellipse(canvas, cx + x_dir * 8, cy + y_dir * 2, 6, 3, leaf);
+        draw_canvas_ellipse(canvas, cx + x_dir * 2, cy + y_dir * 8, 3, 6, leaf);
+        draw_canvas_circle(canvas, cx, cy - 6, 4, petal);
+        draw_canvas_circle(canvas, cx + 6, cy - 1, 4, petal);
+        draw_canvas_circle(canvas, cx + 4, cy + 6, 4, petal);
+        draw_canvas_circle(canvas, cx - 4, cy + 6, 4, petal);
+        draw_canvas_circle(canvas, cx - 6, cy - 1, 4, petal);
+        draw_canvas_circle(canvas, cx, cy, 3, center);
+    }
+
+    fn draw_focus_highlight_floral_wood(
+        canvas: &mut RgbaImage,
+        thickness: u32,
+        accent: image::Rgba<u8>,
+    ) {
+        let width = canvas.width();
+        let height = canvas.height();
+        for y in 0..height.min(thickness) {
+            for x in 0..width {
+                canvas.put_pixel(x, y, wood_tone(x, y, y));
+            }
+        }
+        if height > thickness {
+            let start_y = height.saturating_sub(thickness);
+            for y in start_y..height {
+                for x in 0..width {
+                    canvas.put_pixel(x, y, wood_tone(x, y, height - y));
+                }
+            }
+        }
+        if width > 0 && height > thickness {
+            let vertical_start = thickness.min(height);
+            let vertical_end = height.saturating_sub(thickness);
+            for y in vertical_start..vertical_end {
+                for x in 0..width.min(thickness) {
+                    canvas.put_pixel(x, y, wood_tone(y, x, x));
+                }
+                if width > thickness {
+                    let start_x = width.saturating_sub(thickness);
+                    for x in start_x..width {
+                        canvas.put_pixel(x, y, wood_tone(y, x, width - x));
+                    }
+                }
+            }
+        }
+
+        let bevel = image::Rgba([255, 240, 214, 70]);
+        fill_canvas_rect(canvas, 0, 1, width as i32, 1, bevel);
+        fill_canvas_rect(canvas, 1, 0, 1, height as i32, bevel);
+        fill_canvas_rect(
+            canvas,
+            0,
+            (height as i32).saturating_sub(2),
+            width as i32,
+            1,
+            image::Rgba([58, 34, 18, 90]),
+        );
+        fill_canvas_rect(
+            canvas,
+            (width as i32).saturating_sub(2),
+            0,
+            1,
+            height as i32,
+            image::Rgba([58, 34, 18, 90]),
+        );
+
+        let offset = thickness as i32 + 2;
+        let right = width as i32 - offset - 1;
+        let bottom = height as i32 - offset - 1;
+        draw_flower_corner(canvas, offset, offset, 1, 1, accent);
+        draw_flower_corner(canvas, right, offset, -1, 1, accent);
+        draw_flower_corner(canvas, offset, bottom, 1, -1, accent);
+        draw_flower_corner(canvas, right, bottom, -1, -1, accent);
+    }
+
     unsafe fn paint_focus_highlight_overlay(runtime: &Runtime, target: HWND) -> Result<()> {
         let Some(rect) = focus_highlight_rect(target) else {
             let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
@@ -9702,8 +9941,8 @@ mod windows_overlay {
             }
         };
 
-        let margin = 5i32;
-        let thickness = 4u32;
+        let decoration = runtime.focus_highlight_decoration;
+        let (margin, thickness) = focus_highlight_decoration_metrics(decoration);
         let visible_left = (rect.left - margin).max(monitor_rect.left);
         let visible_top = (rect.top - margin).max(monitor_rect.top);
         let visible_right = (rect.right + margin).min(monitor_rect.right);
@@ -9716,52 +9955,27 @@ mod windows_overlay {
         let width = (visible_right - visible_left).max(1) as u32;
         let height = (visible_bottom - visible_top).max(1) as u32;
         let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
-        let mut hue = runtime.focus_highlight_rainbow_hue;
-        let color = if runtime.focus_highlight_rainbow {
+        let accent = image::Rgba([
+            runtime.focus_highlight_color.r,
+            runtime.focus_highlight_color.g,
+            runtime.focus_highlight_color.b,
+            runtime.focus_highlight_color.a,
+        ]);
+        let color = if matches!(decoration, crate::model::FocusHighlightDecoration::Rainbow) {
+            let hue = runtime.focus_highlight_rainbow_hue;
             let rgb = hsv_to_rgb(hue * 360.0, 0.85, 0.95);
             image::Rgba(rgb)
         } else {
-            image::Rgba([
-                runtime.focus_highlight_color.r,
-                runtime.focus_highlight_color.g,
-                runtime.focus_highlight_color.b,
-                runtime.focus_highlight_color.a,
-            ])
+            accent
         };
 
-        // Draw the 4 edges of the border without scanning the entire inner area.
-        // Top edge:
-        for y in 0..height.min(thickness) {
-            for x in 0..width {
-                canvas.put_pixel(x, y, color);
+        match decoration {
+            crate::model::FocusHighlightDecoration::Plain
+            | crate::model::FocusHighlightDecoration::Rainbow => {
+                draw_focus_highlight_basic_border(&mut canvas, thickness, color);
             }
-        }
-        // Bottom edge:
-        if height > thickness {
-            let start_y = height.saturating_sub(thickness);
-            for y in start_y..height {
-                for x in 0..width {
-                    canvas.put_pixel(x, y, color);
-                }
-            }
-        }
-        // Left edge:
-        let vertical_start_y = thickness.min(height);
-        let vertical_end_y = height.saturating_sub(thickness);
-        if vertical_end_y > vertical_start_y {
-            for y in vertical_start_y..vertical_end_y {
-                for x in 0..width.min(thickness) {
-                    canvas.put_pixel(x, y, color);
-                }
-            }
-        }
-        // Right edge:
-        if width > thickness && vertical_end_y > vertical_start_y {
-            let start_x = width.saturating_sub(thickness);
-            for y in vertical_start_y..vertical_end_y {
-                for x in start_x..width {
-                    canvas.put_pixel(x, y, color);
-                }
+            crate::model::FocusHighlightDecoration::FloralWood => {
+                draw_focus_highlight_floral_wood(&mut canvas, thickness, accent);
             }
         }
 
