@@ -1130,7 +1130,18 @@ mod windows_overlay {
         lane: QuickKeyDisplayLane,
         slot: usize,
         held: bool,
+        shown_at: Instant,
+        released_at: Option<Instant>,
         hide_at: Instant,
+    }
+
+    #[derive(Clone, Copy)]
+    struct QuickKeyDisplayVisual {
+        alpha: f32,
+        scale_x: f32,
+        scale_y: f32,
+        translate_y: f32,
+        hold_mix: f32,
     }
 
     struct Runtime {
@@ -4927,6 +4938,84 @@ mod windows_overlay {
         });
     }
 
+    fn quick_key_display_ease_out_cubic(t: f32) -> f32 {
+        let progress = t.clamp(0.0, 1.0);
+        1.0 - (1.0 - progress).powi(3)
+    }
+
+    fn quick_key_display_ease_in_cubic(t: f32) -> f32 {
+        t.clamp(0.0, 1.0).powi(3)
+    }
+
+    fn quick_key_display_entry_visual(
+        entry: &QuickKeyDisplayEntry,
+        now: Instant,
+    ) -> QuickKeyDisplayVisual {
+        let mut visual = QuickKeyDisplayVisual {
+            alpha: 1.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            translate_y: 0.0,
+            hold_mix: 0.0,
+        };
+
+        let shown_elapsed = now.saturating_duration_since(entry.shown_at);
+        let enter_t = (shown_elapsed.as_secs_f32()
+            / QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION.as_secs_f32())
+        .clamp(0.0, 1.0);
+        if enter_t < 1.0 {
+            let eased = quick_key_display_ease_out_cubic(enter_t);
+            visual.alpha *= eased;
+            visual.scale_x *= 1.1 - (0.1 * eased);
+            visual.scale_y *= 0.9 + (0.1 * eased);
+            visual.translate_y += 10.0 * (1.0 - eased);
+        }
+
+        let held_long_enough = shown_elapsed >= QUICK_KEY_DISPLAY_HOLD_MIN_DURATION;
+        if entry.held && held_long_enough {
+            let hold_elapsed = shown_elapsed
+                .saturating_sub(QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION.mul_f32(0.6));
+            let hold_t = (hold_elapsed.as_secs_f32()
+                / QUICK_KEY_DISPLAY_HOLD_TRANSITION_DURATION.as_secs_f32())
+            .clamp(0.0, 1.0);
+            visual.hold_mix = hold_t;
+            visual.scale_x *= 1.0 + (0.045 * hold_t);
+            visual.scale_y *= 1.0 - (0.032 * hold_t);
+            visual.translate_y -= 2.2 * hold_t;
+        }
+
+        if let Some(released_at) = entry.released_at {
+            let exit_elapsed = now.saturating_duration_since(released_at);
+            let exit_t = (exit_elapsed.as_secs_f32()
+                / QUICK_KEY_DISPLAY_ANIM_EXIT_DURATION.as_secs_f32())
+            .clamp(0.0, 1.0);
+            if exit_t > 0.0 {
+                let eased = quick_key_display_ease_in_cubic(exit_t);
+                visual.alpha *= 1.0 - eased;
+                visual.scale_x *= 1.0 + (0.04 * eased);
+                visual.scale_y *= 1.0 - (0.11 * eased);
+                visual.translate_y -= 9.0 * eased;
+                visual.hold_mix *= 1.0 - (0.85 * eased);
+            }
+        }
+
+        visual
+    }
+
+    fn quick_key_display_mix_rgba(
+        from: [u8; 4],
+        to: [u8; 4],
+        t: f32,
+    ) -> [u8; 4] {
+        let mix = t.clamp(0.0, 1.0);
+        [
+            (((from[0] as f32) * (1.0 - mix)) + ((to[0] as f32) * mix)).round() as u8,
+            (((from[1] as f32) * (1.0 - mix)) + ((to[1] as f32) * mix)).round() as u8,
+            (((from[2] as f32) * (1.0 - mix)) + ((to[2] as f32) * mix)).round() as u8,
+            (((from[3] as f32) * (1.0 - mix)) + ((to[3] as f32) * mix)).round() as u8,
+        ]
+    }
+
     fn quick_key_display_allocate_slot(
         runtime: &Runtime,
         lane: QuickKeyDisplayLane,
@@ -4985,6 +5074,8 @@ mod windows_overlay {
             lane,
             slot,
             held,
+            shown_at: now,
+            released_at: None,
             hide_at: now + QUICK_KEY_DISPLAY_DISPLAY_DURATION,
         });
     }
@@ -4997,6 +5088,9 @@ mod windows_overlay {
             .find(|entry| entry.identity == identity)
         {
             entry.held = false;
+            if entry.released_at.is_none() {
+                entry.released_at = Some(now);
+            }
             entry.hide_at = entry
                 .hide_at
                 .max(now + QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION);
@@ -7975,6 +8069,10 @@ mod windows_overlay {
     const FOCUS_HIGHLIGHT_BORDER_COLOR: u32 = 0x00B6_E07E;
     const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(1200);
     const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(340);
+    const QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION: Duration = Duration::from_millis(180);
+    const QUICK_KEY_DISPLAY_ANIM_EXIT_DURATION: Duration = Duration::from_millis(200);
+    const QUICK_KEY_DISPLAY_HOLD_MIN_DURATION: Duration = Duration::from_millis(200);
+    const QUICK_KEY_DISPLAY_HOLD_TRANSITION_DURATION: Duration = Duration::from_millis(80);
 
     unsafe fn set_native_border_color(hwnd: HWND, color: u32) -> bool {
         if hwnd.0.is_null() {
@@ -9571,6 +9669,7 @@ mod windows_overlay {
         } else {
             0
         };
+        let now = Instant::now();
 
         let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
         let cap_y = outer_pad_y;
@@ -9578,105 +9677,130 @@ mod windows_overlay {
         let mouse_left_edge = outer_pad_x + keyboard_width + center_gap;
 
         let mut draw_entry = |entry: &QuickKeyDisplayEntry, entry_left: i32, alpha_scale: f32| {
-            let mut cursor_x = entry_left;
+            let visual = quick_key_display_entry_visual(entry, now);
+            let entry_width = quick_key_display_entry_width(&entry.text, font_size, cap_height);
+            let scaled_entry_width = (entry_width as f32 * visual.scale_x).round().max(1.0) as i32;
+            let scaled_cap_height =
+                (cap_height as f32 * visual.scale_y).round().max(1.0) as i32;
+            let entry_center_x = entry_left + (entry_width / 2);
+            let scaled_left = entry_center_x - (scaled_entry_width / 2);
+            let scaled_top = cap_y + visual.translate_y.round() as i32;
+            let mut cursor_x = scaled_left;
             let parts = quick_key_display_parts(&entry.text);
             for (part_index, part) in parts.iter().enumerate() {
                 let palette = quick_key_display_palette(part);
-                let (base_fill, inner_fill, border, text_color) =
+                let (base_fill, inner_fill, border, mut text_color) =
                     quick_key_display_palette_colors(palette);
-                let cap_width = quick_key_display_keycap_width(part, font_size, cap_height);
+                let base_cap_width = quick_key_display_keycap_width(part, font_size, cap_height);
+                let cap_width =
+                    (base_cap_width as f32 * visual.scale_x).round().max(1.0) as i32;
+                let cap_radius = (cap_radius * visual.scale_y.max(visual.scale_x)).max(6.0);
+                let fill_alpha = alpha_scale * visual.alpha;
+                let hold_mix = visual.hold_mix;
+                let held_fill =
+                    quick_key_display_mix_rgba(base_fill, [34, 197, 94, 250], hold_mix * 0.28);
+                let held_inner =
+                    quick_key_display_mix_rgba(inner_fill, [62, 132, 96, 228], hold_mix * 0.34);
+                let held_border =
+                    quick_key_display_mix_rgba(border, [197, 255, 228, 236], hold_mix * 0.48);
+                text_color =
+                    quick_key_display_mix_rgba(text_color, [244, 255, 249, 255], hold_mix * 0.36);
 
                 fill_skia_rounded_rect(
                     &mut pixmap,
                     cursor_x as f32,
-                    (cap_y + 4) as f32,
+                    (scaled_top + (4.0 * visual.scale_y).round() as i32) as f32,
                     cap_width as f32,
-                    cap_height as f32,
+                    scaled_cap_height as f32,
                     cap_radius,
-                    quick_key_display_alpha([2, 5, 10, 80], alpha_scale * 0.8),
+                    quick_key_display_alpha([2, 5, 10, 80], fill_alpha * 0.8),
                 );
                 fill_skia_rounded_rect(
                     &mut pixmap,
                     cursor_x as f32,
-                    cap_y as f32,
+                    scaled_top as f32,
                     cap_width as f32,
-                    cap_height as f32,
+                    scaled_cap_height as f32,
                     cap_radius,
-                    quick_key_display_alpha(base_fill, alpha_scale),
+                    quick_key_display_alpha(held_fill, fill_alpha),
                 );
                 fill_skia_rounded_rect(
                     &mut pixmap,
-                    (cursor_x + 2) as f32,
-                    (cap_y + 2) as f32,
-                    (cap_width - 4).max(1) as f32,
-                    (cap_height - 5).max(1) as f32,
+                    (cursor_x + (2.0 * visual.scale_x).round() as i32) as f32,
+                    (scaled_top + (2.0 * visual.scale_y).round() as i32) as f32,
+                    (cap_width - (4.0 * visual.scale_x).round() as i32).max(1) as f32,
+                    (scaled_cap_height - (5.0 * visual.scale_y).round() as i32).max(1) as f32,
                     (cap_radius - 2.0).max(2.0),
-                    quick_key_display_alpha(inner_fill, alpha_scale * 0.92),
+                    quick_key_display_alpha(held_inner, fill_alpha * 0.92),
                 );
                 fill_skia_rounded_rect(
                     &mut pixmap,
-                    (cursor_x + 3) as f32,
-                    (cap_y + 3) as f32,
-                    (cap_width - 6).max(1) as f32,
-                    ((cap_height as f32 - 8.0) * 0.46).max(1.0),
+                    (cursor_x + (3.0 * visual.scale_x).round() as i32) as f32,
+                    (scaled_top + (3.0 * visual.scale_y).round() as i32) as f32,
+                    (cap_width - (6.0 * visual.scale_x).round() as i32).max(1) as f32,
+                    ((scaled_cap_height as f32 - (8.0 * visual.scale_y)) * 0.46).max(1.0),
                     (cap_radius - 3.0).max(2.0),
-                    quick_key_display_alpha([255, 255, 255, 20], alpha_scale),
+                    quick_key_display_alpha([255, 255, 255, 20], fill_alpha),
                 );
                 fill_skia_rounded_rect(
                     &mut pixmap,
-                    (cursor_x + 2) as f32,
-                    (cap_y + cap_height - 12) as f32,
-                    (cap_width - 4).max(1) as f32,
-                    7.0,
+                    (cursor_x + (2.0 * visual.scale_x).round() as i32) as f32,
+                    (scaled_top + scaled_cap_height - (12.0 * visual.scale_y).round() as i32) as f32,
+                    (cap_width - (4.0 * visual.scale_x).round() as i32).max(1) as f32,
+                    (7.0 * visual.scale_y).max(2.0),
                     (cap_radius - 4.0).max(2.0),
-                    quick_key_display_alpha([6, 9, 14, 48], alpha_scale),
+                    quick_key_display_alpha([6, 9, 14, 48], fill_alpha),
                 );
                 stroke_skia_rounded_rect(
                     &mut pixmap,
                     cursor_x as f32 + 0.5,
-                    cap_y as f32 + 0.5,
+                    scaled_top as f32 + 0.5,
                     (cap_width - 1).max(1) as f32,
-                    (cap_height - 1).max(1) as f32,
+                    (scaled_cap_height - 1).max(1) as f32,
                     cap_radius,
                     1.1,
-                    quick_key_display_alpha(border, alpha_scale),
+                    quick_key_display_alpha(held_border, fill_alpha),
                 );
                 stroke_skia_rounded_rect(
                     &mut pixmap,
-                    (cursor_x + 2) as f32 + 0.5,
-                    (cap_y + 2) as f32 + 0.5,
-                    (cap_width - 5).max(1) as f32,
-                    (cap_height - 6).max(1) as f32,
+                    (cursor_x + (2.0 * visual.scale_x).round() as i32) as f32 + 0.5,
+                    (scaled_top + (2.0 * visual.scale_y).round() as i32) as f32 + 0.5,
+                    (cap_width - (5.0 * visual.scale_x).round() as i32).max(1) as f32,
+                    (scaled_cap_height - (6.0 * visual.scale_y).round() as i32).max(1) as f32,
                     (cap_radius - 2.0).max(2.0),
                     0.9,
-                    quick_key_display_alpha([255, 255, 255, 34], alpha_scale),
+                    quick_key_display_alpha([255, 255, 255, 34], fill_alpha),
                 );
 
                 text_runs.push(QuickKeyDisplayTextRun {
                     text: part.clone(),
                     rect: RECT {
-                        left: cursor_x + 8,
-                        top: cap_y,
-                        right: cursor_x + cap_width - 8,
-                        bottom: cap_y + cap_height,
+                        left: cursor_x + (8.0 * visual.scale_x).round() as i32,
+                        top: scaled_top,
+                        right: cursor_x + cap_width - (8.0 * visual.scale_x).round() as i32,
+                        bottom: scaled_top + scaled_cap_height,
                     },
                     color: quick_key_display_colorref(text_color[0], text_color[1], text_color[2]),
                 });
                 cursor_x += cap_width;
 
                 if part_index + 1 < parts.len() {
-                    cursor_x += combo_gap;
+                    let scaled_combo_gap =
+                        (combo_gap as f32 * visual.scale_x).round().max(1.0) as i32;
+                    let scaled_plus_width =
+                        (plus_width as f32 * visual.scale_x).round().max(1.0) as i32;
+                    cursor_x += scaled_combo_gap;
                     text_runs.push(QuickKeyDisplayTextRun {
                         text: "+".to_owned(),
                         rect: RECT {
                             left: cursor_x,
-                            top: cap_y,
-                            right: cursor_x + plus_width,
-                            bottom: cap_y + cap_height,
+                            top: scaled_top,
+                            right: cursor_x + scaled_plus_width,
+                            bottom: scaled_top + scaled_cap_height,
                         },
                         color: quick_key_display_colorref(226, 235, 244),
                     });
-                    cursor_x += plus_width + combo_gap;
+                    cursor_x += scaled_plus_width + scaled_combo_gap;
                 }
             }
         };
