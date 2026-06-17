@@ -1,7 +1,7 @@
 use crate::hotkey;
 use crate::model::*;
 use crate::overlay::OverlayCommand;
-use crate::ui::{CrosshairApp, ZoomPreviewCache, ZoomPreviewView};
+use crate::ui::{CrosshairApp, VisionCaptureTarget, ZoomPreviewCache, ZoomPreviewView};
 use crate::window_list;
 use eframe::egui::{
     self, Button, Color32, ColorImage, DragValue, Frame, RichText, Sense, TextBuffer, TextEdit,
@@ -668,6 +668,9 @@ impl CrosshairApp {
             } else {
                 None
             };
+            let vietnamese_input_enabled = self.state.vietnamese_input_enabled;
+            let vietnamese_input_mode = self.state.vietnamese_input_mode;
+            let mut begin_color_picker_preset_id = None;
             let preset = &mut self.state.pin_presets[index];
             preset.use_source_crop = true;
             preset.enabled = preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
@@ -678,8 +681,8 @@ impl CrosshairApp {
                         ui.add_sized([name_width, 21.0], TextEdit::singleline(&mut preset.name));
                     Self::apply_vietnamese_input_if_changed(
                         &response,
-                        self.state.vietnamese_input_enabled,
-                        self.state.vietnamese_input_mode,
+                        vietnamese_input_enabled,
+                        vietnamese_input_mode,
                         &mut preset.name,
                     );
                     live_sync |= response.changed();
@@ -916,7 +919,20 @@ impl CrosshairApp {
                                 }
                                 PinBinaryMode::ColorSimilarity => {
                                     ui.label(Self::tr_lang(language, "Target Color", "Màu mục tiêu"));
-                                    live_sync |= Self::edit_rgba_color(ui, &mut preset.binary_target_color).changed();
+                                    ui.horizontal(|ui| {
+                                        live_sync |= Self::edit_rgba_color(ui, &mut preset.binary_target_color).changed();
+                                        let picker_btn = ui.add_sized(
+                                            [24.0, 18.0],
+                                            Button::new(Self::material_icon_text(0xe3b8, 14.0)),
+                                        ).on_hover_text(Self::tr_lang(
+                                            language,
+                                            "Pick color from screen",
+                                            "Lấy màu từ màn hình",
+                                        ));
+                                        if picker_btn.clicked() {
+                                            begin_color_picker_preset_id = Some(preset.id);
+                                        }
+                                    });
                                     ui.end_row();
 
                                     ui.label(Self::tr_lang(language, "Tolerance", "Độ lệch màu"));
@@ -1086,6 +1102,13 @@ impl CrosshairApp {
                     });
                 }
             });
+            if let Some(pid) = begin_color_picker_preset_id {
+                self.begin_image_search_capture(
+                    ui.ctx(),
+                    VisionCaptureTarget::PinPresetColor(pid),
+                    crate::ui::VisionCaptureMode::ColorSample,
+                );
+            }
             if let Some((target, status)) = next_capture_target.take() {
                 self.begin_capture(target, status);
             }
