@@ -1,10 +1,10 @@
 use crate::model::*;
 use crate::overlay::UiCommand;
 use crate::ui::{CrosshairApp, OcrLanguageOperationKind, UpdateStatus};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use eframe::egui::{
-    self, vec2, Button, Color32, Frame, Margin, Order, RichText, Shadow, Stroke, TextEdit,
-    WidgetText,
+    self, Button, Color32, Frame, Margin, Order, RichText, Shadow, Stroke, TextEdit, WidgetText,
+    vec2,
 };
 use std::fs;
 use std::path::Path;

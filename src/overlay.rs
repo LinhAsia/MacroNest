@@ -252,6 +252,11 @@ mod windows_overlay {
     static ACTIVE_VIDEO_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> = Lazy::new(|| Mutex::new(None));
     static ACTIVE_VIDEO_THREAD: Lazy<Mutex<Option<thread::JoinHandle<()>>>> =
         Lazy::new(|| Mutex::new(None));
+    static ACTIVE_BIN_PIN_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> = Lazy::new(|| Mutex::new(None));
+    static ACTIVE_BIN_PIN_THREAD: Lazy<Mutex<Option<thread::JoinHandle<()>>>> =
+        Lazy::new(|| Mutex::new(None));
+    static ACTIVE_BIN_PIN_PRESET_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    static ACTIVE_BIN_PIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
     static SYNTHETIC_MOUSE_TRIGGER_SUPPRESSION: Lazy<Mutex<HashMap<String, usize>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
     static SWALLOWED_MOUSE_TRIGGER_RELEASES: Lazy<Mutex<HashSet<String>>> =
@@ -9333,6 +9338,232 @@ mod windows_overlay {
         }
     }
 
+    fn stop_active_bin_pin_thread() {
+        let previous = ACTIVE_BIN_PIN_STOP.lock().take();
+        if let Some(stop_flag) = previous {
+            stop_flag.store(true, Ordering::Relaxed);
+        }
+        let previous_thread = ACTIVE_BIN_PIN_THREAD.lock().take();
+        if let Some(handle) = previous_thread {
+            let _ = handle.join();
+        }
+        ACTIVE_BIN_PIN_PRESET_ID.store(0, Ordering::Relaxed);
+        ACTIVE_BIN_PIN_HWND.store(0, Ordering::Relaxed);
+    }
+
+    fn spawn_bin_pin_thread(preset_id: u32, raw_source_hwnd: HWND, raw_pin_hwnd: HWND) {
+        let previous = ACTIVE_BIN_PIN_STOP.lock().take();
+        if let Some(stop_flag) = previous {
+            stop_flag.store(true, Ordering::Relaxed);
+        }
+        let previous_thread = ACTIVE_BIN_PIN_THREAD.lock().take();
+        if let Some(handle) = previous_thread {
+            let _ = handle.join();
+        }
+        
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        *ACTIVE_BIN_PIN_STOP.lock() = Some(stop_flag.clone());
+        
+        let source_hwnd_val = raw_source_hwnd.0 as isize;
+        let pin_hwnd_val = raw_pin_hwnd.0 as isize;
+        
+        let handle = thread::spawn(move || {
+            let source_hwnd = HWND(source_hwnd_val as *mut c_void);
+            let pin_hwnd = HWND(pin_hwnd_val as *mut c_void);
+            let mut last_run = Instant::now();
+            let loop_interval = Duration::from_millis(33);
+            
+            while !stop_flag.load(Ordering::Relaxed) {
+                let elapsed = last_run.elapsed();
+                if elapsed < loop_interval {
+                    thread::sleep(loop_interval - elapsed);
+                }
+                last_run = Instant::now();
+                
+                if stop_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                
+                let preset_opt = {
+                    let hook_state = HOOK_STATE.lock();
+                    if hook_state.active_pin_preset_id != Some(preset_id) {
+                        None
+                    } else {
+                        hook_state.pin_presets.iter().find(|p| p.id == preset_id).cloned()
+                    }
+                };
+                
+                let Some(preset) = preset_opt else {
+                    break;
+                };
+                
+                if !preset.binary_filter {
+                    break;
+                }
+                
+                unsafe {
+                    if !windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(source_hwnd)).as_bool() {
+                        break;
+                    }
+                }
+                
+                let frame_opt = unsafe { crate::window_list::capture_window_region_from_hwnd(source_hwnd) };
+                let Some(frame) = frame_opt else {
+                    continue;
+                };
+                
+                let width = frame.width;
+                let height = frame.height;
+                let (crop_x, crop_y, crop_w, crop_h) = if preset.use_source_crop {
+                    let cx = preset.source_x.clamp(0, width.saturating_sub(1) as i32) as usize;
+                    let cy = preset.source_y.clamp(0, height.saturating_sub(1) as i32) as usize;
+                    let cw = (preset.source_width.max(1) as usize).min(width - cx);
+                    let ch = (preset.source_height.max(1) as usize).min(height - cy);
+                    (cx, cy, cw, ch)
+                } else {
+                    (0, 0, width, height)
+                };
+                
+                if crop_w == 0 || crop_h == 0 {
+                    continue;
+                }
+                
+                let mut binarized = vec![0u8; crop_w * crop_h * 4];
+                let threshold = preset.binary_threshold;
+                for y in 0..crop_h {
+                    let src_row_offset = (crop_y + y) * width * 4;
+                    let dst_row_offset = y * crop_w * 4;
+                    for x in 0..crop_w {
+                        let src_pixel_offset = src_row_offset + (crop_x + x) * 4;
+                        let dst_pixel_offset = dst_row_offset + x * 4;
+                        
+                        let r = frame.rgba[src_pixel_offset];
+                        let g = frame.rgba[src_pixel_offset + 1];
+                        let b = frame.rgba[src_pixel_offset + 2];
+                        let a = frame.rgba[src_pixel_offset + 3];
+                        
+                        let gray = ((r as u32 * 299 + g as u32 * 587 + b as u32 * 114) / 1000) as u8;
+                        let val = if gray >= threshold { 255 } else { 0 };
+                        
+                        binarized[dst_pixel_offset] = val;
+                        binarized[dst_pixel_offset + 1] = val;
+                        binarized[dst_pixel_offset + 2] = val;
+                        binarized[dst_pixel_offset + 3] = a;
+                    }
+                }
+                
+                unsafe {
+                    let screen_dc = GetDC(None);
+                    if screen_dc.0.is_null() {
+                        continue;
+                    }
+                    let mem_dc = CreateCompatibleDC(Some(screen_dc));
+                    if mem_dc.0.is_null() {
+                        let _ = ReleaseDC(None, screen_dc);
+                        continue;
+                    }
+                    
+                    let target_w = preset.width.max(1);
+                    let target_h = preset.height.max(1);
+                    
+                    let bitmap_info = BITMAPINFO {
+                        bmiHeader: BITMAPINFOHEADER {
+                            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                            biWidth: target_w,
+                            biHeight: -target_h,
+                            biPlanes: 1,
+                            biBitCount: 32,
+                            biCompression: BI_RGB.0,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+                    
+                    let mut bits_ptr: *mut c_void = std::ptr::null_mut();
+                    let bitmap = match CreateDIBSection(
+                        Some(mem_dc),
+                        &bitmap_info,
+                        DIB_RGB_COLORS,
+                        &mut bits_ptr,
+                        None,
+                        0,
+                    ) {
+                        Ok(b) => b,
+                        Err(_) => {
+                            let _ = DeleteDC(mem_dc);
+                            let _ = ReleaseDC(None, screen_dc);
+                            continue;
+                        }
+                    };
+                    
+                    let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
+                    
+                    let source_bitmap_info = BITMAPINFO {
+                        bmiHeader: BITMAPINFOHEADER {
+                            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                            biWidth: crop_w as i32,
+                            biHeight: -(crop_h as i32),
+                            biPlanes: 1,
+                            biBitCount: 32,
+                            biCompression: BI_RGB.0,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+                    
+                    let _ = windows::Win32::Graphics::Gdi::SetStretchBltMode(mem_dc, windows::Win32::Graphics::Gdi::COLORONCOLOR);
+                    let _ = StretchDIBits(
+                        mem_dc,
+                        0,
+                        0,
+                        target_w,
+                        target_h,
+                        0,
+                        0,
+                        crop_w as i32,
+                        crop_h as i32,
+                        Some(binarized.as_ptr() as *const c_void),
+                        &source_bitmap_info,
+                        DIB_RGB_COLORS,
+                        SRCCOPY,
+                    );
+                    
+                    let mut pt_dst = POINT { x: preset.x, y: preset.y };
+                    let mut size_wnd = SIZE { cx: target_w, cy: target_h };
+                    let mut pt_src = POINT { x: 0, y: 0 };
+                    let mut blend = BLENDFUNCTION {
+                        BlendOp: AC_SRC_OVER as u8,
+                        BlendFlags: 0,
+                        SourceConstantAlpha: 255,
+                        AlphaFormat: AC_SRC_ALPHA as u8,
+                    };
+                    
+                    let _ = UpdateLayeredWindow(
+                        pin_hwnd,
+                        Some(screen_dc),
+                        Some(&mut pt_dst),
+                        Some(&mut size_wnd),
+                        Some(mem_dc),
+                        Some(&mut pt_src),
+                        COLORREF(0),
+                        Some(&mut blend),
+                        ULW_ALPHA,
+                    );
+                    
+                    let _ = SelectObject(mem_dc, old_bitmap);
+                    let _ = DeleteObject(HGDIOBJ(bitmap.0));
+                    let _ = DeleteDC(mem_dc);
+                    let _ = ReleaseDC(None, screen_dc);
+                }
+            }
+            
+            ACTIVE_BIN_PIN_PRESET_ID.store(0, Ordering::Relaxed);
+            ACTIVE_BIN_PIN_HWND.store(0, Ordering::Relaxed);
+        });
+        
+        *ACTIVE_BIN_PIN_THREAD.lock() = Some(handle);
+    }
+
     fn refresh_pin_overlay(runtime: &mut Runtime) -> Result<()> {
         let active = {
             let hook_state = HOOK_STATE.lock();
@@ -9352,6 +9583,7 @@ mod windows_overlay {
                     let _ = DwmUnregisterThumbnail(thumbnail_id);
                 }
                 ACTIVE_PIN_SOURCE_HWND.store(0, Ordering::Relaxed);
+                stop_active_bin_pin_thread();
                 sync_window_location_hook_state(runtime);
 
                 let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
@@ -9380,10 +9612,41 @@ mod windows_overlay {
                 && !is_internal_app_window(source_root)
             {
                 let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
+                stop_active_bin_pin_thread();
                 runtime.last_pin_update = Instant::now();
                 return Ok(());
             }
+        }
 
+        if preset.binary_filter {
+            unsafe {
+                if let Some(active) = runtime.active_pin_thumbnail.take()
+                    && let Some(thumbnail_id) = active.thumbnail_id
+                {
+                    let _ = DwmUnregisterThumbnail(thumbnail_id);
+                }
+                ACTIVE_PIN_SOURCE_HWND.store(source.0 as isize, Ordering::Relaxed);
+                sync_window_location_hook_state(runtime);
+            }
+
+            let current_active_id = ACTIVE_BIN_PIN_PRESET_ID.load(Ordering::Relaxed);
+            let current_active_hwnd = ACTIVE_BIN_PIN_HWND.load(Ordering::Relaxed);
+            if current_active_id != preset.id || current_active_hwnd != source.0 as isize {
+                ACTIVE_BIN_PIN_PRESET_ID.store(preset.id, Ordering::Relaxed);
+                ACTIVE_BIN_PIN_HWND.store(source.0 as isize, Ordering::Relaxed);
+                spawn_bin_pin_thread(preset.id, source, runtime.pin_hwnd);
+            }
+
+            unsafe {
+                let _ = ShowWindow(runtime.pin_hwnd, SW_SHOWNA);
+            }
+            runtime.last_pin_update = Instant::now();
+            return Ok(());
+        } else {
+            stop_active_bin_pin_thread();
+        };
+
+        unsafe {
             let mut client_rect = RECT::default();
             GetClientRect(source, &mut client_rect)?;
             let mut client_top_left = POINT {

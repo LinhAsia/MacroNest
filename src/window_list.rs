@@ -970,7 +970,7 @@ mod windows_impl {
         }
     }
 
-    unsafe fn capture_window_region_from_hwnd(hwnd: HWND) -> Option<ScreenCaptureFrame> {
+    pub(crate) unsafe fn capture_window_region_from_hwnd(hwnd: HWND) -> Option<ScreenCaptureFrame> {
         if let Some(frame) = capture_wgc_frame(hwnd) {
             return Some(frame);
         }

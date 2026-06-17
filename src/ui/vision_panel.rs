@@ -1037,7 +1037,11 @@ impl CrosshairApp {
         preset.target_color.into_iter().collect()
     }
 
-    pub(crate) fn image_search_target_color_swatch(ui: &mut egui::Ui, color: Option<RgbaColor>, size: egui::Vec2) {
+    pub(crate) fn image_search_target_color_swatch(
+        ui: &mut egui::Ui,
+        color: Option<RgbaColor>,
+        size: egui::Vec2,
+    ) {
         let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
         let fill = color.map_or(Color32::from_rgba_premultiplied(42, 48, 56, 220), |color| {
             Color32::from_rgba_unmultiplied(color.r, color.g, color.b, 255)
@@ -1110,14 +1114,16 @@ impl CrosshairApp {
                     if rx >= 0 && rx < frame.width as i32 && ry >= 0 && ry < frame.height as i32 {
                         let src_idx = ((ry as usize * frame.width) + rx as usize) * 4;
                         if src_idx + 3 < frame.rgba.len() {
-                            buf[dst_idx..dst_idx+4].copy_from_slice(&frame.rgba[src_idx..src_idx+4]);
+                            buf[dst_idx..dst_idx + 4]
+                                .copy_from_slice(&frame.rgba[src_idx..src_idx + 4]);
                         }
                     }
                 }
             }
             (sample_size as usize, sample_size as usize, buf)
         } else {
-            let capture = window_list::capture_virtual_screen_region(left, top, sample_size, sample_size)?;
+            let capture =
+                window_list::capture_virtual_screen_region(left, top, sample_size, sample_size)?;
             (capture.width, capture.height, capture.rgba)
         };
         if rgba.len() < 4 {
@@ -1326,7 +1332,7 @@ impl CrosshairApp {
         #[cfg(windows)]
         unsafe {
             if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
                 let _ = ShowWindow(hwnd, SW_HIDE);
             }
         }
@@ -1340,7 +1346,9 @@ impl CrosshairApp {
         let is_template = matches!(mode, VisionCaptureMode::Template);
         let is_point_click = matches!(
             mode,
-            VisionCaptureMode::ColorSample | VisionCaptureMode::ColorPriorityAnchor | VisionCaptureMode::SinglePixel
+            VisionCaptureMode::ColorSample
+                | VisionCaptureMode::ColorPriorityAnchor
+                | VisionCaptureMode::SinglePixel
         );
         let use_natural_point_click_preview = matches!(
             target,
@@ -1356,7 +1364,9 @@ impl CrosshairApp {
 
             // Capture virtual screen bounds
             let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
-            let (result, capture_frame) = if let Some(capture) = crate::window_list::capture_virtual_screen_region(left, top, width, height) {
+            let (result, capture_frame) = if let Some(capture) =
+                crate::window_list::capture_virtual_screen_region(left, top, width, height)
+            {
                 let native_mode = if is_point_click {
                     crate::overlay::native_capture::NativeCaptureMode::PointClick {
                         vietnamese,
@@ -1379,14 +1389,19 @@ impl CrosshairApp {
                 );
                 (res, Some(capture))
             } else {
-                (crate::overlay::native_capture::NativeCaptureResult::Cancelled, None)
+                (
+                    crate::overlay::native_capture::NativeCaptureResult::Cancelled,
+                    None,
+                )
             };
 
             // Restore main app window natively
             #[cfg(windows)]
             unsafe {
                 if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL, SetForegroundWindow};
+                    use windows::Win32::UI::WindowsAndMessaging::{
+                        SW_SHOWNORMAL, SetForegroundWindow, ShowWindow,
+                    };
                     let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
                     let _ = SetForegroundWindow(hwnd);
                 }
@@ -1418,7 +1433,9 @@ impl CrosshairApp {
             .vision_capture_mode
             .unwrap_or(VisionCaptureMode::Template)
         {
-            VisionCaptureMode::ColorSample | VisionCaptureMode::ColorPriorityAnchor | VisionCaptureMode::SinglePixel => {
+            VisionCaptureMode::ColorSample
+            | VisionCaptureMode::ColorPriorityAnchor
+            | VisionCaptureMode::SinglePixel => {
                 // Do nothing on mouse down, wait for mouse up to capture!
             }
             VisionCaptureMode::Template | VisionCaptureMode::SearchRegion => {
@@ -1470,7 +1487,9 @@ impl CrosshairApp {
                     ctx.request_repaint();
                 }
             }
-            VisionCaptureMode::ColorSample | VisionCaptureMode::ColorPriorityAnchor | VisionCaptureMode::SinglePixel => {}
+            VisionCaptureMode::ColorSample
+            | VisionCaptureMode::ColorPriorityAnchor
+            | VisionCaptureMode::SinglePixel => {}
         }
     }
 
@@ -1555,7 +1574,9 @@ impl CrosshairApp {
                     self.status = "Image area capture cancelled.".to_owned();
                 }
             }
-            VisionCaptureMode::ColorSample | VisionCaptureMode::ColorPriorityAnchor | VisionCaptureMode::SinglePixel => {
+            VisionCaptureMode::ColorSample
+            | VisionCaptureMode::ColorPriorityAnchor
+            | VisionCaptureMode::SinglePixel => {
                 let Some(target) = self.vision_capture_target else {
                     self.cancel_image_search_capture(ctx);
                     self.status = "No image search preset is active.".to_owned();
@@ -1563,12 +1584,12 @@ impl CrosshairApp {
                 };
                 match target {
                     VisionCaptureTarget::Preset(preset_id) => {
-                        if matches!(self.vision_capture_mode, Some(VisionCaptureMode::SinglePixel)) {
+                        if matches!(
+                            self.vision_capture_mode,
+                            Some(VisionCaptureMode::SinglePixel)
+                        ) {
                             self.finish_image_search_single_pixel_capture_from_screen(
-                                ctx,
-                                preset_id,
-                                screen_x,
-                                screen_y,
+                                ctx, preset_id, screen_x, screen_y,
                             );
                         } else {
                             let priority_anchor = matches!(
@@ -1615,13 +1636,19 @@ impl CrosshairApp {
                                 let _ = clipboard.set_text(formatted.clone());
                             }
                             self.status = match self.state.ui_language {
-                                crate::model::UiLanguage::Vietnamese => format!("Da sao chep toa do vao clipboard: {}", formatted),
+                                crate::model::UiLanguage::Vietnamese => {
+                                    format!("Da sao chep toa do vao clipboard: {}", formatted)
+                                }
                                 _ => format!("Coordinates copied to clipboard: {}", formatted),
                             };
                         } else {
                             self.status = match self.state.ui_language {
-                                crate::model::UiLanguage::Vietnamese => format!("Toa do da chon: X={}, Y={}", screen_x, screen_y),
-                                _ => format!("Coordinates captured: X={}, Y={}", screen_x, screen_y),
+                                crate::model::UiLanguage::Vietnamese => {
+                                    format!("Toa do da chon: X={}, Y={}", screen_x, screen_y)
+                                }
+                                _ => {
+                                    format!("Coordinates captured: X={}, Y={}", screen_x, screen_y)
+                                }
                             };
                         }
                     }
@@ -1636,9 +1663,14 @@ impl CrosshairApp {
                         self.persist();
                         self.status = match self.state.ui_language {
                             crate::model::UiLanguage::Vietnamese => {
-                                format!("Da dat vi tri hien thi phim: X={}, Y={}", screen_x, screen_y)
+                                format!(
+                                    "Da dat vi tri hien thi phim: X={}, Y={}",
+                                    screen_x, screen_y
+                                )
                             }
-                            _ => format!("Key display position set: X={}, Y={}", screen_x, screen_y),
+                            _ => {
+                                format!("Key display position set: X={}, Y={}", screen_x, screen_y)
+                            }
                         };
                     }
                 }
@@ -1837,10 +1869,16 @@ impl CrosshairApp {
                 .map(|preset| preset.name.clone()),
             VisionCaptureTarget::GeometryColor => Some("Geometry Color".to_owned()),
             VisionCaptureTarget::OcrStepRegion { .. } => Some("Custom OCR".to_owned()),
-            VisionCaptureTarget::MacroStepGeometryColor { .. } => Some("Macro Step Geometry Color".to_owned()),
-            VisionCaptureTarget::QuickActionsCoordinates => Some("Quick Actions Coordinates".to_owned()),
+            VisionCaptureTarget::MacroStepGeometryColor { .. } => {
+                Some("Macro Step Geometry Color".to_owned())
+            }
+            VisionCaptureTarget::QuickActionsCoordinates => {
+                Some("Quick Actions Coordinates".to_owned())
+            }
             VisionCaptureTarget::QuickActionsColor => Some("Quick Actions Color".to_owned()),
-            VisionCaptureTarget::QuickActionsKeyDisplayPosition => Some("Quick Actions Key Display Position".to_owned()),
+            VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
+                Some("Quick Actions Key Display Position".to_owned())
+            }
         }
     }
 
@@ -1999,8 +2037,8 @@ impl CrosshairApp {
                             );
                         }
                         VisionCaptureTarget::GeometryColor => {
-                            self.status =
-                                "Geometry color picking does not support search regions.".to_owned();
+                            self.status = "Geometry color picking does not support search regions."
+                                .to_owned();
                         }
                         VisionCaptureTarget::OcrPreset(preset_id) => {
                             if let Some(preset) = self
@@ -2033,8 +2071,8 @@ impl CrosshairApp {
                             );
                         }
                         VisionCaptureTarget::MacroStepGeometryColor { .. } => {
-                            self.status =
-                                "Geometry color picking does not support search regions.".to_owned();
+                            self.status = "Geometry color picking does not support search regions."
+                                .to_owned();
                         }
                         VisionCaptureTarget::QuickActionsCoordinates
                         | VisionCaptureTarget::QuickActionsColor
@@ -2060,7 +2098,9 @@ impl CrosshairApp {
                 let screen_x = center.x.round() as i32;
                 let screen_y = center.y.round() as i32;
                 if let Some(VisionCaptureTarget::Preset(preset_id)) = self.vision_capture_target {
-                    self.finish_image_search_single_pixel_capture_from_screen(ctx, preset_id, screen_x, screen_y);
+                    self.finish_image_search_single_pixel_capture_from_screen(
+                        ctx, preset_id, screen_x, screen_y,
+                    );
                 }
             }
         }
@@ -2192,10 +2232,13 @@ impl CrosshairApp {
             }
             VisionCaptureTarget::GeometryColor => {
                 self.vision_manual_color = color;
-                self.vision_manual_color_hex =
-                    format!("{:02X}{:02X}{:02X}{:02X}", color.r, color.g, color.b, color.a);
+                self.vision_manual_color_hex = format!(
+                    "{:02X}{:02X}{:02X}{:02X}",
+                    color.r, color.g, color.b, color.a
+                );
                 let mut applied = false;
-                if let Some((preset_id, object_id, is_fill)) = self.geometry_color_pick_target.take()
+                if let Some((preset_id, object_id, is_fill)) =
+                    self.geometry_color_pick_target.take()
                 {
                     if let Some(preset) = self
                         .state
@@ -2203,8 +2246,10 @@ impl CrosshairApp {
                         .iter_mut()
                         .find(|preset| preset.id == preset_id)
                     {
-                        if let Some(object) =
-                            preset.objects.iter_mut().find(|object| object.id == object_id)
+                        if let Some(object) = preset
+                            .objects
+                            .iter_mut()
+                            .find(|object| object.id == object_id)
                         {
                             if is_fill {
                                 object.spec.fill_color = color;
@@ -2241,11 +2286,22 @@ impl CrosshairApp {
                     color.r, color.g, color.b
                 )
             }
-            VisionCaptureTarget::MacroStepGeometryColor { group_id, preset_id, step_index, is_fill, is_hold_stop } => {
+            VisionCaptureTarget::MacroStepGeometryColor {
+                group_id,
+                preset_id,
+                step_index,
+                is_fill,
+                is_hold_stop,
+            } => {
                 self.vision_manual_color = color;
-                self.vision_manual_color_hex =
-                    format!("{:02X}{:02X}{:02X}{:02X}", color.r, color.g, color.b, color.a);
-                let step = self.state.macro_groups.iter_mut()
+                self.vision_manual_color_hex = format!(
+                    "{:02X}{:02X}{:02X}{:02X}",
+                    color.r, color.g, color.b, color.a
+                );
+                let step = self
+                    .state
+                    .macro_groups
+                    .iter_mut()
                     .find(|g| g.id == group_id)
                     .and_then(|g| g.presets.iter_mut().find(|p| p.id == preset_id))
                     .and_then(|p| {
@@ -2265,9 +2321,13 @@ impl CrosshairApp {
                         step.geometry_spec.stroke_color_expr =
                             Self::geometry_color_expr_literal(color);
                     }
-                    if self.draw_geometry_step_preview_target == Some((group_id, preset_id, step_index, is_hold_stop)) {
+                    if self.draw_geometry_step_preview_target
+                        == Some((group_id, preset_id, step_index, is_hold_stop))
+                    {
                         let _ = self.overlay_tx.send(
-                            crate::overlay::OverlayCommand::PreviewGeometrySpec(Some(step.geometry_spec.clone())),
+                            crate::overlay::OverlayCommand::PreviewGeometrySpec(Some(
+                                step.geometry_spec.clone(),
+                            )),
                         );
                     }
                     self.sync_macro_presets();
@@ -2287,7 +2347,9 @@ impl CrosshairApp {
                         let _ = clipboard.set_text(hex_str.clone());
                     }
                     match self.state.ui_language {
-                        crate::model::UiLanguage::Vietnamese => format!("Da sao chep ma mau vao clipboard: {}", hex_str),
+                        crate::model::UiLanguage::Vietnamese => {
+                            format!("Da sao chep ma mau vao clipboard: {}", hex_str)
+                        }
                         _ => format!("Color code copied to clipboard: {}", hex_str),
                     }
                 } else {
@@ -2554,9 +2616,13 @@ impl CrosshairApp {
                     if sy >= 0 && sy < frame.height as i32 {
                         let src_start = ((sy as usize * frame.width) + rx.max(0) as usize) * 4;
                         let dst_start = (dy as usize * width as usize) * 4;
-                        let copy_len = (width as usize * 4).min(frame.width * 4 - src_start % (frame.width * 4));
-                        if src_start + copy_len <= frame.rgba.len() && dst_start + copy_len <= cropped_rgba.len() {
-                            cropped_rgba[dst_start..dst_start+copy_len].copy_from_slice(&frame.rgba[src_start..src_start+copy_len]);
+                        let copy_len = (width as usize * 4)
+                            .min(frame.width * 4 - src_start % (frame.width * 4));
+                        if src_start + copy_len <= frame.rgba.len()
+                            && dst_start + copy_len <= cropped_rgba.len()
+                        {
+                            cropped_rgba[dst_start..dst_start + copy_len]
+                                .copy_from_slice(&frame.rgba[src_start..src_start + copy_len]);
                         }
                     }
                 }
@@ -2675,12 +2741,10 @@ impl CrosshairApp {
                 );
             }
             VisionCaptureTarget::GeometryColor => {
-                self.status =
-                    "Geometry color picking does not support search regions.".to_owned();
+                self.status = "Geometry color picking does not support search regions.".to_owned();
             }
             VisionCaptureTarget::MacroStepGeometryColor { .. } => {
-                self.status =
-                    "Geometry color picking does not support search regions.".to_owned();
+                self.status = "Geometry color picking does not support search regions.".to_owned();
             }
             VisionCaptureTarget::QuickActionsCoordinates
             | VisionCaptureTarget::QuickActionsColor
@@ -2765,10 +2829,13 @@ impl CrosshairApp {
             }
             VisionCaptureTarget::GeometryColor => {
                 self.vision_manual_color = color;
-                self.vision_manual_color_hex =
-                    format!("{:02X}{:02X}{:02X}{:02X}", color.r, color.g, color.b, color.a);
+                self.vision_manual_color_hex = format!(
+                    "{:02X}{:02X}{:02X}{:02X}",
+                    color.r, color.g, color.b, color.a
+                );
                 let mut applied = false;
-                if let Some((preset_id, object_id, is_fill)) = self.geometry_color_pick_target.take()
+                if let Some((preset_id, object_id, is_fill)) =
+                    self.geometry_color_pick_target.take()
                 {
                     if let Some(preset) = self
                         .state
@@ -2776,8 +2843,10 @@ impl CrosshairApp {
                         .iter_mut()
                         .find(|preset| preset.id == preset_id)
                     {
-                        if let Some(object) =
-                            preset.objects.iter_mut().find(|object| object.id == object_id)
+                        if let Some(object) = preset
+                            .objects
+                            .iter_mut()
+                            .find(|object| object.id == object_id)
                         {
                             if is_fill {
                                 object.spec.fill_color = color;
@@ -2814,11 +2883,22 @@ impl CrosshairApp {
                     color.r, color.g, color.b
                 )
             }
-            VisionCaptureTarget::MacroStepGeometryColor { group_id, preset_id, step_index, is_fill, is_hold_stop } => {
+            VisionCaptureTarget::MacroStepGeometryColor {
+                group_id,
+                preset_id,
+                step_index,
+                is_fill,
+                is_hold_stop,
+            } => {
                 self.vision_manual_color = color;
-                self.vision_manual_color_hex =
-                    format!("{:02X}{:02X}{:02X}{:02X}", color.r, color.g, color.b, color.a);
-                let step = self.state.macro_groups.iter_mut()
+                self.vision_manual_color_hex = format!(
+                    "{:02X}{:02X}{:02X}{:02X}",
+                    color.r, color.g, color.b, color.a
+                );
+                let step = self
+                    .state
+                    .macro_groups
+                    .iter_mut()
                     .find(|g| g.id == group_id)
                     .and_then(|g| g.presets.iter_mut().find(|p| p.id == preset_id))
                     .and_then(|p| {
@@ -2838,9 +2918,13 @@ impl CrosshairApp {
                         step.geometry_spec.stroke_color_expr =
                             Self::geometry_color_expr_literal(color);
                     }
-                    if self.draw_geometry_step_preview_target == Some((group_id, preset_id, step_index, is_hold_stop)) {
+                    if self.draw_geometry_step_preview_target
+                        == Some((group_id, preset_id, step_index, is_hold_stop))
+                    {
                         let _ = self.overlay_tx.send(
-                            crate::overlay::OverlayCommand::PreviewGeometrySpec(Some(step.geometry_spec.clone())),
+                            crate::overlay::OverlayCommand::PreviewGeometrySpec(Some(
+                                step.geometry_spec.clone(),
+                            )),
                         );
                     }
                     self.sync_macro_presets();
@@ -2860,7 +2944,9 @@ impl CrosshairApp {
                         let _ = clipboard.set_text(hex_str.clone());
                     }
                     match self.state.ui_language {
-                        crate::model::UiLanguage::Vietnamese => format!("Da sao chep ma mau vao clipboard: {}", hex_str),
+                        crate::model::UiLanguage::Vietnamese => {
+                            format!("Da sao chep ma mau vao clipboard: {}", hex_str)
+                        }
                         _ => format!("Color code copied to clipboard: {}", hex_str),
                     }
                 } else {

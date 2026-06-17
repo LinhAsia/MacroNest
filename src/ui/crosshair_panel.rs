@@ -246,10 +246,14 @@ impl CrosshairApp {
                     ui.data_mut(|data| data.insert_temp(size_id, pending_size));
 
                     // ---- Paint color picker (edits style.color directly so the render matches) ----
-                    let mut paint_rgba = [style.color.r, style.color.g, style.color.b, style.color.a];
+                    let mut paint_rgba =
+                        [style.color.r, style.color.g, style.color.b, style.color.a];
                     ui.horizontal(|ui| {
                         ui.label(Self::tr_lang(language, "Paint color", "Mau ve"));
-                        if ui.color_edit_button_srgba_unmultiplied(&mut paint_rgba).changed() {
+                        if ui
+                            .color_edit_button_srgba_unmultiplied(&mut paint_rgba)
+                            .changed()
+                        {
                             style.color.r = paint_rgba[0];
                             style.color.g = paint_rgba[1];
                             style.color.b = paint_rgba[2];
@@ -278,8 +282,7 @@ impl CrosshairApp {
                     if response.hovered() || response.dragged() || response.clicked() {
                         let pointer_down = ui.input(|input| input.pointer.any_down());
                         if pointer_down {
-                            if let Some(mouse_pos) =
-                                ui.input(|input| input.pointer.interact_pos())
+                            if let Some(mouse_pos) = ui.input(|input| input.pointer.interact_pos())
                             {
                                 if rect.contains(mouse_pos) {
                                     let relative_pos = mouse_pos - rect.min;
@@ -289,7 +292,9 @@ impl CrosshairApp {
                                         let r = r as usize;
                                         let c = c as usize;
                                         let is_right_click = ui.input(|input| {
-                                            input.pointer.button_down(egui::PointerButton::Secondary)
+                                            input
+                                                .pointer
+                                                .button_down(egui::PointerButton::Secondary)
                                         });
                                         let new_char = if is_right_click { '.' } else { '#' };
                                         if grid[r][c] != new_char {
@@ -361,7 +366,10 @@ impl CrosshairApp {
                         painter.rect_stroke(
                             center_cell_rect,
                             0.0,
-                            egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 80, 80, 160)),
+                            egui::Stroke::new(
+                                1.0,
+                                Color32::from_rgba_unmultiplied(255, 80, 80, 160),
+                            ),
                             egui::StrokeKind::Inside,
                         );
                     }
@@ -597,3 +605,4 @@ impl CrosshairApp {
         }
     }
 }
+

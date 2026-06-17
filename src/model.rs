@@ -175,6 +175,10 @@ fn default_if_color_tolerance() -> u8 {
     10
 }
 
+fn default_binary_threshold() -> u8 {
+    128
+}
+
 fn default_image_search_confidence_threshold() -> f32 {
     0.99
 }
@@ -1697,6 +1701,10 @@ pub struct PinPreset {
     pub source_y: i32,
     pub source_width: i32,
     pub source_height: i32,
+    #[serde(default)]
+    pub binary_filter: bool,
+    #[serde(default = "default_binary_threshold")]
+    pub binary_threshold: u8,
 }
 
 impl PinPreset {
@@ -1725,6 +1733,8 @@ impl PinPreset {
             source_y: 0,
             source_width: 320,
             source_height: 180,
+            binary_filter: false,
+            binary_threshold: 128,
         }
     }
 }
