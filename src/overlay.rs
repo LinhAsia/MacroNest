@@ -619,6 +619,8 @@ mod windows_overlay {
         committed_dirty: bool,
         pending_repaint: bool,
         capturing_region: bool,
+        capture_trigger: Option<HotkeyBinding>,
+        capture_session_id: u64,
         last_present_at: Option<Instant>,
         dirty_rect: Option<ScreenDrawDirtyRect>,
         live_stroke_rect: Option<ScreenDrawDirtyRect>,
@@ -662,6 +664,8 @@ mod windows_overlay {
                 committed_dirty: true,
                 pending_repaint: false,
                 capturing_region: false,
+                capture_trigger: None,
+                capture_session_id: 0,
                 last_present_at: None,
                 dirty_rect: None,
                 live_stroke_rect: None,
@@ -2570,8 +2574,13 @@ mod windows_overlay {
                     update_quick_key_display_key(key_name, is_key_down, is_key_up);
                 }
                 if let Some(key_name) = key_name.clone() {
+                    let binding = binding_from_trigger_event(&key_name);
+                    if screen_draw_capture_should_swallow_binding(&binding) {
+                        update_held_key(&key_name, is_key_down, is_key_up);
+                        update_modifier_state(info.vkCode, is_key_down);
+                        return LRESULT(1);
+                    }
                     if is_key_down {
-                        let binding = binding_from_trigger_event(&key_name);
                         if process_screen_draw_hotkey(&binding, is_repeat_key(&key_name)) {
                             update_modifier_state(info.vkCode, is_key_down);
                             return LRESULT(1);
@@ -2999,6 +3008,9 @@ mod windows_overlay {
                     ((info.mouseData >> 16) & 0xFFFF) as u16,
                 );
                 update_held_mouse_button(message, ((info.mouseData >> 16) & 0xFFFF) as u16);
+                if screen_draw_capture_should_swallow_binding(&binding) {
+                    return LRESULT(1);
+                }
                 if is_down && process_screen_draw_hotkey(&binding, false) {
                     return LRESULT(1);
                 }
@@ -4985,7 +4997,24 @@ mod windows_overlay {
         send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(display));
     }
 
+    fn screen_draw_capture_should_swallow_binding(binding: &HotkeyBinding) -> bool {
+        let state = SCREEN_DRAW_STATE.lock();
+        state.capturing_region
+            && state
+                .capture_trigger
+                .as_ref()
+                .is_some_and(|trigger| hotkey::binding_matches(trigger, binding))
+    }
+
+    fn screen_draw_capture_session_is_current(session_id: u64) -> bool {
+        let state = SCREEN_DRAW_STATE.lock();
+        state.active && state.capturing_region && state.capture_session_id == session_id
+    }
+
     fn process_screen_draw_hotkey(binding: &HotkeyBinding, is_repeat: bool) -> bool {
+        if screen_draw_capture_should_swallow_binding(binding) {
+            return true;
+        }
         if is_repeat {
             return false;
         }
@@ -5818,6 +5847,7 @@ mod windows_overlay {
             } else {
                 state.active = true;
                 state.capturing_region = false;
+                state.capture_trigger = None;
                 state.current_stroke = None;
                 state.active_control = ScreenDrawControl::None;
                 state.pending_repaint = true;
@@ -5949,6 +5979,7 @@ mod windows_overlay {
         state.current_stroke = None;
         state.active_control = ScreenDrawControl::None;
         state.capturing_region = false;
+        state.capture_trigger = None;
         state.strokes.clear();
         state.canvas_width = 0;
         state.canvas_height = 0;
@@ -6038,6 +6069,7 @@ mod windows_overlay {
 
     fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
         let mut capture_mode = None;
+        let mut capture_session_id = 0u64;
         let mut state = SCREEN_DRAW_STATE.lock();
         if !state.active || state.capturing_region {
             return false;
@@ -6080,6 +6112,9 @@ mod windows_overlay {
             ScreenDrawHit::CaptureRegion => {
                 if !state.capturing_region {
                     state.capturing_region = true;
+                    state.capture_trigger = None;
+                    state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
+                    capture_session_id = state.capture_session_id;
                     state.active_control = ScreenDrawControl::None;
                     state.current_stroke = None;
                     state.pending_repaint = false;
@@ -6109,17 +6144,21 @@ mod windows_overlay {
                     let _ = paint_screen_draw_overlay(hwnd);
                 }
             }
-            begin_screen_draw_region_capture(capture_mode);
+            begin_screen_draw_region_capture(capture_mode, capture_session_id);
         }
         true
     }
 
     fn begin_screen_draw_capture_from_trigger(trigger: HotkeyBinding) {
         let mut should_start = false;
+        let mut session_id = 0u64;
         {
             let mut state = SCREEN_DRAW_STATE.lock();
             if state.active && !state.capturing_region {
                 state.capturing_region = true;
+                state.capture_trigger = Some(trigger.clone());
+                state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
+                session_id = state.capture_session_id;
                 state.active_control = ScreenDrawControl::None;
                 state.current_stroke = None;
                 state.pending_repaint = false;
@@ -6137,22 +6176,25 @@ mod windows_overlay {
                 let _ = paint_screen_draw_overlay(hwnd);
             }
         }
-        begin_screen_draw_region_capture(ScreenDrawCaptureMode::HoldTrigger(trigger));
+        begin_screen_draw_region_capture(ScreenDrawCaptureMode::HoldTrigger(trigger), session_id);
     }
 
-    fn begin_screen_draw_region_capture(capture_mode: ScreenDrawCaptureMode) {
+    fn begin_screen_draw_region_capture(capture_mode: ScreenDrawCaptureMode, session_id: u64) {
         let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
         thread::spawn(move || {
-            let status = run_screen_draw_region_capture_flow(capture_mode);
-            restore_screen_draw_after_region_capture(hwnd_raw);
+            let status = run_screen_draw_region_capture_flow(capture_mode, session_id);
+            restore_screen_draw_after_region_capture(hwnd_raw, session_id);
             if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
                 let _ = tx.send(UiCommand::ScreenDrawCaptureStatus(status));
             }
         });
     }
 
-    fn run_screen_draw_region_capture_flow(capture_mode: ScreenDrawCaptureMode) -> String {
-        match capture_screen_draw_region_to_clipboard(capture_mode) {
+    fn run_screen_draw_region_capture_flow(
+        capture_mode: ScreenDrawCaptureMode,
+        session_id: u64,
+    ) -> String {
+        match capture_screen_draw_region_to_clipboard(capture_mode, session_id) {
             Ok(copied) if copied => "Copied annotated screen region to clipboard.".to_owned(),
             Ok(_) => "Screen draw capture cancelled.".to_owned(),
             Err(error) => format!("Screen draw capture failed: {error}"),
@@ -6161,11 +6203,15 @@ mod windows_overlay {
 
     fn capture_screen_draw_region_to_clipboard(
         capture_mode: ScreenDrawCaptureMode,
+        session_id: u64,
     ) -> Result<bool> {
+        if !screen_draw_capture_session_is_current(session_id) {
+            return Ok(false);
+        }
         let selected = match capture_mode {
-            ScreenDrawCaptureMode::MouseDrag => select_screen_draw_capture_region()?,
+            ScreenDrawCaptureMode::MouseDrag => select_screen_draw_capture_region(session_id)?,
             ScreenDrawCaptureMode::HoldTrigger(trigger) => {
-                select_screen_draw_capture_region_from_trigger(&trigger)?
+                select_screen_draw_capture_region_from_trigger(&trigger, session_id)?
             }
         };
         let Some((x, y, width, height)) = selected else {
@@ -6176,7 +6222,9 @@ mod windows_overlay {
         Ok(true)
     }
 
-    fn select_screen_draw_capture_region() -> Result<Option<(i32, i32, i32, i32)>> {
+    fn select_screen_draw_capture_region(
+        session_id: u64,
+    ) -> Result<Option<(i32, i32, i32, i32)>> {
         let is_down = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
 
         while is_down(0x01) {
@@ -6190,6 +6238,9 @@ mod windows_overlay {
 
         let mut origin: Option<(i32, i32)> = None;
         let result = loop {
+            if !screen_draw_capture_session_is_current(session_id) {
+                break Ok(None);
+            }
             if is_down(0x1B) || is_down(0x02) {
                 break Ok(None);
             }
@@ -6220,6 +6271,7 @@ mod windows_overlay {
 
     fn select_screen_draw_capture_region_from_trigger(
         trigger: &HotkeyBinding,
+        session_id: u64,
     ) -> Result<Option<(i32, i32, i32, i32)>> {
         let mut origin = POINT::default();
         if unsafe { GetCursorPos(&mut origin).is_err() } {
@@ -6230,6 +6282,9 @@ mod windows_overlay {
         update_screen_draw_region_capture_preview(origin, origin);
 
         let result = loop {
+            if !screen_draw_capture_session_is_current(session_id) {
+                break Ok(None);
+            }
             if (unsafe { GetAsyncKeyState(0x1B) } as u16 & 0x8000) != 0 {
                 break Ok(None);
             }
@@ -6422,9 +6477,13 @@ mod windows_overlay {
             .context("Failed to copy the annotated screenshot to the clipboard")
     }
 
-    fn restore_screen_draw_after_region_capture(hwnd_raw: isize) {
+    fn restore_screen_draw_after_region_capture(hwnd_raw: isize, session_id: u64) {
         let mut state = SCREEN_DRAW_STATE.lock();
+        if state.capture_session_id != session_id {
+            return;
+        }
         state.capturing_region = false;
+        state.capture_trigger = None;
         let active = state.active;
         if active {
             let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
