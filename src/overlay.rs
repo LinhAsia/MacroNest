@@ -624,6 +624,7 @@ mod windows_overlay {
         capture_trigger: Option<HotkeyBinding>,
         trigger_latched: bool,
         trigger_pressed_at: Option<Instant>,
+        trigger_started_from_inactive: bool,
         capture_trigger_release_point: Option<(i32, i32)>,
         capture_session_id: u64,
         last_present_at: Option<Instant>,
@@ -672,6 +673,7 @@ mod windows_overlay {
                 capture_trigger: None,
                 trigger_latched: false,
                 trigger_pressed_at: None,
+                trigger_started_from_inactive: false,
                 capture_trigger_release_point: None,
                 capture_session_id: 0,
                 last_present_at: None,
@@ -5416,9 +5418,6 @@ mod windows_overlay {
         if screen_draw_capture_should_swallow_binding(binding) {
             return true;
         }
-        if is_repeat {
-            return false;
-        }
         let (
             matches_trigger,
             pass_trigger_through,
@@ -5454,28 +5453,52 @@ mod windows_overlay {
             let mut state = SCREEN_DRAW_STATE.lock();
             state.trigger_latched = false;
             state.trigger_pressed_at = None;
+            state.trigger_started_from_inactive = false;
+        }
+        if is_repeat && active {
+            return !pass_trigger_through;
         }
 
         if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
             return true;
         }
-        SCREEN_DRAW_STATE.lock().trigger_latched = true;
-
-        if active {
-            if !capturing_region {
-                let mut state = SCREEN_DRAW_STATE.lock();
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            state.trigger_latched = true;
+            if active {
+                if !capturing_region {
+                    state.trigger_pressed_at = Some(Instant::now());
+                    state.trigger_started_from_inactive = false;
+                }
+            } else {
+                state.active = true;
+                state.capturing_region = false;
+                state.capture_trigger = None;
                 state.trigger_pressed_at = Some(Instant::now());
+                state.trigger_started_from_inactive = true;
+                state.capture_trigger_release_point = None;
+                state.current_stroke = None;
+                state.active_control = ScreenDrawControl::None;
+                state.pending_repaint = true;
+                state.dirty_rect = Some(ScreenDrawDirtyRect::full(
+                    state.canvas_width.max(1),
+                    state.canvas_height.max(1),
+                ));
+                state.live_stroke_rect = None;
             }
-            return !pass_trigger_through;
         }
-
-        toggle_screen_draw_state();
         request_screen_draw_overlay_sync();
         !pass_trigger_through
     }
 
     fn process_screen_draw_hotkey_release(binding: &HotkeyBinding) -> bool {
-        let (matches_trigger_key, pass_trigger_through, active, capturing_region) = {
+        let (
+            matches_trigger_key,
+            pass_trigger_through,
+            active,
+            capturing_region,
+            started_from_inactive,
+        ) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
                 state.enabled
@@ -5486,6 +5509,7 @@ mod windows_overlay {
                 state.pass_trigger_through,
                 state.active,
                 state.capturing_region,
+                state.trigger_started_from_inactive,
             )
         };
         if !matches_trigger_key {
@@ -5500,10 +5524,12 @@ mod windows_overlay {
         {
             let mut state = SCREEN_DRAW_STATE.lock();
             state.trigger_latched = false;
+            state.trigger_started_from_inactive = false;
             if active
                 && let Some(pressed_at) = state.trigger_pressed_at.take()
                 && Instant::now().duration_since(pressed_at)
                     < Duration::from_millis(SCREEN_DRAW_TRIGGER_HOLD_MS)
+                && !started_from_inactive
             {
                 deactivate_screen_draw(&mut state);
                 should_toggle_off = true;
@@ -5521,11 +5547,13 @@ mod windows_overlay {
         let Some(trigger) = state.trigger.clone() else {
             state.trigger_latched = false;
             state.trigger_pressed_at = None;
+            state.trigger_started_from_inactive = false;
             return;
         };
         if !screen_draw_trigger_binding_is_down(&trigger) {
             state.trigger_latched = false;
             state.trigger_pressed_at = None;
+            state.trigger_started_from_inactive = false;
         }
     }
 
@@ -5558,14 +5586,17 @@ mod windows_overlay {
             let Some(trigger) = state.trigger.clone() else {
                 state.trigger_pressed_at = None;
                 state.trigger_latched = false;
+                state.trigger_started_from_inactive = false;
                 return;
             };
             if !screen_draw_trigger_binding_is_down(&trigger) {
                 state.trigger_pressed_at = None;
                 state.trigger_latched = false;
+                state.trigger_started_from_inactive = false;
                 return;
             }
             state.trigger_pressed_at = None;
+            state.trigger_started_from_inactive = false;
             state.capture_trigger_release_point = None;
             trigger
         };
@@ -6353,31 +6384,6 @@ mod windows_overlay {
         unsafe { sync_screen_draw_overlay_window(runtime.screen_draw_hwnd) }
     }
 
-    fn toggle_screen_draw_state() {
-        let mut state = SCREEN_DRAW_STATE.lock();
-        if !state.enabled {
-            return;
-        }
-        if state.active {
-            deactivate_screen_draw(&mut state);
-        } else {
-            state.active = true;
-            state.capturing_region = false;
-            state.capture_trigger = None;
-            state.trigger_latched = false;
-            state.trigger_pressed_at = None;
-            state.capture_trigger_release_point = None;
-            state.current_stroke = None;
-            state.active_control = ScreenDrawControl::None;
-            state.pending_repaint = true;
-            state.dirty_rect = Some(ScreenDrawDirtyRect::full(
-                state.canvas_width.max(1),
-                state.canvas_height.max(1),
-            ));
-            state.live_stroke_rect = None;
-        }
-    }
-
     fn request_screen_draw_overlay_sync() {
         let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
         if hwnd_raw == 0 {
@@ -6521,6 +6527,7 @@ mod windows_overlay {
         state.capture_trigger = None;
         state.trigger_latched = false;
         state.trigger_pressed_at = None;
+        state.trigger_started_from_inactive = false;
         state.capture_trigger_release_point = None;
         state.strokes.clear();
         state.committed_dirty = true;
@@ -6693,6 +6700,7 @@ mod windows_overlay {
                 state.capture_trigger = Some(trigger.clone());
                 state.trigger_latched = true;
                 state.trigger_pressed_at = None;
+                state.trigger_started_from_inactive = false;
                 state.capture_trigger_release_point = None;
                 state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
                 session_id = state.capture_session_id;
@@ -7089,6 +7097,7 @@ mod windows_overlay {
         if !trigger_still_down {
             state.trigger_latched = false;
             state.trigger_pressed_at = None;
+            state.trigger_started_from_inactive = false;
         }
         let active = state.active;
         if active {
