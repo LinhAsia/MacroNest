@@ -457,6 +457,22 @@ fn protractor_calibration_status_text(
     }
 }
 
+fn protractor_cursor_warning_text(
+    state: &CaptureState,
+    ui_language: crate::model::UiLanguage,
+) -> Option<&'static str> {
+    if state.protractor_points.len() < 2 || !protractor_circle_too_small(state) {
+        return None;
+    }
+
+    Some(match ui_language {
+        crate::model::UiLanguage::Vietnamese => "Vong tron qua nho",
+        crate::model::UiLanguage::English | crate::model::UiLanguage::Icon => {
+            "Circle too small"
+        }
+    })
+}
+
 fn draw_rounded_rect(
     pixmap: &mut Pixmap,
     x: f32,
@@ -956,22 +972,54 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
         let abs_x = curr.0 + state.left;
         let abs_y = curr.1 + state.top;
         let coords_str = format!("X: {}, Y: {}", abs_x, abs_y);
+        let tooltip_warning = match state.mode {
+            NativeCaptureMode::ProtractorCalibration { ui_language } => {
+                protractor_cursor_warning_text(state, ui_language)
+            }
+            _ => None,
+        };
         let mut coords_u16: Vec<u16> = coords_str.encode_utf16().collect();
 
         let mut c_calc = RECT::default();
         let _ = DrawTextW(hdc, &mut coords_u16, &mut c_calc, DT_CALCRECT);
         let cw = c_calc.right - c_calc.left;
         let ch = c_calc.bottom - c_calc.top;
+        let (warning_u16, warning_w, warning_h) = if let Some(text) = tooltip_warning {
+            let mut warning_u16: Vec<u16> = text.encode_utf16().collect();
+            let mut warning_calc = RECT::default();
+            let _ = DrawTextW(hdc, &mut warning_u16, &mut warning_calc, DT_CALCRECT);
+            (
+                Some(warning_u16),
+                warning_calc.right - warning_calc.left,
+                warning_calc.bottom - warning_calc.top,
+            )
+        } else {
+            (None, 0, 0)
+        };
+        let content_w = cw.max(warning_w);
+        let content_h = if warning_u16.is_some() {
+            ch + 4 + warning_h
+        } else {
+            ch
+        };
 
-        let tooltip_x = curr.0 + 15;
-        let tooltip_y = curr.1 + 15;
+        let tooltip_w = content_w + 16;
+        let tooltip_h = content_h + 10;
+        let max_tooltip_x = (state.width - tooltip_w - 8).max(8);
+        let max_tooltip_y = (state.height - tooltip_h - 8).max(8);
+        let tooltip_x = (curr.0 + 15).clamp(8, max_tooltip_x);
+        let tooltip_y = (curr.1 + 15).clamp(8, max_tooltip_y);
 
         // Draw small dark tooltip background
         let t_brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(rgb(15, 23, 42));
         let t_pen = windows::Win32::Graphics::Gdi::CreatePen(
             windows::Win32::Graphics::Gdi::PS_SOLID,
             1,
-            rgb(0, 160, 255),
+            if warning_u16.is_some() {
+                rgb(255, 140, 72)
+            } else {
+                rgb(0, 160, 255)
+            },
         );
         let old_tb = SelectObject(hdc, HGDIOBJ(t_brush.0));
         let old_tp = SelectObject(hdc, HGDIOBJ(t_pen.0));
@@ -980,19 +1028,41 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
             hdc,
             tooltip_x,
             tooltip_y,
-            tooltip_x + cw + 16,
-            tooltip_y + ch + 10,
+            tooltip_x + tooltip_w,
+            tooltip_y + tooltip_h,
             6,
             6,
         );
 
-        let mut t_rect = RECT {
+        let mut coords_rect = RECT {
             left: tooltip_x + 8,
             top: tooltip_y + 5,
-            right: tooltip_x + cw + 8,
+            right: tooltip_x + content_w + 8,
             bottom: tooltip_y + ch + 5,
         };
-        let _ = DrawTextW(hdc, &mut coords_u16, &mut t_rect, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        let _ = SetTextColor(hdc, rgb(255, 255, 255));
+        let _ = DrawTextW(
+            hdc,
+            &mut coords_u16,
+            &mut coords_rect,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
+
+        if let Some(mut warning_u16) = warning_u16 {
+            let _ = SetTextColor(hdc, rgb(255, 196, 148));
+            let mut warning_rect = RECT {
+                left: tooltip_x + 8,
+                top: coords_rect.bottom + 4,
+                right: tooltip_x + content_w + 8,
+                bottom: coords_rect.bottom + 4 + warning_h,
+            };
+            let _ = DrawTextW(
+                hdc,
+                &mut warning_u16,
+                &mut warning_rect,
+                DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+            );
+        }
 
         let _ = SelectObject(hdc, old_tb);
         let _ = SelectObject(hdc, old_tp);
