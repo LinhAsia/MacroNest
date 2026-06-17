@@ -9692,7 +9692,7 @@ mod windows_overlay {
         decoration: crate::model::FocusHighlightDecoration,
     ) -> (i32, u32) {
         match decoration {
-            crate::model::FocusHighlightDecoration::FloralWood => (18, 10),
+            crate::model::FocusHighlightDecoration::FloralWood => (28, 14),
             crate::model::FocusHighlightDecoration::Plain
             | crate::model::FocusHighlightDecoration::Rainbow => (5, 4),
         }
@@ -9772,6 +9772,256 @@ mod windows_overlay {
                 }
             }
         }
+    }
+
+    fn draw_canvas_line(
+        canvas: &mut RgbaImage,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        radius: i32,
+        color: image::Rgba<u8>,
+    ) {
+        let dx = x1 - x0;
+        let dy = y1 - y0;
+        let steps = dx.abs().max(dy.abs()).max(1);
+        for step in 0..=steps {
+            let t = step as f32 / steps as f32;
+            let x = x0 as f32 + dx as f32 * t;
+            let y = y0 as f32 + dy as f32 * t;
+            draw_canvas_circle(canvas, x.round() as i32, y.round() as i32, radius, color);
+        }
+    }
+
+    fn draw_canvas_leaf(
+        canvas: &mut RgbaImage,
+        cx: i32,
+        cy: i32,
+        radius_x: i32,
+        radius_y: i32,
+        tip_x: i32,
+        tip_y: i32,
+        fill: image::Rgba<u8>,
+        vein: image::Rgba<u8>,
+    ) {
+        draw_canvas_ellipse(canvas, cx, cy, radius_x, radius_y, fill);
+        draw_canvas_line(canvas, cx, cy, tip_x, tip_y, 1, vein);
+        draw_canvas_circle(canvas, tip_x, tip_y, 1, vein);
+    }
+
+    fn vine_wave(progress: f32, seed: f32, amplitude: f32) -> f32 {
+        (progress * 0.085 + seed).sin() * amplitude
+            + (progress * 0.041 + seed * 1.7).cos() * amplitude * 0.45
+    }
+
+    fn draw_vine_strip_horizontal(
+        canvas: &mut RgbaImage,
+        y: i32,
+        width: i32,
+        outward_dir: i32,
+        strand_count: usize,
+    ) {
+        let vine_dark = image::Rgba([88, 68, 48, 220]);
+        let vine_mid = image::Rgba([118, 92, 68, 205]);
+        let vine_light = image::Rgba([150, 123, 96, 185]);
+        let colors = [vine_dark, vine_mid, vine_light, vine_dark];
+        for strand in 0..strand_count {
+            let seed = 0.9 + strand as f32 * 0.82;
+            let amplitude = 4.0 + strand as f32 * 1.6;
+            let base_y = y + outward_dir * ((strand as i32 % 3) - 1);
+            let mut prev_x = 0;
+            let mut prev_y = base_y;
+            let step = 6;
+            let radius = if strand % 2 == 0 { 1 } else { 2 };
+            for x in (0..=width).step_by(step as usize) {
+                let xf = x as f32;
+                let wave = vine_wave(xf, seed, amplitude).round() as i32;
+                let current_y = base_y + wave;
+                draw_canvas_line(
+                    canvas,
+                    prev_x,
+                    prev_y,
+                    x,
+                    current_y,
+                    radius,
+                    colors[strand.min(colors.len() - 1)],
+                );
+                prev_x = x;
+                prev_y = current_y;
+            }
+        }
+    }
+
+    fn draw_vine_strip_vertical(
+        canvas: &mut RgbaImage,
+        x: i32,
+        height: i32,
+        outward_dir: i32,
+        strand_count: usize,
+    ) {
+        let vine_dark = image::Rgba([86, 64, 46, 220]);
+        let vine_mid = image::Rgba([116, 88, 64, 205]);
+        let vine_light = image::Rgba([146, 116, 88, 185]);
+        let colors = [vine_dark, vine_mid, vine_light, vine_dark];
+        for strand in 0..strand_count {
+            let seed = 1.2 + strand as f32 * 0.76;
+            let amplitude = 4.0 + strand as f32 * 1.6;
+            let base_x = x + outward_dir * ((strand as i32 % 3) - 1);
+            let mut prev_x = base_x;
+            let mut prev_y = 0;
+            let step = 6;
+            let radius = if strand % 2 == 0 { 1 } else { 2 };
+            for y in (0..=height).step_by(step as usize) {
+                let yf = y as f32;
+                let wave = vine_wave(yf, seed, amplitude).round() as i32;
+                let current_x = base_x + wave;
+                draw_canvas_line(
+                    canvas,
+                    prev_x,
+                    prev_y,
+                    current_x,
+                    y,
+                    radius,
+                    colors[strand.min(colors.len() - 1)],
+                );
+                prev_x = current_x;
+                prev_y = y;
+            }
+        }
+    }
+
+    fn draw_leaf_run_horizontal(
+        canvas: &mut RgbaImage,
+        start_x: i32,
+        end_x: i32,
+        base_y: i32,
+        outward_dir: i32,
+        seed: f32,
+    ) {
+        let leaf_fill = image::Rgba([112, 176, 68, 230]);
+        let leaf_fill_bright = image::Rgba([156, 208, 92, 238]);
+        let vein = image::Rgba([72, 118, 48, 220]);
+        let length = (end_x - start_x).max(1);
+        let leaf_count = (length / 34).clamp(2, 14);
+        for index in 0..leaf_count {
+            let t = index as f32 / leaf_count as f32;
+            let x = start_x + (length as f32 * t) as i32;
+            let sway = vine_wave(x as f32, seed + index as f32 * 0.4, 6.0).round() as i32;
+            let y = base_y + sway + outward_dir * (10 + (index % 3) as i32 * 4);
+            let tip_x = x + if index % 2 == 0 { 7 } else { -7 };
+            let tip_y = y + outward_dir * (8 + (index % 2) as i32 * 2);
+            let fill = if index % 3 == 0 {
+                leaf_fill_bright
+            } else {
+                leaf_fill
+            };
+            draw_canvas_leaf(
+                canvas,
+                x,
+                y,
+                5 + (index % 2) as i32,
+                3,
+                tip_x,
+                tip_y,
+                fill,
+                vein,
+            );
+        }
+    }
+
+    fn draw_leaf_run_vertical(
+        canvas: &mut RgbaImage,
+        start_y: i32,
+        end_y: i32,
+        base_x: i32,
+        outward_dir: i32,
+        seed: f32,
+    ) {
+        let leaf_fill = image::Rgba([104, 168, 74, 230]);
+        let leaf_fill_bright = image::Rgba([154, 210, 96, 238]);
+        let vein = image::Rgba([70, 116, 52, 220]);
+        let length = (end_y - start_y).max(1);
+        let leaf_count = (length / 38).clamp(2, 12);
+        for index in 0..leaf_count {
+            let t = index as f32 / leaf_count as f32;
+            let y = start_y + (length as f32 * t) as i32;
+            let sway = vine_wave(y as f32, seed + index as f32 * 0.33, 6.0).round() as i32;
+            let x = base_x + sway + outward_dir * (10 + (index % 3) as i32 * 4);
+            let tip_x = x + outward_dir * (8 + (index % 2) as i32 * 2);
+            let tip_y = y + if index % 2 == 0 { 7 } else { -7 };
+            let fill = if index % 3 == 0 {
+                leaf_fill_bright
+            } else {
+                leaf_fill
+            };
+            draw_canvas_leaf(
+                canvas,
+                x,
+                y,
+                3,
+                5 + (index % 2) as i32,
+                tip_x,
+                tip_y,
+                fill,
+                vein,
+            );
+        }
+    }
+
+    fn draw_corner_foliage_cluster(
+        canvas: &mut RgbaImage,
+        anchor_x: i32,
+        anchor_y: i32,
+        x_dir: i32,
+        y_dir: i32,
+        lushness: i32,
+    ) {
+        let dark_leaf = image::Rgba([74, 128, 56, 238]);
+        let mid_leaf = image::Rgba([102, 168, 70, 240]);
+        let bright_leaf = image::Rgba([164, 214, 102, 244]);
+        let vein = image::Rgba([58, 94, 42, 220]);
+        let petal = image::Rgba([214, 240, 190, 232]);
+        let blossom_center = image::Rgba([248, 218, 108, 245]);
+
+        for layer in 0..lushness {
+            let offset_x = x_dir * (6 + layer * 6);
+            let offset_y = y_dir * (4 + layer * 5);
+            let leaf_color = match layer % 3 {
+                0 => bright_leaf,
+                1 => mid_leaf,
+                _ => dark_leaf,
+            };
+            draw_canvas_leaf(
+                canvas,
+                anchor_x + offset_x,
+                anchor_y + offset_y,
+                7 + layer % 2,
+                4 + layer % 3,
+                anchor_x + offset_x + x_dir * (8 + layer),
+                anchor_y + offset_y + y_dir * (4 + layer / 2),
+                leaf_color,
+                vein,
+            );
+            draw_canvas_leaf(
+                canvas,
+                anchor_x + offset_x / 2,
+                anchor_y + offset_y + y_dir * 6,
+                6,
+                4,
+                anchor_x + offset_x / 2 - x_dir * (6 + layer / 2),
+                anchor_y + offset_y + y_dir * 10,
+                leaf_color,
+                vein,
+            );
+        }
+
+        draw_canvas_circle(canvas, anchor_x, anchor_y, 4, petal);
+        draw_canvas_circle(canvas, anchor_x + x_dir * 7, anchor_y - 1, 4, petal);
+        draw_canvas_circle(canvas, anchor_x + x_dir * 4, anchor_y + y_dir * 7, 4, petal);
+        draw_canvas_circle(canvas, anchor_x - x_dir * 4, anchor_y + y_dir * 7, 4, petal);
+        draw_canvas_circle(canvas, anchor_x - x_dir * 7, anchor_y - 1, 4, petal);
+        draw_canvas_circle(canvas, anchor_x, anchor_y, 3, blossom_center);
     }
 
     fn draw_focus_highlight_basic_border(
@@ -9861,6 +10111,8 @@ mod windows_overlay {
     ) {
         let width = canvas.width();
         let height = canvas.height();
+        let width_i = width as i32;
+        let height_i = height as i32;
         for y in 0..height.min(thickness) {
             for x in 0..width {
                 canvas.put_pixel(x, y, wood_tone(x, y, y));
@@ -9890,6 +10142,11 @@ mod windows_overlay {
             }
         }
 
+        draw_vine_strip_horizontal(canvas, thickness as i32 / 2 + 1, width_i, 1, 4);
+        draw_vine_strip_horizontal(canvas, height_i - thickness as i32 / 2 - 2, width_i, -1, 4);
+        draw_vine_strip_vertical(canvas, thickness as i32 / 2 + 1, height_i, 1, 4);
+        draw_vine_strip_vertical(canvas, width_i - thickness as i32 / 2 - 2, height_i, -1, 4);
+
         let bevel = image::Rgba([255, 240, 214, 70]);
         fill_canvas_rect(canvas, 0, 1, width as i32, 1, bevel);
         fill_canvas_rect(canvas, 1, 0, 1, height as i32, bevel);
@@ -9910,13 +10167,57 @@ mod windows_overlay {
             image::Rgba([58, 34, 18, 90]),
         );
 
-        let offset = thickness as i32 + 2;
-        let right = width as i32 - offset - 1;
-        let bottom = height as i32 - offset - 1;
-        draw_flower_corner(canvas, offset, offset, 1, 1, accent);
-        draw_flower_corner(canvas, right, offset, -1, 1, accent);
-        draw_flower_corner(canvas, offset, bottom, 1, -1, accent);
-        draw_flower_corner(canvas, right, bottom, -1, -1, accent);
+        let offset = thickness as i32 + 4;
+        let right = width_i - offset - 1;
+        let bottom = height_i - offset - 1;
+
+        draw_leaf_run_horizontal(canvas, 28, width_i - 40, thickness as i32 - 1, 1, 0.9);
+        draw_leaf_run_horizontal(
+            canvas,
+            32,
+            width_i - 26,
+            height_i - thickness as i32 + 1,
+            -1,
+            2.3,
+        );
+        draw_leaf_run_vertical(canvas, 24, height_i - 34, thickness as i32 - 1, 1, 1.4);
+        draw_leaf_run_vertical(
+            canvas,
+            22,
+            height_i - 28,
+            width_i - thickness as i32 + 1,
+            -1,
+            2.0,
+        );
+
+        draw_corner_foliage_cluster(canvas, offset + 6, bottom - 4, 1, -1, 5);
+        draw_corner_foliage_cluster(canvas, right - 2, offset + 4, -1, 1, 5);
+        draw_corner_foliage_cluster(canvas, offset + 4, offset + 3, 1, 1, 3);
+        draw_corner_foliage_cluster(canvas, right - 4, bottom - 4, -1, -1, 3);
+
+        draw_flower_corner(canvas, offset + 10, offset + 10, 1, 1, accent);
+        draw_flower_corner(canvas, right - 8, offset + 10, -1, 1, accent);
+        draw_flower_corner(canvas, offset + 8, bottom - 8, 1, -1, accent);
+        draw_flower_corner(canvas, right - 10, bottom - 8, -1, -1, accent);
+
+        draw_canvas_line(
+            canvas,
+            right - 12,
+            offset + 18,
+            right - 22,
+            offset + 56,
+            1,
+            image::Rgba([92, 118, 58, 210]),
+        );
+        draw_canvas_line(
+            canvas,
+            offset + 14,
+            offset + 34,
+            offset + 8,
+            offset + 66,
+            1,
+            image::Rgba([92, 118, 58, 210]),
+        );
     }
 
     unsafe fn paint_focus_highlight_overlay(runtime: &Runtime, target: HWND) -> Result<()> {
