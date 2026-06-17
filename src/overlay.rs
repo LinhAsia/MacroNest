@@ -6106,13 +6106,25 @@ mod windows_overlay {
     }
 
     fn capture_screen_draw_region_to_clipboard() -> Result<bool> {
-        let capture = build_screen_draw_capture_frame()?;
+        let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+        if screen_w <= 0 || screen_h <= 0 {
+            bail!("Virtual screen is unavailable");
+        }
+
+        thread::sleep(Duration::from_millis(16));
+        let selection_frame = window_list::capture_virtual_screen_region(
+            screen_x,
+            screen_y,
+            screen_w,
+            screen_h,
+        )
+        .ok_or_else(|| anyhow::anyhow!("Failed to capture the virtual screen"))?;
         let result = native_capture::run_capture_overlay(
-            capture.clone(),
-            capture.screen_x,
-            capture.screen_y,
-            capture.width as i32,
-            capture.height as i32,
+            selection_frame,
+            screen_x,
+            screen_y,
+            screen_w,
+            screen_h,
             native_capture::NativeCaptureMode::RegionSelect {
                 is_template: false,
                 vietnamese: false,
@@ -6125,54 +6137,105 @@ mod windows_overlay {
                 width,
                 height,
             } => {
-                copy_screen_draw_capture_region_to_clipboard(&capture, x, y, width, height)?;
+                let capture = build_screen_draw_capture_region(x, y, width, height)?;
+                copy_screen_draw_capture_to_clipboard(&capture)?;
                 Ok(true)
             }
             _ => Ok(false),
         }
     }
 
-    fn build_screen_draw_capture_frame() -> Result<window_list::ScreenCaptureFrame> {
+    fn build_screen_draw_capture_region(
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    ) -> Result<window_list::ScreenCaptureFrame> {
+        let (capture_x, capture_y, capture_w, capture_h) =
+            normalize_screen_draw_capture_region(x, y, width, height)?;
+        thread::sleep(Duration::from_millis(16));
+        let mut capture = window_list::capture_virtual_screen_region(
+            capture_x,
+            capture_y,
+            capture_w,
+            capture_h,
+        )
+        .ok_or_else(|| anyhow::anyhow!("Failed to capture the selected screen region"))?;
+        let draw_layer = build_screen_draw_capture_region_layer(
+            capture_x,
+            capture_y,
+            capture.width as i32,
+            capture.height as i32,
+        )?;
+        blend_screen_draw_layer_onto_capture(capture.rgba.as_mut_slice(), draw_layer.as_slice());
+        Ok(capture)
+    }
+
+    fn normalize_screen_draw_capture_region(
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    ) -> Result<(i32, i32, i32, i32)> {
         let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
         if screen_w <= 0 || screen_h <= 0 {
             bail!("Virtual screen is unavailable");
         }
 
-        let draw_layer = {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            if !state.active {
-                bail!("Screen draw is not active");
-            }
-            let width = screen_w as usize;
-            let height = screen_h as usize;
-            ensure_screen_draw_canvas(&mut state, width, height);
-            if state.committed_dirty {
-                rebuild_screen_draw_canvas(&mut state);
-            }
-            let mut rgba = state.committed_rgba.clone();
-            if let Some(stroke) = state.current_stroke.clone()
-                && let Some(mut pixmap) =
-                    tiny_skia::PixmapMut::from_bytes(rgba.as_mut_slice(), width as u32, height as u32)
-            {
-                render_screen_draw_stroke_skia(&mut pixmap, &stroke);
-            }
-            rgba
-        };
-
-        let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
-        if hwnd_raw != 0 {
-            unsafe {
-                let hwnd = HWND(hwnd_raw as *mut c_void);
-                set_screen_draw_refresh_timer(hwnd, false);
-                let _ = ShowWindow(hwnd, SW_HIDE);
-            }
+        let screen_right = screen_x + screen_w;
+        let screen_bottom = screen_y + screen_h;
+        let capture_x = x.clamp(screen_x, screen_right - 1);
+        let capture_y = y.clamp(screen_y, screen_bottom - 1);
+        let capture_w = width.max(1).min(screen_right - capture_x);
+        let capture_h = height.max(1).min(screen_bottom - capture_y);
+        if capture_w <= 0 || capture_h <= 0 {
+            bail!("Selected capture region is empty");
         }
-        thread::sleep(Duration::from_millis(30));
 
-        let mut capture = window_list::capture_virtual_screen_region(screen_x, screen_y, screen_w, screen_h)
-            .ok_or_else(|| anyhow::anyhow!("Failed to capture the virtual screen"))?;
-        blend_screen_draw_layer_onto_capture(capture.rgba.as_mut_slice(), draw_layer.as_slice());
-        Ok(capture)
+        Ok((capture_x, capture_y, capture_w, capture_h))
+    }
+
+    fn build_screen_draw_capture_region_layer(
+        capture_x: i32,
+        capture_y: i32,
+        capture_w: i32,
+        capture_h: i32,
+    ) -> Result<Vec<u8>> {
+        let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+        if screen_w <= 0 || screen_h <= 0 {
+            bail!("Virtual screen is unavailable");
+        }
+
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if !state.active {
+            bail!("Screen draw is not active");
+        }
+
+        let canvas_width = screen_w as usize;
+        let canvas_height = screen_h as usize;
+        ensure_screen_draw_canvas(&mut state, canvas_width, canvas_height);
+        if state.committed_dirty {
+            rebuild_screen_draw_canvas(&mut state);
+        }
+
+        let rel_x = (capture_x - screen_x).clamp(0, screen_w.saturating_sub(1)) as usize;
+        let rel_y = (capture_y - screen_y).clamp(0, screen_h.saturating_sub(1)) as usize;
+        let copy_w = (capture_w.max(1) as usize).min(canvas_width.saturating_sub(rel_x));
+        let copy_h = (capture_h.max(1) as usize).min(canvas_height.saturating_sub(rel_y));
+        if copy_w == 0 || copy_h == 0 {
+            bail!("Selected capture region is empty");
+        }
+
+        let mut rgba = vec![0u8; copy_w * copy_h * 4];
+        for row in 0..copy_h {
+            let src_index = ((rel_y + row) * canvas_width + rel_x) * 4;
+            let dst_index = row * copy_w * 4;
+            let byte_count = copy_w * 4;
+            rgba[dst_index..dst_index + byte_count]
+                .copy_from_slice(&state.committed_rgba[src_index..src_index + byte_count]);
+        }
+
+        Ok(rgba)
     }
 
     fn blend_screen_draw_layer_onto_capture(dst: &mut [u8], src: &[u8]) {
@@ -6194,43 +6257,15 @@ mod windows_overlay {
         }
     }
 
-    fn copy_screen_draw_capture_region_to_clipboard(
+    fn copy_screen_draw_capture_to_clipboard(
         capture: &window_list::ScreenCaptureFrame,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
     ) -> Result<()> {
-        let rel_x = (x - capture.screen_x).clamp(0, capture.width.saturating_sub(1) as i32) as u32;
-        let rel_y = (y - capture.screen_y).clamp(0, capture.height.saturating_sub(1) as i32) as u32;
-        let max_width = capture.width.saturating_sub(rel_x as usize) as u32;
-        let max_height = capture.height.saturating_sub(rel_y as usize) as u32;
-        let crop_width = (width.max(1) as u32).min(max_width);
-        let crop_height = (height.max(1) as u32).min(max_height);
-        if crop_width == 0 || crop_height == 0 {
-            bail!("Selected capture region is empty");
-        }
-
-        let source = RgbaImage::from_raw(
-            capture.width as u32,
-            capture.height as u32,
-            capture.rgba.clone(),
-        )
-        .ok_or_else(|| anyhow::anyhow!("Failed to build the screen capture image"))?;
-        let cropped = image::imageops::crop_imm(
-            &source,
-            rel_x,
-            rel_y,
-            crop_width,
-            crop_height,
-        )
-        .to_image();
         let mut clipboard = Clipboard::new().context("Failed to open the clipboard")?;
         clipboard
             .set_image(ImageData {
-                width: crop_width as usize,
-                height: crop_height as usize,
-                bytes: Cow::Owned(cropped.into_raw()),
+                width: capture.width,
+                height: capture.height,
+                bytes: Cow::Owned(capture.rgba.clone()),
             })
             .context("Failed to copy the annotated screenshot to the clipboard")
     }
