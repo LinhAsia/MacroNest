@@ -13,14 +13,14 @@ impl CrosshairApp {
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             if ui
-                .button(self.tr("+ Add HUD preset", "+ Thêm preset HUD"))
+                .button(self.tr("+ Add HUD preset", "+ Add HUD preset"))
                 .clicked()
             {
                 self.add_toolbox_preset();
                 self.persist_hud_presets();
             }
             if ui
-                .button(self.tr("+ Add timer preset", "+ Thêm preset Timer"))
+                .button(self.tr("+ Add timer preset", "+ Add timer preset"))
                 .clicked()
             {
                 let mut id = 1;
@@ -46,7 +46,7 @@ impl CrosshairApp {
 
         ui.add_space(16.0);
         ui.label(
-            RichText::new(self.tr("Text Presets", "Thiết lập Văn bản"))
+            RichText::new(self.tr("Text Presets", "Text Presets"))
                 .strong()
                 .size(14.0),
         );
@@ -82,9 +82,9 @@ impl CrosshairApp {
                             ),
                         )
                         .on_hover_text(if preview_active {
-                            Self::tr_lang(language, "Stop HUD preview", "Dung preview HUD")
+                            Self::tr_lang(language, "Stop HUD preview", "Stop HUD preview")
                         } else {
-                            Self::tr_lang(language, "Run HUD preview", "Chay preview HUD")
+                            Self::tr_lang(language, "Run HUD preview", "Run HUD preview")
                         });
                         if preview_response.clicked() {
                             preset.preview_enabled = !preset.preview_enabled;
@@ -99,7 +99,7 @@ impl CrosshairApp {
                         if Self::sound_style_toggle_button(
                             ui,
                             if preset.collapsed {
-                                Self::tr_lang(language, "Show", "Hiện")
+                                Self::tr_lang(language, "Show", "Show")
                             } else {
                                 Self::tr_lang(language, "Hide", "Hide")
                             },
@@ -135,7 +135,7 @@ impl CrosshairApp {
                         changed |= response.changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Font Size", "Cỡ chữ"));
+                        ui.label(Self::tr_lang(language, "Font Size", "Font Size"));
                         changed |= ui
                             .add(
                                 Slider::new(&mut preset.font_size, 1.0..=200.0)
@@ -145,16 +145,16 @@ impl CrosshairApp {
                             .changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Text Color", "Màu chữ"));
+                        ui.label(Self::tr_lang(language, "Text Color", "Text Color"));
                         changed |= Self::edit_rgba_color(ui, &mut preset.text_color).changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Background Color", "Màu nền"));
+                        ui.label(Self::tr_lang(language, "Background Color", "Background Color"));
                         changed |=
                             Self::edit_rgba_color(ui, &mut preset.background_color).changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Background Opacity", "Độ mờ nền"));
+                        ui.label(Self::tr_lang(language, "Background Opacity", "Background Opacity"));
                         changed |= ui
                             .add(
                                 Slider::new(&mut preset.background_opacity, 0.0..=1.0)
@@ -164,7 +164,7 @@ impl CrosshairApp {
                             .changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Rounded Background", "Nền bo góc"));
+                        ui.label(Self::tr_lang(language, "Rounded Background", "Rounded Background"));
                         changed |= ui
                             .checkbox(
                                 &mut preset.rounded_background,
@@ -176,11 +176,7 @@ impl CrosshairApp {
 
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new(Self::tr_lang(
-                        language,
-                        "Position Preview",
-                        "Preview vị trí",
-                    ))
+                    RichText::new(Self::tr_lang(language, "Position Preview", "Position Preview"))
                     .strong(),
                 );
                 changed |= Self::render_hud_rect_editor(ui, (preset.id, "toolbox-editor"), preset);
@@ -227,7 +223,7 @@ impl CrosshairApp {
 
         ui.add_space(16.0);
         ui.label(
-            RichText::new(self.tr("Timer Presets", "Thiết lập Hẹn giờ"))
+            RichText::new(self.tr("Timer Presets", "Timer Presets"))
                 .strong()
                 .size(14.0),
         );
@@ -260,9 +256,9 @@ impl CrosshairApp {
                         if Self::sound_style_toggle_button(
                             ui,
                             if preset.collapsed {
-                                Self::tr_lang(language, "Show", "Hiện")
+                                Self::tr_lang(language, "Show", "Show")
                             } else {
-                                Self::tr_lang(language, "Hide", "Ẩn")
+                                Self::tr_lang(language, "Hide", "Hide")
                             },
                         )
                         .clicked()
@@ -285,14 +281,14 @@ impl CrosshairApp {
                     .num_columns(2)
                     .spacing([12.0, 8.0])
                     .show(ui, |ui| {
-                        ui.label(Self::tr_lang(language, "Type", "Loại"));
+                        ui.label(Self::tr_lang(language, "Type", "Type"));
                         ui.horizontal(|ui| {
                             let mut selected_type = if preset.is_countdown { 1 } else { 0 };
                             let resp = egui::ComboBox::from_id_salt((preset.id, "timer-type-sel"))
                                 .selected_text(if selected_type == 1 {
-                                    Self::tr_lang(language, "Countdown", "Đếm ngược (Hẹn giờ)")
+                                    Self::tr_lang(language, "Countdown", "Countdown")
                                 } else {
-                                    Self::tr_lang(language, "Stopwatch", "Đếm xuôi (Bấm giờ)")
+                                    Self::tr_lang(language, "Stopwatch", "Stopwatch")
                                 })
                                 .show_ui(ui, |ui| {
                                     let mut changed = false;
@@ -303,7 +299,7 @@ impl CrosshairApp {
                                             Self::tr_lang(
                                                 language,
                                                 "Stopwatch",
-                                                "Đếm xuôi (Bấm giờ)",
+                                                "Stopwatch",
                                             ),
                                         )
                                         .clicked();
@@ -314,7 +310,7 @@ impl CrosshairApp {
                                             Self::tr_lang(
                                                 language,
                                                 "Countdown",
-                                                "Đếm ngược (Hẹn giờ)",
+                                                "Countdown",
                                             ),
                                         )
                                         .clicked();
@@ -328,11 +324,11 @@ impl CrosshairApp {
                         ui.end_row();
 
                         if preset.is_countdown {
-                            ui.label(Self::tr_lang(language, "Duration", "Thời lượng"));
+                            ui.label(Self::tr_lang(language, "Duration", "Duration"));
                             timer_changed |= ui
                                 .add(
                                     Slider::new(&mut preset.duration_secs, 1..=3600)
-                                        .text(Self::tr_lang(language, "seconds", "giây"))
+                                        .text(Self::tr_lang(language, "seconds", "seconds"))
                                         .clamping(egui::SliderClamping::Always),
                                 )
                                 .changed();
@@ -340,24 +336,24 @@ impl CrosshairApp {
                         }
 
                         if preset.show_text {
-                            ui.label(Self::tr_lang(language, "Format", "Định dạng"));
+                            ui.label(Self::tr_lang(language, "Format", "Format"));
                             ui.horizontal(|ui| {
                                 timer_changed |= ui
                                     .checkbox(
                                         &mut preset.show_minutes,
-                                        Self::tr_lang(language, "Min", "Phút"),
+                                        Self::tr_lang(language, "Min", "Min"),
                                     )
                                     .changed();
                                 timer_changed |= ui
                                     .checkbox(
                                         &mut preset.show_seconds,
-                                        Self::tr_lang(language, "Sec", "Giây"),
+                                        Self::tr_lang(language, "Sec", "Sec"),
                                     )
                                     .changed();
                                 timer_changed |= ui
                                     .checkbox(
                                         &mut preset.show_ms,
-                                        Self::tr_lang(language, "Ms/Ticks", "Khắc (Ms)"),
+                                        Self::tr_lang(language, "Ms/Ticks", "Ms/Ticks"),
                                     )
                                     .changed();
                             });
@@ -365,7 +361,7 @@ impl CrosshairApp {
                         }
 
                         if preset.show_text {
-                            ui.label(Self::tr_lang(language, "Font Size", "Cỡ chữ"));
+                            ui.label(Self::tr_lang(language, "Font Size", "Font Size"));
                             timer_changed |= ui
                                 .add(
                                     Slider::new(&mut preset.font_size, 1.0..=200.0)
@@ -375,18 +371,18 @@ impl CrosshairApp {
                                 .changed();
                             ui.end_row();
 
-                            ui.label(Self::tr_lang(language, "Text Color", "Màu chữ"));
+                            ui.label(Self::tr_lang(language, "Text Color", "Text Color"));
                             timer_changed |=
                                 Self::edit_rgba_color(ui, &mut preset.text_color).changed();
                             ui.end_row();
                         }
 
-                        ui.label(Self::tr_lang(language, "Background Color", "Màu nền"));
+                        ui.label(Self::tr_lang(language, "Background Color", "Background Color"));
                         timer_changed |=
                             Self::edit_rgba_color(ui, &mut preset.background_color).changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Background Opacity", "Độ mờ nền"));
+                        ui.label(Self::tr_lang(language, "Background Opacity", "Background Opacity"));
                         timer_changed |= ui
                             .add(
                                 Slider::new(&mut preset.background_opacity, 0.0..=1.0)
@@ -396,7 +392,7 @@ impl CrosshairApp {
                             .changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Rounded Background", "Nền bo góc"));
+                        ui.label(Self::tr_lang(language, "Rounded Background", "Rounded Background"));
                         timer_changed |= ui
                             .checkbox(
                                 &mut preset.rounded_background,
@@ -409,11 +405,7 @@ impl CrosshairApp {
                         timer_changed |= ui
                             .checkbox(
                                 &mut preset.preview_enabled,
-                                Self::tr_lang(
-                                    language,
-                                    "Stream preview in editor",
-                                    "Stream preview trong editor",
-                                ),
+                                Self::tr_lang(language, "Stream preview in editor", "Stream preview in editor"),
                             )
                             .changed();
                         ui.end_row();
@@ -421,11 +413,7 @@ impl CrosshairApp {
 
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new(Self::tr_lang(
-                        language,
-                        "Position Preview",
-                        "Preview vị trí",
-                    ))
+                    RichText::new(Self::tr_lang(language, "Position Preview", "Position Preview"))
                     .strong(),
                 );
                 timer_changed |=

@@ -717,11 +717,7 @@ impl CrosshairApp {
             ui.horizontal_wrapped(|ui| {
                 if ui
                     .button(Self::material_icon_text(0xe145, 18.0))
-                    .on_hover_text(Self::tr_lang(
-                        language,
-                        "Choose audio file",
-                        "Chọn file âm thanh",
-                    ))
+                    .on_hover_text(Self::tr_lang(language, "Choose audio file", "Choose audio file"))
                     .clicked()
                 {
                     outcome.choose_file = true;
@@ -731,11 +727,7 @@ impl CrosshairApp {
                         !clip.file_path.trim().is_empty(),
                         Button::new(Self::material_icon_text(0xe3c9, 18.0)),
                     )
-                    .on_hover_text(Self::tr_lang(
-                        language,
-                        "Open Media editor",
-                        "Mở trình sửa Media",
-                    ))
+                    .on_hover_text(Self::tr_lang(language, "Open Media editor", "Open Media editor"))
                     .clicked()
                 {
                     outcome.open_editor = true;
@@ -750,45 +742,40 @@ impl CrosshairApp {
                         }),
                     )
                     .on_hover_text(if previewing {
-                        Self::tr_lang(language, "Stop preview", "Dừng nghe thử")
+                        Self::tr_lang(language, "Stop preview", "Stop preview")
                     } else {
-                        Self::tr_lang(language, "Preview audio", "Nghe thử âm thanh")
+                        Self::tr_lang(language, "Preview audio", "Preview audio")
                     })
                     .clicked()
                 {
                     match audio::toggle_preview(clip.clone()) {
                         Ok(true) => {
-                            outcome.status = Some(match language {
-                                UiLanguage::Vietnamese => {
-                                    format!("Đang nghe thử {title}.")
-                                }
-                                _ => format!("Previewing {title}."),
-                            })
+                            outcome.status = Some(
+                                crate::lang::translate(language, "Previewing {}.")
+                                    .unwrap_or("Previewing {}.")
+                                    .replace("{}", &title),
+                            )
                         }
                         Ok(false) => {
-                            outcome.status = Some(match language {
-                                UiLanguage::Vietnamese => format!("Đã dừng nghe thử {title}."),
-                                _ => format!("Stopped {title} preview."),
-                            })
+                            outcome.status = Some(
+                                crate::lang::translate(language, "Stopped {} preview.")
+                                    .unwrap_or("Stopped {} preview.")
+                                    .replace("{}", &title),
+                            )
                         }
                         Err(error) => {
-                            outcome.status = Some(match language {
-                                UiLanguage::Vietnamese => {
-                                    format!("Nghe thử thất bại: {error}")
-                                }
-                                _ => format!("Preview failed: {error}"),
-                            })
+                            outcome.status = Some(
+                                crate::lang::translate(language, "Preview failed: {}")
+                                    .unwrap_or("Preview failed: {}")
+                                    .replace("{}", &error.to_string()),
+                            )
                         }
                     }
                 }
             });
 
             ui.label(if clip.file_path.is_empty() {
-                Self::tr_lang(
-                    language,
-                    "No audio file selected.",
-                    "Chưa chọn file âm thanh.",
-                )
+                Self::tr_lang(language, "No audio file selected.", "No audio file selected.")
             } else {
                 clip.file_path.as_str()
             });
@@ -799,7 +786,7 @@ impl CrosshairApp {
                     "{} {}  |  {} {}",
                     Self::tr_lang(language, "Total:", "Total:"),
                     Self::format_ms(total_ms),
-                    Self::tr_lang(language, "Slice", "Đoạn hiện tại"),
+                    Self::tr_lang(language, "Slice", "Slice"),
                     Self::format_ms(clip.end_ms.saturating_sub(clip.start_ms))
                 ));
             }
@@ -1317,7 +1304,7 @@ impl CrosshairApp {
         let mut changed = false;
         ui.horizontal(|ui| {
             if ui
-                .button(self.tr("+ Add sound preset", "+ Thêm preset âm thanh"))
+                .button(self.tr("+ Add sound preset", "+ Add sound preset"))
                 .clicked()
             {
                 let mut id = 1;
@@ -1339,11 +1326,7 @@ impl CrosshairApp {
                 changed = true;
             }
             if ui
-                .button(Self::tr_lang(
-                    language,
-                    "+ Add Video Preset",
-                    "+ Thêm preset video",
-                ))
+                .button(Self::tr_lang(language, "+ Add Video Preset", "+ Add Video Preset"))
                 .clicked()
             {
                 let mut id = 1;
@@ -1385,7 +1368,7 @@ impl CrosshairApp {
 
         ui.add_space(16.0);
         ui.label(
-            RichText::new(Self::tr_lang(language, "Sound Presets", "Preset âm thanh"))
+            RichText::new(Self::tr_lang(language, "Sound Presets", "Sound Presets"))
                 .strong()
                 .size(14.0),
         );
@@ -1435,11 +1418,7 @@ impl CrosshairApp {
                                 [36.0, 21.0],
                                 Button::new(Self::material_icon_text(0xe872, 18.0)),
                             )
-                            .on_hover_text(Self::tr_lang(
-                                language,
-                                "Delete sound preset",
-                                "Xóa sound preset",
-                            ))
+                            .on_hover_text(Self::tr_lang(language, "Delete sound preset", "Delete sound preset"))
                             .clicked()
                         {
                             remove_sound_preset = Some(preset.id);
@@ -1511,7 +1490,7 @@ impl CrosshairApp {
 
         ui.add_space(16.0);
         ui.label(
-            RichText::new(Self::tr_lang(language, "Video Presets", "Preset video"))
+            RichText::new(Self::tr_lang(language, "Video Presets", "Video Presets"))
                 .strong()
                 .size(14.0),
         );
@@ -1602,11 +1581,7 @@ impl CrosshairApp {
                                 [36.0, 21.0],
                                 Button::new(Self::material_icon_text(0xe872, 18.0)),
                             )
-                            .on_hover_text(Self::tr_lang(
-                                language,
-                                "Delete video preset",
-                                "Xóa preset video",
-                            ))
+                            .on_hover_text(Self::tr_lang(language, "Delete video preset", "Delete video preset"))
                             .clicked()
                         {
                             remove_video_preset = Some(preset.id);
@@ -1640,11 +1615,7 @@ impl CrosshairApp {
                             button_size,
                             Button::new(Self::tr_lang(language, "Import video", "Import video")),
                         )
-                        .on_hover_text(Self::tr_lang(
-                            language,
-                            "Choose video file",
-                            "Chọn file video",
-                        ))
+                        .on_hover_text(Self::tr_lang(language, "Choose video file", "Choose video file"))
                         .clicked()
                     {
                         choose_video_for = Some(preset.id);
@@ -1663,17 +1634,13 @@ impl CrosshairApp {
                                     if previewing_this_preset {
                                         "Stop"
                                     } else {
-                                        "Xem thử"
+                                        "Preview"
                                     },
                                 )),
                             )
                         })
                         .inner
-                        .on_hover_text(Self::tr_lang(
-                            language,
-                            "Preview overlay video",
-                            "Xem thử video overlay",
-                        ))
+                        .on_hover_text(Self::tr_lang(language, "Preview overlay video", "Preview overlay video"))
                         .clicked()
                     {
                         if self.active_video_overlay_preset_id == Some(preset.id) {
@@ -1703,9 +1670,9 @@ impl CrosshairApp {
                                         "Pick chroma color"
                                     },
                                     if pick_active {
-                                        "Đang lấy màu..."
+                                        "Picking color..."
                                     } else {
-                                        "Lấy màu chroma"
+                                        "Pick chroma color"
                                     },
                                 )),
                             )
@@ -1719,7 +1686,7 @@ impl CrosshairApp {
                 });
 
                 ui.label(if preset.clip.file_path.is_empty() {
-                    Self::tr_lang(language, "No video file selected.", "Chưa chọn file video.")
+                    Self::tr_lang(language, "No video file selected.", "No video file selected.")
                 } else {
                     preset.clip.file_path.as_str()
                 });
@@ -1729,11 +1696,7 @@ impl CrosshairApp {
                 }
                 if preset.clip.file_path.trim().is_empty() {
                     ui.label(
-                        RichText::new(Self::tr_lang(
-                            language,
-                            "Import a video first to unlock preview, trim, and chroma key picking.",
-                            "Import video trước để mở preview, trim và chọn màu xóa phông.",
-                        ))
+                        RichText::new(Self::tr_lang(language, "Import a video first to unlock preview, trim, and chroma key picking.", "Import a video first to unlock preview, trim, and chroma key picking."))
                         .small()
                         .color(ui.visuals().weak_text_color()),
                     );
@@ -1814,7 +1777,7 @@ impl CrosshairApp {
                             changed |= timeline_outcome.changed;
                             ui.add_space(1.0);
                             ui.horizontal(|ui| {
-                                ui.label(Self::tr_lang(language, "Start", "Bắt đầu"));
+                                ui.label(Self::tr_lang(language, "Start", "Start"));
                                 changed |= ui
                                     .add(
                                         DragValue::new(&mut preset.clip.start_ms)
@@ -1834,11 +1797,7 @@ impl CrosshairApp {
 
                     ui.add_space(2.0);
                     ui.horizontal(|ui| {
-                        ui.label(Self::tr_lang(
-                            language,
-                            "Render Resolution:",
-                            "Độ phân giải dựng:",
-                        ));
+                        ui.label(Self::tr_lang(language, "Render Resolution:", "Render Resolution:"));
                         egui::ComboBox::from_id_source(("video-res", preset.id))
                             .selected_text(preset.clip.resolution.as_str())
                             .show_ui(ui, |ui| {
@@ -1860,10 +1819,10 @@ impl CrosshairApp {
                     changed |= ui
                         .checkbox(
                             &mut preset.clip.chroma_key_enabled,
-                            Self::tr_lang(language, "Chroma Key", "Xóa phông màu"),
+                            Self::tr_lang(language, "Chroma Key", "Chroma Key"),
                         )
                         .changed();
-                    ui.label(Self::tr_lang(language, "Color", "Màu"));
+                    ui.label(Self::tr_lang(language, "Color", "Color"));
                     let mut key_rgba = [
                         preset.clip.chroma_key_color.r,
                         preset.clip.chroma_key_color.g,
@@ -1882,7 +1841,7 @@ impl CrosshairApp {
                         };
                         changed = true;
                     }
-                    ui.label(Self::tr_lang(language, "Tolerance", "Ngưỡng"));
+                    ui.label(Self::tr_lang(language, "Tolerance", "Tolerance"));
                     changed |= ui
                         .add(Slider::new(&mut preset.clip.chroma_key_tolerance, 0..=128))
                         .changed();
@@ -1958,22 +1917,14 @@ impl CrosshairApp {
             if let Err(error) = self.start_video_preview(preset_id, &clip, start_ms) {
                 self.status = error.to_string();
             } else {
-                self.status = Self::tr_lang(
-                    language,
-                    "Previewing video inside the app.",
-                    "Đang xem thử video trong app.",
-                )
+                self.status = Self::tr_lang(language, "Previewing video inside the app.", "Previewing video inside the app.")
                 .to_owned();
             }
         }
 
         if let Some((preset_id, start_ms)) = preview_video_overlay_request {
             self.start_active_video_overlay_preview(preset_id, start_ms);
-            self.status = Self::tr_lang(
-                language,
-                "Previewing video overlay.",
-                "Đang xem thử video overlay.",
-            )
+            self.status = Self::tr_lang(language, "Previewing video overlay.", "Previewing video overlay.")
             .to_owned();
         }
 
@@ -2009,11 +1960,7 @@ impl CrosshairApp {
 
         ui.horizontal(|ui| {
             if ui
-                .button(Self::tr_lang(
-                    language,
-                    "Choose audio file",
-                    "Chọn file âm thanh",
-                ))
+                .button(Self::tr_lang(language, "Choose audio file", "Choose audio file"))
                 .clicked()
             {
                 outcome.choose_file = true;
@@ -2050,7 +1997,7 @@ impl CrosshairApp {
                     outcome.changed |= trim_timeline_outcome.changed;
                     ui.add_space(1.0);
                     ui.horizontal(|ui| {
-                        ui.label(Self::tr_lang(language, "Start", "Bắt đầu"));
+                        ui.label(Self::tr_lang(language, "Start", "Start"));
                         outcome.changed |= ui
                             .add(DragValue::new(&mut clip.start_ms).range(0..=total_ms))
                             .changed();
@@ -2118,36 +2065,37 @@ impl CrosshairApp {
                     }),
                 )
                 .on_hover_text(if previewing {
-                    Self::tr_lang(language, "Stop preview", "Dừng nghe thử")
+                    Self::tr_lang(language, "Stop preview", "Stop preview")
                 } else {
-                    Self::tr_lang(language, "Preview audio", "Nghe thử âm thanh")
+                    Self::tr_lang(language, "Preview audio", "Preview audio")
                 })
                 .clicked()
             {
                 match audio::toggle_preview(clip.clone()) {
                     Ok(true) => {
-                        outcome.status = Some(match language {
-                            UiLanguage::Vietnamese => {
-                                format!("Đang nghe thử {title}.")
-                            }
-                            _ => format!("Previewing {title}."),
-                        })
+                        outcome.status = Some(
+                            crate::lang::translate(language, "Previewing {}.")
+                                .unwrap_or("Previewing {}.")
+                                .replace("{}", &title),
+                        )
                     }
                     Ok(false) => {
-                        outcome.status = Some(match language {
-                            UiLanguage::Vietnamese => format!("Đã dừng nghe thử {title}."),
-                            _ => format!("Stopped {title} preview."),
-                        })
+                        outcome.status = Some(
+                            crate::lang::translate(language, "Stopped {} preview.")
+                                .unwrap_or("Stopped {} preview.")
+                                .replace("{}", &title),
+                        )
                     }
                     Err(error) => {
-                        outcome.status = Some(match language {
-                            UiLanguage::Vietnamese => format!("Nghe thử thất bại: {error}"),
-                            _ => format!("Preview failed: {error}"),
-                        })
+                        outcome.status = Some(
+                            crate::lang::translate(language, "Preview failed: {}")
+                                .unwrap_or("Preview failed: {}")
+                                .replace("{}", &error.to_string()),
+                        )
                     }
                 }
             }
-            ui.label(Self::tr_lang(language, "Volume", "Âm lượng"));
+            ui.label(Self::tr_lang(language, "Volume", "Volume"));
             outcome.changed |= ui
                 .add_sized(
                     [170.0, 24.0],
@@ -2156,7 +2104,7 @@ impl CrosshairApp {
                         .clamping(egui::SliderClamping::Always),
                 )
                 .changed();
-            ui.label(Self::tr_lang(language, "Speed", "Tốc độ"));
+            ui.label(Self::tr_lang(language, "Speed", "Speed"));
             outcome.changed |= ui
                 .add_sized(
                     [170.0, 24.0],
@@ -2187,11 +2135,11 @@ impl CrosshairApp {
         let mut trim_timeline_zoom = self.trim_timeline_zoom;
 
         ui.horizontal(|ui| {
-            if ui.button(self.tr("Back", "Quay lại")).clicked() {
+            if ui.button(self.tr("Back", "Back")).clicked() {
                 self.close_audio_editor();
             }
             if ui
-                .button(self.tr("Choose audio file", "Chọn file âm thanh"))
+                .button(self.tr("Choose audio file", "Choose audio file"))
                 .clicked()
             {
                 match target {
@@ -2240,7 +2188,7 @@ impl CrosshairApp {
                         ("preset", preset.id),
                         &format!(
                             "{}: {}",
-                            Self::tr_lang(language, "Sound Preset", "Preset âm thanh"),
+                            Self::tr_lang(language, "Sound Preset", "Sound Preset"),
                             preset.name
                         ),
                         &mut preset.clip,

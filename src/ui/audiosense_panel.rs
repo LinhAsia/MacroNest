@@ -10,7 +10,7 @@ impl CrosshairApp {
 
         ui.horizontal(|ui| {
             if ui
-                .button(Self::tr_lang(language, "+ Pitch preset", "+ Preset cao do"))
+                .button(Self::tr_lang(language, "+ Pitch preset", "+ Pitch preset"))
                 .clicked()
             {
                 let id = self
@@ -31,7 +31,7 @@ impl CrosshairApp {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let button_label = if self.audio_sense_test_active {
-                    Self::tr_lang(language, "Stop test", "Dung test")
+                    Self::tr_lang(language, "Stop test", "Stop test")
                 } else {
                     Self::tr_lang(language, "Test sound", "Test sound")
                 };
@@ -63,7 +63,7 @@ impl CrosshairApp {
                                 .input_device_name
                                 .clone()
                                 .unwrap_or_else(|| {
-                                    Self::tr_lang(language, "Default microphone", "Micro mac dinh")
+                                    Self::tr_lang(language, "Default microphone", "Default microphone")
                                         .to_owned()
                                 }),
                         )
@@ -71,7 +71,7 @@ impl CrosshairApp {
                             if ui
                                 .selectable_label(
                                     self.audio_sense_test_settings.input_device_name.is_none(),
-                                    Self::tr_lang(language, "Default microphone", "Micro mac dinh"),
+                                    Self::tr_lang(language, "Default microphone", "Default microphone"),
                                 )
                                 .clicked()
                             {
@@ -102,9 +102,9 @@ impl CrosshairApp {
                 ComboBox::from_id_salt("audiosense-test-source")
                     .width(130.0)
                     .selected_text(match self.audio_sense_test_settings.source {
-                        AudioSenseSource::System => Self::tr_lang(language, "System", "He thong"),
+                        AudioSenseSource::System => Self::tr_lang(language, "System", "System"),
                         AudioSenseSource::Microphone => {
-                            Self::tr_lang(language, "Microphone", "Micro")
+                            Self::tr_lang(language, "Microphone", "Microphone")
                         }
                     })
                     .show_ui(ui, |ui| {
@@ -112,14 +112,14 @@ impl CrosshairApp {
                             .selectable_value(
                                 &mut self.audio_sense_test_settings.source,
                                 AudioSenseSource::System,
-                                Self::tr_lang(language, "System", "He thong"),
+                                Self::tr_lang(language, "System", "System"),
                             )
                             .changed();
                         source_changed |= ui
                             .selectable_value(
                                 &mut self.audio_sense_test_settings.source,
                                 AudioSenseSource::Microphone,
-                                Self::tr_lang(language, "Microphone", "Micro"),
+                                Self::tr_lang(language, "Microphone", "Microphone"),
                             )
                             .changed();
                     });
@@ -139,17 +139,13 @@ impl CrosshairApp {
             Self::show_preset_card(ui, self.audio_sense_test_active, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new(Self::tr_lang(
-                            language,
-                            "Live input preview",
-                            "Xem truoc am thanh",
-                        ))
+                        egui::RichText::new(Self::tr_lang(language, "Live input preview", "Live input preview"))
                         .strong(),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(format!(
                             "{} {:.2}",
-                            Self::tr_lang(language, "Level", "Muc"),
+                            Self::tr_lang(language, "Level", "Level"),
                             test_snapshot.level
                         ));
                         ui.separator();
@@ -174,7 +170,7 @@ impl CrosshairApp {
         let mut changed = false;
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(Self::tr_lang(language, "Detect Pitch", "Phat hien cao do"))
+            egui::RichText::new(Self::tr_lang(language, "Detect Pitch", "Detect Pitch"))
                 .strong()
                 .size(14.0),
         );
@@ -211,9 +207,9 @@ impl CrosshairApp {
                         if Self::sound_style_toggle_button(
                             ui,
                             if preset.collapsed {
-                                Self::tr_lang(language, "Show", "Hien")
+                                Self::tr_lang(language, "Show", "Show")
                             } else {
-                                Self::tr_lang(language, "Hide", "An")
+                                Self::tr_lang(language, "Hide", "Hide")
                             },
                         )
                         .clicked()
@@ -227,15 +223,15 @@ impl CrosshairApp {
                 if !preset.collapsed {
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        ui.label(Self::tr_lang(language, "Source", "Nguon"));
+                        ui.label(Self::tr_lang(language, "Source", "Source"));
                         ComboBox::from_id_salt(("audiosense-source", preset.id))
                             .width(120.0)
                             .selected_text(match preset.pitch.monitor.source {
                                 AudioSenseSource::System => {
-                                    Self::tr_lang(language, "System", "He thong")
+                                    Self::tr_lang(language, "System", "System")
                                 }
                                 AudioSenseSource::Microphone => {
-                                    Self::tr_lang(language, "Microphone", "Micro")
+                                    Self::tr_lang(language, "Microphone", "Microphone")
                                 }
                             })
                             .show_ui(ui, |ui| {
@@ -243,14 +239,14 @@ impl CrosshairApp {
                                     .selectable_value(
                                         &mut preset.pitch.monitor.source,
                                         AudioSenseSource::System,
-                                        Self::tr_lang(language, "System", "He thong"),
+                                        Self::tr_lang(language, "System", "System"),
                                     )
                                     .changed();
                                 changed |= ui
                                     .selectable_value(
                                         &mut preset.pitch.monitor.source,
                                         AudioSenseSource::Microphone,
-                                        Self::tr_lang(language, "Microphone", "Micro"),
+                                        Self::tr_lang(language, "Microphone", "Microphone"),
                                     )
                                     .changed();
                             });
@@ -265,11 +261,7 @@ impl CrosshairApp {
                                         .input_device_name
                                         .clone()
                                         .unwrap_or_else(|| {
-                                            Self::tr_lang(
-                                                language,
-                                                "Default microphone",
-                                                "Micro mac dinh",
-                                            )
+                                            Self::tr_lang(language, "Default microphone", "Default microphone")
                                             .to_owned()
                                         }),
                                 )
@@ -277,11 +269,7 @@ impl CrosshairApp {
                                     if ui
                                         .selectable_label(
                                             preset.pitch.monitor.input_device_name.is_none(),
-                                            Self::tr_lang(
-                                                language,
-                                                "Default microphone",
-                                                "Micro mac dinh",
-                                            ),
+                                            Self::tr_lang(language, "Default microphone", "Default microphone"),
                                         )
                                         .clicked()
                                     {
@@ -319,7 +307,7 @@ impl CrosshairApp {
                         changed |= ui
                             .checkbox(
                                 &mut preset.pitch.monitor.permanent,
-                                Self::tr_lang(language, "Permanent", "Vĩnh viễn"),
+                                Self::tr_lang(language, "Permanent", "Permanent"),
                             )
                             .changed();
                         if !preset.pitch.monitor.permanent {
@@ -441,17 +429,13 @@ fn render_pitch_settings_ui(
     changed |= ui
         .checkbox(
             &mut settings.show_sharps,
-            CrosshairApp::tr_lang(language, "Sharps", "Dau thang"),
+            CrosshairApp::tr_lang(language, "Sharps", "Sharps"),
         )
         .changed();
 
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(CrosshairApp::tr_lang(
-            language,
-            "Min Conf",
-            "Tin cậy tối thiểu",
-        ));
+        ui.label(CrosshairApp::tr_lang(language, "Min Conf", "Min Conf"));
         changed |= ui
             .add(
                 egui::DragValue::new(&mut settings.min_confidence)
@@ -460,11 +444,7 @@ fn render_pitch_settings_ui(
             )
             .changed();
         ui.add_space(8.0);
-        ui.label(CrosshairApp::tr_lang(
-            language,
-            "Min Level",
-            "Mức tối thiểu",
-        ));
+        ui.label(CrosshairApp::tr_lang(language, "Min Level", "Min Level"));
         changed |= ui
             .add(
                 egui::DragValue::new(&mut settings.min_level)
@@ -478,7 +458,7 @@ fn render_pitch_settings_ui(
     ui.horizontal(|ui| {
         ui.label(format!(
             "{}: {}",
-            CrosshairApp::tr_lang(language, "Current note", "Cao do hien tai"),
+            CrosshairApp::tr_lang(language, "Current note", "Current note"),
             snapshot.note
         ));
         ui.label(format!("conf {:.2}", snapshot.confidence));

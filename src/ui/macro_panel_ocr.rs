@@ -16,7 +16,7 @@ impl CrosshairApp {
         step: &mut MacroStep,
         live_sync: &mut bool,
     ) {
-        let outputs_label = Self::tr_lang(language, "Outputs", "Đầu ra").to_owned();
+        let outputs_label = Self::tr_lang(language, "Outputs", "Outputs").to_owned();
 
         egui::ComboBox::from_id_salt((group_id, preset_id, step_index, "ocr-outputs"))
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
@@ -29,15 +29,11 @@ impl CrosshairApp {
                     .num_columns(2)
                     .spacing([8.0, 6.0])
                     .show(ui, |ui| {
-                        let found_label = ui.label(Self::tr_lang(
-                            language,
-                            "Found Var:",
-                            "Biến kết quả:",
-                        ));
+                        let found_label = ui.label(Self::tr_lang(language, "Found Var:", "Found Var:"));
                         found_label.on_hover_text(Self::tr_lang(
                             language,
                             "Assigns 1 if the target text was found (or if OCR succeeded when no target is set), 0 otherwise",
-                            "Gán 1 nếu tìm thấy từ khóa (hoặc nếu quét OCR thành công khi không đặt từ tìm), ngược lại là 0",
+                            "Assigns 1 if the target text was found (or if OCR succeeded when no target is set), 0 otherwise",
                         ));
                         let found_resp = ui.add(
                             egui::TextEdit::singleline(&mut step.ocr_success_var)
@@ -53,11 +49,7 @@ impl CrosshairApp {
                         ui.end_row();
 
                         let pos_x_label = ui.label("Pos X:");
-                        pos_x_label.on_hover_text(Self::tr_lang(
-                            language,
-                            "Assigns the absolute X coordinate of the center of found text",
-                            "Gán tọa độ X tuyệt đối ở chính giữa từ tìm thấy",
-                        ));
+                        pos_x_label.on_hover_text(Self::tr_lang(language, "Assigns the absolute X coordinate of the center of found text", "Assigns the absolute X coordinate of the center of found text"));
                         let pos_x_resp =
                             ui.add(
                                 egui::TextEdit::singleline(&mut step.ocr_pos_var_x)
@@ -73,11 +65,7 @@ impl CrosshairApp {
                         ui.end_row();
 
                         let pos_y_label = ui.label("Pos Y:");
-                        pos_y_label.on_hover_text(Self::tr_lang(
-                            language,
-                            "Assigns the absolute Y coordinate of the center of found text",
-                            "Gán tọa độ Y tuyệt đối ở chính giữa từ tìm thấy",
-                        ));
+                        pos_y_label.on_hover_text(Self::tr_lang(language, "Assigns the absolute Y coordinate of the center of found text", "Assigns the absolute Y coordinate of the center of found text"));
                         let pos_y_resp =
                             ui.add(
                                 egui::TextEdit::singleline(&mut step.ocr_pos_var_y)
@@ -94,11 +82,7 @@ impl CrosshairApp {
 
                         let text_var_label =
                             ui.label(Self::tr_lang(language, "Text Var:", "Text Var:"));
-                        text_var_label.on_hover_text(Self::tr_lang(
-                            language,
-                            "Stores ALL recognized text into this variable, regardless of the Target Text filter",
-                            "Stores all OCR text into this variable regardless of Target Text filter",
-                        ));
+                        text_var_label.on_hover_text(Self::tr_lang(language, "Stores ALL recognized text into this variable, regardless of the Target Text filter", "Stores ALL recognized text into this variable, regardless of the Target Text filter"));
                         let text_var_resp = ui.add(
                             egui::TextEdit::singleline(&mut step.ocr_text_var)
                                 .hint_text("text_var"),
@@ -133,11 +117,7 @@ impl CrosshairApp {
         let pick_btn = egui::Button::new("⛶");
         if ui
             .add_sized([ctrl_height, ctrl_height], pick_btn)
-            .on_hover_text(Self::tr_lang(
-                language,
-                "Pick area - Drag on screen to select the OCR scan region",
-                "Chọn vùng - Kéo trên màn hình để chọn vùng quét OCR",
-            ))
+            .on_hover_text(Self::tr_lang(language, "Pick area - Drag on screen to select the OCR scan region", "Pick area - Drag on screen to select the OCR scan region"))
             .clicked()
         {
             *pending_ocr_step_capture = Some((group_id, preset_id, step_index));
@@ -227,7 +207,7 @@ impl CrosshairApp {
 
         combo_resp.response.on_hover_text(format!(
             "{}: {}",
-            Self::tr_lang(language, "Language", "Ngôn ngữ"),
+            Self::tr_lang(language, "Language", "Language"),
             language_label
         ));
 
@@ -240,7 +220,7 @@ impl CrosshairApp {
             240.0,
             18.0,
             18.0,
-            &Self::tr_lang(language, "Target Text", "Van ban can tim"),
+            &Self::tr_lang(language, "Target Text", "Target Text"),
             false,
         );
 

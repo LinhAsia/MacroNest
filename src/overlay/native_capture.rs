@@ -885,9 +885,17 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
         NativeCaptureMode::RegionSelect { is_template, vietnamese } => {
             if vietnamese {
                 if is_template {
-                    "Kéo chuột trên màn hình để chọn mẫu ảnh (template). Nhấn Esc để hủy."
+                    crate::lang::translate(
+                        crate::model::UiLanguage::Vietnamese,
+                        "Drag on screen to pick an image template. Press Esc to cancel.",
+                    )
+                    .unwrap_or("Drag on screen to pick an image template. Press Esc to cancel.")
                 } else {
-                    "Kéo chuột trên màn hình để chọn vùng tìm kiếm ảnh. Nhấn Esc để hủy."
+                    crate::lang::translate(
+                        crate::model::UiLanguage::Vietnamese,
+                        "Drag on screen to pick the image search area. Press Esc to cancel.",
+                    )
+                    .unwrap_or("Drag on screen to pick the image search area. Press Esc to cancel.")
                 }
             } else {
                 if is_template {
@@ -899,7 +907,11 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
         }
         NativeCaptureMode::PointClick { vietnamese, .. } => {
             if vietnamese {
-                "Nhấp chuột vào một điểm trên màn hình để lấy tọa độ/màu sắc. Nhấn Esc để hủy."
+                crate::lang::translate(
+                    crate::model::UiLanguage::Vietnamese,
+                    "Click a point on screen to capture. Press Esc to cancel.",
+                )
+                .unwrap_or("Click a point on screen to capture. Press Esc to cancel.")
             } else {
                 "Click a point on screen to capture. Press Esc to cancel."
             }

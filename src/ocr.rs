@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use crate::model::UiLanguage;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 
@@ -113,24 +114,26 @@ pub fn available_ocr_languages() -> Vec<String> {
 fn friendly_lang_not_installed_msg(language_code: &str) -> String {
     let lang_name = match language_code {
         "en" | "en-US" => "English",
-        "vi" => "Tiếng Việt",
-        "zh-Hans" => "简体中文 (Simplified Chinese)",
-        "zh-Hant" => "繁體中文 (Traditional Chinese)",
-        "ja" => "日本語 (Japanese)",
-        "ko" => "한국어 (Korean)",
-        "fr" => "Français (French)",
+        "vi" => "Vietnamese",
+        "zh-Hans" => "Simplified Chinese",
+        "zh-Hant" => "Traditional Chinese",
+        "ja" => "Japanese",
+        "ko" => "Korean",
+        "fr" => "French",
         "de" => "Deutsch (German)",
-        "es" => "Español (Spanish)",
-        "ru" => "Русский (Russian)",
-        "th" => "ไทย (Thai)",
+        "es" => "Spanish",
+        "ru" => "Russian",
+        "th" => "Thai",
         other => other,
     };
-    format!(
-        "Ngôn ngữ OCR '{}' chưa được cài đặt trên Windows.\n\
-        Vui lòng vào Settings → Time & Language → Language & Region → Add a language\n\
-        và cài thêm gói Optional features → Basic Typing / OCR cho ngôn ngữ đó.",
-        lang_name
+    crate::lang::translate(
+        UiLanguage::Vietnamese,
+        "OCR language '{}' is not installed on Windows.\nGo to Settings -> Time & Language -> Language & Region -> Add a language\nand install the Optional features -> Basic Typing / OCR package for that language.",
     )
+    .unwrap_or(
+        "OCR language '{}' is not installed on Windows.\nGo to Settings -> Time & Language -> Language & Region -> Add a language\nand install the Optional features -> Basic Typing / OCR package for that language.",
+    )
+    .replace("{}", lang_name)
 }
 
 #[cfg(windows)]

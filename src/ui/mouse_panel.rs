@@ -68,7 +68,7 @@ impl CrosshairApp {
             ui.label(RichText::new(title).strong());
             if active {
                 ui.label(
-                    RichText::new(self.tr("Active", "Dang bat"))
+                    RichText::new(self.tr("Active", "Active"))
                         .small()
                         .color(Color32::from_rgb(126, 224, 182)),
                 );
@@ -77,9 +77,9 @@ impl CrosshairApp {
                 if Self::sound_style_toggle_button(
                     ui,
                     if *open {
-                        Self::tr_lang(self.state.ui_language, "Hide", "An")
+                        Self::tr_lang(self.state.ui_language, "Hide", "Hide")
                     } else {
-                        Self::tr_lang(self.state.ui_language, "Show", "Hien")
+                        Self::tr_lang(self.state.ui_language, "Show", "Show")
                     },
                 )
                 .clicked()
@@ -133,7 +133,7 @@ impl CrosshairApp {
                             self.status = self
                                 .tr(
                                     "Arduino tools downloaded successfully!",
-                                    "Tải công cụ Arduino thành công!",
+                                    "Arduino tools downloaded successfully!",
                                 )
                                 .to_owned();
                         }
@@ -169,7 +169,7 @@ impl CrosshairApp {
                 match res {
                     Ok(()) => {
                         self.arduino_flash_status =
-                            self.tr("Flash Success!", "Nạp thành công!").to_owned();
+                            self.tr("Flash Success!", "Flash Success!").to_owned();
                     }
                     Err(e) => {
                         self.arduino_flash_status = format!("Error: {e}");
@@ -180,9 +180,9 @@ impl CrosshairApp {
             }
         }
 
-        let refresh_txt = self.tr("Refresh Ports", "Tai lai danh sach cong");
-        let select_port_txt = self.tr("Select Port", "Chon cong");
-        let com_port_lbl = self.tr("COM Port:", "Cong COM:");
+        let refresh_txt = self.tr("Refresh Ports", "Refresh Ports");
+        let select_port_txt = self.tr("Select Port", "Select Port");
+        let com_port_lbl = self.tr("COM Port:", "COM Port:");
         let runtime_lbl = "Runtime:";
 
         let should_refresh_arduino_ports = self
@@ -240,14 +240,14 @@ impl CrosshairApp {
 
         // --- Mouse Input Backend (Sticky at the top) ---
         ui.add_space(10.0);
-        ui.label(RichText::new(self.tr("Mouse Input Backend", "Che do chuot")).strong());
+        ui.label(RichText::new(self.tr("Mouse Input Backend", "Mouse Input Backend")).strong());
 
         let mut next_mode = selected_mode;
         ui.horizontal(|ui| {
             ui.selectable_value(
                 &mut next_mode,
                 MouseInputBackendMode::Normal,
-                self.tr("Normal", "Binh thuong"),
+                self.tr("Normal", "Normal"),
             );
             ui.selectable_value(&mut next_mode, MouseInputBackendMode::Arduino, "Arduino");
             ui.selectable_value(
@@ -274,15 +274,9 @@ impl CrosshairApp {
 
         ui.add_space(6.0);
 
-        let normal_title = self.tr("Normal Windows Input", "Chuot Windows mac dinh");
-        let normal_summary = self.tr(
-            "Uses the standard Windows mouse path with no extra driver or hardware.",
-            "Dung input chuot Windows mac dinh, khong can driver hay phan cung bo sung.",
-        );
-        let normal_hint = self.tr(
-            "This mode follows the default SendInput and SetCursorPos path.",
-            "Che do nay dung luong SendInput va SetCursorPos mac dinh.",
-        );
+        let normal_title = self.tr("Normal Windows Input", "Normal Windows Input");
+        let normal_summary = self.tr("Uses the standard Windows mouse path with no extra driver or hardware.", "Uses the standard Windows mouse path with no extra driver or hardware.");
+        let normal_hint = self.tr("This mode follows the default SendInput and SetCursorPos path.", "This mode follows the default SendInput and SetCursorPos path.");
         let mut normal_open = self.mouse_input_normal_open;
         Self::show_preset_card(ui, next_mode == MouseInputBackendMode::Normal, |ui| {
             self.render_mouse_input_mode_card_header(
@@ -308,10 +302,7 @@ impl CrosshairApp {
                 / 1000.0
         });
         let interception_title = self.tr("Interception Driver", "Interception Driver");
-        let interception_summary = self.tr(
-            "Uses the Interception driver path for mouse movement and clicks in games.",
-            "Dung driver Interception de di chuot va click trong game.",
-        );
+        let interception_summary = self.tr("Uses the Interception driver path for mouse movement and clicks in games.", "Uses the Interception driver path for mouse movement and clicks in games.");
         let mut interception_open = self.mouse_input_interception_open;
         Self::show_preset_card(ui, next_mode == MouseInputBackendMode::Interception, |ui| {
             self.render_mouse_input_mode_card_header(
@@ -344,10 +335,7 @@ impl CrosshairApp {
 
         ui.add_space(6.0);
 
-        let arduino_panel_title = self.tr(
-            "Arduino Leonardo Emulation",
-            "Gia lap phan cung Arduino Leonardo",
-        );
+        let arduino_panel_title = self.tr("Arduino Leonardo Emulation", "Arduino Leonardo Emulation");
         let mut arduino_open = self.mouse_input_arduino_open;
         Self::show_preset_card(ui, next_mode == MouseInputBackendMode::Arduino, |ui| {
             self.render_mouse_input_mode_card_header(
@@ -372,17 +360,17 @@ impl CrosshairApp {
                     && !is_connected
                 {
                     ui.label(
-                        RichText::new(self.tr("Connecting...", "Dang ket noi..."))
+                        RichText::new(self.tr("Connecting...", "Connecting..."))
                             .color(Color32::from_rgb(255, 206, 96)),
                     );
                 } else if is_connected {
                     ui.label(
-                        RichText::new(self.tr("Connected", "Dang ket noi"))
+                        RichText::new(self.tr("Connected", "Connected"))
                             .color(Color32::from_rgb(126, 224, 182)),
                     );
                 } else {
                     ui.label(
-                        RichText::new(self.tr("Disconnected", "Chua ket noi"))
+                        RichText::new(self.tr("Disconnected", "Disconnected"))
                             .color(Color32::from_rgb(255, 96, 96)),
                     );
                 }
@@ -457,10 +445,7 @@ impl CrosshairApp {
 
             ui.add_space(4.0);
             let note_lbl = match self.state.vision_settings.arduino_transport {
-                ArduinoTransport::Serial => self.tr(
-                    "Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.",
-                    "Hay bam 'Auto-Flash Firmware' it nhat mot lan de nap board dang ket noi.",
-                ),
+                ArduinoTransport::Serial => self.tr("Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.", "Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board."),
                 ArduinoTransport::Hid => "RawHID runtime uses VID/PID for live control. Auto-Flash will program the RawHID firmware for the selected Runtime. The COM port is still only used to flash the board.",
             };
             ui.label(
@@ -480,22 +465,19 @@ impl CrosshairApp {
                         as f32
                         / 1000.0;
                     ui.horizontal(|ui| {
-                        ui.label(self.tr("Downloading tools...", "Dang tai cong cu..."));
+                        ui.label(self.tr("Downloading tools...", "Downloading tools..."));
                         ui.add(egui::ProgressBar::new(progress).show_percentage());
                     });
                     ui.ctx().request_repaint();
                 } else {
-                    let download_btn_lbl = self.tr(
-                        "Download Flashing Tools & Firmware",
-                        "Tai cong cu nap va firmware",
-                    );
+                    let download_btn_lbl = self.tr("Download Flashing Tools & Firmware", "Download Flashing Tools & Firmware");
                     if ui.button(download_btn_lbl).clicked() {
                         self.start_arduino_tools_download();
                     }
                 }
             } else {
                 ui.horizontal(|ui| {
-                    let flash_btn_lbl = self.tr("Auto-Flash Firmware", "Tu dong nap firmware");
+                    let flash_btn_lbl = self.tr("Auto-Flash Firmware", "Auto-Flash Firmware");
                     let flash_btn = ui.add_enabled(
                         !self.arduino_flash_running
                             && !self.state.vision_settings.arduino_com_port.is_empty(),
@@ -506,7 +488,7 @@ impl CrosshairApp {
                     }
 
                     ui.add_space(8.0);
-                    let delete_btn_lbl = self.tr("Delete Tools", "Xoa cong cu nap");
+                    let delete_btn_lbl = self.tr("Delete Tools", "Delete Tools");
                     if ui.button(delete_btn_lbl).clicked() {
                         self.delete_arduino_tools();
                     }
@@ -520,19 +502,13 @@ impl CrosshairApp {
 
             ui.add_space(6.0);
 
-            let spoof_panel_title = self.tr(
-                "Anti-Cheat Bypass & USB ID Spoofing",
-                "Vuot anti-cheat va gia lap ID cong USB",
-            );
+            let spoof_panel_title = self.tr("Anti-Cheat Bypass & USB ID Spoofing", "Anti-Cheat Bypass & USB ID Spoofing");
             ui.collapsing(spoof_panel_title, |ui| {
                 ui.set_enabled(runtime_ready || selected_port_exists);
                 if !runtime_ready && !selected_port_exists {
                     ui.colored_label(
                         Color32::from_rgb(255, 96, 96),
-                        self.tr(
-                            "Please plug in the Arduino and select COM port first.",
-                            "Hay cam Arduino va chon cong COM truoc.",
-                        ),
+                        self.tr("Please plug in the Arduino and select COM port first.", "Please plug in the Arduino and select COM port first."),
                     );
                     ui.add_space(4.0);
                 }
@@ -547,10 +523,10 @@ impl CrosshairApp {
                 ui.add_space(8.0);
 
                 let mut spoof_changed = false;
-                let enable_spoof_lbl = self.tr("Enable Spoofing", "Bat gia lap ID");
+                let enable_spoof_lbl = self.tr("Enable Spoofing", "Enable Spoofing");
                 let vid_lbl = self.tr("Vendor ID (VID):", "Vendor ID (VID):");
                 let pid_lbl = self.tr("Product ID (PID):", "Product ID (PID):");
-                let presets_lbl = self.tr("Presets:", "Mau nhanh:");
+                let presets_lbl = self.tr("Presets:", "Presets:");
                 let reset_lbl = self.tr(
                     "Reset to Default (0x2341, 0x8036)",
                     "Khoi phuc mac dinh (0x2341, 0x8036)",
@@ -607,10 +583,7 @@ impl CrosshairApp {
                 }
 
                 ui.add_space(6.0);
-                let note_text = self.tr(
-                    "Note: This automatically patches firmware.hex at the byte level during upload. The Arduino bootloader remains unaffected, so you can always re-flash safely.",
-                    "Luu y: Qua trinh nay se patch firmware khi nap, nhung bootloader van an toan de nap lai sau nay.",
-                );
+                let note_text = self.tr("Note: This automatically patches firmware.hex at the byte level during upload. The Arduino bootloader remains unaffected, so you can always re-flash safely.", "Note: This automatically patches firmware.hex at the byte level during upload. The Arduino bootloader remains unaffected, so you can always re-flash safely.");
                 ui.label(RichText::new(note_text).small().weak());
 
                 if spoof_changed {
@@ -632,7 +605,7 @@ impl CrosshairApp {
                 // Sensitivity Presets
                 ui.horizontal(|ui| {
                     if ui
-                        .button(self.tr("+ Add sensitivity preset", "+ Thêm preset độ nhạy"))
+                        .button(self.tr("+ Add sensitivity preset", "+ Add sensitivity preset"))
                         .clicked()
                     {
                         self.add_mouse_sensitivity_preset();
@@ -640,7 +613,7 @@ impl CrosshairApp {
                     }
 
                     if ui
-                        .button(self.tr("+ Add path preset", "+ Thêm preset đường chuột"))
+                        .button(self.tr("+ Add path preset", "+ Add path preset"))
                         .clicked()
                     {
                         self.add_mouse_path_preset();
@@ -650,10 +623,11 @@ impl CrosshairApp {
                     if let Some(active_id) = self.active_mouse_record_preset_id {
                         ui.add_space(8.0);
                         ui.label(
-                            RichText::new(match language {
-                                UiLanguage::Vietnamese => format!("Đang ghi preset #{active_id}"),
-                                _ => format!("Recording preset #{active_id}"),
-                            })
+                            RichText::new(
+                                crate::lang::translate(language, "Recording preset #{}")
+                                    .unwrap_or("Recording preset #{}")
+                                    .replace("{}", &active_id.to_string()),
+                            )
                             .strong()
                             .color(Color32::from_rgb(255, 96, 96)),
                         );
@@ -664,11 +638,7 @@ impl CrosshairApp {
                             ui.label(
                                 RichText::new(format!(
                                     "{} {}",
-                                    Self::tr_lang(
-                                        language,
-                                        "Current sensitivity:",
-                                        "Độ nhạy hiện tại:"
-                                    ),
+                                    Self::tr_lang(language, "Current sensitivity:", "Current sensitivity:"),
                                     current
                                 ))
                                 .strong()
@@ -683,17 +653,13 @@ impl CrosshairApp {
                                     .range(1..=20),
                             )
                             .changed();
-                        ui.label(Self::tr_lang(language, "Speed", "Tốc độ"));
+                        ui.label(Self::tr_lang(language, "Speed", "Speed"));
 
                         mouse_sensitivity_live_sync |= ui
                             .checkbox(&mut self.state.mouse_sensitivity_restore_on_exit, "")
                             .changed();
                         ui.label(
-                            RichText::new(Self::tr_lang(
-                                language,
-                                "Restore sensitivity on exit",
-                                "Khôi phục độ nhạy khi tắt app",
-                            ))
+                            RichText::new(Self::tr_lang(language, "Restore sensitivity on exit", "Restore sensitivity on exit"))
                             .strong(),
                         );
                     });
@@ -701,7 +667,7 @@ impl CrosshairApp {
 
                 ui.add_space(16.0);
                 ui.label(
-                    RichText::new(Self::tr_lang(language, "Sensitivity", "Độ nhạy"))
+                    RichText::new(Self::tr_lang(language, "Sensitivity", "Sensitivity"))
                         .strong()
                         .size(14.0),
                 );
@@ -748,7 +714,7 @@ impl CrosshairApp {
 
                             if Self::sound_style_toggle_button(
                                 ui,
-                                Self::tr_lang(language, "Apply", "Áp dụng"),
+                                Self::tr_lang(language, "Apply", "Apply"),
                             )
                             .clicked()
                             {
@@ -758,7 +724,7 @@ impl CrosshairApp {
                             }
                             if Self::sound_style_toggle_button(
                                 ui,
-                                Self::tr_lang(language, "Restore", "Khôi phục"),
+                                Self::tr_lang(language, "Restore", "Restore"),
                             )
                             .clicked()
                             {
@@ -800,11 +766,7 @@ impl CrosshairApp {
                                     };
 
                                     let hover_text = if capture_active {
-                                        Self::tr_lang(
-                                            language,
-                                            "Capturing... Press any key.",
-                                            "Đang ghi... Nhấn một phím bất kỳ.",
-                                        )
+                                        Self::tr_lang(language, "Capturing... Press any key.", "Capturing... Press any key.")
                                         .to_string()
                                     } else if has_keys {
                                         let bindings_labels: Vec<String> =
@@ -817,29 +779,17 @@ impl CrosshairApp {
                                             .collect();
                                         format!(
                                             "{} {}\n{}",
-                                            Self::tr_lang(language, "Hotkey:", "Phím tắt:"),
+                                            Self::tr_lang(language, "Hotkey:", "Hotkey:"),
                                             bindings_labels.join(", "),
-                                            Self::tr_lang(
-                                                language,
-                                                "Left click: rebind | Right click: clear",
-                                                "Chuột trái: đổi phím | Chuột phải: xóa phím"
-                                            )
+                                            Self::tr_lang(language, "Left click: rebind | Right click: clear", "Left click: rebind | Right click: clear")
                                         )
                                     } else {
-                                        Self::tr_lang(
-                                            language,
-                                            "Left click: bind hotkey",
-                                            "Chuột trái: gán phím tắt",
-                                        )
+                                        Self::tr_lang(language, "Left click: bind hotkey", "Left click: bind hotkey")
                                         .to_string()
                                     };
 
                                     let btn_text = if capture_active {
-                                        RichText::new(Self::tr_lang(
-                                            language,
-                                            "Capturing...",
-                                            "Đang bắt...",
-                                        ))
+                                        RichText::new(Self::tr_lang(language, "Capturing...", "Capturing..."))
                                         .strong()
                                         .color(Color32::from_rgb(255, 232, 96))
                                     } else {
@@ -861,18 +811,12 @@ impl CrosshairApp {
                                         } else {
                                             next_mouse_sensitivity_capture_target = Some((
                                                 capture_target,
-                                                match language {
-                                                    UiLanguage::Vietnamese => {
-                                                        format!(
-                                                            "Đang bật phím tắt cho {}.",
-                                                            preset.name
-                                                        )
-                                                    }
-                                                    _ => format!(
-                                                        "Capturing hotkey for {}.",
-                                                        preset.name
-                                                    ),
-                                                },
+                                                crate::lang::translate(
+                                                    language,
+                                                    "Capturing hotkey for {}.",
+                                                )
+                                                .unwrap_or("Capturing hotkey for {}.")
+                                                .replace("{}", &preset.name),
                                             ));
                                         }
                                     }
@@ -890,7 +834,7 @@ impl CrosshairApp {
                                     if Self::sound_style_toggle_button(
                                         ui,
                                         if preset.collapsed {
-                                            Self::tr_lang(language, "Show", "Hiện")
+                                            Self::tr_lang(language, "Show", "Show")
                                         } else {
                                             Self::tr_lang(language, "Hide", "Hide")
                                         },
@@ -915,7 +859,7 @@ impl CrosshairApp {
                             .num_columns(2)
                             .spacing([14.0, 8.0])
                             .show(ui, |ui| {
-                                ui.label(Self::tr_lang(language, "Speed", "Tốc độ chuột"));
+                                ui.label(Self::tr_lang(language, "Speed", "Speed"));
                                 mouse_sensitivity_live_sync |= ui
                                     .add(Slider::new(&mut preset.speed, 1..=20).show_value(true))
                                     .changed();
@@ -928,7 +872,7 @@ impl CrosshairApp {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(Self::tr_lang(language, "Mouse Path", "Đường dẫn chuột"))
+                        RichText::new(Self::tr_lang(language, "Mouse Path", "Mouse Path"))
                             .strong(),
                     );
                 });
@@ -964,7 +908,7 @@ impl CrosshairApp {
                                     if Self::sound_style_toggle_button(
                                         ui,
                                         if preset.collapsed {
-                                            Self::tr_lang(language, "Show", "Hiện")
+                                            Self::tr_lang(language, "Show", "Show")
                                         } else {
                                             Self::tr_lang(language, "Hide", "Hide")
                                         },
@@ -1001,20 +945,12 @@ impl CrosshairApp {
                                     if begin_capture {
                                         next_capture_target = Some((
                                             capture_target,
-                                            match language {
-                                                UiLanguage::Vietnamese => {
-                                                    format!(
-                                                        "Đang bật phím tắt ghi cho {}.",
-                                                        preset.name
-                                                    )
-                                                }
-                                                _ => {
-                                                    format!(
-                                                        "Capturing record hotkey for {}.",
-                                                        preset.name
-                                                    )
-                                                }
-                                            },
+                                            crate::lang::translate(
+                                                language,
+                                                "Capturing record hotkey for {}.",
+                                            )
+                                            .unwrap_or("Capturing record hotkey for {}.")
+                                            .replace("{}", &preset.name),
                                         ));
                                     }
                                     if cancel_capture {
@@ -1026,11 +962,7 @@ impl CrosshairApp {
                                 if self.active_mouse_record_preset_id == Some(preset.id) {
                                     ui.label("");
                                     ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            language,
-                                            "Recording via hotkey...",
-                                            "Đang ghi bằng phím tắt...",
-                                        ))
+                                        RichText::new(Self::tr_lang(language, "Recording via hotkey...", "Recording via hotkey..."))
                                         .color(Color32::from_rgb(255, 96, 96))
                                         .strong(),
                                     );
@@ -1042,11 +974,7 @@ impl CrosshairApp {
                                     live_sync |= ui
                                         .checkbox(
                                             &mut preset.replay_relative_motion,
-                                            Self::tr_lang(
-                                                language,
-                                                "Relative motion",
-                                                "Di chuyển tương đối",
-                                            ),
+                                            Self::tr_lang(language, "Relative motion", "Relative motion"),
                                         )
                                         .changed();
                                 });
@@ -1279,11 +1207,7 @@ impl CrosshairApp {
             ui.painter().text(
                 draw_rect.center(),
                 egui::Align2::CENTER_CENTER,
-                Self::tr_lang(
-                    language,
-                    "Record a mouse path to preview it here",
-                    "Ghi một đường chuột để xem trước tại đây",
-                ),
+                Self::tr_lang(language, "Record a mouse path to preview it here", "Record a mouse path to preview it here"),
                 egui::FontId::proportional(16.0),
                 Color32::from_rgb(210, 210, 210),
             );
@@ -1753,11 +1677,7 @@ impl CrosshairApp {
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             if ui
-                .button(Self::tr_lang(
-                    language,
-                    "Preview selection",
-                    "Preview doan chon",
-                ))
+                .button(Self::tr_lang(language, "Preview selection", "Preview selection"))
                 .clicked()
             {
                 outcome.preview_selection = Some(Self::slice_mouse_path_events(
@@ -1768,21 +1688,13 @@ impl CrosshairApp {
                 outcome.preview_from_ms = Some(playhead_ms);
             }
             if ui
-                .button(Self::tr_lang(
-                    language,
-                    "Trim to selection",
-                    "Cat theo doan chon",
-                ))
+                .button(Self::tr_lang(language, "Trim to selection", "Trim to selection"))
                 .clicked()
             {
                 outcome.trim_range = Some((trim_start_ms, trim_end_ms));
             }
             if ui
-                .button(Self::tr_lang(
-                    language,
-                    "Split at playhead",
-                    "Tach tai playhead",
-                ))
+                .button(Self::tr_lang(language, "Split at playhead", "Split at playhead"))
                 .clicked()
             {
                 outcome.split_at_ms = Some(playhead_ms);
@@ -1791,13 +1703,13 @@ impl CrosshairApp {
 
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            ui.label(Self::tr_lang(language, "Merge from", "Gop tu"));
+            ui.label(Self::tr_lang(language, "Merge from", "Merge from"));
             let selected_label = preset_options
                 .iter()
                 .find(|(id, _)| *id == selected_merge_source)
                 .map(|(_, name)| name.clone())
                 .unwrap_or_else(|| {
-                    Self::tr_lang(language, "Select preset", "Chon preset").to_owned()
+                    Self::tr_lang(language, "Select preset", "Select preset").to_owned()
                 });
             egui::ComboBox::from_id_salt((preset_id, "mouse-path-merge-select"))
                 .width(170.0)
@@ -1822,11 +1734,7 @@ impl CrosshairApp {
             if ui
                 .add_enabled(
                     selected_merge_source != 0 && selected_merge_source != preset_id,
-                    Button::new(Self::tr_lang(
-                        language,
-                        "Merge into this",
-                        "Gop vao preset nay",
-                    )),
+                    Button::new(Self::tr_lang(language, "Merge into this", "Merge into this")),
                 )
                 .clicked()
             {
@@ -2195,11 +2103,7 @@ impl CrosshairApp {
             .find(|preset| preset.id == preset_id)
             .map(|preset| preset.name.clone())
         else {
-            self.status = Self::tr_lang(
-                self.state.ui_language,
-                "Selected mouse path preset was not found.",
-                "Khong tim thay mouse path da chon.",
-            )
+            self.status = Self::tr_lang(self.state.ui_language, "Selected mouse path preset was not found.", "Selected mouse path preset was not found.")
             .to_owned();
             return;
         };
@@ -2212,11 +2116,7 @@ impl CrosshairApp {
         self.mouse_path_draw_capture_restore_outer_pos = viewport.outer_rect.map(|rect| rect.min);
         self.mouse_path_draw_capture_preset_id = Some(preset_id);
         self.enforce_square_window_frames = 0;
-        self.status = Self::tr_lang(
-            self.state.ui_language,
-            "Hide app. Hold left mouse to draw the path, then release to save. Press Esc to cancel.",
-            "An app. Giu chuot trai de ve duong, tha ra de luu. Nhan Esc de huy.",
-        )
+        self.status = Self::tr_lang(self.state.ui_language, "Hide app. Hold left mouse to draw the path, then release to save. Press Esc to cancel.", "Hide app. Hold left mouse to draw the path, then release to save. Press Esc to cancel.")
         .to_owned();
 
         let _ = self
@@ -2244,11 +2144,7 @@ impl CrosshairApp {
             .send(OverlayCommand::CancelMousePathDrawCapture);
         crate::overlay::wake_command_queue();
         self.restore_mouse_path_draw_capture_window(ctx);
-        self.status = Self::tr_lang(
-            self.state.ui_language,
-            "Mouse path draw cancelled.",
-            "Da huy ve mouse path.",
-        )
+        self.status = Self::tr_lang(self.state.ui_language, "Mouse path draw cancelled.", "Mouse path draw cancelled.")
         .to_owned();
         ctx.request_repaint_after(Duration::from_millis(33));
     }
@@ -2363,11 +2259,7 @@ impl CrosshairApp {
         self.mouse_move_absolute_capture_wait_for_mouse_release = false;
         self.restore_mouse_move_absolute_capture_window(ctx);
         self.mouse_move_absolute_capture_raise_window = true;
-        self.status = Self::tr_lang(
-            self.state.ui_language,
-            "Mouse position capture cancelled.",
-            "Đã hủy bắt tọa độ chuột.",
-        )
+        self.status = Self::tr_lang(self.state.ui_language, "Mouse position capture cancelled.", "Mouse position capture cancelled.")
         .to_owned();
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -2461,12 +2353,13 @@ impl CrosshairApp {
                 }
             }
             self.mouse_move_absolute_capture_raise_window = true;
-            self.status = match self.state.ui_language {
-                crate::model::UiLanguage::Vietnamese => {
-                    format!("Đã lấy tọa độ {}, {}.", screen_x, screen_y)
-                }
-                _ => format!("Captured position {}, {}.", screen_x, screen_y),
-            };
+            self.status = crate::lang::translate(
+                self.state.ui_language,
+                "Captured position {}, {}.",
+            )
+            .unwrap_or("Captured position {}, {}.")
+            .replacen("{}", &screen_x.to_string(), 1)
+            .replacen("{}", &screen_y.to_string(), 1);
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
             self.persist();
             if target.group_id.is_some() {
@@ -2539,12 +2432,13 @@ impl CrosshairApp {
                 }
             }
             self.mouse_move_absolute_capture_raise_window = true;
-            self.status = match self.state.ui_language {
-                crate::model::UiLanguage::Vietnamese => {
-                    format!("Đã lấy tọa độ {}, {}.", screen_x, screen_y)
-                }
-                _ => format!("Captured position {}, {}.", screen_x, screen_y),
-            };
+            self.status = crate::lang::translate(
+                self.state.ui_language,
+                "Captured position {}, {}.",
+            )
+            .unwrap_or("Captured position {}, {}.")
+            .replacen("{}", &screen_x.to_string(), 1)
+            .replacen("{}", &screen_y.to_string(), 1);
             ctx.request_repaint_after(std::time::Duration::from_millis(33));
             self.persist();
             if target.group_id.is_some() {
@@ -2667,11 +2561,7 @@ impl CrosshairApp {
 
             let Some(object) = object_result else {
                 self.cancel_mouse_move_absolute_capture(ctx);
-                self.status = Self::tr_lang(
-                    self.state.ui_language,
-                    "Geometry target was not found.",
-                    "Khong tim thay hinh hoc de lay toa do.",
-                )
+                self.status = Self::tr_lang(self.state.ui_language, "Geometry target was not found.", "Geometry target was not found.")
                 .to_owned();
                 return;
             };
@@ -2733,11 +2623,7 @@ impl CrosshairApp {
 
         let Some(step) = step_result else {
             self.cancel_mouse_move_absolute_capture(ctx);
-            self.status = Self::tr_lang(
-                self.state.ui_language,
-                "Mouse position capture target was not found.",
-                "Không tìm thấy step để bắt tọa độ chuột.",
-            )
+            self.status = Self::tr_lang(self.state.ui_language, "Mouse position capture target was not found.", "Mouse position capture target was not found.")
             .to_owned();
             return;
         };
@@ -2751,12 +2637,13 @@ impl CrosshairApp {
         self.mouse_move_absolute_capture_wait_for_mouse_release = false;
         self.restore_mouse_move_absolute_capture_window(ctx);
         self.mouse_move_absolute_capture_raise_window = true;
-        self.status = match self.state.ui_language {
-            UiLanguage::Vietnamese => {
-                format!("Đã lấy tọa độ chuột {}, {}.", screen_x, screen_y)
-            }
-            _ => format!("Captured mouse position {}, {}.", screen_x, screen_y),
-        };
+        self.status = crate::lang::translate(
+            self.state.ui_language,
+            "Captured mouse position {}, {}.",
+        )
+        .unwrap_or("Captured mouse position {}, {}.")
+        .replacen("{}", &screen_x.to_string(), 1)
+        .replacen("{}", &screen_y.to_string(), 1);
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
@@ -2998,7 +2885,7 @@ impl CrosshairApp {
             self.arduino_flash_status = self
                 .tr(
                     "Error: Select a COM Port first",
-                    "Lỗi: Hãy chọn cổng COM trước",
+                    "Error: Select a COM Port first",
                 )
                 .to_owned();
             return;

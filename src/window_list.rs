@@ -834,6 +834,7 @@ mod windows_impl {
         )?;
 
         let session = frame_pool.CreateCaptureSession(&item)?;
+        let _ = session.SetIsBorderRequired(false);
         session.StartCapture()?;
 
         Ok(WgcSession {
@@ -968,6 +969,11 @@ mod windows_impl {
                 None
             }
         }
+    }
+
+    pub(crate) fn close_window_capture_session() {
+        let mut manager = WGC_MANAGER.lock();
+        *manager = None;
     }
 
     pub(crate) unsafe fn capture_window_region_from_hwnd(hwnd: HWND) -> Option<ScreenCaptureFrame> {
@@ -1142,6 +1148,8 @@ mod fallback {
     pub fn set_window_topmost(_selector: &str, _topmost: bool) -> bool {
         false
     }
+
+    pub(crate) fn close_window_capture_session() {}
 }
 
 #[cfg(not(windows))]
