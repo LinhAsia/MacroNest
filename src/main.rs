@@ -12,6 +12,7 @@ mod model;
 mod ocr;
 mod overlay;
 mod platform;
+mod protractor;
 mod render;
 mod storage;
 mod ui;

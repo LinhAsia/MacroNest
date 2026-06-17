@@ -10544,29 +10544,38 @@ impl CrosshairApp {
         self.mouse_move_absolute_capture_raise_window = true;
 
         if points.len() == 3 {
-            if let Some(((cx, cy), radius)) = circle_from_3_points(points[0], points[1], points[2])
+            if let Some(((cx, cy), radius)) =
+                crate::protractor::circle_from_3_points(points[0], points[1], points[2])
             {
-                let scale = (radius / 150.0).clamp(0.4, 2.5);
-                self.state.protractor_center_x = cx;
-                self.state.protractor_center_y = cy;
-                self.state.protractor_scale = scale;
-                self.state.protractor_enabled = true;
-                self.status = Self::tr_lang(
-                    self.state.ui_language,
-                    "Protractor calibrated successfully!",
-                    "Cân chỉnh thước đo góc thành công!",
-                )
-                .to_owned();
+                if radius < crate::protractor::PROTRACTOR_MIN_CALIBRATION_RADIUS {
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Selected circle is too small. Pick three points farther apart.",
+                        "Vong tron da chon qua nho. Hay chon 3 diem cach xa nhau hon.",
+                    )
+                    .to_owned();
+                } else {
+                    let scale = crate::protractor::calibrated_protractor_scale(radius);
+                    self.state.protractor_center_x = cx;
+                    self.state.protractor_center_y = cy;
+                    self.state.protractor_scale = scale;
+                    self.state.protractor_enabled = true;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Protractor calibrated successfully!",
+                        "Can chinh thuoc do do thanh cong!",
+                    )
+                    .to_owned();
+                }
             } else {
                 self.status = Self::tr_lang(
                     self.state.ui_language,
                     "Points are collinear. Cannot form a circle.",
-                    "Các điểm thẳng hàng. Không thể tạo đường tròn.",
+                    "Cac diem thang hang. Khong the tao duong tron.",
                 )
                 .to_owned();
             }
         }
-
         self.sync_protractor_state();
         self.persist();
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
@@ -10575,33 +10584,6 @@ impl CrosshairApp {
     pub(crate) fn render_protractor_calibration_overlay(&mut self, _ctx: &egui::Context) -> bool {
         false
     }
-}
-
-fn circle_from_3_points(
-    p1: (i32, i32),
-    p2: (i32, i32),
-    p3: (i32, i32),
-) -> Option<((i32, i32), f32)> {
-    let (x1, y1) = (p1.0 as f64, p1.1 as f64);
-    let (x2, y2) = (p2.0 as f64, p2.1 as f64);
-    let (x3, y3) = (p3.0 as f64, p3.1 as f64);
-
-    let d = 2.0 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2));
-    if d.abs() < 1e-6 {
-        return None; // collinear or identical
-    }
-
-    let ux = ((x1 * x1 + y1 * y1) * (y2 - y3)
-        + (x2 * x2 + y2 * y2) * (y3 - y1)
-        + (x3 * x3 + y3 * y3) * (y1 - y2))
-        / d;
-    let uy = ((x1 * x1 + y1 * y1) * (x3 - x2)
-        + (x2 * x2 + y2 * y2) * (x1 - x3)
-        + (x3 * x3 + y3 * y3) * (x2 - x1))
-        / d;
-
-    let r = ((x1 - ux).powi(2) + (y1 - uy).powi(2)).sqrt();
-    Some(((ux.round() as i32, uy.round() as i32), r as f32))
 }
 
 impl eframe::App for CrosshairApp {
@@ -12449,3 +12431,4 @@ pub(crate) fn video_duration(clip: &VideoClipSettings) -> Option<u64> {
             .map(|meta| meta.duration_ms)
     }
 }
+
