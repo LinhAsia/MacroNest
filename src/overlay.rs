@@ -43,6 +43,7 @@ mod windows_overlay {
     use super::{MacroRecordingEvent, MacroRecordingSession};
     use crate::ui::{VisionCaptureTarget, VisionCaptureMode, MouseMoveAbsoluteCaptureTarget};
     use std::{
+        borrow::Cow,
         collections::{HashMap, HashSet},
         ffi::{CString, c_void},
         mem::size_of,
@@ -57,6 +58,7 @@ mod windows_overlay {
         thread,
         time::{Duration, Instant},
     };
+    use arboard::{Clipboard, ImageData};
     use anyhow::{Context, Result, bail};
     use crossbeam_channel::{Receiver, Sender};
     use eframe::egui;
@@ -205,6 +207,10 @@ mod windows_overlay {
     const SCREEN_DRAW_TIMER_ID: usize = 3;
     const SCREEN_DRAW_REFRESH_INTERVAL_MS: u32 = 16;
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 6;
+    const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 408;
+    const SCREEN_DRAW_TOOLBAR_HEIGHT: i32 = 78;
+    const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 370;
+    const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 326;
     #[derive(Debug, Clone)]
     struct VisionRunOutcome {
         matched: bool,
@@ -519,6 +525,7 @@ mod windows_overlay {
         Eraser,
         Smoothing,
         SmoothingAmount,
+        CaptureRegion,
     }
 
     impl Default for ScreenDrawControl {
@@ -605,6 +612,7 @@ mod windows_overlay {
         frame_rgba: Vec<u8>,
         committed_dirty: bool,
         pending_repaint: bool,
+        capturing_region: bool,
         last_present_at: Option<Instant>,
         dirty_rect: Option<ScreenDrawDirtyRect>,
         live_stroke_rect: Option<ScreenDrawDirtyRect>,
@@ -647,6 +655,7 @@ mod windows_overlay {
                 frame_rgba: Vec::new(),
                 committed_dirty: true,
                 pending_repaint: false,
+                capturing_region: false,
                 last_present_at: None,
                 dirty_rect: None,
                 live_stroke_rect: None,
@@ -678,6 +687,7 @@ mod windows_overlay {
         MousePathRecordingStarted(u32, String),
         MousePathRecordingFinished(u32, Vec<MousePathEvent>, String),
         MousePathDrawCaptureCancelled(String),
+        ScreenDrawCaptureStatus(String),
         VisionFinished(String),
         MacroStepInlineFeedback {
             preset_id: u32,
@@ -4720,6 +4730,25 @@ mod windows_overlay {
             .collect()
     }
 
+    fn quick_key_display_entry_base_and_count(entry: &str) -> (String, u32) {
+        if let Some((base, suffix)) = entry.rsplit_once(" (x")
+            && let Some(value) = suffix.strip_suffix(')')
+            && let Ok(count) = value.parse::<u32>()
+            && count > 1
+        {
+            return (base.to_owned(), count);
+        }
+        (entry.to_owned(), 1)
+    }
+
+    fn quick_key_display_format_entry(text: &str, count: u32) -> String {
+        if count > 1 {
+            format!("{text} (x{count})")
+        } else {
+            text.to_owned()
+        }
+    }
+
     fn quick_key_display_should_replace(previous: &str, next: &str) -> bool {
         let previous_parts = quick_key_display_parts(previous);
         let next_parts = quick_key_display_parts(next);
@@ -4798,15 +4827,29 @@ mod windows_overlay {
 
         let should_append_duplicate = runtime.quick_key_display_hide_at.is_some();
         match runtime.quick_key_display_entries.last_mut() {
-            Some(last)
-                if last.eq_ignore_ascii_case(&text) && !should_append_duplicate => {}
-            Some(last)
-                if !should_append_duplicate && quick_key_display_should_replace(last, &text) =>
-            {
-                *last = text;
+            Some(last) => {
+                let (last_base, last_count) = quick_key_display_entry_base_and_count(last);
+                if last_base.eq_ignore_ascii_case(&text) && !should_append_duplicate {
+                    *last = quick_key_display_format_entry(&text, last_count.saturating_add(1));
+                } else if !should_append_duplicate
+                    && quick_key_display_should_replace(&last_base, &text)
+                {
+                    *last = quick_key_display_format_entry(&text, 1);
+                } else {
+                    runtime
+                        .quick_key_display_entries
+                        .push(quick_key_display_format_entry(&text, 1));
+                    if runtime.quick_key_display_entries.len() > QUICK_KEY_DISPLAY_MAX_ENTRIES {
+                        let drop_count = runtime.quick_key_display_entries.len()
+                            - QUICK_KEY_DISPLAY_MAX_ENTRIES;
+                        runtime.quick_key_display_entries.drain(0..drop_count);
+                    }
+                }
             }
             _ => {
-                runtime.quick_key_display_entries.push(text);
+                runtime
+                    .quick_key_display_entries
+                    .push(quick_key_display_format_entry(&text, 1));
                 if runtime.quick_key_display_entries.len() > QUICK_KEY_DISPLAY_MAX_ENTRIES {
                     let drop_count =
                         runtime.quick_key_display_entries.len() - QUICK_KEY_DISPLAY_MAX_ENTRIES;
@@ -4924,6 +4967,7 @@ mod windows_overlay {
             let state = SCREEN_DRAW_STATE.lock();
             (
                 state.enabled
+                    && !state.capturing_region
                     && state
                         .trigger
                         .as_ref()
@@ -5716,9 +5760,17 @@ mod windows_overlay {
     }
 
     fn refresh_screen_draw_overlay(runtime: &mut Runtime) -> Result<()> {
-        let active = SCREEN_DRAW_STATE.lock().active;
+        let state = SCREEN_DRAW_STATE.lock();
+        let active = state.active;
+        let capturing_region = state.capturing_region;
+        drop(state);
         if active {
-            unsafe { paint_screen_draw_overlay(runtime.screen_draw_hwnd) }
+            if capturing_region {
+                let _ = unsafe { ShowWindow(runtime.screen_draw_hwnd, SW_HIDE) };
+                Ok(())
+            } else {
+                unsafe { paint_screen_draw_overlay(runtime.screen_draw_hwnd) }
+            }
         } else {
             let _ = unsafe { ShowWindow(runtime.screen_draw_hwnd, SW_HIDE) };
             Ok(())
@@ -5735,6 +5787,7 @@ mod windows_overlay {
                 deactivate_screen_draw(&mut state);
             } else {
                 state.active = true;
+                state.capturing_region = false;
                 state.current_stroke = None;
                 state.active_control = ScreenDrawControl::None;
                 state.pending_repaint = true;
@@ -5758,7 +5811,8 @@ mod windows_overlay {
     }
 
     fn screen_draw_active() -> bool {
-        SCREEN_DRAW_STATE.lock().active
+        let state = SCREEN_DRAW_STATE.lock();
+        state.active && !state.capturing_region
     }
 
     fn screen_draw_local_point_from_screen(point: POINT) -> POINT {
@@ -5790,8 +5844,8 @@ mod windows_overlay {
         ScreenDrawDirtyRect {
             left: state.toolbar_x.max(0) as usize,
             top: state.toolbar_y.max(0) as usize,
-            right: (state.toolbar_x + 332).max(0) as usize,
-            bottom: (state.toolbar_y + 78).max(0) as usize,
+            right: (state.toolbar_x + SCREEN_DRAW_TOOLBAR_WIDTH).max(0) as usize,
+            bottom: (state.toolbar_y + SCREEN_DRAW_TOOLBAR_HEIGHT).max(0) as usize,
         }
     }
 
@@ -5864,6 +5918,7 @@ mod windows_overlay {
         state.active = false;
         state.current_stroke = None;
         state.active_control = ScreenDrawControl::None;
+        state.capturing_region = false;
         state.strokes.clear();
         state.canvas_width = 0;
         state.canvas_height = 0;
@@ -5952,8 +6007,9 @@ mod windows_overlay {
     }
 
     fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
+        let mut start_region_capture = false;
         let mut state = SCREEN_DRAW_STATE.lock();
-        if !state.active {
+        if !state.active || state.capturing_region {
             return false;
         }
         if right_button {
@@ -5991,6 +6047,15 @@ mod windows_overlay {
                 update_screen_draw_smoothing_slider(&mut state, point.x);
                 mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
             }
+            ScreenDrawHit::CaptureRegion => {
+                if !state.capturing_region {
+                    state.capturing_region = true;
+                    state.active_control = ScreenDrawControl::None;
+                    state.current_stroke = None;
+                    state.pending_repaint = false;
+                    start_region_capture = true;
+                }
+            }
             ScreenDrawHit::ToolbarBody => {
                 state.active_control = ScreenDrawControl::MoveToolbar;
                 state.drag_offset_x = point.x - state.toolbar_x;
@@ -6002,23 +6067,210 @@ mod windows_overlay {
                 sync_screen_draw_live_stroke_dirty(&mut state);
             }
         }
-        if state.active {
+        if state.active && !start_region_capture {
             mark_screen_draw_repaint_pending(&mut state);
+        }
+        drop(state);
+        if start_region_capture {
+            begin_screen_draw_region_capture();
         }
         true
     }
 
+    fn begin_screen_draw_region_capture() {
+        let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
+        thread::spawn(move || {
+            let status = run_screen_draw_region_capture_flow();
+            restore_screen_draw_after_region_capture(hwnd_raw);
+            if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
+                let _ = tx.send(UiCommand::ScreenDrawCaptureStatus(status));
+            }
+        });
+    }
+
+    fn run_screen_draw_region_capture_flow() -> String {
+        match capture_screen_draw_region_to_clipboard() {
+            Ok(copied) if copied => "Copied annotated screen region to clipboard.".to_owned(),
+            Ok(_) => "Screen draw capture cancelled.".to_owned(),
+            Err(error) => format!("Screen draw capture failed: {error}"),
+        }
+    }
+
+    fn capture_screen_draw_region_to_clipboard() -> Result<bool> {
+        let capture = build_screen_draw_capture_frame()?;
+        let result = native_capture::run_capture_overlay(
+            capture.clone(),
+            capture.screen_x,
+            capture.screen_y,
+            capture.width as i32,
+            capture.height as i32,
+            native_capture::NativeCaptureMode::RegionSelect {
+                is_template: false,
+                vietnamese: false,
+            },
+        );
+        match result {
+            native_capture::NativeCaptureResult::SelectedRegion {
+                x,
+                y,
+                width,
+                height,
+            } => {
+                copy_screen_draw_capture_region_to_clipboard(&capture, x, y, width, height)?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn build_screen_draw_capture_frame() -> Result<window_list::ScreenCaptureFrame> {
+        let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+        if screen_w <= 0 || screen_h <= 0 {
+            bail!("Virtual screen is unavailable");
+        }
+
+        let draw_layer = {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            if !state.active {
+                bail!("Screen draw is not active");
+            }
+            let width = screen_w as usize;
+            let height = screen_h as usize;
+            ensure_screen_draw_canvas(&mut state, width, height);
+            if state.committed_dirty {
+                rebuild_screen_draw_canvas(&mut state);
+            }
+            let mut rgba = state.committed_rgba.clone();
+            if let Some(stroke) = state.current_stroke.clone()
+                && let Some(mut pixmap) =
+                    tiny_skia::PixmapMut::from_bytes(rgba.as_mut_slice(), width as u32, height as u32)
+            {
+                render_screen_draw_stroke_skia(&mut pixmap, &stroke);
+            }
+            rgba
+        };
+
+        let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
+        if hwnd_raw != 0 {
+            unsafe {
+                let hwnd = HWND(hwnd_raw as *mut c_void);
+                set_screen_draw_refresh_timer(hwnd, false);
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+        thread::sleep(Duration::from_millis(30));
+
+        let mut capture = window_list::capture_virtual_screen_region(screen_x, screen_y, screen_w, screen_h)
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture the virtual screen"))?;
+        blend_screen_draw_layer_onto_capture(capture.rgba.as_mut_slice(), draw_layer.as_slice());
+        Ok(capture)
+    }
+
+    fn blend_screen_draw_layer_onto_capture(dst: &mut [u8], src: &[u8]) {
+        let pixel_count = (dst.len() / 4).min(src.len() / 4);
+        for index in 0..pixel_count {
+            let offset = index * 4;
+            let src_a = src[offset + 3];
+            if src_a == 0 {
+                continue;
+            }
+            blend_premultiplied_rgba(
+                &mut dst[offset..offset + 4],
+                src[offset],
+                src[offset + 1],
+                src[offset + 2],
+                src_a,
+            );
+            dst[offset + 3] = 255;
+        }
+    }
+
+    fn copy_screen_draw_capture_region_to_clipboard(
+        capture: &window_list::ScreenCaptureFrame,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    ) -> Result<()> {
+        let rel_x = (x - capture.screen_x).clamp(0, capture.width.saturating_sub(1) as i32) as u32;
+        let rel_y = (y - capture.screen_y).clamp(0, capture.height.saturating_sub(1) as i32) as u32;
+        let max_width = capture.width.saturating_sub(rel_x as usize) as u32;
+        let max_height = capture.height.saturating_sub(rel_y as usize) as u32;
+        let crop_width = (width.max(1) as u32).min(max_width);
+        let crop_height = (height.max(1) as u32).min(max_height);
+        if crop_width == 0 || crop_height == 0 {
+            bail!("Selected capture region is empty");
+        }
+
+        let source = RgbaImage::from_raw(
+            capture.width as u32,
+            capture.height as u32,
+            capture.rgba.clone(),
+        )
+        .ok_or_else(|| anyhow::anyhow!("Failed to build the screen capture image"))?;
+        let cropped = image::imageops::crop_imm(
+            &source,
+            rel_x,
+            rel_y,
+            crop_width,
+            crop_height,
+        )
+        .to_image();
+        let mut clipboard = Clipboard::new().context("Failed to open the clipboard")?;
+        clipboard
+            .set_image(ImageData {
+                width: crop_width as usize,
+                height: crop_height as usize,
+                bytes: Cow::Owned(cropped.into_raw()),
+            })
+            .context("Failed to copy the annotated screenshot to the clipboard")
+    }
+
+    fn restore_screen_draw_after_region_capture(hwnd_raw: isize) {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        state.capturing_region = false;
+        let active = state.active;
+        if active {
+            let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+            let _ = (screen_x, screen_y);
+            state.pending_repaint = true;
+            state.dirty_rect = Some(ScreenDrawDirtyRect::full(
+                screen_w.max(1) as usize,
+                screen_h.max(1) as usize,
+            ));
+        }
+        drop(state);
+
+        if hwnd_raw == 0 {
+            return;
+        }
+
+        unsafe {
+            let hwnd = HWND(hwnd_raw as *mut c_void);
+            if active {
+                set_screen_draw_refresh_timer(hwnd, true);
+                let _ = paint_screen_draw_overlay(hwnd);
+            } else {
+                set_screen_draw_refresh_timer(hwnd, false);
+                let _ = clear_screen_draw_overlay_window(hwnd);
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+    }
+
     fn screen_draw_handle_move(point: POINT) -> bool {
         let mut state = SCREEN_DRAW_STATE.lock();
-        if !state.active {
+        if !state.active || state.capturing_region {
             return false;
         }
         match state.active_control {
             ScreenDrawControl::MoveToolbar => {
                 let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
-                state.toolbar_x = (point.x - state.drag_offset_x).clamp(0, (screen_w - 332).max(0));
-                state.toolbar_y = (point.y - state.drag_offset_y).clamp(0, (screen_h - 78).max(0));
+                state.toolbar_x = (point.x - state.drag_offset_x)
+                    .clamp(0, (screen_w - SCREEN_DRAW_TOOLBAR_WIDTH).max(0));
+                state.toolbar_y = (point.y - state.drag_offset_y)
+                    .clamp(0, (screen_h - SCREEN_DRAW_TOOLBAR_HEIGHT).max(0));
                 mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
                 mark_screen_draw_repaint_pending(&mut state);
                 true
@@ -6054,7 +6306,7 @@ mod windows_overlay {
 
     fn screen_draw_handle_button_up() -> bool {
         let mut state = SCREEN_DRAW_STATE.lock();
-        if !state.active {
+        if !state.active || state.capturing_region {
             return false;
         }
         if let Some(previous) = state.live_stroke_rect.take() {
@@ -6163,10 +6415,14 @@ mod windows_overlay {
     fn screen_draw_hit(state: &ScreenDrawState, point: POINT) -> ScreenDrawHit {
         let x = point.x - state.toolbar_x;
         let y = point.y - state.toolbar_y;
-        if x < 0 || y < 0 || x > 332 || y > 76 {
+        if x < 0 || y < 0 || x > SCREEN_DRAW_TOOLBAR_WIDTH || y > SCREEN_DRAW_TOOLBAR_HEIGHT {
             return ScreenDrawHit::Canvas;
         }
-        if x >= 294 && x <= 320 && y >= 10 && y <= 30 {
+        if x >= SCREEN_DRAW_TOOLBAR_CLOSE_X
+            && x <= SCREEN_DRAW_TOOLBAR_CLOSE_X + 26
+            && y >= 10
+            && y <= 30
+        {
             return ScreenDrawHit::Close;
         }
         if x >= 14 && x <= 50 && y >= 20 && y <= 56 {
@@ -6183,6 +6439,13 @@ mod windows_overlay {
         }
         if x >= 264 && x <= 318 && y >= 22 && y <= 54 {
             return ScreenDrawHit::SmoothingAmount;
+        }
+        if x >= SCREEN_DRAW_TOOLBAR_CAPTURE_X
+            && x <= SCREEN_DRAW_TOOLBAR_CAPTURE_X + 36
+            && y >= 20
+            && y <= 56
+        {
+            return ScreenDrawHit::CaptureRegion;
         }
         ScreenDrawHit::ToolbarBody
     }
@@ -6450,7 +6713,7 @@ mod windows_overlay {
             return Ok(());
         }
         let mut state_guard = SCREEN_DRAW_STATE.lock();
-        if !state_guard.active {
+        if !state_guard.active || state_guard.capturing_region {
             let _ = ShowWindow(hwnd, SW_HIDE);
             return Ok(());
         }
@@ -6642,21 +6905,71 @@ mod windows_overlay {
         smoothing: bool,
         smoothing_amount: f32,
     ) {
-        let toolbar_w = 332usize;
+        let toolbar_w = SCREEN_DRAW_TOOLBAR_WIDTH as usize;
         let toolbar_h = 72usize;
         let mut pixmap = match tiny_skia::Pixmap::new(toolbar_w as u32, toolbar_h as u32) {
             Some(pixmap) => pixmap,
             None => return,
         };
 
-        fill_skia_rounded_rect(&mut pixmap, 2.0, 4.0, 328.0, 68.0, 16.0, [0, 0, 0, 72]);
-        fill_skia_rounded_rect(&mut pixmap, 0.0, 0.0, 332.0, 72.0, 16.0, [28, 36, 48, 232]);
-        fill_skia_rounded_rect(&mut pixmap, 1.0, 1.0, 330.0, 26.0, 15.0, [255, 255, 255, 12]);
-        stroke_skia_rounded_rect(&mut pixmap, 0.5, 0.5, 331.0, 71.0, 16.0, 1.0, [220, 232, 248, 32]);
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            2.0,
+            4.0,
+            (toolbar_w as f32 - 4.0).max(1.0),
+            68.0,
+            16.0,
+            [0, 0, 0, 72],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            0.0,
+            0.0,
+            toolbar_w as f32,
+            72.0,
+            16.0,
+            [28, 36, 48, 232],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            1.0,
+            1.0,
+            (toolbar_w as f32 - 2.0).max(1.0),
+            26.0,
+            15.0,
+            [255, 255, 255, 12],
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            0.5,
+            0.5,
+            (toolbar_w as f32 - 1.0).max(1.0),
+            71.0,
+            16.0,
+            1.0,
+            [220, 232, 248, 32],
+        );
 
-        fill_skia_rounded_rect(&mut pixmap, 294.0, 10.0, 26.0, 20.0, 8.0, [82, 96, 120, 214]);
-        draw_skia_line(&mut pixmap, 301.0, 16.0, 313.0, 24.0, [255, 255, 255, 255], 2.0);
-        draw_skia_line(&mut pixmap, 313.0, 16.0, 301.0, 24.0, [255, 255, 255, 255], 2.0);
+        let close_x = SCREEN_DRAW_TOOLBAR_CLOSE_X as f32;
+        fill_skia_rounded_rect(&mut pixmap, close_x, 10.0, 26.0, 20.0, 8.0, [82, 96, 120, 214]);
+        draw_skia_line(
+            &mut pixmap,
+            close_x + 7.0,
+            16.0,
+            close_x + 19.0,
+            24.0,
+            [255, 255, 255, 255],
+            2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            close_x + 19.0,
+            16.0,
+            close_x + 7.0,
+            24.0,
+            [255, 255, 255, 255],
+            2.0,
+        );
 
         fill_skia_rounded_rect(&mut pixmap, 13.0, 19.0, 38.0, 38.0, 11.0, [236, 244, 255, 84]);
         fill_skia_rounded_rect(
@@ -6728,6 +7041,68 @@ mod windows_overlay {
             38.0,
             54.0,
             smoothing_amount.clamp(0.0, 1.0),
+        );
+
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32,
+            20.0,
+            36.0,
+            36.0,
+            10.0,
+            [86, 106, 132, 224],
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 0.5,
+            20.5,
+            35.0,
+            35.0,
+            10.0,
+            1.0,
+            [255, 255, 255, 34],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 8.0,
+            28.0,
+            20.0,
+            14.0,
+            4.0,
+            [240, 246, 255, 246],
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 12.0,
+            28.0,
+            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 16.0,
+            24.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 16.0,
+            24.0,
+            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 22.0,
+            24.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
+        draw_skia_circle_fill(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 18.0,
+            35.0,
+            4.6,
+            [74, 98, 128, 255],
+        );
+        draw_skia_circle_outline(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 18.0,
+            35.0,
+            4.6,
+            [255, 255, 255, 196],
+            1.0,
         );
 
         let data = pixmap.data();

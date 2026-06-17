@@ -11122,6 +11122,10 @@ impl eframe::App for CrosshairApp {
                     self.status = status;
                     ctx.request_repaint();
                 }
+                UiCommand::ScreenDrawCaptureStatus(status) => {
+                    self.status = status;
+                    ctx.request_repaint();
+                }
                 UiCommand::MouseMoveAbsolutePointCaptured { .. } => {}
                 UiCommand::MouseMoveAbsoluteCaptureCancelled => {}
                 UiCommand::NativeVisionCaptureFinished {
@@ -11293,6 +11297,21 @@ impl eframe::App for CrosshairApp {
                                         )
                                         .to_owned();
                                     }
+                                }
+                                VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
+                                    self.clear_image_search_capture_state();
+                                    self.state.quick_key_display_x = x;
+                                    self.state.quick_key_display_y = y;
+                                    self.sync_quick_key_display_config();
+                                    self.persist();
+                                    self.status = match self.state.ui_language {
+                                        crate::model::UiLanguage::Vietnamese => {
+                                            format!("Da dat vi tri hien thi phim: X={}, Y={}", x, y)
+                                        }
+                                        _ => {
+                                            format!("Key display position set: X={}, Y={}", x, y)
+                                        }
+                                    };
                                 }
                                 _ => {}
                             }
