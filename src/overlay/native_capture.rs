@@ -410,25 +410,51 @@ fn blit_rect(
     }
 }
 
-fn circle_from_3_points(
-    p1: (i32, i32),
-    p2: (i32, i32),
-    p3: (i32, i32),
-) -> Option<((i32, i32), f32)> {
-    let (x1, y1) = (p1.0 as f64, p1.1 as f64);
-    let (x2, y2) = (p2.0 as f64, p2.1 as f64);
-    let (x3, y3) = (p3.0 as f64, p3.1 as f64);
-
-    let d = 2.0 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2));
-    if d.abs() < 1e-6 {
-        return None;
+fn protractor_circle_too_small(state: &CaptureState) -> bool {
+    if state.protractor_points.len() != 2 {
+        return false;
     }
 
-    let ux = ((x1 * x1 + y1 * y1) * (y2 - y3) + (x2 * x2 + y2 * y2) * (y3 - y1) + (x3 * x3 + y3 * y3) * (y1 - y2)) / d;
-    let uy = ((x1 * x1 + y1 * y1) * (x3 - x2) + (x2 * x2 + y2 * y2) * (x1 - x3) + (x3 * x3 + y3 * y3) * (x2 - x1)) / d;
+    let Some(curr) = state.current_point else {
+        return false;
+    };
 
-    let r = ((x1 - ux).powi(2) + (y1 - uy).powi(2)).sqrt();
-    Some(((ux.round() as i32, uy.round() as i32), r as f32))
+    let pt1 = state.protractor_points[0];
+    let pt2 = state.protractor_points[1];
+    let curr_abs = (curr.0 + state.left, curr.1 + state.top);
+
+    let Some((_, radius)) = crate::protractor::circle_from_3_points(pt1, pt2, curr_abs) else {
+        return false;
+    };
+
+    radius < crate::protractor::PROTRACTOR_MIN_CALIBRATION_RADIUS
+}
+
+fn protractor_calibration_status_text(
+    state: &CaptureState,
+    ui_language: crate::model::UiLanguage,
+) -> &'static str {
+    let count = state.protractor_points.len();
+    let too_small = count >= 2 && protractor_circle_too_small(state);
+
+    match ui_language {
+        crate::model::UiLanguage::Vietnamese => match count {
+            0 => "Can chinh: Click diem 1/3 tren man hinh. Nhan Esc de huy.",
+            1 => "Can chinh: Click diem 2/3 tren man hinh. Nhan Esc de huy.",
+            _ if too_small => {
+                "Can chinh: vong tron qua nho. Hay chon diem 3 xa hon hoac nhan Esc de huy."
+            }
+            _ => "Can chinh: Click diem 3/3 tren man hinh. Nhan Esc de huy.",
+        },
+        crate::model::UiLanguage::English | crate::model::UiLanguage::Icon => match count {
+            0 => "Calibration: Click point 1/3 on screen. Press Esc to cancel.",
+            1 => "Calibration: Click point 2/3 on screen. Press Esc to cancel.",
+            _ if too_small => {
+                "Calibration: circle too small. Pick point 3 farther away or press Esc to cancel."
+            }
+            _ => "Calibration: Click point 3/3 on screen. Press Esc to cancel.",
+        },
+    }
 }
 
 fn draw_rounded_rect(
@@ -588,7 +614,9 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
                     let pt2 = state.protractor_points[1];
                     let curr_abs = (curr.0 + state.left, curr.1 + state.top);
 
-                    if let Some((center, radius)) = circle_from_3_points(pt1, pt2, curr_abs) {
+                    if let Some((center, radius)) =
+                        crate::protractor::circle_from_3_points(pt1, pt2, curr_abs)
+                    {
                         let rcx = center.0 - state.left;
                         let rcy = center.1 - state.top;
 
@@ -836,23 +864,7 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
     // 5. Draw status bar & instructions using GDI DrawTextW
     let status_text = match state.mode {
         NativeCaptureMode::ProtractorCalibration { ui_language } => {
-            let count = state.protractor_points.len();
-            match ui_language {
-                crate::model::UiLanguage::Vietnamese => {
-                    match count {
-                        0 => "Cân chỉnh: Click điểm 1/3 trên màn hình. Nhấn Esc để hủy.",
-                        1 => "Cân chỉnh: Click điểm 2/3 trên màn hình. Nhấn Esc để hủy.",
-                        _ => "Cân chỉnh: Click điểm 3/3 trên màn hình. Nhấn Esc để hủy.",
-                    }
-                }
-                crate::model::UiLanguage::English | crate::model::UiLanguage::Icon => {
-                    match count {
-                        0 => "Calibration: Click point 1/3 on screen. Press Esc to cancel.",
-                        1 => "Calibration: Click point 2/3 on screen. Press Esc to cancel.",
-                        _ => "Calibration: Click point 3/3 on screen. Press Esc to cancel.",
-                    }
-                }
-            }
+            protractor_calibration_status_text(state, ui_language)
         }
         NativeCaptureMode::RegionSelect { is_template, vietnamese } => {
             if vietnamese {
@@ -1220,3 +1232,4 @@ unsafe fn draw_region_select_capture_to_dc(
 
     Ok(())
 }
+
