@@ -2574,12 +2574,12 @@ mod windows_overlay {
                     update_quick_key_display_key(key_name, is_key_down, is_key_up);
                 }
                 if let Some(key_name) = key_name.clone() {
-                    let binding = binding_from_trigger_event(&key_name);
-                    if screen_draw_capture_should_swallow_binding(&binding) {
+                    if screen_draw_capture_should_swallow_key_name(&key_name) {
                         update_held_key(&key_name, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
                         return LRESULT(1);
                     }
+                    let binding = binding_from_trigger_event(&key_name);
                     if is_key_down {
                         if process_screen_draw_hotkey(&binding, is_repeat_key(&key_name)) {
                             update_modifier_state(info.vkCode, is_key_down);
@@ -3008,6 +3008,11 @@ mod windows_overlay {
                     ((info.mouseData >> 16) & 0xFFFF) as u16,
                 );
                 update_held_mouse_button(message, ((info.mouseData >> 16) & 0xFFFF) as u16);
+                if let Some(key_name) = event_key_name
+                    && screen_draw_capture_should_swallow_key_name(key_name)
+                {
+                    return LRESULT(1);
+                }
                 if screen_draw_capture_should_swallow_binding(&binding) {
                     return LRESULT(1);
                 }
@@ -5006,6 +5011,18 @@ mod windows_overlay {
                 .is_some_and(|trigger| hotkey::binding_matches(trigger, binding))
     }
 
+    fn screen_draw_capture_should_swallow_key_name(key_name: &str) -> bool {
+        let state = SCREEN_DRAW_STATE.lock();
+        if !state.capturing_region {
+            return false;
+        }
+        state.capture_trigger.as_ref().is_some_and(|trigger| {
+            hotkey::binding_key_names(trigger)
+                .into_iter()
+                .any(|part| part.eq_ignore_ascii_case(key_name))
+        })
+    }
+
     fn screen_draw_capture_session_is_current(session_id: u64) -> bool {
         let state = SCREEN_DRAW_STATE.lock();
         state.active && state.capturing_region && state.capture_session_id == session_id
@@ -6486,13 +6503,9 @@ mod windows_overlay {
         state.capture_trigger = None;
         let active = state.active;
         if active {
-            let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
-            let _ = (screen_x, screen_y);
             state.pending_repaint = true;
-            state.dirty_rect = Some(ScreenDrawDirtyRect::full(
-                screen_w.max(1) as usize,
-                screen_h.max(1) as usize,
-            ));
+            let toolbar_rect = screen_draw_toolbar_rect(&state);
+            mark_screen_draw_dirty(&mut state, toolbar_rect);
         }
         drop(state);
 
