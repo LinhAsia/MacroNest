@@ -26,14 +26,14 @@ impl CrosshairApp {
 
         ui.horizontal(|ui| {
             if ui
-                .button(self.tr("+ Add resize preset", "+ Thêm preset kích thước"))
+                .button(self.tr("+ Add resize preset", "+ Add resize preset"))
                 .clicked()
             {
                 self.add_window_preset();
                 self.persist();
             }
             if ui
-                .button(self.tr("+ Add layout preset", "+ Thêm preset bố cục"))
+                .button(self.tr("+ Add layout preset", "+ Add layout preset"))
                 .clicked()
             {
                 self.add_window_layout();
@@ -45,7 +45,7 @@ impl CrosshairApp {
         let mut remove_id = None;
         let mut live_sync = false;
         ui.label(
-            RichText::new(Self::tr_lang(language, "Resize Presets", "Kích thước"))
+            RichText::new(Self::tr_lang(language, "Resize Presets", "Resize Presets"))
                 .strong()
                 .size(14.0),
         );
@@ -140,11 +140,7 @@ impl CrosshairApp {
                                     };
 
                                     let hover_text = if capture_active {
-                                        Self::tr_lang(
-                                            language,
-                                            "Capturing... Press any key.",
-                                            "Đang ghi... Nhấn một phím bất kỳ.",
-                                        )
+                                        Self::tr_lang(language, "Capturing... Press any key.", "Capturing... Press any key.")
                                         .to_string()
                                     } else if has_keys {
                                         let bindings_labels: Vec<String> =
@@ -157,29 +153,17 @@ impl CrosshairApp {
                                             .collect();
                                         format!(
                                             "{} {}\n{}",
-                                            Self::tr_lang(language, "Hotkey:", "Phím tắt:"),
+                                            Self::tr_lang(language, "Hotkey:", "Hotkey:"),
                                             bindings_labels.join(", "),
-                                            Self::tr_lang(
-                                                language,
-                                                "Left click: rebind | Right click: clear",
-                                                "Chuột trái: đổi phím | Chuột phải: xóa phím"
-                                            )
+                                            Self::tr_lang(language, "Left click: rebind | Right click: clear", "Left click: rebind | Right click: clear")
                                         )
                                     } else {
-                                        Self::tr_lang(
-                                            language,
-                                            "Left click: bind hotkey",
-                                            "Chuột trái: gán phím tắt",
-                                        )
+                                        Self::tr_lang(language, "Left click: bind hotkey", "Left click: bind hotkey")
                                         .to_string()
                                     };
 
                                     let btn_text = if capture_active {
-                                        RichText::new(Self::tr_lang(
-                                            language,
-                                            "Capturing...",
-                                            "Đang bắt...",
-                                        ))
+                                        RichText::new(Self::tr_lang(language, "Capturing...", "Capturing..."))
                                         .strong()
                                         .color(Color32::from_rgb(255, 232, 96))
                                     } else {
@@ -219,11 +203,7 @@ impl CrosshairApp {
                                         ui,
                                         Self::material_icon_text(0xe037, 18.0),
                                     )
-                                    .on_hover_text(Self::tr_lang(
-                                        language,
-                                        "Run this resize preset now",
-                                        "Chay preset kich thuoc nay ngay",
-                                    ));
+                                    .on_hover_text(Self::tr_lang(language, "Run this resize preset now", "Run this resize preset now"));
                                     if run_response.clicked() {
                                         run_resize_now = true;
                                     }
@@ -234,9 +214,9 @@ impl CrosshairApp {
                                     if Self::sound_style_toggle_button(
                                         ui,
                                         if preset.collapsed {
-                                            Self::tr_lang(language, "Show", "Hiện")
+                                            Self::tr_lang(language, "Show", "Show")
                                         } else {
-                                            Self::tr_lang(language, "Hide", "Ẩn")
+                                            Self::tr_lang(language, "Hide", "Hide")
                                         },
                                     )
                                     .clicked()
@@ -306,11 +286,7 @@ impl CrosshairApp {
                             live_sync |= ui
                                 .checkbox(&mut preset.remove_title_bar, Self::tr_lang(language, "Remove bar", "Remove bar"))
                                 .on_hover_text(
-                                    Self::tr_lang(
-                                        language,
-                                        "Remove title bar before apply. Off restores it.",
-                                        "Nếu bật, preset sẽ xóa thanh tiêu đề trước khi áp dụng kích thước và vị trí. Nếu tắt, thanh tiêu đề sẽ được giữ hoặc khôi phục.",
-                                    ),
+                                    Self::tr_lang(language, "Remove title bar before apply. Off restores it.", "Remove title bar before apply. Off restores it."),
                                 )
                                 .changed();
                             ui.end_row();
@@ -338,7 +314,7 @@ impl CrosshairApp {
                                 ui,
                                 language,
                                 (preset.id, "window-target"),
-                                Self::tr_lang(language, "Focus", "Cửa sổ đang focus"),
+                                Self::tr_lang(language, "Focus", "Focus"),
                                 &mut preset.target_window_title,
                                 &mut preset.extra_target_window_titles,
                                 &mut preset.match_duplicate_window_titles,
@@ -346,10 +322,10 @@ impl CrosshairApp {
                             );
                             ui.end_row();
 
-                            ui.label(Self::tr_lang(language, "Preview", "Xem trước"));
+                            ui.label(Self::tr_lang(language, "Preview", "Preview"));
                             ui.horizontal_wrapped(|ui| {
                                 live_sync |= ui
-                                    .checkbox(&mut preset.preview_enabled, Self::tr_lang(language, "Stream preview in editor", "Xem trước stream"))
+                                    .checkbox(&mut preset.preview_enabled, Self::tr_lang(language, "Stream preview in editor", "Stream preview in editor"))
                                     .changed();
                             });
                             ui.end_row();
@@ -527,7 +503,7 @@ impl CrosshairApp {
                             ui,
                             language,
                             (preset.id, "zoom-target-window"),
-                            Self::tr_lang(language, "Any focused window", "Cửa sổ đang focus"),
+                            Self::tr_lang(language, "Any focused window", "Any focused window"),
                             &mut preset.target_window_title,
                             &mut preset.extra_target_window_titles,
                             &self.open_windows,
@@ -623,11 +599,7 @@ impl CrosshairApp {
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             if ui
-                .button(Self::tr_lang(
-                    language,
-                    "+ Add pin preset",
-                    "+ Thêm preset ghim",
-                ))
+                .button(Self::tr_lang(language, "+ Add pin preset", "+ Add pin preset"))
                 .clicked()
             {
                 self.add_pin_preset();
@@ -732,11 +704,7 @@ impl CrosshairApp {
                         };
 
                         let hover_text = if capture_active {
-                            Self::tr_lang(
-                                language,
-                                "Capturing... Press any key.",
-                                "Đang ghi... Nhấn một phím bất kỳ.",
-                            )
+                            Self::tr_lang(language, "Capturing... Press any key.", "Capturing... Press any key.")
                             .to_string()
                         } else if has_keys {
                             let bindings_labels: Vec<String> =
@@ -746,25 +714,17 @@ impl CrosshairApp {
                                     .collect();
                             format!(
                                 "{} {}\n{}",
-                                Self::tr_lang(language, "Hotkey:", "Phím tắt:"),
+                                Self::tr_lang(language, "Hotkey:", "Hotkey:"),
                                 bindings_labels.join(", "),
-                                Self::tr_lang(
-                                    language,
-                                    "Left click: rebind | Right click: clear",
-                                    "Chuột trái: đổi phím | Chuột phải: xóa phím"
-                                )
+                                Self::tr_lang(language, "Left click: rebind | Right click: clear", "Left click: rebind | Right click: clear")
                             )
                         } else {
-                            Self::tr_lang(
-                                language,
-                                "Left click: bind hotkey",
-                                "Chuột trái: gán phím tắt",
-                            )
+                            Self::tr_lang(language, "Left click: bind hotkey", "Left click: bind hotkey")
                             .to_string()
                         };
 
                         let btn_text = if capture_active {
-                            RichText::new(Self::tr_lang(language, "Capturing...", "Đang bắt..."))
+                            RichText::new(Self::tr_lang(language, "Capturing...", "Capturing..."))
                                 .strong()
                                 .color(Color32::from_rgb(255, 232, 96))
                         } else {
@@ -806,13 +766,9 @@ impl CrosshairApp {
                             ),
                         )
                         .on_hover_text(if pin_active {
-                            Self::tr_lang(language, "Stop this pin preset", "Dung preset ghim nay")
+                            Self::tr_lang(language, "Stop this pin preset", "Stop this pin preset")
                         } else {
-                            Self::tr_lang(
-                                language,
-                                "Run this pin preset now",
-                                "Chay preset ghim nay ngay",
-                            )
+                            Self::tr_lang(language, "Run this pin preset now", "Run this pin preset now")
                         });
                         if run_response.clicked() {
                             toggle_pin_now = true;
@@ -824,7 +780,7 @@ impl CrosshairApp {
                         if Self::sound_style_toggle_button(
                             ui,
                             if preset.collapsed {
-                                Self::tr_lang(language, "Show", "Hiện")
+                                Self::tr_lang(language, "Show", "Show")
                             } else {
                                 Self::tr_lang(language, "Hide", "Hide")
                             },
@@ -844,12 +800,12 @@ impl CrosshairApp {
                     .num_columns(2)
                     .spacing([14.0, 8.0])
                     .show(ui, |ui| {
-                        ui.label(Self::tr_lang(language, "Target Window", "Cửa sổ mục tiêu"));
+                        ui.label(Self::tr_lang(language, "Target Window", "Target Window"));
                         let target_changed = Self::render_multi_window_targets_with_duplicate_mode(
                             ui,
                             language,
                             (preset.id, "pin-target-window"),
-                            Self::tr_lang(language, "Focus", "Cửa sổ đang focus"),
+                            Self::tr_lang(language, "Focus", "Focus"),
                             &mut preset.target_window_title,
                             &mut preset.extra_target_window_titles,
                             &mut preset.match_duplicate_window_titles,
@@ -868,23 +824,19 @@ impl CrosshairApp {
                         live_sync |= ui
                             .checkbox(
                                 &mut preset.preview_enabled,
-                                Self::tr_lang(
-                                    language,
-                                    "Stream preview in editor",
-                                    "Phát xem trước trong trình chỉnh",
-                                ),
+                                Self::tr_lang(language, "Stream preview in editor", "Stream preview in editor"),
                             )
                             .changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Binarize", "Trắng đen"));
+                        ui.label(Self::tr_lang(language, "Binarize", "Binarize"));
                         let binary_changed = ui
                             .checkbox(
                                 &mut preset.binary_filter,
                                 Self::tr_lang(
                                     language,
                                     "Binarize (Black & White)",
-                                    "Chuyển thành trắng đen",
+                                    "Binarize (Black & White)",
                                 ),
                             )
                             .changed();
@@ -892,16 +844,16 @@ impl CrosshairApp {
                         ui.end_row();
 
                         if preset.binary_filter {
-                            ui.label(Self::tr_lang(language, "Binarize Mode", "Chế độ trắng đen"));
+                            ui.label(Self::tr_lang(language, "Binarize Mode", "Binarize Mode"));
                             let mode_changed = egui::ComboBox::from_id_salt((preset.id, "bin-mode"))
                                 .selected_text(match preset.binary_mode {
-                                    PinBinaryMode::Grayscale => Self::tr_lang(language, "Grayscale", "Độ sáng"),
-                                    PinBinaryMode::ColorSimilarity => Self::tr_lang(language, "Color Similarity", "Độ tương đồng màu"),
+                                    PinBinaryMode::Grayscale => Self::tr_lang(language, "Grayscale", "Grayscale"),
+                                    PinBinaryMode::ColorSimilarity => Self::tr_lang(language, "Color Similarity", "Color Similarity"),
                                 })
                                 .show_ui(ui, |ui| {
                                     let mut m_changed = false;
-                                    m_changed |= ui.selectable_value(&mut preset.binary_mode, PinBinaryMode::Grayscale, Self::tr_lang(language, "Grayscale", "Độ sáng")).clicked();
-                                    m_changed |= ui.selectable_value(&mut preset.binary_mode, PinBinaryMode::ColorSimilarity, Self::tr_lang(language, "Color Similarity", "Độ tương đồng màu")).clicked();
+                                    m_changed |= ui.selectable_value(&mut preset.binary_mode, PinBinaryMode::Grayscale, Self::tr_lang(language, "Grayscale", "Grayscale")).clicked();
+                                    m_changed |= ui.selectable_value(&mut preset.binary_mode, PinBinaryMode::ColorSimilarity, Self::tr_lang(language, "Color Similarity", "Color Similarity")).clicked();
                                     m_changed
                                 })
                                 .inner
@@ -911,14 +863,14 @@ impl CrosshairApp {
 
                             match preset.binary_mode {
                                 PinBinaryMode::Grayscale => {
-                                    ui.label(Self::tr_lang(language, "Threshold", "Ngưỡng nhận diện"));
+                                    ui.label(Self::tr_lang(language, "Threshold", "Threshold"));
                                     live_sync |= ui
                                         .add(egui::Slider::new(&mut preset.binary_threshold, 0..=255))
                                         .changed();
                                     ui.end_row();
                                 }
                                 PinBinaryMode::ColorSimilarity => {
-                                    ui.label(Self::tr_lang(language, "Target Color", "Mau muc tieu"));
+                                    ui.label(Self::tr_lang(language, "Target Color", "Target Color"));
                                     ui.vertical(|ui| {
                                         let colors = preset.binary_target_colors();
                                         if colors.is_empty() {
@@ -964,11 +916,7 @@ impl CrosshairApp {
                                                     [24.0, 21.0],
                                                     Button::new(Self::material_icon_text(0xe40a, 18.0)),
                                                 )
-                                                .on_hover_text(Self::tr_lang(
-                                                    language,
-                                                    "Manual color input",
-                                                    "Chon mau thu cong",
-                                                ));
+                                                .on_hover_text(Self::tr_lang(language, "Manual color input", "Manual color input"));
 
                                             if manual_button.clicked() {
                                                 popup_open = true;
@@ -985,11 +933,7 @@ impl CrosshairApp {
                                                 .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
                                                 .show(|ui| {
                                                     ui.set_min_width(220.0);
-                                                    ui.label(Self::tr_lang(
-                                                        language,
-                                                        "Manual color",
-                                                        "Chon mau thu cong",
-                                                    ));
+                                                    ui.label(Self::tr_lang(language, "Manual color", "Manual color"));
                                                     ui.separator();
 
                                                     let mut color32 = Color32::from_rgba_unmultiplied(
@@ -1047,11 +991,7 @@ impl CrosshairApp {
                                                     ui.add_space(8.0);
 
                                                     if ui
-                                                        .button(Self::tr_lang(
-                                                            language,
-                                                            "Add color",
-                                                            "Them mau",
-                                                        ))
+                                                        .button(Self::tr_lang(language, "Add color", "Add color"))
                                                         .clicked()
                                                     {
                                                         added_color = true;
@@ -1081,7 +1021,7 @@ impl CrosshairApp {
                                     });
                                     ui.end_row();
 
-                                    ui.label(Self::tr_lang(language, "Tolerance", "Độ lệch màu"));
+                                    ui.label(Self::tr_lang(language, "Tolerance", "Tolerance"));
                                     live_sync |= ui
                                         .add(egui::Slider::new(&mut preset.binary_threshold, 0..=255))
                                         .changed();
@@ -1134,11 +1074,7 @@ impl CrosshairApp {
                     });
                 } else {
                     ui.label(
-                        RichText::new(Self::tr_lang(
-                            language,
-                            "Pinned view will keep the original window position and size.",
-                            "Khung ghim sẽ giữ vị trí và kích thước gốc của cửa sổ.",
-                        ))
+                        RichText::new(Self::tr_lang(language, "Pinned view will keep the original window position and size.", "Pinned view will keep the original window position and size."))
                         .italics(),
                     );
                 }
@@ -1189,7 +1125,7 @@ impl CrosshairApp {
                     let crop_changed = Self::render_zoom_rect_editor(
                         ui,
                         (preset.id, "pin-source-crop"),
-                        Self::tr_lang(language, "Source Crop", "Cắt vùng nguồn"),
+                        Self::tr_lang(language, "Source Crop", "Source Crop"),
                         &mut preset.source_x,
                         &mut preset.source_y,
                         &mut preset.source_width,
@@ -1208,11 +1144,7 @@ impl CrosshairApp {
                     live_sync |= crop_changed;
                     ui.horizontal_wrapped(|ui| {
                         if ui
-                            .button(Self::tr_lang(
-                                language,
-                                "Reset to Full Window",
-                                "Khôi phục toàn bộ cửa sổ",
-                            ))
+                            .button(Self::tr_lang(language, "Reset to Full Window", "Reset to Full Window"))
                             .clicked()
                         {
                             let mut target_frame = None;
@@ -1886,7 +1818,7 @@ impl CrosshairApp {
                 let display_text = if let Some(title) = &preset.target_window_title {
                     title.clone()
                 } else {
-                    Self::tr_lang(language, "Target Window", "Cửa sổ mục tiêu").to_string()
+                    Self::tr_lang(language, "Target Window", "Target Window").to_string()
                 };
                 let font_id = egui::FontId::proportional(12.0);
                 ui.painter().text(
@@ -2891,7 +2823,7 @@ impl CrosshairApp {
 
         ui.add_space(16.0);
         ui.label(
-            RichText::new(Self::tr_lang(language, "Layout Presets", "Bố cục"))
+            RichText::new(Self::tr_lang(language, "Layout Presets", "Layout Presets"))
                 .strong()
                 .size(14.0),
         );
@@ -2976,11 +2908,7 @@ impl CrosshairApp {
                             };
 
                             let hover_text = if capture_active {
-                                Self::tr_lang(
-                                    language,
-                                    "Capturing... Press any key.",
-                                    "Đang ghi... Nhấn một phím bất kỳ.",
-                                )
+                                Self::tr_lang(language, "Capturing... Press any key.", "Capturing... Press any key.")
                                 .to_string()
                             } else if has_keys {
                                 let bindings_labels: Vec<String> = Self::preset_trigger_bindings(
@@ -2992,29 +2920,17 @@ impl CrosshairApp {
                                 .collect();
                                 format!(
                                     "{} {}\n{}",
-                                    Self::tr_lang(language, "Hotkey:", "Phím tắt:"),
+                                    Self::tr_lang(language, "Hotkey:", "Hotkey:"),
                                     bindings_labels.join(", "),
-                                    Self::tr_lang(
-                                        language,
-                                        "Left click: rebind | Right click: clear",
-                                        "Chuột trái: đổi phím | Chuột phải: xóa phím"
-                                    )
+                                    Self::tr_lang(language, "Left click: rebind | Right click: clear", "Left click: rebind | Right click: clear")
                                 )
                             } else {
-                                Self::tr_lang(
-                                    language,
-                                    "Left click: bind hotkey",
-                                    "Chuột trái: gán phím tắt",
-                                )
+                                Self::tr_lang(language, "Left click: bind hotkey", "Left click: bind hotkey")
                                 .to_string()
                             };
 
                             let btn_text = if capture_active {
-                                RichText::new(Self::tr_lang(
-                                    language,
-                                    "Capturing...",
-                                    "Đang bắt...",
-                                ))
+                                RichText::new(Self::tr_lang(language, "Capturing...", "Capturing..."))
                                 .strong()
                                 .color(Color32::from_rgb(255, 232, 96))
                             } else {
@@ -3051,11 +2967,7 @@ impl CrosshairApp {
                                 ui,
                                 Self::material_icon_text(0xe037, 18.0),
                             )
-                            .on_hover_text(Self::tr_lang(
-                                language,
-                                "Run this layout preset now",
-                                "Chay preset bo cuc nay ngay",
-                            ));
+                            .on_hover_text(Self::tr_lang(language, "Run this layout preset now", "Run this layout preset now"));
                             if run_response.clicked() {
                                 run_layout_now = true;
                             }
@@ -3067,9 +2979,9 @@ impl CrosshairApp {
                             if Self::sound_style_toggle_button(
                                 ui,
                                 if layout.collapsed {
-                                    Self::tr_lang(language, "Show", "Hiện")
+                                    Self::tr_lang(language, "Show", "Show")
                                 } else {
-                                    Self::tr_lang(language, "Hide", "Ẩn")
+                                    Self::tr_lang(language, "Hide", "Hide")
                                 },
                             )
                             .clicked()
@@ -3089,36 +3001,28 @@ impl CrosshairApp {
                     .num_columns(2)
                     .spacing([14.0, 8.0])
                     .show(ui, |ui| {
-                        ui.label(Self::tr_lang(
-                            language,
-                            "Focus on apply",
-                            "Focus khi áp dụng",
-                        ));
+                        ui.label(Self::tr_lang(language, "Focus on apply", "Focus on apply"));
                         live_sync |= ui.checkbox(&mut layout.focus_on_apply, "").changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Block taskbar", "Tránh taskbar"));
+                        ui.label(Self::tr_lang(language, "Block taskbar", "Block taskbar"));
                         live_sync |= ui.checkbox(&mut layout.block_taskbar, "").changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(
-                            language,
-                            "Remove title bar",
-                            "Xóa thanh tiêu đề",
-                        ));
+                        ui.label(Self::tr_lang(language, "Remove title bar", "Remove title bar"));
                         live_sync |= ui.checkbox(&mut layout.remove_title_bar, "").changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Grid size", "Kích thước lưới"));
+                        ui.label(Self::tr_lang(language, "Grid size", "Grid size"));
                         ui.horizontal(|ui| {
-                            ui.label(Self::tr_lang(language, "Rows", "Hàng"));
+                            ui.label(Self::tr_lang(language, "Rows", "Rows"));
                             let mut rows = layout.rows;
                             if ui.add(DragValue::new(&mut rows).range(1..=6)).changed() {
                                 layout.rows = rows;
                                 Self::sanitize_layout(layout);
                                 live_sync = true;
                             }
-                            ui.label(Self::tr_lang(language, "Cols", "Cột"));
+                            ui.label(Self::tr_lang(language, "Cols", "Cols"));
                             let mut cols = layout.cols;
                             if ui.add(DragValue::new(&mut cols).range(1..=6)).changed() {
                                 layout.cols = cols;
@@ -3128,7 +3032,7 @@ impl CrosshairApp {
                         });
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Row ratios", "Tỷ lệ hàng"));
+                        ui.label(Self::tr_lang(language, "Row ratios", "Row ratios"));
                         ui.horizontal(|ui| {
                             for r in 0..layout.rows {
                                 if r < layout.row_ratios.len() {
@@ -3150,7 +3054,7 @@ impl CrosshairApp {
                         });
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Col ratios", "Tỷ lệ cột"));
+                        ui.label(Self::tr_lang(language, "Col ratios", "Col ratios"));
                         ui.horizontal(|ui| {
                             for c in 0..layout.cols {
                                 if c < layout.col_ratios.len() {
@@ -3172,7 +3076,7 @@ impl CrosshairApp {
                         });
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Visual Grid", "Xem trước lưới"));
+                        ui.label(Self::tr_lang(language, "Visual Grid", "Visual Grid"));
                         ui.vertical(|ui| {
                             let r_sum: f32 = layout.row_ratios.iter().sum();
                             let c_sum: f32 = layout.col_ratios.iter().sum();
@@ -3354,7 +3258,7 @@ impl CrosshairApp {
                                         ui.painter().text(
                                             r_top.center(),
                                             egui::Align2::CENTER_CENTER,
-                                            Self::tr_lang(language, "TASKBAR", "THANH TÁC VỤ"),
+                                            Self::tr_lang(language, "TASKBAR", "TASKBAR"),
                                             egui::FontId::proportional(10.0),
                                             text_color,
                                         );
@@ -3377,7 +3281,7 @@ impl CrosshairApp {
                                         ui.painter().text(
                                             r_bottom.center(),
                                             egui::Align2::CENTER_CENTER,
-                                            Self::tr_lang(language, "TASKBAR", "THANH TÁC VỤ"),
+                                            Self::tr_lang(language, "TASKBAR", "TASKBAR"),
                                             egui::FontId::proportional(10.0),
                                             text_color,
                                         );
@@ -3400,7 +3304,7 @@ impl CrosshairApp {
                                         ui.painter().text(
                                             r_left.center(),
                                             egui::Align2::CENTER_CENTER,
-                                            Self::tr_lang(language, "TASKBAR", "THANH TÁC VỤ"),
+                                            Self::tr_lang(language, "TASKBAR", "TASKBAR"),
                                             egui::FontId::proportional(10.0),
                                             text_color,
                                         );
@@ -3423,7 +3327,7 @@ impl CrosshairApp {
                                         ui.painter().text(
                                             r_right.center(),
                                             egui::Align2::CENTER_CENTER,
-                                            Self::tr_lang(language, "TASKBAR", "THANH TÁC VỤ"),
+                                            Self::tr_lang(language, "TASKBAR", "TASKBAR"),
                                             egui::FontId::proportional(10.0),
                                             text_color,
                                         );
@@ -3782,9 +3686,9 @@ impl CrosshairApp {
                                 .num_columns(2)
                                 .spacing([14.0, 8.0])
                                 .show(ui, |ui| {
-                                    ui.label(Self::tr_lang(language, "Span", "Hợp nhất"));
+                                    ui.label(Self::tr_lang(language, "Span", "Span"));
                                     ui.horizontal(|ui| {
-                                        ui.label(Self::tr_lang(language, "Row span", "Hợp dòng"));
+                                        ui.label(Self::tr_lang(language, "Row span", "Row span"));
                                         let max_row_span = layout.rows - sel_row;
                                         if ui
                                             .add(
@@ -3795,7 +3699,7 @@ impl CrosshairApp {
                                         {
                                             cell_modified = true;
                                         }
-                                        ui.label(Self::tr_lang(language, "Col span", "Hợp cột"));
+                                        ui.label(Self::tr_lang(language, "Col span", "Col span"));
                                         let max_col_span = layout.cols - sel_col;
                                         if ui
                                             .add(
@@ -3809,17 +3713,13 @@ impl CrosshairApp {
                                     });
                                     ui.end_row();
 
-                                    ui.label(Self::tr_lang(
-                                        language,
-                                        "Target Window",
-                                        "Cửa sổ mục tiêu",
-                                    ));
+                                    ui.label(Self::tr_lang(language, "Target Window", "Target Window"));
                                     let dropdown_changed =
                                         Self::render_multi_window_targets_with_duplicate_mode(
                                             ui,
                                             language,
                                             (layout.id, "cell-target-picker", sel_row, sel_col),
-                                            Self::tr_lang(language, "Focus", "Cửa sổ đang focus"),
+                                            Self::tr_lang(language, "Focus", "Focus"),
                                             &mut target_window_title,
                                             &mut extra_target_window_titles,
                                             &mut match_duplicate_window_titles,
@@ -3831,7 +3731,7 @@ impl CrosshairApp {
                                     ui.end_row();
 
                                     // Render cell estimated resolution info
-                                    ui.label(Self::tr_lang(language, "Resolution", "Độ phân giải"));
+                                    ui.label(Self::tr_lang(language, "Resolution", "Resolution"));
                                     let (mon_w, mon_h) =
                                         Self::get_monitor_work_size(layout.block_taskbar);
 
