@@ -621,6 +621,7 @@ mod windows_overlay {
         pending_repaint: bool,
         capturing_region: bool,
         capture_trigger: Option<HotkeyBinding>,
+        trigger_latched: bool,
         capture_session_id: u64,
         last_present_at: Option<Instant>,
         dirty_rect: Option<ScreenDrawDirtyRect>,
@@ -666,6 +667,7 @@ mod windows_overlay {
                 pending_repaint: false,
                 capturing_region: false,
                 capture_trigger: None,
+                trigger_latched: false,
                 capture_session_id: 0,
                 last_present_at: None,
                 dirty_rect: None,
@@ -2581,12 +2583,16 @@ mod windows_overlay {
                 if let Some(key_name) = key_name.clone() {
                     if screen_draw_capture_should_swallow_key_name(&key_name) {
                         update_held_key(&key_name, is_key_down, is_key_up);
+                        if is_key_up {
+                            screen_draw_release_trigger_latch_if_ready();
+                        }
                         update_modifier_state(info.vkCode, is_key_down);
                         return LRESULT(1);
                     }
                     let binding = binding_from_trigger_event(&key_name);
                     if is_key_down {
                         if process_screen_draw_hotkey(&binding, is_repeat_key(&key_name)) {
+                            update_held_key(&key_name, is_key_down, is_key_up);
                             update_modifier_state(info.vkCode, is_key_down);
                             return LRESULT(1);
                         }
@@ -2663,6 +2669,9 @@ mod windows_overlay {
                 if is_ui_in_foreground() {
                     if let Some(key_name) = key_name.clone() {
                         update_held_key(&key_name, is_key_down, is_key_up);
+                        if is_key_up {
+                            screen_draw_release_trigger_latch_if_ready();
+                        }
                     }
 
                     update_modifier_state(info.vkCode, is_key_down);
@@ -2686,6 +2695,9 @@ mod windows_overlay {
                     }
 
                     update_held_key(&key_name, is_key_down, is_key_up);
+                    if is_key_up {
+                        screen_draw_release_trigger_latch_if_ready();
+                    }
                     if is_key_up {
                         swallow |= process_binding_release(&binding);
                     }
@@ -3013,6 +3025,15 @@ mod windows_overlay {
                     ((info.mouseData >> 16) & 0xFFFF) as u16,
                 );
                 update_held_mouse_button(message, ((info.mouseData >> 16) & 0xFFFF) as u16);
+                if matches!(
+                    message,
+                    WM_LBUTTONUP
+                        | WM_RBUTTONUP
+                        | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
+                        | WM_XBUTTONUP
+                ) {
+                    screen_draw_release_trigger_latch_if_ready();
+                }
                 if let Some(key_name) = event_key_name
                     && screen_draw_capture_should_swallow_key_name(key_name)
                 {
@@ -5040,7 +5061,7 @@ mod windows_overlay {
         if is_repeat {
             return false;
         }
-        let (matches_trigger, pass_trigger_through, active, capturing_region) = {
+        let (matches_trigger, pass_trigger_through, active, capturing_region, trigger_latched) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
                 state.enabled
@@ -5051,15 +5072,20 @@ mod windows_overlay {
                 state.pass_trigger_through,
                 state.active,
                 state.capturing_region,
+                state.trigger_latched,
             )
         };
         if !matches_trigger {
             return false;
         }
+        if trigger_latched {
+            return !pass_trigger_through;
+        }
 
         if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
             return true;
         }
+        SCREEN_DRAW_STATE.lock().trigger_latched = true;
 
         if active {
             if !capturing_region {
@@ -5071,6 +5097,17 @@ mod windows_overlay {
         toggle_screen_draw_state();
         request_screen_draw_overlay_sync();
         !pass_trigger_through
+    }
+
+    fn screen_draw_release_trigger_latch_if_ready() {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        let Some(trigger) = state.trigger.clone() else {
+            state.trigger_latched = false;
+            return;
+        };
+        if !screen_draw_trigger_binding_is_down(&trigger) {
+            state.trigger_latched = false;
+        }
     }
 
     fn apply_keyboard_arrow_mouse_movement() {
@@ -5858,6 +5895,7 @@ mod windows_overlay {
             state.active = true;
             state.capturing_region = false;
             state.capture_trigger = None;
+            state.trigger_latched = false;
             state.current_stroke = None;
             state.active_control = ScreenDrawControl::None;
             state.pending_repaint = true;
@@ -6010,6 +6048,7 @@ mod windows_overlay {
         state.active_control = ScreenDrawControl::None;
         state.capturing_region = false;
         state.capture_trigger = None;
+        state.trigger_latched = false;
         state.strokes.clear();
         state.committed_dirty = true;
         state.pending_repaint = false;
@@ -6138,6 +6177,7 @@ mod windows_overlay {
                 if !state.capturing_region {
                     state.capturing_region = true;
                     state.capture_trigger = None;
+                    state.trigger_latched = false;
                     state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
                     capture_session_id = state.capture_session_id;
                     state.active_control = ScreenDrawControl::None;
@@ -6176,6 +6216,7 @@ mod windows_overlay {
             if state.active && !state.capturing_region {
                 state.capturing_region = true;
                 state.capture_trigger = Some(trigger.clone());
+                state.trigger_latched = true;
                 state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
                 session_id = state.capture_session_id;
                 state.active_control = ScreenDrawControl::None;
