@@ -387,6 +387,7 @@ mod windows_overlay {
     static PROTRACTOR_DRAG_START_CENTER: Lazy<Mutex<(i32, i32)>> = Lazy::new(|| Mutex::new((0, 0)));
     static PROTRACTOR_DRAG_START_ANGLE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(0.0));
     static PROTRACTOR_DRAG_START_SCALE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(1.0));
+    static PROTRACTOR_DRAG_START_DISTANCE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(1.0));
     static CACHED_APP_UI_HWND: AtomicIsize = AtomicIsize::new(0);
     pub static UI_WINDOW_RECT_LEFT: std::sync::atomic::AtomicI32 =
         std::sync::atomic::AtomicI32::new(0);
@@ -2005,8 +2006,14 @@ mod windows_overlay {
                                 ProtractorDragTarget::Needle2 => needle2,
                                 _ => 0.0,
                             };
+                            let start_distance = (((mouse_screen.x - cx_val).pow(2)
+                                + (mouse_screen.y - cy_val).pow(2))
+                                as f32)
+                                .sqrt()
+                                .max(1.0);
                             *PROTRACTOR_DRAG_START_ANGLE.lock() = start_ang;
                             *PROTRACTOR_DRAG_START_SCALE.lock() = scale;
+                            *PROTRACTOR_DRAG_START_DISTANCE.lock() = start_distance;
 
                             windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd);
                         }
@@ -2067,7 +2074,14 @@ mod windows_overlay {
                                 let dx = mouse_screen.x - cx;
                                 let dy = mouse_screen.y - cy;
                                 let dist = ((dx * dx + dy * dy) as f32).sqrt();
-                                let new_scale = (dist / 150.0).clamp(0.4, 2.5);
+                                let start_scale = *PROTRACTOR_DRAG_START_SCALE.lock();
+                                let start_distance =
+                                    (*PROTRACTOR_DRAG_START_DISTANCE.lock()).max(1.0);
+                                let scale_ratio = dist / start_distance;
+                                let new_scale = (start_scale * scale_ratio).clamp(
+                                    crate::protractor::PROTRACTOR_MIN_SCALE,
+                                    crate::protractor::PROTRACTOR_MAX_SCALE,
+                                );
 
                                 {
                                     let mut state = PROTRACTOR_STATE.lock();
