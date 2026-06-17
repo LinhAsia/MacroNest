@@ -31,7 +31,6 @@ use crate::{
         VideoClipSettings, VietnameseInputMode, WindowAnchor, WindowExpandDirection, WindowPreset,
     },
     overlay::{OverlayCommand, UiCommand},
-    profile_code,
     storage::AppPaths,
     window_list,
 };
@@ -658,9 +657,6 @@ pub struct CrosshairApp {
     ui_rx: Receiver<UiCommand>,
     status: String,
     save_name: String,
-    import_code_buffer: String,
-    export_code_buffer: String,
-    custom_assets: Vec<String>,
     open_windows: Vec<String>,
     open_windows_loaded_once: bool,
     open_windows_loading: bool,
@@ -746,7 +742,6 @@ pub struct CrosshairApp {
     active_macro_folder_view: Option<u32>,
     macro_folders_panel_open: bool,
     macro_panel_render_limit: usize,
-    crosshair_panel_collapsed: bool,
     startup_splash: StartupSplashState,
     settings_popup_open: bool,
     focus_groq_api_key_pending: bool,
@@ -892,9 +887,6 @@ impl CrosshairApp {
             ui_rx,
             status: String::new(),
             save_name,
-            import_code_buffer: String::new(),
-            export_code_buffer: String::new(),
-            custom_assets: Vec::new(),
             open_windows: Vec::new(),
             open_windows_loaded_once: false,
             open_windows_loading: false,
@@ -987,7 +979,6 @@ impl CrosshairApp {
             } else {
                 usize::MAX
             },
-            crosshair_panel_collapsed: true,
             startup_splash: StartupSplashState {
                 started_at: None,
                 duration_sec: 0.0,
@@ -1502,38 +1493,6 @@ impl CrosshairApp {
         self.macro_referenced_variables_cache = None;
     }
 
-    fn save_profile(&mut self) {
-        let name = self.save_name.trim().to_owned();
-        if name.is_empty() {
-            self.status = "Enter a profile name before saving.".to_owned();
-            return;
-        }
-        if let Some(existing) = self
-            .state
-            .profiles
-            .iter_mut()
-            .find(|profile| profile.name == name)
-        {
-            existing.style = self.state.active_style.clone();
-        } else {
-            self.state.profiles.push(ProfileRecord {
-                name: name.clone(),
-                enabled: self.state.active_style.enabled,
-                collapsed: true,
-                style: self.state.active_style.clone(),
-                target_window_title: None,
-                extra_target_window_titles: Vec::new(),
-            });
-        }
-        self.state
-            .profiles
-            .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        self.state.selected_profile = Some(name.clone());
-        self.sync_profiles();
-        self.persist();
-        self.status = format!("Saved profile: {name}");
-    }
-
     fn add_profile(&mut self) {
         let name = self.unique_profile_name("Profile");
         let default_style = CrosshairStyle::default();
@@ -1634,68 +1593,6 @@ impl CrosshairApp {
         self.sync_profiles();
         self.persist();
         self.status = format!("Pasted crosshair preset: {}.", name);
-    }
-
-    fn delete_profile(&mut self) {
-        let Some(selected) = self.state.selected_profile.clone() else {
-            self.status = "No profile is selected.".to_owned();
-            return;
-        };
-
-        let mut index_to_remove = None;
-        for (i, p) in self.state.profiles.iter().enumerate() {
-            if p.name == selected {
-                index_to_remove = Some(i);
-                break;
-            }
-        }
-
-        if let Some(i) = index_to_remove {
-            self.state.profiles.remove(i);
-            self.status = format!("Deleted profile: {selected}");
-        } else {
-            self.status = format!("Could not find profile: {selected}");
-        }
-
-        if self.state.profiles.is_empty() {
-            self.state.selected_profile = None;
-            self.state.active_style = CrosshairStyle::default();
-            self.state.active_style.enabled = false;
-            self.save_name = String::new();
-        } else {
-            let next = self.state.profiles[0].clone();
-            self.state.selected_profile = Some(next.name.clone());
-            self.state.active_style = next.style;
-            self.save_name = next.name;
-        }
-        self.sync_crosshair();
-        self.sync_profiles();
-        self.persist();
-    }
-
-    fn export_code(&mut self) {
-        match profile_code::encode_style(&self.state.active_style) {
-            Ok(code) => {
-                self.export_code_buffer = code.clone();
-                self.status = "Crosshair code copied to clipboard.".to_owned();
-                if let Ok(mut clipboard) = Clipboard::new() {
-                    let _ = clipboard.set_text(code);
-                }
-            }
-            Err(error) => self.status = format!("Failed to export code: {error}"),
-        }
-    }
-
-    fn import_code(&mut self) {
-        match profile_code::decode_style(&self.import_code_buffer) {
-            Ok(style) => {
-                self.state.active_style = style;
-                self.sync_crosshair();
-                self.persist();
-                self.status = "Imported crosshair code.".to_owned();
-            }
-            Err(error) => self.status = format!("Failed to import code: {error}"),
-        }
     }
 
     fn export_macro_step(&mut self, preset_id: u32, step_index: usize, step: &MacroStep) {
@@ -1959,16 +1856,6 @@ impl CrosshairApp {
                 .to_owned();
             }
             Err(error) => self.status = format!("Import failed: {error}"),
-        }
-    }
-
-    fn reload_custom_assets(&mut self) {
-        match self.paths.list_crosshair_assets() {
-            Ok(assets) => {
-                self.custom_assets = assets;
-                self.status = "Reloaded custom crosshair folder.".to_owned();
-            }
-            Err(error) => self.status = format!("Failed to scan custom folder: {error}"),
         }
     }
 

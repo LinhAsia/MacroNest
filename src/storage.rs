@@ -629,24 +629,6 @@ impl AppPaths {
         Ok(())
     }
 
-    pub fn list_crosshair_assets(&self) -> Result<Vec<String>> {
-        let mut assets = Vec::new();
-        for entry in fs::read_dir(&self.asset_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-            if is_supported_asset(&path) {
-                if let Some(name) = path.file_name().and_then(|value| value.to_str()) {
-                    assets.push(name.to_owned());
-                }
-            }
-        }
-        assets.sort_by_key(|name| name.to_lowercase());
-        Ok(assets)
-    }
-
     pub fn asset_path(&self, asset_name: &str) -> PathBuf {
         self.asset_dir.join(asset_name)
     }
@@ -666,16 +648,6 @@ fn sanitize_name(name: &str) -> String {
     } else {
         cleaned
     }
-}
-
-fn is_supported_asset(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_ascii_lowercase())
-            .as_deref(),
-        Some("svg" | "png" | "jpg" | "jpeg" | "bmp" | "webp" | "ico")
-    )
 }
 
 fn ensure_opencv_videoio_ffmpeg_plugin(target_path: &Path) {
