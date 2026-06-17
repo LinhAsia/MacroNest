@@ -1,20 +1,17 @@
 use std::mem::size_of;
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{HWND, POINT, COLORREF};
+use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, LoadImageW, DestroyIcon,
-    IMAGE_ICON, LR_LOADFROMFILE, SM_CXSCREEN,
+    LoadImageW, DestroyIcon, IMAGE_ICON, LR_LOADFROMFILE,
 };
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NOTIFYICONDATAW, NIM_ADD, NIM_MODIFY, NIM_DELETE,
+    Shell_NotifyIconW, NOTIFYICONDATAW, NIM_ADD, NIM_MODIFY,
     NIF_MESSAGE, NIF_ICON, NIF_TIP,
 };
-use anyhow::{Result, Context};
+use anyhow::Result;
 
-use crate::model::TimerPreset;
 use super::{
-    HOOK_STATE, TRAY_UID, WMAPP_TRAYICON, WMAPP_PROCESS_QUEUE, CONTROLLER_HWND,
-    runtime_icon_path, paint_timer_hwnd,
+    HOOK_STATE, TRAY_UID, WMAPP_TRAYICON, runtime_icon_path,
 };
 
 pub(crate) fn blend_rgba_pixel(
@@ -58,7 +55,14 @@ pub(crate) fn fill_rect_rgba(
     }
 }
 
-pub(crate) fn point_in_ellipse(x: i32, y: i32, left: i32, top: i32, width: i32, height: i32) -> bool {
+pub(crate) fn point_in_ellipse(
+    x: i32,
+    y: i32,
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+) -> bool {
     let center_x = left as f32 + width as f32 * 0.5;
     let center_y = top as f32 + height as f32 * 0.5;
     let radius_x = (width as f32 * 0.5).max(1.0);
@@ -211,219 +215,6 @@ pub(crate) fn draw_line_rgba(
     color: [u8; 4],
 ) {
     draw_line_aa_impl(pixels, width, height, x0, y0, x1, y1, color, 1);
-}
-
-pub(crate) fn draw_line_thick_rgba(
-    pixels: &mut [u8],
-    width: usize,
-    height: usize,
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    color: [u8; 4],
-    thickness: i32,
-) {
-    draw_line_aa_impl(pixels, width, height, x0, y0, x1, y1, color, thickness);
-}
-
-pub(crate) fn draw_rect_outline_thick_rgba(
-    pixels: &mut [u8],
-    width: usize,
-    height: usize,
-    left: i32,
-    top: i32,
-    rect_width: i32,
-    rect_height: i32,
-    color: [u8; 4],
-    thickness: i32,
-) {
-    let right = left + rect_width.max(1) - 1;
-    let bottom = top + rect_height.max(1) - 1;
-    draw_line_thick_rgba(pixels, width, height, left, top, right, top, color, thickness);
-    draw_line_thick_rgba(pixels, width, height, right, top, right, bottom, color, thickness);
-    draw_line_thick_rgba(
-        pixels,
-        width,
-        height,
-        right,
-        bottom,
-        left,
-        bottom,
-        color,
-        thickness,
-    );
-    draw_line_thick_rgba(pixels, width, height, left, bottom, left, top, color, thickness);
-}
-
-pub(crate) fn draw_ellipse_outline_thick_rgba(
-    pixels: &mut [u8],
-    width: usize,
-    height: usize,
-    left: i32,
-    top: i32,
-    ellipse_width: i32,
-    ellipse_height: i32,
-    color: [u8; 4],
-    thickness: i32,
-) {
-    let steps = ((ellipse_width.max(ellipse_height) as f32) * std::f32::consts::TAU / 2.0)
-        .round()
-        .clamp(32.0, 480.0) as i32;
-    let center_x = left as f32 + ellipse_width as f32 * 0.5;
-    let center_y = top as f32 + ellipse_height as f32 * 0.5;
-    let radius_x = ellipse_width as f32 * 0.5;
-    let radius_y = ellipse_height as f32 * 0.5;
-    let mut prev_x = center_x + radius_x;
-    let mut prev_y = center_y;
-    for step in 1..=steps {
-        let angle = (step as f32 / steps as f32) * std::f32::consts::TAU;
-        let next_x = center_x + radius_x * angle.cos();
-        let next_y = center_y + radius_y * angle.sin();
-        draw_line_thick_rgba(
-            pixels,
-            width,
-            height,
-            prev_x.round() as i32,
-            prev_y.round() as i32,
-            next_x.round() as i32,
-            next_y.round() as i32,
-            color,
-            thickness,
-        );
-        prev_x = next_x;
-        prev_y = next_y;
-    }
-}
-
-pub(crate) fn draw_arrow_head_rgba(
-    pixels: &mut [u8],
-    width: usize,
-    height: usize,
-    x1: i32,
-    y1: i32,
-    x2: i32,
-    y2: i32,
-    color: [u8; 4],
-    thickness: i32,
-    head_size: i32,
-) {
-    let dx = (x2 - x1) as f32;
-    let dy = (y2 - y1) as f32;
-    let len = (dx * dx + dy * dy).sqrt().max(1.0);
-    let ux = dx / len;
-    let uy = dy / len;
-    let angle = 28.0_f32.to_radians();
-    let sin_a = angle.sin();
-    let cos_a = angle.cos();
-    for side in [-1.0_f32, 1.0_f32] {
-        let rx = ux * cos_a - side * uy * sin_a;
-        let ry = uy * cos_a + side * ux * sin_a;
-        let hx = x2 as f32 - rx * head_size as f32;
-        let hy = y2 as f32 - ry * head_size as f32;
-        draw_line_thick_rgba(
-            pixels,
-            width,
-            height,
-            x2,
-            y2,
-            hx.round() as i32,
-            hy.round() as i32,
-            color,
-            thickness,
-        );
-    }
-}
-
-pub(crate) fn fill_polygon_rgba(
-    pixels: &mut [u8],
-    width: usize,
-    height: usize,
-    points: &[(i32, i32)],
-    offset_x: i32,
-    offset_y: i32,
-    color: [u8; 4],
-) {
-    if points.len() < 3 {
-        return;
-    }
-    let min_y = points.iter().map(|(_, y)| *y).min().unwrap_or(0);
-    let max_y = points.iter().map(|(_, y)| *y).max().unwrap_or(0);
-    for y in min_y..=max_y {
-        let mut intersections = Vec::new();
-        for i in 0..points.len() {
-            let (x1, y1) = points[i];
-            let (x2, y2) = points[(i + 1) % points.len()];
-            if (y1 <= y && y2 > y) || (y2 <= y && y1 > y) {
-                let dy = (y2 - y1) as f32;
-                if dy.abs() > f32::EPSILON {
-                    let t = (y - y1) as f32 / dy;
-                    let x = x1 as f32 + (x2 - x1) as f32 * t;
-                    intersections.push(x.round() as i32);
-                }
-            }
-        }
-        intersections.sort_unstable();
-        for pair in intersections.chunks(2) {
-            if let [start, end] = pair {
-                for x in *start..=*end {
-                    blend_rgba_pixel(
-                        pixels,
-                        width,
-                        height,
-                        x - offset_x,
-                        y - offset_y,
-                        color,
-                    );
-                }
-            }
-        }
-    }
-}
-
-pub(crate) fn draw_arc_rgba(
-    pixels: &mut [u8],
-    width: usize,
-    height: usize,
-    cx: i32,
-    cy: i32,
-    rx: i32,
-    ry: i32,
-    start_angle_deg: f32,
-    end_angle_deg: f32,
-    color: [u8; 4],
-    thickness: i32,
-) {
-    let mut delta = end_angle_deg - start_angle_deg;
-    if delta.abs() < f32::EPSILON {
-        delta = 360.0;
-    }
-    if delta < 0.0 {
-        delta += 360.0;
-    }
-    let steps = ((rx.max(ry) as f32) * delta.to_radians()).round().clamp(12.0, 480.0) as i32;
-    let mut prev_x = cx as f32 + rx as f32 * start_angle_deg.to_radians().cos();
-    let mut prev_y = cy as f32 + ry as f32 * start_angle_deg.to_radians().sin();
-    for step in 1..=steps {
-        let t = step as f32 / steps as f32;
-        let angle_deg = start_angle_deg + delta * t;
-        let angle_rad = angle_deg.to_radians();
-        let next_x = cx as f32 + rx as f32 * angle_rad.cos();
-        let next_y = cy as f32 + ry as f32 * angle_rad.sin();
-        draw_line_thick_rgba(
-            pixels,
-            width,
-            height,
-            prev_x.round() as i32,
-            prev_y.round() as i32,
-            next_x.round() as i32,
-            next_y.round() as i32,
-            color,
-            thickness,
-        );
-        prev_x = next_x;
-        prev_y = next_y;
-    }
 }
 
 pub(crate) fn rgba_to_bgra(rgba: &[u8]) -> Vec<u8> {

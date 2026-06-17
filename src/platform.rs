@@ -291,34 +291,6 @@ mod windows_platform {
         }
     }
 
-    pub fn hide_native_window(frame: &Frame) {
-        let Ok(window_handle) = frame.window_handle() else {
-            return;
-        };
-        let hwnd = match window_handle.as_raw() {
-            RawWindowHandle::Win32(handle) => HWND(handle.hwnd.get() as *mut _),
-            _ => return,
-        };
-
-        unsafe {
-            let _ = ShowWindow(hwnd, SW_HIDE);
-        }
-    }
-
-    pub fn show_native_window(frame: &Frame) {
-        let Ok(window_handle) = frame.window_handle() else {
-            return;
-        };
-        let hwnd = match window_handle.as_raw() {
-            RawWindowHandle::Win32(handle) => HWND(handle.hwnd.get() as *mut _),
-            _ => return,
-        };
-
-        unsafe {
-            let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
-        }
-    }
-
     fn taskbar_windows() -> Vec<HWND> {
         let mut windows = Vec::new();
         unsafe {
@@ -535,8 +507,6 @@ mod fallback {
         Ok(())
     }
 
-    pub fn hide_native_window(_frame: &Frame) {}
-    pub fn show_native_window(_frame: &Frame) {}
     pub fn hide_taskbar() -> bool { false }
     pub fn show_taskbar() -> bool { false }
     pub fn is_taskbar_hidden() -> bool { false }
