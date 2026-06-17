@@ -889,11 +889,43 @@ impl CrosshairApp {
                         ui.end_row();
 
                         if preset.binary_filter {
-                            ui.label(Self::tr_lang(language, "Threshold", "Ngưỡng nhận diện"));
-                            live_sync |= ui
-                                .add(egui::Slider::new(&mut preset.binary_threshold, 0..=255))
-                                .changed();
+                            ui.label(Self::tr_lang(language, "Binarize Mode", "Chế độ trắng đen"));
+                            let mode_changed = egui::ComboBox::from_id_salt((preset.id, "bin-mode"))
+                                .selected_text(match preset.binary_mode {
+                                    PinBinaryMode::Grayscale => Self::tr_lang(language, "Grayscale", "Độ sáng"),
+                                    PinBinaryMode::ColorSimilarity => Self::tr_lang(language, "Color Similarity", "Độ tương đồng màu"),
+                                })
+                                .show_ui(ui, |ui| {
+                                    let mut m_changed = false;
+                                    m_changed |= ui.selectable_value(&mut preset.binary_mode, PinBinaryMode::Grayscale, Self::tr_lang(language, "Grayscale", "Độ sáng")).clicked();
+                                    m_changed |= ui.selectable_value(&mut preset.binary_mode, PinBinaryMode::ColorSimilarity, Self::tr_lang(language, "Color Similarity", "Độ tương đồng màu")).clicked();
+                                    m_changed
+                                })
+                                .inner
+                                .unwrap_or(false);
+                            live_sync |= mode_changed;
                             ui.end_row();
+
+                            match preset.binary_mode {
+                                PinBinaryMode::Grayscale => {
+                                    ui.label(Self::tr_lang(language, "Threshold", "Ngưỡng nhận diện"));
+                                    live_sync |= ui
+                                        .add(egui::Slider::new(&mut preset.binary_threshold, 0..=255))
+                                        .changed();
+                                    ui.end_row();
+                                }
+                                PinBinaryMode::ColorSimilarity => {
+                                    ui.label(Self::tr_lang(language, "Target Color", "Màu mục tiêu"));
+                                    live_sync |= Self::edit_rgba_color(ui, &mut preset.binary_target_color).changed();
+                                    ui.end_row();
+
+                                    ui.label(Self::tr_lang(language, "Tolerance", "Độ lệch màu"));
+                                    live_sync |= ui
+                                        .add(egui::Slider::new(&mut preset.binary_threshold, 0..=255))
+                                        .changed();
+                                    ui.end_row();
+                                }
+                            }
                         }
                     });
 

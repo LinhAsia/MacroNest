@@ -1664,6 +1664,22 @@ impl Default for ZoomPreset {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum PinBinaryMode {
+    #[default]
+    Grayscale,
+    ColorSimilarity,
+}
+
+fn default_binary_target_color() -> RgbaColor {
+    RgbaColor {
+        r: 255,
+        g: 255,
+        b: 0,
+        a: 255,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum PinOverlayStyle {
     #[default]
     Rectangle,
@@ -1705,6 +1721,10 @@ pub struct PinPreset {
     pub binary_filter: bool,
     #[serde(default = "default_binary_threshold")]
     pub binary_threshold: u8,
+    #[serde(default)]
+    pub binary_mode: PinBinaryMode,
+    #[serde(default = "default_binary_target_color")]
+    pub binary_target_color: RgbaColor,
 }
 
 impl PinPreset {
@@ -1735,6 +1755,8 @@ impl PinPreset {
             source_height: 180,
             binary_filter: false,
             binary_threshold: 128,
+            binary_mode: PinBinaryMode::Grayscale,
+            binary_target_color: default_binary_target_color(),
         }
     }
 }
