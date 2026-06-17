@@ -82,9 +82,8 @@ mod windows_overlay {
                 Dwm::{
                     DWM_THUMBNAIL_PROPERTIES, DWM_TNP_OPACITY, DWM_TNP_RECTDESTINATION,
                     DWM_TNP_RECTSOURCE, DWM_TNP_SOURCECLIENTAREAONLY, DWM_TNP_VISIBLE,
-                    DWMWA_BORDER_COLOR, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
-                    DwmRegisterThumbnail, DwmSetWindowAttribute, DwmUnregisterThumbnail,
-                    DwmUpdateThumbnailProperties,
+                    DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute, DwmRegisterThumbnail,
+                    DwmUnregisterThumbnail, DwmUpdateThumbnailProperties,
                 },
                 Gdi::{
                     AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO,
@@ -8402,28 +8401,12 @@ mod windows_overlay {
         true
     }
 
-    const DWM_COLOR_DEFAULT: u32 = 0xFFFF_FFFF;
-    const FOCUS_HIGHLIGHT_BORDER_COLOR: u32 = 0x00B6_E07E;
     const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(1200);
     const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(240);
     const QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION: Duration = Duration::from_millis(180);
     const QUICK_KEY_DISPLAY_ANIM_EXIT_DURATION: Duration = Duration::from_millis(200);
     const QUICK_KEY_DISPLAY_HOLD_MIN_DURATION: Duration = Duration::from_millis(400);
     const QUICK_KEY_DISPLAY_HOLD_TRANSITION_DURATION: Duration = Duration::from_millis(80);
-
-    unsafe fn set_native_border_color(hwnd: HWND, color: u32) -> bool {
-        if hwnd.0.is_null() {
-            return false;
-        }
-
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_BORDER_COLOR,
-            &color as *const _ as *const _,
-            size_of::<u32>() as u32,
-        )
-        .is_ok()
-    }
 
     unsafe fn normalize_native_focus_highlight_target(hwnd: HWND) -> HWND {
         if hwnd.0.is_null() {
@@ -8455,9 +8438,7 @@ mod windows_overlay {
     }
 
     unsafe fn clear_native_focus_highlight(runtime: &mut Runtime) {
-        if let Some(previous) = runtime.active_focus_highlight_hwnd.take() {
-            let _ = set_native_border_color(previous, DWM_COLOR_DEFAULT);
-        }
+        runtime.active_focus_highlight_hwnd = None;
         ACTIVE_HIGHLIGHT_HWND.store(0, Ordering::Relaxed);
         sync_window_location_hook_state(runtime);
         let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
@@ -9193,7 +9174,6 @@ mod windows_overlay {
 
         clear_native_focus_highlight(runtime);
         if is_native_focus_highlight_target(target) {
-            let _ = set_native_border_color(target, FOCUS_HIGHLIGHT_BORDER_COLOR);
             let _ = paint_focus_highlight_overlay(runtime, target);
             runtime.active_focus_highlight_hwnd = Some(target);
             ACTIVE_HIGHLIGHT_HWND.store(target.0 as isize, Ordering::Relaxed);
@@ -18917,9 +18897,6 @@ mod windows_overlay {
     fn shutdown_application(hwnd: HWND, runtime: &Runtime) -> Result<()> {
         let _ = unsafe { Shell_NotifyIconW(NIM_DELETE, &notify_icon(hwnd)) };
         let _ = crate::platform::show_taskbar();
-        if let Some(highlighted_hwnd) = runtime.active_focus_highlight_hwnd {
-            let _ = unsafe { set_native_border_color(highlighted_hwnd, DWM_COLOR_DEFAULT) };
-        }
         let _ = restore_mouse_sensitivity_on_exit();
         let _ = unsafe { ShowWindow(runtime.overlay_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.hud_hwnd, SW_HIDE) };
