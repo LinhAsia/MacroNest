@@ -1593,11 +1593,7 @@ impl CrosshairApp {
     fn export_macro_step(&mut self, preset_id: u32, step_index: usize, step: &MacroStep) {
         match crate::macro_code::encode_step(step) {
             Ok(code) => {
-                self.status = Self::tr_lang(
-                    self.state.ui_language,
-                    "Step code copied to clipboard.",
-                    "Đã sao chép mã bước vào clipboard.",
-                )
+                self.status = Self::tr_lang(self.state.ui_language, "Step code copied to clipboard.", "Step code copied to clipboard.")
                 .to_owned();
                 self.macro_step_export_feedback_until =
                     Some(Instant::now() + Duration::from_millis(1200));
@@ -1653,11 +1649,7 @@ impl CrosshairApp {
                         }
                         self.sync_macro_presets();
                         self.persist();
-                        self.status = Self::tr_lang(
-                            self.state.ui_language,
-                            "Step imported successfully.",
-                            "Đã nhập bước thành công.",
-                        )
+                        self.status = Self::tr_lang(self.state.ui_language, "Step imported successfully.", "Step imported successfully.")
                         .to_owned();
                     }
                 }
@@ -1669,11 +1661,7 @@ impl CrosshairApp {
     fn export_macro_preset(&mut self, preset_id: u32, preset: &MacroPreset) {
         match crate::macro_code::encode_preset(preset) {
             Ok(code) => {
-                self.status = Self::tr_lang(
-                    self.state.ui_language,
-                    "Preset code copied to clipboard.",
-                    "Đã sao chép mã preset vào clipboard.",
-                )
+                self.status = Self::tr_lang(self.state.ui_language, "Preset code copied to clipboard.", "Preset code copied to clipboard.")
                 .to_owned();
                 self.macro_preset_export_feedback_until =
                     Some(Instant::now() + Duration::from_millis(1200));
@@ -1737,11 +1725,7 @@ impl CrosshairApp {
                     self.reconcile_master_presets();
                     self.sync_macro_presets();
                     self.persist();
-                    self.status = Self::tr_lang(
-                        self.state.ui_language,
-                        "Preset imported successfully.",
-                        "Đã nhập preset thành công.",
-                    )
+                    self.status = Self::tr_lang(self.state.ui_language, "Preset imported successfully.", "Preset imported successfully.")
                     .to_owned();
                 }
             }
@@ -1752,11 +1736,7 @@ impl CrosshairApp {
     fn export_macro_group(&mut self, group_id: u32, group: &MacroGroup) {
         match crate::macro_code::encode_group(group) {
             Ok(code) => {
-                self.status = Self::tr_lang(
-                    self.state.ui_language,
-                    "Group code copied to clipboard.",
-                    "Đã sao chép mã nhóm vào clipboard.",
-                )
+                self.status = Self::tr_lang(self.state.ui_language, "Group code copied to clipboard.", "Group code copied to clipboard.")
                 .to_owned();
                 self.macro_group_export_feedback_until =
                     Some(Instant::now() + Duration::from_millis(1200));
@@ -1843,11 +1823,7 @@ impl CrosshairApp {
                 self.reconcile_master_presets();
                 self.sync_macro_presets();
                 self.persist();
-                self.status = Self::tr_lang(
-                    self.state.ui_language,
-                    "Group imported successfully.",
-                    "Đã nhập nhóm thành công.",
-                )
+                self.status = Self::tr_lang(self.state.ui_language, "Group imported successfully.", "Group imported successfully.")
                 .to_owned();
             }
             Err(error) => self.status = format!("Import failed: {error}"),
@@ -1913,11 +1889,8 @@ impl CrosshairApp {
 
     fn render_panel_loading_shell(&self, ui: &mut egui::Ui, panel: AppPanel) {
         let title = self.panel_label(panel);
-        let subtitle = self.tr("Preparing this panel...", "Dang chuan bi panel nay...");
-        let detail = self.tr(
-            "The window is ready. Content will finish loading in the next moments.",
-            "Cua so da hien. Noi dung se tiep tuc hoan thien ngay sau do.",
-        );
+        let subtitle = self.tr("Preparing this panel...", "Preparing this panel...");
+        let detail = self.tr("The window is ready. Content will finish loading in the next moments.", "The window is ready. Content will finish loading in the next moments.");
         ui.with_layout(
             egui::Layout::top_down_justified(egui::Align::Center),
             |ui| {
@@ -3036,7 +3009,7 @@ impl CrosshairApp {
     fn format_binding_ui(language: UiLanguage, binding: Option<&HotkeyBinding>) -> String {
         let label = hotkey::format_binding(binding);
         if label == "Not set" {
-            Self::tr_lang(language, "Not set", "Chưa gán").to_owned()
+            Self::tr_lang(language, "Not set", "Not set").to_owned()
         } else {
             label
         }
@@ -3207,11 +3180,7 @@ impl CrosshairApp {
                         .add(
                             Button::new(RichText::new(label).monospace()).min_size(vec2(0.0, 22.0)),
                         )
-                        .on_hover_text(Self::tr_lang(
-                            language,
-                            "Click to remove this trigger",
-                            "Bấm để xóa phím tắt này",
-                        ))
+                        .on_hover_text(Self::tr_lang(language, "Click to remove this trigger", "Click to remove this trigger"))
                         .clicked()
                     {
                         remove_binding = Some(binding.clone());
@@ -3239,11 +3208,7 @@ impl CrosshairApp {
                             .fill(Color32::from_rgba_premultiplied(72, 156, 116, 120))
                             .stroke(egui::Stroke::new(1.0, Color32::from_rgb(126, 224, 182))),
                     )
-                    .on_hover_text(Self::tr_lang(
-                        language,
-                        "Captured key preview",
-                        "Xem trước trigger đang bấm",
-                    ));
+                    .on_hover_text(Self::tr_lang(language, "Captured key preview", "Captured key preview"));
                 });
             }
         }
@@ -3338,7 +3303,7 @@ impl CrosshairApp {
                 .as_deref()
                 .map(Self::simplify_window_title)
                 .unwrap_or_else(|| {
-                    Self::tr_lang(language, "Any focused window", "Bat ky cua so dang focus")
+                    Self::tr_lang(language, "Any focused window", "Any focused window")
                         .to_owned()
                 });
             ui.label(target);
@@ -3391,11 +3356,7 @@ impl CrosshairApp {
                             .fill(Color32::from_rgba_premultiplied(72, 156, 116, 120))
                             .stroke(egui::Stroke::new(1.0, Color32::from_rgb(126, 224, 182))),
                     )
-                    .on_hover_text(Self::tr_lang(
-                        language,
-                        "Captured key preview",
-                        "Xem truoc trigger dang bat",
-                    ));
+                    .on_hover_text(Self::tr_lang(language, "Captured key preview", "Captured key preview"));
                 });
             }
         }
@@ -3426,7 +3387,7 @@ impl CrosshairApp {
                 .as_deref()
                 .map(Self::simplify_window_title)
                 .unwrap_or_else(|| {
-                    Self::tr_lang(language, "Any focused window", "Bat ky cua so dang focus")
+                    Self::tr_lang(language, "Any focused window", "Any focused window")
                         .to_owned()
                 });
             return format!("Focus: {target}");
@@ -3435,7 +3396,7 @@ impl CrosshairApp {
         let bindings = Self::macro_trigger_bindings(preset);
         let label = hotkey::format_binding_list(&bindings);
         if label == "Not set" {
-            Self::tr_lang(language, "Not set", "Chưa gán").to_owned()
+            Self::tr_lang(language, "Not set", "Not set").to_owned()
         } else {
             label
         }
@@ -3552,7 +3513,7 @@ impl CrosshairApp {
             AppPanel::Geometry => "Geometry",
         };
         if panel == AppPanel::Ocr {
-            Self::tr_lang(self.state.ui_language, "OCR", "Nhận dạng chữ (OCR)")
+            Self::tr_lang(self.state.ui_language, "OCR", "OCR")
         } else {
             Self::tr_lang(self.state.ui_language, english, english)
         }
@@ -3585,7 +3546,7 @@ impl CrosshairApp {
     }
 
     fn titlebar_language_tooltip(&self) -> &'static str {
-        self.tr("Switch language", "Đổi ngôn ngữ")
+        self.tr("Switch language", "Switch language")
     }
 
     fn vietnamese_input_button_text(&self) -> RichText {
@@ -3602,33 +3563,33 @@ impl CrosshairApp {
 
     fn titlebar_vietnamese_input_tooltip(&self) -> &'static str {
         if !self.state.vietnamese_input_enabled {
-            self.tr("Vietnamese input: off", "Gõ tiếng Việt: tắt")
+            self.tr("Vietnamese input: off", "Vietnamese input: off")
         } else {
             match self.state.vietnamese_input_mode {
                 VietnameseInputMode::Telex => {
-                    self.tr("Vietnamese input: Telex", "Gõ tiếng Việt: Telex")
+                    self.tr("Vietnamese input: Telex", "Vietnamese input: Telex")
                 }
-                VietnameseInputMode::Vni => self.tr("Vietnamese input: VNI", "Gõ tiếng Việt: VNI"),
+                VietnameseInputMode::Vni => self.tr("Vietnamese input: VNI", "Vietnamese input: VNI"),
                 VietnameseInputMode::Off => {
-                    self.tr("Vietnamese input: Telex", "Gõ tiếng Việt: Telex")
+                    self.tr("Vietnamese input: Telex", "Vietnamese input: Telex")
                 }
             }
         }
     }
 
     fn titlebar_theme_tooltip(&self) -> &'static str {
-        self.tr("Toggle dark / light theme", "Đổi giao diện sáng / tối")
+        self.tr("Toggle dark / light theme", "Toggle dark / light theme")
     }
 
     fn titlebar_minimize_tooltip(&self) -> &'static str {
-        self.tr("Minimize", "Thu nhỏ")
+        self.tr("Minimize", "Minimize")
     }
 
     fn titlebar_maximize_tooltip(&self, maximized: bool) -> &'static str {
         if maximized {
-            self.tr("Restore", "Khôi phục")
+            self.tr("Restore", "Restore")
         } else {
-            self.tr("Maximize", "Phóng to")
+            self.tr("Maximize", "Maximize")
         }
     }
 
@@ -4070,39 +4031,23 @@ impl CrosshairApp {
                             };
                             self.status = if success {
                                 if taskbar_hidden {
-                                    Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Windows taskbar restored.",
-                                        "Da hien lai taskbar Windows.",
-                                    )
+                                    Self::tr_lang(self.state.ui_language, "Windows taskbar restored.", "Windows taskbar restored.")
                                 } else {
-                                    Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Windows taskbar hidden.",
-                                        "Da an taskbar Windows.",
-                                    )
+                                    Self::tr_lang(self.state.ui_language, "Windows taskbar hidden.", "Windows taskbar hidden.")
                                 }
                             } else if taskbar_hidden {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Failed to restore the Windows taskbar.",
-                                    "Khong the hien lai taskbar Windows.",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Failed to restore the Windows taskbar.", "Failed to restore the Windows taskbar.")
                             } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Failed to hide the Windows taskbar.",
-                                    "Khong the an taskbar Windows.",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Failed to hide the Windows taskbar.", "Failed to hide the Windows taskbar.")
                             }
                             .to_owned();
                         }
 
                         ui.add_space(6.0);
                         let taskbar_label = if taskbar_hidden {
-                            Self::tr_lang(self.state.ui_language, "Show taskbar", "Hien taskbar")
+                            Self::tr_lang(self.state.ui_language, "Show taskbar", "Show taskbar")
                         } else {
-                            Self::tr_lang(self.state.ui_language, "Hide taskbar", "An taskbar")
+                            Self::tr_lang(self.state.ui_language, "Hide taskbar", "Hide taskbar")
                         };
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 28.0),
@@ -4140,34 +4085,18 @@ impl CrosshairApp {
                             self.sync_windows_key_locked();
                             self.persist();
                             self.status = if self.state.windows_key_locked {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Windows key locked.",
-                                    "Da khoa phim Windows.",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Windows key locked.", "Windows key locked.")
                             } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Windows key unlocked.",
-                                    "Da mo phim Windows.",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Windows key unlocked.", "Windows key unlocked.")
                             }
                             .to_owned();
                         }
 
                         ui.add_space(6.0);
                         let windows_label = if self.state.windows_key_locked {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Unlock Windows key",
-                                "Mo khoa phim Windows",
-                            )
+                            Self::tr_lang(self.state.ui_language, "Unlock Windows key", "Unlock Windows key")
                         } else {
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Lock Windows key",
-                                "Khoa phim Windows",
-                            )
+                            Self::tr_lang(self.state.ui_language, "Lock Windows key", "Lock Windows key")
                         };
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 28.0),
@@ -4209,32 +4138,16 @@ impl CrosshairApp {
                                 );
                                 self.status = if success {
                                     if next_state {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Pinned the selected window on top.",
-                                            "Da ghim cua so da chon len tren cung.",
-                                        )
+                                        Self::tr_lang(self.state.ui_language, "Pinned the selected window on top.", "Pinned the selected window on top.")
                                     } else {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Removed topmost from the selected window.",
-                                            "Da bo ghim cua so da chon.",
-                                        )
+                                        Self::tr_lang(self.state.ui_language, "Removed topmost from the selected window.", "Removed topmost from the selected window.")
                                     }
                                 } else {
-                                    Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Could not update the selected window.",
-                                        "Khong the cap nhat cua so da chon.",
-                                    )
+                                    Self::tr_lang(self.state.ui_language, "Could not update the selected window.", "Could not update the selected window.")
                                 }
                                 .to_owned();
                             } else {
-                                self.status = Self::tr_lang(
-                                    self.state.ui_language,
-                                    "No window is available to pin.",
-                                    "Khong co cua so nao de ghim.",
-                                )
+                                self.status = Self::tr_lang(self.state.ui_language, "No window is available to pin.", "No window is available to pin.")
                                 .to_owned();
                             }
                         }
@@ -4242,9 +4155,9 @@ impl CrosshairApp {
                         ui.add_space(6.0);
                         let pin_label = Self::truncate_window_title(
                             if pinned_window_active {
-                                Self::tr_lang(self.state.ui_language, "Unpin window", "Bo ghim")
+                                Self::tr_lang(self.state.ui_language, "Unpin window", "Unpin window")
                             } else {
-                                Self::tr_lang(self.state.ui_language, "Pin window", "Ghim cua so")
+                                Self::tr_lang(self.state.ui_language, "Pin window", "Pin window")
                             },
                             14,
                         );
@@ -4264,7 +4177,7 @@ impl CrosshairApp {
                             },
                         );
                         let selected_window_text = if self.quick_action_window_selector.is_empty() {
-                            Self::tr_lang(self.state.ui_language, "Select window", "Chon cua so")
+                            Self::tr_lang(self.state.ui_language, "Select window", "Select window")
                                 .to_owned()
                         } else {
                             Self::truncate_window_title(
@@ -4350,24 +4263,16 @@ impl CrosshairApp {
                             self.sync_native_focus_highlight_enabled();
                             self.persist();
                             self.status = if self.state.native_focus_highlight_enabled {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Native focus highlight enabled.",
-                                    "Da bat vien focus native.",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Native focus highlight enabled.", "Native focus highlight enabled.")
                             } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Native focus highlight disabled.",
-                                    "Da tat vien focus native.",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Native focus highlight disabled.", "Native focus highlight disabled.")
                             }
                             .to_owned();
                         }
 
                         ui.add_space(4.0);
                         let focus_label =
-                            Self::tr_lang(self.state.ui_language, "Focus highlight", "Vien focus");
+                            Self::tr_lang(self.state.ui_language, "Focus highlight", "Focus highlight");
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 20.0),
                             egui::Layout::top_down(egui::Align::Center),
@@ -4402,11 +4307,7 @@ impl CrosshairApp {
                                 }
                                 ui.add_space(4.0);
                                 ui.add(egui::Label::new(
-                                    RichText::new(Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Color",
-                                        "Mau",
-                                    ))
+                                    RichText::new(Self::tr_lang(self.state.ui_language, "Color", "Color"))
                                     .size(10.0),
                                 ));
                             },
@@ -4422,11 +4323,7 @@ impl CrosshairApp {
                                 let rainbow_changed = ui
                                     .checkbox(
                                         &mut self.state.focus_highlight_rainbow,
-                                        RichText::new(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Rainbow",
-                                            "Cau vong",
-                                        ))
+                                        RichText::new(Self::tr_lang(self.state.ui_language, "Rainbow", "Rainbow"))
                                         .size(10.0),
                                     )
                                     .changed();
@@ -4464,24 +4361,16 @@ impl CrosshairApp {
                             self.sync_protractor_state();
                             self.persist();
                             self.status = if self.state.protractor_enabled {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Protractor overlay enabled.",
-                                    "Da bat thuoc do do.",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Protractor overlay enabled.", "Protractor overlay enabled.")
                             } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Protractor overlay disabled.",
-                                    "Da tat thuoc do do.",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Protractor overlay disabled.", "Protractor overlay disabled.")
                             }
                             .to_owned();
                         }
 
                         ui.add_space(4.0);
                         let proto_label =
-                            Self::tr_lang(self.state.ui_language, "Protractor", "Thuoc do do");
+                            Self::tr_lang(self.state.ui_language, "Protractor", "Protractor");
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 20.0),
                             egui::Layout::top_down(egui::Align::Center),
@@ -4526,7 +4415,7 @@ impl CrosshairApp {
 
                         ui.add_space(4.0);
                         let coords_label =
-                            Self::tr_lang(self.state.ui_language, "Get Coordinates", "Lấy tọa độ");
+                            Self::tr_lang(self.state.ui_language, "Get Coordinates", "Get Coordinates");
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 20.0),
                             egui::Layout::top_down(egui::Align::Center),
@@ -4553,11 +4442,7 @@ impl CrosshairApp {
                                 let copy_x_changed = ui
                                     .checkbox(
                                         &mut self.state.quick_actions_copy_x,
-                                        RichText::new(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Copy X",
-                                            "Sao chép X",
-                                        ))
+                                        RichText::new(Self::tr_lang(self.state.ui_language, "Copy X", "Copy X"))
                                         .size(10.0),
                                     )
                                     .changed();
@@ -4577,11 +4462,7 @@ impl CrosshairApp {
                                 let copy_y_changed = ui
                                     .checkbox(
                                         &mut self.state.quick_actions_copy_y,
-                                        RichText::new(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Copy Y",
-                                            "Sao chép Y",
-                                        ))
+                                        RichText::new(Self::tr_lang(self.state.ui_language, "Copy Y", "Copy Y"))
                                         .size(10.0),
                                     )
                                     .changed();
@@ -4618,7 +4499,7 @@ impl CrosshairApp {
 
                         ui.add_space(4.0);
                         let color_label =
-                            Self::tr_lang(self.state.ui_language, "Get Color", "Lấy mã màu");
+                            Self::tr_lang(self.state.ui_language, "Get Color", "Get Color");
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 20.0),
                             egui::Layout::top_down(egui::Align::Center),
@@ -4645,11 +4526,7 @@ impl CrosshairApp {
                                 let copy_color_changed = ui
                                     .checkbox(
                                         &mut self.state.quick_actions_copy_color,
-                                        RichText::new(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Copy hex",
-                                            "Sao chép màu",
-                                        ))
+                                        RichText::new(Self::tr_lang(self.state.ui_language, "Copy hex", "Copy hex"))
                                         .size(10.0),
                                     )
                                     .changed();
@@ -4681,17 +4558,9 @@ impl CrosshairApp {
                             self.sync_quick_key_display_config();
                             self.persist();
                             self.status = if self.state.quick_key_display_enabled {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Key display enabled.",
-                                    "Da bat hien thi phim.",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Key display enabled.", "Key display enabled.")
                             } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Key display disabled.",
-                                    "Da tat hien thi phim.",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Key display disabled.", "Key display disabled.")
                             }
                             .to_owned();
                         }
@@ -4702,11 +4571,7 @@ impl CrosshairApp {
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(
-                                    RichText::new(Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Key display",
-                                        "Hien thi phim",
-                                    ))
+                                    RichText::new(Self::tr_lang(self.state.ui_language, "Key display", "Key display"))
                                     .size(11.0)
                                     .color(
                                         if button_response.hovered() {
@@ -4755,11 +4620,7 @@ impl CrosshairApp {
                             |ui| {
                                 ui.add_space(4.0);
                                 ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Size",
-                                        "Co",
-                                    ))
+                                    RichText::new(Self::tr_lang(self.state.ui_language, "Size", "Size"))
                                     .size(10.0),
                                 );
                                 let size_changed = ui
@@ -4784,13 +4645,9 @@ impl CrosshairApp {
                             .add_sized(
                                 [74.0, 20.0],
                                 Button::new(if is_pick_active {
-                                    Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Picking...",
-                                        "Dang chon...",
-                                    )
+                                    Self::tr_lang(self.state.ui_language, "Picking...", "Picking...")
                                 } else {
-                                    Self::tr_lang(self.state.ui_language, "Pick point", "Chon diem")
+                                    Self::tr_lang(self.state.ui_language, "Pick point", "Pick point")
                                 }),
                             )
                             .clicked()
@@ -4845,11 +4702,7 @@ impl CrosshairApp {
                         let pass_changed = ui
                             .checkbox(
                                 &mut self.state.quick_screen_draw_pass_trigger_through,
-                                RichText::new(Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Pass through",
-                                    "Pass qua",
-                                ))
+                                RichText::new(Self::tr_lang(self.state.ui_language, "Pass through", "Pass through"))
                                 .size(10.0),
                             )
                             .changed();
@@ -4899,17 +4752,9 @@ impl CrosshairApp {
                                     .stroke(egui::Stroke::new(1.0, capture_stroke)),
                             )
                             .on_hover_text(if capture_active {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Cancel capture",
-                                    "Huy bat phim",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Cancel capture", "Cancel capture")
                             } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Capture draw hotkey",
-                                    "Bat phim ve",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Capture draw hotkey", "Capture draw hotkey")
                             })
                             .clicked()
                         {
@@ -4944,17 +4789,9 @@ impl CrosshairApp {
                                     .min_size(vec2(0.0, 22.0))
                             };
                             let chip_response = ui.add(chip).on_hover_text(if capture_active {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Captured key preview",
-                                    "Xem truoc phim dang bat",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Captured key preview", "Captured key preview")
                             } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Click to clear this hotkey",
-                                    "Bam de xoa phim tat nay",
-                                )
+                                Self::tr_lang(self.state.ui_language, "Click to clear this hotkey", "Click to clear this hotkey")
                             });
                             if chip_response.clicked() && !capture_active {
                                 self.state.quick_screen_draw_hotkey = None;
@@ -4964,11 +4801,7 @@ impl CrosshairApp {
                             }
                         } else {
                             ui.label(
-                                RichText::new(Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Not set",
-                                    "Chua gan",
-                                ))
+                                RichText::new(Self::tr_lang(self.state.ui_language, "Not set", "Not set"))
                                 .size(10.0)
                                 .weak(),
                             );
@@ -5257,7 +5090,7 @@ impl CrosshairApp {
                 let add_btn = Button::new(Self::material_icon_text(0xe145, 12.0));
                 if ui
                     .add_sized([24.0, 21.0], add_btn)
-                    .on_hover_text(Self::tr_lang(language, "+ Window", "+ Cửa sổ"))
+                    .on_hover_text(Self::tr_lang(language, "+ Window", "+ Window"))
                     .clicked()
                 {
                     let next = open_windows
@@ -5383,14 +5216,14 @@ impl CrosshairApp {
             .as_deref()
             .map(|current| {
                 if current == "[Active Window]" {
-                    Self::tr_lang(language, "[Active Window]", "[Cửa sổ hiện tại]").to_owned()
+                    Self::tr_lang(language, "[Active Window]", "[Active Window]").to_owned()
                 } else {
                     let mut display = current.to_owned();
                     let rules = [
-                        (" [Lowest]", "[Lowest on Screen]", "[Dưới cùng màn hình]"),
-                        (" [Highest]", "[Highest on Screen]", "[Trên cùng màn hình]"),
-                        (" [Leftmost]", "[Leftmost on Screen]", "[Bên trái cùng]"),
-                        (" [Rightmost]", "[Rightmost on Screen]", "[Bên phải cùng]"),
+                        (" [Lowest]", "[Lowest on Screen]", "[Lowest on Screen]"),
+                        (" [Highest]", "[Highest on Screen]", "[Highest on Screen]"),
+                        (" [Leftmost]", "[Leftmost on Screen]", "[Leftmost on Screen]"),
+                        (" [Rightmost]", "[Rightmost on Screen]", "[Rightmost on Screen]"),
                     ];
                     let mut matched_rule = false;
                     for (suffix, en_label, vi_label) in rules {
@@ -5442,7 +5275,7 @@ impl CrosshairApp {
                 }
 
                 let active_window_label =
-                    Self::tr_lang(language, "[Active Window]", "[Cửa sổ hiện tại]");
+                    Self::tr_lang(language, "[Active Window]", "[Active Window]");
                 let is_active_selected = target.as_deref() == Some("[Active Window]");
                 if ui
                     .selectable_label(is_active_selected, active_window_label)
@@ -5491,35 +5324,19 @@ impl CrosshairApp {
                                 let rules = [
                                     (
                                         " [Lowest]",
-                                        Self::tr_lang(
-                                            language,
-                                            "[Lowest on Screen]",
-                                            "[Dưới cùng màn hình]",
-                                        ),
+                                        Self::tr_lang(language, "[Lowest on Screen]", "[Lowest on Screen]"),
                                     ),
                                     (
                                         " [Highest]",
-                                        Self::tr_lang(
-                                            language,
-                                            "[Highest on Screen]",
-                                            "[Trên cùng màn hình]",
-                                        ),
+                                        Self::tr_lang(language, "[Highest on Screen]", "[Highest on Screen]"),
                                     ),
                                     (
                                         " [Leftmost]",
-                                        Self::tr_lang(
-                                            language,
-                                            "[Leftmost on Screen]",
-                                            "[Bên trái cùng]",
-                                        ),
+                                        Self::tr_lang(language, "[Leftmost on Screen]", "[Leftmost on Screen]"),
                                     ),
                                     (
                                         " [Rightmost]",
-                                        Self::tr_lang(
-                                            language,
-                                            "[Rightmost on Screen]",
-                                            "[Bên phải cùng]",
-                                        ),
+                                        Self::tr_lang(language, "[Rightmost on Screen]", "[Rightmost on Screen]"),
                                     ),
                                 ];
 
@@ -5612,7 +5429,7 @@ impl CrosshairApp {
                 let add_btn = Button::new(Self::material_icon_text(0xe145, 12.0));
                 if ui
                     .add_sized([24.0, 21.0], add_btn)
-                    .on_hover_text(Self::tr_lang(language, "+ Window", "+ Cửa sổ"))
+                    .on_hover_text(Self::tr_lang(language, "+ Window", "+ Window"))
                     .clicked()
                 {
                     let next = open_windows
@@ -5774,277 +5591,84 @@ impl CrosshairApp {
     }
 
     fn macro_action_tooltip(action: MacroAction, language: UiLanguage) -> &'static str {
+        let (translation_key, english) = match action {
+            MacroAction::KeyPress => ("macro_action_tooltip.key_press", "Press and release one keyboard key."),
+            MacroAction::KeyDown => ("macro_action_tooltip.key_down", "Hold a keyboard key down."),
+            MacroAction::KeyUp => ("macro_action_tooltip.key_up", "Release a held keyboard key."),
+            MacroAction::Wait => ("macro_action_tooltip.wait", "Wait for the number of milliseconds in Delay, then continue."),
+            MacroAction::TypeText => ("macro_action_tooltip.type_text", "Type the whole text from the Input field."),
+            MacroAction::ApplyWindowPreset => ("macro_action_tooltip.apply_window_preset", "Resize or apply window layout preset."),
+            MacroAction::FocusWindowPreset => ("macro_action_tooltip.focus_window_preset", "Bring one window forward with the selected focus preset."),
+            MacroAction::TriggerMacroPreset => ("macro_action_tooltip.trigger_macro_preset", "Run another macro preset from the same macro group."),
+            MacroAction::TriggerMacroPresetIfEnabled => ("macro_action_tooltip.trigger_macro_preset_if_enabled", "Run selected macro presets only when those presets are enabled."),
+            MacroAction::StopMacroPreset => ("macro_action_tooltip.stop_macro_preset", "Stop the selected macro presets if they are currently running."),
+            MacroAction::TriggerCommandPreset => ("macro_action_tooltip.trigger_command_preset", "Run one custom command preset from the Custom tab."),
+            MacroAction::EnableCrosshairProfile => ("macro_action_tooltip.enable_crosshair_profile", "Enable one saved crosshair profile."),
+            MacroAction::DisableCrosshair => ("macro_action_tooltip.disable_crosshair", "Turn the overlay crosshair off."),
+            MacroAction::EnablePinPreset => ("macro_action_tooltip.enable_pin_preset", "Enable one saved pin preset from the Pin tab."),
+            MacroAction::DisablePin => ("macro_action_tooltip.disable_pin", "Turn the pinned app overlay off."),
+            MacroAction::PlayMousePathPreset => ("macro_action_tooltip.play_mouse_path_preset", "Play one recorded mouse path preset from the Mouse tab."),
+            MacroAction::ApplyMouseSensitivityPreset => ("macro_action_tooltip.apply_mouse_sensitivity_preset", "Apply one mouse sensitivity preset from the Mouse tab."),
+            MacroAction::EnableZoomPreset => ("macro_action_tooltip.enable_zoom_preset", "Enable one saved zoom preset."),
+            MacroAction::DisableZoom => ("macro_action_tooltip.disable_zoom", "Turn the zoom overlay off."),
+            MacroAction::PlaySoundPreset => ("macro_action_tooltip.play_sound_preset", "Play one sound preset from the Media tab."),
+            MacroAction::PlayVideoPreset => ("macro_action_tooltip.play_video_preset", "Play one fullscreen video preset from the Media tab."),
+            MacroAction::StartVisionSearch => ("macro_action_tooltip.start_vision_search", "Start scanning one image-search preset in the background."),
+            MacroAction::ScanVisionOnce => ("macro_action_tooltip.scan_vision_once", "Scan for the selected image, color, or pixel counter preset exactly once."),
+            MacroAction::StartAudioSensePreset => ("macro_action_tooltip.start_audio_sense_preset", "Start pitch detection from an AudioSense preset or custom pitch settings."),
+            MacroAction::StopAudioSense => ("macro_action_tooltip.stop_audio_sense", "Stop custom AudioSense monitoring or stop every active AudioSense monitor."),
+            MacroAction::StopVisionWait => ("macro_action_tooltip.stop_vision_wait", "Stop waiting for one image-search preset to match."),
+            MacroAction::StopVision => ("macro_action_tooltip.stop_vision", "Stop one image-search preset that is currently scanning."),
+            MacroAction::LoopStart => ("macro_action_tooltip.loop_start", "Start looping the next adjacent steps. Input = loop count, or turn on Infinite."),
+            MacroAction::LoopEnd => ("macro_action_tooltip.loop_end", "End the current loop block."),
+            MacroAction::StopIfTriggerPressedAgain => ("macro_action_tooltip.stop_if_trigger_pressed_again", "Stop the current loop if you press the trigger again."),
+            MacroAction::StopIfKeyPressed => ("macro_action_tooltip.stop_if_key_pressed", "Break only the current loop if the key in Input is pressed, then continue with the steps after the loop."),
+            MacroAction::ShowHud => ("macro_action_tooltip.show_hud", "Show one HUD preset from the HUD tab."),
+            MacroAction::HideHud => ("macro_action_tooltip.hide_hud", "Hide the currently visible HUD."),
+            MacroAction::HideTaskbar => ("macro_action_tooltip.hide_taskbar", "Hide the Windows taskbar for a cleaner fullscreen layout."),
+            MacroAction::ShowTaskbar => ("macro_action_tooltip.show_taskbar", "Show the Windows taskbar again if it is hidden."),
+            MacroAction::LockKeys => ("macro_action_tooltip.lock_keys", "Lock the keys listed in Input."),
+            MacroAction::UnlockKeys => ("macro_action_tooltip.unlock_keys", "Unlock the keys listed in Input."),
+            MacroAction::LockMouse => ("macro_action_tooltip.lock_mouse", "Lock mouse movement, clicks, and wheel input until it is unlocked or the macro ends."),
+            MacroAction::UnlockMouse => ("macro_action_tooltip.unlock_mouse", "Unlock mouse movement and mouse buttons again."),
+            MacroAction::EnableMacroPreset => ("macro_action_tooltip.enable_macro_preset", "Enable one other macro preset from the same macro group."),
+            MacroAction::DisableMacroPreset => ("macro_action_tooltip.disable_macro_preset", "Disable one other macro preset from the same macro group."),
+            MacroAction::EnableStep => ("macro_action_tooltip.enable_step", "Enable one or more specific steps in this macro."),
+            MacroAction::DisableStep => ("macro_action_tooltip.disable_step", "Disable one or more specific steps in this macro."),
+            MacroAction::MouseLeftClick => ("macro_action_tooltip.mouse_left_click", "Press and release left mouse button."),
+            MacroAction::MouseLeftDown => ("macro_action_tooltip.mouse_left_down", "Hold left mouse button down."),
+            MacroAction::MouseLeftUp => ("macro_action_tooltip.mouse_left_up", "Release held left mouse button."),
+            MacroAction::MouseRightClick => ("macro_action_tooltip.mouse_right_click", "Press and release right mouse button."),
+            MacroAction::MouseRightDown => ("macro_action_tooltip.mouse_right_down", "Hold right mouse button down."),
+            MacroAction::MouseRightUp => ("macro_action_tooltip.mouse_right_up", "Release held right mouse button."),
+            MacroAction::MouseMiddleClick => ("macro_action_tooltip.mouse_middle_click", "Press and release middle mouse button."),
+            MacroAction::MouseMiddleDown => ("macro_action_tooltip.mouse_middle_down", "Hold middle mouse button down."),
+            MacroAction::MouseMiddleUp => ("macro_action_tooltip.mouse_middle_up", "Release held middle mouse button."),
+            MacroAction::MouseX1Click => ("macro_action_tooltip.mouse_x1_click", "Press and release mouse button X1."),
+            MacroAction::MouseX1Down => ("macro_action_tooltip.mouse_x1_down", "Hold mouse button X1 down."),
+            MacroAction::MouseX1Up => ("macro_action_tooltip.mouse_x1_up", "Release held mouse button X1."),
+            MacroAction::MouseX2Click => ("macro_action_tooltip.mouse_x2_click", "Press and release mouse button X2."),
+            MacroAction::MouseX2Down => ("macro_action_tooltip.mouse_x2_down", "Hold mouse button X2 down."),
+            MacroAction::MouseX2Up => ("macro_action_tooltip.mouse_x2_up", "Release held mouse button X2."),
+            MacroAction::MouseWheelUp => ("macro_action_tooltip.mouse_wheel_up", "Scroll mouse wheel up."),
+            MacroAction::MouseWheelDown => ("macro_action_tooltip.mouse_wheel_down", "Scroll mouse wheel down."),
+            MacroAction::MouseMoveAbsolute => ("macro_action_tooltip.mouse_move_absolute", "Move mouse to absolute coordinates."),
+            MacroAction::MouseMoveRelative => ("macro_action_tooltip.mouse_move_relative", "Move mouse relative to current position."),
+            MacroAction::IfStart => ("macro_action_tooltip.if_start", "Start a conditional If block. Only runs steps inside if the expression comparison is met."),
+            MacroAction::Else => ("macro_action_tooltip.else", "Otherwise (Else) block. Runs steps inside if the above If condition was NOT met."),
+            MacroAction::IfEnd => ("macro_action_tooltip.if_end", "End the current conditional If block."),
+            MacroAction::SetVariable => ("macro_action_tooltip.set_variable", "Set a variable to a numeric value or copy from another variable."),
+            MacroAction::OcrSearch => ("macro_action_tooltip.ocr_search", "Scan screen region via Windows OCR Native to extract text and numbers."),
+            MacroAction::DrawGeometry => ("macro_action_tooltip.draw_geometry", "Draw one geometry shape on the screen overlay using coordinates or expressions."),
+            MacroAction::ShowGeometryPreset => ("macro_action_tooltip.show_geometry_preset", "Show one saved geometry preset from the Geometry tab."),
+            MacroAction::HideGeometryPreset => ("macro_action_tooltip.hide_geometry_preset", "Hide geometry preset (or clear all geometry overlay)."),
+            MacroAction::FunnyMemeReply => ("macro_action_tooltip.funny_meme_reply", "Turn one message into a meme search query, fetch the best image result, and copy it to the clipboard."),
+            MacroAction::JumpToStep => ("macro_action_tooltip.jump_to_step", "Jump to a specified step (1-indexed or math expression)."),
+             _ => ("macro_action_tooltip.legacy", "Legacy (Deprecated)"),
+        };
         match language {
-            UiLanguage::Vietnamese => match action {
-                MacroAction::KeyPress => "Nhấn và nhả một phím trên bàn phím.",
-                MacroAction::KeyDown => "Nhấn giữ một phím bàn phím.",
-                MacroAction::KeyUp => "Nhả một phím đang giữ trên bàn phím.",
-                MacroAction::Wait => {
-                    "Chờ trong khoảng thời gian (Delay - Mili giây), sau đó tiếp tục."
-                }
-                MacroAction::TypeText => "Nhập chuỗi văn bản từ ô nhập liệu.",
-                MacroAction::ApplyWindowPreset => "Thay đổi kích thước hoặc áp dụng bố cục cửa sổ.",
-                MacroAction::FocusWindowPreset => {
-                    "Đưa cửa sổ lên phía trước bằng preset focus đã chọn."
-                }
-                MacroAction::TriggerMacroPreset => {
-                    "Chạy một preset macro khác trong cùng nhóm macro."
-                }
-                MacroAction::TriggerMacroPresetIfEnabled => {
-                    "Only trigger selected macro presets when they are enabled."
-                }
-                MacroAction::StopMacroPreset => {
-                    "Dừng ngay các preset macro đã chọn nếu chúng đang chạy."
-                }
-                MacroAction::TriggerCommandPreset => {
-                    "Chạy một preset câu lệnh tùy chỉnh từ tab Dòng lệnh."
-                }
-                MacroAction::EnableCrosshairProfile => "Bật một cấu hình tâm ngắm đã lưu.",
-                MacroAction::DisableCrosshair => "Tắt hiển thị tâm ngắm overlay.",
-                MacroAction::EnablePinPreset => "Bật một preset ghim cửa sổ đã lưu từ tab Ghim.",
-                MacroAction::DisablePin => "Tắt hiển thị cửa sổ overlay đang ghim.",
-                MacroAction::PlayMousePathPreset => {
-                    "Chạy một preset đường di chuyển chuột đã ghi từ tab Chuột."
-                }
-                MacroAction::ApplyMouseSensitivityPreset => {
-                    "Áp dụng một preset độ nhạy chuột từ tab Chuột."
-                }
-                MacroAction::EnableZoomPreset => "Bật một preset phóng to đã lưu.",
-                MacroAction::DisableZoom => "Tắt hiển thị phóng to overlay.",
-                MacroAction::PlaySoundPreset => "Phát một preset âm thanh đã chọn từ tab Media.",
-                MacroAction::PlayVideoPreset => {
-                    "Phát một preset video fullscreen đã chọn từ tab Media."
-                }
-                MacroAction::StartVisionSearch => {
-                    "Bắt đầu quét tìm hình ảnh trong nền bằng preset tìm ảnh đã chọn."
-                }
-                MacroAction::ScanVisionOnce => {
-                    "Quét tìm hình ảnh hoặc màu hoặc đếm pixel một lần duy nhất bằng preset đã chọn."
-                }
-                MacroAction::StartAudioSensePreset => {
-                    "Start pitch detection from an AudioSense preset or custom pitch settings."
-                }
-                MacroAction::StopAudioSense => {
-                    "Dừng AudioSense tùy chỉnh đang chạy hoặc dừng toàn bộ AudioSense."
-                }
-
-                MacroAction::StopVisionWait => "Dừng chờ kết quả tìm kiếm hình ảnh.",
-                MacroAction::StopVision => "Dừng quét tìm hình ảnh đang chạy trong nền.",
-                MacroAction::LoopStart => {
-                    "Bắt đầu vòng lặp cho các bước kế tiếp. Nhập số lần lặp, hoặc bật Vô tận (Infinite)."
-                }
-                MacroAction::LoopEnd => "Kết thúc khối vòng lặp hiện tại.",
-                MacroAction::StopIfTriggerPressedAgain => {
-                    "Dừng vòng lặp hiện tại nếu bạn nhấn lại phím kích hoạt macro một lần nữa."
-                }
-                MacroAction::StopIfKeyPressed => {
-                    "Thoát vòng lặp hiện tại nếu phím chỉ định trong ô Nhập được nhấn, sau đó tiếp tục các bước sau vòng lặp."
-                }
-                MacroAction::ShowHud => "Hiển thị HUD từ tab HUD.",
-                MacroAction::HideHud => "Ẩn HUD (Menu công cụ) đang hiển thị.",
-                MacroAction::HideTaskbar => {
-                    "Ẩn thanh taskbar của Windows để làm màn hình sạch hơn."
-                }
-                MacroAction::ShowTaskbar => "Hiện lại thanh taskbar của Windows nếu đang bị ẩn.",
-                MacroAction::LockKeys => "Khóa các phím được liệt kê trong ô Nhập.",
-                MacroAction::UnlockKeys => "Mở khóa các phím được liệt kê trong ô Nhập.",
-                MacroAction::LockMouse => {
-                    "Khóa di chuyển chuột, các cú nhấp chuột và cuộn chuột cho đến khi được mở khóa hoặc dừng macro."
-                }
-                MacroAction::UnlockMouse => "Mở khóa lại di chuyển chuột và các nút chuột.",
-                MacroAction::EnableMacroPreset => {
-                    "Bật một preset macro khác trong cùng nhóm macro."
-                }
-                MacroAction::DisableMacroPreset => {
-                    "Tắt một preset macro khác trong cùng nhóm macro."
-                }
-                MacroAction::EnableStep => "Bật một hoặc nhiều bước (step) cụ thể trong macro này.",
-                MacroAction::DisableStep => {
-                    "Tắt một hoặc nhiều bước (step) cụ thể trong macro này."
-                }
-                MacroAction::MouseLeftClick => "Click chuột trái.",
-                MacroAction::MouseLeftDown => "Nhấn giữ chuột trái.",
-                MacroAction::MouseLeftUp => "Nhả chuột trái.",
-                MacroAction::MouseRightClick => "Click chuột phải.",
-                MacroAction::MouseRightDown => "Nhấn giữ chuột phải.",
-                MacroAction::MouseRightUp => "Nhả chuột phải.",
-                MacroAction::MouseMiddleClick => "Click chuột giữa.",
-                MacroAction::MouseMiddleDown => "Nhấn giữ chuột giữa.",
-                MacroAction::MouseMiddleUp => "Nhả chuột giữa.",
-                MacroAction::MouseX1Click => "Click nút chuột X1.",
-                MacroAction::MouseX1Down => "Nhấn giữ nút chuột X1.",
-                MacroAction::MouseX1Up => "Nhả nút chuột X1.",
-                MacroAction::MouseX2Click => "Click nút chuột X2.",
-                MacroAction::MouseX2Down => "Nhấn giữ nút chuột X2.",
-                MacroAction::MouseX2Up => "Nhả nút chuột X2.",
-                MacroAction::MouseWheelUp => "Cuộn chuột lên.",
-                MacroAction::MouseWheelDown => "Cuộn chuột xuống.",
-                MacroAction::MouseMoveAbsolute => "Di chuyển chuột tới tọa độ tuyệt đối.",
-                MacroAction::MouseMoveRelative => "Di chuyển chuột tương đối (theo lượng pixel).",
-                MacroAction::IfStart => {
-                    "Bắt đầu khối điều kiện Nếu (If). Chỉ chạy các bước bên trong nếu điều kiện biến được thỏa mãn."
-                }
-                MacroAction::Else => {
-                    "Khối Ngược lại (Else). Chạy các bước bên trong nếu điều kiện Nếu (If) bên trên KHÔNG được thỏa mãn."
-                }
-                MacroAction::IfEnd => "Kết thúc khối điều kiện Hiện tại.",
-                MacroAction::SetVariable => {
-                    "Đặt giá trị cho một biến (số nguyên hoặc sao chép từ biến khác)."
-                }
-                MacroAction::OcrSearch => {
-                    "Quét vùng màn hình qua Windows OCR Native để nhận diện chữ/số."
-                }
-                MacroAction::DrawGeometry => {
-                    "Vẽ một hình hình học lên overlay màn hình bằng tọa độ hoặc biểu thức."
-                }
-                MacroAction::ShowGeometryPreset => {
-                    "Hiện một preset hình học đã lưu từ tab Geometry."
-                }
-                MacroAction::HideGeometryPreset => {
-                    "Ẩn preset hình học (hoặc xóa toàn bộ hình học)."
-                }
-                MacroAction::FunnyMemeReply => {
-                    "Biến câu nhắn thành query meme, tìm ảnh phù hợp và chép ảnh đầu tiên vào clipboard."
-                }
-                MacroAction::JumpToStep => {
-                    "Nhảy đến bước chỉ định (bắt đầu từ 1 hoặc dùng biểu thức)."
-                }
-                _ => "Tính năng cũ (Không dùng)",
-            },
-            _ => match action {
-                MacroAction::KeyPress => "Press and release one keyboard key.",
-                MacroAction::KeyDown => "Hold a keyboard key down.",
-                MacroAction::KeyUp => "Release a held keyboard key.",
-                MacroAction::Wait => "Wait for the number of milliseconds in Delay, then continue.",
-                MacroAction::TypeText => "Type the whole text from the Input field.",
-                MacroAction::ApplyWindowPreset => "Resize or apply window layout preset.",
-                MacroAction::FocusWindowPreset => {
-                    "Bring one window forward with the selected focus preset."
-                }
-                MacroAction::TriggerMacroPreset => {
-                    "Run another macro preset from the same macro group."
-                }
-                MacroAction::TriggerMacroPresetIfEnabled => {
-                    "Run selected macro presets only when those presets are enabled."
-                }
-                MacroAction::StopMacroPreset => {
-                    "Stop the selected macro presets if they are currently running."
-                }
-                MacroAction::TriggerCommandPreset => {
-                    "Run one custom command preset from the Custom tab."
-                }
-                MacroAction::EnableCrosshairProfile => "Enable one saved crosshair profile.",
-                MacroAction::DisableCrosshair => "Turn the overlay crosshair off.",
-                MacroAction::EnablePinPreset => "Enable one saved pin preset from the Pin tab.",
-                MacroAction::DisablePin => "Turn the pinned app overlay off.",
-                MacroAction::PlayMousePathPreset => {
-                    "Play one recorded mouse path preset from the Mouse tab."
-                }
-                MacroAction::ApplyMouseSensitivityPreset => {
-                    "Apply one mouse sensitivity preset from the Mouse tab."
-                }
-                MacroAction::EnableZoomPreset => "Enable one saved zoom preset.",
-                MacroAction::DisableZoom => "Turn the zoom overlay off.",
-                MacroAction::PlaySoundPreset => "Play one sound preset from the Media tab.",
-                MacroAction::PlayVideoPreset => {
-                    "Play one fullscreen video preset from the Media tab."
-                }
-                MacroAction::StartVisionSearch => {
-                    "Start scanning one image-search preset in the background."
-                }
-                MacroAction::ScanVisionOnce => {
-                    "Scan for the selected image, color, or pixel counter preset exactly once."
-                }
-                MacroAction::StartAudioSensePreset => {
-                    "Start pitch detection from an AudioSense preset or custom pitch settings."
-                }
-                MacroAction::StopAudioSense => {
-                    "Stop custom AudioSense monitoring or stop every active AudioSense monitor."
-                }
-
-                MacroAction::StopVisionWait => "Stop waiting for one image-search preset to match.",
-                MacroAction::StopVision => {
-                    "Stop one image-search preset that is currently scanning."
-                }
-                MacroAction::LoopStart => {
-                    "Start looping the next adjacent steps. Input = loop count, or turn on Infinite."
-                }
-                MacroAction::LoopEnd => "End the current loop block.",
-                MacroAction::StopIfTriggerPressedAgain => {
-                    "Stop the current loop if you press the trigger again."
-                }
-                MacroAction::StopIfKeyPressed => {
-                    "Break only the current loop if the key in Input is pressed, then continue with the steps after the loop."
-                }
-                MacroAction::ShowHud => "Show one HUD preset from the HUD tab.",
-                MacroAction::HideHud => "Hide the currently visible HUD.",
-                MacroAction::HideTaskbar => {
-                    "Hide the Windows taskbar for a cleaner fullscreen layout."
-                }
-                MacroAction::ShowTaskbar => "Show the Windows taskbar again if it is hidden.",
-                MacroAction::LockKeys => "Lock the keys listed in Input.",
-                MacroAction::UnlockKeys => "Unlock the keys listed in Input.",
-                MacroAction::LockMouse => {
-                    "Lock mouse movement, clicks, and wheel input until it is unlocked or the macro ends."
-                }
-                MacroAction::UnlockMouse => "Unlock mouse movement and mouse buttons again.",
-                MacroAction::EnableMacroPreset => {
-                    "Enable one other macro preset from the same macro group."
-                }
-                MacroAction::DisableMacroPreset => {
-                    "Disable one other macro preset from the same macro group."
-                }
-                MacroAction::EnableStep => "Enable one or more specific steps in this macro.",
-                MacroAction::DisableStep => "Disable one or more specific steps in this macro.",
-                MacroAction::MouseLeftClick => "Press and release left mouse button.",
-                MacroAction::MouseLeftDown => "Hold left mouse button down.",
-                MacroAction::MouseLeftUp => "Release held left mouse button.",
-                MacroAction::MouseRightClick => "Press and release right mouse button.",
-                MacroAction::MouseRightDown => "Hold right mouse button down.",
-                MacroAction::MouseRightUp => "Release held right mouse button.",
-                MacroAction::MouseMiddleClick => "Press and release middle mouse button.",
-                MacroAction::MouseMiddleDown => "Hold middle mouse button down.",
-                MacroAction::MouseMiddleUp => "Release held middle mouse button.",
-                MacroAction::MouseX1Click => "Press and release mouse button X1.",
-                MacroAction::MouseX1Down => "Hold mouse button X1 down.",
-                MacroAction::MouseX1Up => "Release held mouse button X1.",
-                MacroAction::MouseX2Click => "Press and release mouse button X2.",
-                MacroAction::MouseX2Down => "Hold mouse button X2 down.",
-                MacroAction::MouseX2Up => "Release held mouse button X2.",
-                MacroAction::MouseWheelUp => "Scroll mouse wheel up.",
-                MacroAction::MouseWheelDown => "Scroll mouse wheel down.",
-                MacroAction::MouseMoveAbsolute => "Move mouse to absolute coordinates.",
-                MacroAction::MouseMoveRelative => "Move mouse relative to current position.",
-                MacroAction::IfStart => {
-                    "Start a conditional If block. Only runs steps inside if the expression comparison is met."
-                }
-                MacroAction::Else => {
-                    "Otherwise (Else) block. Runs steps inside if the above If condition was NOT met."
-                }
-                MacroAction::IfEnd => "End the current conditional If block.",
-                MacroAction::SetVariable => {
-                    "Set a variable to a numeric value or copy from another variable."
-                }
-                MacroAction::OcrSearch => {
-                    "Scan screen region via Windows OCR Native to extract text and numbers."
-                }
-                MacroAction::DrawGeometry => {
-                    "Draw one geometry shape on the screen overlay using coordinates or expressions."
-                }
-                MacroAction::ShowGeometryPreset => {
-                    "Show one saved geometry preset from the Geometry tab."
-                }
-                MacroAction::HideGeometryPreset => {
-                    "Hide geometry preset (or clear all geometry overlay)."
-                }
-                MacroAction::FunnyMemeReply => {
-                    "Turn one message into a meme search query, fetch the best image result, and copy it to the clipboard."
-                }
-                MacroAction::JumpToStep => {
-                    "Jump to a specified step (1-indexed or math expression)."
-                }
-                _ => "Legacy (Deprecated)",
-            },
+            UiLanguage::Vietnamese => crate::lang::translate(language, translation_key).unwrap_or(english),
+            UiLanguage::English | UiLanguage::Icon => english,
         }
     }
 
@@ -6136,242 +5760,89 @@ impl CrosshairApp {
     }
 
     fn macro_action_short_label(action: MacroAction, language: UiLanguage) -> &'static str {
+        let (translation_key, english) = match action {
+            MacroAction::KeyPress => ("macro_action_short_label.key_press", "Press"),
+            MacroAction::KeyDown => ("macro_action_short_label.key_down", "KEY Dn"),
+            MacroAction::KeyUp => ("macro_action_short_label.key_up", "KEY Up"),
+            MacroAction::Wait => ("macro_action_short_label.wait", "Wait"),
+            MacroAction::TypeText => ("macro_action_short_label.type_text", "Text"),
+            MacroAction::ApplyWindowPreset => ("macro_action_short_label.apply_window_preset", "Window"),
+            MacroAction::FocusWindowPreset => ("macro_action_short_label.focus_window_preset", "Focus"),
+            MacroAction::TriggerMacroPreset => ("macro_action_short_label.trigger_macro_preset", "Macro"),
+            MacroAction::TriggerMacroPresetIfEnabled => ("macro_action_short_label.trigger_macro_preset_if_enabled", "Start"),
+            MacroAction::StopMacroPreset => ("macro_action_short_label.stop_macro_preset", "Stop"),
+            MacroAction::TriggerCommandPreset => ("macro_action_short_label.trigger_command_preset", "Cmd"),
+            MacroAction::EnableCrosshairProfile => ("macro_action_short_label.enable_crosshair_profile", "Cross"),
+            MacroAction::DisableCrosshair => ("macro_action_short_label.disable_crosshair", "NoCross"),
+            MacroAction::EnablePinPreset => ("macro_action_short_label.enable_pin_preset", "Pin"),
+            MacroAction::DisablePin => ("macro_action_short_label.disable_pin", "NoPin"),
+            MacroAction::PlayMousePathPreset => ("macro_action_short_label.play_mouse_path_preset", "Path"),
+            MacroAction::ApplyMouseSensitivityPreset => ("macro_action_short_label.apply_mouse_sensitivity_preset", "Sense"),
+            MacroAction::EnableZoomPreset => ("macro_action_short_label.enable_zoom_preset", "Zoom"),
+            MacroAction::DisableZoom => ("macro_action_short_label.disable_zoom", "NoZoom"),
+            MacroAction::PlaySoundPreset => ("macro_action_short_label.play_sound_preset", "Sound"),
+            MacroAction::PlayVideoPreset => ("macro_action_short_label.play_video_preset", "Video"),
+            MacroAction::StartVisionSearch => ("macro_action_short_label.start_vision_search", "Start"),
+            MacroAction::ScanVisionOnce => ("macro_action_short_label.scan_vision_once", "Scan"),
+            MacroAction::StartAudioSensePreset => ("macro_action_short_label.start_audio_sense_preset", "AudioOn"),
+            MacroAction::StopAudioSense => ("macro_action_short_label.stop_audio_sense", "AudioOff"),
+            MacroAction::StopVisionWait => ("macro_action_short_label.stop_vision_wait", "Wait"),
+            MacroAction::StopVision => ("macro_action_short_label.stop_vision", "Stop"),
+            MacroAction::LoopStart => ("macro_action_short_label.loop_start", "Loop"),
+            MacroAction::LoopEnd => ("macro_action_short_label.loop_end", "End"),
+            MacroAction::StopIfTriggerPressedAgain => ("macro_action_short_label.stop_if_trigger_pressed_again", "Stop"),
+            MacroAction::StopIfKeyPressed => ("macro_action_short_label.stop_if_key_pressed", "Break"),
+            MacroAction::ShowHud => ("macro_action_short_label.show_hud", "Show HUD"),
+            MacroAction::HideHud => ("macro_action_short_label.hide_hud", "Hide HUD"),
+            MacroAction::HideTaskbar => ("macro_action_short_label.hide_taskbar", "TB Off"),
+            MacroAction::ShowTaskbar => ("macro_action_short_label.show_taskbar", "TB On"),
+            MacroAction::LockKeys => ("macro_action_short_label.lock_keys", "KL On"),
+            MacroAction::UnlockKeys => ("macro_action_short_label.unlock_keys", "KL Off"),
+            MacroAction::LockMouse => ("macro_action_short_label.lock_mouse", "Lock M"),
+            MacroAction::UnlockMouse => ("macro_action_short_label.unlock_mouse", "Unlock M"),
+            MacroAction::EnableMacroPreset => ("macro_action_short_label.enable_macro_preset", "PresetOn"),
+            MacroAction::DisableMacroPreset => ("macro_action_short_label.disable_macro_preset", "PresetOff"),
+            MacroAction::StartTimerPreset => ("macro_action_short_label.start_timer_preset", "TimerOn"),
+            MacroAction::PauseTimerPreset => ("macro_action_short_label.pause_timer_preset", "TimerPs"),
+            MacroAction::StopTimerPreset => ("macro_action_short_label.stop_timer_preset", "TimerOff"),
+            MacroAction::EnableStep => ("macro_action_short_label.enable_step", "StepOn"),
+            MacroAction::DisableStep => ("macro_action_short_label.disable_step", "StepOff"),
+            MacroAction::MouseLeftClick => ("macro_action_short_label.mouse_left_click", "LClick"),
+            MacroAction::MouseLeftDown => ("macro_action_short_label.mouse_left_down", "LDown"),
+            MacroAction::MouseLeftUp => ("macro_action_short_label.mouse_left_up", "LUp"),
+            MacroAction::MouseRightClick => ("macro_action_short_label.mouse_right_click", "RClick"),
+            MacroAction::MouseRightDown => ("macro_action_short_label.mouse_right_down", "RDown"),
+            MacroAction::MouseRightUp => ("macro_action_short_label.mouse_right_up", "RUp"),
+            MacroAction::MouseMiddleClick => ("macro_action_short_label.mouse_middle_click", "MClick"),
+            MacroAction::MouseMiddleDown => ("macro_action_short_label.mouse_middle_down", "MDown"),
+            MacroAction::MouseMiddleUp => ("macro_action_short_label.mouse_middle_up", "MUp"),
+            MacroAction::MouseX1Click => ("macro_action_short_label.mouse_x1_click", "X1"),
+            MacroAction::MouseX1Down => ("macro_action_short_label.mouse_x1_down", "X1Dn"),
+            MacroAction::MouseX1Up => ("macro_action_short_label.mouse_x1_up", "X1Up"),
+            MacroAction::MouseX2Click => ("macro_action_short_label.mouse_x2_click", "X2"),
+            MacroAction::MouseX2Down => ("macro_action_short_label.mouse_x2_down", "X2Dn"),
+            MacroAction::MouseX2Up => ("macro_action_short_label.mouse_x2_up", "X2Up"),
+            MacroAction::MouseWheelUp => ("macro_action_short_label.mouse_wheel_up", "WhUp"),
+            MacroAction::MouseWheelDown => ("macro_action_short_label.mouse_wheel_down", "WhDn"),
+            MacroAction::MouseMoveAbsolute => ("macro_action_short_label.mouse_move_absolute", "MoveTo"),
+            MacroAction::MouseMoveRelative => ("macro_action_short_label.mouse_move_relative", "MoveBy"),
+            MacroAction::IfStart => ("macro_action_short_label.if_start", "IfStart"),
+            MacroAction::Else => ("macro_action_short_label.else", "Else"),
+            MacroAction::IfEnd => ("macro_action_short_label.if_end", "IfEnd"),
+            MacroAction::SetVariable => ("macro_action_short_label.set_variable", "SetVar"),
+            MacroAction::DrawGeometry => ("macro_action_short_label.draw_geometry", "DrawGeo"),
+            MacroAction::ShowGeometryPreset => ("macro_action_short_label.show_geometry_preset", "ShowGeo"),
+            MacroAction::HideGeometryPreset => ("macro_action_short_label.hide_geometry_preset", "HideGeo"),
+            MacroAction::FunnyMemeReply => ("macro_action_short_label.funny_meme_reply", "Meme"),
+            MacroAction::OcrSearch => ("macro_action_short_label.ocr_search", "OCR"),
+            MacroAction::JumpToStep => ("macro_action_short_label.jump_to_step", "Jump"),
+             _ => ("macro_action_short_label.legacy", "Legacy"),
+        };
         match language {
-            UiLanguage::Vietnamese => Self::normalize_vietnamese(match action {
-                MacroAction::KeyPress => "Nhấn",
-                MacroAction::KeyDown => "Giữ",
-                MacroAction::KeyUp => "Nhả",
-                MacroAction::Wait => "Chờ",
-                MacroAction::TypeText => "Chữ",
-                MacroAction::ApplyWindowPreset => "Cửa sổ",
-                MacroAction::FocusWindowPreset => "Cửa sổ",
-                MacroAction::TriggerMacroPreset => "Macro",
-                MacroAction::TriggerMacroPresetIfEnabled => "Chạy",
-                MacroAction::StopMacroPreset => "Dừng",
-                MacroAction::TriggerCommandPreset => "Câu lệnh",
-                MacroAction::EnableCrosshairProfile => "Tâm ngắm",
-                MacroAction::DisableCrosshair => "Tắt tâm",
-                MacroAction::EnablePinPreset => "Ghim",
-                MacroAction::DisablePin => "Bỏ ghim",
-                MacroAction::PlayMousePathPreset => "Đ.chuột",
-                MacroAction::ApplyMouseSensitivityPreset => "Độ nhạy",
-                MacroAction::EnableZoomPreset => "Phóng",
-                MacroAction::DisableZoom => "Tắt phóng",
-                MacroAction::PlaySoundPreset => "Âm thanh",
-                MacroAction::PlayVideoPreset => "Video",
-                MacroAction::StartVisionSearch => "Tìm ảnh",
-                MacroAction::ScanVisionOnce => "Quét",
-                MacroAction::StartAudioSensePreset => "Audio",
-                MacroAction::StopAudioSense => "Tắt Audio",
-
-                MacroAction::StopVisionWait => "Chờ",
-                MacroAction::HideTaskbar => "Ẩn taskbar",
-                MacroAction::ShowTaskbar => "Hiện taskbar",
-                MacroAction::StartVisionSearch => "Tìm ảnh",
-                MacroAction::ScanVisionOnce => "Quét",
-                MacroAction::StartAudioSensePreset => "Audio",
-                MacroAction::StopAudioSense => "Tắt Audio",
-                MacroAction::LockKeys => "Khóa",
-                MacroAction::UnlockKeys => "Mở phím",
-                MacroAction::LockMouse => "Khóa chuột",
-                MacroAction::UnlockMouse => "Mở chuột",
-                MacroAction::EnableMacroPreset => "Bật macro",
-                MacroAction::DisableMacroPreset => "Tắt macro",
-                MacroAction::StartTimerPreset => "Hẹn giờ",
-                MacroAction::PauseTimerPreset => "Dừng Hẹn giờ",
-                MacroAction::StopTimerPreset => "Tắt Hẹn giờ",
-                MacroAction::EnableStep => "Bật bước",
-                MacroAction::DisableStep => "Tắt bước",
-                MacroAction::MouseLeftClick => "Trái",
-                MacroAction::MouseLeftDown => "Trái↓",
-                MacroAction::MouseLeftUp => "Trái↑",
-                MacroAction::MouseRightClick => "Phải",
-                MacroAction::MouseRightDown => "Phải↓",
-                MacroAction::MouseRightUp => "Phải↑",
-                MacroAction::MouseMiddleClick => "Giữa",
-                MacroAction::MouseMiddleDown => "Giữa↓",
-                MacroAction::MouseMiddleUp => "Giữa↑",
-                MacroAction::MouseMiddleDown => "G↓",
-                MacroAction::MouseMiddleUp => "G↑",
-                MacroAction::MouseX1Click => "X1",
-                MacroAction::MouseX1Down => "X1↓",
-                MacroAction::MouseX1Up => "X1↑",
-                MacroAction::MouseX2Click => "X2",
-                MacroAction::MouseX2Down => "X2↓",
-                MacroAction::MouseX2Up => "X2↑",
-                MacroAction::MouseWheelUp => "Lên",
-                MacroAction::MouseWheelDown => "Xuống",
-                MacroAction::MouseMoveAbsolute => "Tuyệt đối",
-                MacroAction::MouseMoveRelative => "Tương đối",
-                MacroAction::IfStart => "Nếu",
-                MacroAction::Else => "Ngược lại",
-                MacroAction::IfEnd => "Hết",
-                MacroAction::SetVariable => "Biến",
-                MacroAction::DrawGeometry => "Vẽ",
-                MacroAction::ShowGeometryPreset => "Hiện",
-                MacroAction::HideGeometryPreset => "Ẩn",
-                MacroAction::FunnyMemeReply => "Meme",
-                MacroAction::OcrSearch => "OCR",
-                MacroAction::JumpToStep => "Nhảy",
-                _ => "Cũ",
-            }),
-            UiLanguage::English => match action {
-                MacroAction::KeyPress => "Press",
-                MacroAction::KeyDown => "KEY Dn",
-                MacroAction::KeyUp => "KEY Up",
-                MacroAction::Wait => "Wait",
-                MacroAction::TypeText => "Text",
-                MacroAction::ApplyWindowPreset => "Window",
-                MacroAction::FocusWindowPreset => "Focus",
-                MacroAction::TriggerMacroPreset => "Macro",
-                MacroAction::TriggerMacroPresetIfEnabled => "Start",
-                MacroAction::StopMacroPreset => "Stop",
-                MacroAction::TriggerCommandPreset => "Cmd",
-                MacroAction::EnableCrosshairProfile => "Cross",
-                MacroAction::DisableCrosshair => "NoCross",
-                MacroAction::EnablePinPreset => "Pin",
-                MacroAction::DisablePin => "NoPin",
-                MacroAction::PlayMousePathPreset => "Path",
-                MacroAction::ApplyMouseSensitivityPreset => "Sense",
-                MacroAction::EnableZoomPreset => "Zoom",
-                MacroAction::DisableZoom => "NoZoom",
-                MacroAction::PlaySoundPreset => "Sound",
-                MacroAction::PlayVideoPreset => "Video",
-                MacroAction::StartVisionSearch => "Start",
-                MacroAction::ScanVisionOnce => "Scan",
-                MacroAction::StartAudioSensePreset => "AudioOn",
-                MacroAction::StopAudioSense => "AudioOff",
-
-                MacroAction::StopVisionWait => "Wait",
-                MacroAction::StopVision => "Stop",
-                MacroAction::LoopStart => "Loop",
-                MacroAction::LoopEnd => "End",
-                MacroAction::StopIfTriggerPressedAgain => "Stop",
-                MacroAction::StopIfKeyPressed => "Break",
-                MacroAction::ShowHud => "Show HUD",
-                MacroAction::HideHud => "Hide HUD",
-                MacroAction::HideTaskbar => "TB Off",
-                MacroAction::ShowTaskbar => "TB On",
-                MacroAction::LockKeys => "KL On",
-                MacroAction::UnlockKeys => "KL Off",
-                MacroAction::LockMouse => "Lock M",
-                MacroAction::UnlockMouse => "Unlock M",
-                MacroAction::EnableMacroPreset => "PresetOn",
-                MacroAction::DisableMacroPreset => "PresetOff",
-                MacroAction::StartTimerPreset => "TimerOn",
-                MacroAction::PauseTimerPreset => "TimerPs",
-                MacroAction::StopTimerPreset => "TimerOff",
-                MacroAction::EnableStep => "StepOn",
-                MacroAction::DisableStep => "StepOff",
-                MacroAction::MouseLeftClick => "LClick",
-                MacroAction::MouseLeftDown => "LDown",
-                MacroAction::MouseLeftUp => "LUp",
-                MacroAction::MouseRightClick => "RClick",
-                MacroAction::MouseRightDown => "RDown",
-                MacroAction::MouseRightUp => "RUp",
-                MacroAction::MouseMiddleClick => "MClick",
-                MacroAction::MouseMiddleDown => "MDown",
-                MacroAction::MouseMiddleUp => "MUp",
-                MacroAction::MouseX1Click => "X1",
-                MacroAction::MouseX1Down => "X1Dn",
-                MacroAction::MouseX1Up => "X1Up",
-                MacroAction::MouseX2Click => "X2",
-                MacroAction::MouseX2Down => "X2Dn",
-                MacroAction::MouseX2Up => "X2Up",
-                MacroAction::MouseWheelUp => "WhUp",
-                MacroAction::MouseWheelDown => "WhDn",
-                MacroAction::MouseMoveAbsolute => "MoveTo",
-                MacroAction::MouseMoveRelative => "MoveBy",
-                MacroAction::IfStart => "IfStart",
-                MacroAction::Else => "Else",
-                MacroAction::IfEnd => "IfEnd",
-                MacroAction::SetVariable => "SetVar",
-                MacroAction::DrawGeometry => "DrawGeo",
-                MacroAction::ShowGeometryPreset => "ShowGeo",
-                MacroAction::HideGeometryPreset => "HideGeo",
-                MacroAction::FunnyMemeReply => "Meme",
-                MacroAction::OcrSearch => "OCR",
-                MacroAction::JumpToStep => "Jump",
-                _ => "Legacy",
-            },
-            UiLanguage::Icon => match action {
-                MacroAction::KeyPress => "Press",
-                MacroAction::KeyDown => "KEY Dn",
-                MacroAction::KeyUp => "KEY Up",
-                MacroAction::Wait => "Wait",
-                MacroAction::TypeText => "Text",
-                MacroAction::ApplyWindowPreset => "Window",
-                MacroAction::FocusWindowPreset => "Focus",
-                MacroAction::TriggerMacroPreset => "Macro",
-                MacroAction::TriggerMacroPresetIfEnabled => "Start",
-                MacroAction::StopMacroPreset => "Stop",
-                MacroAction::TriggerCommandPreset => "Cmd",
-                MacroAction::EnableCrosshairProfile => "Cross",
-                MacroAction::DisableCrosshair => "NoCross",
-                MacroAction::EnablePinPreset => "Pin",
-                MacroAction::DisablePin => "NoPin",
-                MacroAction::PlayMousePathPreset => "Path",
-                MacroAction::ApplyMouseSensitivityPreset => "Sense",
-                MacroAction::EnableZoomPreset => "Zoom",
-                MacroAction::DisableZoom => "NoZoom",
-                MacroAction::PlaySoundPreset => "Sound",
-                MacroAction::StartVisionSearch => "Start",
-                MacroAction::ScanVisionOnce => "Scan",
-                MacroAction::StartAudioSensePreset => "AudioOn",
-                MacroAction::StopAudioSense => "AudioOff",
-
-                MacroAction::StopVisionWait => "Wait",
-                MacroAction::StopVision => "Stop",
-                MacroAction::LoopStart => "Loop",
-                MacroAction::LoopEnd => "End",
-                MacroAction::StopIfTriggerPressedAgain => "Stop",
-                MacroAction::StopIfKeyPressed => "Break",
-                MacroAction::ShowHud => "Show HUD",
-                MacroAction::HideHud => "Hide HUD",
-                MacroAction::HideTaskbar => "Hide taskbar",
-                MacroAction::ShowTaskbar => "Show taskbar",
-                MacroAction::LockKeys => "KL On",
-                MacroAction::UnlockKeys => "KL Off",
-                MacroAction::LockMouse => "ML On",
-                MacroAction::UnlockMouse => "ML Off",
-                MacroAction::EnableMacroPreset => "PresetOn",
-                MacroAction::DisableMacroPreset => "PresetOff",
-                MacroAction::StartTimerPreset => "TimerOn",
-                MacroAction::PauseTimerPreset => "TimerPs",
-                MacroAction::StopTimerPreset => "TimerOff",
-                MacroAction::EnableStep => "StepOn",
-                MacroAction::DisableStep => "StepOff",
-                MacroAction::MouseLeftClick => "LClick",
-                MacroAction::MouseLeftDown => "LDown",
-                MacroAction::MouseLeftUp => "LUp",
-                MacroAction::MouseRightClick => "RClick",
-                MacroAction::MouseRightDown => "RDown",
-                MacroAction::MouseRightUp => "RUp",
-                MacroAction::MouseMiddleClick => "MClick",
-                MacroAction::MouseMiddleDown => "MDown",
-                MacroAction::MouseMiddleUp => "MUp",
-                MacroAction::MouseX1Click => "X1",
-                MacroAction::MouseX1Down => "X1Dn",
-                MacroAction::MouseX1Up => "X1Up",
-                MacroAction::MouseX2Click => "X2",
-                MacroAction::MouseX2Down => "X2Dn",
-                MacroAction::MouseX2Up => "X2Up",
-                MacroAction::MouseWheelUp => "WhUp",
-                MacroAction::MouseWheelDown => "WhDn",
-                MacroAction::MouseMoveAbsolute => "MoveTo",
-                MacroAction::MouseMoveRelative => "MoveBy",
-                MacroAction::IfStart => "IfStart",
-                MacroAction::Else => "Else",
-                MacroAction::IfEnd => "IfEnd",
-                MacroAction::SetVariable => "SetVar",
-                MacroAction::DrawGeometry => "DrawGeo",
-                MacroAction::ShowGeometryPreset => "ShowGeo",
-                MacroAction::HideGeometryPreset => "HideGeo",
-                MacroAction::FunnyMemeReply => "Meme",
-                MacroAction::OcrSearch => "OCR",
-                MacroAction::JumpToStep => "Jump",
-                _ => "Legacy",
-            },
+            UiLanguage::Vietnamese => Self::normalize_vietnamese(
+                crate::lang::translate(language, translation_key).unwrap_or(english),
+            ),
+            UiLanguage::English | UiLanguage::Icon => english,
         }
     }
 
@@ -6547,25 +6018,15 @@ impl CrosshairApp {
     }
 
     fn macro_trigger_mode_label(mode: MacroTriggerMode, language: UiLanguage) -> &'static str {
+        let (translation_key, english) = match mode {
+            MacroTriggerMode::Press => ("macro_trigger_mode_label.press", "Press"),
+            MacroTriggerMode::Hold => ("macro_trigger_mode_label.hold", "Hold"),
+            MacroTriggerMode::Release => ("macro_trigger_mode_label.release", "Release"),
+            MacroTriggerMode::WindowFocus => ("macro_trigger_mode_label.window_focus", "Focus"),
+        };
         match language {
-            UiLanguage::Vietnamese => match mode {
-                MacroTriggerMode::Press => "Nhấn",
-                MacroTriggerMode::Hold => "Giữ",
-                MacroTriggerMode::Release => "Thả",
-                _ => "Focus",
-            },
-            UiLanguage::English => match mode {
-                MacroTriggerMode::Press => "Press",
-                MacroTriggerMode::Hold => "Hold",
-                MacroTriggerMode::Release => "Release",
-                MacroTriggerMode::WindowFocus => "Window focus",
-            },
-            UiLanguage::Icon => match mode {
-                MacroTriggerMode::Press => "Press",
-                MacroTriggerMode::Hold => "Hold",
-                MacroTriggerMode::Release => "Release",
-                MacroTriggerMode::WindowFocus => "Focus",
-            },
+            UiLanguage::Vietnamese => crate::lang::translate(language, translation_key).unwrap_or(english),
+            UiLanguage::English | UiLanguage::Icon => english,
         }
     }
 
@@ -7698,7 +7159,7 @@ impl CrosshairApp {
 
     fn capture_button_text(language: UiLanguage, active: bool) -> RichText {
         if active {
-            RichText::new(Self::tr_lang(language, "Capturing...", "Đang bắt..."))
+            RichText::new(Self::tr_lang(language, "Capturing...", "Capturing..."))
                 .strong()
                 .color(Color32::from_rgb(255, 232, 96))
         } else {
@@ -8210,7 +7671,7 @@ impl CrosshairApp {
              - If the user asks for a simple task like shutdown, open app, launch file, or run console commands, encode that as the command string.\n\
              - If the user says center or center of the screen, that is not screen coordinate 0,0; that means the middle of the screen.\n\
              - Keep unrelated fields unchanged.\n\
-             - IMPORTANT: You MUST also generate an appropriate, concise, and descriptive name for the 'name' field (in the same language as the user request, maximum 3-5 words, e.g., 'Start MsPaint' or 'Mở Paint') that summarizes what the new command does. Do not leave the 'name' field unchanged if the command's behavior is changed.\n\
+             - IMPORTANT: You MUST also generate an appropriate, concise, and descriptive name for the 'name' field (in the same language as the user request, maximum 3-5 words, e.g., 'Start MsPaint' or 'Start Discord') that summarizes what the new command does. Do not leave the 'name' field unchanged if the command's behavior is changed.\n\
              - The JSON object will be treated as a patch and applied onto the current custom preset.\n\
              \n\
              User request: {}\n",
@@ -8340,20 +7801,25 @@ impl CrosshairApp {
                     && temp_preset.command.trim() != old_name.trim()
                 {
                     let cmd_lower = temp_preset.command.to_ascii_lowercase();
+                    let vi_name = |english: &'static str| {
+                        crate::lang::translate(UiLanguage::Vietnamese, english)
+                            .unwrap_or(english)
+                            .to_owned()
+                    };
                     let new_fallback_name = if cmd_lower.contains("shutdown") {
-                        "Tắt máy".to_owned()
+                        vi_name("Shutdown")
                     } else if cmd_lower.contains("mspaint") || cmd_lower.contains("pbrush") {
-                        "Mở Paint".to_owned()
+                        vi_name("Start Paint")
                     } else if cmd_lower.contains("calc") {
-                        "Mở Máy tính".to_owned()
+                        vi_name("Start Calculator")
                     } else if cmd_lower.contains("notepad") {
-                        "Mở Notepad".to_owned()
+                        vi_name("Start Notepad")
                     } else if cmd_lower.contains("discord") {
-                        "Mở Discord".to_owned()
+                        vi_name("Start Discord")
                     } else if cmd_lower.contains("chrome") {
-                        "Mở Chrome".to_owned()
+                        vi_name("Start Chrome")
                     } else if cmd_lower.contains("edge") || cmd_lower.contains("msedge") {
-                        "Mở Edge".to_owned()
+                        vi_name("Start Edge")
                     } else {
                         let mut parts = temp_preset.command.split_whitespace();
                         if let Some(first) = parts.next() {
@@ -8366,7 +7832,7 @@ impl CrosshairApp {
                             if let Some(first_char) = chars.next() {
                                 let capitalized =
                                     first_char.to_uppercase().collect::<String>() + chars.as_str();
-                                format!("Mở {}", capitalized)
+                                vi_name("Start {}").replace("{}", &capitalized)
                             } else {
                                 temp_preset.name.clone()
                             }
@@ -8431,45 +7897,50 @@ impl CrosshairApp {
             {
                 let cmd_lower = preset.command.to_ascii_lowercase();
                 let is_vietnamese = old_name.chars().any(|c| c as u32 > 127);
+                let vi_name = |english: &'static str| {
+                    crate::lang::translate(UiLanguage::Vietnamese, english)
+                        .unwrap_or(english)
+                        .to_owned()
+                };
                 let new_fallback_name = if cmd_lower.contains("shutdown") {
                     if is_vietnamese {
-                        "Tắt máy".to_owned()
+                        vi_name("Shutdown")
                     } else {
                         "Shutdown".to_owned()
                     }
                 } else if cmd_lower.contains("mspaint") || cmd_lower.contains("pbrush") {
                     if is_vietnamese {
-                        "Mở Paint".to_owned()
+                        vi_name("Start Paint")
                     } else {
                         "Start Paint".to_owned()
                     }
                 } else if cmd_lower.contains("calc") {
                     if is_vietnamese {
-                        "Mở Máy tính".to_owned()
+                        vi_name("Start Calculator")
                     } else {
                         "Start Calculator".to_owned()
                     }
                 } else if cmd_lower.contains("notepad") {
                     if is_vietnamese {
-                        "Mở Notepad".to_owned()
+                        vi_name("Start Notepad")
                     } else {
                         "Start Notepad".to_owned()
                     }
                 } else if cmd_lower.contains("discord") {
                     if is_vietnamese {
-                        "Mở Discord".to_owned()
+                        vi_name("Start Discord")
                     } else {
                         "Start Discord".to_owned()
                     }
                 } else if cmd_lower.contains("chrome") {
                     if is_vietnamese {
-                        "Mở Chrome".to_owned()
+                        vi_name("Start Chrome")
                     } else {
                         "Start Chrome".to_owned()
                     }
                 } else if cmd_lower.contains("edge") || cmd_lower.contains("msedge") {
                     if is_vietnamese {
-                        "Mở Edge".to_owned()
+                        vi_name("Start Edge")
                     } else {
                         "Start Edge".to_owned()
                     }
@@ -8486,7 +7957,7 @@ impl CrosshairApp {
                             let capitalized =
                                 first_char.to_uppercase().collect::<String>() + chars.as_str();
                             if is_vietnamese {
-                                format!("Mở {}", capitalized)
+                                vi_name("Start {}").replace("{}", &capitalized)
                             } else {
                                 format!("Start {}", capitalized)
                             }
@@ -9083,12 +8554,12 @@ impl CrosshairApp {
         self.capture_suppress_polls_remaining = 0;
         self.capture_mouse_guard_until = None;
         self.status = if self.capture_request_keeps_open(&target) {
-            match self.state.ui_language {
-                UiLanguage::Vietnamese => {
-                    "Đang bắt trigger. Giữ rồi nhả để lưu, nhấn lại nút bắt để hủy.".to_owned()
-                }
-                _ => "Capturing triggers. Hold keys, then release to save. Click Capture again to cancel.".to_owned(),
-            }
+            crate::lang::translate(
+                self.state.ui_language,
+                "Capturing triggers. Hold keys, then release to save. Click Capture again to cancel.",
+            )
+            .unwrap_or("Capturing triggers. Hold keys, then release to save. Click Capture again to cancel.")
+            .to_owned()
         } else {
             status
         };
@@ -9261,7 +8732,7 @@ impl CrosshairApp {
 
     fn pick_point_button_text(language: UiLanguage, active: bool) -> RichText {
         if active {
-            RichText::new(Self::tr_lang(language, "Picking...", "Đang chọn..."))
+            RichText::new(Self::tr_lang(language, "Picking...", "Picking..."))
                 .strong()
                 .color(Color32::from_rgb(255, 232, 96))
         } else {
@@ -9450,10 +8921,12 @@ impl CrosshairApp {
                 self.state.macros_master_hotkey = Some(binding);
                 self.sync_macro_master_hotkey();
                 self.persist();
-                self.status = match self.state.ui_language {
-                    UiLanguage::Vietnamese => "Đã gán hotkey bật/tắt macro.".to_owned(),
-                    _ => "Captured the macro master hotkey.".to_owned(),
-                };
+                self.status = crate::lang::translate(
+                    self.state.ui_language,
+                    "Captured the macro master hotkey.",
+                )
+                .unwrap_or("Captured the macro master hotkey.")
+                .to_owned();
             }
             (CaptureRequest::QuickScreenDrawHotkey, CapturedInput::Binding(binding)) => {
                 self.state.quick_screen_draw_hotkey = Some(binding);
@@ -10049,25 +9522,20 @@ impl CrosshairApp {
     fn capture_combo_status_text(&self, combo_keys: &[String]) -> String {
         let preview = Self::hotkey_binding_from_combo_keys(combo_keys.to_vec());
         let label = hotkey::format_binding(Some(&preview));
-        match self.state.ui_language {
-            UiLanguage::Vietnamese => {
-                if combo_keys.len() == 1 {
-                    format!(
-                        "Đã nhận phím: {label}. Giữ thêm phím khác để thành combo, hoặc thả ra để lưu."
-                    )
-                } else {
-                    format!("Đã nhận combo: {label}. Thả ra để lưu.")
-                }
-            }
-            _ => {
-                if combo_keys.len() == 1 {
-                    format!(
-                        "Captured key: {label}. Hold another key to form a combo, or release to save."
-                    )
-                } else {
-                    format!("Captured combo: {label}. Release to save.")
-                }
-            }
+        if combo_keys.len() == 1 {
+            crate::lang::translate(
+                self.state.ui_language,
+                "Captured key: {label}. Hold another key to form a combo, or release to save.",
+            )
+            .unwrap_or("Captured key: {label}. Hold another key to form a combo, or release to save.")
+            .replace("{label}", &label)
+        } else {
+            crate::lang::translate(
+                self.state.ui_language,
+                "Captured combo: {label}. Release to save.",
+            )
+            .unwrap_or("Captured combo: {label}. Release to save.")
+            .replace("{label}", &label)
         }
     }
 
@@ -10506,11 +9974,7 @@ impl CrosshairApp {
         self.protractor_calibration_points = None;
         self.captured_freeze_texture = None;
         self.captured_freeze_frame = None;
-        self.status = Self::tr_lang(
-            self.state.ui_language,
-            "Protractor calibration cancelled.",
-            "Huy can chinh thuoc do do.",
-        )
+        self.status = Self::tr_lang(self.state.ui_language, "Protractor calibration cancelled.", "Protractor calibration cancelled.")
         .to_owned();
     }
 
@@ -10521,11 +9985,7 @@ impl CrosshairApp {
         self.captured_freeze_frame = None;
         self.restore_mouse_move_absolute_capture_window(ctx);
         self.mouse_move_absolute_capture_raise_window = true;
-        self.status = Self::tr_lang(
-            self.state.ui_language,
-            "Protractor calibration cancelled.",
-            "Đã hủy cân chỉnh thước đo góc.",
-        )
+        self.status = Self::tr_lang(self.state.ui_language, "Protractor calibration cancelled.", "Protractor calibration cancelled.")
         .to_owned();
         self.sync_protractor_state();
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
@@ -10548,11 +10008,7 @@ impl CrosshairApp {
                 crate::protractor::circle_from_3_points(points[0], points[1], points[2])
             {
                 if radius < crate::protractor::PROTRACTOR_MIN_CALIBRATION_RADIUS {
-                    self.status = Self::tr_lang(
-                        self.state.ui_language,
-                        "Selected circle is too small. Pick three points farther apart.",
-                        "Vong tron da chon qua nho. Hay chon 3 diem cach xa nhau hon.",
-                    )
+                    self.status = Self::tr_lang(self.state.ui_language, "Selected circle is too small. Pick three points farther apart.", "Selected circle is too small. Pick three points farther apart.")
                     .to_owned();
                 } else {
                     let scale = crate::protractor::calibrated_protractor_scale(radius);
@@ -10560,19 +10016,11 @@ impl CrosshairApp {
                     self.state.protractor_center_y = cy;
                     self.state.protractor_scale = scale;
                     self.state.protractor_enabled = true;
-                    self.status = Self::tr_lang(
-                        self.state.ui_language,
-                        "Protractor calibrated successfully!",
-                        "Can chinh thuoc do do thanh cong!",
-                    )
+                    self.status = Self::tr_lang(self.state.ui_language, "Protractor calibrated successfully!", "Protractor calibrated successfully!")
                     .to_owned();
                 }
             } else {
-                self.status = Self::tr_lang(
-                    self.state.ui_language,
-                    "Points are collinear. Cannot form a circle.",
-                    "Cac diem thang hang. Khong the tao duong tron.",
-                )
+                self.status = Self::tr_lang(self.state.ui_language, "Points are collinear. Cannot form a circle.", "Points are collinear. Cannot form a circle.")
                 .to_owned();
             }
         }
@@ -11096,11 +10544,7 @@ impl eframe::App for CrosshairApp {
                                             };
                                         }
                                     } else {
-                                        self.status = Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Failed to capture screen color.",
-                                            "Khong the lay ma mau man hinh.",
-                                        )
+                                        self.status = Self::tr_lang(self.state.ui_language, "Failed to capture screen color.", "Failed to capture screen color.")
                                         .to_owned();
                                     }
                                 }
@@ -11139,11 +10583,7 @@ impl eframe::App for CrosshairApp {
                         _ => {
                             self.protractor_picking_active = false;
                             self.protractor_calibration_points = None;
-                            self.status = Self::tr_lang(
-                                self.state.ui_language,
-                                "Protractor calibration cancelled.",
-                                "Huy can chinh thuoc do do.",
-                            )
+                            self.status = Self::tr_lang(self.state.ui_language, "Protractor calibration cancelled.", "Protractor calibration cancelled.")
                             .to_owned();
                             self.sync_protractor_state();
                         }
@@ -11191,11 +10631,7 @@ impl eframe::App for CrosshairApp {
                         _ => {
                             self.mouse_move_absolute_capture_target = None;
                             self.mouse_move_absolute_capture_wait_for_mouse_release = false;
-                            self.status = Self::tr_lang(
-                                self.state.ui_language,
-                                "Absolute coordinate capture cancelled.",
-                                "Huy lay toa do tuyet doi.",
-                            )
+                            self.status = Self::tr_lang(self.state.ui_language, "Absolute coordinate capture cancelled.", "Absolute coordinate capture cancelled.")
                             .to_owned();
                         }
                     }
@@ -11433,11 +10869,7 @@ impl eframe::App for CrosshairApp {
                 match job.join() {
                     Ok(Ok(())) => {
                         self.opencv_installed = true;
-                        self.status = Self::tr_lang(
-                            self.state.ui_language,
-                            "OpenCV installed successfully.",
-                            "Cài đặt OpenCV thành công.",
-                        )
+                        self.status = Self::tr_lang(self.state.ui_language, "OpenCV installed successfully.", "OpenCV installed successfully.")
                         .to_owned();
                     }
                     Ok(Err(error)) => {
@@ -11457,11 +10889,7 @@ impl eframe::App for CrosshairApp {
                 match job.join() {
                     Ok(Ok(())) => {
                         self.interception_package_downloaded = true;
-                        self.status = Self::tr_lang(
-                            self.state.ui_language,
-                            "Interception package downloaded successfully.",
-                            "Cài đặt Interception driver thành công.",
-                        )
+                        self.status = Self::tr_lang(self.state.ui_language, "Interception package downloaded successfully.", "Interception package downloaded successfully.")
                         .to_owned();
                     }
                     Ok(Err(error)) => {
@@ -11484,11 +10912,7 @@ impl eframe::App for CrosshairApp {
                         self.interception_driver_installed =
                             crate::platform::is_interception_driver_installed();
                         self.interception_driver_needs_restart = self.interception_driver_installed;
-                        self.status = Self::tr_lang(
-                            self.state.ui_language,
-                            "Interception driver installed. Restart your PC for it to take effect.",
-                            "Đã cài driver Interception. Hãy khởi động lại máy để driver có hiệu lực."
-                        ).to_owned();
+                        self.status = Self::tr_lang(self.state.ui_language, "Interception driver installed. Restart your PC for it to take effect.", "Interception driver installed. Restart your PC for it to take effect.").to_owned();
                     }
                     Ok(Err(error)) => {
                         self.status = format!("Driver install failed: {error}");
@@ -11508,11 +10932,7 @@ impl eframe::App for CrosshairApp {
                         self.interception_driver_installed =
                             crate::platform::is_interception_driver_installed();
                         self.interception_driver_needs_restart = true;
-                        self.status = Self::tr_lang(
-                            self.state.ui_language,
-                            "Interception driver removed. Restart your PC to finish cleanup.",
-                            "Đã gỡ driver Interception. Hãy khởi động lại máy để hoàn tất dọn dẹp.",
-                        )
+                        self.status = Self::tr_lang(self.state.ui_language, "Interception driver removed. Restart your PC to finish cleanup.", "Interception driver removed. Restart your PC to finish cleanup.")
                         .to_owned();
                     }
                     Ok(Err(error)) => {
@@ -11802,7 +11222,7 @@ impl eframe::App for CrosshairApp {
                                 ),
                             ),
                             show_icon_tooltips,
-                            self.tr("Exit", "Thoát"),
+                            self.tr("Exit", "Exit"),
                         );
                         if exit_response.clicked() {
                             let _ = self.overlay_tx.send(OverlayCommand::Exit);
@@ -11819,7 +11239,7 @@ impl eframe::App for CrosshairApp {
                                 ),
                             ),
                             show_icon_tooltips,
-                            self.tr("Hide to tray", "Ẩn xuống khay"),
+                            self.tr("Hide to tray", "Hide to tray"),
                         );
                         if hide_response.clicked() {
                             self.hide_to_tray(ctx);
@@ -11942,7 +11362,7 @@ impl eframe::App for CrosshairApp {
                         let guides_response = Self::hover_if(
                             guides_button_response,
                             show_icon_tooltips,
-                            Self::tr_lang(self.state.ui_language, "Guides", "Huong dan"),
+                            Self::tr_lang(self.state.ui_language, "Guides", "Guides"),
                         );
                         if guides_response.clicked() {
                             self.titlebar_guides_open = !self.titlebar_guides_open;
@@ -12007,11 +11427,7 @@ impl eframe::App for CrosshairApp {
                         let quick_actions_response = Self::hover_if(
                             quick_actions_button_response,
                             show_icon_tooltips,
-                            Self::tr_lang(
-                                self.state.ui_language,
-                                "Quick actions",
-                                "Thao tac nhanh",
-                            ),
+                            Self::tr_lang(self.state.ui_language, "Quick actions", "Quick actions"),
                         );
                         let quick_actions_popup_id =
                             ui.make_persistent_id("titlebar-quick-actions-popup");
@@ -12354,7 +11770,7 @@ impl eframe::App for CrosshairApp {
         if self.variable_inspector_open {
             let mut open = self.variable_inspector_open;
             let screen_center = ctx.screen_rect().center();
-            egui::Window::new(Self::tr_lang(self.state.ui_language, "Variables", "Biến"))
+            egui::Window::new(Self::tr_lang(self.state.ui_language, "Variables", "Variables"))
                 .open(&mut open)
                 .fixed_pos(screen_center)
                 .pivot(egui::Align2::CENTER_CENTER)
@@ -12371,7 +11787,7 @@ impl eframe::App for CrosshairApp {
         if self.titlebar_guides_open {
             let mut open = self.titlebar_guides_open;
             let screen_center = ctx.screen_rect().center();
-            egui::Window::new(Self::tr_lang(self.state.ui_language, "Guides", "Huong dan"))
+            egui::Window::new(Self::tr_lang(self.state.ui_language, "Guides", "Guides"))
                 .open(&mut open)
                 .fixed_pos(screen_center)
                 .pivot(egui::Align2::CENTER_CENTER)
@@ -12431,4 +11847,3 @@ pub(crate) fn video_duration(clip: &VideoClipSettings) -> Option<u64> {
             .map(|meta| meta.duration_ms)
     }
 }
-

@@ -24,11 +24,7 @@ impl CrosshairApp {
         // Add OCR preset button
         ui.horizontal(|ui| {
             if ui
-                .button(Self::tr_lang(
-                    language,
-                    "+ Add OCR preset",
-                    "+ Thêm preset OCR",
-                ))
+                .button(Self::tr_lang(language, "+ Add OCR preset", "+ Add OCR preset"))
                 .clicked()
             {
                 let mut id = 1;
@@ -87,11 +83,7 @@ impl CrosshairApp {
                             ui,
                             Self::material_icon_text(0xe037, 18.0),
                         )
-                        .on_hover_text(Self::tr_lang(
-                            language,
-                            "Run this OCR preset now",
-                            "Chay preset OCR nay ngay",
-                        ));
+                        .on_hover_text(Self::tr_lang(language, "Run this OCR preset now", "Run this OCR preset now"));
                         if run_response.clicked() {
                             run_test_preset_id = Some(preset.id);
                         }
@@ -103,9 +95,9 @@ impl CrosshairApp {
                         if Self::sound_style_toggle_button(
                             ui,
                             if preset.collapsed {
-                                Self::tr_lang(language, "Show", "Hiện")
+                                Self::tr_lang(language, "Show", "Show")
                             } else {
-                                Self::tr_lang(language, "Hide", "Ẩn")
+                                Self::tr_lang(language, "Hide", "Hide")
                             },
                         )
                         .clicked()
@@ -132,7 +124,7 @@ impl CrosshairApp {
                     .min_col_width(110.0)
                     .show(ui, |ui| {
                         // Language Code - Dropdown with popular languages
-                        ui.label(Self::tr_lang(language, "Language", "Ngon ngu OCR"));
+                        ui.label(Self::tr_lang(language, "Language", "Language"));
                         {
                             let avail_langs = crate::ocr::available_ocr_languages();
 
@@ -205,7 +197,7 @@ impl CrosshairApp {
                         ui.end_row();
 
                         // Scan Region (X, Y, W, H)
-                        ui.label(Self::tr_lang(language, "Scan Region (X, Y, W, H)", "Vùng quét OCR (X, Y, W, H)"));
+                        ui.label(Self::tr_lang(language, "Scan Region (X, Y, W, H)", "Scan Region (X, Y, W, H)"));
                         ui.horizontal(|ui| {
                             let mut changed = false;
                             ui.label("X:");
@@ -222,7 +214,7 @@ impl CrosshairApp {
 
                              ui.add_space(10.0);
                              if ui
-                                 .button(Self::tr_lang(language, "Pick area", "Chọn khu vực"))
+                                 .button(Self::tr_lang(language, "Pick area", "Pick area"))
                                  .clicked()
                              {
                                  start_ocr_capture_preset_id = Some(preset.id);
@@ -238,11 +230,7 @@ impl CrosshairApp {
                         ui.label(Self::tr_lang(language, "Preview", "Preview"));
                         let prev_resp = ui.checkbox(
                             &mut preset.preview_enabled,
-                            Self::tr_lang(
-                                language,
-                                "Stream preview in editor",
-                                "Stream preview trong editor",
-                            ),
+                            Self::tr_lang(language, "Stream preview in editor", "Stream preview in editor"),
                         );
                         if prev_resp.changed() {
                             live_sync = true;
@@ -257,11 +245,7 @@ impl CrosshairApp {
 
                 // Region Editor Preview
                 ui.label(
-                    RichText::new(Self::tr_lang(
-                        language,
-                        "Visual Region Adjuster",
-                        "Điều chỉnh Vùng quét trực quan",
-                    ))
+                    RichText::new(Self::tr_lang(language, "Visual Region Adjuster", "Visual Region Adjuster"))
                     .strong(),
                 );
                 ui.add_space(4.0);
@@ -293,11 +277,7 @@ impl CrosshairApp {
                 ui.horizontal(|ui| {
                     if ui
                         .button(
-                            RichText::new(Self::tr_lang(
-                                language,
-                                "⚡ Test Capture and OCR Scan",
-                                "⚡ Chụp và Quét thử OCR",
-                            ))
+                            RichText::new(Self::tr_lang(language, "⚡ Test Capture and OCR Scan", "⚡ Test Capture and OCR Scan"))
                             .strong()
                             .color(Color32::from_rgb(0, 255, 170)),
                         )
@@ -308,7 +288,7 @@ impl CrosshairApp {
 
                     if ocr_test_running {
                         ui.spinner();
-                        ui.label(Self::tr_lang(language, "Scanning...", "Đang nhận diện..."));
+                        ui.label(Self::tr_lang(language, "Scanning...", "Scanning..."));
                     }
                 });
 
@@ -331,22 +311,14 @@ impl CrosshairApp {
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "Full Extracted Text:",
-                                        "Toàn bộ đoạn chữ quét được:",
-                                    ))
+                                    RichText::new(Self::tr_lang(language, "Full Extracted Text:", "Full Extracted Text:"))
                                     .strong(),
                                 );
                             });
                             ui.add_space(4.0);
 
                             let mut text_val_str = if res.text.trim().is_empty() {
-                                Self::tr_lang(
-                                    language,
-                                    "[No text found in region]",
-                                    "[Không tìm thấy chữ nào trong vùng quét]",
-                                )
+                                Self::tr_lang(language, "[No text found in region]", "[No text found in region]")
                                 .to_string()
                             } else {
                                 res.text.clone()
@@ -378,11 +350,7 @@ impl CrosshairApp {
                                     ui.add_space(6.0);
                                     ui.horizontal(|ui| {
                                         ui.label(
-                                            RichText::new(Self::tr_lang(
-                                                language,
-                                                "💡 Extracted Numeric values:",
-                                                "💡 Các số trích xuất được:",
-                                            ))
+                                            RichText::new(Self::tr_lang(language, "💡 Extracted Numeric values:", "💡 Extracted Numeric values:"))
                                             .strong()
                                             .color(Color32::from_rgb(255, 232, 96)),
                                         );
@@ -395,11 +363,7 @@ impl CrosshairApp {
                         if !res.words.is_empty() {
                             ui.add_space(8.0);
                             ui.label(
-                                RichText::new(Self::tr_lang(
-                                    language,
-                                    "Detailed Words Coordinates:",
-                                    "Tọa độ chi tiết các từ:",
-                                ))
+                                RichText::new(Self::tr_lang(language, "Detailed Words Coordinates:", "Detailed Words Coordinates:"))
                                 .strong(),
                             );
                             ui.add_space(4.0);

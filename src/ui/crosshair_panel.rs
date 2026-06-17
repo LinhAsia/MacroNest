@@ -72,7 +72,7 @@ impl CrosshairApp {
                 dragging |= response.dragged();
                 ui.end_row();
 
-                ui.label(Self::tr_lang(language, "X", "Độ lệch ngang"));
+                ui.label(Self::tr_lang(language, "X", "X"));
                 ui.horizontal(|ui| {
                     let response = ui.add_sized(
                         [280.0, 20.0],
@@ -159,11 +159,7 @@ impl CrosshairApp {
                 ui.end_row();
 
                 if style.center_dot {
-                    ui.label(Self::tr_lang(
-                        language,
-                        "Center dot size",
-                        "Kích thước chấm giữa",
-                    ));
+                    ui.label(Self::tr_lang(language, "Center dot size", "Center dot size"));
                     let response = ui.add_sized(
                         [340.0, 20.0],
                         DragValue::new(&mut style.center_dot_size)
@@ -175,20 +171,20 @@ impl CrosshairApp {
                     ui.end_row();
                 }
 
-                ui.label(Self::tr_lang(language, "Crosshair color", "Màu tâm ngắm"));
+                ui.label(Self::tr_lang(language, "Crosshair color", "Crosshair color"));
                 let response = Self::edit_rgba_color(ui, &mut style.color);
                 changed |= response.changed();
                 dragging |= response.dragged();
                 ui.end_row();
 
                 if style.outline_enabled {
-                    ui.label(Self::tr_lang(language, "Outline color", "Màu viền"));
+                    ui.label(Self::tr_lang(language, "Outline color", "Outline color"));
                     let response = Self::edit_rgba_color(ui, &mut style.outline_color);
                     changed |= response.changed();
                     dragging |= response.dragged();
                     ui.end_row();
                 }
-                ui.label(Self::tr_lang(language, "Custom pixels", "Tu ve tam ngam"));
+                ui.label(Self::tr_lang(language, "Custom pixels", "Custom pixels"));
                 ui.vertical(|ui| {
                     let grid_size = style.custom_pixels_grid_size.max(1).min(31) as i32;
 
@@ -213,7 +209,7 @@ impl CrosshairApp {
                     let mut size_changed = false;
                     let mut clear_clicked = false;
                     ui.horizontal(|ui| {
-                        ui.label(Self::tr_lang(language, "Size", "Kich thuoc"));
+                        ui.label(Self::tr_lang(language, "Size", "Size"));
                         let size_response = ui.add(
                             egui::Slider::new(&mut pending_size, 3u8..=31u8)
                                 .step_by(2.0)
@@ -221,7 +217,7 @@ impl CrosshairApp {
                         );
                         size_changed = size_response.changed();
                         clear_clicked = ui
-                            .button(Self::tr_lang(language, "Clear", "Xoa sach"))
+                            .button(Self::tr_lang(language, "Clear", "Clear"))
                             .clicked();
                     });
                     if size_changed {
@@ -249,7 +245,7 @@ impl CrosshairApp {
                     let mut paint_rgba =
                         [style.color.r, style.color.g, style.color.b, style.color.a];
                     ui.horizontal(|ui| {
-                        ui.label(Self::tr_lang(language, "Paint color", "Mau ve"));
+                        ui.label(Self::tr_lang(language, "Paint color", "Paint color"));
                         if ui
                             .color_edit_button_srgba_unmultiplied(&mut paint_rgba)
                             .changed()
@@ -405,11 +401,7 @@ impl CrosshairApp {
                     // ---- Hint text ----
                     ui.add_space(4.0);
                     ui.label(
-                        egui::RichText::new(Self::tr_lang(
-                            language,
-                            "Left-click: paint  |  Right-click: erase  |  Red marker = center",
-                            "Trai: ve  |  Phai: xoa  |  Vach do = tam",
-                        ))
+                        egui::RichText::new(Self::tr_lang(language, "Left-click: paint  |  Right-click: erase  |  Red marker = center", "Left-click: paint  |  Right-click: erase  |  Red marker = center"))
                         .small()
                         .color(Color32::from_gray(140)),
                     );
@@ -439,11 +431,7 @@ impl CrosshairApp {
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             if ui
-                .button(Self::tr_lang(
-                    language,
-                    "+ Add crosshair preset",
-                    "+ Thêm preset tâm ngắm",
-                ))
+                .button(Self::tr_lang(language, "+ Add crosshair preset", "+ Add crosshair preset"))
                 .clicked()
             {
                 self.add_profile();
@@ -540,11 +528,7 @@ impl CrosshairApp {
                     });
                     if !preset.collapsed {
                         ui.add_space(4.0);
-                        ui.label(Self::tr_lang(
-                            language,
-                            "Crosshair Settings",
-                            "Cài đặt tâm ngắm",
-                        ));
+                        ui.label(Self::tr_lang(language, "Crosshair Settings", "Crosshair Settings"));
                         let (style_changed, style_dragging) = Self::render_crosshair_style_editor(
                             ui,
                             language,

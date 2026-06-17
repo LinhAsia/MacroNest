@@ -8983,16 +8983,15 @@ mod windows_overlay {
             right: 88,
             bottom: 28,
         };
-        let calib_text = if calibrating {
-            match ui_language {
-                crate::model::UiLanguage::Vietnamese => "Huỷ",
-                _ => "Cancel",
-            }
+        let calib_text_key = if calibrating {
+            "overlay.geometry_calibration.cancel"
         } else {
-            match ui_language {
-                crate::model::UiLanguage::Vietnamese => "3 Điểm",
-                _ => "3 Points",
-            }
+            "overlay.geometry_calibration.three_points"
+        };
+        let calib_text = if calibrating {
+            crate::lang::translate(ui_language, calib_text_key).unwrap_or("Cancel")
+        } else {
+            crate::lang::translate(ui_language, calib_text_key).unwrap_or("3 Points")
         };
         let mut w_calib = calib_text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         let _ = DrawTextW(mem_dc, &mut w_calib, &mut r_calib, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
@@ -9356,6 +9355,7 @@ mod windows_overlay {
         }
         ACTIVE_BIN_PIN_PRESET_ID.store(0, Ordering::Relaxed);
         ACTIVE_BIN_PIN_HWND.store(0, Ordering::Relaxed);
+        crate::window_list::close_window_capture_session();
     }
 
     fn spawn_bin_pin_thread(preset_id: u32, raw_source_hwnd: HWND, raw_pin_hwnd: HWND) {

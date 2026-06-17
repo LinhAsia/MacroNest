@@ -681,7 +681,7 @@ impl CrosshairApp {
                         ui.add_space(4.0);
                         if Self::settings_action_button(
                             ui,
-                            Self::tr_lang(language, "Retry", "Thử lại"),
+                            Self::tr_lang(language, "Retry", "Retry"),
                         )
                         .clicked()
                         {
@@ -855,11 +855,7 @@ impl CrosshairApp {
                                             Color32::from_gray(60)
                                         })
                                         .hint_text(
-                                            egui::RichText::new(Self::tr_lang(
-                                                self.state.ui_language,
-                                                "Example: Open Excel, write text to cell A1, then save...",
-                                                "Ví dụ: Mở Excel, ghi nội dung vào ô A1, sau đó lưu lại...",
-                                            ))
+                                            egui::RichText::new(Self::tr_lang(self.state.ui_language, "Example: Open Excel, write text to cell A1, then save...", "Example: Open Excel, write text to cell A1, then save..."))
                                             .color(if dark_theme {
                                                 Color32::from_rgba_unmultiplied(120, 120, 120, 140)
                                             } else {
@@ -1357,7 +1353,7 @@ impl CrosshairApp {
         Self::settings_card_frame(ui).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.vertical(|ui| {
-                let header_text = RichText::new(Self::tr_lang(language, "OCR Language Packs", "Gói Ngôn ngữ OCR"))
+                let header_text = RichText::new(Self::tr_lang(language, "OCR Language Packs", "OCR Language Packs"))
                     .strong()
                     .size(14.0);
                 if Self::settings_section_button(ui, header_text, self.ocr_lang_pack_open).clicked() {
@@ -1372,7 +1368,7 @@ impl CrosshairApp {
 
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    if Self::settings_action_button(ui, Self::tr_lang(language, "Refresh", "Làm mới"))
+                    if Self::settings_action_button(ui, Self::tr_lang(language, "Refresh", "Refresh"))
                         .clicked()
                     {
                         self.refresh_ocr_language_status();
@@ -1380,11 +1376,7 @@ impl CrosshairApp {
                 });
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new(Self::tr_lang(
-                        language,
-                        "This list only shows languages that Windows OCR supports. OCR ready means the OCR capability is installed on this PC.",
-                        "Danh sách này chỉ hiện những ngôn ngữ mà Windows OCR hỗ trợ. OCR sẵn sàng nghĩa là gói OCR đã được cài trên máy này.",
-                    ))
+                    RichText::new(Self::tr_lang(language, "This list only shows languages that Windows OCR supports. OCR ready means the OCR capability is installed on this PC.", "This list only shows languages that Windows OCR supports. OCR ready means the OCR capability is installed on this PC."))
                     .small()
                     .weak(),
                 );
@@ -1394,11 +1386,7 @@ impl CrosshairApp {
                     ui.label(
                         RichText::new(format!(
                             "{} {}",
-                            Self::tr_lang(
-                                language,
-                                "Selected from OCR dropdown:",
-                                "Duoc chon tu dropdown OCR:",
-                            ),
+                            Self::tr_lang(language, "Selected from OCR dropdown:", "Selected from OCR dropdown:"),
                             lang_code
                         ))
                         .small()
@@ -1452,19 +1440,15 @@ impl CrosshairApp {
                                 }
                                 ui.horizontal(|ui| {
                                     ui.label(
-                                        RichText::new(Self::tr_lang(language, "OCR ready", "OCR sẵn sàng"))
+                                        RichText::new(Self::tr_lang(language, "OCR ready", "OCR ready"))
                                             .small()
                                             .color(Color32::from_rgb(126, 224, 182)),
                                     );
                                     if Self::settings_action_button(
                                         ui,
-                                        Self::tr_lang(language, "Delete", "Xóa"),
+                                        Self::tr_lang(language, "Delete", "Delete"),
                                     )
-                                    .on_hover_text(Self::tr_lang(
-                                        language,
-                                        "Remove the Windows OCR capability for this language.",
-                                        "Gỡ OCR capability của Windows cho ngôn ngữ này.",
-                                    ))
+                                    .on_hover_text(Self::tr_lang(language, "Remove the Windows OCR capability for this language.", "Remove the Windows OCR capability for this language."))
                                     .clicked()
                                     {
                                         self.uninstall_ocr_language_capability(
@@ -1486,10 +1470,10 @@ impl CrosshairApp {
                                     let progress = 0.12 + pulse * 0.76;
                                     let label = match operation_kind {
                                         OcrLanguageOperationKind::Install => {
-                                            Self::tr_lang(language, "Installing", "Đang cài")
+                                            Self::tr_lang(language, "Installing", "Installing")
                                         }
                                         OcrLanguageOperationKind::Remove => {
-                                            Self::tr_lang(language, "Removing", "Đang xóa")
+                                            Self::tr_lang(language, "Removing", "Removing")
                                         }
                                     };
                                     ui.vertical(|ui| {
@@ -1506,13 +1490,9 @@ impl CrosshairApp {
                                     ui.ctx().request_repaint_after(Duration::from_millis(80));
                                 } else if Self::settings_action_button(
                                     ui,
-                                    Self::tr_lang(language, "Install", "Cài đặt"),
+                                    Self::tr_lang(language, "Install", "Install"),
                                 )
-                                .on_hover_text(Self::tr_lang(
-                                    language,
-                                    "Install the Windows OCR capability for this language directly.",
-                                    "Cài Windows OCR capability cho ngôn ngữ này trực tiếp.",
-                                ))
+                                .on_hover_text(Self::tr_lang(language, "Install the Windows OCR capability for this language directly.", "Install the Windows OCR capability for this language directly."))
                                 .clicked()
                                 {
                                     self.install_ocr_language_capability(lang_code, display_name);

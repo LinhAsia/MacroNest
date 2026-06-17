@@ -12,7 +12,7 @@ impl CrosshairApp {
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             if ui
-                .button(self.tr("+ Add command preset", "+ Thêm preset lệnh"))
+                .button(self.tr("+ Add command preset", "+ Add command preset"))
                 .clicked()
             {
                 self.add_custom_preset();
@@ -44,22 +44,14 @@ impl CrosshairApp {
                         &mut preset.name,
                     );
                     changed |= response.changed();
-                    if Self::sound_style_toggle_button(ui, Self::tr_lang(language, "Run", "Chạy"))
-                        .on_hover_text(Self::tr_lang(
-                            language,
-                            "Execute this custom preset immediately",
-                            "Chạy câu lệnh này ngay lập tức",
-                        ))
+                    if Self::sound_style_toggle_button(ui, Self::tr_lang(language, "Run", "Run"))
+                        .on_hover_text(Self::tr_lang(language, "Execute this custom preset immediately", "Execute this custom preset immediately"))
                         .clicked()
                     {
                         let command_text = ai::normalize_command_text(&preset.command);
                         if !command_text.is_empty() {
                             preset.run_output = Some(
-                                Self::tr_lang(
-                                    language,
-                                    "Running command...",
-                                    "Đang chạy câu lệnh...",
-                                )
+                                Self::tr_lang(language, "Running command...", "Running command...")
                                 .to_string(),
                             );
                             crate::overlay::spawn_custom_command(
@@ -128,12 +120,8 @@ impl CrosshairApp {
                     .num_columns(2)
                     .spacing([14.0, 8.0])
                     .show(ui, |ui| {
-                        ui.label(Self::tr_lang(language, "Command", "Câu lệnh"));
-                        let command_hint = RichText::new(Self::tr_lang(
-                            language,
-                            "Example: shutdown /s /t 0",
-                            "Ví dụ: shutdown /s /t 0",
-                        ))
+                        ui.label(Self::tr_lang(language, "Command", "Command"));
+                        let command_hint = RichText::new(Self::tr_lang(language, "Example: shutdown /s /t 0", "Example: shutdown /s /t 0"))
                         .italics()
                         .color(Color32::from_rgba_unmultiplied(120, 120, 120, 140));
                         changed |= ui
@@ -152,9 +140,9 @@ impl CrosshairApp {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.label(
-                            RichText::new(Self::tr_lang(language, "Output:", "Kết quả:")).strong(),
+                            RichText::new(Self::tr_lang(language, "Output:", "Output:")).strong(),
                         );
-                        if ui.button(Self::tr_lang(language, "Clear", "Xóa")).clicked() {
+                        if ui.button(Self::tr_lang(language, "Clear", "Clear")).clicked() {
                             clear_output = true;
                         }
                     });
