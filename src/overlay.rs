@@ -6864,6 +6864,57 @@ mod windows_overlay {
         })
     }
 
+    fn sync_trigger_binding_input_state(binding: &HotkeyBinding) {
+        let ctrl_down = unsafe { GetAsyncKeyState(0x11) } < 0;
+        let alt_down = unsafe { GetAsyncKeyState(0x12) } < 0;
+        let shift_down = unsafe { GetAsyncKeyState(0x10) } < 0;
+        let win_down =
+            unsafe { GetAsyncKeyState(0x5B) } < 0 || unsafe { GetAsyncKeyState(0x5C) } < 0;
+        let keys = hotkey::binding_key_names(binding);
+        let mut hook_state = HOOK_STATE.lock();
+        for key in keys {
+            let is_down = hotkey::key_name_to_vk(&key)
+                .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
+            if is_down {
+                continue;
+            }
+            if hotkey::is_mouse_key_name(&key) {
+                if let Some(stored) = hook_state
+                    .held_mouse_buttons
+                    .iter()
+                    .find(|held| held.eq_ignore_ascii_case(&key))
+                    .cloned()
+                {
+                    hook_state.held_mouse_buttons.remove(&stored);
+                }
+                continue;
+            }
+            if let Some(stored) = hook_state
+                .held_inputs
+                .iter()
+                .find(|held| held.eq_ignore_ascii_case(&key))
+                .cloned()
+            {
+                hook_state.held_inputs.remove(&stored);
+            }
+            if let Some(stored) = hook_state
+                .pressed_inputs
+                .iter()
+                .find(|pressed| pressed.eq_ignore_ascii_case(&key))
+                .cloned()
+            {
+                hook_state.pressed_inputs.remove(&stored);
+            }
+            hook_state
+                .stop_ignore_keys
+                .retain(|_, ignored| !ignored.eq_ignore_ascii_case(&key));
+        }
+        hook_state.ctrl = ctrl_down;
+        hook_state.alt = alt_down;
+        hook_state.shift = shift_down;
+        hook_state.win = win_down;
+    }
+
     fn update_screen_draw_region_capture_preview(origin: POINT, point: POINT) {
         let left = origin.x.min(point.x);
         let top = origin.y.min(point.y);
@@ -7019,14 +7070,19 @@ mod windows_overlay {
     }
 
     fn restore_screen_draw_after_region_capture(hwnd_raw: isize, session_id: u64) {
+        let mut trigger_to_sync = None;
         let mut state = SCREEN_DRAW_STATE.lock();
         if state.capture_session_id != session_id {
             return;
         }
-        let trigger_still_down = state
-            .capture_trigger
-            .as_ref()
-            .is_some_and(screen_draw_trigger_binding_is_down);
+        let trigger_still_down = state.capture_trigger.as_ref().is_some_and(|trigger| {
+            if screen_draw_trigger_binding_is_down(trigger) {
+                true
+            } else {
+                trigger_to_sync = Some(trigger.clone());
+                false
+            }
+        });
         state.capturing_region = false;
         state.capture_trigger = None;
         state.capture_trigger_release_point = None;
@@ -7041,6 +7097,9 @@ mod windows_overlay {
             mark_screen_draw_dirty(&mut state, toolbar_rect);
         }
         drop(state);
+        if let Some(trigger) = trigger_to_sync.as_ref() {
+            sync_trigger_binding_input_state(trigger);
+        }
         let _ = hwnd_raw;
         request_screen_draw_overlay_sync();
     }
