@@ -8,6 +8,7 @@ use windows::Win32::{
         BITMAPINFOHEADER, BI_RGB, DrawTextW, DT_CENTER, DT_SINGLELINE, DT_VCENTER, SetBkMode,
         SetTextColor, TRANSPARENT, CreateFontW, HFONT, FW_BOLD, DT_CALCRECT, DeleteObject, SRCCOPY,
         FONT_CHARSET, FONT_OUTPUT_PRECISION, FONT_CLIP_PRECISION, FONT_QUALITY,
+        CreatePen, MoveToEx, LineTo, PS_SOLID,
     },
     UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW,
@@ -66,6 +67,7 @@ pub enum NativeCaptureResult {
 
 struct CaptureState {
     capture_frame: crate::window_list::ScreenCaptureFrame,
+    dimmed_rgba: Vec<u8>,
     left: i32,
     top: i32,
     width: i32,
@@ -91,6 +93,7 @@ impl CaptureState {
         mode: NativeCaptureMode,
     ) -> Self {
         Self {
+            dimmed_rgba: dim_capture_frame(&capture_frame),
             capture_frame,
             left,
             top,
@@ -102,6 +105,53 @@ impl CaptureState {
             protractor_points: Vec::new(),
             result: NativeCaptureResult::Cancelled,
         }
+    }
+}
+
+fn dim_capture_frame(capture_frame: &crate::window_list::ScreenCaptureFrame) -> Vec<u8> {
+    let mut dimmed = capture_frame.rgba.clone();
+    for pixel in dimmed.chunks_exact_mut(4) {
+        pixel[0] = ((pixel[0] as u16 * 127) / 255) as u8;
+        pixel[1] = ((pixel[1] as u16 * 127) / 255) as u8;
+        pixel[2] = ((pixel[2] as u16 * 127) / 255) as u8;
+    }
+    dimmed
+}
+
+fn region_select_rect(state: &CaptureState) -> Option<RECT> {
+    let (start, curr) = (state.start_point?, state.current_point?);
+    let left = start.0.min(curr.0);
+    let top = start.1.min(curr.1);
+    let right = start.0.max(curr.0);
+    let bottom = start.1.max(curr.1);
+    if right - left < 2 || bottom - top < 2 {
+        return None;
+    }
+    Some(RECT {
+        left,
+        top,
+        right,
+        bottom,
+    })
+}
+
+fn union_selection_dirty_rect(previous: Option<RECT>, next: Option<RECT>) -> Option<RECT> {
+    let padding = 6;
+    let expand = |rect: RECT| RECT {
+        left: rect.left - padding,
+        top: rect.top - padding,
+        right: rect.right + padding,
+        bottom: rect.bottom + padding,
+    };
+    match (previous.map(expand), next.map(expand)) {
+        (Some(a), Some(b)) => Some(RECT {
+            left: a.left.min(b.left),
+            top: a.top.min(b.top),
+            right: a.right.max(b.right),
+            bottom: a.bottom.max(b.bottom),
+        }),
+        (Some(rect), None) | (None, Some(rect)) => Some(rect),
+        (None, None) => None,
     }
 }
 
@@ -183,7 +233,15 @@ unsafe extern "system" fn capture_wnd_proc(
                     state.start_point = Some((rx, ry));
                     state.current_point = Some((rx, ry));
                     SetCapture(hwnd);
-                    InvalidateRect(hwnd, None, false);
+                    unsafe {
+                        let dirty = RECT {
+                            left: (rx - 8).max(0),
+                            top: (ry - 8).max(0),
+                            right: (rx + 8).min(state.width),
+                            bottom: (ry + 8).min(state.height),
+                        };
+                        InvalidateRect(hwnd, Some(&dirty), false);
+                    }
                 }
             }
             LRESULT(0)
@@ -193,10 +251,26 @@ unsafe extern "system" fn capture_wnd_proc(
             if let Some(state) = state {
                 let mut pt = POINT::default();
                 if GetCursorPos(&mut pt).is_ok() {
+                    let previous_rect = if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
+                        region_select_rect(state)
+                    } else {
+                        None
+                    };
                     let rx = pt.x - state.left;
                     let ry = pt.y - state.top;
                     state.current_point = Some((rx, ry));
-                    InvalidateRect(hwnd, None, false);
+                    unsafe {
+                        if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
+                            let next_rect = region_select_rect(state);
+                            if let Some(dirty) = union_selection_dirty_rect(previous_rect, next_rect) {
+                                InvalidateRect(hwnd, Some(&dirty), false);
+                            } else {
+                                InvalidateRect(hwnd, None, false);
+                            }
+                        } else {
+                            InvalidateRect(hwnd, None, false);
+                        }
+                    }
                 }
             }
             LRESULT(0)
@@ -400,6 +474,11 @@ fn draw_rounded_rect(
 }
 
 unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<()> {
+    if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
+        draw_region_select_capture_to_dc(hdc, state)?;
+        return Ok(());
+    }
+
     let w = state.width as usize;
     let h = state.height as usize;
 
@@ -991,6 +1070,137 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
 
     // Restore font and delete
     let _ = SelectObject(hdc, old_font);
+    let _ = DeleteObject(HGDIOBJ(font.0));
+
+    Ok(())
+}
+
+unsafe fn draw_region_select_capture_to_dc(
+    hdc: HDC,
+    state: &CaptureState,
+) -> anyhow::Result<()> {
+    let mut bmi = BITMAPINFO::default();
+    bmi.bmiHeader = BITMAPINFOHEADER {
+        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+        biWidth: state.width,
+        biHeight: -state.height,
+        biPlanes: 1,
+        biBitCount: 32,
+        biCompression: BI_RGB.0,
+        ..Default::default()
+    };
+
+    let _ = StretchDIBits(
+        hdc,
+        0,
+        0,
+        state.width,
+        state.height,
+        0,
+        0,
+        state.width,
+        state.height,
+        Some(state.dimmed_rgba.as_ptr() as *const std::ffi::c_void),
+        &bmi,
+        DIB_RGB_COLORS,
+        SRCCOPY,
+    );
+
+    if let Some(rect) = region_select_rect(state) {
+        let select_w = rect.right - rect.left;
+        let select_h = rect.bottom - rect.top;
+        if select_w >= 2 && select_h >= 2 {
+            let _ = StretchDIBits(
+                hdc,
+                rect.left,
+                rect.top,
+                select_w,
+                select_h,
+                rect.left,
+                rect.top,
+                select_w,
+                select_h,
+                Some(state.capture_frame.rgba.as_ptr() as *const std::ffi::c_void),
+                &bmi,
+                DIB_RGB_COLORS,
+                SRCCOPY,
+            );
+
+            let pen = CreatePen(PS_SOLID, 2, rgb(0, 160, 255));
+            let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+            let _ = MoveToEx(hdc, rect.left, rect.top, None);
+            let _ = LineTo(hdc, rect.right, rect.top);
+            let _ = LineTo(hdc, rect.right, rect.bottom);
+            let _ = LineTo(hdc, rect.left, rect.bottom);
+            let _ = LineTo(hdc, rect.left, rect.top);
+            let _ = SelectObject(hdc, old_pen);
+            let _ = DeleteObject(HGDIOBJ(pen.0));
+        }
+    }
+
+    let status_text =
+        "Drag on screen to capture a region with your drawing. Press Esc to cancel.";
+    let font = CreateFontW(
+        22,
+        0,
+        0,
+        0,
+        FW_BOLD.0 as i32,
+        0,
+        0,
+        0,
+        FONT_CHARSET(0),
+        FONT_OUTPUT_PRECISION(0),
+        FONT_CLIP_PRECISION(0),
+        FONT_QUALITY(0),
+        0,
+        w!("Segoe UI"),
+    );
+    let old_font = SelectObject(hdc, HGDIOBJ(font.0));
+    let _ = SetBkMode(hdc, TRANSPARENT);
+    let _ = SetTextColor(hdc, rgb(255, 255, 255));
+
+    let mut text_u16: Vec<u16> = status_text.encode_utf16().collect();
+    let mut calc_rect = RECT::default();
+    let _ = DrawTextW(hdc, &mut text_u16, &mut calc_rect, DT_CALCRECT);
+    let text_w = calc_rect.right - calc_rect.left;
+    let text_h = calc_rect.bottom - calc_rect.top;
+    let pill_w = text_w + 48;
+    let pill_h = text_h + 16;
+    let pill_x = (state.width - pill_w) / 2;
+    let pill_y = 40;
+
+    let brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(rgb(12, 18, 28));
+    let pen = CreatePen(PS_SOLID, 1, rgb(110, 156, 210));
+    let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
+    let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+    let _ = windows::Win32::Graphics::Gdi::RoundRect(
+        hdc,
+        pill_x,
+        pill_y,
+        pill_x + pill_w,
+        pill_y + pill_h,
+        18,
+        18,
+    );
+    let mut text_rect = RECT {
+        left: pill_x,
+        top: pill_y,
+        right: pill_x + pill_w,
+        bottom: pill_y + pill_h,
+    };
+    let _ = DrawTextW(
+        hdc,
+        &mut text_u16,
+        &mut text_rect,
+        DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+    );
+
+    let _ = SelectObject(hdc, old_brush);
+    let _ = SelectObject(hdc, old_pen);
+    let _ = SelectObject(hdc, old_font);
+    let _ = DeleteObject(HGDIOBJ(brush.0));
+    let _ = DeleteObject(HGDIOBJ(pen.0));
     let _ = DeleteObject(HGDIOBJ(font.0));
 
     Ok(())
