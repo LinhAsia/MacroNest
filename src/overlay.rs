@@ -208,7 +208,8 @@ mod windows_overlay {
     const SCREEN_DRAW_TIMER_ID: usize = 3;
     const SCREEN_DRAW_REFRESH_INTERVAL_MS: u32 = 16;
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 6;
-    const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 110;
+    const SCREEN_DRAW_TRIGGER_INITIAL_CAPTURE_HOLD_MS: u64 = 55;
+    const SCREEN_DRAW_TRIGGER_ACTIVE_CAPTURE_HOLD_MS: u64 = 110;
     const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
     const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 408;
     const SCREEN_DRAW_TOOLBAR_HEIGHT: i32 = 78;
@@ -5465,6 +5466,7 @@ mod windows_overlay {
         }
         let press_started_at = Instant::now();
         let hold_trigger = trigger.unwrap_or_else(|| binding.clone());
+        let started_from_inactive = !active;
         {
             let mut state = SCREEN_DRAW_STATE.lock();
             state.trigger_latched = true;
@@ -5490,7 +5492,7 @@ mod windows_overlay {
                 state.live_stroke_rect = None;
             }
         }
-        schedule_screen_draw_hold_capture(hold_trigger, press_started_at);
+        schedule_screen_draw_hold_capture(hold_trigger, press_started_at, started_from_inactive);
         request_screen_draw_overlay_sync();
         !pass_trigger_through
     }
@@ -5582,8 +5584,13 @@ mod windows_overlay {
             let Some(pressed_at) = state.trigger_pressed_at else {
                 return;
             };
+            let capture_hold_ms = if state.trigger_started_from_inactive {
+                SCREEN_DRAW_TRIGGER_INITIAL_CAPTURE_HOLD_MS
+            } else {
+                SCREEN_DRAW_TRIGGER_ACTIVE_CAPTURE_HOLD_MS
+            };
             if Instant::now().duration_since(pressed_at)
-                < Duration::from_millis(SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS)
+                < Duration::from_millis(capture_hold_ms)
             {
                 return;
             }
@@ -6876,9 +6883,18 @@ mod windows_overlay {
         })
     }
 
-    fn schedule_screen_draw_hold_capture(trigger: HotkeyBinding, pressed_at: Instant) {
+    fn schedule_screen_draw_hold_capture(
+        trigger: HotkeyBinding,
+        pressed_at: Instant,
+        started_from_inactive: bool,
+    ) {
         thread::spawn(move || {
-            thread::sleep(Duration::from_millis(SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS));
+            let capture_hold_ms = if started_from_inactive {
+                SCREEN_DRAW_TRIGGER_INITIAL_CAPTURE_HOLD_MS
+            } else {
+                SCREEN_DRAW_TRIGGER_ACTIVE_CAPTURE_HOLD_MS
+            };
+            thread::sleep(Duration::from_millis(capture_hold_ms));
             let should_begin = {
                 let mut state = SCREEN_DRAW_STATE.lock();
                 if !state.enabled
