@@ -4854,6 +4854,7 @@ mod windows_overlay {
         text: String,
         rect: RECT,
         color: COLORREF,
+        alpha: f32,
     }
 
     fn quick_key_display_parts(label: &str) -> Vec<String> {
@@ -4917,25 +4918,30 @@ mod windows_overlay {
             return None;
         }
 
-        let mut combo_keys = {
-            let hook_state = HOOK_STATE.lock();
-            hook_state
-                .held_inputs
-                .iter()
-                .cloned()
-                .chain(hook_state.held_mouse_buttons.iter().cloned())
-                .collect::<Vec<_>>()
-        };
+        let (ctrl, alt, shift, win) = quick_key_display_modifier_flags();
+        let mut combo_keys = Vec::<String>::new();
+        if ctrl {
+            combo_keys.push("Ctrl".to_owned());
+        }
+        if alt {
+            combo_keys.push("Alt".to_owned());
+        }
+        if shift {
+            combo_keys.push("Shift".to_owned());
+        }
+        if win {
+            combo_keys.push("Win".to_owned());
+        }
         combo_keys.push(key_name.to_owned());
-        combo_keys.retain(|key| !key.trim().is_empty());
-        combo_keys.sort_by(|a, b| {
-            let rank_a = hotkey_binding_rank(a);
-            let rank_b = hotkey_binding_rank(b);
-            rank_a
-                .cmp(&rank_b)
-                .then_with(|| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()))
-        });
-        combo_keys.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+
+        let has_modifier_combo = combo_keys
+            .iter()
+            .any(|key| hotkey::is_modifier_key_name(key));
+        if !has_modifier_combo {
+            let label = quick_key_display_label(key_name);
+            return Some((label, vec![key_name.to_owned()]));
+        }
+
         if combo_keys.is_empty() {
             None
         } else {
@@ -5299,6 +5305,15 @@ mod windows_overlay {
 
     fn quick_key_display_colorref(r: u8, g: u8, b: u8) -> COLORREF {
         COLORREF((r as u32) | ((g as u32) << 8) | ((b as u32) << 16))
+    }
+
+    fn quick_key_display_colorref_components(color: COLORREF) -> (u8, u8, u8) {
+        let value = color.0;
+        (
+            (value & 0xFF) as u8,
+            ((value >> 8) & 0xFF) as u8,
+            ((value >> 16) & 0xFF) as u8,
+        )
     }
 
     fn quick_key_display_alpha(color: [u8; 4], alpha_scale: f32) -> [u8; 4] {
@@ -9910,6 +9925,7 @@ mod windows_overlay {
                     bottom: scaled_top + scaled_cap_height,
                 },
                 color: quick_key_display_colorref(text_color[0], text_color[1], text_color[2]),
+                alpha: fill_alpha,
             });
         };
 
@@ -9994,7 +10010,20 @@ mod windows_overlay {
         let old_font = SelectObject(text_mem_dc, HGDIOBJ(font.0));
         let _ = SetBkMode(text_mem_dc, TRANSPARENT);
         for run in &text_runs {
-            let _ = SetTextColor(text_mem_dc, run.color);
+            let (base_r, base_g, base_b) = quick_key_display_colorref_components(run.color);
+            let scaled_r = ((base_r as f32) * run.alpha.clamp(0.0, 1.0))
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            let scaled_g = ((base_g as f32) * run.alpha.clamp(0.0, 1.0))
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            let scaled_b = ((base_b as f32) * run.alpha.clamp(0.0, 1.0))
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            let _ = SetTextColor(
+                text_mem_dc,
+                quick_key_display_colorref(scaled_r, scaled_g, scaled_b),
+            );
             let mut wide = run
                 .text
                 .encode_utf16()
