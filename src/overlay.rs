@@ -4829,7 +4829,7 @@ mod windows_overlay {
         match runtime.quick_key_display_entries.last_mut() {
             Some(last) => {
                 let (last_base, last_count) = quick_key_display_entry_base_and_count(last);
-                if last_base.eq_ignore_ascii_case(&text) && !should_append_duplicate {
+                if last_base.eq_ignore_ascii_case(&text) {
                     *last = quick_key_display_format_entry(&text, last_count.saturating_add(1));
                 } else if !should_append_duplicate
                     && quick_key_display_should_replace(&last_base, &text)
@@ -6072,6 +6072,15 @@ mod windows_overlay {
         }
         drop(state);
         if start_region_capture {
+            let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
+            if hwnd_raw != 0 {
+                unsafe {
+                    let hwnd = HWND(hwnd_raw as *mut c_void);
+                    set_screen_draw_refresh_timer(hwnd, false);
+                    let _ = clear_screen_draw_overlay_window(hwnd);
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                }
+            }
             begin_screen_draw_region_capture();
         }
         true
