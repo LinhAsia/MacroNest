@@ -812,6 +812,11 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
         ..Default::default()
     };
 
+    let mut bgra = pixmap.data().to_vec();
+    for pixel in bgra.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+
     let _ = StretchDIBits(
         hdc,
         0,
@@ -822,7 +827,7 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
         0,
         state.width,
         state.height,
-        Some(pixmap.data().as_ptr() as *const std::ffi::c_void),
+        Some(bgra.as_ptr() as *const std::ffi::c_void),
         &bmi,
         DIB_RGB_COLORS,
         SRCCOPY,
@@ -1090,6 +1095,11 @@ unsafe fn draw_region_select_capture_to_dc(
         ..Default::default()
     };
 
+    let mut dimmed_bgra = state.dimmed_rgba.clone();
+    for pixel in dimmed_bgra.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+
     let _ = StretchDIBits(
         hdc,
         0,
@@ -1100,7 +1110,7 @@ unsafe fn draw_region_select_capture_to_dc(
         0,
         state.width,
         state.height,
-        Some(state.dimmed_rgba.as_ptr() as *const std::ffi::c_void),
+        Some(dimmed_bgra.as_ptr() as *const std::ffi::c_void),
         &bmi,
         DIB_RGB_COLORS,
         SRCCOPY,
@@ -1110,6 +1120,11 @@ unsafe fn draw_region_select_capture_to_dc(
         let select_w = rect.right - rect.left;
         let select_h = rect.bottom - rect.top;
         if select_w >= 2 && select_h >= 2 {
+            let mut select_bgra = state.capture_frame.rgba.clone();
+            for pixel in select_bgra.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+
             let _ = StretchDIBits(
                 hdc,
                 rect.left,
@@ -1120,7 +1135,7 @@ unsafe fn draw_region_select_capture_to_dc(
                 rect.top,
                 select_w,
                 select_h,
-                Some(state.capture_frame.rgba.as_ptr() as *const std::ffi::c_void),
+                Some(select_bgra.as_ptr() as *const std::ffi::c_void),
                 &bmi,
                 DIB_RGB_COLORS,
                 SRCCOPY,
