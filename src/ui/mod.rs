@@ -10935,6 +10935,18 @@ impl eframe::App for CrosshairApp {
                     self.status = status;
                     ctx.request_repaint();
                 }
+                UiCommand::UpdateScreenDrawConfig {
+                    color,
+                    brush_size,
+                    smoothing,
+                    smoothing_amount,
+                } => {
+                    self.state.quick_screen_draw_color = color;
+                    self.state.quick_screen_draw_brush_size = brush_size;
+                    self.state.quick_screen_draw_smoothing = smoothing;
+                    self.state.quick_screen_draw_smoothing_amount = smoothing_amount;
+                    self.persist();
+                }
                 UiCommand::MouseMoveAbsolutePointCaptured { .. } => {}
                 UiCommand::MouseMoveAbsoluteCaptureCancelled => {}
                 UiCommand::NativeVisionCaptureFinished {
