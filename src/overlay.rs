@@ -1570,7 +1570,11 @@ mod windows_overlay {
                 None,
             )?;
             let screen_draw_hwnd = CreateWindowExW(
-                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+                WS_EX_LAYERED
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_TOPMOST
+                    | WS_EX_NOACTIVATE
+                    | WS_EX_TRANSPARENT,
                 w!("MacroNestScreenDraw"),
                 w!("MacroNestScreenDraw"),
                 WS_POPUP,
@@ -2490,40 +2494,14 @@ mod windows_overlay {
         hwnd: HWND,
         msg: u32,
         _wparam: WPARAM,
-        lparam: LPARAM,
+        _lparam: LPARAM,
     ) -> LRESULT {
         match msg {
             WM_NCHITTEST => {
-                if SCREEN_DRAW_STATE.lock().active {
-                    return LRESULT(1);
-                }
                 return LRESULT(HTTRANSPARENT as isize);
             }
             WM_MOUSEACTIVATE => {
                 return LRESULT(MA_NOACTIVATE as isize);
-            }
-            WM_LBUTTONDOWN | WM_RBUTTONDOWN => {
-                let point = screen_draw_lparam_point(lparam);
-                let right_button = msg == WM_RBUTTONDOWN;
-                if screen_draw_handle_button_down(point, right_button) {
-                    set_screen_draw_refresh_timer(hwnd, screen_draw_active());
-                    let _ = paint_screen_draw_overlay(hwnd);
-                }
-                LRESULT(0)
-            }
-            WM_MOUSEMOVE => {
-                let point = screen_draw_lparam_point(lparam);
-                if screen_draw_handle_move(point) && screen_draw_should_present_immediately() {
-                    let _ = paint_screen_draw_overlay(hwnd);
-                }
-                LRESULT(0)
-            }
-            WM_LBUTTONUP | WM_RBUTTONUP => {
-                if screen_draw_handle_button_up() {
-                    set_screen_draw_refresh_timer(hwnd, screen_draw_active());
-                    let _ = paint_screen_draw_overlay(hwnd);
-                }
-                LRESULT(0)
             }
             WM_TIMER => {
                 if _wparam.0 == SCREEN_DRAW_TIMER_ID {
@@ -2536,7 +2514,7 @@ mod windows_overlay {
                     }
                     return LRESULT(0);
                 }
-                DefWindowProcW(hwnd, msg, _wparam, lparam)
+                DefWindowProcW(hwnd, msg, _wparam, _lparam)
             }
             windows::Win32::UI::WindowsAndMessaging::WM_PAINT => {
                 let mut paint = PAINTSTRUCT::default();
@@ -2544,7 +2522,7 @@ mod windows_overlay {
                 let _ = EndPaint(hwnd, &paint);
                 LRESULT(0)
             }
-            _ => DefWindowProcW(hwnd, msg, _wparam, lparam),
+            _ => DefWindowProcW(hwnd, msg, _wparam, _lparam),
         }
     }
 
