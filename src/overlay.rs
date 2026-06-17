@@ -5462,19 +5462,21 @@ mod windows_overlay {
         if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
             return true;
         }
+        let press_started_at = Instant::now();
+        let hold_trigger = trigger.unwrap_or_else(|| binding.clone());
         {
             let mut state = SCREEN_DRAW_STATE.lock();
             state.trigger_latched = true;
             if active {
                 if !capturing_region {
-                    state.trigger_pressed_at = Some(Instant::now());
+                    state.trigger_pressed_at = Some(press_started_at);
                     state.trigger_started_from_inactive = false;
                 }
             } else {
                 state.active = true;
                 state.capturing_region = false;
                 state.capture_trigger = None;
-                state.trigger_pressed_at = Some(Instant::now());
+                state.trigger_pressed_at = Some(press_started_at);
                 state.trigger_started_from_inactive = true;
                 state.capture_trigger_release_point = None;
                 state.current_stroke = None;
@@ -5487,6 +5489,7 @@ mod windows_overlay {
                 state.live_stroke_rect = None;
             }
         }
+        schedule_screen_draw_hold_capture(hold_trigger, press_started_at);
         request_screen_draw_overlay_sync();
         !pass_trigger_through
     }
@@ -6870,6 +6873,32 @@ mod windows_overlay {
             hotkey::key_name_to_vk(&key)
                 .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0)
         })
+    }
+
+    fn schedule_screen_draw_hold_capture(trigger: HotkeyBinding, pressed_at: Instant) {
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(SCREEN_DRAW_TRIGGER_HOLD_MS));
+            let should_begin = {
+                let mut state = SCREEN_DRAW_STATE.lock();
+                if !state.enabled
+                    || !state.active
+                    || state.capturing_region
+                    || !state.trigger_latched
+                    || state.trigger_pressed_at != Some(pressed_at)
+                    || !screen_draw_trigger_binding_is_down(&trigger)
+                {
+                    false
+                } else {
+                    state.trigger_pressed_at = None;
+                    state.trigger_started_from_inactive = false;
+                    state.capture_trigger_release_point = None;
+                    true
+                }
+            };
+            if should_begin {
+                begin_screen_draw_capture_from_trigger(trigger);
+            }
+        });
     }
 
     fn sync_trigger_binding_input_state(binding: &HotkeyBinding) {
