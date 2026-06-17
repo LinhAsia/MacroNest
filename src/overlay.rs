@@ -624,6 +624,7 @@ mod windows_overlay {
         capture_trigger: Option<HotkeyBinding>,
         trigger_latched: bool,
         trigger_pressed_at: Option<Instant>,
+        capture_trigger_release_point: Option<(i32, i32)>,
         capture_session_id: u64,
         last_present_at: Option<Instant>,
         dirty_rect: Option<ScreenDrawDirtyRect>,
@@ -671,6 +672,7 @@ mod windows_overlay {
                 capture_trigger: None,
                 trigger_latched: false,
                 trigger_pressed_at: None,
+                capture_trigger_release_point: None,
                 capture_session_id: 0,
                 last_present_at: None,
                 dirty_rect: None,
@@ -2588,6 +2590,9 @@ mod windows_overlay {
                     if screen_draw_capture_should_swallow_key_name(&key_name) {
                         update_held_key(&key_name, is_key_down, is_key_up);
                         if is_key_up {
+                            mark_screen_draw_capture_trigger_released();
+                        }
+                        if is_key_up {
                             screen_draw_release_trigger_latch_if_ready();
                         }
                         update_modifier_state(info.vkCode, is_key_down);
@@ -3050,6 +3055,9 @@ mod windows_overlay {
                 if let Some(key_name) = event_key_name
                     && screen_draw_capture_should_swallow_key_name(key_name)
                 {
+                    if !is_down {
+                        mark_screen_draw_capture_trigger_released();
+                    }
                     return LRESULT(1);
                 }
                 if screen_draw_capture_should_swallow_binding(&binding) {
@@ -5168,6 +5176,17 @@ mod windows_overlay {
         }
     }
 
+    fn mark_screen_draw_capture_trigger_released() {
+        let mut point = POINT::default();
+        if unsafe { GetCursorPos(&mut point).is_err() } {
+            return;
+        }
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if state.active && state.capturing_region && state.capture_trigger.is_some() {
+            state.capture_trigger_release_point = Some((point.x, point.y));
+        }
+    }
+
     fn screen_draw_maybe_begin_trigger_capture() {
         let trigger = {
             let mut state = SCREEN_DRAW_STATE.lock();
@@ -5194,6 +5213,7 @@ mod windows_overlay {
                 return;
             }
             state.trigger_pressed_at = None;
+            state.capture_trigger_release_point = None;
             trigger
         };
         begin_screen_draw_capture_from_trigger(trigger);
@@ -5986,6 +6006,7 @@ mod windows_overlay {
             state.capture_trigger = None;
             state.trigger_latched = false;
             state.trigger_pressed_at = None;
+            state.capture_trigger_release_point = None;
             state.current_stroke = None;
             state.active_control = ScreenDrawControl::None;
             state.pending_repaint = true;
@@ -6140,6 +6161,7 @@ mod windows_overlay {
         state.capture_trigger = None;
         state.trigger_latched = false;
         state.trigger_pressed_at = None;
+        state.capture_trigger_release_point = None;
         state.strokes.clear();
         state.committed_dirty = true;
         state.pending_repaint = false;
@@ -6270,6 +6292,7 @@ mod windows_overlay {
                     state.capture_trigger = None;
                     state.trigger_latched = false;
                     state.trigger_pressed_at = None;
+                    state.capture_trigger_release_point = None;
                     state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
                     capture_session_id = state.capture_session_id;
                     state.active_control = ScreenDrawControl::None;
@@ -6310,6 +6333,7 @@ mod windows_overlay {
                 state.capture_trigger = Some(trigger.clone());
                 state.trigger_latched = true;
                 state.trigger_pressed_at = None;
+                state.capture_trigger_release_point = None;
                 state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
                 session_id = state.capture_session_id;
                 state.active_control = ScreenDrawControl::None;
@@ -6433,6 +6457,21 @@ mod windows_overlay {
                 break Ok(None);
             }
             if (unsafe { GetAsyncKeyState(0x1B) } as u16 & 0x8000) != 0 {
+                break Ok(None);
+            }
+
+            let released_point = {
+                let mut state = SCREEN_DRAW_STATE.lock();
+                state.capture_trigger_release_point.take()
+            };
+            if let Some((release_x, release_y)) = released_point {
+                let x = origin.x.min(release_x);
+                let y = origin.y.min(release_y);
+                let width = (origin.x - release_x).abs();
+                let height = (origin.y - release_y).abs();
+                if width >= 2 && height >= 2 {
+                    break Ok(Some((x, y, width, height)));
+                }
                 break Ok(None);
             }
 
@@ -6626,6 +6665,7 @@ mod windows_overlay {
         }
         state.capturing_region = false;
         state.capture_trigger = None;
+        state.capture_trigger_release_point = None;
         let active = state.active;
         if active {
             state.pending_repaint = true;
