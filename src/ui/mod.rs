@@ -4046,12 +4046,12 @@ impl CrosshairApp {
         let pinned_window_active = pin_window_available
             && window_list::is_window_topmost(&self.quick_action_window_selector);
         let mut keep_menu_open = false;
-        let action_width = 108.0;
-        let action_height = 164.0;
+        let action_width = 112.0;
+        let action_height = 168.0;
 
         Grid::new("titlebar-quick-actions-grid")
             .num_columns(5)
-            .spacing([14.0, 12.0])
+            .spacing([20.0, 16.0])
             .show(ui, |ui| {
                 ui.allocate_ui_with_layout(
                     vec2(action_width, action_height),
@@ -12043,7 +12043,7 @@ impl eframe::App for CrosshairApp {
                                         },
                                     ))
                                     .corner_radius(14.0)
-                                    .inner_margin(egui::Margin::symmetric(10, 10))
+                                    .inner_margin(egui::Margin::symmetric(12, 12))
                                     .show(ui, |ui| {
                                         keep_quick_actions_open = self
                                             .render_titlebar_quick_actions_grid(ui, taskbar_hidden);
