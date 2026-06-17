@@ -2356,7 +2356,7 @@ impl CrosshairApp {
                     .iter_mut()
                     .find(|preset| preset.id == preset_id)
                 {
-                    preset.binary_target_color = color;
+                    preset.add_binary_target_color(color);
                 }
                 self.sync_window_presets();
                 format!(
@@ -2970,7 +2970,7 @@ impl CrosshairApp {
                     .iter_mut()
                     .find(|preset| preset.id == preset_id)
                 {
-                    preset.binary_target_color = color;
+                    preset.add_binary_target_color(color);
                 }
                 self.sync_window_presets();
                 format!(
