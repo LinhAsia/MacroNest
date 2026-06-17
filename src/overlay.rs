@@ -929,6 +929,7 @@ mod windows_overlay {
         vision_capture_mouse_blocked: bool,
         vision_capture_is_region_mode: bool,
         vision_capture_anchor: Option<(i32, i32)>,
+        vision_capture_completed_region: Option<(i32, i32, i32, i32)>,
         pub(crate) vision_capture_preview_regions: Vec<VisionRegion>,
         pub(crate) vision_preview_source: Option<(u32, usize)>,
         mouse_path_draw_capture: Option<MousePathDrawCaptureSession>,
@@ -1026,6 +1027,7 @@ mod windows_overlay {
                 vision_capture_mouse_blocked: false,
                 vision_capture_is_region_mode: false,
                 vision_capture_anchor: None,
+                vision_capture_completed_region: None,
                 vision_capture_preview_regions: Vec::new(),
                 vision_preview_source: None,
                 mouse_path_draw_capture: None,
@@ -2868,6 +2870,7 @@ mod windows_overlay {
                         let mut hook_state = HOOK_STATE.lock();
                         if hook_state.vision_capture_is_region_mode {
                             hook_state.vision_capture_anchor = Some((info.pt.x, info.pt.y));
+                            hook_state.vision_capture_completed_region = None;
                             hook_state.vision_capture_preview_regions = vec![VisionRegion {
                                 left: info.pt.x,
                                 top: info.pt.y,
@@ -2895,6 +2898,20 @@ mod windows_overlay {
                     WM_LBUTTONUP => {
                         update_held_mouse_button(message, ((info.mouseData >> 16) & 0xFFFF) as u16);
                         let mut hook_state = HOOK_STATE.lock();
+                        if hook_state.vision_capture_is_region_mode
+                            && let Some((start_x, start_y)) = hook_state.vision_capture_anchor
+                        {
+                            let left = start_x.min(info.pt.x);
+                            let top = start_y.min(info.pt.y);
+                            let width = (start_x - info.pt.x).abs();
+                            let height = (start_y - info.pt.y).abs();
+                            if width >= 2 && height >= 2 {
+                                hook_state.vision_capture_completed_region =
+                                    Some((left, top, width, height));
+                            } else {
+                                hook_state.vision_capture_completed_region = None;
+                            }
+                        }
                         hook_state.vision_capture_anchor = None;
                         hook_state.vision_capture_preview_regions = Vec::new();
                         hook_state.vision_preview_source = None;
@@ -5478,6 +5495,7 @@ mod windows_overlay {
                     let mut hook_state = HOOK_STATE.lock();
                     hook_state.vision_capture_mouse_blocked = blocked;
                     hook_state.vision_capture_is_region_mode = is_region_mode;
+                    hook_state.vision_capture_completed_region = None;
                     if !blocked {
                         hook_state.vision_capture_anchor = None;
                         hook_state.vision_capture_preview_regions = Vec::new();
@@ -6132,20 +6150,21 @@ mod windows_overlay {
                 break Ok(None);
             }
 
-            let mut point = POINT::default();
-            if unsafe { GetCursorPos(&mut point).is_ok() } {
-                if is_down(0x01) {
+            let completed_region = {
+                let hook_state = HOOK_STATE.lock();
+                hook_state.vision_capture_completed_region
+            };
+            if let Some(region) = completed_region {
+                break Ok(Some(region));
+            }
+
+            if is_down(0x01) {
+                let mut point = POINT::default();
+                if unsafe { GetCursorPos(&mut point).is_ok() } {
                     origin.get_or_insert((point.x, point.y));
-                } else if let Some(start) = origin {
-                    let x = start.0.min(point.x);
-                    let y = start.1.min(point.y);
-                    let width = (start.0 - point.x).abs();
-                    let height = (start.1 - point.y).abs();
-                    if width >= 2 && height >= 2 {
-                        break Ok(Some((x, y, width, height)));
-                    }
-                    break Ok(None);
                 }
+            } else if origin.is_some() {
+                break Ok(None);
             }
 
             thread::sleep(Duration::from_millis(8));
