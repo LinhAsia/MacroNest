@@ -202,6 +202,7 @@ mod windows_overlay {
     const WMAPP_PROCESS_QUEUE: u32 = WM_APP + 2;
     const WMAPP_WINDOW_FOCUS_CHANGED: u32 = WM_APP + 3;
     const WMAPP_WINDOW_LOCATION_CHANGED: u32 = WM_APP + 4;
+    const WMAPP_SCREEN_DRAW_SYNC: u32 = WM_APP + 5;
     const MACRO_PRESET_BASE_ID: i32 = 10000;
     const FOCUS_TRIGGER_TIMER_ID: usize = 2;
     const SCREEN_DRAW_TIMER_ID: usize = 3;
@@ -2537,6 +2538,10 @@ mod windows_overlay {
                     return LRESULT(0);
                 }
                 DefWindowProcW(hwnd, msg, _wparam, _lparam)
+            }
+            WMAPP_SCREEN_DRAW_SYNC => {
+                let _ = sync_screen_draw_overlay_window(hwnd);
+                LRESULT(0)
             }
             windows::Win32::UI::WindowsAndMessaging::WM_PAINT => {
                 let mut paint = PAINTSTRUCT::default();
@@ -5052,8 +5057,7 @@ mod windows_overlay {
             return false;
         }
 
-        let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
-        if hwnd_raw == 0 {
+        if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
             return true;
         }
 
@@ -5064,10 +5068,8 @@ mod windows_overlay {
             return !pass_trigger_through;
         }
 
-        unsafe {
-            let hwnd = HWND(hwnd_raw as *mut c_void);
-            toggle_screen_draw_overlay(hwnd);
-        }
+        toggle_screen_draw_state();
+        request_screen_draw_overlay_sync();
         !pass_trigger_through
     }
 
@@ -5842,48 +5844,59 @@ mod windows_overlay {
     }
 
     fn refresh_screen_draw_overlay(runtime: &mut Runtime) -> Result<()> {
-        let state = SCREEN_DRAW_STATE.lock();
-        let active = state.active;
-        drop(state);
-        if active {
-            unsafe { paint_screen_draw_overlay(runtime.screen_draw_hwnd) }
+        unsafe { sync_screen_draw_overlay_window(runtime.screen_draw_hwnd) }
+    }
+
+    fn toggle_screen_draw_state() {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if !state.enabled {
+            return;
+        }
+        if state.active {
+            deactivate_screen_draw(&mut state);
         } else {
-            let _ = unsafe { ShowWindow(runtime.screen_draw_hwnd, SW_HIDE) };
-            Ok(())
+            state.active = true;
+            state.capturing_region = false;
+            state.capture_trigger = None;
+            state.current_stroke = None;
+            state.active_control = ScreenDrawControl::None;
+            state.pending_repaint = true;
+            state.dirty_rect = Some(ScreenDrawDirtyRect::full(
+                state.canvas_width.max(1),
+                state.canvas_height.max(1),
+            ));
+            state.live_stroke_rect = None;
         }
     }
 
-    unsafe fn toggle_screen_draw_overlay(hwnd: HWND) {
-        let active = {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            if !state.enabled {
-                return;
-            }
-            if state.active {
-                deactivate_screen_draw(&mut state);
-            } else {
-                state.active = true;
-                state.capturing_region = false;
-                state.capture_trigger = None;
-                state.current_stroke = None;
-                state.active_control = ScreenDrawControl::None;
-                state.pending_repaint = true;
-                state.dirty_rect = Some(ScreenDrawDirtyRect::full(
-                    state.canvas_width.max(1),
-                    state.canvas_height.max(1),
-                ));
-                state.live_stroke_rect = None;
-            }
-            state.active
-        };
+    fn request_screen_draw_overlay_sync() {
+        let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
+        if hwnd_raw == 0 {
+            return;
+        }
+        unsafe {
+            let _ = PostMessageW(
+                Some(HWND(hwnd_raw as *mut c_void)),
+                WMAPP_SCREEN_DRAW_SYNC,
+                WPARAM(0),
+                LPARAM(0),
+            );
+        }
+    }
 
+    unsafe fn sync_screen_draw_overlay_window(hwnd: HWND) -> Result<()> {
+        let (active, interactive) = {
+            let state = SCREEN_DRAW_STATE.lock();
+            (state.active, state.active && !state.capturing_region)
+        };
         if active {
-            set_screen_draw_refresh_timer(hwnd, true);
-            let _ = paint_screen_draw_overlay(hwnd);
+            set_screen_draw_refresh_timer(hwnd, interactive);
+            paint_screen_draw_overlay(hwnd)
         } else {
             set_screen_draw_refresh_timer(hwnd, false);
             let _ = clear_screen_draw_overlay_window(hwnd);
             let _ = ShowWindow(hwnd, SW_HIDE);
+            Ok(())
         }
     }
 
@@ -5998,16 +6011,11 @@ mod windows_overlay {
         state.capturing_region = false;
         state.capture_trigger = None;
         state.strokes.clear();
-        state.canvas_width = 0;
-        state.canvas_height = 0;
-        state.committed_rgba.clear();
-        state.frame_rgba.clear();
         state.committed_dirty = true;
         state.pending_repaint = false;
         state.last_present_at = None;
         state.dirty_rect = None;
         state.live_stroke_rect = None;
-        release_screen_draw_surface(state);
     }
 
     fn release_screen_draw_surface(state: &mut ScreenDrawState) {
@@ -6154,13 +6162,7 @@ mod windows_overlay {
         }
         drop(state);
         if let Some(capture_mode) = capture_mode {
-            let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
-            if hwnd_raw != 0 {
-                unsafe {
-                    let hwnd = HWND(hwnd_raw as *mut c_void);
-                    let _ = paint_screen_draw_overlay(hwnd);
-                }
-            }
+            request_screen_draw_overlay_sync();
             begin_screen_draw_region_capture(capture_mode, capture_session_id);
         }
         true
@@ -6186,13 +6188,7 @@ mod windows_overlay {
             return;
         }
 
-        let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
-        if hwnd_raw != 0 {
-            unsafe {
-                let hwnd = HWND(hwnd_raw as *mut c_void);
-                let _ = paint_screen_draw_overlay(hwnd);
-            }
-        }
+        request_screen_draw_overlay_sync();
         begin_screen_draw_region_capture(ScreenDrawCaptureMode::HoldTrigger(trigger), session_id);
     }
 
@@ -6377,7 +6373,6 @@ mod windows_overlay {
     ) -> Result<window_list::ScreenCaptureFrame> {
         let (capture_x, capture_y, capture_w, capture_h) =
             normalize_screen_draw_capture_region(x, y, width, height)?;
-        thread::sleep(Duration::from_millis(16));
         let mut capture = window_list::capture_virtual_screen_region(
             capture_x,
             capture_y,
@@ -6385,13 +6380,13 @@ mod windows_overlay {
             capture_h,
         )
         .ok_or_else(|| anyhow::anyhow!("Failed to capture the selected screen region"))?;
-        let draw_layer = build_screen_draw_capture_region_layer(
+        blend_screen_draw_capture_region_onto_capture(
+            capture.rgba.as_mut_slice(),
             capture_x,
             capture_y,
             capture.width as i32,
             capture.height as i32,
         )?;
-        blend_screen_draw_layer_onto_capture(capture.rgba.as_mut_slice(), draw_layer.as_slice());
         Ok(capture)
     }
 
@@ -6419,12 +6414,13 @@ mod windows_overlay {
         Ok((capture_x, capture_y, capture_w, capture_h))
     }
 
-    fn build_screen_draw_capture_region_layer(
+    fn blend_screen_draw_capture_region_onto_capture(
+        dst: &mut [u8],
         capture_x: i32,
         capture_y: i32,
         capture_w: i32,
         capture_h: i32,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<()> {
         let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
         if screen_w <= 0 || screen_h <= 0 {
             bail!("Virtual screen is unavailable");
@@ -6450,35 +6446,30 @@ mod windows_overlay {
             bail!("Selected capture region is empty");
         }
 
-        let mut rgba = vec![0u8; copy_w * copy_h * 4];
         for row in 0..copy_h {
             let src_index = ((rel_y + row) * canvas_width + rel_x) * 4;
-            let dst_index = row * copy_w * 4;
-            let byte_count = copy_w * 4;
-            rgba[dst_index..dst_index + byte_count]
-                .copy_from_slice(&state.committed_rgba[src_index..src_index + byte_count]);
-        }
-
-        Ok(rgba)
-    }
-
-    fn blend_screen_draw_layer_onto_capture(dst: &mut [u8], src: &[u8]) {
-        let pixel_count = (dst.len() / 4).min(src.len() / 4);
-        for index in 0..pixel_count {
-            let offset = index * 4;
-            let src_a = src[offset + 3];
-            if src_a == 0 {
-                continue;
+            let dst_row_index = row * copy_w * 4;
+            for col in 0..copy_w {
+                let src_offset = src_index + col * 4;
+                let dst_offset = dst_row_index + col * 4;
+                if dst_offset + 4 > dst.len() {
+                    break;
+                }
+                let src_a = state.committed_rgba[src_offset + 3];
+                if src_a == 0 {
+                    continue;
+                }
+                blend_premultiplied_rgba(
+                    &mut dst[dst_offset..dst_offset + 4],
+                    state.committed_rgba[src_offset],
+                    state.committed_rgba[src_offset + 1],
+                    state.committed_rgba[src_offset + 2],
+                    src_a,
+                );
+                dst[dst_offset + 3] = 255;
             }
-            blend_premultiplied_rgba(
-                &mut dst[offset..offset + 4],
-                src[offset],
-                src[offset + 1],
-                src[offset + 2],
-                src_a,
-            );
-            dst[offset + 3] = 255;
         }
+        Ok(())
     }
 
     fn copy_screen_draw_capture_to_clipboard(
@@ -6508,22 +6499,8 @@ mod windows_overlay {
             mark_screen_draw_dirty(&mut state, toolbar_rect);
         }
         drop(state);
-
-        if hwnd_raw == 0 {
-            return;
-        }
-
-        unsafe {
-            let hwnd = HWND(hwnd_raw as *mut c_void);
-            if active {
-                set_screen_draw_refresh_timer(hwnd, true);
-                let _ = paint_screen_draw_overlay(hwnd);
-            } else {
-                set_screen_draw_refresh_timer(hwnd, false);
-                let _ = clear_screen_draw_overlay_window(hwnd);
-                let _ = ShowWindow(hwnd, SW_HIDE);
-            }
-        }
+        let _ = hwnd_raw;
+        request_screen_draw_overlay_sync();
     }
 
     fn screen_draw_handle_move(point: POINT) -> bool {
@@ -6659,15 +6636,8 @@ mod windows_overlay {
             _ => (false, false),
         };
         if handled || repaint {
-            let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
-            if hwnd_raw != 0 {
-                let hwnd = HWND(hwnd_raw as *mut c_void);
-                unsafe {
-                    set_screen_draw_refresh_timer(hwnd, screen_draw_active());
-                    if message != WM_MOUSEMOVE || screen_draw_should_present_immediately() {
-                        let _ = paint_screen_draw_overlay(hwnd);
-                    }
-                }
+            if message != WM_MOUSEMOVE || screen_draw_should_present_immediately() {
+                request_screen_draw_overlay_sync();
             }
         }
         handled
