@@ -664,11 +664,8 @@ pub struct CrosshairApp {
     capture_target: Option<CaptureRequest>,
     startup_clip_duration_ms: Option<u64>,
     exit_clip_duration_ms: Option<u64>,
-    startup_sound_played: bool,
     show_startup_audio_editor: bool,
     show_exit_audio_editor: bool,
-    startup_sound_collapsed: bool,
-    exit_sound_collapsed: bool,
     audio_waveforms: HashMap<String, Vec<f32>>,
     sound_preset_clip_duration_ms: HashMap<u32, Option<u64>>,
     video_preset_clip_duration_ms: HashMap<u32, Option<u64>>,
@@ -894,11 +891,8 @@ impl CrosshairApp {
             capture_target: None,
             startup_clip_duration_ms: None,
             exit_clip_duration_ms: None,
-            startup_sound_played: false,
             show_startup_audio_editor: false,
             show_exit_audio_editor: false,
-            startup_sound_collapsed: true,
-            exit_sound_collapsed: true,
             audio_waveforms: HashMap::new(),
             sound_preset_clip_duration_ms: HashMap::new(),
             video_preset_clip_duration_ms: HashMap::new(),
@@ -1859,14 +1853,6 @@ impl CrosshairApp {
         }
     }
 
-    fn reload_open_windows(&mut self) {
-        self.schedule_open_windows_refresh(Some("Reloaded open window list.".to_owned()));
-    }
-
-    fn refresh_open_windows_now(&mut self) {
-        self.schedule_open_windows_refresh(None);
-    }
-
     fn active_panel_needs_open_windows(panel: AppPanel) -> bool {
         matches!(
             panel,
@@ -1904,17 +1890,6 @@ impl CrosshairApp {
 
     fn panel_is_warmed(&self, panel: AppPanel) -> bool {
         self.warmed_panels.contains(&panel)
-    }
-
-    fn begin_panel_warmup(&mut self, panel: AppPanel) {
-        if self.panel_is_warmed(panel) {
-            return;
-        }
-        if self.panel_warmup_target == Some(panel) && self.panel_warmup_frames_remaining > 0 {
-            return;
-        }
-        self.panel_warmup_target = Some(panel);
-        self.panel_warmup_frames_remaining = 1;
     }
 
     fn panel_loading_shell_active(&self, panel: AppPanel) -> bool {
@@ -2036,16 +2011,6 @@ impl CrosshairApp {
     #[cfg(not(windows))]
     fn current_screen_cursor_pos() -> Option<(i32, i32)> {
         None
-    }
-
-    fn play_startup_sound_once(&mut self) {
-        if self.startup_sound_played {
-            return;
-        }
-        self.startup_sound_played = true;
-        if self.state.audio_settings.startup.enabled {
-            audio::play_clip_async(self.state.audio_settings.startup.clone());
-        }
     }
 
     fn open_audio_editor(&mut self, target: AudioEditorTarget) {
@@ -3569,34 +3534,6 @@ impl CrosshairApp {
         option_env!("MACRONEST_BUILD_TAG").unwrap_or(env!("CARGO_PKG_VERSION"))
     }
 
-    fn app_brand_subtitle(&self) -> &'static str {
-        match self.state.ui_language {
-            UiLanguage::English => "Macro control, pin, settings, sound, and window tools",
-            UiLanguage::Vietnamese => self.tr(
-                "Macro control, pin, settings, sound, and window tools",
-                "Macro control, pin, settings, sound, and window tools",
-            ),
-            UiLanguage::Icon => "Macro control, pin, settings, sound, and window tools",
-        }
-    }
-
-    fn panel_icon(panel: AppPanel) -> u32 {
-        match panel {
-            AppPanel::Crosshair => 0xe3dc,
-            AppPanel::WindowPresets => 0xe8f0,
-            AppPanel::Pin | AppPanel::Zoom => 0xe55f,
-            AppPanel::Mouse => 0xe323,
-            AppPanel::Vision => 0xe8b6,
-            AppPanel::AudioSense => 0xe050,
-            AppPanel::Macros | AppPanel::Modes => 0xe312,
-            AppPanel::Commands => 0xe32a,
-            AppPanel::Sound | AppPanel::Media => 0xe050,
-            AppPanel::Hud => 0xe8b8,
-            AppPanel::Ocr => 0xe8b6,
-            AppPanel::Geometry => 0xe158,
-        }
-    }
-
     fn panel_label(&self, panel: AppPanel) -> &'static str {
         let english = match panel {
             AppPanel::Crosshair => "Crosshair",
@@ -3692,21 +3629,6 @@ impl CrosshairApp {
         } else {
             self.tr("Maximize", "Phóng to")
         }
-    }
-
-    fn capture_hint_text(&self) -> String {
-        if matches!(
-            self.capture_target,
-            Some(CaptureRequest::MacroPresetHotkey(_, _))
-        ) && let Some(pending) = self.capture_hotkey_combo_keys.as_ref()
-        {
-            return self.capture_combo_status_text(pending);
-        }
-        self.tr(
-            "Capture mode is active. Hold your combo, then release to save. Press Esc to cancel.",
-            "Đang ở chế độ bắt phím. Giữ combo rồi thả tay để lưu. Nhấn Esc để hủy.",
-        )
-        .to_owned()
     }
 
     fn titlebar_button(&self, text: RichText, active: bool, danger: bool) -> Button<'static> {
