@@ -5780,15 +5780,9 @@ mod windows_overlay {
     fn refresh_screen_draw_overlay(runtime: &mut Runtime) -> Result<()> {
         let state = SCREEN_DRAW_STATE.lock();
         let active = state.active;
-        let capturing_region = state.capturing_region;
         drop(state);
         if active {
-            if capturing_region {
-                let _ = unsafe { ShowWindow(runtime.screen_draw_hwnd, SW_HIDE) };
-                Ok(())
-            } else {
-                unsafe { paint_screen_draw_overlay(runtime.screen_draw_hwnd) }
-            }
+            unsafe { paint_screen_draw_overlay(runtime.screen_draw_hwnd) }
         } else {
             let _ = unsafe { ShowWindow(runtime.screen_draw_hwnd, SW_HIDE) };
             Ok(())
@@ -6094,9 +6088,7 @@ mod windows_overlay {
             if hwnd_raw != 0 {
                 unsafe {
                     let hwnd = HWND(hwnd_raw as *mut c_void);
-                    set_screen_draw_refresh_timer(hwnd, false);
-                    let _ = clear_screen_draw_overlay_window(hwnd);
-                    let _ = ShowWindow(hwnd, SW_HIDE);
+                    let _ = paint_screen_draw_overlay(hwnd);
                 }
             }
             begin_screen_draw_region_capture();
@@ -6179,6 +6171,7 @@ mod windows_overlay {
         hook_state.vision_capture_mouse_blocked = blocked;
         hook_state.vision_capture_is_region_mode = blocked;
         hook_state.vision_capture_anchor = None;
+        hook_state.vision_capture_completed_region = None;
         hook_state.vision_capture_preview_regions = Vec::new();
         hook_state.vision_preview_source = None;
         drop(hook_state);
@@ -6797,7 +6790,7 @@ mod windows_overlay {
             return Ok(());
         }
         let mut state_guard = SCREEN_DRAW_STATE.lock();
-        if !state_guard.active || state_guard.capturing_region {
+        if !state_guard.active {
             let _ = ShowWindow(hwnd, SW_HIDE);
             return Ok(());
         }
@@ -6843,18 +6836,21 @@ mod windows_overlay {
         let toolbar_eraser = state_guard.eraser;
         let toolbar_smoothing = state_guard.smoothing;
         let toolbar_smoothing_amount = state_guard.smoothing_amount;
-        draw_screen_draw_toolbar_rgba(
-            state_guard.frame_rgba.as_mut_slice(),
-            width,
-            height,
-            toolbar_x,
-            toolbar_y,
-            toolbar_color,
-            toolbar_brush_size,
-            toolbar_eraser,
-            toolbar_smoothing,
-            toolbar_smoothing_amount,
-        );
+        let capturing_region = state_guard.capturing_region;
+        if !capturing_region {
+            draw_screen_draw_toolbar_rgba(
+                state_guard.frame_rgba.as_mut_slice(),
+                width,
+                height,
+                toolbar_x,
+                toolbar_y,
+                toolbar_color,
+                toolbar_brush_size,
+                toolbar_eraser,
+                toolbar_smoothing,
+                toolbar_smoothing_amount,
+            );
+        }
 
         let _ = SetWindowPos(
             hwnd,
