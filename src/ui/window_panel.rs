@@ -140,7 +140,11 @@ impl CrosshairApp {
                                     };
 
                                     let hover_text = if capture_active {
-                                        Self::tr_lang(language, "Capturing... Press any key.", "Capturing... Press any key.")
+                                        Self::tr_lang(
+                                            language,
+                                            "Capturing... Press any key.",
+                                            "Capturing... Press any key.",
+                                        )
                                         .to_string()
                                     } else if has_keys {
                                         let bindings_labels: Vec<String> =
@@ -155,15 +159,27 @@ impl CrosshairApp {
                                             "{} {}\n{}",
                                             Self::tr_lang(language, "Hotkey:", "Hotkey:"),
                                             bindings_labels.join(", "),
-                                            Self::tr_lang(language, "Left click: rebind | Right click: clear", "Left click: rebind | Right click: clear")
+                                            Self::tr_lang(
+                                                language,
+                                                "Left click: rebind | Right click: clear",
+                                                "Left click: rebind | Right click: clear"
+                                            )
                                         )
                                     } else {
-                                        Self::tr_lang(language, "Left click: bind hotkey", "Left click: bind hotkey")
+                                        Self::tr_lang(
+                                            language,
+                                            "Left click: bind hotkey",
+                                            "Left click: bind hotkey",
+                                        )
                                         .to_string()
                                     };
 
                                     let btn_text = if capture_active {
-                                        RichText::new(Self::tr_lang(language, "Capturing...", "Capturing..."))
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "Capturing...",
+                                            "Capturing...",
+                                        ))
                                         .strong()
                                         .color(Color32::from_rgb(255, 232, 96))
                                     } else {
@@ -203,7 +219,11 @@ impl CrosshairApp {
                                         ui,
                                         Self::material_icon_text(0xe037, 18.0),
                                     )
-                                    .on_hover_text(Self::tr_lang(language, "Run this resize preset now", "Run this resize preset now"));
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Run this resize preset now",
+                                        "Run this resize preset now",
+                                    ));
                                     if run_response.clicked() {
                                         run_resize_now = true;
                                     }
@@ -284,17 +304,25 @@ impl CrosshairApp {
 
                             ui.label(Self::tr_lang(language, "Title", "Title"));
                             live_sync |= ui
-                                .checkbox(&mut preset.remove_title_bar, Self::tr_lang(language, "Remove bar", "Remove bar"))
-                                .on_hover_text(
-                                    Self::tr_lang(language, "Remove title bar before apply. Off restores it.", "Remove title bar before apply. Off restores it."),
+                                .checkbox(
+                                    &mut preset.remove_title_bar,
+                                    Self::tr_lang(language, "Remove bar", "Remove bar"),
                                 )
+                                .on_hover_text(Self::tr_lang(
+                                    language,
+                                    "Remove title bar before apply. Off restores it.",
+                                    "Remove title bar before apply. Off restores it.",
+                                ))
                                 .changed();
                             ui.end_row();
 
                             ui.label(Self::tr_lang(language, "Animated Apply", "Animated Apply"));
                             ui.horizontal_wrapped(|ui| {
                                 live_sync |= ui
-                                    .checkbox(&mut preset.animate_enabled, Self::tr_lang(language, "Enabled", "Enabled"))
+                                    .checkbox(
+                                        &mut preset.animate_enabled,
+                                        Self::tr_lang(language, "Enabled", "Enabled"),
+                                    )
                                     .changed();
                                 if preset.animate_enabled {
                                     ui.label(Self::tr_lang(language, "Duration", "Duration"));
@@ -325,7 +353,14 @@ impl CrosshairApp {
                             ui.label(Self::tr_lang(language, "Preview", "Preview"));
                             ui.horizontal_wrapped(|ui| {
                                 live_sync |= ui
-                                    .checkbox(&mut preset.preview_enabled, Self::tr_lang(language, "Stream preview in editor", "Stream preview in editor"))
+                                    .checkbox(
+                                        &mut preset.preview_enabled,
+                                        Self::tr_lang(
+                                            language,
+                                            "Stream preview in editor",
+                                            "Stream preview in editor",
+                                        ),
+                                    )
                                     .changed();
                             });
                             ui.end_row();
@@ -599,7 +634,11 @@ impl CrosshairApp {
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             if ui
-                .button(Self::tr_lang(language, "+ Add pin preset", "+ Add pin preset"))
+                .button(Self::tr_lang(
+                    language,
+                    "+ Add pin preset",
+                    "+ Add pin preset",
+                ))
                 .clicked()
             {
                 self.add_pin_preset();
@@ -704,7 +743,11 @@ impl CrosshairApp {
                         };
 
                         let hover_text = if capture_active {
-                            Self::tr_lang(language, "Capturing... Press any key.", "Capturing... Press any key.")
+                            Self::tr_lang(
+                                language,
+                                "Capturing... Press any key.",
+                                "Capturing... Press any key.",
+                            )
                             .to_string()
                         } else if has_keys {
                             let bindings_labels: Vec<String> =
@@ -716,10 +759,18 @@ impl CrosshairApp {
                                 "{} {}\n{}",
                                 Self::tr_lang(language, "Hotkey:", "Hotkey:"),
                                 bindings_labels.join(", "),
-                                Self::tr_lang(language, "Left click: rebind | Right click: clear", "Left click: rebind | Right click: clear")
+                                Self::tr_lang(
+                                    language,
+                                    "Left click: rebind | Right click: clear",
+                                    "Left click: rebind | Right click: clear"
+                                )
                             )
                         } else {
-                            Self::tr_lang(language, "Left click: bind hotkey", "Left click: bind hotkey")
+                            Self::tr_lang(
+                                language,
+                                "Left click: bind hotkey",
+                                "Left click: bind hotkey",
+                            )
                             .to_string()
                         };
 
@@ -768,7 +819,11 @@ impl CrosshairApp {
                         .on_hover_text(if pin_active {
                             Self::tr_lang(language, "Stop this pin preset", "Stop this pin preset")
                         } else {
-                            Self::tr_lang(language, "Run this pin preset now", "Run this pin preset now")
+                            Self::tr_lang(
+                                language,
+                                "Run this pin preset now",
+                                "Run this pin preset now",
+                            )
                         });
                         if run_response.clicked() {
                             toggle_pin_now = true;
@@ -824,7 +879,11 @@ impl CrosshairApp {
                         live_sync |= ui
                             .checkbox(
                                 &mut preset.preview_enabled,
-                                Self::tr_lang(language, "Stream preview in editor", "Stream preview in editor"),
+                                Self::tr_lang(
+                                    language,
+                                    "Stream preview in editor",
+                                    "Stream preview in editor",
+                                ),
                             )
                             .changed();
                         ui.end_row();
@@ -844,20 +903,73 @@ impl CrosshairApp {
                         ui.end_row();
 
                         if preset.binary_filter {
+                            ui.label(Self::tr_lang(language, "Output Filter", "Output Filter"));
+                            let hide_black_changed = ui
+                                .checkbox(
+                                    &mut preset.binary_transparent_black,
+                                    Self::tr_lang(
+                                        language,
+                                        "Hide black pixels",
+                                        "Hide black pixels",
+                                    ),
+                                )
+                                .changed();
+                            if hide_black_changed && preset.binary_transparent_black {
+                                preset.binary_transparent_white = false;
+                            }
+                            let hide_white_changed = ui
+                                .checkbox(
+                                    &mut preset.binary_transparent_white,
+                                    Self::tr_lang(
+                                        language,
+                                        "Hide white pixels",
+                                        "Hide white pixels",
+                                    ),
+                                )
+                                .changed();
+                            if hide_white_changed && preset.binary_transparent_white {
+                                preset.binary_transparent_black = false;
+                            }
+                            live_sync |= hide_black_changed || hide_white_changed;
+                            ui.end_row();
+
                             ui.label(Self::tr_lang(language, "Binarize Mode", "Binarize Mode"));
-                            let mode_changed = egui::ComboBox::from_id_salt((preset.id, "bin-mode"))
-                                .selected_text(match preset.binary_mode {
-                                    PinBinaryMode::Grayscale => Self::tr_lang(language, "Grayscale", "Grayscale"),
-                                    PinBinaryMode::ColorSimilarity => Self::tr_lang(language, "Color Similarity", "Color Similarity"),
-                                })
-                                .show_ui(ui, |ui| {
-                                    let mut m_changed = false;
-                                    m_changed |= ui.selectable_value(&mut preset.binary_mode, PinBinaryMode::Grayscale, Self::tr_lang(language, "Grayscale", "Grayscale")).clicked();
-                                    m_changed |= ui.selectable_value(&mut preset.binary_mode, PinBinaryMode::ColorSimilarity, Self::tr_lang(language, "Color Similarity", "Color Similarity")).clicked();
-                                    m_changed
-                                })
-                                .inner
-                                .unwrap_or(false);
+                            let mode_changed =
+                                egui::ComboBox::from_id_salt((preset.id, "bin-mode"))
+                                    .selected_text(match preset.binary_mode {
+                                        PinBinaryMode::Grayscale => {
+                                            Self::tr_lang(language, "Grayscale", "Grayscale")
+                                        }
+                                        PinBinaryMode::ColorSimilarity => Self::tr_lang(
+                                            language,
+                                            "Color Similarity",
+                                            "Color Similarity",
+                                        ),
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        let mut m_changed = false;
+                                        m_changed |= ui
+                                            .selectable_value(
+                                                &mut preset.binary_mode,
+                                                PinBinaryMode::Grayscale,
+                                                Self::tr_lang(language, "Grayscale", "Grayscale"),
+                                            )
+                                            .clicked();
+                                        m_changed |= ui
+                                            .selectable_value(
+                                                &mut preset.binary_mode,
+                                                PinBinaryMode::ColorSimilarity,
+                                                Self::tr_lang(
+                                                    language,
+                                                    "Color Similarity",
+                                                    "Color Similarity",
+                                                ),
+                                            )
+                                            .clicked();
+                                        m_changed
+                                    })
+                                    .inner
+                                    .unwrap_or(false);
                             live_sync |= mode_changed;
                             ui.end_row();
 
@@ -865,12 +977,19 @@ impl CrosshairApp {
                                 PinBinaryMode::Grayscale => {
                                     ui.label(Self::tr_lang(language, "Threshold", "Threshold"));
                                     live_sync |= ui
-                                        .add(egui::Slider::new(&mut preset.binary_threshold, 0..=255))
+                                        .add(egui::Slider::new(
+                                            &mut preset.binary_threshold,
+                                            0..=255,
+                                        ))
                                         .changed();
                                     ui.end_row();
                                 }
                                 PinBinaryMode::ColorSimilarity => {
-                                    ui.label(Self::tr_lang(language, "Target Color", "Target Color"));
+                                    ui.label(Self::tr_lang(
+                                        language,
+                                        "Target Color",
+                                        "Target Color",
+                                    ));
                                     ui.vertical(|ui| {
                                         let colors = preset.binary_target_colors();
                                         if colors.is_empty() {
@@ -882,8 +1001,12 @@ impl CrosshairApp {
                                                 .min_col_width(0.0)
                                                 .spacing([ui.spacing().item_spacing.x, 4.0])
                                                 .show(ui, |ui| {
-                                                    for (index, color) in colors.iter().copied().enumerate() {
-                                                        if Self::image_search_color_tile(ui, color).clicked() {
+                                                    for (index, color) in
+                                                        colors.iter().copied().enumerate()
+                                                    {
+                                                        if Self::image_search_color_tile(ui, color)
+                                                            .clicked()
+                                                        {
                                                             remove_color_index = Some(index);
                                                         }
                                                         if (index + 1) % 8 == 0 {
@@ -900,12 +1023,16 @@ impl CrosshairApp {
 
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
-                                            if Self::image_search_add_color_button(ui, language).clicked() {
+                                            if Self::image_search_add_color_button(ui, language)
+                                                .clicked()
+                                            {
                                                 begin_color_picker_preset_id = Some(preset.id);
                                             }
 
-                                            let popup_id =
-                                                ui.make_persistent_id((preset.id, "pin-manual-color-popup"));
+                                            let popup_id = ui.make_persistent_id((
+                                                preset.id,
+                                                "pin-manual-color-popup",
+                                            ));
                                             let mut popup_open = ui
                                                 .ctx()
                                                 .data(|data| data.get_temp::<bool>(popup_id))
@@ -914,9 +1041,15 @@ impl CrosshairApp {
                                             let manual_button = ui
                                                 .add_sized(
                                                     [24.0, 21.0],
-                                                    Button::new(Self::material_icon_text(0xe40a, 18.0)),
+                                                    Button::new(Self::material_icon_text(
+                                                        0xe40a, 18.0,
+                                                    )),
                                                 )
-                                                .on_hover_text(Self::tr_lang(language, "Manual color input", "Manual color input"));
+                                                .on_hover_text(Self::tr_lang(
+                                                    language,
+                                                    "Manual color input",
+                                                    "Manual color input",
+                                                ));
 
                                             if manual_button.clicked() {
                                                 popup_open = true;
@@ -924,90 +1057,115 @@ impl CrosshairApp {
 
                                             let mut added_color = false;
 
-                                            let popup_response = egui::Popup::from_response(&manual_button)
-                                                .id(popup_id)
-                                                .open_bool(&mut popup_open)
-                                                .align(egui::RectAlign::BOTTOM_START)
-                                                .layout(egui::Layout::top_down_justified(egui::Align::Min))
-                                                .width(220.0)
-                                                .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                                                .show(|ui| {
-                                                    ui.set_min_width(220.0);
-                                                    ui.label(Self::tr_lang(language, "Manual color", "Manual color"));
-                                                    ui.separator();
+                                            let popup_response =
+                                                egui::Popup::from_response(&manual_button)
+                                                    .id(popup_id)
+                                                    .open_bool(&mut popup_open)
+                                                    .align(egui::RectAlign::BOTTOM_START)
+                                                    .layout(egui::Layout::top_down_justified(
+                                                        egui::Align::Min,
+                                                    ))
+                                                    .width(220.0)
+                                                    .close_behavior(
+                                                        egui::PopupCloseBehavior::IgnoreClicks,
+                                                    )
+                                                    .show(|ui| {
+                                                        ui.set_min_width(220.0);
+                                                        ui.label(Self::tr_lang(
+                                                            language,
+                                                            "Manual color",
+                                                            "Manual color",
+                                                        ));
+                                                        ui.separator();
 
-                                                    let mut color32 = Color32::from_rgba_unmultiplied(
-                                                        self.vision_manual_color.r,
-                                                        self.vision_manual_color.g,
-                                                        self.vision_manual_color.b,
-                                                        self.vision_manual_color.a,
-                                                    );
-                                                    if egui::color_picker::color_picker_color32(
-                                                        ui,
-                                                        &mut color32,
-                                                        egui::color_picker::Alpha::Opaque,
-                                                    ) {
-                                                        self.vision_manual_color.r = color32.r();
-                                                        self.vision_manual_color.g = color32.g();
-                                                        self.vision_manual_color.b = color32.b();
-                                                        self.vision_manual_color.a = color32.a();
-                                                        self.vision_manual_color_hex = format!(
-                                                            "{:02X}{:02X}{:02X}",
-                                                            self.vision_manual_color.r,
-                                                            self.vision_manual_color.g,
-                                                            self.vision_manual_color.b
-                                                        );
-                                                    }
+                                                        let mut color32 =
+                                                            Color32::from_rgba_unmultiplied(
+                                                                self.vision_manual_color.r,
+                                                                self.vision_manual_color.g,
+                                                                self.vision_manual_color.b,
+                                                                self.vision_manual_color.a,
+                                                            );
+                                                        if egui::color_picker::color_picker_color32(
+                                                            ui,
+                                                            &mut color32,
+                                                            egui::color_picker::Alpha::Opaque,
+                                                        ) {
+                                                            self.vision_manual_color.r =
+                                                                color32.r();
+                                                            self.vision_manual_color.g =
+                                                                color32.g();
+                                                            self.vision_manual_color.b =
+                                                                color32.b();
+                                                            self.vision_manual_color.a =
+                                                                color32.a();
+                                                            self.vision_manual_color_hex = format!(
+                                                                "{:02X}{:02X}{:02X}",
+                                                                self.vision_manual_color.r,
+                                                                self.vision_manual_color.g,
+                                                                self.vision_manual_color.b
+                                                            );
+                                                        }
 
-                                                    ui.add_space(4.0);
+                                                        ui.add_space(4.0);
 
-                                                    ui.horizontal(|ui| {
-                                                        ui.label("#");
-                                                        let hex_resp = ui.add(
-                                                            TextEdit::singleline(
-                                                                &mut self.vision_manual_color_hex,
-                                                            )
-                                                            .hint_text("RRGGBB"),
-                                                        );
-                                                        if hex_resp.changed() {
-                                                            let hex = self
-                                                                .vision_manual_color_hex
-                                                                .trim()
-                                                                .trim_start_matches('#');
-                                                            if hex.len() == 6
-                                                                && let Ok(color_val) =
-                                                                    u32::from_str_radix(hex, 16)
-                                                            {
-                                                                self.vision_manual_color.r =
-                                                                    ((color_val >> 16) & 0xFF) as u8;
-                                                                self.vision_manual_color.g =
-                                                                    ((color_val >> 8) & 0xFF) as u8;
-                                                                self.vision_manual_color.b =
-                                                                    (color_val & 0xFF) as u8;
+                                                        ui.horizontal(|ui| {
+                                                            ui.label("#");
+                                                            let hex_resp = ui.add(
+                                                                TextEdit::singleline(
+                                                                    &mut self
+                                                                        .vision_manual_color_hex,
+                                                                )
+                                                                .hint_text("RRGGBB"),
+                                                            );
+                                                            if hex_resp.changed() {
+                                                                let hex = self
+                                                                    .vision_manual_color_hex
+                                                                    .trim()
+                                                                    .trim_start_matches('#');
+                                                                if hex.len() == 6
+                                                                    && let Ok(color_val) =
+                                                                        u32::from_str_radix(hex, 16)
+                                                                {
+                                                                    self.vision_manual_color.r =
+                                                                        ((color_val >> 16) & 0xFF)
+                                                                            as u8;
+                                                                    self.vision_manual_color.g =
+                                                                        ((color_val >> 8) & 0xFF)
+                                                                            as u8;
+                                                                    self.vision_manual_color.b =
+                                                                        (color_val & 0xFF) as u8;
+                                                                }
                                                             }
+                                                        });
+
+                                                        ui.add_space(8.0);
+
+                                                        if ui
+                                                            .button(Self::tr_lang(
+                                                                language,
+                                                                "Add color",
+                                                                "Add color",
+                                                            ))
+                                                            .clicked()
+                                                        {
+                                                            added_color = true;
                                                         }
                                                     });
 
-                                                    ui.add_space(8.0);
-
-                                                    if ui
-                                                        .button(Self::tr_lang(language, "Add color", "Add color"))
-                                                        .clicked()
-                                                    {
-                                                        added_color = true;
-                                                    }
-                                                });
-
                                             if added_color {
-                                                preset.add_binary_target_color(self.vision_manual_color);
+                                                preset.add_binary_target_color(
+                                                    self.vision_manual_color,
+                                                );
                                                 live_sync = true;
                                                 popup_open = false;
                                             }
 
                                             if popup_open
-                                                && let Some(pointer_pos) = ui.ctx().pointer_hover_pos()
+                                                && let Some(pointer_pos) =
+                                                    ui.ctx().pointer_hover_pos()
                                             {
-                                                let mut keep_open_rect = manual_button.rect.expand(10.0);
+                                                let mut keep_open_rect =
+                                                    manual_button.rect.expand(10.0);
                                                 if let Some(popup) = &popup_response {
                                                     keep_open_rect = keep_open_rect
                                                         .union(popup.response.rect.expand(10.0));
@@ -1016,14 +1174,19 @@ impl CrosshairApp {
                                                     popup_open = false;
                                                 }
                                             }
-                                            ui.ctx().data_mut(|data| data.insert_temp(popup_id, popup_open));
+                                            ui.ctx().data_mut(|data| {
+                                                data.insert_temp(popup_id, popup_open)
+                                            });
                                         });
                                     });
                                     ui.end_row();
 
                                     ui.label(Self::tr_lang(language, "Tolerance", "Tolerance"));
                                     live_sync |= ui
-                                        .add(egui::Slider::new(&mut preset.binary_threshold, 0..=255))
+                                        .add(egui::Slider::new(
+                                            &mut preset.binary_threshold,
+                                            0..=255,
+                                        ))
                                         .changed();
                                     ui.end_row();
                                 }
@@ -1074,7 +1237,11 @@ impl CrosshairApp {
                     });
                 } else {
                     ui.label(
-                        RichText::new(Self::tr_lang(language, "Pinned view will keep the original window position and size.", "Pinned view will keep the original window position and size."))
+                        RichText::new(Self::tr_lang(
+                            language,
+                            "Pinned view will keep the original window position and size.",
+                            "Pinned view will keep the original window position and size.",
+                        ))
                         .italics(),
                     );
                 }
@@ -1144,7 +1311,11 @@ impl CrosshairApp {
                     live_sync |= crop_changed;
                     ui.horizontal_wrapped(|ui| {
                         if ui
-                            .button(Self::tr_lang(language, "Reset to Full Window", "Reset to Full Window"))
+                            .button(Self::tr_lang(
+                                language,
+                                "Reset to Full Window",
+                                "Reset to Full Window",
+                            ))
                             .clicked()
                         {
                             let mut target_frame = None;
@@ -2908,7 +3079,11 @@ impl CrosshairApp {
                             };
 
                             let hover_text = if capture_active {
-                                Self::tr_lang(language, "Capturing... Press any key.", "Capturing... Press any key.")
+                                Self::tr_lang(
+                                    language,
+                                    "Capturing... Press any key.",
+                                    "Capturing... Press any key.",
+                                )
                                 .to_string()
                             } else if has_keys {
                                 let bindings_labels: Vec<String> = Self::preset_trigger_bindings(
@@ -2922,15 +3097,27 @@ impl CrosshairApp {
                                     "{} {}\n{}",
                                     Self::tr_lang(language, "Hotkey:", "Hotkey:"),
                                     bindings_labels.join(", "),
-                                    Self::tr_lang(language, "Left click: rebind | Right click: clear", "Left click: rebind | Right click: clear")
+                                    Self::tr_lang(
+                                        language,
+                                        "Left click: rebind | Right click: clear",
+                                        "Left click: rebind | Right click: clear"
+                                    )
                                 )
                             } else {
-                                Self::tr_lang(language, "Left click: bind hotkey", "Left click: bind hotkey")
+                                Self::tr_lang(
+                                    language,
+                                    "Left click: bind hotkey",
+                                    "Left click: bind hotkey",
+                                )
                                 .to_string()
                             };
 
                             let btn_text = if capture_active {
-                                RichText::new(Self::tr_lang(language, "Capturing...", "Capturing..."))
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Capturing...",
+                                    "Capturing...",
+                                ))
                                 .strong()
                                 .color(Color32::from_rgb(255, 232, 96))
                             } else {
@@ -2967,7 +3154,11 @@ impl CrosshairApp {
                                 ui,
                                 Self::material_icon_text(0xe037, 18.0),
                             )
-                            .on_hover_text(Self::tr_lang(language, "Run this layout preset now", "Run this layout preset now"));
+                            .on_hover_text(Self::tr_lang(
+                                language,
+                                "Run this layout preset now",
+                                "Run this layout preset now",
+                            ));
                             if run_response.clicked() {
                                 run_layout_now = true;
                             }
@@ -3009,7 +3200,11 @@ impl CrosshairApp {
                         live_sync |= ui.checkbox(&mut layout.block_taskbar, "").changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Remove title bar", "Remove title bar"));
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Remove title bar",
+                            "Remove title bar",
+                        ));
                         live_sync |= ui.checkbox(&mut layout.remove_title_bar, "").changed();
                         ui.end_row();
 
@@ -3713,7 +3908,11 @@ impl CrosshairApp {
                                     });
                                     ui.end_row();
 
-                                    ui.label(Self::tr_lang(language, "Target Window", "Target Window"));
+                                    ui.label(Self::tr_lang(
+                                        language,
+                                        "Target Window",
+                                        "Target Window",
+                                    ));
                                     let dropdown_changed =
                                         Self::render_multi_window_targets_with_duplicate_mode(
                                             ui,
