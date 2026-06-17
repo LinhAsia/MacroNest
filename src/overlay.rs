@@ -9692,10 +9692,10 @@ mod windows_overlay {
         decoration: crate::model::FocusHighlightDecoration,
     ) -> (i32, u32) {
         match decoration {
-            crate::model::FocusHighlightDecoration::FloralWood => (28, 14),
+            crate::model::FocusHighlightDecoration::FloralWood => (0, 14),
             crate::model::FocusHighlightDecoration::CyberMech => (0, 6),
             crate::model::FocusHighlightDecoration::Plain
-            | crate::model::FocusHighlightDecoration::Rainbow => (5, 4),
+            | crate::model::FocusHighlightDecoration::Rainbow => (0, 4),
         }
     }
 
