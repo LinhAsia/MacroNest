@@ -139,6 +139,7 @@ pub(crate) enum VisionCaptureTarget {
         is_fill: bool,
         is_hold_stop: bool,
     },
+    PinPresetColor(u32),
     QuickActionsCoordinates,
     QuickActionsColor,
     QuickActionsKeyDisplayPosition,

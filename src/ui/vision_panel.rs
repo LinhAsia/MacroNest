@@ -1355,6 +1355,7 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsCoordinates
                 | VisionCaptureTarget::QuickActionsColor
                 | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+                | VisionCaptureTarget::PinPresetColor(_)
         );
         let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
 
@@ -1565,7 +1566,8 @@ impl CrosshairApp {
                         }
                         VisionCaptureTarget::QuickActionsCoordinates
                         | VisionCaptureTarget::QuickActionsColor
-                        | VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
+                        | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+                        | VisionCaptureTarget::PinPresetColor(_) => {
                             self.cancel_image_search_capture(ctx);
                         }
                     }
@@ -1652,7 +1654,8 @@ impl CrosshairApp {
                             };
                         }
                     }
-                    VisionCaptureTarget::QuickActionsColor => {
+                    VisionCaptureTarget::QuickActionsColor
+                    | VisionCaptureTarget::PinPresetColor(_) => {
                         self.finish_image_search_color_pick_from_screen(ctx, screen_x, screen_y);
                     }
                     VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
@@ -1879,6 +1882,9 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
                 Some("Quick Actions Key Display Position".to_owned())
             }
+            VisionCaptureTarget::PinPresetColor(preset_id) => {
+                Some(format!("Pin Preset Color #{preset_id}"))
+            }
         }
     }
 
@@ -1897,6 +1903,7 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsCoordinates => false,
             VisionCaptureTarget::QuickActionsColor => false,
             VisionCaptureTarget::QuickActionsKeyDisplayPosition => false,
+            VisionCaptureTarget::PinPresetColor(_) => false,
         }
     }
 
@@ -1999,8 +2006,9 @@ impl CrosshairApp {
                     ),
                     VisionCaptureTarget::QuickActionsCoordinates
                     | VisionCaptureTarget::QuickActionsColor
-                    | VisionCaptureTarget::QuickActionsKeyDisplayPosition => (
-                        "Quick Actions do not support template captures.".to_owned(),
+                    | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+                    | VisionCaptureTarget::PinPresetColor(_) => (
+                        "Pin presets do not support template captures.".to_owned(),
                         false,
                     ),
                 };
@@ -2076,8 +2084,9 @@ impl CrosshairApp {
                         }
                         VisionCaptureTarget::QuickActionsCoordinates
                         | VisionCaptureTarget::QuickActionsColor
-                        | VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
-                            self.status = "Quick Actions do not support search regions.".to_owned();
+                        | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+                        | VisionCaptureTarget::PinPresetColor(_) => {
+                            self.status = "Pin presets do not support search regions.".to_owned();
                         }
                     }
                 } else {
@@ -2340,6 +2349,21 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsCoordinates => {
                 "Quick Actions Coordinates do not support color picking.".to_owned()
             }
+            VisionCaptureTarget::PinPresetColor(preset_id) => {
+                if let Some(preset) = self
+                    .state
+                    .pin_presets
+                    .iter_mut()
+                    .find(|preset| preset.id == preset_id)
+                {
+                    preset.binary_target_color = color;
+                }
+                self.sync_window_presets();
+                format!(
+                    "Picked target color #{:02X}{:02X}{:02X} for pin preset #{}.",
+                    color.r, color.g, color.b, preset_id
+                )
+            }
             VisionCaptureTarget::QuickActionsColor => {
                 let hex_str = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
                 if self.state.quick_actions_copy_color {
@@ -2401,8 +2425,9 @@ impl CrosshairApp {
             }
             VisionCaptureTarget::QuickActionsCoordinates
             | VisionCaptureTarget::QuickActionsColor
-            | VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
-                "Quick Actions do not support priority anchors.".to_owned()
+            | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+            | VisionCaptureTarget::PinPresetColor(_) => {
+                "Pin presets do not support priority anchors.".to_owned()
             }
         }
     }
@@ -2748,8 +2773,9 @@ impl CrosshairApp {
             }
             VisionCaptureTarget::QuickActionsCoordinates
             | VisionCaptureTarget::QuickActionsColor
-            | VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
-                self.status = "Quick Actions do not support search regions.".to_owned();
+            | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+            | VisionCaptureTarget::PinPresetColor(_) => {
+                self.status = "Pin presets do not support search regions.".to_owned();
             }
         }
         ctx.request_repaint();
@@ -2937,6 +2963,21 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsCoordinates => {
                 "Quick Actions Coordinates do not support color picking.".to_owned()
             }
+            VisionCaptureTarget::PinPresetColor(preset_id) => {
+                if let Some(preset) = self
+                    .state
+                    .pin_presets
+                    .iter_mut()
+                    .find(|preset| preset.id == preset_id)
+                {
+                    preset.binary_target_color = color;
+                }
+                self.sync_window_presets();
+                format!(
+                    "Picked target color #{:02X}{:02X}{:02X} for pin preset #{}.",
+                    color.r, color.g, color.b, preset_id
+                )
+            }
             VisionCaptureTarget::QuickActionsColor => {
                 let hex_str = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
                 if self.state.quick_actions_copy_color {
@@ -3030,8 +3071,9 @@ impl CrosshairApp {
             }
             VisionCaptureTarget::QuickActionsCoordinates
             | VisionCaptureTarget::QuickActionsColor
-            | VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
-                self.status = "Quick Actions do not support priority anchors.".to_owned();
+            | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+            | VisionCaptureTarget::PinPresetColor(_) => {
+                self.status = "Pin presets do not support priority anchors.".to_owned();
             }
         }
         ctx.request_repaint();
