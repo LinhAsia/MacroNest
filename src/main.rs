@@ -12,7 +12,6 @@ mod model;
 mod ocr;
 mod overlay;
 mod platform;
-mod profile_code;
 mod render;
 mod storage;
 mod ui;
