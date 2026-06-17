@@ -6106,43 +6106,64 @@ mod windows_overlay {
     }
 
     fn capture_screen_draw_region_to_clipboard() -> Result<bool> {
-        let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
-        if screen_w <= 0 || screen_h <= 0 {
-            bail!("Virtual screen is unavailable");
+        let Some((x, y, width, height)) = select_screen_draw_capture_region()? else {
+            return Ok(false);
+        };
+        let capture = build_screen_draw_capture_region(x, y, width, height)?;
+        copy_screen_draw_capture_to_clipboard(&capture)?;
+        Ok(true)
+    }
+
+    fn select_screen_draw_capture_region() -> Result<Option<(i32, i32, i32, i32)>> {
+        let is_down = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
+
+        while is_down(0x01) {
+            if is_down(0x1B) {
+                return Ok(None);
+            }
+            thread::sleep(Duration::from_millis(6));
         }
 
-        thread::sleep(Duration::from_millis(16));
-        let selection_frame = window_list::capture_virtual_screen_region(
-            screen_x,
-            screen_y,
-            screen_w,
-            screen_h,
-        )
-        .ok_or_else(|| anyhow::anyhow!("Failed to capture the virtual screen"))?;
-        let result = native_capture::run_capture_overlay(
-            selection_frame,
-            screen_x,
-            screen_y,
-            screen_w,
-            screen_h,
-            native_capture::NativeCaptureMode::RegionSelect {
-                is_template: false,
-                vietnamese: false,
-            },
-        );
-        match result {
-            native_capture::NativeCaptureResult::SelectedRegion {
-                x,
-                y,
-                width,
-                height,
-            } => {
-                let capture = build_screen_draw_capture_region(x, y, width, height)?;
-                copy_screen_draw_capture_to_clipboard(&capture)?;
-                Ok(true)
+        set_screen_draw_region_capture_mouse_blocked(true);
+
+        let mut origin: Option<(i32, i32)> = None;
+        let result = loop {
+            if is_down(0x1B) || is_down(0x02) {
+                break Ok(None);
             }
-            _ => Ok(false),
-        }
+
+            let mut point = POINT::default();
+            if unsafe { GetCursorPos(&mut point).is_ok() } {
+                if is_down(0x01) {
+                    origin.get_or_insert((point.x, point.y));
+                } else if let Some(start) = origin {
+                    let x = start.0.min(point.x);
+                    let y = start.1.min(point.y);
+                    let width = (start.0 - point.x).abs();
+                    let height = (start.1 - point.y).abs();
+                    if width >= 2 && height >= 2 {
+                        break Ok(Some((x, y, width, height)));
+                    }
+                    break Ok(None);
+                }
+            }
+
+            thread::sleep(Duration::from_millis(8));
+        };
+
+        set_screen_draw_region_capture_mouse_blocked(false);
+        result
+    }
+
+    fn set_screen_draw_region_capture_mouse_blocked(blocked: bool) {
+        let mut hook_state = HOOK_STATE.lock();
+        hook_state.vision_capture_mouse_blocked = blocked;
+        hook_state.vision_capture_is_region_mode = blocked;
+        hook_state.vision_capture_anchor = None;
+        hook_state.vision_capture_preview_regions = Vec::new();
+        hook_state.vision_preview_source = None;
+        drop(hook_state);
+        wake_command_queue();
     }
 
     fn build_screen_draw_capture_region(
