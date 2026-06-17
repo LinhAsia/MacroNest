@@ -10061,6 +10061,8 @@ mod windows_overlay {
                 let threshold = preset.binary_threshold;
                 let threshold_sq = (threshold as i32).pow(2);
                 let binary_mode = preset.binary_mode;
+                let transparent_black = preset.binary_transparent_black;
+                let transparent_white = preset.binary_transparent_white;
                 let target_colors = preset.binary_target_colors.as_slice();
                 let single_target_color = preset.binary_target_color;
                 let renderer_ref = if let Some(existing) = renderer.as_mut() {
@@ -10114,7 +10116,14 @@ mod windows_overlay {
                         binarized[dst_pixel_offset] = val;
                         binarized[dst_pixel_offset + 1] = val;
                         binarized[dst_pixel_offset + 2] = val;
-                        binarized[dst_pixel_offset + 3] = a;
+                        binarized[dst_pixel_offset + 3] = if transparent_black && !transparent_white
+                        {
+                            if val == 0 { 0 } else { 255 }
+                        } else if transparent_white && !transparent_black {
+                            if val == 255 { 0 } else { 255 }
+                        } else {
+                            a
+                        };
                     }
                 }
 

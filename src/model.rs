@@ -347,8 +347,6 @@ fn default_ocr_height() -> i32 {
     180
 }
 
-
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum AppPanel {
     #[default]
@@ -566,10 +564,26 @@ impl WindowLayout {
             row_ratios: vec![0.5, 0.5],
             col_ratios: vec![0.5, 0.5],
             cells: vec![
-                WindowLayoutCell { row: 0, col: 0, ..Default::default() },
-                WindowLayoutCell { row: 0, col: 1, ..Default::default() },
-                WindowLayoutCell { row: 1, col: 0, ..Default::default() },
-                WindowLayoutCell { row: 1, col: 1, ..Default::default() },
+                WindowLayoutCell {
+                    row: 0,
+                    col: 0,
+                    ..Default::default()
+                },
+                WindowLayoutCell {
+                    row: 0,
+                    col: 1,
+                    ..Default::default()
+                },
+                WindowLayoutCell {
+                    row: 1,
+                    col: 0,
+                    ..Default::default()
+                },
+                WindowLayoutCell {
+                    row: 1,
+                    col: 1,
+                    ..Default::default()
+                },
             ],
             focus_on_apply: true,
             hotkey: None,
@@ -585,7 +599,6 @@ impl Default for WindowLayout {
         Self::new(1)
     }
 }
-
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum WindowAnchor {
@@ -1009,8 +1022,6 @@ impl Default for GeometryPreset {
         Self::new(1)
     }
 }
-
-
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum SetVariableSource {
@@ -1723,6 +1734,10 @@ pub struct PinPreset {
     pub source_height: i32,
     #[serde(default)]
     pub binary_filter: bool,
+    #[serde(default)]
+    pub binary_transparent_black: bool,
+    #[serde(default)]
+    pub binary_transparent_white: bool,
     #[serde(default = "default_binary_threshold")]
     pub binary_threshold: u8,
     #[serde(default)]
@@ -1760,6 +1775,8 @@ impl PinPreset {
             source_width: 320,
             source_height: 180,
             binary_filter: false,
+            binary_transparent_black: false,
+            binary_transparent_white: false,
             binary_threshold: 128,
             binary_mode: PinBinaryMode::Grayscale,
             binary_target_color: default_binary_target_color_option(),
