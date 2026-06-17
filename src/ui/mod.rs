@@ -11043,9 +11043,11 @@ impl eframe::App for CrosshairApp {
                                     }
                                 }
                                 VisionCaptureTarget::GeometryColor
-                                | VisionCaptureTarget::MacroStepGeometryColor { .. } => {
+                                | VisionCaptureTarget::MacroStepGeometryColor { .. }
+                                | VisionCaptureTarget::PinPresetColor(_) => {
                                     if let Some(col) = color {
-                                        self.apply_image_search_color_pick(target, col);
+                                        let status = self.apply_image_search_color_pick(target, col);
+                                        self.status = status;
                                     }
                                     self.clear_image_search_capture_state();
                                 }
