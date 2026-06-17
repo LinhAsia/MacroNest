@@ -9833,7 +9833,7 @@ mod windows_overlay {
 
         let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
         let cap_y = outer_pad_y;
-        let keyboard_right_edge = outer_pad_x + keyboard_width;
+        let keyboard_left_edge = outer_pad_x;
         let mouse_left_edge = outer_pad_x + keyboard_width + center_gap;
 
         let mut draw_entry = |entry: &QuickKeyDisplayEntry, entry_left: i32, alpha_scale: f32| {
@@ -9948,11 +9948,7 @@ mod windows_overlay {
         };
         for (entry_index, entry) in keyboard_entries.iter().enumerate() {
             let alpha_scale = 0.56 + (((entry_index + 1) as f32 / keyboard_count) * 0.44);
-            let slot_width = keyboard_slot_widths
-                .get(entry.slot)
-                .copied()
-                .unwrap_or_else(|| quick_key_display_entry_width(&entry.text, font_size, cap_height));
-            let entry_left = keyboard_right_edge - keyboard_slot_offset(entry.slot) - slot_width;
+            let entry_left = keyboard_left_edge + keyboard_slot_offset(entry.slot);
             draw_entry(entry, entry_left, alpha_scale);
         }
 
