@@ -400,6 +400,7 @@ pub enum FocusHighlightDecoration {
     Plain,
     Rainbow,
     FloralWood,
+    CyberMech,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

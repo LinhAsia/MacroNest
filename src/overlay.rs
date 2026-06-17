@@ -9693,6 +9693,7 @@ mod windows_overlay {
     ) -> (i32, u32) {
         match decoration {
             crate::model::FocusHighlightDecoration::FloralWood => (28, 14),
+            crate::model::FocusHighlightDecoration::CyberMech => (60, 12),
             crate::model::FocusHighlightDecoration::Plain
             | crate::model::FocusHighlightDecoration::Rainbow => (5, 4),
         }
@@ -10063,6 +10064,459 @@ mod windows_overlay {
         }
     }
 
+    fn draw_cyber_plate(
+        canvas: &mut RgbaImage,
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+        fill: image::Rgba<u8>,
+        frame: image::Rgba<u8>,
+        glow: image::Rgba<u8>,
+    ) {
+        if width <= 0 || height <= 0 {
+            return;
+        }
+        fill_canvas_rect(canvas, left, top, width, height, fill);
+        fill_canvas_rect(canvas, left, top, width, 2, frame);
+        fill_canvas_rect(canvas, left, top + height - 2, width, 2, frame);
+        fill_canvas_rect(canvas, left, top, 2, height, frame);
+        fill_canvas_rect(canvas, left + width - 2, top, 2, height, frame);
+
+        let inner = image::Rgba([frame[0] / 2, frame[1] / 2, frame[2], 120]);
+        fill_canvas_rect(canvas, left + 4, top + 4, width - 8, 1, inner);
+        fill_canvas_rect(canvas, left + 4, top + height - 5, width - 8, 1, inner);
+
+        let notch = (width.min(height) / 5).clamp(6, 12);
+        fill_canvas_rect(canvas, left, top, notch, notch / 2 + 1, frame);
+        fill_canvas_rect(
+            canvas,
+            left + width - notch,
+            top + height - (notch / 2 + 1),
+            notch,
+            notch / 2 + 1,
+            frame,
+        );
+        draw_canvas_line(
+            canvas,
+            left + 1,
+            top + notch,
+            left + notch,
+            top + 1,
+            1,
+            glow,
+        );
+        draw_canvas_line(
+            canvas,
+            left + width - notch - 1,
+            top + height - 2,
+            left + width - 2,
+            top + height - notch - 1,
+            1,
+            glow,
+        );
+    }
+
+    fn draw_cyber_corner_bracket(
+        canvas: &mut RgbaImage,
+        anchor_x: i32,
+        anchor_y: i32,
+        x_dir: i32,
+        y_dir: i32,
+        arm_len: i32,
+        arm_thickness: i32,
+        frame: image::Rgba<u8>,
+        glow: image::Rgba<u8>,
+    ) {
+        let horizontal_left = if x_dir >= 0 {
+            anchor_x
+        } else {
+            anchor_x - arm_len
+        };
+        let vertical_top = if y_dir >= 0 {
+            anchor_y
+        } else {
+            anchor_y - arm_len
+        };
+        fill_canvas_rect(
+            canvas,
+            horizontal_left,
+            anchor_y - arm_thickness / 2,
+            arm_len,
+            arm_thickness,
+            frame,
+        );
+        fill_canvas_rect(
+            canvas,
+            anchor_x - arm_thickness / 2,
+            vertical_top,
+            arm_thickness,
+            arm_len,
+            frame,
+        );
+        draw_canvas_line(
+            canvas,
+            anchor_x + x_dir * (arm_thickness + 2),
+            anchor_y + y_dir,
+            anchor_x + x_dir * (arm_len - 4),
+            anchor_y + y_dir * (arm_len / 3),
+            1,
+            glow,
+        );
+        draw_canvas_line(
+            canvas,
+            anchor_x + x_dir,
+            anchor_y + y_dir * (arm_thickness + 2),
+            anchor_x + x_dir * (arm_len / 3),
+            anchor_y + y_dir * (arm_len - 4),
+            1,
+            glow,
+        );
+        draw_canvas_circle(
+            canvas,
+            anchor_x + x_dir * (arm_len - 7),
+            anchor_y + y_dir * 2,
+            2,
+            glow,
+        );
+        draw_canvas_circle(
+            canvas,
+            anchor_x + x_dir * 2,
+            anchor_y + y_dir * (arm_len - 7),
+            2,
+            glow,
+        );
+    }
+
+    fn draw_cyber_girl_panel(
+        canvas: &mut RgbaImage,
+        left: i32,
+        top: i32,
+        size: i32,
+        frame: image::Rgba<u8>,
+        glow: image::Rgba<u8>,
+    ) {
+        let fill = image::Rgba([10, 18, 36, 188]);
+        draw_cyber_plate(canvas, left, top, size, size, fill, frame, glow);
+
+        let hair_dark = image::Rgba([56, 54, 128, 230]);
+        let hair_light = image::Rgba([154, 148, 240, 238]);
+        let skin = image::Rgba([244, 218, 205, 240]);
+        let cap = image::Rgba([40, 46, 106, 236]);
+        let hoodie = image::Rgba([214, 225, 255, 218]);
+        let hoodie_shadow = image::Rgba([88, 108, 180, 196]);
+        let eye = image::Rgba([32, 18, 56, 235]);
+
+        let cx = left + size / 2 + 1;
+        let cy = top + size / 2 + 2;
+        let face_rx = (size / 6).max(5);
+        let face_ry = (size / 5).max(6);
+
+        draw_canvas_ellipse(canvas, cx - 3, cy + 8, size / 4, size / 7, hoodie_shadow);
+        draw_canvas_ellipse(canvas, cx + 8, cy + 10, size / 4, size / 7, hoodie);
+        draw_canvas_ellipse(canvas, cx, cy, face_rx + 5, face_ry + 4, hair_dark);
+        draw_canvas_ellipse(canvas, cx - 8, cy - 1, face_rx - 1, face_ry + 3, hair_light);
+        draw_canvas_ellipse(canvas, cx + 7, cy - 2, face_rx - 2, face_ry + 1, hair_light);
+        draw_canvas_ellipse(canvas, cx, cy + 1, face_rx, face_ry, skin);
+
+        draw_canvas_ellipse(canvas, cx + 1, cy - face_ry - 5, face_rx + 7, 6, cap);
+        fill_canvas_rect(
+            canvas,
+            cx - face_rx - 3,
+            cy - face_ry - 1,
+            face_rx * 2 + 10,
+            3,
+            cap,
+        );
+        draw_canvas_line(
+            canvas,
+            cx - face_rx - 3,
+            cy - face_ry + 1,
+            cx + face_rx + 5,
+            cy - face_ry + 3,
+            1,
+            glow,
+        );
+
+        draw_canvas_circle(canvas, cx - 5, cy, 2, eye);
+        draw_canvas_circle(canvas, cx + 5, cy, 2, eye);
+        draw_canvas_line(canvas, cx + 2, cy - 3, cx + 8, cy + 3, 1, glow);
+        draw_canvas_line(canvas, cx + 2, cy + 3, cx + 8, cy - 3, 1, glow);
+        draw_canvas_line(canvas, cx - 8, cy - 2, cx - 2, cy, 1, glow);
+        draw_canvas_line(canvas, cx - 2, cy, cx - 8, cy + 2, 1, glow);
+
+        draw_canvas_line(canvas, cx - 2, cy + 3, cx + 2, cy + 4, 1, eye);
+        draw_canvas_line(canvas, cx, cy + 5, cx - 1, cy + 8, 1, eye);
+        draw_canvas_line(canvas, cx - 10, cy + 16, cx + 6, cy + 12, 1, hoodie_shadow);
+        draw_canvas_line(canvas, cx + 6, cy + 12, cx + 14, cy + 16, 1, hoodie_shadow);
+
+        fill_canvas_rect(canvas, left + 6, top + 6, 3, 3, glow);
+        fill_canvas_rect(canvas, left + 12, top + 6, 5, 2, frame);
+        fill_canvas_rect(canvas, left + 20, top + 6, 4, 2, glow);
+    }
+
+    fn draw_cyber_robot_panel(
+        canvas: &mut RgbaImage,
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+        frame: image::Rgba<u8>,
+        glow: image::Rgba<u8>,
+    ) {
+        let fill = image::Rgba([10, 18, 36, 188]);
+        draw_cyber_plate(canvas, left, top, width, height, fill, frame, glow);
+
+        let steel = image::Rgba([118, 136, 182, 236]);
+        let steel_dark = image::Rgba([62, 76, 116, 236]);
+        let screen = image::Rgba([36, 28, 76, 240]);
+        let eye = image::Rgba([212, 192, 255, 246]);
+
+        let cx = left + width / 2;
+        let head_top = top + 10;
+        let head_width = (width - 20).max(24);
+        let head_height = (height / 2).max(18);
+        let head_left = cx - head_width / 2;
+
+        draw_canvas_line(
+            canvas,
+            head_left + 5,
+            head_top - 4,
+            head_left,
+            head_top - 11,
+            1,
+            steel,
+        );
+        draw_canvas_line(
+            canvas,
+            head_left + head_width - 6,
+            head_top - 4,
+            head_left + head_width,
+            head_top - 11,
+            1,
+            steel,
+        );
+        draw_cyber_plate(
+            canvas,
+            head_left,
+            head_top,
+            head_width,
+            head_height,
+            steel_dark,
+            steel,
+            glow,
+        );
+        fill_canvas_rect(
+            canvas,
+            head_left + 5,
+            head_top + 5,
+            head_width - 10,
+            head_height - 10,
+            screen,
+        );
+
+        let pixel = 3;
+        let left_eye_x = cx - 11;
+        let right_eye_x = cx + 2;
+        let eye_y = head_top + 9;
+        for &(base_x, mirrored) in &[(left_eye_x, false), (right_eye_x, true)] {
+            for row in 0..3 {
+                for col in 0..3 {
+                    let on = if mirrored {
+                        matches!((row, col), (0, 1) | (1, 0) | (1, 2) | (2, 1))
+                    } else {
+                        matches!((row, col), (0, 0) | (0, 2) | (1, 1) | (2, 0) | (2, 2))
+                    };
+                    if on {
+                        fill_canvas_rect(
+                            canvas,
+                            base_x + col * (pixel + 1),
+                            eye_y + row * (pixel + 1),
+                            pixel,
+                            pixel,
+                            eye,
+                        );
+                    }
+                }
+            }
+        }
+
+        draw_canvas_line(
+            canvas,
+            cx,
+            head_top + head_height,
+            cx,
+            top + height - 14,
+            1,
+            steel,
+        );
+        draw_canvas_circle(canvas, cx, top + height - 14, 3, glow);
+        draw_canvas_line(
+            canvas,
+            cx - 12,
+            head_top + head_height + 4,
+            cx - 18,
+            top + height - 18,
+            1,
+            steel,
+        );
+        draw_canvas_line(
+            canvas,
+            cx + 12,
+            head_top + head_height + 4,
+            cx + 18,
+            top + height - 18,
+            1,
+            steel,
+        );
+        draw_canvas_circle(canvas, cx - 18, top + height - 18, 2, glow);
+        draw_canvas_circle(canvas, cx + 18, top + height - 18, 2, glow);
+        fill_canvas_rect(canvas, left + width - 18, top + height - 10, 10, 2, glow);
+    }
+
+    fn draw_focus_highlight_cyber_mech(
+        canvas: &mut RgbaImage,
+        margin: i32,
+        thickness: u32,
+        accent: image::Rgba<u8>,
+    ) {
+        let width_i = canvas.width() as i32;
+        let height_i = canvas.height() as i32;
+        let thickness_i = thickness as i32;
+        let deep = image::Rgba([4, 10, 24, 210]);
+        let frame = image::Rgba([24, 58, 102, 236]);
+        let trim = image::Rgba([44, 120, 182, 224]);
+        let glow = image::Rgba([
+            ((accent[0] as u16 * 2 + 78) / 3).min(255) as u8,
+            ((accent[1] as u16 * 2 + 214) / 3).min(255) as u8,
+            ((accent[2] as u16 * 3 + 255) / 4).min(255) as u8,
+            242,
+        ]);
+        let glow_soft = image::Rgba([glow[0] / 2, glow[1] / 2, glow[2], 168]);
+
+        draw_focus_highlight_basic_border(canvas, thickness, deep);
+        fill_canvas_rect(canvas, 0, 0, width_i, 2, frame);
+        fill_canvas_rect(canvas, 0, height_i - 2, width_i, 2, frame);
+        fill_canvas_rect(canvas, 0, 0, 2, height_i, frame);
+        fill_canvas_rect(canvas, width_i - 2, 0, 2, height_i, frame);
+
+        fill_canvas_rect(canvas, 0, thickness_i - 3, width_i, 1, trim);
+        fill_canvas_rect(canvas, 0, height_i - thickness_i + 2, width_i, 1, trim);
+        fill_canvas_rect(canvas, thickness_i - 3, 0, 1, height_i, trim);
+        fill_canvas_rect(canvas, width_i - thickness_i + 2, 0, 1, height_i, trim);
+
+        let arm_len = (margin - 10).clamp(34, 56);
+        let bracket_anchor = thickness_i / 2 + 1;
+        draw_cyber_corner_bracket(
+            canvas,
+            bracket_anchor,
+            bracket_anchor,
+            1,
+            1,
+            arm_len,
+            thickness_i,
+            frame,
+            glow,
+        );
+        draw_cyber_corner_bracket(
+            canvas,
+            width_i - bracket_anchor - 1,
+            bracket_anchor,
+            -1,
+            1,
+            arm_len,
+            thickness_i,
+            frame,
+            glow,
+        );
+        draw_cyber_corner_bracket(
+            canvas,
+            bracket_anchor,
+            height_i - bracket_anchor - 1,
+            1,
+            -1,
+            arm_len,
+            thickness_i,
+            frame,
+            glow,
+        );
+        draw_cyber_corner_bracket(
+            canvas,
+            width_i - bracket_anchor - 1,
+            height_i - bracket_anchor - 1,
+            -1,
+            -1,
+            arm_len,
+            thickness_i,
+            frame,
+            glow,
+        );
+
+        let center_x = width_i / 2;
+        fill_canvas_rect(canvas, center_x - 36, 4, 18, 3, glow);
+        fill_canvas_rect(canvas, center_x - 14, 4, 10, 3, frame);
+        fill_canvas_rect(canvas, center_x + 2, 4, 28, 3, glow_soft);
+        fill_canvas_rect(canvas, center_x - 24, height_i - 7, 14, 3, glow_soft);
+        fill_canvas_rect(canvas, center_x - 4, height_i - 7, 12, 3, glow);
+        fill_canvas_rect(canvas, center_x + 14, height_i - 7, 26, 3, frame);
+
+        fill_canvas_rect(canvas, 6, height_i / 2 - 10, 4, 8, glow_soft);
+        fill_canvas_rect(canvas, 6, height_i / 2 + 4, 8, 4, glow);
+        fill_canvas_rect(canvas, width_i - 10, height_i / 2 - 14, 4, 10, glow);
+        fill_canvas_rect(canvas, width_i - 14, height_i / 2 + 2, 8, 4, glow_soft);
+
+        draw_canvas_line(
+            canvas,
+            arm_len + 8,
+            thickness_i / 2 + 2,
+            center_x - 44,
+            thickness_i / 2 + 2,
+            1,
+            glow_soft,
+        );
+        draw_canvas_line(
+            canvas,
+            center_x + 46,
+            height_i - thickness_i / 2 - 3,
+            width_i - arm_len - 10,
+            height_i - thickness_i / 2 - 3,
+            1,
+            glow_soft,
+        );
+        draw_canvas_line(
+            canvas,
+            thickness_i / 2 + 2,
+            arm_len + 8,
+            thickness_i / 2 + 2,
+            height_i / 2 - 24,
+            1,
+            glow_soft,
+        );
+        draw_canvas_line(
+            canvas,
+            width_i - thickness_i / 2 - 3,
+            height_i / 2 + 24,
+            width_i - thickness_i / 2 - 3,
+            height_i - arm_len - 10,
+            1,
+            glow_soft,
+        );
+
+        let panel_size = (margin - 12).clamp(42, 52);
+        if width_i >= panel_size + margin + 40 && height_i >= panel_size + margin + 32 {
+            draw_cyber_girl_panel(canvas, 6, 6, panel_size, frame, glow);
+            draw_cyber_robot_panel(
+                canvas,
+                width_i - panel_size - 16,
+                height_i - panel_size - 10,
+                panel_size + 10,
+                panel_size,
+                frame,
+                glow,
+            );
+        }
+    }
+
     fn wood_tone(primary: u32, secondary: u32, depth: u32) -> image::Rgba<u8> {
         let grain =
             (((primary as i32 * 13 + secondary as i32 * 7 + depth as i32 * 5) % 31) - 15) * 2;
@@ -10277,6 +10731,9 @@ mod windows_overlay {
             }
             crate::model::FocusHighlightDecoration::FloralWood => {
                 draw_focus_highlight_floral_wood(&mut canvas, thickness, accent);
+            }
+            crate::model::FocusHighlightDecoration::CyberMech => {
+                draw_focus_highlight_cyber_mech(&mut canvas, margin, thickness, accent);
             }
         }
 

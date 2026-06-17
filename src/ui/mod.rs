@@ -4447,10 +4447,15 @@ impl CrosshairApp {
                                         "Floral Wood",
                                         "Floral Wood",
                                     ),
+                                    FocusHighlightDecoration::CyberMech => Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Cyber Mech",
+                                        "Cyber Mech",
+                                    ),
                                 };
                                 let decoration_changed =
                                     egui::ComboBox::from_id_salt("focus-highlight-decoration")
-                                        .width(84.0)
+                                        .width(116.0)
                                         .selected_text(selected_text)
                                         .show_ui(ui, |ui| {
                                             let mut changed = false;
@@ -4484,6 +4489,17 @@ impl CrosshairApp {
                                                         self.state.ui_language,
                                                         "Floral Wood",
                                                         "Floral Wood",
+                                                    ),
+                                                )
+                                                .clicked();
+                                            changed |= ui
+                                                .selectable_value(
+                                                    &mut self.state.focus_highlight_decoration,
+                                                    FocusHighlightDecoration::CyberMech,
+                                                    Self::tr_lang(
+                                                        self.state.ui_language,
+                                                        "Cyber Mech",
+                                                        "Cyber Mech",
                                                     ),
                                                 )
                                                 .clicked();
