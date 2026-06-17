@@ -204,6 +204,7 @@ mod windows_overlay {
     const FOCUS_TRIGGER_TIMER_ID: usize = 2;
     const SCREEN_DRAW_TIMER_ID: usize = 3;
     const SCREEN_DRAW_REFRESH_INTERVAL_MS: u32 = 16;
+    const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 6;
     #[derive(Debug, Clone)]
     struct VisionRunOutcome {
         matched: bool,
@@ -559,6 +560,7 @@ mod windows_overlay {
         frame_rgba: Vec<u8>,
         committed_dirty: bool,
         pending_repaint: bool,
+        last_present_at: Option<Instant>,
     }
 
     impl Default for ScreenDrawState {
@@ -591,6 +593,7 @@ mod windows_overlay {
                 frame_rgba: Vec::new(),
                 committed_dirty: true,
                 pending_repaint: false,
+                last_present_at: None,
             }
         }
     }
@@ -2447,7 +2450,9 @@ mod windows_overlay {
             }
             WM_MOUSEMOVE => {
                 let point = screen_draw_lparam_point(lparam);
-                let _ = screen_draw_handle_move(point);
+                if screen_draw_handle_move(point) && screen_draw_should_present_immediately() {
+                    let _ = paint_screen_draw_overlay(hwnd);
+                }
                 LRESULT(0)
             }
             WM_LBUTTONUP | WM_RBUTTONUP => {
@@ -5734,6 +5739,21 @@ mod windows_overlay {
         state.pending_repaint = true;
     }
 
+    fn screen_draw_should_present_immediately() -> bool {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if !state.active || !state.pending_repaint {
+            return false;
+        }
+        let now = Instant::now();
+        if let Some(last_present_at) = state.last_present_at
+            && now.duration_since(last_present_at)
+                < Duration::from_millis(SCREEN_DRAW_MIN_FRAME_INTERVAL_MS)
+        {
+            return false;
+        }
+        true
+    }
+
     fn deactivate_screen_draw(state: &mut ScreenDrawState) {
         state.active = false;
         state.current_stroke = None;
@@ -5745,6 +5765,7 @@ mod windows_overlay {
         state.frame_rgba.clear();
         state.committed_dirty = true;
         state.pending_repaint = false;
+        state.last_present_at = None;
     }
 
     fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
@@ -5920,7 +5941,7 @@ mod windows_overlay {
                 let hwnd = HWND(hwnd_raw as *mut c_void);
                 unsafe {
                     set_screen_draw_refresh_timer(hwnd, screen_draw_active());
-                    if message != WM_MOUSEMOVE {
+                    if message != WM_MOUSEMOVE || screen_draw_should_present_immediately() {
                         let _ = paint_screen_draw_overlay(hwnd);
                     }
                 }
@@ -6219,6 +6240,7 @@ mod windows_overlay {
         }
         draw_screen_draw_toolbar(pixels, width, height, &state_guard);
         state_guard.pending_repaint = false;
+        state_guard.last_present_at = Some(Instant::now());
         drop(state_guard);
         let blend = BLENDFUNCTION {
             BlendOp: AC_SRC_OVER as u8,
