@@ -549,13 +549,16 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
         }
     }
 
+    let show_preview_panel = matches!(state.mode, NativeCaptureMode::PointClick { .. });
+    let show_cursor_tooltip = !matches!(state.mode, NativeCaptureMode::RegionSelect { .. });
+
     // Draw coordinate & color magnifier preview panel
     let mut center_color = (0u8, 0u8, 0u8, 255u8);
     let mut panel_x = 0.0f32;
     let mut panel_y = 0.0f32;
     let mut preview_panel_visible = false;
 
-    if let Some(curr) = state.current_point {
+    if show_preview_panel && let Some(curr) = state.current_point {
         preview_panel_visible = true;
 
         let panel_w = 200.0f32;
@@ -853,7 +856,7 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
     let _ = DeleteObject(HGDIOBJ(pen.0));
 
     // Render coordinates tooltip next to mouse cursor
-    if let Some(curr) = state.current_point {
+    if show_cursor_tooltip && let Some(curr) = state.current_point {
         let abs_x = curr.0 + state.left;
         let abs_y = curr.1 + state.top;
         let coords_str = format!("X: {}, Y: {}", abs_x, abs_y);
