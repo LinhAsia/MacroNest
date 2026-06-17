@@ -5232,11 +5232,17 @@ mod windows_overlay {
         font_size: f32,
         cap_height: i32,
     ) -> Vec<i32> {
-        let max_slot = entries
+        let max_live_slot = entries
             .iter()
             .filter(|entry| entry.lane == lane)
             .map(|entry| entry.slot)
             .max();
+        let max_memory_slot = slot_labels
+            .keys()
+            .filter(|(stored_lane, _)| *stored_lane == lane)
+            .map(|(_, slot)| *slot)
+            .max();
+        let max_slot = max_live_slot.max(max_memory_slot);
         let Some(max_slot) = max_slot else {
             return Vec::new();
         };
@@ -6292,6 +6298,8 @@ mod windows_overlay {
     fn refresh_quick_key_display(runtime: &mut Runtime) -> Result<()> {
         if is_ui_in_foreground() || !runtime.quick_key_display_enabled {
             runtime.quick_key_display_entries.clear();
+            runtime.quick_key_display_slot_memory.clear();
+            runtime.quick_key_display_slot_labels.clear();
             let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
             return Ok(());
         }
@@ -6300,6 +6308,8 @@ mod windows_overlay {
         quick_key_display_release_expired_entries(runtime, Instant::now());
 
         if runtime.quick_key_display_entries.is_empty() {
+            runtime.quick_key_display_slot_memory.clear();
+            runtime.quick_key_display_slot_labels.clear();
             let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
             return Ok(());
         }
