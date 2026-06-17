@@ -20,28 +20,40 @@ pub struct MacroRecordingSession {
 #[cfg(windows)]
 mod windows_overlay {
 
-    #[path = "../math_expr.rs"]
-    pub mod math_expr;
-    #[path = "../drawing.rs"]
-    pub mod drawing;
     #[path = "../arduino.rs"]
     pub mod arduino;
-    #[path = "../vision.rs"]
-    pub mod vision;
     #[path = "../audio_sense.rs"]
     pub mod audio_sense;
+    #[path = "../drawing.rs"]
+    pub mod drawing;
+    #[path = "../math_expr.rs"]
+    pub mod math_expr;
     #[path = "../native_capture.rs"]
     pub mod native_capture;
+    #[path = "../vision.rs"]
+    pub mod vision;
 
-    pub use math_expr::*;
-    pub use drawing::*;
     pub use arduino::*;
-    pub use vision::*;
     pub use audio_sense::*;
+    pub use drawing::*;
+    pub use math_expr::*;
     pub use native_capture::*;
+    pub use vision::*;
 
     use super::{MacroRecordingEvent, MacroRecordingSession};
-    use crate::ui::{VisionCaptureTarget, VisionCaptureMode, MouseMoveAbsoluteCaptureTarget};
+    use crate::ui::{MouseMoveAbsoluteCaptureTarget, VisionCaptureMode, VisionCaptureTarget};
+    use anyhow::{Context, Result, bail};
+    use arboard::{Clipboard, ImageData};
+    use crossbeam_channel::{Receiver, Sender};
+    use eframe::egui;
+    use hidapi::HidApi;
+    use once_cell::sync::Lazy;
+    use opencv::{
+        core::{self as cv, Mat, Size},
+        imgproc,
+        prelude::*,
+    };
+    use parking_lot::Mutex;
     use std::{
         borrow::Cow,
         collections::{HashMap, HashSet},
@@ -58,26 +70,10 @@ mod windows_overlay {
         thread,
         time::{Duration, Instant},
     };
-    use arboard::{Clipboard, ImageData};
-    use anyhow::{Context, Result, bail};
-    use crossbeam_channel::{Receiver, Sender};
-    use eframe::egui;
-    use hidapi::HidApi;
-    use once_cell::sync::Lazy;
-    use opencv::{
-        core::{self as cv, Mat, Size},
-        imgproc,
-        prelude::*,
-    };
-    use parking_lot::Mutex;
     use windows::{
         Win32::{
             Devices::HumanInterfaceDevice::HidD_SetOutputReport,
             Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM},
-            Storage::FileSystem::{
-                CreateFileA, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE,
-                OPEN_EXISTING, WriteFile,
-            },
             Graphics::{
                 Dwm::{
                     DWM_THUMBNAIL_PROPERTIES, DWM_TNP_OPACITY, DWM_TNP_RECTDESTINATION,
@@ -88,19 +84,22 @@ mod windows_overlay {
                 Gdi::{
                     AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO,
                     BITMAPINFOHEADER, BLENDFUNCTION, BeginPaint, CLIP_DEFAULT_PRECIS,
-                    ClientToScreen, CreateCompatibleDC, CreateDIBSection, CreateFontW, CreateRectRgn,
-                    DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER, DT_SINGLELINE,
-                    DT_VCENTER,
-                    DeleteDC, DeleteObject, DrawTextW, EndPaint, FF_DONTCARE, FW_MEDIUM, GetDC,
-                    GetMonitorInfoW, HDC, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-                    MonitorFromWindow, OUT_DEFAULT_PRECIS, PAINTSTRUCT, ReleaseDC, SRCCOPY,
-                    SelectObject, SetBkMode, SetTextColor, SetWindowRgn, StretchDIBits,
-                    TRANSPARENT,
+                    ClientToScreen, CreateCompatibleDC, CreateDIBSection, CreateFontW,
+                    CreateRectRgn, DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
+                    DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint,
+                    FF_DONTCARE, FW_MEDIUM, GetDC, GetMonitorInfoW, HDC, HGDIOBJ,
+                    MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow, OUT_DEFAULT_PRECIS,
+                    PAINTSTRUCT, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetTextColor,
+                    SetWindowRgn, StretchDIBits, TRANSPARENT,
                 },
             },
             Media::Audio::{
                 Endpoints::IAudioEndpointVolume, IMMDeviceEnumerator, MMDeviceEnumerator, eConsole,
                 eRender,
+            },
+            Storage::FileSystem::{
+                CreateFileA, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE,
+                OPEN_EXISTING, WriteFile,
             },
             System::{
                 Com::{
@@ -111,9 +110,7 @@ mod windows_overlay {
                 Threading::{CREATE_NO_WINDOW, GetCurrentProcessId},
             },
             UI::{
-                Accessibility::{
-                    HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent,
-                },
+                Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent},
                 Input::KeyboardAndMouse::{
                     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
                     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE,
@@ -133,25 +130,25 @@ mod windows_overlay {
                     DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW,
                     EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWLP_USERDATA, GetAncestor,
                     GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
-                    GetSystemMetrics, GetWindow,
-                    GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HHOOK,
-                    HMENU, HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IMAGE_ICON, IsZoomed,
-                    KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LoadCursorW,
-                    LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT,
-                    PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN,
-                    SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOWNA,
-                    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-                    SetCursorPos, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
-                    SetWindowsHookExW, ShowWindow, SystemParametersInfoW, TPM_BOTTOMALIGN,
-                    TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
+                    GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
+                    GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTTRANSPARENT, HWND_TOPMOST,
+                    IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE,
+                    LoadCursorW, LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG,
+                    MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN,
+                    SM_CYSCREEN, SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE,
+                    SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+                    SWP_SHOWWINDOW, SetCursorPos, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
+                    SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
+                    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
                     UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
-                    WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WM_APP, WM_COMMAND, WM_CREATE,
-                    WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-                    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-                    WM_NCCREATE, WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
-                    WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION,
-                    WINEVENT_OUTOFCONTEXT, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-                    WS_EX_TRANSPARENT, WS_OVERLAPPEDWINDOW, WS_POPUP, WindowFromPoint,
+                    WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
+                    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
+                    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+                    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCHITTEST,
+                    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER,
+                    WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION, WS_EX_LAYERED,
+                    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
+                    WS_OVERLAPPEDWINDOW, WS_POPUP, WindowFromPoint,
                 },
             },
         },
@@ -177,13 +174,13 @@ mod windows_overlay {
     use crate::{
         ai, audio, audiosense, hotkey, media,
         model::{
-            ArduinoTransport, AudioSensePreset, AudioSenseSpec, AudioSettings, CommandPreset, CrosshairStyle,
-            HotkeyBinding, HudPreset, GeometryShapeKind, GeometrySpec, IfConditionType, MacroAction,
-            MacroGroup, MacroPreset, MacroStep, MacroTriggerMode, MousePathEvent,
-            MousePathEventKind, MousePathPreset, MouseSensitivityPreset, PinOverlayStyle,
-            PinPreset, ProfileRecord, RgbaColor, SoundLibraryItem, SoundPreset,
-            TimerPreset, VideoPreset, VisionPreset, VisionSettings, WindowAnchor, WindowExpandControls,
-            WindowExpandDirection, WindowFocusPreset, WindowPreset,
+            ArduinoTransport, AudioSensePreset, AudioSenseSpec, AudioSettings, CommandPreset,
+            CrosshairStyle, GeometryShapeKind, GeometrySpec, HotkeyBinding, HudPreset,
+            IfConditionType, MacroAction, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode,
+            MousePathEvent, MousePathEventKind, MousePathPreset, MouseSensitivityPreset,
+            PinOverlayStyle, PinPreset, ProfileRecord, RgbaColor, SoundLibraryItem, SoundPreset,
+            TimerPreset, VideoPreset, VisionPreset, VisionSettings, WindowAnchor,
+            WindowExpandControls, WindowExpandDirection, WindowFocusPreset, WindowPreset,
         },
         render::{RenderedSvgImage, render_crosshair, render_svg_image},
         storage::AppPaths,
@@ -227,11 +224,14 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(HashSet::new()));
     static FORCE_STOP_REQUESTED_MACRO_PRESETS: Lazy<Mutex<HashSet<u32>>> =
         Lazy::new(|| Mutex::new(HashSet::new()));
-    pub(crate) static HUD_DISPLAY: Lazy<Mutex<Option<HudDisplayState>>> = Lazy::new(|| Mutex::new(None));
+    pub(crate) static HUD_DISPLAY: Lazy<Mutex<Option<HudDisplayState>>> =
+        Lazy::new(|| Mutex::new(None));
     static HUD_PREVIEW_DISPLAY: Lazy<Mutex<Option<HudDisplayState>>> =
         Lazy::new(|| Mutex::new(None));
-    pub(crate) static ACTIVE_VIDEO_PRESET_ID: Lazy<Mutex<Option<u32>>> = Lazy::new(|| Mutex::new(None));
-    pub(crate) static ACTIVE_VIDEO_EXPIRES: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+    pub(crate) static ACTIVE_VIDEO_PRESET_ID: Lazy<Mutex<Option<u32>>> =
+        Lazy::new(|| Mutex::new(None));
+    pub(crate) static ACTIVE_VIDEO_EXPIRES: Lazy<Mutex<Option<Instant>>> =
+        Lazy::new(|| Mutex::new(None));
     static MOUSE_RECORDING: Lazy<Mutex<Option<MouseRecordingSession>>> =
         Lazy::new(|| Mutex::new(None));
     static MOUSE_PATH_PREVIEW: Lazy<Mutex<Option<MousePathPreviewSession>>> =
@@ -242,20 +242,19 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(ScreenDrawState::default()));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
 
-
-
-
-
     pub(crate) static HOOK_STATE: Lazy<Mutex<HookState>> =
         Lazy::new(|| Mutex::new(HookState::default()));
     static ACTIVE_VIDEO_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> = Lazy::new(|| Mutex::new(None));
     static ACTIVE_VIDEO_THREAD: Lazy<Mutex<Option<thread::JoinHandle<()>>>> =
         Lazy::new(|| Mutex::new(None));
-    static ACTIVE_BIN_PIN_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> = Lazy::new(|| Mutex::new(None));
+    static ACTIVE_BIN_PIN_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> =
+        Lazy::new(|| Mutex::new(None));
     static ACTIVE_BIN_PIN_THREAD: Lazy<Mutex<Option<thread::JoinHandle<()>>>> =
         Lazy::new(|| Mutex::new(None));
-    static ACTIVE_BIN_PIN_PRESET_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    static ACTIVE_BIN_PIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+    static ACTIVE_BIN_PIN_PRESET_ID: std::sync::atomic::AtomicU32 =
+        std::sync::atomic::AtomicU32::new(0);
+    static ACTIVE_BIN_PIN_HWND: std::sync::atomic::AtomicIsize =
+        std::sync::atomic::AtomicIsize::new(0);
     static SYNTHETIC_MOUSE_TRIGGER_SUPPRESSION: Lazy<Mutex<HashMap<String, usize>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
     static SWALLOWED_MOUSE_TRIGGER_RELEASES: Lazy<Mutex<HashSet<String>>> =
@@ -263,8 +262,9 @@ mod windows_overlay {
     pub static ACTIVE_MACRO_STEPS: Lazy<Mutex<HashMap<u32, HashSet<usize>>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
 
-    static GEOMETRY_SVG_CACHE: Lazy<Mutex<HashMap<(String, u32, u32, u32, i32), RenderedSvgImage>>> =
-        Lazy::new(|| Mutex::new(HashMap::new()));
+    static GEOMETRY_SVG_CACHE: Lazy<
+        Mutex<HashMap<(String, u32, u32, u32, i32), RenderedSvgImage>>,
+    > = Lazy::new(|| Mutex::new(HashMap::new()));
     pub fn add_active_step(preset_id: u32, step_index: usize) {
         let mut active = ACTIVE_MACRO_STEPS.lock();
         active.entry(preset_id).or_default().insert(step_index);
@@ -369,20 +369,24 @@ mod windows_overlay {
         ui_language: crate::model::UiLanguage,
     }
 
-    static PROTRACTOR_STATE: Lazy<Mutex<ProtractorState>> = Lazy::new(|| Mutex::new(ProtractorState {
-        enabled: false,
-        scale: 1.0,
-        needle1_angle: 0.0,
-        needle2_angle: 90.0,
-        center_x: 500,
-        center_y: 500,
-        thickness: 2.0,
-        calibrating: false,
-        ui_language: crate::model::UiLanguage::English,
-    }));
+    static PROTRACTOR_STATE: Lazy<Mutex<ProtractorState>> = Lazy::new(|| {
+        Mutex::new(ProtractorState {
+            enabled: false,
+            scale: 1.0,
+            needle1_angle: 0.0,
+            needle2_angle: 90.0,
+            center_x: 500,
+            center_y: 500,
+            thickness: 2.0,
+            calibrating: false,
+            ui_language: crate::model::UiLanguage::English,
+        })
+    });
 
-    static PROTRACTOR_DRAG_TARGET: Lazy<Mutex<Option<ProtractorDragTarget>>> = Lazy::new(|| Mutex::new(None));
-    static PROTRACTOR_DRAG_START_MOUSE: Lazy<Mutex<POINT>> = Lazy::new(|| Mutex::new(POINT::default()));
+    static PROTRACTOR_DRAG_TARGET: Lazy<Mutex<Option<ProtractorDragTarget>>> =
+        Lazy::new(|| Mutex::new(None));
+    static PROTRACTOR_DRAG_START_MOUSE: Lazy<Mutex<POINT>> =
+        Lazy::new(|| Mutex::new(POINT::default()));
     static PROTRACTOR_DRAG_START_CENTER: Lazy<Mutex<(i32, i32)>> = Lazy::new(|| Mutex::new((0, 0)));
     static PROTRACTOR_DRAG_START_ANGLE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(0.0));
     static PROTRACTOR_DRAG_START_SCALE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(1.0));
@@ -408,7 +412,6 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
     pub static TEXT_VARIABLES: Lazy<Mutex<std::collections::HashMap<String, String>>> =
         Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
-
 
     #[derive(Debug, Clone)]
     pub enum OverlayCommand {
@@ -868,15 +871,11 @@ mod windows_overlay {
         }
     }
 
-
     /// Directly close the Arduino runtime transport and mark flash in progress.
     /// Called from the flash thread to guarantee the COM port is released
     /// before avrdude attempts to claim it, without relying on async channel timing.
 
     /// Re-enable background Arduino connection after flash is complete.
-
-
-
 
     pub fn set_ui_context(ctx: egui::Context) {
         *UI_CONTEXT.lock() = Some(ctx);
@@ -926,7 +925,8 @@ mod windows_overlay {
         vision_presets: Vec<VisionPreset>,
         audio_sense_presets: Vec<AudioSensePreset>,
         active_audio_sense_keys: HashSet<String>,
-        active_audio_sense_snapshots: std::collections::HashMap<String, crate::audiosense::PitchSnapshot>,
+        active_audio_sense_snapshots:
+            std::collections::HashMap<String, crate::audiosense::PitchSnapshot>,
         geometry_presets: Vec<crate::model::GeometryPreset>,
         active_geometry_preset_ids: HashSet<u32>,
         active_geometry_preset_owner_ids: HashMap<(u32, usize), u32>,
@@ -1346,6 +1346,197 @@ mod windows_overlay {
         last_source_crop: Option<(i32, i32, i32, i32)>,
     }
 
+    struct BinPinFrameRenderer {
+        screen_dc: HDC,
+        mem_dc: HDC,
+        restore_bitmap: Option<HGDIOBJ>,
+        active_bitmap: Option<HGDIOBJ>,
+        target_size: Option<(i32, i32)>,
+        source_bitmap_info: BITMAPINFO,
+        source_size: Option<(usize, usize)>,
+        binarized: Vec<u8>,
+    }
+
+    impl BinPinFrameRenderer {
+        unsafe fn new() -> Option<Self> {
+            let screen_dc = GetDC(None);
+            if screen_dc.0.is_null() {
+                return None;
+            }
+
+            let mem_dc = CreateCompatibleDC(Some(screen_dc));
+            if mem_dc.0.is_null() {
+                let _ = ReleaseDC(None, screen_dc);
+                return None;
+            }
+
+            let _ = windows::Win32::Graphics::Gdi::SetStretchBltMode(
+                mem_dc,
+                windows::Win32::Graphics::Gdi::COLORONCOLOR,
+            );
+
+            Some(Self {
+                screen_dc,
+                mem_dc,
+                restore_bitmap: None,
+                active_bitmap: None,
+                target_size: None,
+                source_bitmap_info: BITMAPINFO::default(),
+                source_size: None,
+                binarized: Vec::new(),
+            })
+        }
+
+        fn binarized_mut(&mut self, len: usize) -> &mut [u8] {
+            if self.binarized.len() != len {
+                self.binarized.resize(len, 0);
+            }
+            &mut self.binarized
+        }
+
+        unsafe fn ensure_target_surface(&mut self, target_w: i32, target_h: i32) -> bool {
+            if self.target_size == Some((target_w, target_h)) && self.active_bitmap.is_some() {
+                return true;
+            }
+
+            let bitmap_info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: target_w,
+                    biHeight: -target_h,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+
+            let mut bits_ptr: *mut c_void = std::ptr::null_mut();
+            let bitmap = match CreateDIBSection(
+                Some(self.mem_dc),
+                &bitmap_info,
+                DIB_RGB_COLORS,
+                &mut bits_ptr,
+                None,
+                0,
+            ) {
+                Ok(bitmap) => bitmap,
+                Err(_) => return false,
+            };
+
+            let bitmap_obj = HGDIOBJ(bitmap.0);
+            let replaced = SelectObject(self.mem_dc, bitmap_obj);
+            if let Some(previous_bitmap) = self.active_bitmap.replace(bitmap_obj) {
+                let _ = DeleteObject(previous_bitmap);
+            } else {
+                self.restore_bitmap = Some(replaced);
+            }
+
+            self.target_size = Some((target_w, target_h));
+            true
+        }
+
+        fn ensure_source_bitmap_info(&mut self, crop_w: usize, crop_h: usize) {
+            if self.source_size == Some((crop_w, crop_h)) {
+                return;
+            }
+
+            self.source_bitmap_info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: crop_w as i32,
+                    biHeight: -(crop_h as i32),
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            self.source_size = Some((crop_w, crop_h));
+        }
+
+        unsafe fn present(
+            &mut self,
+            pin_hwnd: HWND,
+            preset: &PinPreset,
+            crop_w: usize,
+            crop_h: usize,
+        ) -> bool {
+            let target_w = preset.width.max(1);
+            let target_h = preset.height.max(1);
+            if !self.ensure_target_surface(target_w, target_h) {
+                return false;
+            }
+
+            self.ensure_source_bitmap_info(crop_w, crop_h);
+            let _ = StretchDIBits(
+                self.mem_dc,
+                0,
+                0,
+                target_w,
+                target_h,
+                0,
+                0,
+                crop_w as i32,
+                crop_h as i32,
+                Some(self.binarized.as_ptr() as *const c_void),
+                &self.source_bitmap_info,
+                DIB_RGB_COLORS,
+                SRCCOPY,
+            );
+
+            let mut pt_dst = POINT {
+                x: preset.x,
+                y: preset.y,
+            };
+            let mut size_wnd = SIZE {
+                cx: target_w,
+                cy: target_h,
+            };
+            let mut pt_src = POINT { x: 0, y: 0 };
+            let mut blend = BLENDFUNCTION {
+                BlendOp: AC_SRC_OVER as u8,
+                BlendFlags: 0,
+                SourceConstantAlpha: 255,
+                AlphaFormat: AC_SRC_ALPHA as u8,
+            };
+
+            UpdateLayeredWindow(
+                pin_hwnd,
+                Some(self.screen_dc),
+                Some(&mut pt_dst),
+                Some(&mut size_wnd),
+                Some(self.mem_dc),
+                Some(&mut pt_src),
+                COLORREF(0),
+                Some(&mut blend),
+                ULW_ALPHA,
+            )
+            .is_ok()
+        }
+    }
+
+    impl Drop for BinPinFrameRenderer {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(restore_bitmap) = self.restore_bitmap.take() {
+                    let _ = SelectObject(self.mem_dc, restore_bitmap);
+                }
+                if let Some(active_bitmap) = self.active_bitmap.take() {
+                    let _ = DeleteObject(active_bitmap);
+                }
+                if !self.mem_dc.0.is_null() {
+                    let _ = DeleteDC(self.mem_dc);
+                }
+                if !self.screen_dc.0.is_null() {
+                    let _ = ReleaseDC(None, self.screen_dc);
+                }
+            }
+        }
+    }
+
     #[allow(dead_code)]
     enum WindowHotkeyAction {
         Apply(WindowPreset),
@@ -1436,10 +1627,11 @@ mod windows_overlay {
                             let mut hid_guard = ARDUINO_HID_DEVICE.lock();
                             let mut hid_name_guard = CURRENT_ARDUINO_HID_NAME.lock();
 
-                            if hid_guard.is_none() && last_attempt.elapsed() >= Duration::from_secs(3) {
+                            if hid_guard.is_none()
+                                && last_attempt.elapsed() >= Duration::from_secs(3)
+                            {
                                 last_attempt = Instant::now();
-                                if let Ok(runtime) =
-                                    open_arduino_hid_device(target_vid, target_pid)
+                                if let Ok(runtime) = open_arduino_hid_device(target_vid, target_pid)
                                 {
                                     *hid_name_guard = runtime.path.clone();
                                     *hid_guard = Some(runtime);
@@ -1461,7 +1653,7 @@ mod windows_overlay {
             while poll_running.load(Ordering::Relaxed) {
                 unsafe {
                     let foreground = HWND(
-                        FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void,
+                        FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void
                     );
                     let mut ui_in_foreground = false;
                     let mut ui_visible = false;
@@ -1529,7 +1721,11 @@ mod windows_overlay {
             )?;
             register_class(instance, w!("CrosshairOverlay"), Some(overlay_wnd_proc))?;
             register_class(instance, w!("CrosshairToolbox"), Some(hud_wnd_proc))?;
-            register_class(instance, w!("MacroNestScreenDraw"), Some(screen_draw_wnd_proc))?;
+            register_class(
+                instance,
+                w!("MacroNestScreenDraw"),
+                Some(screen_draw_wnd_proc),
+            )?;
             let overlay_hwnd = CreateWindowExW(
                 WS_EX_LAYERED
                     | WS_EX_TRANSPARENT
@@ -1694,10 +1890,7 @@ mod windows_overlay {
                 None,
             )?;
             let protractor_hwnd = CreateWindowExW(
-                WS_EX_LAYERED
-                    | WS_EX_TOOLWINDOW
-                    | WS_EX_TOPMOST
-                    | WS_EX_NOACTIVATE,
+                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
                 w!("CrosshairOverlay"),
                 w!("CrosshairProtractor"),
                 WS_POPUP,
@@ -1766,7 +1959,12 @@ mod windows_overlay {
                 ui_visible: true,
                 ui_foreground: true,
                 native_focus_highlight_enabled: false,
-                focus_highlight_color: crate::model::RgbaColor { r: 126, g: 224, b: 182, a: 235 },
+                focus_highlight_color: crate::model::RgbaColor {
+                    r: 126,
+                    g: 224,
+                    b: 182,
+                    a: 235,
+                },
                 focus_highlight_rainbow: false,
                 focus_highlight_rainbow_hue: 0.0,
                 protractor_hwnd,
@@ -1845,7 +2043,7 @@ mod windows_overlay {
                     let radius = (scale * base_radius) as i32;
                     let padding = (scale * 30.0) as i32;
                     let half_size = radius + padding;
-                    
+
                     let cx = half_size;
                     let cy = half_size;
 
@@ -1861,7 +2059,11 @@ mod windows_overlay {
                     let slider_right = cx + 30;
                     let slider_top = size - 18;
                     let slider_bottom = size - 6;
-                    if pt.x >= slider_left - 4 && pt.x <= slider_right + 4 && pt.y >= slider_top - 4 && pt.y <= slider_bottom + 4 {
+                    if pt.x >= slider_left - 4
+                        && pt.x <= slider_right + 4
+                        && pt.y >= slider_top - 4
+                        && pt.y <= slider_bottom + 4
+                    {
                         return LRESULT(1isize); // HTCLIENT
                     }
 
@@ -1904,10 +2106,16 @@ mod windows_overlay {
                 WM_LBUTTONDOWN => {
                     let mx = (lparam.0 & 0xFFFF) as i16 as i32;
                     let my = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
-                    
+
                     let (scale, needle1, needle2, cx_val, cy_val) = {
                         let state = PROTRACTOR_STATE.lock();
-                        (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y)
+                        (
+                            state.scale,
+                            state.needle1_angle,
+                            state.needle2_angle,
+                            state.center_x,
+                            state.center_y,
+                        )
                     };
 
                     let base_radius = 150.0;
@@ -1930,7 +2138,11 @@ mod windows_overlay {
                     let slider_right = cx + 30;
                     let slider_top = size - 18;
                     let slider_bottom = size - 6;
-                    if mx >= slider_left - 4 && mx <= slider_right + 4 && my >= slider_top - 4 && my <= slider_bottom + 4 {
+                    if mx >= slider_left - 4
+                        && mx <= slider_right + 4
+                        && my >= slider_top - 4
+                        && my <= slider_bottom + 4
+                    {
                         hit = Some(ProtractorDragTarget::ThicknessSlider);
                     }
 
@@ -1981,7 +2193,9 @@ mod windows_overlay {
                             let mut was_minimized = false;
                             unsafe {
                                 if let Some(app_hwnd) = find_app_ui_window() {
-                                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_RESTORE, SetForegroundWindow, IsIconic};
+                                    use windows::Win32::UI::WindowsAndMessaging::{
+                                        IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow,
+                                    };
                                     was_minimized = IsIconic(app_hwnd).as_bool();
                                     if was_minimized {
                                         let _ = ShowWindow(app_hwnd, SW_RESTORE);
@@ -1990,7 +2204,9 @@ mod windows_overlay {
                                 }
                             }
                             if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
-                                let _ = ui_tx.send(UiCommand::RequestProtractorCalibration { was_minimized });
+                                let _ = ui_tx.send(UiCommand::RequestProtractorCalibration {
+                                    was_minimized,
+                                });
                             }
                         } else {
                             let mut mouse_screen = POINT::default();
@@ -1999,7 +2215,7 @@ mod windows_overlay {
                             *PROTRACTOR_DRAG_TARGET.lock() = Some(target);
                             *PROTRACTOR_DRAG_START_MOUSE.lock() = mouse_screen;
                             *PROTRACTOR_DRAG_START_CENTER.lock() = (cx_val, cy_val);
-                            
+
                             let start_ang = match target {
                                 ProtractorDragTarget::Needle1 => needle1,
                                 ProtractorDragTarget::Needle2 => needle2,
@@ -2035,14 +2251,16 @@ mod windows_overlay {
                                 let dy = mouse_screen.y - start_mouse.y;
                                 let new_cx = start_center.0 + dx;
                                 let new_cy = start_center.1 + dy;
-                                
+
                                 {
                                     let mut state = PROTRACTOR_STATE.lock();
                                     state.center_x = new_cx;
                                     state.center_y = new_cy;
                                 }
 
-                                if let Some(runtime) = runtime_mut(HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void)) {
+                                if let Some(runtime) = runtime_mut(HWND(
+                                    CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void,
+                                )) {
                                     let _ = paint_protractor_overlay(runtime);
                                 }
                             }
@@ -2052,7 +2270,9 @@ mod windows_overlay {
                                 let dx = mouse_screen.x - cx;
                                 let dy = mouse_screen.y - cy;
                                 let mut angle = (dy as f32).atan2(dx as f32).to_degrees();
-                                if angle < 0.0 { angle += 360.0; }
+                                if angle < 0.0 {
+                                    angle += 360.0;
+                                }
 
                                 {
                                     let mut state = PROTRACTOR_STATE.lock();
@@ -2063,7 +2283,9 @@ mod windows_overlay {
                                     }
                                 }
 
-                                if let Some(runtime) = runtime_mut(HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void)) {
+                                if let Some(runtime) = runtime_mut(HWND(
+                                    CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void,
+                                )) {
                                     let _ = paint_protractor_overlay(runtime);
                                 }
                             }
@@ -2087,13 +2309,16 @@ mod windows_overlay {
                                     state.scale = new_scale;
                                 }
 
-                                if let Some(runtime) = runtime_mut(HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void)) {
+                                if let Some(runtime) = runtime_mut(HWND(
+                                    CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void,
+                                )) {
                                     let _ = paint_protractor_overlay(runtime);
                                 }
                             }
                             ProtractorDragTarget::ThicknessSlider => {
                                 let mut pt = mouse_screen;
-                                let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
+                                let _ =
+                                    windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
 
                                 let scale = {
                                     let state = PROTRACTOR_STATE.lock();
@@ -2113,7 +2338,9 @@ mod windows_overlay {
                                     state.thickness = new_thick;
                                 }
 
-                                if let Some(runtime) = runtime_mut(HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void)) {
+                                if let Some(runtime) = runtime_mut(HWND(
+                                    CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void,
+                                )) {
                                     let _ = paint_protractor_overlay(runtime);
                                 }
                             }
@@ -2132,7 +2359,14 @@ mod windows_overlay {
 
                         let (scale, needle1, needle2, cx, cy, thickness) = {
                             let state = PROTRACTOR_STATE.lock();
-                            (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y, state.thickness)
+                            (
+                                state.scale,
+                                state.needle1_angle,
+                                state.needle2_angle,
+                                state.center_x,
+                                state.center_y,
+                                state.thickness,
+                            )
                         };
 
                         if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
@@ -2275,7 +2509,8 @@ mod windows_overlay {
                         && runtime.active_focus_highlight_hwnd.is_some()
                     {
                         let target_hwnd = runtime.active_focus_highlight_hwnd.unwrap();
-                        runtime.focus_highlight_rainbow_hue = (runtime.focus_highlight_rainbow_hue + 0.015) % 1.0;
+                        runtime.focus_highlight_rainbow_hue =
+                            (runtime.focus_highlight_rainbow_hue + 0.015) % 1.0;
                         let _ = paint_focus_highlight_overlay(runtime, target_hwnd);
                     }
 
@@ -2677,9 +2912,7 @@ mod windows_overlay {
                             update_modifier_state(info.vkCode, is_key_down);
                             return LRESULT(1);
                         }
-                    } else if is_key_up
-                        && process_screen_draw_hotkey_release(&binding)
-                    {
+                    } else if is_key_up && process_screen_draw_hotkey_release(&binding) {
                         update_held_key(&key_name, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
                         return LRESULT(1);
@@ -2689,8 +2922,7 @@ mod windows_overlay {
                     let hook_state = HOOK_STATE.lock();
                     hook_state.windows_key_locked
                 };
-                if windows_key_locked && matches!(info.vkCode, 0x5B | 0x5C)
-                {
+                if windows_key_locked && matches!(info.vkCode, 0x5B | 0x5C) {
                     if let Some(key_name) = key_name.as_ref() {
                         update_held_key(key_name, is_key_down, is_key_up);
                     }
@@ -3309,11 +3541,6 @@ mod windows_overlay {
         toggle_mouse_recording(preset.id, preset.name);
         Some(true)
     }
-
-
-
-
-
 
     fn process_image_search_hotkey(binding: &HotkeyBinding, is_repeat: bool) -> Option<bool> {
         if is_repeat {
@@ -4939,8 +5166,7 @@ mod windows_overlay {
     fn quick_key_display_combo_snapshot_for_key_name(
         key_name: &str,
     ) -> Option<(String, Vec<String>)> {
-        if !quick_key_display_is_mouse_key_name(key_name)
-            && hotkey::is_modifier_key_name(key_name)
+        if !quick_key_display_is_mouse_key_name(key_name) && hotkey::is_modifier_key_name(key_name)
         {
             return None;
         }
@@ -4980,9 +5206,13 @@ mod windows_overlay {
                 .or_else(|| combo_keys.last().cloned())
                 .unwrap_or_default();
             let binding = HotkeyBinding {
-                ctrl: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Ctrl")),
+                ctrl: combo_keys
+                    .iter()
+                    .any(|key| key.eq_ignore_ascii_case("Ctrl")),
                 alt: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Alt")),
-                shift: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Shift")),
+                shift: combo_keys
+                    .iter()
+                    .any(|key| key.eq_ignore_ascii_case("Shift")),
                 win: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Win")),
                 key,
                 combo_keys: combo_keys.clone(),
@@ -4996,15 +5226,12 @@ mod windows_overlay {
     }
 
     fn quick_key_display_release_expired_entries(runtime: &mut Runtime, now: Instant) {
-        runtime.quick_key_display_entries.retain(|entry| {
-            entry.held || entry.hide_at > now
-        });
+        runtime
+            .quick_key_display_entries
+            .retain(|entry| entry.held || entry.hide_at > now);
     }
 
-    fn quick_key_display_combo_key_is_held(
-        hook_state: &HookState,
-        key_name: &str,
-    ) -> bool {
+    fn quick_key_display_combo_key_is_held(hook_state: &HookState, key_name: &str) -> bool {
         if quick_key_display_is_wheel_key_name(key_name) {
             return false;
         }
@@ -5078,8 +5305,8 @@ mod windows_overlay {
 
         let held_long_enough = shown_elapsed >= QUICK_KEY_DISPLAY_HOLD_MIN_DURATION;
         if entry.held && held_long_enough {
-            let hold_elapsed = shown_elapsed
-                .saturating_sub(QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION.mul_f32(0.6));
+            let hold_elapsed =
+                shown_elapsed.saturating_sub(QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION.mul_f32(0.6));
             let hold_t = (hold_elapsed.as_secs_f32()
                 / QUICK_KEY_DISPLAY_HOLD_TRANSITION_DURATION.as_secs_f32())
             .clamp(0.0, 1.0);
@@ -5107,11 +5334,7 @@ mod windows_overlay {
         visual
     }
 
-    fn quick_key_display_mix_rgba(
-        from: [u8; 4],
-        to: [u8; 4],
-        t: f32,
-    ) -> [u8; 4] {
+    fn quick_key_display_mix_rgba(from: [u8; 4], to: [u8; 4], t: f32) -> [u8; 4] {
         let mix = t.clamp(0.0, 1.0);
         [
             (((from[0] as f32) * (1.0 - mix)) + ((to[0] as f32) * mix)).round() as u8,
@@ -5177,17 +5400,19 @@ mod windows_overlay {
         runtime
             .quick_key_display_slot_labels
             .insert((lane, slot), text.clone());
-        runtime.quick_key_display_entries.push(QuickKeyDisplayEntry {
-            text,
-            identity,
-            combo_keys,
-            lane,
-            slot,
-            held,
-            shown_at: now,
-            released_at: None,
-            hide_at: now + QUICK_KEY_DISPLAY_DISPLAY_DURATION,
-        });
+        runtime
+            .quick_key_display_entries
+            .push(QuickKeyDisplayEntry {
+                text,
+                identity,
+                combo_keys,
+                lane,
+                slot,
+                held,
+                shown_at: now,
+                released_at: None,
+                hide_at: now + QUICK_KEY_DISPLAY_DISPLAY_DURATION,
+            });
     }
 
     fn quick_key_display_release_entry(runtime: &mut Runtime, identity: &str) {
@@ -5280,11 +5505,7 @@ mod windows_overlay {
                     .iter()
                     .find(|entry| entry.lane == lane && entry.slot == slot)
                     .map(|entry| entry.text.as_str())
-                    .or_else(|| {
-                        slot_labels
-                            .get(&(lane, slot))
-                            .map(|label| label.as_str())
-                    })
+                    .or_else(|| slot_labels.get(&(lane, slot)).map(|label| label.as_str()))
                     .map(|label| quick_key_display_entry_width(label, font_size, cap_height))
                     .unwrap_or(cap_height)
             })
@@ -5295,7 +5516,8 @@ mod windows_overlay {
         if slot_widths.is_empty() {
             0
         } else {
-            slot_widths.iter().sum::<i32>() + entry_gap * (slot_widths.len().saturating_sub(1) as i32)
+            slot_widths.iter().sum::<i32>()
+                + entry_gap * (slot_widths.len().saturating_sub(1) as i32)
         }
     }
 
@@ -5404,9 +5626,7 @@ mod windows_overlay {
             return;
         }
 
-        if is_key_up
-            && let Some(identity) = quick_key_display_identity_for_key_name(key_name)
-        {
+        if is_key_up && let Some(identity) = quick_key_display_identity_for_key_name(key_name) {
             send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(
                 QuickKeyDisplayUpdate::Release { identity },
             ));
@@ -5710,21 +5930,22 @@ mod windows_overlay {
 
                 OverlayCommand::PreviewMousePath(preview) => {
                     let mut preview_guard = MOUSE_PATH_PREVIEW.lock();
-                    *preview_guard = preview.map(|(_, events, playback_from_ms)| MousePathPreviewSession {
-                        points: events
-                            .iter()
-                            .filter(|event| matches!(event.kind, MousePathEventKind::Move))
-                            .map(|event| POINT {
-                                x: event.x,
-                                y: event.y,
-                            })
-                            .collect(),
-                        events,
-                        playback_started_at: Some(Instant::now()),
-                        playback_from_ms: playback_from_ms.unwrap_or(0),
-                        playback_marker: None,
-                        dirty: true,
-                    });
+                    *preview_guard =
+                        preview.map(|(_, events, playback_from_ms)| MousePathPreviewSession {
+                            points: events
+                                .iter()
+                                .filter(|event| matches!(event.kind, MousePathEventKind::Move))
+                                .map(|event| POINT {
+                                    x: event.x,
+                                    y: event.y,
+                                })
+                                .collect(),
+                            events,
+                            playback_started_at: Some(Instant::now()),
+                            playback_from_ms: playback_from_ms.unwrap_or(0),
+                            playback_marker: None,
+                            dirty: true,
+                        });
                     drop(preview_guard);
                     let _ = refresh_mouse_record_trail(runtime);
                 }
@@ -5803,7 +6024,6 @@ mod windows_overlay {
                     let _ = refresh_search_area_overlay(runtime);
                 }
 
-
                 OverlayCommand::RefreshSearchAreaOverlay => {
                     SEARCH_AREA_OVERLAY_REFRESH_PENDING.store(false, Ordering::Release);
                     let _ = refresh_search_area_overlay(runtime);
@@ -5866,23 +6086,26 @@ mod windows_overlay {
                         .macro_groups
                         .iter()
                         .flat_map(|group| {
-                            group.presets.iter().map(|preset| {
-                                (preset.id, group.enabled && preset.enabled)
-                            })
+                            group
+                                .presets
+                                .iter()
+                                .map(|preset| (preset.id, group.enabled && preset.enabled))
                         })
                         .collect();
                     let next_enabled: HashMap<u32, bool> = presets
                         .iter()
                         .flat_map(|group| {
-                            group.presets.iter().map(|preset| {
-                                (preset.id, group.enabled && preset.enabled)
-                            })
+                            group
+                                .presets
+                                .iter()
+                                .map(|preset| (preset.id, group.enabled && preset.enabled))
                         })
                         .collect();
                     let presets_to_stop: Vec<u32> = previous_enabled
                         .iter()
                         .filter_map(|(preset_id, was_enabled)| {
-                            if *was_enabled && !next_enabled.get(preset_id).copied().unwrap_or(false)
+                            if *was_enabled
+                                && !next_enabled.get(preset_id).copied().unwrap_or(false)
                             {
                                 Some(*preset_id)
                             } else {
@@ -6518,10 +6741,7 @@ mod windows_overlay {
         }
     }
 
-    fn mark_screen_draw_toolbar_dirty(
-        state: &mut ScreenDrawState,
-        previous: ScreenDrawDirtyRect,
-    ) {
+    fn mark_screen_draw_toolbar_dirty(state: &mut ScreenDrawState, previous: ScreenDrawDirtyRect) {
         mark_screen_draw_dirty(state, previous);
         mark_screen_draw_dirty(state, screen_draw_toolbar_rect(state));
     }
@@ -6564,10 +6784,8 @@ mod windows_overlay {
             if state.surface_dc != 0 {
                 let surface_dc = HDC(state.surface_dc as *mut c_void);
                 if state.surface_bitmap != 0 {
-                    let _ = SelectObject(
-                        surface_dc,
-                        HGDIOBJ(state.surface_old_bitmap as *mut c_void),
-                    );
+                    let _ =
+                        SelectObject(surface_dc, HGDIOBJ(state.surface_old_bitmap as *mut c_void));
                     let _ = DeleteObject(HGDIOBJ(state.surface_bitmap as *mut c_void));
                 }
                 let _ = DeleteDC(surface_dc);
@@ -6791,9 +7009,7 @@ mod windows_overlay {
         Ok(true)
     }
 
-    fn select_screen_draw_capture_region(
-        session_id: u64,
-    ) -> Result<Option<(i32, i32, i32, i32)>> {
+    fn select_screen_draw_capture_region(session_id: u64) -> Result<Option<(i32, i32, i32, i32)>> {
         let is_down = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
 
         while is_down(0x01) {
@@ -6898,31 +7114,36 @@ mod windows_overlay {
     fn screen_draw_trigger_key_is_down(key_name: &str, hook_state: &HookState) -> bool {
         if key_name.eq_ignore_ascii_case("Ctrl") || key_name.eq_ignore_ascii_case("Control") {
             return hook_state.ctrl
-                || hotkey::key_name_to_vk(key_name)
-                    .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
+                || hotkey::key_name_to_vk(key_name).is_some_and(|vk| {
+                    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
+                });
         }
         if key_name.eq_ignore_ascii_case("Alt") {
             return hook_state.alt
-                || hotkey::key_name_to_vk(key_name)
-                    .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
+                || hotkey::key_name_to_vk(key_name).is_some_and(|vk| {
+                    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
+                });
         }
         if key_name.eq_ignore_ascii_case("Shift") {
             return hook_state.shift
-                || hotkey::key_name_to_vk(key_name)
-                    .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
+                || hotkey::key_name_to_vk(key_name).is_some_and(|vk| {
+                    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
+                });
         }
         if key_name.eq_ignore_ascii_case("Win") || key_name.eq_ignore_ascii_case("Meta") {
             return hook_state.win
-                || hotkey::key_name_to_vk(key_name)
-                    .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
+                || hotkey::key_name_to_vk(key_name).is_some_and(|vk| {
+                    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
+                });
         }
         if hotkey::is_mouse_key_name(key_name) {
             return hook_state
                 .held_mouse_buttons
                 .iter()
                 .any(|held| held.eq_ignore_ascii_case(key_name))
-                || hotkey::key_name_to_vk(key_name)
-                    .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
+                || hotkey::key_name_to_vk(key_name).is_some_and(|vk| {
+                    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
+                });
         }
         hook_state
             .held_inputs
@@ -7032,13 +7253,9 @@ mod windows_overlay {
     ) -> Result<window_list::ScreenCaptureFrame> {
         let (capture_x, capture_y, capture_w, capture_h) =
             normalize_screen_draw_capture_region(x, y, width, height)?;
-        let mut capture = window_list::capture_virtual_screen_region(
-            capture_x,
-            capture_y,
-            capture_w,
-            capture_h,
-        )
-        .ok_or_else(|| anyhow::anyhow!("Failed to capture the selected screen region"))?;
+        let mut capture =
+            window_list::capture_virtual_screen_region(capture_x, capture_y, capture_w, capture_h)
+                .ok_or_else(|| anyhow::anyhow!("Failed to capture the selected screen region"))?;
         blend_screen_draw_capture_region_onto_capture(
             capture.rgba.as_mut_slice(),
             capture_x,
@@ -7229,8 +7446,7 @@ mod windows_overlay {
         if let Some(previous) = state.live_stroke_rect.take() {
             mark_screen_draw_dirty(&mut state, previous);
         }
-        if let Some(stroke) = state.current_stroke.take()
-        {
+        if let Some(stroke) = state.current_stroke.take() {
             if !stroke.points.is_empty() {
                 if state.canvas_width > 0
                     && state.canvas_height > 0
@@ -7408,14 +7624,54 @@ mod windows_overlay {
 
     fn next_screen_draw_color(color: RgbaColor) -> RgbaColor {
         const PALETTE: [RgbaColor; 8] = [
-            RgbaColor { r: 0, g: 255, b: 170, a: 255 },
-            RgbaColor { r: 255, g: 96, b: 96, a: 255 },
-            RgbaColor { r: 255, g: 224, b: 96, a: 255 },
-            RgbaColor { r: 96, g: 176, b: 255, a: 255 },
-            RgbaColor { r: 255, g: 128, b: 224, a: 255 },
-            RgbaColor { r: 255, g: 255, b: 255, a: 255 },
-            RgbaColor { r: 32, g: 32, b: 32, a: 255 },
-            RgbaColor { r: 126, g: 224, b: 182, a: 255 },
+            RgbaColor {
+                r: 0,
+                g: 255,
+                b: 170,
+                a: 255,
+            },
+            RgbaColor {
+                r: 255,
+                g: 96,
+                b: 96,
+                a: 255,
+            },
+            RgbaColor {
+                r: 255,
+                g: 224,
+                b: 96,
+                a: 255,
+            },
+            RgbaColor {
+                r: 96,
+                g: 176,
+                b: 255,
+                a: 255,
+            },
+            RgbaColor {
+                r: 255,
+                g: 128,
+                b: 224,
+                a: 255,
+            },
+            RgbaColor {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
+            RgbaColor {
+                r: 32,
+                g: 32,
+                b: 32,
+                a: 255,
+            },
+            RgbaColor {
+                r: 126,
+                g: 224,
+                b: 182,
+                a: 255,
+            },
         ];
         let index = PALETTE
             .iter()
@@ -7424,11 +7680,7 @@ mod windows_overlay {
         PALETTE[(index + 1) % PALETTE.len()]
     }
 
-    fn ensure_screen_draw_canvas(
-        state: &mut ScreenDrawState,
-        width: usize,
-        height: usize,
-    ) -> bool {
+    fn ensure_screen_draw_canvas(state: &mut ScreenDrawState, width: usize, height: usize) -> bool {
         if state.canvas_width == width
             && state.canvas_height == height
             && state.committed_rgba.len() == width * height * 4
@@ -7454,10 +7706,8 @@ mod windows_overlay {
         pixmap: &mut tiny_skia::PixmapMut,
         stroke: &ScreenDrawStroke,
     ) {
-        let filtered_points = filtered_screen_draw_points(
-            &stroke.points,
-            if stroke.smoothing { 1.2 } else { 0.6 },
-        );
+        let filtered_points =
+            filtered_screen_draw_points(&stroke.points, if stroke.smoothing { 1.2 } else { 0.6 });
         let points = if stroke.smoothing {
             smoothed_screen_draw_points(&filtered_points, stroke.smoothing_amount)
         } else {
@@ -7677,12 +7927,11 @@ mod windows_overlay {
             );
         }
         if let Some(stroke) = state_guard.current_stroke.clone()
-            && let Some(mut pixmap) =
-                tiny_skia::PixmapMut::from_bytes(
-                    state_guard.frame_rgba.as_mut_slice(),
-                    width as u32,
-                    height as u32,
-                )
+            && let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
+                state_guard.frame_rgba.as_mut_slice(),
+                width as u32,
+                height as u32,
+            )
         {
             render_screen_draw_stroke_skia(&mut pixmap, &stroke);
         }
@@ -7743,8 +7992,14 @@ mod windows_overlay {
         let _ = UpdateLayeredWindow(
             hwnd,
             Some(screen_dc),
-            Some(&POINT { x: screen_x, y: screen_y }),
-            Some(&SIZE { cx: screen_w, cy: screen_h }),
+            Some(&POINT {
+                x: screen_x,
+                y: screen_y,
+            }),
+            Some(&SIZE {
+                cx: screen_w,
+                cy: screen_h,
+            }),
             Some(surface_dc),
             Some(&POINT { x: 0, y: 0 }),
             COLORREF(0),
@@ -7888,7 +8143,15 @@ mod windows_overlay {
         );
 
         let close_x = SCREEN_DRAW_TOOLBAR_CLOSE_X as f32;
-        fill_skia_rounded_rect(&mut pixmap, close_x, 10.0, 26.0, 20.0, 8.0, [82, 96, 120, 214]);
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            close_x,
+            10.0,
+            26.0,
+            20.0,
+            8.0,
+            [82, 96, 120, 214],
+        );
         draw_skia_line(
             &mut pixmap,
             close_x + 7.0,
@@ -7908,7 +8171,15 @@ mod windows_overlay {
             2.0,
         );
 
-        fill_skia_rounded_rect(&mut pixmap, 13.0, 19.0, 38.0, 38.0, 11.0, [236, 244, 255, 84]);
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            13.0,
+            19.0,
+            38.0,
+            38.0,
+            11.0,
+            [236, 244, 255, 84],
+        );
         fill_skia_rounded_rect(
             &mut pixmap,
             15.0,
@@ -7918,7 +8189,16 @@ mod windows_overlay {
             10.0,
             [color.r, color.g, color.b, color.a],
         );
-        stroke_skia_rounded_rect(&mut pixmap, 14.5, 20.5, 35.0, 35.0, 10.0, 1.0, [255, 255, 255, 48]);
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            14.5,
+            20.5,
+            35.0,
+            35.0,
+            10.0,
+            1.0,
+            [255, 255, 255, 48],
+        );
 
         draw_screen_draw_slider_skia(
             &mut pixmap,
@@ -7934,7 +8214,16 @@ mod windows_overlay {
             [76, 90, 112, 220]
         };
         fill_skia_rounded_rect(&mut pixmap, 172.0, 20.0, 36.0, 36.0, 10.0, eraser_fill);
-        stroke_skia_rounded_rect(&mut pixmap, 172.5, 20.5, 35.0, 35.0, 10.0, 1.0, [255, 255, 255, 34]);
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            172.5,
+            20.5,
+            35.0,
+            35.0,
+            10.0,
+            1.0,
+            [255, 255, 255, 34],
+        );
         {
             let mut pb = tiny_skia::PathBuilder::new();
             pb.move_to(182.0, 42.0);
@@ -7955,7 +8244,15 @@ mod windows_overlay {
                 );
             }
         }
-        draw_skia_line(&mut pixmap, 186.0, 45.0, 196.0, 45.0, [62, 74, 92, 255], 2.0);
+        draw_skia_line(
+            &mut pixmap,
+            186.0,
+            45.0,
+            196.0,
+            45.0,
+            [62, 74, 92, 255],
+            2.0,
+        );
 
         let smooth_fill = if smoothing {
             [100, 188, 156, 255]
@@ -7963,13 +8260,54 @@ mod windows_overlay {
             [76, 90, 112, 220]
         };
         fill_skia_rounded_rect(&mut pixmap, 224.0, 24.0, 28.0, 28.0, 8.0, smooth_fill);
-        stroke_skia_rounded_rect(&mut pixmap, 224.5, 24.5, 27.0, 27.0, 8.0, 1.0, [255, 255, 255, 34]);
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            224.5,
+            24.5,
+            27.0,
+            27.0,
+            8.0,
+            1.0,
+            [255, 255, 255, 34],
+        );
         if smoothing {
-            draw_skia_line(&mut pixmap, 230.0, 38.0, 237.0, 45.0, [255, 255, 255, 255], 2.0);
-            draw_skia_line(&mut pixmap, 237.0, 45.0, 247.0, 31.0, [255, 255, 255, 255], 2.0);
+            draw_skia_line(
+                &mut pixmap,
+                230.0,
+                38.0,
+                237.0,
+                45.0,
+                [255, 255, 255, 255],
+                2.0,
+            );
+            draw_skia_line(
+                &mut pixmap,
+                237.0,
+                45.0,
+                247.0,
+                31.0,
+                [255, 255, 255, 255],
+                2.0,
+            );
         } else {
-            draw_skia_line(&mut pixmap, 230.0, 40.0, 246.0, 34.0, [255, 255, 255, 210], 2.0);
-            draw_skia_line(&mut pixmap, 230.0, 36.0, 246.0, 40.0, [255, 255, 255, 160], 1.4);
+            draw_skia_line(
+                &mut pixmap,
+                230.0,
+                40.0,
+                246.0,
+                34.0,
+                [255, 255, 255, 210],
+                2.0,
+            );
+            draw_skia_line(
+                &mut pixmap,
+                230.0,
+                36.0,
+                246.0,
+                40.0,
+                [255, 255, 255, 160],
+                1.4,
+            );
         }
 
         draw_screen_draw_slider_skia(
@@ -8086,14 +8424,14 @@ mod windows_overlay {
                 session.dirty = false;
                 (
                     session
-                    .events
-                    .iter()
-                    .filter(|event| matches!(event.kind, MousePathEventKind::Move))
-                    .map(|event| POINT {
-                        x: event.x,
-                        y: event.y,
-                    })
-                    .collect::<Vec<_>>(),
+                        .events
+                        .iter()
+                        .filter(|event| matches!(event.kind, MousePathEventKind::Move))
+                        .map(|event| POINT {
+                            x: event.x,
+                            y: event.y,
+                        })
+                        .collect::<Vec<_>>(),
                     None,
                 )
             } else {
@@ -8114,7 +8452,10 @@ mod windows_overlay {
                     for event in &session.events {
                         accumulated_ms = accumulated_ms.saturating_add(event.delay_ms);
                         if matches!(event.kind, MousePathEventKind::Move) {
-                            let point = POINT { x: event.x, y: event.y };
+                            let point = POINT {
+                                x: event.x,
+                                y: event.y,
+                            };
                             all_points.push(point);
                             if accumulated_ms >= target_ms && marker.is_none() {
                                 marker = Some(point);
@@ -8246,9 +8587,8 @@ mod windows_overlay {
             stop_active_video_preset_playback();
         }
 
-        let search_layer_is_empty = regions.is_empty()
-            && preview_regions.is_empty()
-            && static_geometry_shapes.is_empty();
+        let search_layer_is_empty =
+            regions.is_empty() && preview_regions.is_empty() && static_geometry_shapes.is_empty();
         let dynamic_layer_is_empty = dynamic_geometry_shapes.is_empty();
 
         if search_layer_is_empty {
@@ -8363,9 +8703,7 @@ mod windows_overlay {
             return 16;
         }
 
-        if runtime.quick_key_display_enabled
-            && !runtime.quick_key_display_entries.is_empty()
-        {
+        if runtime.quick_key_display_enabled && !runtime.quick_key_display_entries.is_empty() {
             return 33;
         }
 
@@ -8414,18 +8752,12 @@ mod windows_overlay {
         }
 
         let root = GetAncestor(hwnd, GA_ROOT);
-        if root.0.is_null() {
-            hwnd
-        } else {
-            root
-        }
+        if root.0.is_null() { hwnd } else { root }
     }
 
     unsafe fn is_native_focus_highlight_target(hwnd: HWND) -> bool {
         let target = normalize_native_focus_highlight_target(hwnd);
-        if target.0.is_null()
-            || is_internal_app_window(target)
-            || looks_like_main_ui_window(target)
+        if target.0.is_null() || is_internal_app_window(target) || looks_like_main_ui_window(target)
         {
             return false;
         }
@@ -8446,11 +8778,17 @@ mod windows_overlay {
 
     fn angle_between(angle: f32, start: f32, end: f32) -> bool {
         let mut s = start % 360.0;
-        if s < 0.0 { s += 360.0; }
+        if s < 0.0 {
+            s += 360.0;
+        }
         let mut e = end % 360.0;
-        if e < 0.0 { e += 360.0; }
+        if e < 0.0 {
+            e += 360.0;
+        }
         let mut a = angle % 360.0;
-        if a < 0.0 { a += 360.0; }
+        if a < 0.0 {
+            a += 360.0;
+        }
 
         if s <= e {
             a >= s && a <= e
@@ -8485,22 +8823,41 @@ mod windows_overlay {
     }
 
     fn blend_rgba_pixel(buf: &mut [u8], w: usize, _h: usize, x: i32, y: i32, color: [u8; 4]) {
-        if x < 0 || y < 0 { return; }
+        if x < 0 || y < 0 {
+            return;
+        }
         let (x, y) = (x as usize, y as usize);
-        if x >= w { return; }
+        if x >= w {
+            return;
+        }
         let off = (y * w + x) * 4;
-        if off + 3 >= buf.len() { return; }
+        if off + 3 >= buf.len() {
+            return;
+        }
         let sa = color[3] as u32;
         let da = buf[off + 3] as u32;
         let out_a = sa + da * (255 - sa) / 255;
-        if out_a == 0 { return; }
-        buf[off]     = ((color[0] as u32 * sa + buf[off]     as u32 * da * (255 - sa) / 255) / out_a) as u8;
-        buf[off + 1] = ((color[1] as u32 * sa + buf[off + 1] as u32 * da * (255 - sa) / 255) / out_a) as u8;
-        buf[off + 2] = ((color[2] as u32 * sa + buf[off + 2] as u32 * da * (255 - sa) / 255) / out_a) as u8;
+        if out_a == 0 {
+            return;
+        }
+        buf[off] = ((color[0] as u32 * sa + buf[off] as u32 * da * (255 - sa) / 255) / out_a) as u8;
+        buf[off + 1] =
+            ((color[1] as u32 * sa + buf[off + 1] as u32 * da * (255 - sa) / 255) / out_a) as u8;
+        buf[off + 2] =
+            ((color[2] as u32 * sa + buf[off + 2] as u32 * da * (255 - sa) / 255) / out_a) as u8;
         buf[off + 3] = out_a as u8;
     }
 
-    fn draw_line_rgba(buf: &mut [u8], w: usize, h: usize, x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4]) {
+    fn draw_line_rgba(
+        buf: &mut [u8],
+        w: usize,
+        h: usize,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        color: [u8; 4],
+    ) {
         let (mut x0, mut y0) = (x0, y0);
         let (x1, y1) = (x1, y1);
         let dx = (x1 - x0).abs();
@@ -8510,27 +8867,56 @@ mod windows_overlay {
         let mut err = dx - dy;
         loop {
             blend_rgba_pixel(buf, w, h, x0, y0, color);
-            if x0 == x1 && y0 == y1 { break; }
+            if x0 == x1 && y0 == y1 {
+                break;
+            }
             let e2 = 2 * err;
-            if e2 > -dy { err -= dy; x0 += sx; }
-            if e2 < dx  { err += dx; y0 += sy; }
+            if e2 > -dy {
+                err -= dy;
+                x0 += sx;
+            }
+            if e2 < dx {
+                err += dx;
+                y0 += sy;
+            }
         }
     }
 
-    fn draw_line_thick_rgba(buf: &mut [u8], w: usize, h: usize, x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4], thickness: i32) {
+    fn draw_line_thick_rgba(
+        buf: &mut [u8],
+        w: usize,
+        h: usize,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        color: [u8; 4],
+        thickness: i32,
+    ) {
         let half = thickness / 2;
         for t in -half..=half {
             let len = ((x1 - x0).pow(2) + (y1 - y0).pow(2)) as f32;
-            if len < 0.001 { break; }
+            if len < 0.001 {
+                break;
+            }
             let nx = -(y1 - y0) as f32 / len.sqrt();
-            let ny =  (x1 - x0) as f32 / len.sqrt();
+            let ny = (x1 - x0) as f32 / len.sqrt();
             let ox = (nx * t as f32).round() as i32;
             let oy = (ny * t as f32).round() as i32;
             draw_line_rgba(buf, w, h, x0 + ox, y0 + oy, x1 + ox, y1 + oy, color);
         }
     }
 
-    fn fill_ellipse_rgba(buf: &mut [u8], w: usize, h: usize, bx: i32, by: i32, bw: i32, bh: i32, color: [u8; 4]) {
+    fn fill_ellipse_rgba(
+        buf: &mut [u8],
+        w: usize,
+        h: usize,
+        bx: i32,
+        by: i32,
+        bw: i32,
+        bh: i32,
+        color: [u8; 4],
+    ) {
         let cx = bx + bw / 2;
         let cy = by + bh / 2;
         let rx = (bw / 2).max(1) as f32;
@@ -8546,7 +8932,17 @@ mod windows_overlay {
         }
     }
 
-    fn draw_ellipse_outline_thick_rgba(buf: &mut [u8], w: usize, h: usize, bx: i32, by: i32, bw: i32, bh: i32, color: [u8; 4], thickness: i32) {
+    fn draw_ellipse_outline_thick_rgba(
+        buf: &mut [u8],
+        w: usize,
+        h: usize,
+        bx: i32,
+        by: i32,
+        bw: i32,
+        bh: i32,
+        color: [u8; 4],
+        thickness: i32,
+    ) {
         let cx = bx + bw / 2;
         let cy = by + bh / 2;
         let rx = (bw / 2).max(1) as f32;
@@ -8566,7 +8962,16 @@ mod windows_overlay {
         }
     }
 
-    fn fill_rect_rgba(buf: &mut [u8], w: usize, h: usize, x: i32, y: i32, rw: i32, rh: i32, color: [u8; 4]) {
+    fn fill_rect_rgba(
+        buf: &mut [u8],
+        w: usize,
+        h: usize,
+        x: i32,
+        y: i32,
+        rw: i32,
+        rh: i32,
+        color: [u8; 4],
+    ) {
         for py in y..y + rh {
             for px in x..x + rw {
                 blend_rgba_pixel(buf, w, h, px, py, color);
@@ -8588,11 +8993,19 @@ mod windows_overlay {
         pb.line_to(x1, y1);
         if let Some(path) = pb.finish() {
             let mut paint = tiny_skia::Paint::default();
-            paint.set_color(tiny_skia::Color::from_rgba8(color[0], color[1], color[2], color[3]));
+            paint.set_color(tiny_skia::Color::from_rgba8(
+                color[0], color[1], color[2], color[3],
+            ));
             paint.anti_alias = true;
             let mut stroke = tiny_skia::Stroke::default();
             stroke.width = stroke_width;
-            pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+            pixmap.stroke_path(
+                &path,
+                &paint,
+                &stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
     }
 
@@ -8619,11 +9032,19 @@ mod windows_overlay {
         pb.close();
         if let Some(path) = pb.finish() {
             let mut paint = tiny_skia::Paint::default();
-            paint.set_color(tiny_skia::Color::from_rgba8(color[0], color[1], color[2], color[3]));
+            paint.set_color(tiny_skia::Color::from_rgba8(
+                color[0], color[1], color[2], color[3],
+            ));
             paint.anti_alias = true;
             let mut stroke = tiny_skia::Stroke::default();
             stroke.width = stroke_width;
-            pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+            pixmap.stroke_path(
+                &path,
+                &paint,
+                &stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
     }
 
@@ -8649,9 +9070,17 @@ mod windows_overlay {
         pb.close();
         if let Some(path) = pb.finish() {
             let mut paint = tiny_skia::Paint::default();
-            paint.set_color(tiny_skia::Color::from_rgba8(color[0], color[1], color[2], color[3]));
+            paint.set_color(tiny_skia::Color::from_rgba8(
+                color[0], color[1], color[2], color[3],
+            ));
             paint.anti_alias = true;
-            pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+            pixmap.fill_path(
+                &path,
+                &paint,
+                tiny_skia::FillRule::Winding,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
     }
 
@@ -8665,7 +9094,9 @@ mod windows_overlay {
     ) {
         if let Some(rect) = tiny_skia::Rect::from_xywh(left, top, width, height) {
             let mut paint = tiny_skia::Paint::default();
-            paint.set_color(tiny_skia::Color::from_rgba8(color[0], color[1], color[2], color[3]));
+            paint.set_color(tiny_skia::Color::from_rgba8(
+                color[0], color[1], color[2], color[3],
+            ));
             paint.anti_alias = true;
             pixmap.fill_rect(rect, &paint, tiny_skia::Transform::identity(), None);
         }
@@ -8691,7 +9122,16 @@ mod windows_overlay {
     unsafe fn paint_protractor_overlay(runtime: &Runtime) -> Result<()> {
         let (scale, needle1, needle2, cx_val, cy_val, thickness, calibrating, ui_language) = {
             let state = PROTRACTOR_STATE.lock();
-            (state.scale, state.needle1_angle, state.needle2_angle, state.center_x, state.center_y, state.thickness, state.calibrating, state.ui_language)
+            (
+                state.scale,
+                state.needle1_angle,
+                state.needle2_angle,
+                state.center_x,
+                state.center_y,
+                state.thickness,
+                state.calibrating,
+                state.ui_language,
+            )
         };
 
         let base_radius = 150.0;
@@ -8723,11 +9163,17 @@ mod windows_overlay {
         let mut pb_sector = tiny_skia::PathBuilder::new();
         pb_sector.move_to(cx as f32, cy as f32);
         let mut s = needle1 % 360.0;
-        if s < 0.0 { s += 360.0; }
+        if s < 0.0 {
+            s += 360.0;
+        }
         let mut e = needle2 % 360.0;
-        if e < 0.0 { e += 360.0; }
+        if e < 0.0 {
+            e += 360.0;
+        }
         let mut diff = e - s;
-        if diff < 0.0 { diff += 360.0; }
+        if diff < 0.0 {
+            diff += 360.0;
+        }
         let sector_steps = (diff.abs() as i32).max(1);
         for i in 0..=sector_steps {
             let deg = s + (diff * (i as f32 / sector_steps as f32));
@@ -8741,7 +9187,13 @@ mod windows_overlay {
             let mut paint = tiny_skia::Paint::default();
             paint.set_color(tiny_skia::Color::from_rgba8(0, 160, 255, 40));
             paint.anti_alias = true;
-            pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+            pixmap.fill_path(
+                &path,
+                &paint,
+                tiny_skia::FillRule::Winding,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
 
         // 2. Draw outer circle
@@ -8767,22 +9219,30 @@ mod windows_overlay {
         // 3. Draw tick marks every 5 degrees
         for deg in 0..360 {
             if deg % 5 == 0 {
-                let len = if deg % 90 == 0 { (15.0 * scale) as i32 }
-                          else if deg % 10 == 0 { (10.0 * scale) as i32 }
-                          else { (5.0 * scale) as i32 };
+                let len = if deg % 90 == 0 {
+                    (15.0 * scale) as i32
+                } else if deg % 10 == 0 {
+                    (10.0 * scale) as i32
+                } else {
+                    (5.0 * scale) as i32
+                };
                 let thick = if deg % 10 == 0 { 2.0 } else { 1.0 };
-                
+
                 let rad = (deg as f32).to_radians();
                 let r_in = radius - len;
                 let x0 = cx as f32 + r_in as f32 * rad.cos();
                 let y0 = cy as f32 + r_in as f32 * rad.sin();
                 let x1 = cx as f32 + radius as f32 * rad.cos();
                 let y1 = cy as f32 + radius as f32 * rad.sin();
-                
+
                 // Draw black backing for high contrast
                 draw_skia_line(&mut pixmap, x0, y0, x1, y1, [0, 0, 0, 220], thick + 1.5);
                 // Draw white tick
-                let color = if deg % 90 == 0 { [255, 255, 255, 255] } else { [255, 255, 255, 220] };
+                let color = if deg % 90 == 0 {
+                    [255, 255, 255, 255]
+                } else {
+                    [255, 255, 255, 220]
+                };
                 draw_skia_line(&mut pixmap, x0, y0, x1, y1, color, thick);
             }
         }
@@ -8791,19 +9251,67 @@ mod windows_overlay {
         draw_skia_circle_fill(&mut pixmap, cx as f32, cy as f32, 4.0, [0, 0, 0, 255]);
         draw_skia_circle_fill(&mut pixmap, cx as f32, cy as f32, 2.0, [255, 92, 141, 255]);
         // Black backing
-        draw_skia_line(&mut pixmap, cx as f32 - 12.0, cy as f32, cx as f32 + 12.0, cy as f32, [0, 0, 0, 255], 3.0);
-        draw_skia_line(&mut pixmap, cx as f32, cy as f32 - 12.0, cx as f32, cy as f32 + 12.0, [0, 0, 0, 255], 3.0);
+        draw_skia_line(
+            &mut pixmap,
+            cx as f32 - 12.0,
+            cy as f32,
+            cx as f32 + 12.0,
+            cy as f32,
+            [0, 0, 0, 255],
+            3.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            cx as f32,
+            cy as f32 - 12.0,
+            cx as f32,
+            cy as f32 + 12.0,
+            [0, 0, 0, 255],
+            3.0,
+        );
         // White crosshair
-        draw_skia_line(&mut pixmap, cx as f32 - 12.0, cy as f32, cx as f32 + 12.0, cy as f32, [255, 255, 255, 255], 1.0);
-        draw_skia_line(&mut pixmap, cx as f32, cy as f32 - 12.0, cx as f32, cy as f32 + 12.0, [255, 255, 255, 255], 1.0);
+        draw_skia_line(
+            &mut pixmap,
+            cx as f32 - 12.0,
+            cy as f32,
+            cx as f32 + 12.0,
+            cy as f32,
+            [255, 255, 255, 255],
+            1.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            cx as f32,
+            cy as f32 - 12.0,
+            cx as f32,
+            cy as f32 + 12.0,
+            [255, 255, 255, 255],
+            1.0,
+        );
 
         // 5. Needle 1 & handle
         let rad1 = (needle1 as f32).to_radians();
         let n1x = cx as f32 + radius as f32 * rad1.cos();
         let n1y = cy as f32 + radius as f32 * rad1.sin();
         // Black backing
-        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n1x, n1y, [0, 0, 0, 255], thickness + 2.0);
-        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n1x, n1y, [0, 220, 255, 255], thickness);
+        draw_skia_line(
+            &mut pixmap,
+            cx as f32,
+            cy as f32,
+            n1x,
+            n1y,
+            [0, 0, 0, 255],
+            thickness + 2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            cx as f32,
+            cy as f32,
+            n1x,
+            n1y,
+            [0, 220, 255, 255],
+            thickness,
+        );
         draw_skia_circle_fill(&mut pixmap, n1x, n1y, 7.5, [0, 0, 0, 255]);
         draw_skia_circle_fill(&mut pixmap, n1x, n1y, 6.0, [0, 220, 255, 255]);
         draw_skia_circle_outline(&mut pixmap, n1x, n1y, 6.0, [255, 255, 255, 255], 1.5);
@@ -8813,8 +9321,24 @@ mod windows_overlay {
         let n2x = cx as f32 + radius as f32 * rad2.cos();
         let n2y = cy as f32 + radius as f32 * rad2.sin();
         // Black backing
-        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n2x, n2y, [0, 0, 0, 255], thickness + 2.0);
-        draw_skia_line(&mut pixmap, cx as f32, cy as f32, n2x, n2y, [255, 92, 141, 255], thickness);
+        draw_skia_line(
+            &mut pixmap,
+            cx as f32,
+            cy as f32,
+            n2x,
+            n2y,
+            [0, 0, 0, 255],
+            thickness + 2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            cx as f32,
+            cy as f32,
+            n2x,
+            n2y,
+            [255, 92, 141, 255],
+            thickness,
+        );
         draw_skia_circle_fill(&mut pixmap, n2x, n2y, 7.5, [0, 0, 0, 255]);
         draw_skia_circle_fill(&mut pixmap, n2x, n2y, 6.0, [255, 92, 141, 255]);
         draw_skia_circle_outline(&mut pixmap, n2x, n2y, 6.0, [255, 255, 255, 255], 1.5);
@@ -8827,9 +9351,32 @@ mod windows_overlay {
         draw_skia_circle_outline(&mut pixmap, gx, gy, 7.0, [255, 255, 255, 255], 1.0);
 
         // 8. Close Button
-        draw_skia_rect_fill(&mut pixmap, size as f32 - 24.0, 8.0, 16.0, 16.0, [255, 80, 80, 220]);
-        draw_skia_line(&mut pixmap, size as f32 - 21.0, 11.0, size as f32 - 11.0, 21.0, [255, 255, 255, 255], 2.0);
-        draw_skia_line(&mut pixmap, size as f32 - 11.0, 11.0, size as f32 - 21.0, 21.0, [255, 255, 255, 255], 2.0);
+        draw_skia_rect_fill(
+            &mut pixmap,
+            size as f32 - 24.0,
+            8.0,
+            16.0,
+            16.0,
+            [255, 80, 80, 220],
+        );
+        draw_skia_line(
+            &mut pixmap,
+            size as f32 - 21.0,
+            11.0,
+            size as f32 - 11.0,
+            21.0,
+            [255, 255, 255, 255],
+            2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            size as f32 - 11.0,
+            11.0,
+            size as f32 - 21.0,
+            21.0,
+            [255, 255, 255, 255],
+            2.0,
+        );
 
         // 9. Calibration Button (background/border)
         let btn_bg_color = if calibrating {
@@ -8843,11 +9390,32 @@ mod windows_overlay {
         // 10. Thickness Slider
         let slider_left = cx as f32 - 30.0;
         let slider_right = cx as f32 + 30.0;
-        draw_skia_line(&mut pixmap, slider_left, size as f32 - 12.0, slider_right, size as f32 - 12.0, [200, 200, 200, 180], 1.0);
+        draw_skia_line(
+            &mut pixmap,
+            slider_left,
+            size as f32 - 12.0,
+            slider_right,
+            size as f32 - 12.0,
+            [200, 200, 200, 180],
+            1.0,
+        );
         let t_frac = ((thickness - 1.0) / 7.0).clamp(0.0, 1.0);
         let thumb_x = slider_left + t_frac * 60.0;
-        draw_skia_circle_fill(&mut pixmap, thumb_x, size as f32 - 12.0, 4.0, [0, 220, 255, 255]);
-        draw_skia_circle_outline(&mut pixmap, thumb_x, size as f32 - 12.0, 4.0, [255, 255, 255, 255], 1.0);
+        draw_skia_circle_fill(
+            &mut pixmap,
+            thumb_x,
+            size as f32 - 12.0,
+            4.0,
+            [0, 220, 255, 255],
+        );
+        draw_skia_circle_outline(
+            &mut pixmap,
+            thumb_x,
+            size as f32 - 12.0,
+            4.0,
+            [255, 255, 255, 255],
+            1.0,
+        );
 
         // GDI render & Text setup
         let screen_dc = GetDC(None);
@@ -8887,7 +9455,7 @@ mod windows_overlay {
         }
 
         let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
-        
+
         // Copy tiny-skia pixels to DIB section bits, swapping R and B channels to match BGRA
         let pixmap_data = pixmap.data();
         let bits_ptr = bits as *mut u8;
@@ -8908,7 +9476,11 @@ mod windows_overlay {
 
         // Draw labels
         let angle_diff = (needle2 - needle1).abs();
-        let angle_val = if angle_diff > 180.0 { 360.0 - angle_diff } else { angle_diff };
+        let angle_val = if angle_diff > 180.0 {
+            360.0 - angle_diff
+        } else {
+            angle_diff
+        };
         let angle_str = format!("{:.1}°", angle_val);
         let center_str = format!("X:{} Y:{}", cx_val, cy_val);
 
@@ -8946,8 +9518,16 @@ mod windows_overlay {
             right: cx + 80,
             bottom: cy - 22,
         };
-        let mut w_angle = angle_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
-        let _ = DrawTextW(mem_dc, &mut w_angle, &mut r_angle, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        let mut w_angle = angle_str
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let _ = DrawTextW(
+            mem_dc,
+            &mut w_angle,
+            &mut r_angle,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
 
         let mut r_center = RECT {
             left: cx - 80,
@@ -8955,8 +9535,16 @@ mod windows_overlay {
             right: cx + 80,
             bottom: cy - 2,
         };
-        let mut w_center = center_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
-        let _ = DrawTextW(mem_dc, &mut w_center, &mut r_center, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        let mut w_center = center_str
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let _ = DrawTextW(
+            mem_dc,
+            &mut w_center,
+            &mut r_center,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
 
         let mut r_p1 = RECT {
             left: cx - 80,
@@ -8964,8 +9552,16 @@ mod windows_overlay {
             right: cx + 80,
             bottom: cy + 24,
         };
-        let mut w_p1 = p1_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
-        let _ = DrawTextW(mem_dc, &mut w_p1, &mut r_p1, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        let mut w_p1 = p1_str
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let _ = DrawTextW(
+            mem_dc,
+            &mut w_p1,
+            &mut r_p1,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
 
         let mut r_p2 = RECT {
             left: cx - 80,
@@ -8973,8 +9569,16 @@ mod windows_overlay {
             right: cx + 80,
             bottom: cy + 44,
         };
-        let mut w_p2 = p2_str.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
-        let _ = DrawTextW(mem_dc, &mut w_p2, &mut r_p2, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        let mut w_p2 = p2_str
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let _ = DrawTextW(
+            mem_dc,
+            &mut w_p2,
+            &mut r_p2,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
 
         // Draw Calibration Button text on top
         let mut r_calib = RECT {
@@ -8993,8 +9597,16 @@ mod windows_overlay {
         } else {
             crate::lang::translate(ui_language, calib_text_key).unwrap_or("3 Points")
         };
-        let mut w_calib = calib_text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
-        let _ = DrawTextW(mem_dc, &mut w_calib, &mut r_calib, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        let mut w_calib = calib_text
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let _ = DrawTextW(
+            mem_dc,
+            &mut w_calib,
+            &mut r_calib,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
 
         let _ = SelectObject(mem_dc, old_font);
         let _ = DeleteObject(HGDIOBJ(font.0));
@@ -9013,7 +9625,10 @@ mod windows_overlay {
 
         let destination = POINT { x: win_x, y: win_y };
         let source = POINT { x: 0, y: 0 };
-        let sz = SIZE { cx: width as i32, cy: height as i32 };
+        let sz = SIZE {
+            cx: width as i32,
+            cy: height as i32,
+        };
         let blend = BLENDFUNCTION {
             BlendOp: AC_SRC_OVER as u8,
             BlendFlags: 0,
@@ -9367,58 +9982,66 @@ mod windows_overlay {
         if let Some(handle) = previous_thread {
             let _ = handle.join();
         }
-        
+
         let stop_flag = Arc::new(AtomicBool::new(false));
         *ACTIVE_BIN_PIN_STOP.lock() = Some(stop_flag.clone());
-        
+
         let source_hwnd_val = raw_source_hwnd.0 as isize;
         let pin_hwnd_val = raw_pin_hwnd.0 as isize;
-        
+
         let handle = thread::spawn(move || {
             let source_hwnd = HWND(source_hwnd_val as *mut c_void);
             let pin_hwnd = HWND(pin_hwnd_val as *mut c_void);
             let mut last_run = Instant::now();
             let loop_interval = Duration::from_millis(33);
-            
+            let mut renderer: Option<BinPinFrameRenderer> = None;
+
             while !stop_flag.load(Ordering::Relaxed) {
                 let elapsed = last_run.elapsed();
                 if elapsed < loop_interval {
                     thread::sleep(loop_interval - elapsed);
                 }
                 last_run = Instant::now();
-                
+
                 if stop_flag.load(Ordering::Relaxed) {
                     break;
                 }
-                
+
                 let preset_opt = {
                     let hook_state = HOOK_STATE.lock();
                     if hook_state.active_pin_preset_id != Some(preset_id) {
                         None
                     } else {
-                        hook_state.pin_presets.iter().find(|p| p.id == preset_id).cloned()
+                        hook_state
+                            .pin_presets
+                            .iter()
+                            .find(|p| p.id == preset_id)
+                            .cloned()
                     }
                 };
-                
+
                 let Some(preset) = preset_opt else {
                     break;
                 };
-                
+
                 if !preset.binary_filter {
                     break;
                 }
-                
+
                 unsafe {
-                    if !windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(source_hwnd)).as_bool() {
+                    if !windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(source_hwnd))
+                        .as_bool()
+                    {
                         break;
                     }
                 }
-                
-                let frame_opt = unsafe { crate::window_list::capture_window_region_from_hwnd(source_hwnd) };
+
+                let frame_opt =
+                    unsafe { crate::window_list::capture_window_region_from_hwnd(source_hwnd) };
                 let Some(frame) = frame_opt else {
                     continue;
                 };
-                
+
                 let width = frame.width;
                 let height = frame.height;
                 let (crop_x, crop_y, crop_w, crop_h) = if preset.use_source_crop {
@@ -9430,165 +10053,80 @@ mod windows_overlay {
                 } else {
                     (0, 0, width, height)
                 };
-                
+
                 if crop_w == 0 || crop_h == 0 {
                     continue;
                 }
-                
-                let mut binarized = vec![0u8; crop_w * crop_h * 4];
+
                 let threshold = preset.binary_threshold;
                 let threshold_sq = (threshold as i32).pow(2);
                 let binary_mode = preset.binary_mode;
-                let target_colors = preset.binary_target_colors();
-                
+                let target_colors = preset.binary_target_colors.as_slice();
+                let single_target_color = preset.binary_target_color;
+                let renderer_ref = if let Some(existing) = renderer.as_mut() {
+                    existing
+                } else {
+                    let Some(created) = (unsafe { BinPinFrameRenderer::new() }) else {
+                        continue;
+                    };
+                    renderer.insert(created)
+                };
+                let binarized = renderer_ref.binarized_mut(crop_w * crop_h * 4);
+
                 for y in 0..crop_h {
                     let src_row_offset = (crop_y + y) * width * 4;
                     let dst_row_offset = y * crop_w * 4;
                     for x in 0..crop_w {
                         let src_pixel_offset = src_row_offset + (crop_x + x) * 4;
                         let dst_pixel_offset = dst_row_offset + x * 4;
-                        
+
                         let r = frame.rgba[src_pixel_offset];
                         let g = frame.rgba[src_pixel_offset + 1];
                         let b = frame.rgba[src_pixel_offset + 2];
                         let a = frame.rgba[src_pixel_offset + 3];
-                        
+
                         let val = match binary_mode {
                             crate::model::PinBinaryMode::Grayscale => {
-                                let gray = ((r as u32 * 299 + g as u32 * 587 + b as u32 * 114) / 1000) as u8;
+                                let gray = ((r as u32 * 299 + g as u32 * 587 + b as u32 * 114)
+                                    / 1000) as u8;
                                 if gray >= threshold { 255 } else { 0 }
                             }
                             crate::model::PinBinaryMode::ColorSimilarity => {
-                                let matched = target_colors.iter().any(|target_color| {
-                                    let dist_sq = (r as i32 - target_color.r as i32).pow(2)
-                                        + (g as i32 - target_color.g as i32).pow(2)
-                                        + (b as i32 - target_color.b as i32).pow(2);
-                                    dist_sq <= threshold_sq
-                                });
-                                if matched {
-                                    255
+                                let matched = if target_colors.is_empty() {
+                                    single_target_color.is_some_and(|target_color| {
+                                        let dist_sq = (r as i32 - target_color.r as i32).pow(2)
+                                            + (g as i32 - target_color.g as i32).pow(2)
+                                            + (b as i32 - target_color.b as i32).pow(2);
+                                        dist_sq <= threshold_sq
+                                    })
                                 } else {
-                                    0
-                                }
+                                    target_colors.iter().any(|target_color| {
+                                        let dist_sq = (r as i32 - target_color.r as i32).pow(2)
+                                            + (g as i32 - target_color.g as i32).pow(2)
+                                            + (b as i32 - target_color.b as i32).pow(2);
+                                        dist_sq <= threshold_sq
+                                    })
+                                };
+                                if matched { 255 } else { 0 }
                             }
                         };
-                        
+
                         binarized[dst_pixel_offset] = val;
                         binarized[dst_pixel_offset + 1] = val;
                         binarized[dst_pixel_offset + 2] = val;
                         binarized[dst_pixel_offset + 3] = a;
                     }
                 }
-                
-                unsafe {
-                    let screen_dc = GetDC(None);
-                    if screen_dc.0.is_null() {
-                        continue;
-                    }
-                    let mem_dc = CreateCompatibleDC(Some(screen_dc));
-                    if mem_dc.0.is_null() {
-                        let _ = ReleaseDC(None, screen_dc);
-                        continue;
-                    }
-                    
-                    let target_w = preset.width.max(1);
-                    let target_h = preset.height.max(1);
-                    
-                    let bitmap_info = BITMAPINFO {
-                        bmiHeader: BITMAPINFOHEADER {
-                            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                            biWidth: target_w,
-                            biHeight: -target_h,
-                            biPlanes: 1,
-                            biBitCount: 32,
-                            biCompression: BI_RGB.0,
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-                    
-                    let mut bits_ptr: *mut c_void = std::ptr::null_mut();
-                    let bitmap = match CreateDIBSection(
-                        Some(mem_dc),
-                        &bitmap_info,
-                        DIB_RGB_COLORS,
-                        &mut bits_ptr,
-                        None,
-                        0,
-                    ) {
-                        Ok(b) => b,
-                        Err(_) => {
-                            let _ = DeleteDC(mem_dc);
-                            let _ = ReleaseDC(None, screen_dc);
-                            continue;
-                        }
-                    };
-                    
-                    let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
-                    
-                    let source_bitmap_info = BITMAPINFO {
-                        bmiHeader: BITMAPINFOHEADER {
-                            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                            biWidth: crop_w as i32,
-                            biHeight: -(crop_h as i32),
-                            biPlanes: 1,
-                            biBitCount: 32,
-                            biCompression: BI_RGB.0,
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    };
-                    
-                    let _ = windows::Win32::Graphics::Gdi::SetStretchBltMode(mem_dc, windows::Win32::Graphics::Gdi::COLORONCOLOR);
-                    let _ = StretchDIBits(
-                        mem_dc,
-                        0,
-                        0,
-                        target_w,
-                        target_h,
-                        0,
-                        0,
-                        crop_w as i32,
-                        crop_h as i32,
-                        Some(binarized.as_ptr() as *const c_void),
-                        &source_bitmap_info,
-                        DIB_RGB_COLORS,
-                        SRCCOPY,
-                    );
-                    
-                    let mut pt_dst = POINT { x: preset.x, y: preset.y };
-                    let mut size_wnd = SIZE { cx: target_w, cy: target_h };
-                    let mut pt_src = POINT { x: 0, y: 0 };
-                    let mut blend = BLENDFUNCTION {
-                        BlendOp: AC_SRC_OVER as u8,
-                        BlendFlags: 0,
-                        SourceConstantAlpha: 255,
-                        AlphaFormat: AC_SRC_ALPHA as u8,
-                    };
-                    
-                    let _ = UpdateLayeredWindow(
-                        pin_hwnd,
-                        Some(screen_dc),
-                        Some(&mut pt_dst),
-                        Some(&mut size_wnd),
-                        Some(mem_dc),
-                        Some(&mut pt_src),
-                        COLORREF(0),
-                        Some(&mut blend),
-                        ULW_ALPHA,
-                    );
-                    
-                    let _ = SelectObject(mem_dc, old_bitmap);
-                    let _ = DeleteObject(HGDIOBJ(bitmap.0));
-                    let _ = DeleteDC(mem_dc);
-                    let _ = ReleaseDC(None, screen_dc);
+
+                if !unsafe { renderer_ref.present(pin_hwnd, &preset, crop_w, crop_h) } {
+                    renderer = None;
                 }
             }
-            
+
             ACTIVE_BIN_PIN_PRESET_ID.store(0, Ordering::Relaxed);
             ACTIVE_BIN_PIN_HWND.store(0, Ordering::Relaxed);
         });
-        
+
         *ACTIVE_BIN_PIN_THREAD.lock() = Some(handle);
     }
 
@@ -9689,7 +10227,9 @@ mod windows_overlay {
                 return Err(anyhow::anyhow!("Failed to map client top-left to screen"));
             }
             if !ClientToScreen(source, &mut client_bottom_right).as_bool() {
-                return Err(anyhow::anyhow!("Failed to map client bottom-right to screen"));
+                return Err(anyhow::anyhow!(
+                    "Failed to map client bottom-right to screen"
+                ));
             }
             let source_rect = RECT {
                 left: client_top_left.x,
@@ -10291,8 +10831,7 @@ mod windows_overlay {
             let visual = quick_key_display_entry_visual(entry, now);
             let entry_width = quick_key_display_entry_width(&entry.text, font_size, cap_height);
             let scaled_entry_width = (entry_width as f32 * visual.scale_x).round().max(1.0) as i32;
-            let scaled_cap_height =
-                (cap_height as f32 * visual.scale_y).round().max(1.0) as i32;
+            let scaled_cap_height = (cap_height as f32 * visual.scale_y).round().max(1.0) as i32;
             let entry_center_x = entry_left + (entry_width / 2);
             let scaled_left = entry_center_x - (scaled_entry_width / 2);
             let scaled_top = cap_y + visual.translate_y.round() as i32;
@@ -10382,7 +10921,8 @@ mod windows_overlay {
                 rect: RECT {
                     left: scaled_left + (12.0 * visual.scale_x).round() as i32,
                     top: scaled_top,
-                    right: scaled_left + scaled_entry_width - (12.0 * visual.scale_x).round() as i32,
+                    right: scaled_left + scaled_entry_width
+                        - (12.0 * visual.scale_x).round() as i32,
                     bottom: scaled_top + scaled_cap_height,
                 },
                 color: quick_key_display_colorref(text_color[0], text_color[1], text_color[2]),
@@ -11008,9 +11548,7 @@ mod windows_overlay {
 
     fn send_overlay_command(command: OverlayCommand) {
         let is_refresh = matches!(&command, OverlayCommand::RefreshSearchAreaOverlay);
-        if is_refresh
-            && SEARCH_AREA_OVERLAY_REFRESH_PENDING.swap(true, Ordering::AcqRel)
-        {
+        if is_refresh && SEARCH_AREA_OVERLAY_REFRESH_PENDING.swap(true, Ordering::AcqRel) {
             return;
         }
 
@@ -11226,10 +11764,16 @@ mod windows_overlay {
             || lower.contains("incorrect api key")
             || lower.contains("authentication")
         {
-            return ("Groq API key is invalid. Fix it in Settings.".to_owned(), true);
+            return (
+                "Groq API key is invalid. Fix it in Settings.".to_owned(),
+                true,
+            );
         }
         if lower.contains("403") || lower.contains("forbidden") {
-            return ("Groq rejected this API key. Check Settings.".to_owned(), true);
+            return (
+                "Groq rejected this API key. Check Settings.".to_owned(),
+                true,
+            );
         }
         if lower.contains("429") || lower.contains("rate limit") {
             return ("Groq rate limit hit. Try again soon.".to_owned(), false);
@@ -11244,9 +11788,15 @@ mod windows_overlay {
             return ("No meme image was found for that query.".to_owned(), false);
         }
         if lower.contains("clipboard") {
-            return ("Could not copy the meme image to clipboard.".to_owned(), false);
+            return (
+                "Could not copy the meme image to clipboard.".to_owned(),
+                false,
+            );
         }
-        ("MemeReply failed. Check API key or try again.".to_owned(), false)
+        (
+            "MemeReply failed. Check API key or try again.".to_owned(),
+            false,
+        )
     }
 
     fn trigger_funny_meme_reply_step(
@@ -11278,9 +11828,12 @@ mod windows_overlay {
                     false,
                 ),
                 Err(error) => {
-                    let (short_message, needs_settings) =
-                        summarize_funny_meme_reply_error(error);
-                    (format!("Funny Meme Reply failed: {short_message}"), short_message, needs_settings)
+                    let (short_message, needs_settings) = summarize_funny_meme_reply_error(error);
+                    (
+                        format!("Funny Meme Reply failed: {short_message}"),
+                        short_message,
+                        needs_settings,
+                    )
                 }
             };
             let _ = tx.send(UiCommand::VisionFinished(status));
@@ -11305,10 +11858,11 @@ mod windows_overlay {
         window_preset::focus_window_for_preset(preset)
     }
 
-
-
     fn macro_stop_requested(preset_id: u32, stop_immediately_on_retrigger: bool) -> bool {
-        if FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id) {
+        if FORCE_STOP_REQUESTED_MACRO_PRESETS
+            .lock()
+            .contains(&preset_id)
+        {
             return true;
         }
 
@@ -11639,8 +12193,7 @@ mod windows_overlay {
             0,
         )?;
         let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
-        let (mut capture, metadata) =
-            media::open_video_capture(&preset.clip.file_path, start_ms)?;
+        let (mut capture, metadata) = media::open_video_capture(&preset.clip.file_path, start_ms)?;
         let chroma_key = if preset.clip.chroma_key_enabled {
             Some((
                 preset.clip.chroma_key_color,
@@ -11669,11 +12222,7 @@ mod windows_overlay {
             AlphaFormat: AC_SRC_ALPHA as u8,
         };
         let _ = ShowWindow(hwnd, SW_SHOWNA);
-        let _ = audio::play_video_audio_preview(
-            &preset.clip.file_path,
-            start_ms,
-            clip_end_ms,
-        );
+        let _ = audio::play_video_audio_preview(&preset.clip.file_path, start_ms, clip_end_ms);
         let playback_start = Instant::now();
         loop {
             if stop_flag.load(Ordering::Relaxed) {
@@ -12219,7 +12768,8 @@ mod windows_overlay {
                 let duration = step.get_duration_ms();
                 let mut state = HOOK_STATE.lock();
                 if duration > 0 {
-                    state.active_crosshair_expires = Some(Instant::now() + Duration::from_millis(duration));
+                    state.active_crosshair_expires =
+                        Some(Instant::now() + Duration::from_millis(duration));
                 } else {
                     state.active_crosshair_expires = None;
                 }
@@ -12238,7 +12788,8 @@ mod windows_overlay {
                 let duration = step.get_duration_ms();
                 let mut state = HOOK_STATE.lock();
                 if duration > 0 {
-                    state.active_pin_expires = Some(Instant::now() + Duration::from_millis(duration));
+                    state.active_pin_expires =
+                        Some(Instant::now() + Duration::from_millis(duration));
                 } else {
                     state.active_pin_expires = None;
                 }
@@ -12414,9 +12965,11 @@ mod windows_overlay {
             .macro_groups
             .iter()
             .find_map(|group| {
-                group.presets.iter().find(|preset| preset.id == preset_id).map(|preset| {
-                    group.enabled && preset.enabled
-                })
+                group
+                    .presets
+                    .iter()
+                    .find(|preset| preset.id == preset_id)
+                    .map(|preset| group.enabled && preset.enabled)
             })
             .unwrap_or(false)
     }
@@ -12541,7 +13094,9 @@ mod windows_overlay {
                                 MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
                                 MacroRunFlow::Continue => {}
                                 MacroRunFlow::JumpTo(target) => {
-                                    if let Some(pos) = step_indices.iter().position(|&x| x == target) {
+                                    if let Some(pos) =
+                                        step_indices.iter().position(|&x| x == target)
+                                    {
                                         index = pos;
                                         continue 'outer;
                                     } else {
@@ -12584,7 +13139,9 @@ mod windows_overlay {
                                 MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
                                 MacroRunFlow::Continue => {}
                                 MacroRunFlow::JumpTo(target) => {
-                                    if let Some(pos) = step_indices.iter().position(|&x| x == target) {
+                                    if let Some(pos) =
+                                        step_indices.iter().position(|&x| x == target)
+                                    {
                                         index = pos;
                                         continue 'outer;
                                     } else {
@@ -12794,7 +13351,8 @@ mod windows_overlay {
                     let duration = step.get_duration_ms();
                     let mut state = HOOK_STATE.lock();
                     if duration > 0 {
-                        state.active_crosshair_expires = Some(Instant::now() + Duration::from_millis(duration));
+                        state.active_crosshair_expires =
+                            Some(Instant::now() + Duration::from_millis(duration));
                     } else {
                         state.active_crosshair_expires = None;
                     }
@@ -12813,7 +13371,8 @@ mod windows_overlay {
                     let duration = step.get_duration_ms();
                     let mut state = HOOK_STATE.lock();
                     if duration > 0 {
-                        state.active_pin_expires = Some(Instant::now() + Duration::from_millis(duration));
+                        state.active_pin_expires =
+                            Some(Instant::now() + Duration::from_millis(duration));
                     } else {
                         state.active_pin_expires = None;
                     }
@@ -12915,19 +13474,24 @@ mod windows_overlay {
                     let duration = step.get_duration_ms();
                     let mut state = HOOK_STATE.lock();
                     if duration > 0 {
-                        state.active_geometry_steps_expires.insert((preset_id, absolute_index), Instant::now() + Duration::from_millis(duration));
+                        state.active_geometry_steps_expires.insert(
+                            (preset_id, absolute_index),
+                            Instant::now() + Duration::from_millis(duration),
+                        );
                     } else {
-                        state.active_geometry_steps_expires.remove(&(preset_id, absolute_index));
+                        state
+                            .active_geometry_steps_expires
+                            .remove(&(preset_id, absolute_index));
                     }
                 }
-
 
                 MacroAction::ShowGeometryPreset => {
                     let owner = (preset_id, absolute_index);
                     if let Some(base_preset) = resolve_geometry_preset_from_step(step) {
                         let duration = step.get_duration_ms();
                         if step.geometry_preset_modify_enabled {
-                            let instance = build_geometry_preset_instance_from_step(&base_preset, step);
+                            let instance =
+                                build_geometry_preset_instance_from_step(&base_preset, step);
                             activate_geometry_preset_owner(
                                 owner,
                                 base_preset.id,
@@ -12942,10 +13506,7 @@ mod windows_overlay {
 
                 MacroAction::HideGeometryPreset => {
                     if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
-                        hide_geometry_preset_by_id(
-                            geometry_preset_id,
-                            step.geometry_hide_mode,
-                        );
+                        hide_geometry_preset_by_id(geometry_preset_id, step.geometry_hide_mode);
                     } else {
                         clear_geometry_overlay();
                     }
@@ -13150,7 +13711,9 @@ mod windows_overlay {
                                 MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
                                 MacroRunFlow::Continue => {}
                                 MacroRunFlow::JumpTo(target) => {
-                                    if let Some(pos) = step_indices.iter().position(|&x| x == target) {
+                                    if let Some(pos) =
+                                        step_indices.iter().position(|&x| x == target)
+                                    {
                                         index = pos;
                                         continue 'outer_hold;
                                     } else {
@@ -13193,7 +13756,9 @@ mod windows_overlay {
                                 MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
                                 MacroRunFlow::Continue => {}
                                 MacroRunFlow::JumpTo(target) => {
-                                    if let Some(pos) = step_indices.iter().position(|&x| x == target) {
+                                    if let Some(pos) =
+                                        step_indices.iter().position(|&x| x == target)
+                                    {
                                         index = pos;
                                         continue 'outer_hold;
                                     } else {
@@ -13346,13 +13911,23 @@ mod windows_overlay {
                 MacroAction::TriggerMacroPreset => {
                     let mut no_locked_keys = Vec::new();
                     let mut no_locked_mouse: Vec<MouseMoveLockMask> = Vec::new();
-                    execute_trigger_macro_step(step, true, &mut no_locked_keys, &mut no_locked_mouse);
+                    execute_trigger_macro_step(
+                        step,
+                        true,
+                        &mut no_locked_keys,
+                        &mut no_locked_mouse,
+                    );
                 }
 
                 MacroAction::TriggerMacroPresetIfEnabled => {
                     let mut no_locked_keys = Vec::new();
                     let mut no_locked_mouse: Vec<MouseMoveLockMask> = Vec::new();
-                    execute_trigger_macro_step(step, false, &mut no_locked_keys, &mut no_locked_mouse);
+                    execute_trigger_macro_step(
+                        step,
+                        false,
+                        &mut no_locked_keys,
+                        &mut no_locked_mouse,
+                    );
                 }
 
                 MacroAction::StopMacroPreset => {
@@ -13372,7 +13947,8 @@ mod windows_overlay {
                     let duration = step.get_duration_ms();
                     let mut state = HOOK_STATE.lock();
                     if duration > 0 {
-                        state.active_crosshair_expires = Some(Instant::now() + Duration::from_millis(duration));
+                        state.active_crosshair_expires =
+                            Some(Instant::now() + Duration::from_millis(duration));
                     } else {
                         state.active_crosshair_expires = None;
                     }
@@ -13391,7 +13967,8 @@ mod windows_overlay {
                     let duration = step.get_duration_ms();
                     let mut state = HOOK_STATE.lock();
                     if duration > 0 {
-                        state.active_pin_expires = Some(Instant::now() + Duration::from_millis(duration));
+                        state.active_pin_expires =
+                            Some(Instant::now() + Duration::from_millis(duration));
                     } else {
                         state.active_pin_expires = None;
                     }
@@ -13450,14 +14027,7 @@ mod windows_overlay {
                 }
 
                 MacroAction::StartAudioSensePreset => {
-                    start_audio_sense_from_step(
-                        step,
-                        preset_id,
-                        absolute_index,
-                        true,
-                        true,
-                        false,
-                    );
+                    start_audio_sense_from_step(step, preset_id, absolute_index, true, true, false);
                 }
 
                 MacroAction::ScanVisionOnce => {
@@ -13493,19 +14063,24 @@ mod windows_overlay {
                     let duration = step.get_duration_ms();
                     let mut state = HOOK_STATE.lock();
                     if duration > 0 {
-                        state.active_geometry_steps_expires.insert((preset_id, absolute_index), Instant::now() + Duration::from_millis(duration));
+                        state.active_geometry_steps_expires.insert(
+                            (preset_id, absolute_index),
+                            Instant::now() + Duration::from_millis(duration),
+                        );
                     } else {
-                        state.active_geometry_steps_expires.remove(&(preset_id, absolute_index));
+                        state
+                            .active_geometry_steps_expires
+                            .remove(&(preset_id, absolute_index));
                     }
                 }
-
 
                 MacroAction::ShowGeometryPreset => {
                     let owner = (preset_id, absolute_index);
                     if let Some(base_preset) = resolve_geometry_preset_from_step(step) {
                         let duration = step.get_duration_ms();
                         if step.geometry_preset_modify_enabled {
-                            let instance = build_geometry_preset_instance_from_step(&base_preset, step);
+                            let instance =
+                                build_geometry_preset_instance_from_step(&base_preset, step);
                             activate_geometry_preset_owner(
                                 owner,
                                 base_preset.id,
@@ -13520,10 +14095,7 @@ mod windows_overlay {
 
                 MacroAction::HideGeometryPreset => {
                     if let Some(geometry_preset_id) = resolve_geometry_preset_id_from_step(step) {
-                        hide_geometry_preset_by_id(
-                            geometry_preset_id,
-                            step.geometry_hide_mode,
-                        );
+                        hide_geometry_preset_by_id(geometry_preset_id, step.geometry_hide_mode);
                     } else {
                         clear_geometry_overlay();
                     }
@@ -13957,9 +14529,36 @@ mod windows_overlay {
                         }
                         let s_lower = s_trimmed.to_lowercase();
                         let math_funcs = [
-                            "choice(", "random(", "min(", "max(", "abs(", "atan(", "atan2(", "sin(", "cos(", "tan(", "sqrt(",
-                            "ln(", "log(", "asin(", "acos(", "sinh(", "cosh(", "tanh(", "ceil(", "floor(", "round(",
-                            "pow(", "degrees(", "radians(", "gcd(", "lcm(", "isqrt(", "comb(", "perm(", "factorial(",
+                            "choice(",
+                            "random(",
+                            "min(",
+                            "max(",
+                            "abs(",
+                            "atan(",
+                            "atan2(",
+                            "sin(",
+                            "cos(",
+                            "tan(",
+                            "sqrt(",
+                            "ln(",
+                            "log(",
+                            "asin(",
+                            "acos(",
+                            "sinh(",
+                            "cosh(",
+                            "tanh(",
+                            "ceil(",
+                            "floor(",
+                            "round(",
+                            "pow(",
+                            "degrees(",
+                            "radians(",
+                            "gcd(",
+                            "lcm(",
+                            "isqrt(",
+                            "comb(",
+                            "perm(",
+                            "factorial(",
                         ];
                         for func in &math_funcs {
                             if s_lower.contains(func) {
@@ -13986,7 +14585,9 @@ mod windows_overlay {
                     };
                     let right_str = interpolate_variables(right_expr.trim());
 
-                    if is_math_expression_or_numeric(&left_str) && is_math_expression_or_numeric(&right_str) {
+                    if is_math_expression_or_numeric(&left_str)
+                        && is_math_expression_or_numeric(&right_str)
+                    {
                         let evaluate_operand = |expr: &str, fallback: f64| -> f64 {
                             if expr.trim().is_empty() {
                                 fallback
@@ -13995,7 +14596,8 @@ mod windows_overlay {
                                 evaluate_math_expression_f64(&interpolated)
                             }
                         };
-                        let compare_values = |value: f64, operator: &str, comp: f64| match operator {
+                        let compare_values = |value: f64, operator: &str, comp: f64| match operator
+                        {
                             ">" => value > comp,
                             "<" => value < comp,
                             "=" | "==" => (value - comp).abs() < 1e-9,
@@ -14117,9 +14719,9 @@ mod windows_overlay {
                             .cloned()
                     };
                     if let Some(preset) = preset {
-                        if let Ok(outcome) =
-                            run_vision_once_with_options(&preset, false, false, None, None, None, None)
-                        {
+                        if let Ok(outcome) = run_vision_once_with_options(
+                            &preset, false, false, None, None, None, None,
+                        ) {
                             return outcome.matched;
                         }
                     }
@@ -14238,17 +14840,6 @@ mod windows_overlay {
 
         result
     }
-
-
-
-
-
-
-
-
-
-
-
 
     fn normalize_ocr_match_text(text: &str) -> String {
         text.split_whitespace()
@@ -14415,14 +15006,6 @@ mod windows_overlay {
         }
     }
 
-
-
-
-
-
-
-
-
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -14517,44 +15100,37 @@ mod windows_overlay {
 
         #[test]
         fn test_connected_color_match_requires_adjacent_colors() {
-            let red = RgbaColor { r: 255, g: 0, b: 0, a: 255 };
-            let blue = RgbaColor { r: 0, g: 0, b: 255, a: 255 };
+            let red = RgbaColor {
+                r: 255,
+                g: 0,
+                b: 0,
+                a: 255,
+            };
+            let blue = RgbaColor {
+                r: 0,
+                g: 0,
+                b: 255,
+                a: 255,
+            };
             let adjacent_screen = window_list::ScreenCaptureFrame {
                 screen_x: 0,
                 screen_y: 0,
                 width: 2,
                 height: 1,
-                rgba: vec![
-                    255, 0, 0, 255,
-                    0, 0, 255, 255,
-                ],
+                rgba: vec![255, 0, 0, 255, 0, 0, 255, 255],
             };
             let separated_screen = window_list::ScreenCaptureFrame {
                 screen_x: 0,
                 screen_y: 0,
                 width: 3,
                 height: 1,
-                rgba: vec![
-                    255, 0, 0, 255,
-                    0, 0, 0, 255,
-                    0, 0, 255, 255,
-                ],
+                rgba: vec![255, 0, 0, 255, 0, 0, 0, 255, 0, 0, 255, 255],
             };
-            let adjacent_hit = find_connected_color_match(
-                &adjacent_screen,
-                &[red, blue],
-                0,
-                None,
-                None,
-            );
+            let adjacent_hit =
+                find_connected_color_match(&adjacent_screen, &[red, blue], 0, None, None);
             assert!(adjacent_hit.is_some());
-            let separated_hit = find_connected_color_match(
-                &separated_screen,
-                &[red, blue],
-                0,
-                None,
-                None,
-            );
+            let separated_hit =
+                find_connected_color_match(&separated_screen, &[red, blue], 0, None, None);
             assert!(separated_hit.is_none());
         }
 
@@ -14604,7 +15180,8 @@ mod windows_overlay {
 
             smart_set_variable_from_expression("pretty", "round(863.6897460727389, 2)");
 
-            let val = RUNTIME_VARIABLES.lock()
+            let val = RUNTIME_VARIABLES
+                .lock()
                 .get("pretty")
                 .copied()
                 .unwrap_or_default();
@@ -14627,7 +15204,10 @@ mod windows_overlay {
 
             assert_eq!(evaluate_interpolated_math_expression("{x-x1}"), 105);
             assert_eq!(evaluate_interpolated_math_expression("{y-y1}"), 35);
-            assert_eq!(evaluate_interpolated_math_expression("{x-x1} + {y-y1}"), 140);
+            assert_eq!(
+                evaluate_interpolated_math_expression("{x-x1} + {y-y1}"),
+                140
+            );
             {
                 let mut vars = RUNTIME_VARIABLES.lock();
                 vars.clear();
@@ -14778,7 +15358,7 @@ mod windows_overlay {
             let step_indices = vec![0, 1, 2, 3];
             let mut locked_keys = vec![];
             let mut locked_mouse = vec![];
-            
+
             // Clear variables first
             RUNTIME_VARIABLES.lock().clear();
 
@@ -14799,14 +15379,14 @@ mod windows_overlay {
             // Variable "a" should be 3, because step at index 2 (SetVariable to 2) was skipped!
             let val = RUNTIME_VARIABLES.lock().get("a").copied();
             assert_eq!(val, Some(3.0));
-            
+
             RUNTIME_VARIABLES.lock().clear();
         }
 
         #[test]
         fn test_jump_to_step_loop_propagation() {
             let _guard = TEST_MUTEX.lock().unwrap();
-            
+
             // We have a loop body, and inside it a JumpToStep back to the start of the macro (index 0).
             // Since index 0 is outside the loop body, it must propagate out.
             // We'll set a counter variable "count" to prevent infinite loop, and check that it actually executed step 0 twice.
@@ -14852,7 +15432,7 @@ mod windows_overlay {
             let step_indices = vec![0, 1, 2, 3, 4, 5];
             let mut locked_keys = vec![];
             let mut locked_mouse = vec![];
-            
+
             RUNTIME_VARIABLES.lock().clear();
             RUNTIME_VARIABLES.lock().insert("count".to_string(), 0.0);
 
@@ -15287,7 +15867,10 @@ mod windows_overlay {
         let mut hook_state = HOOK_STATE.lock();
         if let Some(preset_id) = preset_id
             && let Some(active) = hook_state.active_hold_macros.get_mut(&preset_id)
-            && let Some(index) = active.locked_mouse_masks.iter().position(|entry| *entry == mask)
+            && let Some(index) = active
+                .locked_mouse_masks
+                .iter()
+                .position(|entry| *entry == mask)
         {
             active.locked_mouse_masks.remove(index);
         }
@@ -15783,28 +16366,42 @@ mod windows_overlay {
             let mut arduino_success = true;
 
             if dw_flags.contains(MOUSEEVENTF_LEFTDOWN) {
-                if send_btn(1, 1).is_err() { arduino_success = false; }
+                if send_btn(1, 1).is_err() {
+                    arduino_success = false;
+                }
             }
             if dw_flags.contains(MOUSEEVENTF_LEFTUP) {
-                if send_btn(1, 0).is_err() { arduino_success = false; }
+                if send_btn(1, 0).is_err() {
+                    arduino_success = false;
+                }
             }
             if dw_flags.contains(MOUSEEVENTF_RIGHTDOWN) {
-                if send_btn(2, 1).is_err() { arduino_success = false; }
+                if send_btn(2, 1).is_err() {
+                    arduino_success = false;
+                }
             }
             if dw_flags.contains(MOUSEEVENTF_RIGHTUP) {
-                if send_btn(2, 0).is_err() { arduino_success = false; }
+                if send_btn(2, 0).is_err() {
+                    arduino_success = false;
+                }
             }
             if dw_flags.contains(MOUSEEVENTF_MIDDLEDOWN) {
-                if send_btn(3, 1).is_err() { arduino_success = false; }
+                if send_btn(3, 1).is_err() {
+                    arduino_success = false;
+                }
             }
             if dw_flags.contains(MOUSEEVENTF_MIDDLEUP) {
-                if send_btn(3, 0).is_err() { arduino_success = false; }
+                if send_btn(3, 0).is_err() {
+                    arduino_success = false;
+                }
             }
             if dw_flags.contains(MOUSEEVENTF_WHEEL) {
                 let val = (mouse_data as i32) / 120;
                 let val_byte = (val.clamp(-127, 127) as i8) as u8;
                 let packet = [0xAA, 3, val_byte, 0, 0, 0];
-                if write_arduino_data(&packet).is_err() { arduino_success = false; }
+                if write_arduino_data(&packet).is_err() {
+                    arduino_success = false;
+                }
             }
             if dw_flags.contains(MOUSEEVENTF_XDOWN) || dw_flags.contains(MOUSEEVENTF_XUP) {
                 arduino_success = false;
@@ -16250,8 +16847,7 @@ mod windows_overlay {
             .round()
             .clamp(1.0, 5_000.0) as u64;
         let steps = ((duration_ms as f32) / 8.0).ceil().max(1.0) as u64;
-        let frame_delay_ms =
-            ((duration_ms as f32) / steps as f32).round().max(1.0) as u64;
+        let frame_delay_ms = ((duration_ms as f32) / steps as f32).round().max(1.0) as u64;
         let mut prev_x = from_x;
         let mut prev_y = from_y;
         for index in 1..=steps {
@@ -16265,11 +16861,8 @@ mod windows_overlay {
             send_mouse_move_relative(next_x - prev_x, next_y - prev_y)?;
             prev_x = next_x;
             prev_y = next_y;
-            if sleep_for_mouse_path_delay(
-                preset_id,
-                frame_delay_ms,
-                stop_immediately_on_retrigger,
-            ) {
+            if sleep_for_mouse_path_delay(preset_id, frame_delay_ms, stop_immediately_on_retrigger)
+            {
                 return Ok(());
             }
         }
@@ -16449,8 +17042,6 @@ mod windows_overlay {
         draw: GeometryRenderDraw,
     }
 
-
-
     #[derive(Clone, Debug, PartialEq)]
     enum GeometryRenderDraw {
         Point {
@@ -16549,7 +17140,12 @@ mod windows_overlay {
         Some((sum_x / count, sum_y / count))
     }
 
-    fn geometry_rotate_points(points: &[(i32, i32)], cx: f32, cy: f32, rotation_deg: f32) -> Vec<(i32, i32)> {
+    fn geometry_rotate_points(
+        points: &[(i32, i32)],
+        cx: f32,
+        cy: f32,
+        rotation_deg: f32,
+    ) -> Vec<(i32, i32)> {
         points
             .iter()
             .map(|(x, y)| geometry_rotate_point(*x as f32, *y as f32, cx, cy, rotation_deg))
@@ -16638,15 +17234,15 @@ mod windows_overlay {
             .split(';')
             .filter_map(|pair| {
                 let (x_expr, y_expr) = pair.split_once(',')?;
-                Some((
-                    geometry_eval_i32(x_expr, 0),
-                    geometry_eval_i32(y_expr, 0),
-                ))
+                Some((geometry_eval_i32(x_expr, 0), geometry_eval_i32(y_expr, 0)))
             })
             .collect()
     }
 
-    fn geometry_bounds_from_points(points: &[(i32, i32)], pad: i32) -> Option<(i32, i32, i32, i32)> {
+    fn geometry_bounds_from_points(
+        points: &[(i32, i32)],
+        pad: i32,
+    ) -> Option<(i32, i32, i32, i32)> {
         let first = points.first()?;
         let mut min_x = first.0;
         let mut max_x = first.0;
@@ -16666,18 +17262,24 @@ mod windows_overlay {
             return None;
         }
 
-        let thickness = geometry_eval_i32(&spec.thickness_expr, spec.thickness.round() as i32).max(1).min(50);
+        let thickness = geometry_eval_i32(&spec.thickness_expr, spec.thickness.round() as i32)
+            .max(1)
+            .min(50);
         let stroke_opacity = geometry_eval_f32(&spec.opacity_expr, spec.opacity).clamp(0.0, 1.0);
-        let fill_opacity = geometry_eval_f32(&spec.fill_opacity_expr, spec.fill_opacity).clamp(0.0, 1.0);
+        let fill_opacity =
+            geometry_eval_f32(&spec.fill_opacity_expr, spec.fill_opacity).clamp(0.0, 1.0);
         let rotation_deg = geometry_eval_f32(&spec.rotation_expr, 0.0);
-        let stroke = geometry_resolve_color(&spec.stroke_color_expr, spec.stroke_color, stroke_opacity);
+        let stroke =
+            geometry_resolve_color(&spec.stroke_color_expr, spec.stroke_color, stroke_opacity);
         let fill = geometry_resolve_color(&spec.fill_color_expr, spec.fill_color, fill_opacity);
         let fill_option = spec.filled.then_some(fill);
         match spec.shape {
             GeometryShapeKind::Point => {
                 let x = geometry_eval_i32(&spec.x1_expr, 0);
                 let y = geometry_eval_i32(&spec.y1_expr, 0);
-                let radius = geometry_eval_i32(&spec.radius_expr, spec.point_radius.round() as i32).max(1).min(1000);
+                let radius = geometry_eval_i32(&spec.radius_expr, spec.point_radius.round() as i32)
+                    .max(1)
+                    .min(1000);
                 Some(GeometryRenderShape {
                     bounds: (x - radius, y - radius, x + radius, y + radius),
                     draw: GeometryRenderDraw::Point {
@@ -16719,7 +17321,9 @@ mod windows_overlay {
             GeometryShapeKind::Circle => {
                 let cx = geometry_eval_i32(&spec.x1_expr, 0);
                 let cy = geometry_eval_i32(&spec.y1_expr, 0);
-                let radius = geometry_eval_i32(&spec.radius_expr, spec.point_radius.round() as i32).max(1).min(1000);
+                let radius = geometry_eval_i32(&spec.radius_expr, spec.point_radius.round() as i32)
+                    .max(1)
+                    .min(1000);
                 Some(GeometryRenderShape {
                     bounds: (
                         cx - radius - thickness,
@@ -16769,9 +17373,10 @@ mod windows_overlay {
             GeometryShapeKind::Label => {
                 let x = geometry_eval_i32(&spec.x1_expr, 0);
                 let y = geometry_eval_i32(&spec.y1_expr, 0);
-                let font_size = geometry_eval_i32(&spec.font_size_expr, spec.font_size.round() as i32)
-                    .max(10)
-                    .min(256);
+                let font_size =
+                    geometry_eval_i32(&spec.font_size_expr, spec.font_size.round() as i32)
+                        .max(10)
+                        .min(256);
                 let text = interpolate_variables(&spec.text);
                 let bounds = geometry_label_bounds(x, y, font_size, &text, rotation_deg);
                 Some(GeometryRenderShape {
@@ -16791,7 +17396,8 @@ mod windows_overlay {
                 let cy = geometry_eval_i32(&spec.y1_expr, 0);
                 let rx = geometry_eval_i32(&spec.radius_x_expr, 1).max(1).min(1000);
                 let ry = geometry_eval_i32(&spec.radius_y_expr, 1).max(1).min(1000);
-                let points = geometry_sample_ellipse_points(cx, cy, rx, ry, 0.0, 360.0, rotation_deg, true);
+                let points =
+                    geometry_sample_ellipse_points(cx, cy, rx, ry, 0.0, 360.0, rotation_deg, true);
                 let bounds = geometry_bounds_from_points(&points, thickness)?;
                 Some(GeometryRenderShape {
                     bounds,
@@ -16808,7 +17414,12 @@ mod windows_overlay {
                 let mut y1 = geometry_eval_i32(&spec.y1_expr, 0);
                 let mut x2 = geometry_eval_i32(&spec.x2_expr, 0);
                 let mut y2 = geometry_eval_i32(&spec.y2_expr, 0);
-                let head_size = geometry_eval_i32(&spec.arrow_head_size_expr, spec.arrow_head_size.round() as i32).max(4).min(200);
+                let head_size = geometry_eval_i32(
+                    &spec.arrow_head_size_expr,
+                    spec.arrow_head_size.round() as i32,
+                )
+                .max(4)
+                .min(200);
                 if rotation_deg.abs() >= f32::EPSILON {
                     let cx = (x1 + x2) as f32 * 0.5;
                     let cy = (y1 + y2) as f32 * 0.5;
@@ -16898,13 +17509,14 @@ mod windows_overlay {
                 let y = geometry_eval_i32(&spec.y1_expr, 540);
                 let width = geometry_eval_i32(&spec.width_expr, 0).max(0) as u32;
                 let height = geometry_eval_i32(&spec.height_expr, 0).max(0) as u32;
-                let opacity = (geometry_eval_f32(&spec.opacity_expr, 100.0) / 100.0).clamp(0.0, 1.0);
+                let opacity =
+                    (geometry_eval_f32(&spec.opacity_expr, 100.0) / 100.0).clamp(0.0, 1.0);
                 let rotation = geometry_eval_f32(&spec.rotation_expr, 0.0);
                 let code = spec.text.clone();
-                
+
                 let w = if width > 0 { width as i32 } else { 1000 };
                 let h = if height > 0 { height as i32 } else { 1000 };
-                
+
                 Some(GeometryRenderShape {
                     bounds: (x - w, y - h, x + w * 2, y + h * 2),
                     draw: GeometryRenderDraw::Svg {
@@ -16920,8 +17532,6 @@ mod windows_overlay {
             }
         }
     }
-
-
 
     fn geometry_overlay_static_shapes(hook_state: &mut HookState) -> Vec<GeometryRenderShape> {
         let mut shapes = Vec::new();
@@ -16957,7 +17567,9 @@ mod windows_overlay {
             }
         }
         if let Some(preview_preset_id) = hook_state.preview_geometry_preset_id {
-            let is_active = hook_state.active_geometry_preset_ids.contains(&preview_preset_id)
+            let is_active = hook_state
+                .active_geometry_preset_ids
+                .contains(&preview_preset_id)
                 || overridden_preset_ids.contains(&preview_preset_id);
             if let Some(preset) = hook_state
                 .geometry_presets
@@ -16978,14 +17590,19 @@ mod windows_overlay {
 
     fn rebuild_active_geometry_preset_ids(hook_state: &mut HookState) {
         hook_state.active_geometry_preset_ids.clear();
-        hook_state
-            .active_geometry_preset_ids
-            .extend(hook_state.active_geometry_preset_owner_ids.values().copied());
+        hook_state.active_geometry_preset_ids.extend(
+            hook_state
+                .active_geometry_preset_owner_ids
+                .values()
+                .copied(),
+        );
     }
 
     fn remove_active_geometry_preset_owner(hook_state: &mut HookState, owner: (u32, usize)) {
         hook_state.active_geometry_preset_owner_ids.remove(&owner);
-        hook_state.active_geometry_preset_owner_expires.remove(&owner);
+        hook_state
+            .active_geometry_preset_owner_expires
+            .remove(&owner);
         hook_state.active_geometry_preset_instances.remove(&owner);
         hook_state
             .active_geometry_preset_activation_order
@@ -17046,15 +17663,42 @@ mod windows_overlay {
         }
     }
 
-    fn geometry_shape_motion_delta(previous: &GeometryRenderShape, current: &GeometryRenderShape) -> i32 {
+    fn geometry_shape_motion_delta(
+        previous: &GeometryRenderShape,
+        current: &GeometryRenderShape,
+    ) -> i32 {
         match (&previous.draw, &current.draw) {
             (
-                GeometryRenderDraw::Line { x1: px1, y1: py1, x2: px2, y2: py2, .. },
-                GeometryRenderDraw::Line { x1: cx1, y1: cy1, x2: cx2, y2: cy2, .. },
+                GeometryRenderDraw::Line {
+                    x1: px1,
+                    y1: py1,
+                    x2: px2,
+                    y2: py2,
+                    ..
+                },
+                GeometryRenderDraw::Line {
+                    x1: cx1,
+                    y1: cy1,
+                    x2: cx2,
+                    y2: cy2,
+                    ..
+                },
             )
             | (
-                GeometryRenderDraw::Arrow { x1: px1, y1: py1, x2: px2, y2: py2, .. },
-                GeometryRenderDraw::Arrow { x1: cx1, y1: cy1, x2: cx2, y2: cy2, .. },
+                GeometryRenderDraw::Arrow {
+                    x1: px1,
+                    y1: py1,
+                    x2: px2,
+                    y2: py2,
+                    ..
+                },
+                GeometryRenderDraw::Arrow {
+                    x1: cx1,
+                    y1: cy1,
+                    x2: cx2,
+                    y2: cy2,
+                    ..
+                },
             ) => [
                 (cx1 - px1).abs(),
                 (cy1 - py1).abs(),
@@ -17079,18 +17723,6 @@ mod windows_overlay {
             }
         }
     }
-
-
-
-
-
-
-
-
-
-
-
-
 
     fn find_color_match_in_range(
         screen: &window_list::ScreenCaptureFrame,
@@ -17140,7 +17772,6 @@ mod windows_overlay {
 
         best_hit
     }
-
 
     fn find_color_match_from_anchor(
         screen: &window_list::ScreenCaptureFrame,
@@ -17296,32 +17927,6 @@ mod windows_overlay {
 
         result
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     fn stop_vision_waiting(spec: &str) -> Result<()> {
         let preset = vision_preset_by_id(spec)?;
@@ -17551,8 +18156,9 @@ mod windows_overlay {
 
         {
             let mut hook_state = HOOK_STATE.lock();
-            hook_state.pending_window_focus_stable_polls =
-                hook_state.pending_window_focus_stable_polls.saturating_add(1);
+            hook_state.pending_window_focus_stable_polls = hook_state
+                .pending_window_focus_stable_polls
+                .saturating_add(1);
             if hook_state.pending_window_focus_stable_polls < 2 {
                 return true;
             }
@@ -17608,8 +18214,12 @@ mod windows_overlay {
             matches
         };
 
-        for (preset, target_window_title, extra_target_window_titles, match_duplicate_window_titles) in
-            matches
+        for (
+            preset,
+            target_window_title,
+            extra_target_window_titles,
+            match_duplicate_window_titles,
+        ) in matches
         {
             let hotkey_id = MACRO_PRESET_BASE_ID + preset.id as i32;
             if !SUPPRESSED_MACRO_HOTKEYS.lock().contains(&hotkey_id) {
@@ -18130,15 +18740,20 @@ mod windows_overlay {
             hook_state
                 .active_geometry_preset_activation_order
                 .retain(|active_owner| *active_owner != owner);
-            hook_state.active_geometry_preset_activation_order.push(owner);
-            hook_state.active_geometry_preset_owner_ids.insert(owner, preset_id);
+            hook_state
+                .active_geometry_preset_activation_order
+                .push(owner);
+            hook_state
+                .active_geometry_preset_owner_ids
+                .insert(owner, preset_id);
             if duration_ms > 0 {
-                hook_state.active_geometry_preset_owner_expires.insert(
-                    owner,
-                    Instant::now() + Duration::from_millis(duration_ms),
-                );
+                hook_state
+                    .active_geometry_preset_owner_expires
+                    .insert(owner, Instant::now() + Duration::from_millis(duration_ms));
             } else {
-                hook_state.active_geometry_preset_owner_expires.remove(&owner);
+                hook_state
+                    .active_geometry_preset_owner_expires
+                    .remove(&owner);
             }
             if let Some(preset) = instance {
                 hook_state.active_geometry_preset_instances.insert(
@@ -18156,7 +18771,11 @@ mod windows_overlay {
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
-    fn apply_geometry_spec_overrides(target: &mut GeometrySpec, source: &GeometrySpec, step: &MacroStep) {
+    fn apply_geometry_spec_overrides(
+        target: &mut GeometrySpec,
+        source: &GeometrySpec,
+        step: &MacroStep,
+    ) {
         if !source.x1_expr.trim().is_empty() {
             target.x1_expr = source.x1_expr.clone();
         }
@@ -18333,11 +18952,12 @@ mod windows_overlay {
         }
 
         let hook_state = HOOK_STATE.lock();
-        if let Some(preset_id) = spec
-            .parse::<u32>()
-            .ok()
-            .filter(|preset_id| hook_state.geometry_presets.iter().any(|preset| preset.id == *preset_id))
-        {
+        if let Some(preset_id) = spec.parse::<u32>().ok().filter(|preset_id| {
+            hook_state
+                .geometry_presets
+                .iter()
+                .any(|preset| preset.id == *preset_id)
+        }) {
             return Some(preset_id);
         }
 
@@ -18426,7 +19046,6 @@ mod windows_overlay {
         }
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
-
 
     fn macro_preset_trigger_matches(preset: &MacroPreset, binding: &HotkeyBinding) -> bool {
         if preset
@@ -18683,7 +19302,10 @@ mod windows_overlay {
         } else if title.ends_with(" [Leftmost]") {
             (title.strip_suffix(" [Leftmost]").unwrap(), Some("Leftmost"))
         } else if title.ends_with(" [Rightmost]") {
-            (title.strip_suffix(" [Rightmost]").unwrap(), Some("Rightmost"))
+            (
+                title.strip_suffix(" [Rightmost]").unwrap(),
+                Some("Rightmost"),
+            )
         } else {
             (title, None)
         };
@@ -18699,7 +19321,13 @@ mod windows_overlay {
         }
 
         let mut found = None;
-        let mut payload = (title, match_duplicate_window_titles, exclude, targeted, &mut found);
+        let mut payload = (
+            title,
+            match_duplicate_window_titles,
+            exclude,
+            targeted,
+            &mut found,
+        );
         let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
             Some(find_window_by_selector_excluding_targeted_proc),
             LPARAM((&mut payload) as *mut _ as isize),
@@ -18783,7 +19411,8 @@ mod windows_overlay {
                             Some(foreground),
                             &targeted,
                         ) {
-                            MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
+                            MACRO_TARGETED_WINDOWS
+                                .with(|set| set.borrow_mut().insert(hwnd.0 as isize));
                             return hwnd;
                         }
                     }
@@ -18845,7 +19474,8 @@ mod windows_overlay {
                             match_duplicate_window_titles,
                             Some(foreground),
                         ) {
-                            MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
+                            MACRO_TARGETED_WINDOWS
+                                .with(|set| set.borrow_mut().insert(hwnd.0 as isize));
                             return hwnd;
                         }
                     }
@@ -18953,7 +19583,10 @@ mod windows_overlay {
         } else if title.ends_with(" [Leftmost]") {
             (title.strip_suffix(" [Leftmost]").unwrap(), Some("Leftmost"))
         } else if title.ends_with(" [Rightmost]") {
-            (title.strip_suffix(" [Rightmost]").unwrap(), Some("Rightmost"))
+            (
+                title.strip_suffix(" [Rightmost]").unwrap(),
+                Some("Rightmost"),
+            )
         } else {
             (title, None)
         };
@@ -19042,9 +19675,11 @@ mod windows_overlay {
         let clean_candidate = clean_invisible_chars(candidate);
         let target_base = selector_base_title(&clean_target);
         let candidate_base = selector_base_title(&clean_candidate);
-        
-        let is_target_anti = target_base.contains(" - Antigravity IDE - ") || target_base.ends_with(" - Antigravity IDE");
-        let is_cand_anti = candidate_base.contains(" - Antigravity IDE - ") || candidate_base.ends_with(" - Antigravity IDE");
+
+        let is_target_anti = target_base.contains(" - Antigravity IDE - ")
+            || target_base.ends_with(" - Antigravity IDE");
+        let is_cand_anti = candidate_base.contains(" - Antigravity IDE - ")
+            || candidate_base.ends_with(" - Antigravity IDE");
         if is_target_anti && is_cand_anti {
             return true;
         }
@@ -19296,63 +19931,61 @@ mod windows_overlay {
             );
             let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
             let _ = SetBkMode(mem_dc, TRANSPARENT);
-            let draw_anchor_label =
-                |mem_dc: HDC, pixels: &mut [u8], anchor: POINT, text: String, color: [u8; 4], y_bias: i32| {
-                    let label_width = 144;
-                    let label_height = 26;
-                    let desired_left = if anchor.x + 20 + label_width > screen_width {
-                        anchor.x - label_width - 20
-                    } else {
-                        anchor.x + 20
-                    };
-                    let desired_top = (anchor.y + y_bias)
-                        .clamp(6, screen_height.saturating_sub(label_height + 6));
-                    let label_left = desired_left.clamp(6, screen_width.saturating_sub(label_width + 6));
-                    fill_rect_rgba(
-                        pixels,
-                        width_usize,
-                        height_usize,
-                        label_left,
-                        desired_top,
-                        label_width,
-                        label_height,
-                        [18, 26, 22, 210],
-                    );
-                    draw_rect_outline_rgba(
-                        pixels,
-                        width_usize,
-                        height_usize,
-                        label_left,
-                        desired_top,
-                        label_width,
-                        label_height,
-                        color,
-                    );
-                    let _ = SetTextColor(
-                        mem_dc,
-                        COLORREF(
-                            ((color[0] as u32) << 16)
-                                | ((color[1] as u32) << 8)
-                                | color[2] as u32,
-                        ),
-                    );
-                    let mut rect = RECT {
-                        left: label_left + 8,
-                        top: desired_top + 4,
-                        right: label_left + label_width - 8,
-                        bottom: desired_top + label_height - 4,
-                    };
-                    let mut wide = text
-                        .encode_utf16()
-                        .chain(std::iter::once(0))
-                        .collect::<Vec<_>>();
-                    let _ = DrawTextW(
-                        mem_dc,
-                        &mut wide,
-                        &mut rect,
-                        DT_VCENTER | DT_SINGLELINE,
-                    );
+            let draw_anchor_label = |mem_dc: HDC,
+                                     pixels: &mut [u8],
+                                     anchor: POINT,
+                                     text: String,
+                                     color: [u8; 4],
+                                     y_bias: i32| {
+                let label_width = 144;
+                let label_height = 26;
+                let desired_left = if anchor.x + 20 + label_width > screen_width {
+                    anchor.x - label_width - 20
+                } else {
+                    anchor.x + 20
                 };
+                let desired_top =
+                    (anchor.y + y_bias).clamp(6, screen_height.saturating_sub(label_height + 6));
+                let label_left =
+                    desired_left.clamp(6, screen_width.saturating_sub(label_width + 6));
+                fill_rect_rgba(
+                    pixels,
+                    width_usize,
+                    height_usize,
+                    label_left,
+                    desired_top,
+                    label_width,
+                    label_height,
+                    [18, 26, 22, 210],
+                );
+                draw_rect_outline_rgba(
+                    pixels,
+                    width_usize,
+                    height_usize,
+                    label_left,
+                    desired_top,
+                    label_width,
+                    label_height,
+                    color,
+                );
+                let _ = SetTextColor(
+                    mem_dc,
+                    COLORREF(
+                        ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | color[2] as u32,
+                    ),
+                );
+                let mut rect = RECT {
+                    left: label_left + 8,
+                    top: desired_top + 4,
+                    right: label_left + label_width - 8,
+                    bottom: desired_top + label_height - 4,
+                };
+                let mut wide = text
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect::<Vec<_>>();
+                let _ = DrawTextW(mem_dc, &mut wide, &mut rect, DT_VCENTER | DT_SINGLELINE);
+            };
             draw_anchor_label(
                 mem_dc,
                 pixels,
@@ -19458,7 +20091,10 @@ mod windows_overlay {
             max_y = max_y.max(r_bottom);
         }
 
-        for shape in static_geometry_shapes.iter().chain(dynamic_geometry_shapes.iter()) {
+        for shape in static_geometry_shapes
+            .iter()
+            .chain(dynamic_geometry_shapes.iter())
+        {
             let (left, top, right, bottom) = shape.bounds;
             min_x = min_x.min(left);
             min_y = min_y.min(top);
@@ -19534,18 +20170,27 @@ mod windows_overlay {
                     rel_top as f32,
                     region.width as f32,
                     region.height as f32,
-                ).unwrap();
+                )
+                .unwrap();
                 let mut pb = tiny_skia::PathBuilder::new();
                 pb.push_oval(rect);
                 if let Some(path) = pb.finish() {
                     let mut paint = tiny_skia::Paint::default();
-                    paint.set_color(tiny_skia::Color::from_rgba8(outline[0], outline[1], outline[2], outline[3]));
+                    paint.set_color(tiny_skia::Color::from_rgba8(
+                        outline[0], outline[1], outline[2], outline[3],
+                    ));
                     paint.anti_alias = true;
                     let stroke = tiny_skia::Stroke {
                         width: 1.0,
                         ..Default::default()
                     };
-                    pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
                 }
 
                 let center_x = rel_left + region.width / 2;
@@ -19568,7 +20213,13 @@ mod windows_overlay {
                             width: 1.0,
                             ..Default::default()
                         };
-                        pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+                        pixmap.stroke_path(
+                            &path,
+                            &paint,
+                            &stroke,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
                     }
 
                     // 2. Draw END ANGLE (100% - Bright Green Line) based on SPAN!
@@ -19589,7 +20240,13 @@ mod windows_overlay {
                                     width: 1.0,
                                     ..Default::default()
                                 };
-                                pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+                                pixmap.stroke_path(
+                                    &path,
+                                    &paint,
+                                    &stroke,
+                                    tiny_skia::Transform::identity(),
+                                    None,
+                                );
                             }
                         }
                     }
@@ -19600,16 +20257,25 @@ mod windows_overlay {
                     rel_top as f32,
                     region.width as f32,
                     region.height as f32,
-                ).unwrap();
+                )
+                .unwrap();
                 let path = tiny_skia::PathBuilder::from_rect(rect);
                 let mut paint = tiny_skia::Paint::default();
-                paint.set_color(tiny_skia::Color::from_rgba8(outline[0], outline[1], outline[2], outline[3]));
+                paint.set_color(tiny_skia::Color::from_rgba8(
+                    outline[0], outline[1], outline[2], outline[3],
+                ));
                 paint.anti_alias = true;
                 let stroke = tiny_skia::Stroke {
                     width: 1.0,
                     ..Default::default()
                 };
-                pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+                pixmap.stroke_path(
+                    &path,
+                    &paint,
+                    &stroke,
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
             }
         }
 
@@ -19622,38 +20288,58 @@ mod windows_overlay {
                 rel_top as f32,
                 region.width as f32,
                 region.height as f32,
-            ).unwrap();
+            )
+            .unwrap();
             let path = tiny_skia::PathBuilder::from_rect(rect);
             let mut paint = tiny_skia::Paint::default();
-            paint.set_color(tiny_skia::Color::from_rgba8(outline[0], outline[1], outline[2], outline[3]));
+            paint.set_color(tiny_skia::Color::from_rgba8(
+                outline[0], outline[1], outline[2], outline[3],
+            ));
             paint.anti_alias = true;
             let stroke = tiny_skia::Stroke {
                 width: 1.0,
                 ..Default::default()
             };
-            pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+            pixmap.stroke_path(
+                &path,
+                &paint,
+                &stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
 
         let mut geometry_texts = Vec::new();
-        for shape in static_geometry_shapes.iter().chain(dynamic_geometry_shapes.iter()) {
+        for shape in static_geometry_shapes
+            .iter()
+            .chain(dynamic_geometry_shapes.iter())
+        {
             match &shape.draw {
-                GeometryRenderDraw::Point {
-                    x,
-                    y,
-                    radius,
-                    fill,
-                } => {
+                GeometryRenderDraw::Point { x, y, radius, fill } => {
                     let left = x - min_x - radius;
                     let top = y - min_y - radius;
                     let size = radius.saturating_mul(2).max(1);
                     let mut pb = tiny_skia::PathBuilder::new();
-                    if let Some(rect) = tiny_skia::Rect::from_xywh(left as f32, top as f32, size as f32, size as f32) {
+                    if let Some(rect) = tiny_skia::Rect::from_xywh(
+                        left as f32,
+                        top as f32,
+                        size as f32,
+                        size as f32,
+                    ) {
                         pb.push_oval(rect);
                         if let Some(path) = pb.finish() {
                             let mut paint = tiny_skia::Paint::default();
-                            paint.set_color(tiny_skia::Color::from_rgba8(fill[0], fill[1], fill[2], fill[3]));
+                            paint.set_color(tiny_skia::Color::from_rgba8(
+                                fill[0], fill[1], fill[2], fill[3],
+                            ));
                             paint.anti_alias = true;
-                            pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+                            pixmap.fill_path(
+                                &path,
+                                &paint,
+                                tiny_skia::FillRule::Winding,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
                         }
                     }
                 }
@@ -19670,13 +20356,21 @@ mod windows_overlay {
                     pb.line_to((x2 - min_x) as f32, (y2 - min_y) as f32);
                     if let Some(path) = pb.finish() {
                         let mut paint = tiny_skia::Paint::default();
-                        paint.set_color(tiny_skia::Color::from_rgba8(stroke[0], stroke[1], stroke[2], stroke[3]));
+                        paint.set_color(tiny_skia::Color::from_rgba8(
+                            stroke[0], stroke[1], stroke[2], stroke[3],
+                        ));
                         paint.anti_alias = true;
                         let skia_stroke = tiny_skia::Stroke {
                             width: *thickness as f32,
                             ..Default::default()
                         };
-                        pixmap.stroke_path(&path, &paint, &skia_stroke, tiny_skia::Transform::identity(), None);
+                        pixmap.stroke_path(
+                            &path,
+                            &paint,
+                            &skia_stroke,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
                     }
                 }
                 GeometryRenderDraw::Circle {
@@ -19691,21 +20385,45 @@ mod windows_overlay {
                     let top = cy - min_y - radius;
                     let size = radius.saturating_mul(2).max(1);
                     let mut pb = tiny_skia::PathBuilder::new();
-                    if let Some(rect) = tiny_skia::Rect::from_xywh(left as f32, top as f32, size as f32, size as f32) {
+                    if let Some(rect) = tiny_skia::Rect::from_xywh(
+                        left as f32,
+                        top as f32,
+                        size as f32,
+                        size as f32,
+                    ) {
                         pb.push_oval(rect);
                         if let Some(path) = pb.finish() {
                             let mut paint = tiny_skia::Paint::default();
                             paint.anti_alias = true;
                             if let Some(fill_color) = fill {
-                                paint.set_color(tiny_skia::Color::from_rgba8(fill_color[0], fill_color[1], fill_color[2], fill_color[3]));
-                                pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+                                paint.set_color(tiny_skia::Color::from_rgba8(
+                                    fill_color[0],
+                                    fill_color[1],
+                                    fill_color[2],
+                                    fill_color[3],
+                                ));
+                                pixmap.fill_path(
+                                    &path,
+                                    &paint,
+                                    tiny_skia::FillRule::Winding,
+                                    tiny_skia::Transform::identity(),
+                                    None,
+                                );
                             }
-                            paint.set_color(tiny_skia::Color::from_rgba8(stroke[0], stroke[1], stroke[2], stroke[3]));
+                            paint.set_color(tiny_skia::Color::from_rgba8(
+                                stroke[0], stroke[1], stroke[2], stroke[3],
+                            ));
                             let skia_stroke = tiny_skia::Stroke {
                                 width: *thickness as f32,
                                 ..Default::default()
                             };
-                            pixmap.stroke_path(&path, &paint, &skia_stroke, tiny_skia::Transform::identity(), None);
+                            pixmap.stroke_path(
+                                &path,
+                                &paint,
+                                &skia_stroke,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
                         }
                     }
                 }
@@ -19744,13 +20462,21 @@ mod windows_overlay {
                     }
                     if let Some(path) = pb.finish() {
                         let mut paint = tiny_skia::Paint::default();
-                        paint.set_color(tiny_skia::Color::from_rgba8(stroke[0], stroke[1], stroke[2], stroke[3]));
+                        paint.set_color(tiny_skia::Color::from_rgba8(
+                            stroke[0], stroke[1], stroke[2], stroke[3],
+                        ));
                         paint.anti_alias = true;
                         let skia_stroke = tiny_skia::Stroke {
                             width: *thickness as f32,
                             ..Default::default()
                         };
-                        pixmap.stroke_path(&path, &paint, &skia_stroke, tiny_skia::Transform::identity(), None);
+                        pixmap.stroke_path(
+                            &path,
+                            &paint,
+                            &skia_stroke,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
                     }
                 }
                 GeometryRenderDraw::Polyline {
@@ -19772,13 +20498,21 @@ mod windows_overlay {
                     }
                     if let Some(path) = pb.finish() {
                         let mut paint = tiny_skia::Paint::default();
-                        paint.set_color(tiny_skia::Color::from_rgba8(stroke[0], stroke[1], stroke[2], stroke[3]));
+                        paint.set_color(tiny_skia::Color::from_rgba8(
+                            stroke[0], stroke[1], stroke[2], stroke[3],
+                        ));
                         paint.anti_alias = true;
                         let skia_stroke = tiny_skia::Stroke {
                             width: *thickness as f32,
                             ..Default::default()
                         };
-                        pixmap.stroke_path(&path, &paint, &skia_stroke, tiny_skia::Transform::identity(), None);
+                        pixmap.stroke_path(
+                            &path,
+                            &paint,
+                            &skia_stroke,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
                     }
                 }
                 GeometryRenderDraw::Polygon {
@@ -19804,15 +20538,34 @@ mod windows_overlay {
                         let mut paint = tiny_skia::Paint::default();
                         paint.anti_alias = true;
                         if let Some(fill_color) = fill {
-                            paint.set_color(tiny_skia::Color::from_rgba8(fill_color[0], fill_color[1], fill_color[2], fill_color[3]));
-                            pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+                            paint.set_color(tiny_skia::Color::from_rgba8(
+                                fill_color[0],
+                                fill_color[1],
+                                fill_color[2],
+                                fill_color[3],
+                            ));
+                            pixmap.fill_path(
+                                &path,
+                                &paint,
+                                tiny_skia::FillRule::Winding,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
                         }
-                        paint.set_color(tiny_skia::Color::from_rgba8(stroke[0], stroke[1], stroke[2], stroke[3]));
+                        paint.set_color(tiny_skia::Color::from_rgba8(
+                            stroke[0], stroke[1], stroke[2], stroke[3],
+                        ));
                         let skia_stroke = tiny_skia::Stroke {
                             width: *thickness as f32,
                             ..Default::default()
                         };
-                        pixmap.stroke_path(&path, &paint, &skia_stroke, tiny_skia::Transform::identity(), None);
+                        pixmap.stroke_path(
+                            &path,
+                            &paint,
+                            &skia_stroke,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
                     }
                 }
                 GeometryRenderDraw::Label(text) => geometry_texts.push(text.clone()),
@@ -19836,7 +20589,10 @@ mod windows_overlay {
         }
 
         // Draw SVG images directly on top of pixels
-        for shape in static_geometry_shapes.iter().chain(dynamic_geometry_shapes.iter()) {
+        for shape in static_geometry_shapes
+            .iter()
+            .chain(dynamic_geometry_shapes.iter())
+        {
             if let GeometryRenderDraw::Svg {
                 x,
                 y,
@@ -19850,12 +20606,20 @@ mod windows_overlay {
                 if !code.trim().is_empty() {
                     let opacity_key = (opacity * 1000.0).round() as u32;
                     let rotation_key = (rotation * 1000.0).round() as i32;
-                    let cache_key = (code.clone(), *target_w, *target_h, opacity_key, rotation_key);
+                    let cache_key = (
+                        code.clone(),
+                        *target_w,
+                        *target_h,
+                        opacity_key,
+                        rotation_key,
+                    );
                     let mut cache = GEOMETRY_SVG_CACHE.lock();
                     let rendered = if let Some(cached) = cache.get(&cache_key) {
                         Some(cached)
                     } else {
-                        match crate::render::render_svg_image(code, *target_w, *target_h, *opacity, *rotation) {
+                        match crate::render::render_svg_image(
+                            code, *target_w, *target_h, *opacity, *rotation,
+                        ) {
                             Ok(img) => {
                                 cache.insert(cache_key.clone(), img);
                                 cache.get(&cache_key)
@@ -19866,7 +20630,7 @@ mod windows_overlay {
                             }
                         }
                     };
-                    
+
                     if let Some(img) = rendered {
                         let img_w = img.width as usize;
                         let img_h = img.height as usize;
@@ -19890,24 +20654,27 @@ mod windows_overlay {
                                 }
                                 let alpha = img.rgba[img_idx + 3] as u32;
                                 if alpha > 0 {
-                                    let dest_idx = ((screen_y as usize) * (width as usize) + (screen_x as usize)) * 4;
+                                    let dest_idx = ((screen_y as usize) * (width as usize)
+                                        + (screen_x as usize))
+                                        * 4;
                                     if dest_idx + 3 < pixels.len() {
                                         let src_r = img.rgba[img_idx] as u32;
                                         let src_g = img.rgba[img_idx + 1] as u32;
                                         let src_b = img.rgba[img_idx + 2] as u32;
-                                        
+
                                         let dest_b = pixels[dest_idx] as u32;
                                         let dest_g = pixels[dest_idx + 1] as u32;
                                         let dest_r = pixels[dest_idx + 2] as u32;
-                                        
+
                                         let out_r = (src_r * alpha + dest_r * (255 - alpha)) / 255;
                                         let out_g = (src_g * alpha + dest_g * (255 - alpha)) / 255;
                                         let out_b = (src_b * alpha + dest_b * (255 - alpha)) / 255;
-                                        
+
                                         pixels[dest_idx] = out_b as u8;
                                         pixels[dest_idx + 1] = out_g as u8;
                                         pixels[dest_idx + 2] = out_r as u8;
-                                        pixels[dest_idx + 3] = pixels[dest_idx + 3].max(alpha as u8);
+                                        pixels[dest_idx + 3] =
+                                            pixels[dest_idx + 3].max(alpha as u8);
                                     }
                                 }
                             }
@@ -19917,12 +20684,12 @@ mod windows_overlay {
             }
         }
 
+        use windows::Win32::Foundation::RECT;
         use windows::Win32::Graphics::Gdi::{
             DT_LEFT, DT_SINGLELINE, DT_VCENTER, DrawTextW, GetTextExtentPoint32W, GetTextMetricsW,
-            SetBkMode, SetTextAlign, SetTextColor, TextOutW, TRANSPARENT, TA_BASELINE, TA_CENTER,
-            TEXTMETRICW,
+            SetBkMode, SetTextAlign, SetTextColor, TA_BASELINE, TA_CENTER, TEXTMETRICW,
+            TRANSPARENT, TextOutW,
         };
-        use windows::Win32::Foundation::RECT;
         unsafe {
             let _ = SetTextColor(mem_dc, COLORREF(0xFFFFFF));
             let _ = SetBkMode(mem_dc, TRANSPARENT);
@@ -20087,7 +20854,10 @@ mod windows_overlay {
             }
             let old_align = SetTextAlign(mem_dc, TA_CENTER | TA_BASELINE);
             let _ = TextOutW(mem_dc, center_x, baseline_y, text_utf16);
-            let _ = SetTextAlign(mem_dc, windows::Win32::Graphics::Gdi::TEXT_ALIGN_OPTIONS(old_align));
+            let _ = SetTextAlign(
+                mem_dc,
+                windows::Win32::Graphics::Gdi::TEXT_ALIGN_OPTIONS(old_align),
+            );
             let text_alpha = text.color[3].max(1);
             let start_y = marker_rect.top.max(0).min(height as i32);
             let end_y = marker_rect.bottom.max(0).min(height as i32);
@@ -20131,9 +20901,7 @@ mod windows_overlay {
                     let index = ((py as usize) * (width as usize) + (px as usize)) * 4;
                     if index + 3 < pixels.len() {
                         let chunk = &mut pixels[index..index + 4];
-                        if chunk[3] == 0
-                            && (chunk[0] != 0 || chunk[1] != 0 || chunk[2] != 0)
-                        {
+                        if chunk[3] == 0 && (chunk[0] != 0 || chunk[1] != 0 || chunk[2] != 0) {
                             chunk[3] = 255;
                         }
                     }
@@ -20169,26 +20937,6 @@ mod windows_overlay {
         let _ = ReleaseDC(None, screen_dc);
         Ok(())
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     unsafe fn paint_timer_hwnd(hwnd: HWND, preset: &TimerPreset, text: &str) -> Result<()> {
         let window_x = preset.x.max(0);
@@ -20640,22 +21388,25 @@ mod windows_overlay {
 
     pub(crate) fn is_geometry_active(preset_id: u32, step_index: usize) -> bool {
         let hook_state = HOOK_STATE.lock();
-        hook_state.active_geometry_steps.contains_key(&(preset_id, step_index))
+        hook_state
+            .active_geometry_steps
+            .contains_key(&(preset_id, step_index))
     }
 
     pub(crate) fn stop_geometry(preset_id: u32, step_index: usize) {
         let mut hook_state = HOOK_STATE.lock();
-        hook_state.active_geometry_steps.remove(&(preset_id, step_index));
-        hook_state.rendered_geometry_steps.remove(&(preset_id, step_index));
-        hook_state.active_geometry_steps_expires.remove(&(preset_id, step_index));
+        hook_state
+            .active_geometry_steps
+            .remove(&(preset_id, step_index));
+        hook_state
+            .rendered_geometry_steps
+            .remove(&(preset_id, step_index));
+        hook_state
+            .active_geometry_steps_expires
+            .remove(&(preset_id, step_index));
         drop(hook_state);
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
-
-
-
-
-
 
     pub(crate) fn is_crosshair_active(profile_name: &str) -> bool {
         let name = profile_name.trim();
@@ -20702,14 +21453,14 @@ mod windows_overlay {
 pub use windows_overlay::*;
 #[cfg(not(windows))]
 mod fallback {
-    use anyhow::{Result, bail};
     use crate::{
         model::{
-            AudioSettings, CrosshairStyle, MacroGroup, ProfileRecord, RgbaColor, VisionPreset,
-            HotkeyBinding, WindowExpandControls, WindowFocusPreset, WindowLayout, WindowPreset,
+            AudioSettings, CrosshairStyle, HotkeyBinding, MacroGroup, ProfileRecord, RgbaColor,
+            VisionPreset, WindowExpandControls, WindowFocusPreset, WindowLayout, WindowPreset,
         },
         storage::AppPaths,
     };
+    use anyhow::{Result, bail};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum QuickKeyDisplayLane {
@@ -20801,7 +21552,10 @@ mod fallback {
         },
         VisionPointCaptureCancelled(String),
         MacroRealtimeStepRemoved(u32, u32),
-        CustomCommandResult { preset_id: u32, output: String },
+        CustomCommandResult {
+            preset_id: u32,
+            output: String,
+        },
         OpenWindowsLoaded {
             windows: Vec<String>,
             status: Option<String>,
@@ -20856,11 +21610,6 @@ mod fallback {
     }
 
     pub(crate) fn stop_geometry(_preset_id: u32, _step_index: usize) {}
-
-
-
-
-
 
     pub(crate) fn is_crosshair_active(_profile_name: &str) -> bool {
         false
