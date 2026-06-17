@@ -208,8 +208,7 @@ mod windows_overlay {
     const SCREEN_DRAW_TIMER_ID: usize = 3;
     const SCREEN_DRAW_REFRESH_INTERVAL_MS: u32 = 16;
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 6;
-    const SCREEN_DRAW_TRIGGER_INITIAL_CAPTURE_HOLD_MS: u64 = 55;
-    const SCREEN_DRAW_TRIGGER_ACTIVE_CAPTURE_HOLD_MS: u64 = 110;
+    const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 110;
     const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
     const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 408;
     const SCREEN_DRAW_TOOLBAR_HEIGHT: i32 = 78;
@@ -710,6 +709,12 @@ mod windows_overlay {
         MousePathRecordingFinished(u32, Vec<MousePathEvent>, String),
         MousePathDrawCaptureCancelled(String),
         ScreenDrawCaptureStatus(String),
+        UpdateScreenDrawConfig {
+            color: RgbaColor,
+            brush_size: f32,
+            smoothing: bool,
+            smoothing_amount: f32,
+        },
         VisionFinished(String),
         MacroStepInlineFeedback {
             preset_id: u32,
@@ -5446,19 +5451,13 @@ mod windows_overlay {
             return false;
         }
         if trigger_latched {
-            let latch_still_down = trigger
-                .as_ref()
-                .is_some_and(screen_draw_trigger_binding_is_down);
-            if latch_still_down {
+            if is_repeat {
                 return !pass_trigger_through;
             }
             let mut state = SCREEN_DRAW_STATE.lock();
             state.trigger_latched = false;
             state.trigger_pressed_at = None;
             state.trigger_started_from_inactive = false;
-        }
-        if is_repeat && active {
-            return !pass_trigger_through;
         }
 
         if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
@@ -5492,7 +5491,6 @@ mod windows_overlay {
                 state.live_stroke_rect = None;
             }
         }
-        schedule_screen_draw_hold_capture(hold_trigger, press_started_at, started_from_inactive);
         request_screen_draw_overlay_sync();
         !pass_trigger_through
     }
@@ -5584,13 +5582,8 @@ mod windows_overlay {
             let Some(pressed_at) = state.trigger_pressed_at else {
                 return;
             };
-            let capture_hold_ms = if state.trigger_started_from_inactive {
-                SCREEN_DRAW_TRIGGER_INITIAL_CAPTURE_HOLD_MS
-            } else {
-                SCREEN_DRAW_TRIGGER_ACTIVE_CAPTURE_HOLD_MS
-            };
             if Instant::now().duration_since(pressed_at)
-                < Duration::from_millis(capture_hold_ms)
+                < Duration::from_millis(SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS)
             {
                 return;
             }
@@ -6625,6 +6618,7 @@ mod windows_overlay {
     fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
         let mut capture_mode = None;
         let mut capture_session_id = 0u64;
+        let mut should_sync_config = false;
         let mut state = SCREEN_DRAW_STATE.lock();
         if !state.active || state.capturing_region {
             return false;
@@ -6641,12 +6635,14 @@ mod windows_overlay {
             }
             ScreenDrawHit::Color => {
                 state.color = next_screen_draw_color(state.color);
+                should_sync_config = true;
             }
             ScreenDrawHit::BrushSize => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.active_control = ScreenDrawControl::BrushSize;
                 update_screen_draw_brush_slider(&mut state, point.x);
                 mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
+                should_sync_config = true;
             }
             ScreenDrawHit::Eraser => {
                 state.eraser = !state.eraser;
@@ -6657,12 +6653,14 @@ mod windows_overlay {
                 state.smoothing = !state.smoothing;
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
+                should_sync_config = true;
             }
             ScreenDrawHit::SmoothingAmount => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.active_control = ScreenDrawControl::SmoothingAmount;
                 update_screen_draw_smoothing_slider(&mut state, point.x);
                 mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
+                should_sync_config = true;
             }
             ScreenDrawHit::CaptureRegion => {
                 if !state.capturing_region {
@@ -6694,6 +6692,9 @@ mod windows_overlay {
             mark_screen_draw_repaint_pending(&mut state);
         }
         drop(state);
+        if should_sync_config {
+            send_screen_draw_config_to_ui();
+        }
         if let Some(capture_mode) = capture_mode {
             request_screen_draw_overlay_sync();
             begin_screen_draw_region_capture(capture_mode, capture_session_id);
@@ -6876,46 +6877,48 @@ mod windows_overlay {
         result
     }
 
-    fn screen_draw_trigger_binding_is_down(trigger: &HotkeyBinding) -> bool {
-        hotkey::binding_key_names(trigger).into_iter().all(|key| {
-            hotkey::key_name_to_vk(&key)
+    fn screen_draw_trigger_key_is_down(key_name: &str, hook_state: &HookState) -> bool {
+        if key_name.eq_ignore_ascii_case("Ctrl") || key_name.eq_ignore_ascii_case("Control") {
+            return hook_state.ctrl
+                || hotkey::key_name_to_vk(key_name)
+                    .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
+        }
+        if key_name.eq_ignore_ascii_case("Alt") {
+            return hook_state.alt
+                || hotkey::key_name_to_vk(key_name)
+                    .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
+        }
+        if key_name.eq_ignore_ascii_case("Shift") {
+            return hook_state.shift
+                || hotkey::key_name_to_vk(key_name)
+                    .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
+        }
+        if key_name.eq_ignore_ascii_case("Win") || key_name.eq_ignore_ascii_case("Meta") {
+            return hook_state.win
+                || hotkey::key_name_to_vk(key_name)
+                    .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
+        }
+        if hotkey::is_mouse_key_name(key_name) {
+            return hook_state
+                .held_mouse_buttons
+                .iter()
+                .any(|held| held.eq_ignore_ascii_case(key_name))
+                || hotkey::key_name_to_vk(key_name)
+                    .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
+        }
+        hook_state
+            .held_inputs
+            .iter()
+            .any(|held| held.eq_ignore_ascii_case(key_name))
+            || hotkey::key_name_to_vk(key_name)
                 .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0)
-        })
     }
 
-    fn schedule_screen_draw_hold_capture(
-        trigger: HotkeyBinding,
-        pressed_at: Instant,
-        started_from_inactive: bool,
-    ) {
-        thread::spawn(move || {
-            let capture_hold_ms = if started_from_inactive {
-                SCREEN_DRAW_TRIGGER_INITIAL_CAPTURE_HOLD_MS
-            } else {
-                SCREEN_DRAW_TRIGGER_ACTIVE_CAPTURE_HOLD_MS
-            };
-            thread::sleep(Duration::from_millis(capture_hold_ms));
-            let should_begin = {
-                let mut state = SCREEN_DRAW_STATE.lock();
-                if !state.enabled
-                    || !state.active
-                    || state.capturing_region
-                    || !state.trigger_latched
-                    || state.trigger_pressed_at != Some(pressed_at)
-                    || !screen_draw_trigger_binding_is_down(&trigger)
-                {
-                    false
-                } else {
-                    state.trigger_pressed_at = None;
-                    state.trigger_started_from_inactive = false;
-                    state.capture_trigger_release_point = None;
-                    true
-                }
-            };
-            if should_begin {
-                begin_screen_draw_capture_from_trigger(trigger);
-            }
-        });
+    fn screen_draw_trigger_binding_is_down(trigger: &HotkeyBinding) -> bool {
+        let hook_state = HOOK_STATE.lock();
+        hotkey::binding_key_names(trigger)
+            .into_iter()
+            .all(|key| screen_draw_trigger_key_is_down(&key, &hook_state))
     }
 
     fn sync_trigger_binding_input_state(binding: &HotkeyBinding) {
@@ -7124,34 +7127,25 @@ mod windows_overlay {
     }
 
     fn restore_screen_draw_after_region_capture(hwnd_raw: isize, session_id: u64) {
-        let mut trigger_to_sync = None;
-        let mut state = SCREEN_DRAW_STATE.lock();
-        if state.capture_session_id != session_id {
-            return;
-        }
-        let trigger_still_down = state.capture_trigger.as_ref().is_some_and(|trigger| {
-            if screen_draw_trigger_binding_is_down(trigger) {
-                true
-            } else {
-                trigger_to_sync = Some(trigger.clone());
-                false
+        let trigger_to_sync = {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            if state.capture_session_id != session_id {
+                return;
             }
-        });
-        state.capturing_region = false;
-        state.capture_trigger = None;
-        state.capture_trigger_release_point = None;
-        if !trigger_still_down {
+            let trigger = state.capture_trigger.clone();
+            state.capturing_region = false;
+            state.capture_trigger = None;
+            state.capture_trigger_release_point = None;
             state.trigger_latched = false;
             state.trigger_pressed_at = None;
             state.trigger_started_from_inactive = false;
-        }
-        let active = state.active;
-        if active {
-            state.pending_repaint = true;
-            let toolbar_rect = screen_draw_toolbar_rect(&state);
-            mark_screen_draw_dirty(&mut state, toolbar_rect);
-        }
-        drop(state);
+            if state.active {
+                state.pending_repaint = true;
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
+            }
+            trigger
+        };
         if let Some(trigger) = trigger_to_sync.as_ref() {
             sync_trigger_binding_input_state(trigger);
         }
@@ -7210,6 +7204,10 @@ mod windows_overlay {
         if !state.active || state.capturing_region {
             return false;
         }
+        let should_sync_config = matches!(
+            state.active_control,
+            ScreenDrawControl::BrushSize | ScreenDrawControl::SmoothingAmount
+        );
         if let Some(previous) = state.live_stroke_rect.take() {
             mark_screen_draw_dirty(&mut state, previous);
         }
@@ -7242,7 +7240,31 @@ mod windows_overlay {
         if state.active {
             mark_screen_draw_repaint_pending(&mut state);
         }
+        drop(state);
+        if should_sync_config {
+            send_screen_draw_config_to_ui();
+        }
         true
+    }
+
+    fn send_screen_draw_config_to_ui() {
+        let (color, brush_size, smoothing, smoothing_amount) = {
+            let state = SCREEN_DRAW_STATE.lock();
+            (
+                state.color,
+                state.brush_size,
+                state.smoothing,
+                state.smoothing_amount,
+            )
+        };
+        if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
+            let _ = ui_tx.send(UiCommand::UpdateScreenDrawConfig {
+                color,
+                brush_size,
+                smoothing,
+                smoothing_amount,
+            });
+        }
     }
 
     fn append_screen_draw_point(stroke: &mut ScreenDrawStroke, point: POINT) -> bool {
@@ -20498,6 +20520,12 @@ mod fallback {
         },
         AudioSenseDevicesLoaded {
             devices: Vec<String>,
+        },
+        UpdateScreenDrawConfig {
+            color: crate::model::RgbaColor,
+            brush_size: f32,
+            smoothing: bool,
+            smoothing_amount: f32,
         },
         VideoPlaybackFinished(u32),
     }
