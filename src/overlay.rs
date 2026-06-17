@@ -537,6 +537,51 @@ mod windows_overlay {
         smoothing_amount: f32,
     }
 
+    #[derive(Clone, Copy)]
+    struct ScreenDrawDirtyRect {
+        left: usize,
+        top: usize,
+        right: usize,
+        bottom: usize,
+    }
+
+    impl ScreenDrawDirtyRect {
+        fn full(width: usize, height: usize) -> Self {
+            Self {
+                left: 0,
+                top: 0,
+                right: width,
+                bottom: height,
+            }
+        }
+
+        fn normalized(self, width: usize, height: usize) -> Option<Self> {
+            let left = self.left.min(width);
+            let top = self.top.min(height);
+            let right = self.right.min(width);
+            let bottom = self.bottom.min(height);
+            if left >= right || top >= bottom {
+                None
+            } else {
+                Some(Self {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                })
+            }
+        }
+
+        fn union(self, other: Self) -> Self {
+            Self {
+                left: self.left.min(other.left),
+                top: self.top.min(other.top),
+                right: self.right.max(other.right),
+                bottom: self.bottom.max(other.bottom),
+            }
+        }
+    }
+
     struct ScreenDrawState {
         enabled: bool,
         active: bool,
@@ -561,6 +606,15 @@ mod windows_overlay {
         committed_dirty: bool,
         pending_repaint: bool,
         last_present_at: Option<Instant>,
+        dirty_rect: Option<ScreenDrawDirtyRect>,
+        live_stroke_rect: Option<ScreenDrawDirtyRect>,
+        surface_dc: isize,
+        surface_bitmap: isize,
+        surface_old_bitmap: isize,
+        surface_bits: usize,
+        surface_bits_len: usize,
+        surface_width: usize,
+        surface_height: usize,
     }
 
     impl Default for ScreenDrawState {
@@ -594,6 +648,15 @@ mod windows_overlay {
                 committed_dirty: true,
                 pending_repaint: false,
                 last_present_at: None,
+                dirty_rect: None,
+                live_stroke_rect: None,
+                surface_dc: 0,
+                surface_bitmap: 0,
+                surface_old_bitmap: 0,
+                surface_bits: 0,
+                surface_bits_len: 0,
+                surface_width: 0,
+                surface_height: 0,
             }
         }
     }
@@ -5697,6 +5760,11 @@ mod windows_overlay {
                 state.current_stroke = None;
                 state.active_control = ScreenDrawControl::None;
                 state.pending_repaint = true;
+                state.dirty_rect = Some(ScreenDrawDirtyRect::full(
+                    state.canvas_width.max(1),
+                    state.canvas_height.max(1),
+                ));
+                state.live_stroke_rect = None;
             }
             state.active
         };
@@ -5739,8 +5807,67 @@ mod windows_overlay {
         state.pending_repaint = true;
     }
 
+    fn screen_draw_toolbar_rect(state: &ScreenDrawState) -> ScreenDrawDirtyRect {
+        ScreenDrawDirtyRect {
+            left: state.toolbar_x.max(0) as usize,
+            top: state.toolbar_y.max(0) as usize,
+            right: (state.toolbar_x + 332).max(0) as usize,
+            bottom: (state.toolbar_y + 78).max(0) as usize,
+        }
+    }
+
+    fn mark_screen_draw_dirty(state: &mut ScreenDrawState, rect: ScreenDrawDirtyRect) {
+        state.dirty_rect = Some(match state.dirty_rect {
+            Some(existing) => existing.union(rect),
+            None => rect,
+        });
+    }
+
+    fn current_screen_draw_stroke_rect(stroke: &ScreenDrawStroke) -> Option<ScreenDrawDirtyRect> {
+        let first = stroke.points.first()?;
+        let mut min_x = first.x;
+        let mut min_y = first.y;
+        let mut max_x = first.x;
+        let mut max_y = first.y;
+        for point in stroke.points.iter().skip(1) {
+            min_x = min_x.min(point.x);
+            min_y = min_y.min(point.y);
+            max_x = max_x.max(point.x);
+            max_y = max_y.max(point.y);
+        }
+        let pad = (stroke.brush_size.ceil() as i32 + 6).max(4);
+        Some(ScreenDrawDirtyRect {
+            left: min_x.saturating_sub(pad).max(0) as usize,
+            top: min_y.saturating_sub(pad).max(0) as usize,
+            right: (max_x + pad + 1).max(0) as usize,
+            bottom: (max_y + pad + 1).max(0) as usize,
+        })
+    }
+
+    fn sync_screen_draw_live_stroke_dirty(state: &mut ScreenDrawState) {
+        if let Some(previous) = state.live_stroke_rect.take() {
+            mark_screen_draw_dirty(state, previous);
+        }
+        if let Some(current) = state
+            .current_stroke
+            .as_ref()
+            .and_then(current_screen_draw_stroke_rect)
+        {
+            mark_screen_draw_dirty(state, current);
+            state.live_stroke_rect = Some(current);
+        }
+    }
+
+    fn mark_screen_draw_toolbar_dirty(
+        state: &mut ScreenDrawState,
+        previous: ScreenDrawDirtyRect,
+    ) {
+        mark_screen_draw_dirty(state, previous);
+        mark_screen_draw_dirty(state, screen_draw_toolbar_rect(state));
+    }
+
     fn screen_draw_should_present_immediately() -> bool {
-        let mut state = SCREEN_DRAW_STATE.lock();
+        let state = SCREEN_DRAW_STATE.lock();
         if !state.active || !state.pending_repaint {
             return false;
         }
@@ -5766,6 +5893,32 @@ mod windows_overlay {
         state.committed_dirty = true;
         state.pending_repaint = false;
         state.last_present_at = None;
+        state.dirty_rect = None;
+        state.live_stroke_rect = None;
+        release_screen_draw_surface(state);
+    }
+
+    fn release_screen_draw_surface(state: &mut ScreenDrawState) {
+        unsafe {
+            if state.surface_dc != 0 {
+                let surface_dc = HDC(state.surface_dc as *mut c_void);
+                if state.surface_bitmap != 0 {
+                    let _ = SelectObject(
+                        surface_dc,
+                        HGDIOBJ(state.surface_old_bitmap as *mut c_void),
+                    );
+                    let _ = DeleteObject(HGDIOBJ(state.surface_bitmap as *mut c_void));
+                }
+                let _ = DeleteDC(surface_dc);
+            }
+        }
+        state.surface_dc = 0;
+        state.surface_bitmap = 0;
+        state.surface_old_bitmap = 0;
+        state.surface_bits = 0;
+        state.surface_bits_len = 0;
+        state.surface_width = 0;
+        state.surface_height = 0;
     }
 
     fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
@@ -5775,6 +5928,7 @@ mod windows_overlay {
         }
         if right_button {
             start_screen_draw_stroke(&mut state, point, true);
+            sync_screen_draw_live_stroke_dirty(&mut state);
             mark_screen_draw_repaint_pending(&mut state);
             return true;
         }
@@ -5786,18 +5940,26 @@ mod windows_overlay {
                 state.color = next_screen_draw_color(state.color);
             }
             ScreenDrawHit::BrushSize => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.active_control = ScreenDrawControl::BrushSize;
                 update_screen_draw_brush_slider(&mut state, point.x);
+                mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
             }
             ScreenDrawHit::Eraser => {
                 state.eraser = !state.eraser;
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
             }
             ScreenDrawHit::Smoothing => {
                 state.smoothing = !state.smoothing;
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
             }
             ScreenDrawHit::SmoothingAmount => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.active_control = ScreenDrawControl::SmoothingAmount;
                 update_screen_draw_smoothing_slider(&mut state, point.x);
+                mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
             }
             ScreenDrawHit::ToolbarBody => {
                 state.active_control = ScreenDrawControl::MoveToolbar;
@@ -5807,6 +5969,7 @@ mod windows_overlay {
             ScreenDrawHit::Canvas => {
                 let eraser = state.eraser;
                 start_screen_draw_stroke(&mut state, point, eraser);
+                sync_screen_draw_live_stroke_dirty(&mut state);
             }
         }
         if state.active {
@@ -5823,18 +5986,24 @@ mod windows_overlay {
         match state.active_control {
             ScreenDrawControl::MoveToolbar => {
                 let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.toolbar_x = (point.x - state.drag_offset_x).clamp(0, (screen_w - 332).max(0));
                 state.toolbar_y = (point.y - state.drag_offset_y).clamp(0, (screen_h - 78).max(0));
+                mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
                 mark_screen_draw_repaint_pending(&mut state);
                 true
             }
             ScreenDrawControl::BrushSize => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
                 update_screen_draw_brush_slider(&mut state, point.x);
+                mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
                 mark_screen_draw_repaint_pending(&mut state);
                 true
             }
             ScreenDrawControl::SmoothingAmount => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
                 update_screen_draw_smoothing_slider(&mut state, point.x);
+                mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
                 mark_screen_draw_repaint_pending(&mut state);
                 true
             }
@@ -5842,6 +6011,7 @@ mod windows_overlay {
                 if let Some(stroke) = state.current_stroke.as_mut() {
                     let changed = append_screen_draw_point(stroke, point);
                     if changed {
+                        sync_screen_draw_live_stroke_dirty(&mut state);
                         mark_screen_draw_repaint_pending(&mut state);
                     }
                     changed
@@ -5856,6 +6026,9 @@ mod windows_overlay {
         let mut state = SCREEN_DRAW_STATE.lock();
         if !state.active {
             return false;
+        }
+        if let Some(previous) = state.live_stroke_rect.take() {
+            mark_screen_draw_dirty(&mut state, previous);
         }
         if let Some(stroke) = state.current_stroke.take()
         {
@@ -6044,6 +6217,9 @@ mod windows_overlay {
         state.frame_rgba.clear();
         state.frame_rgba.resize(byte_len, 0);
         state.committed_dirty = true;
+        state.dirty_rect = Some(ScreenDrawDirtyRect::full(width, height));
+        state.live_stroke_rect = None;
+        release_screen_draw_surface(state);
         true
     }
 
@@ -6150,6 +6326,93 @@ mod windows_overlay {
         }
     }
 
+    unsafe fn ensure_screen_draw_surface(
+        state: &mut ScreenDrawState,
+        width: usize,
+        height: usize,
+    ) -> Result<()> {
+        if state.surface_width == width
+            && state.surface_height == height
+            && state.surface_dc != 0
+            && state.surface_bits != 0
+            && state.surface_bits_len == width.saturating_mul(height).saturating_mul(4)
+        {
+            return Ok(());
+        }
+
+        release_screen_draw_surface(state);
+        let screen_dc = GetDC(None);
+        let mem_dc = CreateCompatibleDC(Some(screen_dc));
+        let bitmap_info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width as i32,
+                biHeight: -(height as i32),
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits: *mut c_void = null_mut();
+        let bitmap = CreateDIBSection(
+            Some(mem_dc),
+            &bitmap_info,
+            DIB_RGB_COLORS,
+            &mut bits,
+            None,
+            0,
+        )?;
+        let _ = ReleaseDC(None, screen_dc);
+        if bits.is_null() {
+            let _ = DeleteObject(HGDIOBJ(bitmap.0));
+            let _ = DeleteDC(mem_dc);
+            bail!("Failed to allocate persistent screen draw surface");
+        }
+
+        let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
+        state.surface_dc = mem_dc.0 as isize;
+        state.surface_bitmap = bitmap.0 as isize;
+        state.surface_old_bitmap = old_bitmap.0 as isize;
+        state.surface_bits = bits as usize;
+        state.surface_bits_len = width.saturating_mul(height).saturating_mul(4);
+        state.surface_width = width;
+        state.surface_height = height;
+        state.dirty_rect = Some(ScreenDrawDirtyRect::full(width, height));
+        Ok(())
+    }
+
+    fn copy_screen_draw_rgba_region(
+        src: &[u8],
+        dst: &mut [u8],
+        width: usize,
+        rect: ScreenDrawDirtyRect,
+    ) {
+        for y in rect.top..rect.bottom {
+            let row_start = (y * width + rect.left) * 4;
+            let row_end = (y * width + rect.right) * 4;
+            dst[row_start..row_end].copy_from_slice(&src[row_start..row_end]);
+        }
+    }
+
+    fn copy_screen_draw_rgba_to_bgra_region(
+        src: &[u8],
+        dst: &mut [u8],
+        width: usize,
+        rect: ScreenDrawDirtyRect,
+    ) {
+        for y in rect.top..rect.bottom {
+            for x in rect.left..rect.right {
+                let offset = (y * width + x) * 4;
+                dst[offset] = src[offset + 2];
+                dst[offset + 1] = src[offset + 1];
+                dst[offset + 2] = src[offset];
+                dst[offset + 3] = src[offset + 3];
+            }
+        }
+    }
+
     unsafe fn paint_screen_draw_overlay(hwnd: HWND) -> Result<()> {
         let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
         if screen_w <= 0 || screen_h <= 0 {
@@ -6164,16 +6427,27 @@ mod windows_overlay {
         let width = screen_w as usize;
         let height = screen_h as usize;
         ensure_screen_draw_canvas(&mut state_guard, width, height);
+        ensure_screen_draw_surface(&mut state_guard, width, height)?;
         if state_guard.committed_dirty {
             rebuild_screen_draw_canvas(&mut state_guard);
         }
+        let dirty_rect = state_guard
+            .dirty_rect
+            .take()
+            .and_then(|rect| rect.normalized(width, height))
+            .unwrap_or_else(|| ScreenDrawDirtyRect::full(width, height));
         {
             let ScreenDrawState {
                 committed_rgba,
                 frame_rgba,
                 ..
             } = &mut *state_guard;
-            frame_rgba.copy_from_slice(committed_rgba.as_slice());
+            copy_screen_draw_rgba_region(
+                committed_rgba.as_slice(),
+                frame_rgba.as_mut_slice(),
+                width,
+                dirty_rect,
+            );
         }
         if let Some(stroke) = state_guard.current_stroke.clone()
             && let Some(mut pixmap) =
@@ -6197,48 +6471,18 @@ mod windows_overlay {
         );
 
         let screen_dc = GetDC(None);
-        let mem_dc = CreateCompatibleDC(Some(screen_dc));
-        let bitmap_info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: screen_w,
-                biHeight: -screen_h,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut bits: *mut c_void = null_mut();
-        let bitmap = CreateDIBSection(
-            Some(mem_dc),
-            &bitmap_info,
-            DIB_RGB_COLORS,
-            &mut bits,
-            None,
-            0,
-        )?;
-        if bits.is_null() {
-            let _ = DeleteObject(HGDIOBJ(bitmap.0));
-            let _ = DeleteDC(mem_dc);
-            let _ = ReleaseDC(None, screen_dc);
-            bail!("Failed to map screen draw DIB");
-        }
-        let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
-        let pixels =
-            std::slice::from_raw_parts_mut(bits as *mut u8, state_guard.frame_rgba.len());
-        for (src, dst) in state_guard
-            .frame_rgba
-            .chunks_exact(4)
-            .zip(pixels.chunks_exact_mut(4))
-        {
-            dst[0] = src[2];
-            dst[1] = src[1];
-            dst[2] = src[0];
-            dst[3] = src[3];
-        }
+        let pixels = std::slice::from_raw_parts_mut(
+            state_guard.surface_bits as *mut u8,
+            state_guard.surface_bits_len,
+        );
+        copy_screen_draw_rgba_to_bgra_region(
+            state_guard.frame_rgba.as_slice(),
+            pixels,
+            width,
+            dirty_rect,
+        );
         draw_screen_draw_toolbar(pixels, width, height, &state_guard);
+        let surface_dc = HDC(state_guard.surface_dc as *mut c_void);
         state_guard.pending_repaint = false;
         state_guard.last_present_at = Some(Instant::now());
         drop(state_guard);
@@ -6253,15 +6497,12 @@ mod windows_overlay {
             Some(screen_dc),
             Some(&POINT { x: screen_x, y: screen_y }),
             Some(&SIZE { cx: screen_w, cy: screen_h }),
-            Some(mem_dc),
+            Some(surface_dc),
             Some(&POINT { x: 0, y: 0 }),
             COLORREF(0),
             Some(&blend),
             ULW_ALPHA,
         );
-        let _ = SelectObject(mem_dc, old_bitmap);
-        let _ = DeleteObject(HGDIOBJ(bitmap.0));
-        let _ = DeleteDC(mem_dc);
         let _ = ReleaseDC(None, screen_dc);
         let _ = ShowWindow(hwnd, SW_SHOWNA);
         Ok(())
