@@ -7991,6 +7991,10 @@ mod windows_overlay {
             return 16;
         }
 
+        if runtime.quick_key_display_enabled && !runtime.quick_key_display_entries.is_empty() {
+            return 16;
+        }
+
         let timer_interval = {
             let hook_state = HOOK_STATE.lock();
             let mut min_interval = None;
