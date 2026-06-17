@@ -1,9 +1,9 @@
 #![windows_subsystem = "windows"]
 
 mod ai;
-mod audiosense;
 mod app_icon;
 mod audio;
+mod audiosense;
 mod hotkey;
 mod lang;
 mod macro_code;
@@ -23,7 +23,9 @@ use crossbeam_channel::unbounded;
 use std::sync::{Arc, Condvar, Mutex};
 
 use crate::{
-    model::{AppState, GeometryObject, GeometryPreset, GeometryShapeKind},
+    model::{
+        AppState, FocusHighlightDecoration, GeometryObject, GeometryPreset, GeometryShapeKind,
+    },
     overlay::OverlayCommand,
     storage::AppPaths,
     ui::{CrosshairApp, PopupBlobApp, PopupBlobKind},
@@ -42,6 +44,9 @@ fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool)> {
         }
     }
     if normalize_geometry_presets(&mut state) {
+        state_changed = true;
+    }
+    if normalize_focus_highlight_decoration(&mut state) {
         state_changed = true;
     }
     state.show_window = true;
@@ -125,6 +130,21 @@ fn normalize_geometry_presets(state: &mut AppState) -> bool {
     changed
 }
 
+fn normalize_focus_highlight_decoration(state: &mut AppState) -> bool {
+    let mut changed = false;
+    if state.focus_highlight_rainbow_legacy
+        && state.focus_highlight_decoration == FocusHighlightDecoration::Plain
+    {
+        state.focus_highlight_decoration = FocusHighlightDecoration::Rainbow;
+        changed = true;
+    }
+    if state.focus_highlight_rainbow_legacy {
+        state.focus_highlight_rainbow_legacy = false;
+        changed = true;
+    }
+    changed
+}
+
 fn wait_for_startup_gate(startup_gate: &Arc<(Mutex<bool>, Condvar)>) {
     let (gate_lock, gate_ready) = &**startup_gate;
     let mut gate_open = gate_lock.lock().expect("startup gate poisoned");
@@ -189,19 +209,17 @@ fn main() -> Result<()> {
     {
         let startup_paths = paths.clone();
         let startup_ui_tx = ui_tx.clone();
-        std::thread::spawn(move || {
-            match load_startup_state(&startup_paths) {
-                Ok((state, startup_state_dirty)) => {
-                    let _ = startup_ui_tx.send(crate::overlay::UiCommand::StartupStateLoaded {
-                        state,
-                        startup_state_dirty,
-                    });
-                }
-                Err(error) => {
-                    let _ = startup_ui_tx.send(crate::overlay::UiCommand::StartupStateLoadFailed(
-                        error.to_string(),
-                    ));
-                }
+        std::thread::spawn(move || match load_startup_state(&startup_paths) {
+            Ok((state, startup_state_dirty)) => {
+                let _ = startup_ui_tx.send(crate::overlay::UiCommand::StartupStateLoaded {
+                    state,
+                    startup_state_dirty,
+                });
+            }
+            Err(error) => {
+                let _ = startup_ui_tx.send(crate::overlay::UiCommand::StartupStateLoadFailed(
+                    error.to_string(),
+                ));
             }
         });
     }
@@ -218,7 +236,8 @@ fn main() -> Result<()> {
             }
         });
     }
-    let overlay_handle_slot: Arc<Mutex<Option<overlay::OverlayHandle>>> = Arc::new(Mutex::new(None));
+    let overlay_handle_slot: Arc<Mutex<Option<overlay::OverlayHandle>>> =
+        Arc::new(Mutex::new(None));
     let overlay_start_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
     {
@@ -230,7 +249,9 @@ fn main() -> Result<()> {
         std::thread::spawn(move || {
             match overlay::start(overlay_paths, overlay_initial_style, overlay_ui_tx) {
                 Ok(handle) => {
-                    *overlay_handle_slot.lock().expect("overlay handle slot poisoned") = Some(handle);
+                    *overlay_handle_slot
+                        .lock()
+                        .expect("overlay handle slot poisoned") = Some(handle);
                 }
                 Err(error) => {
                     *overlay_start_error
@@ -254,7 +275,9 @@ fn main() -> Result<()> {
                     Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 }
 
-                let handle_guard = overlay_handle_slot.lock().expect("overlay handle slot poisoned");
+                let handle_guard = overlay_handle_slot
+                    .lock()
+                    .expect("overlay handle slot poisoned");
                 if let Some(handle) = handle_guard.as_ref() {
                     for command in pending_commands.drain(..) {
                         let should_exit = matches!(command, OverlayCommand::Exit);
@@ -325,7 +348,13 @@ fn main() -> Result<()> {
             ui::configure_fonts(&cc.egui_ctx, false);
             ui::configure_theme(&cc.egui_ctx, state.ui_theme);
             Ok(Box::new(CrosshairApp::new(
-                paths, state, overlay_tx, ui_tx, ui_rx, false, startup_gate,
+                paths,
+                state,
+                overlay_tx,
+                ui_tx,
+                ui_rx,
+                false,
+                startup_gate,
             )))
         }),
     )
@@ -343,15 +372,15 @@ fn run_popup_blob(kind: PopupBlobKind) -> Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: {
             let mut viewport = eframe::egui::ViewportBuilder::default()
-            .with_title(&app_title)
-            .with_inner_size([560.0, 260.0])
-            .with_min_inner_size([560.0, 260.0])
-            .with_max_inner_size([560.0, 260.0])
-            .with_resizable(false)
-            .with_decorations(false)
-            .with_transparent(true)
-            .with_always_on_top()
-            .with_active(true);
+                .with_title(&app_title)
+                .with_inner_size([560.0, 260.0])
+                .with_min_inner_size([560.0, 260.0])
+                .with_max_inner_size([560.0, 260.0])
+                .with_resizable(false)
+                .with_decorations(false)
+                .with_transparent(true)
+                .with_always_on_top()
+                .with_active(true);
             if let Some(icon) = app_icon {
                 viewport = viewport.with_icon(icon);
             }
