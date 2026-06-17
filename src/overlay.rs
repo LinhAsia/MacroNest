@@ -8404,11 +8404,11 @@ mod windows_overlay {
 
     const DWM_COLOR_DEFAULT: u32 = 0xFFFF_FFFF;
     const FOCUS_HIGHLIGHT_BORDER_COLOR: u32 = 0x00B6_E07E;
-    const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(2400);
-    const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(680);
+    const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(1200);
+    const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(240);
     const QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION: Duration = Duration::from_millis(180);
     const QUICK_KEY_DISPLAY_ANIM_EXIT_DURATION: Duration = Duration::from_millis(200);
-    const QUICK_KEY_DISPLAY_HOLD_MIN_DURATION: Duration = Duration::from_millis(200);
+    const QUICK_KEY_DISPLAY_HOLD_MIN_DURATION: Duration = Duration::from_millis(400);
     const QUICK_KEY_DISPLAY_HOLD_TRANSITION_DURATION: Duration = Duration::from_millis(80);
 
     unsafe fn set_native_border_color(hwnd: HWND, color: u32) -> bool {
