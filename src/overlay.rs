@@ -9430,6 +9430,9 @@ mod windows_overlay {
                 
                 let mut binarized = vec![0u8; crop_w * crop_h * 4];
                 let threshold = preset.binary_threshold;
+                let binary_mode = preset.binary_mode;
+                let target_color = preset.binary_target_color;
+                
                 for y in 0..crop_h {
                     let src_row_offset = (crop_y + y) * width * 4;
                     let dst_row_offset = y * crop_w * 4;
@@ -9442,8 +9445,22 @@ mod windows_overlay {
                         let b = frame.rgba[src_pixel_offset + 2];
                         let a = frame.rgba[src_pixel_offset + 3];
                         
-                        let gray = ((r as u32 * 299 + g as u32 * 587 + b as u32 * 114) / 1000) as u8;
-                        let val = if gray >= threshold { 255 } else { 0 };
+                        let val = match binary_mode {
+                            crate::model::PinBinaryMode::Grayscale => {
+                                let gray = ((r as u32 * 299 + g as u32 * 587 + b as u32 * 114) / 1000) as u8;
+                                if gray >= threshold { 255 } else { 0 }
+                            }
+                            crate::model::PinBinaryMode::ColorSimilarity => {
+                                let dist_sq = (r as i32 - target_color.r as i32).pow(2)
+                                    + (g as i32 - target_color.g as i32).pow(2)
+                                    + (b as i32 - target_color.b as i32).pow(2);
+                                if dist_sq <= (threshold as i32).pow(2) {
+                                    255
+                                } else {
+                                    0
+                                }
+                            }
+                        };
                         
                         binarized[dst_pixel_offset] = val;
                         binarized[dst_pixel_offset + 1] = val;
