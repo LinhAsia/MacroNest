@@ -208,7 +208,8 @@ mod windows_overlay {
     const SCREEN_DRAW_TIMER_ID: usize = 3;
     const SCREEN_DRAW_REFRESH_INTERVAL_MS: u32 = 16;
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 6;
-    const SCREEN_DRAW_TRIGGER_HOLD_MS: u64 = 180;
+    const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 110;
+    const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
     const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 408;
     const SCREEN_DRAW_TOOLBAR_HEIGHT: i32 = 78;
     const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 370;
@@ -5531,7 +5532,7 @@ mod windows_overlay {
             if active
                 && let Some(pressed_at) = state.trigger_pressed_at.take()
                 && Instant::now().duration_since(pressed_at)
-                    < Duration::from_millis(SCREEN_DRAW_TRIGGER_HOLD_MS)
+                    < Duration::from_millis(SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS)
                 && !started_from_inactive
             {
                 deactivate_screen_draw(&mut state);
@@ -5582,7 +5583,7 @@ mod windows_overlay {
                 return;
             };
             if Instant::now().duration_since(pressed_at)
-                < Duration::from_millis(SCREEN_DRAW_TRIGGER_HOLD_MS)
+                < Duration::from_millis(SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS)
             {
                 return;
             }
@@ -6877,7 +6878,7 @@ mod windows_overlay {
 
     fn schedule_screen_draw_hold_capture(trigger: HotkeyBinding, pressed_at: Instant) {
         thread::spawn(move || {
-            thread::sleep(Duration::from_millis(SCREEN_DRAW_TRIGGER_HOLD_MS));
+            thread::sleep(Duration::from_millis(SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS));
             let should_begin = {
                 let mut state = SCREEN_DRAW_STATE.lock();
                 if !state.enabled
