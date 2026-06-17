@@ -1632,8 +1632,8 @@ impl CrosshairApp {
 
                 ui.horizontal_wrapped(|ui| {
                     let button_size = [118.0, 26.0];
-                    let previewing_this_preset =
-                        self.active_video_overlay_preset_id == Some(preset.id)
+                    let previewing_this_preset = self.active_video_overlay_preset_id
+                        == Some(preset.id)
                         || self.active_video_preview_preset_id == Some(preset.id);
                     if ui
                         .add_sized(
@@ -1681,13 +1681,13 @@ impl CrosshairApp {
                         } else if self.active_video_preview_preset_id == Some(preset.id) {
                             stop_video_preview = true;
                         } else {
-                            let start_pos = if preview_cursor_ms >= preset.clip.end_ms.saturating_sub(10) {
-                                preset.clip.start_ms
-                            } else {
-                                preview_cursor_ms
-                            };
-                            preview_video_overlay_request =
-                                Some((preset.id, start_pos));
+                            let start_pos =
+                                if preview_cursor_ms >= preset.clip.end_ms.saturating_sub(10) {
+                                    preset.clip.start_ms
+                                } else {
+                                    preview_cursor_ms
+                                };
+                            preview_video_overlay_request = Some((preset.id, start_pos));
                         }
                     }
                     let pick_active = self.video_chroma_pick_preset_id == Some(preset.id);
@@ -1816,11 +1816,16 @@ impl CrosshairApp {
                             ui.horizontal(|ui| {
                                 ui.label(Self::tr_lang(language, "Start", "Bắt đầu"));
                                 changed |= ui
-                                    .add(DragValue::new(&mut preset.clip.start_ms).range(0..=total_ms))
+                                    .add(
+                                        DragValue::new(&mut preset.clip.start_ms)
+                                            .range(0..=total_ms),
+                                    )
                                     .changed();
                                 ui.label(Self::tr_lang(language, "End", "End"));
                                 changed |= ui
-                                    .add(DragValue::new(&mut preset.clip.end_ms).range(0..=total_ms))
+                                    .add(
+                                        DragValue::new(&mut preset.clip.end_ms).range(0..=total_ms),
+                                    )
                                     .changed();
                             });
                         });
@@ -2057,10 +2062,16 @@ impl CrosshairApp {
                     if !clip.file_path.trim().is_empty() {
                         if trim_timeline_outcome.preview_from_trim_start {
                             let preview_start_ms = clip.start_ms;
-                            Self::set_preview_cursor_ms(preview_cursor, target, preview_start_ms, clip);
+                            Self::set_preview_cursor_ms(
+                                preview_cursor,
+                                target,
+                                preview_start_ms,
+                                clip,
+                            );
                             match audio::start_preview_from_ms(clip.clone(), preview_start_ms) {
                                 Ok(()) => {
-                                    outcome.status = Some("Restarting preview from the start.".to_owned())
+                                    outcome.status =
+                                        Some("Restarting preview from the start.".to_owned())
                                 }
                                 Err(error) => {
                                     outcome.status = Some(format!("Preview failed: {error}"))
@@ -2072,10 +2083,18 @@ impl CrosshairApp {
                                 outcome.status = Some("Stopped preview.".to_owned());
                             } else {
                                 let preview_start_ms = preview_cursor_ms;
-                                Self::set_preview_cursor_ms(preview_cursor, target, preview_start_ms, clip);
-                                match audio::toggle_preview_from_ms(clip.clone(), preview_start_ms) {
+                                Self::set_preview_cursor_ms(
+                                    preview_cursor,
+                                    target,
+                                    preview_start_ms,
+                                    clip,
+                                );
+                                match audio::toggle_preview_from_ms(clip.clone(), preview_start_ms)
+                                {
                                     Ok(true) => outcome.status = Some("Previewing.".to_owned()),
-                                    Ok(false) => outcome.status = Some("Stopped preview.".to_owned()),
+                                    Ok(false) => {
+                                        outcome.status = Some("Stopped preview.".to_owned())
+                                    }
                                     Err(error) => {
                                         outcome.status = Some(format!("Preview failed: {error}"))
                                     }
@@ -2257,4 +2276,3 @@ impl CrosshairApp {
         self.trim_timeline_zoom = trim_timeline_zoom;
     }
 }
-

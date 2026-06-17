@@ -43,7 +43,10 @@ impl CrosshairApp {
             } else {
                 spec.stroke_color_expr = format!(
                     "#{:02X}{:02X}{:02X}{:02X}",
-                    spec.stroke_color.r, spec.stroke_color.g, spec.stroke_color.b, spec.stroke_color.a
+                    spec.stroke_color.r,
+                    spec.stroke_color.g,
+                    spec.stroke_color.b,
+                    spec.stroke_color.a
                 );
             }
         }
@@ -214,17 +217,35 @@ impl CrosshairApp {
                 .width(width * 0.45)
                 .selected_text(mode_text)
                 .show_ui(ui, |ui| {
-                    if ui.selectable_label(current_mode == 0, Self::tr_lang(language, "Resize", "Resize")).clicked() {
+                    if ui
+                        .selectable_label(
+                            current_mode == 0,
+                            Self::tr_lang(language, "Resize", "Resize"),
+                        )
+                        .clicked()
+                    {
                         if current_mode != 0 {
                             // Change to Resize mode. Default to first window preset or empty
-                            *step_key = window_presets.first().map(|p| p.id.to_string()).unwrap_or_default();
+                            *step_key = window_presets
+                                .first()
+                                .map(|p| p.id.to_string())
+                                .unwrap_or_default();
                             *live_sync = true;
                         }
                     }
-                    if ui.selectable_label(current_mode == 1, Self::tr_lang(language, "Layout Preset", "Bố cục")).clicked() {
+                    if ui
+                        .selectable_label(
+                            current_mode == 1,
+                            Self::tr_lang(language, "Layout Preset", "Bố cục"),
+                        )
+                        .clicked()
+                    {
                         if current_mode != 1 {
                             // Change to Layout mode. Default to layout:first_layout_id or empty layout:
-                            *step_key = window_layouts.first().map(|l| format!("layout:{}", l.id)).unwrap_or_else(|| "layout:".to_string());
+                            *step_key = window_layouts
+                                .first()
+                                .map(|l| format!("layout:{}", l.id))
+                                .unwrap_or_else(|| "layout:".to_string());
                             *live_sync = true;
                         }
                     }
@@ -243,7 +264,9 @@ impl CrosshairApp {
                             .find(|l| l.id == id)
                             .map(|l| l.name.clone())
                     })
-                    .unwrap_or_else(|| Self::tr_lang(language, "Select layout", "Chọn bố cục").to_owned());
+                    .unwrap_or_else(|| {
+                        Self::tr_lang(language, "Select layout", "Chọn bố cục").to_owned()
+                    });
 
                 egui::ComboBox::from_id_salt(preset_id_salt)
                     .width(width * 0.55)
@@ -251,7 +274,10 @@ impl CrosshairApp {
                     .show_ui(ui, |ui| {
                         for layout_option in window_layouts {
                             if ui
-                                .selectable_label(selected_id == Some(layout_option.id), &layout_option.name)
+                                .selectable_label(
+                                    selected_id == Some(layout_option.id),
+                                    &layout_option.name,
+                                )
                                 .clicked()
                             {
                                 *step_key = format!("layout:{}", layout_option.id);
@@ -269,7 +295,9 @@ impl CrosshairApp {
                             .find(|preset| preset.id == id)
                             .map(|preset| preset.name.clone())
                     })
-                    .unwrap_or_else(|| Self::tr_lang(language, "Select window", "Chọn cửa sổ").to_owned());
+                    .unwrap_or_else(|| {
+                        Self::tr_lang(language, "Select window", "Chọn cửa sổ").to_owned()
+                    });
 
                 egui::ComboBox::from_id_salt(preset_id_salt)
                     .width(width * 0.55)
@@ -277,7 +305,10 @@ impl CrosshairApp {
                     .show_ui(ui, |ui| {
                         for preset_option in window_presets {
                             if ui
-                                .selectable_label(selected_id == Some(preset_option.id), &preset_option.name)
+                                .selectable_label(
+                                    selected_id == Some(preset_option.id),
+                                    &preset_option.name,
+                                )
                                 .clicked()
                             {
                                 *step_key = preset_option.id.to_string();
@@ -357,189 +388,204 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn render_expression_guides_content(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    pub(crate) fn render_expression_guides_content(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+    ) {
         let language = self.state.ui_language;
         let fill = Color32::from_rgba_unmultiplied(0, 170, 255, 18);
         let stroke = egui::Stroke::new(1.0, Color32::from_rgb(0, 170, 255));
         ui.horizontal(|ui| {
             if let Some(texture) = self.guides_author_logo_texture(ctx) {
-                ui.add(
-                    egui::Image::new((texture.id(), vec2(34.0, 34.0))).sense(Sense::hover()),
-                );
+                ui.add(egui::Image::new((texture.id(), vec2(34.0, 34.0))).sense(Sense::hover()));
             }
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new(Self::tr_lang(
-                    language,
-                    "App made by",
-                    "App duoc tao boi",
-                ))
-                .strong()
-                .size(14.0),
+                egui::RichText::new(Self::tr_lang(language, "App made by", "App duoc tao boi"))
+                    .strong()
+                    .size(14.0),
             );
             ui.hyperlink_to(
                 "NBaoLinh",
                 "https://github.com/NBaoLinh/MacroNest/releases/latest",
             );
         });
-        ui.add_space(8.0);
-        egui::Frame::group(ui.style())
-            .fill(fill)
-            .stroke(stroke)
-            .inner_margin(egui::Margin::symmetric(10, 8))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        Self::material_icon_text(0xe88f, 14.0)
-                            .color(Color32::from_rgb(0, 170, 255)),
-                    );
-                    ui.label(
-                        egui::RichText::new(Self::tr_lang(
-                            language,
-                            "EXPRESSION HELP",
-                            "HUONG DAN BIEU THUC",
-                        ))
-                        .strong()
-                        .color(Color32::from_rgb(0, 170, 255)),
-                    );
-                });
-                ui.add_space(4.0);
-                ui.label(Self::tr_lang(
-                    language,
-                    "To return a value, put variables or math inside {}. Plain text outside {} stays as normal text.",
-                    "De tra ve gia tri, hay dat bien hoac phep tinh vao trong {}. Text nam ngoai {} se duoc giu nguyen.",
-                ));
-                ui.label(
-                    egui::RichText::new(Self::tr_lang(
-                        language,
-                        "Examples: {A}, {100 + B}, HP: {player_hp}",
-                        "Vi du: {A}, {100 + B}, HP: {player_hp}",
-                    ))
-                    .monospace(),
-                );
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(Self::tr_lang(
-                        language,
-                        "Supported math and values",
-                        "Phep tinh va gia tri ho tro",
-                    ))
-                        .strong(),
-                );
-                egui::Grid::new("expression-help-columns")
-                    .num_columns(3)
-                    .min_col_width(220.0)
-                    .spacing([18.0, 0.0])
+        ui.add_space(4.0);
+        let full_width = ui.available_width();
+        ui.allocate_ui_with_layout(
+            vec2(full_width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_min_width(full_width);
+                egui::Frame::group(ui.style())
+                    .fill(fill)
+                    .stroke(stroke)
+                    .inner_margin(egui::Margin::symmetric(10, 8))
                     .show(ui, |ui| {
-                        ui.vertical(|ui| {
+                        ui.set_min_width((full_width - 22.0).max(0.0));
+                        ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new(Self::tr_lang(language, "Functions", "Ham"))
-                                    .strong(),
+                                Self::material_icon_text(0xe88f, 14.0)
+                                    .color(Color32::from_rgb(0, 170, 255)),
                             );
-                            ui.label(egui::RichText::new("- random(min, max)").monospace());
-                            ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
-                            ui.label(egui::RichText::new("- min(a, b)").monospace());
-                            ui.label(egui::RichText::new("- max(a, b)").monospace());
-                            ui.label(egui::RichText::new("- abs(a)").monospace());
-                            ui.label(egui::RichText::new("- atan(a)").monospace());
-                            ui.label(egui::RichText::new("- atan2(y, x)").monospace());
-                            ui.label(egui::RichText::new("- sqrt(a)").monospace());
-                            ui.label(egui::RichText::new("- pow(a, b)").monospace());
-                            ui.label(egui::RichText::new("- round(a, digits)").monospace());
-                            ui.label(egui::RichText::new("- ceil(a) / floor(a)").monospace());
-                            ui.label(egui::RichText::new("- factorial(n)").monospace());
-                            ui.label(egui::RichText::new("- gcd(a, b, ...) / lcm(a, b, ...)").monospace());
-                            ui.label(egui::RichText::new("- isqrt(n)").monospace());
-                            ui.label(egui::RichText::new("- comb(n, k) / perm(n, k)").monospace());
-                            ui.label(egui::RichText::new("- sin(angleDeg) * 1000").monospace());
-                            ui.label(egui::RichText::new("- cos(angleDeg) * 1000").monospace());
-                            ui.label(egui::RichText::new("- degrees(rad) / radians(deg)").monospace());
-                            ui.label(egui::RichText::new("- pi").monospace());
-                            ui.label(egui::RichText::new("- myVar.toNumber").monospace());
-                        });
-                        ui.vertical(|ui| {
                             ui.label(
                                 egui::RichText::new(Self::tr_lang(
                                     language,
-                                    "Numeric values",
-                                    "Gia tri so",
+                                    "EXPRESSION HELP",
+                                    "HUONG DAN BIEU THUC",
                                 ))
-                                .strong(),
-                            );
-                            ui.label(egui::RichText::new("- screen.width").monospace());
-                            ui.label(egui::RichText::new("- screen.height").monospace());
-                            ui.label(egui::RichText::new("- mouse.x").monospace());
-                            ui.label(egui::RichText::new("- mouse.y").monospace());
-                            ui.label(egui::RichText::new("- mouse.sensitivity").monospace());
-                            ui.label(egui::RichText::new("- volume.level").monospace());
-                            ui.label(egui::RichText::new("- window.x / left").monospace());
-                            ui.label(egui::RichText::new("- window.y / top").monospace());
-                            ui.label(egui::RichText::new("- window.right").monospace());
-                            ui.label(egui::RichText::new("- window.bottom").monospace());
-                            ui.label(egui::RichText::new("- window.width").monospace());
-                            ui.label(egui::RichText::new("- window.height").monospace());
-                            ui.label(egui::RichText::new("- window.centerX / centerY").monospace());
-                        });
-                        ui.vertical(|ui| {
-                            ui.label(
-                                egui::RichText::new(Self::tr_lang(
-                                    language,
-                                    "System and text",
-                                    "He thong va text",
-                                ))
-                                .strong(),
-                            );
-                            ui.label(
-                                egui::RichText::new("- system.year / month / day").monospace(),
-                            );
-                            ui.label(
-                                egui::RichText::new("- system.hour / minute / second").monospace(),
-                            );
-                            ui.label(egui::RichText::new("- system.millisecond").monospace());
-                            ui.label(egui::RichText::new("- system.date").monospace());
-                            ui.label(egui::RichText::new("- system.time").monospace());
-                            ui.label(egui::RichText::new("- window.title").monospace());
-                            ui.label(egui::RichText::new("- clipboard.text").monospace());
-                            ui.label(
-                                egui::RichText::new("- timer1.hour ... total_sec").monospace(),
-                            );
-                            ui.label(
-                                egui::RichText::new("- TimerName.hour ... total_sec").monospace(),
+                                .strong()
+                                .color(Color32::from_rgb(0, 170, 255)),
                             );
                         });
-                        ui.end_row();
+                        ui.add_space(4.0);
+                        ui.label(Self::tr_lang(
+                            language,
+                            "To return a value, put variables or math inside {}. Plain text outside {} stays as normal text.",
+                            "De tra ve gia tri, hay dat bien hoac phep tinh vao trong {}. Text nam ngoai {} se duoc giu nguyen.",
+                        ));
+                        ui.label(
+                            egui::RichText::new(Self::tr_lang(
+                                language,
+                                "Examples: {A}, {100 + B}, HP: {player_hp}",
+                                "Vi du: {A}, {100 + B}, HP: {player_hp}",
+                            ))
+                            .monospace(),
+                        );
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new(Self::tr_lang(
+                                language,
+                                "Supported math and values",
+                                "Phep tinh va gia tri ho tro",
+                            ))
+                            .strong(),
+                        );
+                        egui::Grid::new("expression-help-columns")
+                            .num_columns(3)
+                            .min_col_width(220.0)
+                            .spacing([18.0, 0.0])
+                            .show(ui, |ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(Self::tr_lang(language, "Functions", "Ham"))
+                                            .strong(),
+                                    );
+                                    ui.label(egui::RichText::new("- random(min, max)").monospace());
+                                    ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
+                                    ui.label(egui::RichText::new("- min(a, b)").monospace());
+                                    ui.label(egui::RichText::new("- max(a, b)").monospace());
+                                    ui.label(egui::RichText::new("- abs(a)").monospace());
+                                    ui.label(egui::RichText::new("- atan(a)").monospace());
+                                    ui.label(egui::RichText::new("- atan2(y, x)").monospace());
+                                    ui.label(egui::RichText::new("- sqrt(a)").monospace());
+                                    ui.label(egui::RichText::new("- pow(a, b)").monospace());
+                                    ui.label(egui::RichText::new("- round(a, digits)").monospace());
+                                    ui.label(egui::RichText::new("- ceil(a) / floor(a)").monospace());
+                                    ui.label(egui::RichText::new("- factorial(n)").monospace());
+                                    ui.label(egui::RichText::new("- gcd(a, b, ...) / lcm(a, b, ...)").monospace());
+                                    ui.label(egui::RichText::new("- isqrt(n)").monospace());
+                                    ui.label(egui::RichText::new("- comb(n, k) / perm(n, k)").monospace());
+                                    ui.label(egui::RichText::new("- sin(angleDeg) * 1000").monospace());
+                                    ui.label(egui::RichText::new("- cos(angleDeg) * 1000").monospace());
+                                    ui.label(egui::RichText::new("- degrees(rad) / radians(deg)").monospace());
+                                    ui.label(egui::RichText::new("- pi").monospace());
+                                    ui.label(egui::RichText::new("- myVar.toNumber").monospace());
+                                });
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(Self::tr_lang(
+                                            language,
+                                            "Numeric values",
+                                            "Gia tri so",
+                                        ))
+                                        .strong(),
+                                    );
+                                    ui.label(egui::RichText::new("- screen.width").monospace());
+                                    ui.label(egui::RichText::new("- screen.height").monospace());
+                                    ui.label(egui::RichText::new("- mouse.x").monospace());
+                                    ui.label(egui::RichText::new("- mouse.y").monospace());
+                                    ui.label(egui::RichText::new("- mouse.sensitivity").monospace());
+                                    ui.label(egui::RichText::new("- volume.level").monospace());
+                                    ui.label(egui::RichText::new("- window.x / left").monospace());
+                                    ui.label(egui::RichText::new("- window.y / top").monospace());
+                                    ui.label(egui::RichText::new("- window.right").monospace());
+                                    ui.label(egui::RichText::new("- window.bottom").monospace());
+                                    ui.label(egui::RichText::new("- window.width").monospace());
+                                    ui.label(egui::RichText::new("- window.height").monospace());
+                                    ui.label(egui::RichText::new("- window.centerX / centerY").monospace());
+                                });
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(Self::tr_lang(
+                                            language,
+                                            "System and text",
+                                            "He thong va text",
+                                        ))
+                                        .strong(),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("- system.year / month / day").monospace(),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("- system.hour / minute / second").monospace(),
+                                    );
+                                    ui.label(egui::RichText::new("- system.millisecond").monospace());
+                                    ui.label(egui::RichText::new("- system.date").monospace());
+                                    ui.label(egui::RichText::new("- system.time").monospace());
+                                    ui.label(egui::RichText::new("- window.title").monospace());
+                                    ui.label(egui::RichText::new("- clipboard.text").monospace());
+                                    ui.label(
+                                        egui::RichText::new("- timer1.hour ... total_sec").monospace(),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("- TimerName.hour ... total_sec").monospace(),
+                                    );
+                                });
+                                ui.end_row();
+                            });
                     });
-            });
+            },
+        );
         ui.add_space(10.0);
         let note_fill = Color32::from_rgba_unmultiplied(255, 194, 70, 16);
         let note_stroke = egui::Stroke::new(1.0, Color32::from_rgb(255, 194, 70));
-        egui::Frame::group(ui.style())
-            .fill(note_fill)
-            .stroke(note_stroke)
-            .inner_margin(egui::Margin::symmetric(10, 8))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        Self::material_icon_text(0xe002, 14.0)
-                            .color(Color32::from_rgb(255, 194, 70)),
-                    );
-                    ui.label(
-                        egui::RichText::new(Self::tr_lang(
+        ui.allocate_ui_with_layout(
+            vec2(full_width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_min_width(full_width);
+                egui::Frame::group(ui.style())
+                    .fill(note_fill)
+                    .stroke(note_stroke)
+                    .inner_margin(egui::Margin::symmetric(10, 8))
+                    .show(ui, |ui| {
+                        ui.set_min_width((full_width - 22.0).max(0.0));
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                Self::material_icon_text(0xe002, 14.0)
+                                    .color(Color32::from_rgb(255, 194, 70)),
+                            );
+                            ui.label(
+                                egui::RichText::new(Self::tr_lang(
+                                    language,
+                                    "IMPORTANT NOTE",
+                                    "LUU Y QUAN TRONG",
+                                ))
+                                .strong()
+                                .color(Color32::from_rgb(255, 194, 70)),
+                            );
+                        });
+                        ui.add_space(4.0);
+                        ui.label(Self::tr_lang(
                             language,
-                            "IMPORTANT NOTE",
-                            "LUU Y QUAN TRONG",
-                        ))
-                        .strong()
-                        .color(Color32::from_rgb(255, 194, 70)),
-                    );
-                });
-                ui.add_space(4.0);
-                ui.label(Self::tr_lang(
-                    language,
-                    "When the MacroNest window is currently focused, some macros, triggers, or actions may not behave the same as they do in your target app. This is intentional so the editor stays easier and safer to use while you are configuring things inside MacroNest.",
-                    "Khi cua so MacroNest dang duoc focus, mot so macro, trigger, hoac action co the se khong hoat dong giong nhu luc chay tren app muc tieu. Day la chu y co chu dich de viec chinh sua trong MacroNest duoc de dung va an toan hon.",
-                ));
-            });
+                            "When the MacroNest window is currently focused, some macros, triggers, or actions may not behave the same as they do in your target app. This is intentional so the editor stays easier and safer to use while you are configuring things inside MacroNest.",
+                            "Khi cua so MacroNest dang duoc focus, mot so macro, trigger, hoac action co the se khong hoat dong giong nhu luc chay tren app muc tieu. Day la chu y co chu dich de viec chinh sua trong MacroNest duoc de dung va an toan hon.",
+                        ));
+                    });
+            },
+        );
     }
 
     fn sanitize_legacy_ocr_target_text(value: &mut String) -> bool {
@@ -750,10 +796,8 @@ impl CrosshairApp {
                                 response.rect.max.x.max(rect.max.x) + 6.0,
                                 response.rect.max.y.max(rect.min.y) + 8.0,
                             );
-                            keep_open_rect = keep_open_rect.union(egui::Rect::from_min_max(
-                                bridge_min,
-                                bridge_max,
-                            ));
+                            keep_open_rect = keep_open_rect
+                                .union(egui::Rect::from_min_max(bridge_min, bridge_max));
                             if rect.contains(pointer_pos) {
                                 ui.ctx().data_mut(|data| {
                                     data.insert_temp(
@@ -2703,7 +2747,7 @@ impl CrosshairApp {
                                 .corner_radius(6.0),
                         )
                     })
-                        .clicked()
+                    .clicked()
                     {
                         self.state.macros_master_enabled = !self.state.macros_master_enabled;
                         self.sync_macro_master_enabled();
@@ -2748,12 +2792,12 @@ impl CrosshairApp {
                                 .corner_radius(6.0),
                         )
                     })
-                        .on_hover_text(Self::tr_lang(
-                            language,
-                            "Capture macro hotkey",
-                            "Bat macro hotkey",
-                        ))
-                        .clicked()
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Capture macro hotkey",
+                        "Bat macro hotkey",
+                    ))
+                    .clicked()
                     {
                         if macro_hotkey_capture_active {
                             self.cancel_capture();
@@ -2777,12 +2821,12 @@ impl CrosshairApp {
                                     .min_size(vec2(0.0, 28.0)),
                             )
                         })
-                            .on_hover_text(Self::tr_lang(
-                                language,
-                                "Click to remove this hotkey",
-                                "Bấm để xóa hotkey này",
-                            ))
-                            .clicked()
+                        .on_hover_text(Self::tr_lang(
+                            language,
+                            "Click to remove this hotkey",
+                            "Bấm để xóa hotkey này",
+                        ))
+                        .clicked()
                         {
                             self.state.macros_master_hotkey = None;
                             self.sync_macro_master_hotkey();
@@ -2801,12 +2845,12 @@ impl CrosshairApp {
                         )),
                 )
             })
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Add macro group",
-                    "Them macro group",
-                ))
-                .clicked()
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Add macro group",
+                "Them macro group",
+            ))
+            .clicked()
             {
                 if let Some(folder_id) = active_folder_for_controls {
                     self.add_macro_group_to_folder(folder_id);
@@ -2834,12 +2878,12 @@ impl CrosshairApp {
                         .stroke(egui::Stroke::new(1.0, share_stroke)),
                 )
             })
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Toggle Import/Export buttons",
-                    "Bật/Tắt hiển thị nút chia sẻ (Import/Export)",
-                ))
-                .clicked()
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Toggle Import/Export buttons",
+                "Bật/Tắt hiển thị nút chia sẻ (Import/Export)",
+            ))
+            .clicked()
             {
                 self.show_share_buttons = !self.show_share_buttons;
                 self.refresh_macro_share_clipboard_kind(true);
@@ -2887,12 +2931,12 @@ impl CrosshairApp {
                         .stroke(egui::Stroke::new(1.0, paste_stroke)),
                 )
             })
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Paste macro groups",
-                    "Dán macro group",
-                ))
-                .clicked()
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Paste macro groups",
+                "Dán macro group",
+            ))
+            .clicked()
             {
                 self.paste_macro_groups_into_folder(paste_target_folder);
             }
@@ -2916,12 +2960,12 @@ impl CrosshairApp {
                         .stroke(egui::Stroke::new(1.0, copy_stroke)),
                 )
             })
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Copy selected macro groups",
-                    "Sao chép macro group đã chọn",
-                ))
-                .clicked()
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Copy selected macro groups",
+                "Sao chép macro group đã chọn",
+            ))
+            .clicked()
             {
                 self.copy_selected_macro_groups();
             }
@@ -2945,12 +2989,12 @@ impl CrosshairApp {
                         .stroke(egui::Stroke::new(1.0, cut_stroke)),
                 )
             })
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Cut selected macro groups",
-                    "Cat macro group đã chọn",
-                ))
-                .clicked()
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Cut selected macro groups",
+                "Cat macro group đã chọn",
+            ))
+            .clicked()
             {
                 self.cut_selected_macro_groups();
             }
@@ -2974,12 +3018,12 @@ impl CrosshairApp {
                         .stroke(egui::Stroke::new(1.0, trash_stroke)),
                 )
             })
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Delete selected macro groups",
-                    "Xoa cac macro group da chon",
-                ))
-                .clicked()
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Delete selected macro groups",
+                "Xoa cac macro group da chon",
+            ))
+            .clicked()
             {
                 self.remove_selected_macro_groups();
             }
@@ -3006,12 +3050,12 @@ impl CrosshairApp {
                         )),
                 )
             })
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Show star macros only",
-                    "Chi nhóm đã favorite",
-                ))
-                .clicked()
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Show star macros only",
+                "Chi nhóm đã favorite",
+            ))
+            .clicked()
             {
                 self.macro_groups_favorite_filter = if star_filter_active {
                     MacroGroupFavoriteFilter::All
@@ -3108,12 +3152,8 @@ impl CrosshairApp {
                                 .corner_radius(6.0),
                         )
                     })
-                        .on_hover_text(Self::tr_lang(
-                            language,
-                            "Variable manager",
-                            "Quan ly bien",
-                        ))
-                        .clicked()
+                    .on_hover_text(Self::tr_lang(language, "Variable manager", "Quan ly bien"))
+                    .clicked()
                     {
                         self.variable_inspector_open = !self.variable_inspector_open;
                     }
@@ -3137,12 +3177,12 @@ impl CrosshairApp {
                         )),
                 )
             })
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Show / hide macro folders",
-                    "Hien / an macro folder",
-                ))
-                .clicked()
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Show / hide macro folders",
+                "Hien / an macro folder",
+            ))
+            .clicked()
             {
                 self.macro_folders_panel_open = !self.macro_folders_panel_open;
                 if !self.macro_folders_panel_open {
@@ -3238,14 +3278,23 @@ impl CrosshairApp {
         let pending_macro_group_scroll_target = self.pending_macro_group_scroll_target.take();
         let scroll_target_key = ui.make_persistent_id("pending-scroll-target");
         let scroll_frames_key = ui.make_persistent_id("pending-scroll-frames");
-        let last_scroll_target: Option<u32> = ui.ctx().data(|data| data.get_temp(scroll_target_key));
-        
-        let mut scroll_frames: usize = ui.ctx().data(|data| data.get_temp(scroll_frames_key).unwrap_or(0));
+        let last_scroll_target: Option<u32> =
+            ui.ctx().data(|data| data.get_temp(scroll_target_key));
+
+        let mut scroll_frames: usize = ui
+            .ctx()
+            .data(|data| data.get_temp(scroll_frames_key).unwrap_or(0));
         let resolved_scroll_target = if pending_macro_group_scroll_target.is_some() {
             if pending_macro_group_scroll_target != last_scroll_target {
                 scroll_frames = 0;
-                ui.ctx().data_mut(|data| data.insert_temp(scroll_target_key, pending_macro_group_scroll_target.unwrap()));
-                ui.ctx().data_mut(|data| data.insert_temp(scroll_frames_key, 0usize));
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(
+                        scroll_target_key,
+                        pending_macro_group_scroll_target.unwrap(),
+                    )
+                });
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(scroll_frames_key, 0usize));
             }
             pending_macro_group_scroll_target
         } else {
@@ -12581,12 +12630,8 @@ impl CrosshairApp {
             ui.columns(2, |columns| {
                 columns[0].vertical(|ui| {
                     ui.label(
-                        RichText::new(Self::tr_lang(
-                            language,
-                            "Fixed Variables",
-                            "Bien co dinh",
-                        ))
-                        .strong(),
+                        RichText::new(Self::tr_lang(language, "Fixed Variables", "Bien co dinh"))
+                            .strong(),
                     );
                     ui.add_space(4.0);
                     let id_const_name = ui.id().with("new_const_name");
@@ -12680,7 +12725,9 @@ impl CrosshairApp {
                                             );
                                             if ui
                                                 .button(Self::material_icon_text(0xe872, 14.0))
-                                                .on_hover_text(Self::tr_lang(language, "Delete", "Delete"))
+                                                .on_hover_text(Self::tr_lang(
+                                                    language, "Delete", "Delete",
+                                                ))
                                                 .clicked()
                                             {
                                                 to_remove_idx = Some(idx);
@@ -12688,7 +12735,8 @@ impl CrosshairApp {
                                             ui.end_row();
                                         }
                                         if let Some(idx) = to_remove_idx {
-                                            let (removed_name, _) = self.state.global_constants.remove(idx);
+                                            let (removed_name, _) =
+                                                self.state.global_constants.remove(idx);
                                             let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
                                             vars.remove(&removed_name);
                                             self.persist();
@@ -12709,12 +12757,8 @@ impl CrosshairApp {
 
                 columns[1].vertical(|ui| {
                     ui.label(
-                        RichText::new(Self::tr_lang(
-                            language,
-                            "Runtime Variables",
-                            "Bien runtime",
-                        ))
-                        .strong(),
+                        RichText::new(Self::tr_lang(language, "Runtime Variables", "Bien runtime"))
+                            .strong(),
                     );
                     ui.label(
                         RichText::new(Self::tr_lang(
@@ -12744,9 +12788,7 @@ impl CrosshairApp {
                                             );
                                             ui.add_sized(
                                                 [180.0, 20.0],
-                                                egui::Label::new(
-                                                    RichText::new(value).monospace(),
-                                                ),
+                                                egui::Label::new(RichText::new(value).monospace()),
                                             );
                                             ui.end_row();
                                         }
@@ -12883,19 +12925,8 @@ impl CrosshairApp {
             "mouse" => Some(&["x", "y", "sensitivity"]),
             "volume" => Some(&["level"]),
             "window" => Some(&[
-                "title",
-                "x",
-                "left",
-                "y",
-                "top",
-                "right",
-                "bottom",
-                "width",
-                "height",
-                "centerX",
-                "centerY",
-                "cx",
-                "cy",
+                "title", "x", "left", "y", "top", "right", "bottom", "width", "height", "centerX",
+                "centerY", "cx", "cy",
             ]),
             "clipboard" => Some(&["text"]),
             _ => Some(&["toNumber"]),
@@ -13023,9 +13054,8 @@ impl CrosshairApp {
                 if response.hovered() || response.clicked() {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
-                    ui.ctx().data_mut(|data| {
-                        data.insert_temp(owner_id, MacroActionSubmenuKind::Macro)
-                    });
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(owner_id, MacroActionSubmenuKind::Macro));
                 }
                 let popup_rect_id = ui.make_persistent_id((id_source, "macro-submenu-rect"));
                 let popup_response = egui::Popup::from_response(&response)
@@ -13088,11 +13118,7 @@ impl CrosshairApp {
                 } else {
                     ui.visuals().text_color()
                 };
-                ui.label(
-                    RichText::new("Macro")
-                        .size(9.0)
-                        .color(label_color),
-                );
+                ui.label(RichText::new("Macro").size(9.0).color(label_color));
                 if let Some(popup) = popup_response {
                     popup.response
                 } else {
@@ -13542,7 +13568,10 @@ impl CrosshairApp {
         }
         if step.action != MacroAction::StopMacroPreset {
             let cb_text = Self::tr_lang(language, "Wait for completion", "Doi chay xong");
-            if ui.checkbox(&mut step.wait_for_completion, cb_text).changed() {
+            if ui
+                .checkbox(&mut step.wait_for_completion, cb_text)
+                .changed()
+            {
                 *live_sync = true;
             }
         }
@@ -13589,9 +13618,8 @@ impl CrosshairApp {
                 if response.hovered() || response.clicked() {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
-                    ui.ctx().data_mut(|data| {
-                        data.insert_temp(owner_id, MacroActionSubmenuKind::Funny)
-                    });
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(owner_id, MacroActionSubmenuKind::Funny));
                 }
                 let popup_rect_id = ui.make_persistent_id((id_source, "funny-submenu-rect"));
                 let popup_response = egui::Popup::from_response(&response)
@@ -13828,7 +13856,9 @@ impl CrosshairApp {
                     .find(|(preset_id, _)| *preset_id == id)
                     .map(|(_, name)| name.clone())
             })
-            .unwrap_or_else(|| Self::tr_lang(language, "Select geometry", "Chon geometry").to_owned());
+            .unwrap_or_else(|| {
+                Self::tr_lang(language, "Select geometry", "Chon geometry").to_owned()
+            });
 
         if step.geometry_preset_use_custom_ref {
             let text_id = ui.make_persistent_id((id_source, "geometry-preset-ref"));
@@ -13851,15 +13881,12 @@ impl CrosshairApp {
             );
             if response.changed() {
                 let trimmed = step.key.trim();
-                step.geometry_preset_id = trimmed
-                    .parse::<u32>()
-                    .ok()
-                    .or_else(|| {
-                        preset_options
-                            .iter()
-                            .find(|(_, name)| name.trim().eq_ignore_ascii_case(trimmed))
-                            .map(|(id, _)| *id)
-                    });
+                step.geometry_preset_id = trimmed.parse::<u32>().ok().or_else(|| {
+                    preset_options
+                        .iter()
+                        .find(|(_, name)| name.trim().eq_ignore_ascii_case(trimmed))
+                        .map(|(id, _)| *id)
+                });
                 *live_sync = true;
             }
             Self::render_variable_suggestions_braced(
@@ -13975,7 +14002,10 @@ impl CrosshairApp {
         vietnamese_input_mode: VietnameseInputMode,
     ) -> bool {
         let mut changed = false;
-        ui.add_sized([Self::GEOMETRY_LABEL_COL_WIDTH, 18.0], egui::Label::new(label));
+        ui.add_sized(
+            [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
+            egui::Label::new(label),
+        );
         let id = ui.make_persistent_id((preset_id, object_id, row_id, "text"));
         let response = Self::render_interpolated_text_edit(
             ui,
@@ -14018,17 +14048,8 @@ impl CrosshairApp {
                 egui::Label::new("SVG Code"),
             );
             let id = ui.make_persistent_id((preset_id, object_id, "override-code"));
-            let response = Self::render_plain_text_edit(
-                ui,
-                text,
-                id,
-                450.0,
-                450.0,
-                18.0,
-                72.0,
-                "",
-                true,
-            );
+            let response =
+                Self::render_plain_text_edit(ui, text, id, 450.0, 450.0, 18.0, 72.0, "", true);
             changed |= response.changed();
             Self::apply_vietnamese_input_if_changed(
                 &response,
@@ -14313,11 +14334,8 @@ impl CrosshairApp {
                     vietnamese_input_enabled,
                     vietnamese_input_mode,
                 );
-                changed |= Self::geometry_fill_mode_row(
-                    ui,
-                    language,
-                    &mut step.geometry_spec.filled,
-                );
+                changed |=
+                    Self::geometry_fill_mode_row(ui, language, &mut step.geometry_spec.filled);
                 changed
             })
             .inner;
@@ -14451,7 +14469,10 @@ impl CrosshairApp {
         }
 
         let mut selected_index = ui
-            .memory(|mem| mem.data.get_temp::<usize>(response.id.with("geometry-preset-selected")))
+            .memory(|mem| {
+                mem.data
+                    .get_temp::<usize>(response.id.with("geometry-preset-selected"))
+            })
             .unwrap_or(0);
         if selected_index >= suggestions.len() {
             selected_index = 0;
@@ -14469,7 +14490,10 @@ impl CrosshairApp {
                 .memory(|mem| mem.data.get_temp::<bool>(egui::Id::new("arrow_up_pressed")))
                 .unwrap_or(false);
             let arrow_down_pressed = ui
-                .memory(|mem| mem.data.get_temp::<bool>(egui::Id::new("arrow_down_pressed")))
+                .memory(|mem| {
+                    mem.data
+                        .get_temp::<bool>(egui::Id::new("arrow_down_pressed"))
+                })
                 .unwrap_or(false);
             if arrow_down_pressed {
                 selected_index = (selected_index + 1) % suggestions.len();
@@ -14484,13 +14508,22 @@ impl CrosshairApp {
                 selection_changed = true;
             }
             ui.memory_mut(|mem| {
-                mem.data.insert_temp(response.id.with("geometry-preset-selected"), selected_index);
+                mem.data
+                    .insert_temp(response.id.with("geometry-preset-selected"), selected_index);
             });
         }
 
         if confirm_selected {
             let chosen = &suggestions[selected_index];
-            Self::apply_variable_suggestion(ui, response, text, &prefix, chosen, false, &after_cursor);
+            Self::apply_variable_suggestion(
+                ui,
+                response,
+                text,
+                &prefix,
+                chosen,
+                false,
+                &after_cursor,
+            );
             ui.memory_mut(|mem| {
                 mem.data.insert_temp(popup_open_key, false);
                 mem.data.insert_temp(egui::Id::new("enter_pressed"), false);
@@ -14517,7 +14550,8 @@ impl CrosshairApp {
                                     let is_selected = idx == selected_index;
                                     let response = ui.selectable_label(
                                         is_selected,
-                                        RichText::new(suggestion).color(Color32::from_rgb(255, 185, 92)),
+                                        RichText::new(suggestion)
+                                            .color(Color32::from_rgb(255, 185, 92)),
                                     );
                                     if is_selected && selection_changed {
                                         response.scroll_to_me(None);
@@ -14532,7 +14566,15 @@ impl CrosshairApp {
             });
 
         if let Some(chosen) = clicked_choice {
-            Self::apply_variable_suggestion(ui, response, text, &prefix, &chosen, false, &after_cursor);
+            Self::apply_variable_suggestion(
+                ui,
+                response,
+                text,
+                &prefix,
+                &chosen,
+                false,
+                &after_cursor,
+            );
             popup_open = false;
         }
         ui.memory_mut(|mem| {
@@ -14557,8 +14599,8 @@ impl CrosshairApp {
     ) {
         let is_active = match step.action {
             MacroAction::DrawGeometry => {
-                let preview_active = *preview_target
-                    == Some((group_id, macro_preset_id, step_index, is_hold_stop));
+                let preview_active =
+                    *preview_target == Some((group_id, macro_preset_id, step_index, is_hold_stop));
                 let running_active =
                     crate::overlay::is_geometry_active(macro_preset_id, step_index);
                 preview_active || running_active
@@ -15073,7 +15115,6 @@ impl CrosshairApp {
             });
         });
     }
-
 
     fn render_audio_sense_monitor_settings_inline(
         ui: &mut egui::Ui,

@@ -384,8 +384,7 @@ impl CrosshairApp {
                     Err(error) => {
                         self.status = format!(
                             "Failed to apply resize preset {}: {}",
-                            self.state.window_presets[index].name,
-                            error
+                            self.state.window_presets[index].name, error
                         );
                     }
                 }
@@ -804,11 +803,7 @@ impl CrosshairApp {
                             ),
                         )
                         .on_hover_text(if pin_active {
-                            Self::tr_lang(
-                                language,
-                                "Stop this pin preset",
-                                "Dung preset ghim nay",
-                            )
+                            Self::tr_lang(language, "Stop this pin preset", "Dung preset ghim nay")
                         } else {
                             Self::tr_lang(
                                 language,
@@ -878,6 +873,28 @@ impl CrosshairApp {
                             )
                             .changed();
                         ui.end_row();
+
+                        ui.label(Self::tr_lang(language, "Binarize", "Trắng đen"));
+                        let binary_changed = ui
+                            .checkbox(
+                                &mut preset.binary_filter,
+                                Self::tr_lang(
+                                    language,
+                                    "Binarize (Black & White)",
+                                    "Chuyển thành trắng đen",
+                                ),
+                            )
+                            .changed();
+                        live_sync |= binary_changed;
+                        ui.end_row();
+
+                        if preset.binary_filter {
+                            ui.label(Self::tr_lang(language, "Threshold", "Ngưỡng nhận diện"));
+                            live_sync |= ui
+                                .add(egui::Slider::new(&mut preset.binary_threshold, 0..=255))
+                                .changed();
+                            ui.end_row();
+                        }
                     });
 
                 if preset.use_custom_bounds {
@@ -1764,46 +1781,52 @@ impl CrosshairApp {
         );
 
         let selection_bounds_rect = preview_rect;
-        let (coord_width, coord_height, content_scale, preview_content_rect, coords_origin_x, coords_origin_y) =
-            if let Some(preview_frame) = preview {
-                let window_pos = egui::pos2(
-                    selection_bounds_rect.left() + (preview_frame.screen_x as f32 * scale),
-                    selection_bounds_rect.top() + (preview_frame.screen_y as f32 * scale),
-                );
-                let window_size = vec2(
-                    preview_frame.logical_width.max(1) as f32 * scale,
-                    preview_frame.logical_height.max(1) as f32 * scale,
-                );
-                let preview_content_rect = egui::Rect::from_min_size(window_pos, window_size);
-                if use_preview_local_coordinates {
-                    (
-                        preview_frame.logical_width.max(1) as f32,
-                        preview_frame.logical_height.max(1) as f32,
-                        scale,
-                        preview_content_rect,
-                        preview_content_rect.left(),
-                        preview_content_rect.top(),
-                    )
-                } else {
-                    (
-                        screen_size.x,
-                        screen_size.y,
-                        scale,
-                        preview_content_rect,
-                        selection_bounds_rect.left(),
-                        selection_bounds_rect.top(),
-                    )
-                }
+        let (
+            coord_width,
+            coord_height,
+            content_scale,
+            preview_content_rect,
+            coords_origin_x,
+            coords_origin_y,
+        ) = if let Some(preview_frame) = preview {
+            let window_pos = egui::pos2(
+                selection_bounds_rect.left() + (preview_frame.screen_x as f32 * scale),
+                selection_bounds_rect.top() + (preview_frame.screen_y as f32 * scale),
+            );
+            let window_size = vec2(
+                preview_frame.logical_width.max(1) as f32 * scale,
+                preview_frame.logical_height.max(1) as f32 * scale,
+            );
+            let preview_content_rect = egui::Rect::from_min_size(window_pos, window_size);
+            if use_preview_local_coordinates {
+                (
+                    preview_frame.logical_width.max(1) as f32,
+                    preview_frame.logical_height.max(1) as f32,
+                    scale,
+                    preview_content_rect,
+                    preview_content_rect.left(),
+                    preview_content_rect.top(),
+                )
             } else {
                 (
                     screen_size.x,
                     screen_size.y,
                     scale,
-                    selection_bounds_rect,
+                    preview_content_rect,
                     selection_bounds_rect.left(),
                     selection_bounds_rect.top(),
                 )
-            };
+            }
+        } else {
+            (
+                screen_size.x,
+                screen_size.y,
+                scale,
+                selection_bounds_rect,
+                selection_bounds_rect.left(),
+                selection_bounds_rect.top(),
+            )
+        };
 
         if show_preview_image && let Some(preview_frame) = preview {
             ui.painter().image(
@@ -2361,7 +2384,9 @@ impl CrosshairApp {
             }
         }
 
-        layout.cells.retain(|cell| cell.row < rows && cell.col < cols);
+        layout
+            .cells
+            .retain(|cell| cell.row < rows && cell.col < cols);
         for cell in &mut layout.cells {
             cell.row_span = cell.row_span.max(1).min(rows - cell.row);
             cell.col_span = cell.col_span.max(1).min(cols - cell.col);
@@ -2444,11 +2469,13 @@ impl CrosshairApp {
     fn get_monitor_layout_metrics() -> MonitorLayoutMetrics {
         #[cfg(windows)]
         unsafe {
-            use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST, MonitorFromPoint};
-            use windows::Win32::Foundation::POINT;
-            use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
             use std::mem::size_of;
-            
+            use windows::Win32::Foundation::POINT;
+            use windows::Win32::Graphics::Gdi::{
+                GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+            };
+            use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
             let mut pt = POINT::default();
             let _ = GetCursorPos(&mut pt);
             let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
@@ -2526,15 +2553,15 @@ impl CrosshairApp {
         spacing: f32,
     ) {
         painter.rect_filled(rect, 0.0, fill_color);
-        
+
         let x_min = rect.min.x;
         let x_max = rect.max.x;
         let y_min = rect.min.y;
         let y_max = rect.max.y;
-        
+
         let start_c = x_min + y_min;
         let end_c = x_max + y_max;
-        
+
         let mut c = start_c;
         while c <= end_c {
             let x_start = x_min.max(c - y_max);
@@ -2556,7 +2583,7 @@ impl CrosshairApp {
         let cell = &layout.cells[cell_idx];
         let col = cell.col;
         let col_span = cell.col_span;
-        
+
         if col_span > 1 {
             let half = col_span / 2;
             let mut cell_b = layout.cells[cell_idx].clone();
@@ -2567,11 +2594,11 @@ impl CrosshairApp {
         } else {
             let split_col = col;
             layout.cols += 1;
-            
+
             let orig_ratio = layout.col_ratios[split_col];
             layout.col_ratios[split_col] = orig_ratio / 2.0;
             layout.col_ratios.insert(split_col + 1, orig_ratio / 2.0);
-            
+
             let mut cell_b = layout.cells[cell_idx].clone();
             for (idx, c) in layout.cells.iter_mut().enumerate() {
                 if idx == cell_idx {
@@ -2592,7 +2619,7 @@ impl CrosshairApp {
         let cell = &layout.cells[cell_idx];
         let row = cell.row;
         let row_span = cell.row_span;
-        
+
         if row_span > 1 {
             let half = row_span / 2;
             let mut cell_b = layout.cells[cell_idx].clone();
@@ -2603,11 +2630,11 @@ impl CrosshairApp {
         } else {
             let split_row = row;
             layout.rows += 1;
-            
+
             let orig_ratio = layout.row_ratios[split_row];
             layout.row_ratios[split_row] = orig_ratio / 2.0;
             layout.row_ratios.insert(split_row + 1, orig_ratio / 2.0);
-            
+
             let mut cell_b = layout.cells[cell_idx].clone();
             for (idx, c) in layout.cells.iter_mut().enumerate() {
                 if idx == cell_idx {
@@ -2640,7 +2667,7 @@ impl CrosshairApp {
         }
         let dir_x = dx / len;
         let dir_y = dy / len;
-        
+
         let mut dist = 0.0;
         while dist < len {
             let chunk_end = (dist + dash_length).min(len);
@@ -2668,7 +2695,7 @@ impl CrosshairApp {
                 .size(14.0),
         );
         ui.add_space(4.0);
-        
+
         let layouts_count = self.state.window_layouts.len();
         for index in 0..layouts_count {
             let mut next_capture_target = None;
@@ -2677,13 +2704,13 @@ impl CrosshairApp {
             let active_capture_target = self.capture_target.clone();
             let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
             ui.add_space(6.0);
-            
+
             let layout = &mut self.state.window_layouts[index];
             Self::sanitize_layout(layout);
-            
+
             let capture_target = CaptureRequest::WindowLayoutHotkey(layout.id);
             let id_source = layout.id;
-            
+
             Self::show_preset_card(ui, layout.enabled, |ui| {
                 egui::Grid::new((id_source, "window-layout-header"))
                     .num_columns(2)
@@ -2712,174 +2739,175 @@ impl CrosshairApp {
                                 &capture_target,
                                 pending_combo_keys.as_ref(),
                             );
-                            layout.enabled = layout.hotkey.is_some()
-                                || !layout.trigger_keys.trim().is_empty();
+                            layout.enabled =
+                                layout.hotkey.is_some() || !layout.trigger_keys.trim().is_empty();
                         });
-                        
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                let capture_active =
-                                    active_capture_target.as_ref() == Some(&capture_target);
-                                let capture_time = ui.ctx().input(|input| input.time) as f32;
-                                let pulse = if capture_active {
-                                    0.5 + 0.5 * (capture_time * 6.0).sin().abs()
-                                } else {
-                                    0.0
-                                };
-                                let has_keys = layout.hotkey.is_some()
-                                    || !layout.trigger_keys.trim().is_empty();
-                                let fill = if capture_active {
-                                    Color32::from_rgba_premultiplied(
-                                        (88.0 + pulse * 28.0) as u8,
-                                        (84.0 + pulse * 28.0) as u8,
-                                        (44.0 + pulse * 10.0) as u8,
-                                        255,
-                                    )
-                                } else if has_keys {
-                                    Color32::from_rgba_premultiplied(72, 156, 116, 120)
-                                } else {
-                                    ui.visuals().faint_bg_color
-                                };
-                                let stroke = if capture_active {
-                                    Color32::from_rgb(255, 232, 96)
-                                } else if has_keys {
-                                    Color32::from_rgb(126, 224, 182)
-                                } else {
-                                    ui.visuals().widgets.noninteractive.bg_stroke.color
-                                };
 
-                                let hover_text = if capture_active {
-                                    Self::tr_lang(
-                                        language,
-                                        "Capturing... Press any key.",
-                                        "Đang ghi... Nhấn một phím bất kỳ.",
-                                    )
-                                    .to_string()
-                                } else if has_keys {
-                                    let bindings_labels: Vec<String> =
-                                        Self::preset_trigger_bindings(
-                                            &layout.hotkey,
-                                            &layout.trigger_keys,
-                                        )
-                                        .iter()
-                                        .map(|b| hotkey::format_binding(Some(b)))
-                                        .collect();
-                                    format!(
-                                        "{} {}\n{}",
-                                        Self::tr_lang(language, "Hotkey:", "Phím tắt:"),
-                                        bindings_labels.join(", "),
-                                        Self::tr_lang(
-                                            language,
-                                            "Left click: rebind | Right click: clear",
-                                            "Chuột trái: đổi phím | Chuột phải: xóa phím"
-                                        )
-                                    )
-                                } else {
-                                    Self::tr_lang(
-                                        language,
-                                        "Left click: bind hotkey",
-                                        "Chuột trái: gán phím tắt",
-                                    )
-                                    .to_string()
-                                };
-
-                                let btn_text = if capture_active {
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "Capturing...",
-                                        "Đang bắt...",
-                                    ))
-                                    .strong()
-                                    .color(Color32::from_rgb(255, 232, 96))
-                                } else {
-                                    Self::material_icon_text(0xe312, 18.0)
-                                };
-                                let btn_width = if capture_active { 84.0 } else { 36.0 };
-                                let btn_response = ui
-                                    .add_sized(
-                                        [btn_width, 24.0],
-                                        Button::new(btn_text)
-                                            .fill(fill)
-                                            .stroke(egui::Stroke::new(1.0, stroke)),
-                                    )
-                                    .on_hover_text(hover_text);
-
-                                if btn_response.clicked() {
-                                    if capture_active {
-                                        cancel_active_capture = true;
-                                    } else {
-                                        next_capture_target = Some((
-                                            capture_target.clone(),
-                                            format!(
-                                                "Capturing preset hotkey for {}.",
-                                                layout.name
-                                            ),
-                                        ));
-                                    }
-                                }
-                                if btn_response.secondary_clicked() {
-                                    layout.hotkey = None;
-                                    layout.trigger_keys.clear();
-                                    layout.enabled = false;
-                                    live_sync = true;
-                                }
-
-                                let run_response = Self::sound_style_icon_button(
-                                    ui,
-                                    Self::material_icon_text(0xe037, 18.0),
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let capture_active =
+                                active_capture_target.as_ref() == Some(&capture_target);
+                            let capture_time = ui.ctx().input(|input| input.time) as f32;
+                            let pulse = if capture_active {
+                                0.5 + 0.5 * (capture_time * 6.0).sin().abs()
+                            } else {
+                                0.0
+                            };
+                            let has_keys =
+                                layout.hotkey.is_some() || !layout.trigger_keys.trim().is_empty();
+                            let fill = if capture_active {
+                                Color32::from_rgba_premultiplied(
+                                    (88.0 + pulse * 28.0) as u8,
+                                    (84.0 + pulse * 28.0) as u8,
+                                    (44.0 + pulse * 10.0) as u8,
+                                    255,
                                 )
-                                .on_hover_text(Self::tr_lang(
+                            } else if has_keys {
+                                Color32::from_rgba_premultiplied(72, 156, 116, 120)
+                            } else {
+                                ui.visuals().faint_bg_color
+                            };
+                            let stroke = if capture_active {
+                                Color32::from_rgb(255, 232, 96)
+                            } else if has_keys {
+                                Color32::from_rgb(126, 224, 182)
+                            } else {
+                                ui.visuals().widgets.noninteractive.bg_stroke.color
+                            };
+
+                            let hover_text = if capture_active {
+                                Self::tr_lang(
                                     language,
-                                    "Run this layout preset now",
-                                    "Chay preset bo cuc nay ngay",
-                                ));
-                                if run_response.clicked() {
-                                    run_layout_now = true;
-                                }
-
-                                if Self::sound_style_remove_button(ui).clicked() {
-                                    remove_id = Some(layout.id);
-                                }
-                                
-                                if Self::sound_style_toggle_button(
-                                    ui,
-                                    if layout.collapsed {
-                                        Self::tr_lang(language, "Show", "Hiện")
-                                    } else {
-                                        Self::tr_lang(language, "Hide", "Ẩn")
-                                    },
+                                    "Capturing... Press any key.",
+                                    "Đang ghi... Nhấn một phím bất kỳ.",
                                 )
-                                .clicked()
-                                {
-                                    layout.collapsed = !layout.collapsed;
-                                    live_sync = true;
+                                .to_string()
+                            } else if has_keys {
+                                let bindings_labels: Vec<String> = Self::preset_trigger_bindings(
+                                    &layout.hotkey,
+                                    &layout.trigger_keys,
+                                )
+                                .iter()
+                                .map(|b| hotkey::format_binding(Some(b)))
+                                .collect();
+                                format!(
+                                    "{} {}\n{}",
+                                    Self::tr_lang(language, "Hotkey:", "Phím tắt:"),
+                                    bindings_labels.join(", "),
+                                    Self::tr_lang(
+                                        language,
+                                        "Left click: rebind | Right click: clear",
+                                        "Chuột trái: đổi phím | Chuột phải: xóa phím"
+                                    )
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    language,
+                                    "Left click: bind hotkey",
+                                    "Chuột trái: gán phím tắt",
+                                )
+                                .to_string()
+                            };
+
+                            let btn_text = if capture_active {
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Capturing...",
+                                    "Đang bắt...",
+                                ))
+                                .strong()
+                                .color(Color32::from_rgb(255, 232, 96))
+                            } else {
+                                Self::material_icon_text(0xe312, 18.0)
+                            };
+                            let btn_width = if capture_active { 84.0 } else { 36.0 };
+                            let btn_response = ui
+                                .add_sized(
+                                    [btn_width, 24.0],
+                                    Button::new(btn_text)
+                                        .fill(fill)
+                                        .stroke(egui::Stroke::new(1.0, stroke)),
+                                )
+                                .on_hover_text(hover_text);
+
+                            if btn_response.clicked() {
+                                if capture_active {
+                                    cancel_active_capture = true;
+                                } else {
+                                    next_capture_target = Some((
+                                        capture_target.clone(),
+                                        format!("Capturing preset hotkey for {}.", layout.name),
+                                    ));
                                 }
-                            },
-                        );
+                            }
+                            if btn_response.secondary_clicked() {
+                                layout.hotkey = None;
+                                layout.trigger_keys.clear();
+                                layout.enabled = false;
+                                live_sync = true;
+                            }
+
+                            let run_response = Self::sound_style_icon_button(
+                                ui,
+                                Self::material_icon_text(0xe037, 18.0),
+                            )
+                            .on_hover_text(Self::tr_lang(
+                                language,
+                                "Run this layout preset now",
+                                "Chay preset bo cuc nay ngay",
+                            ));
+                            if run_response.clicked() {
+                                run_layout_now = true;
+                            }
+
+                            if Self::sound_style_remove_button(ui).clicked() {
+                                remove_id = Some(layout.id);
+                            }
+
+                            if Self::sound_style_toggle_button(
+                                ui,
+                                if layout.collapsed {
+                                    Self::tr_lang(language, "Show", "Hiện")
+                                } else {
+                                    Self::tr_lang(language, "Hide", "Ẩn")
+                                },
+                            )
+                            .clicked()
+                            {
+                                layout.collapsed = !layout.collapsed;
+                                live_sync = true;
+                            }
+                        });
                         ui.end_row();
                     });
-                
+
                 if layout.collapsed {
                     return;
                 }
-                
+
                 egui::Grid::new((id_source, "window-layout-settings-grid"))
                     .num_columns(2)
                     .spacing([14.0, 8.0])
                     .show(ui, |ui| {
-                        ui.label(Self::tr_lang(language, "Focus on apply", "Focus khi áp dụng"));
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Focus on apply",
+                            "Focus khi áp dụng",
+                        ));
                         live_sync |= ui.checkbox(&mut layout.focus_on_apply, "").changed();
                         ui.end_row();
-                        
+
                         ui.label(Self::tr_lang(language, "Block taskbar", "Tránh taskbar"));
                         live_sync |= ui.checkbox(&mut layout.block_taskbar, "").changed();
                         ui.end_row();
-                        
-                        ui.label(Self::tr_lang(language, "Remove title bar", "Xóa thanh tiêu đề"));
+
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Remove title bar",
+                            "Xóa thanh tiêu đề",
+                        ));
                         live_sync |= ui.checkbox(&mut layout.remove_title_bar, "").changed();
                         ui.end_row();
-                        
+
                         ui.label(Self::tr_lang(language, "Grid size", "Kích thước lưới"));
                         ui.horizontal(|ui| {
                             ui.label(Self::tr_lang(language, "Rows", "Hàng"));
@@ -2898,13 +2926,21 @@ impl CrosshairApp {
                             }
                         });
                         ui.end_row();
-                        
+
                         ui.label(Self::tr_lang(language, "Row ratios", "Tỷ lệ hàng"));
                         ui.horizontal(|ui| {
                             for r in 0..layout.rows {
                                 if r < layout.row_ratios.len() {
                                     let mut val = layout.row_ratios[r];
-                                    if ui.add(DragValue::new(&mut val).range(0.05..=10.0).speed(0.05).prefix(&format!("R{}: ", r + 1))).changed() {
+                                    if ui
+                                        .add(
+                                            DragValue::new(&mut val)
+                                                .range(0.05..=10.0)
+                                                .speed(0.05)
+                                                .prefix(&format!("R{}: ", r + 1)),
+                                        )
+                                        .changed()
+                                    {
                                         layout.row_ratios[r] = val;
                                         live_sync = true;
                                     }
@@ -2912,13 +2948,21 @@ impl CrosshairApp {
                             }
                         });
                         ui.end_row();
-                        
+
                         ui.label(Self::tr_lang(language, "Col ratios", "Tỷ lệ cột"));
                         ui.horizontal(|ui| {
                             for c in 0..layout.cols {
                                 if c < layout.col_ratios.len() {
                                     let mut val = layout.col_ratios[c];
-                                    if ui.add(DragValue::new(&mut val).range(0.05..=10.0).speed(0.05).prefix(&format!("C{}: ", c + 1))).changed() {
+                                    if ui
+                                        .add(
+                                            DragValue::new(&mut val)
+                                                .range(0.05..=10.0)
+                                                .speed(0.05)
+                                                .prefix(&format!("C{}: ", c + 1)),
+                                        )
+                                        .changed()
+                                    {
                                         layout.col_ratios[c] = val;
                                         live_sync = true;
                                     }
@@ -2926,33 +2970,40 @@ impl CrosshairApp {
                             }
                         });
                         ui.end_row();
-                        
+
                         ui.label(Self::tr_lang(language, "Visual Grid", "Xem trước lưới"));
                         ui.vertical(|ui| {
                             let r_sum: f32 = layout.row_ratios.iter().sum();
                             let c_sum: f32 = layout.col_ratios.iter().sum();
-                            
+
                             let mut row_starts = vec![0.0];
                             let mut acc = 0.0f32;
                             for r in &layout.row_ratios {
                                 acc += r / r_sum;
                                 row_starts.push(acc);
                             }
-                            
+
                             let mut col_starts = vec![0.0];
                             let mut acc = 0.0f32;
                             for c in &layout.col_ratios {
                                 acc += c / c_sum;
                                 col_starts.push(acc);
                             }
-                            
+
                             let metrics = Self::get_monitor_layout_metrics();
-                            let aspect = if metrics.monitor_height > 0.0 { metrics.monitor_width / metrics.monitor_height } else { 16.0 / 9.0 };
+                            let aspect = if metrics.monitor_height > 0.0 {
+                                metrics.monitor_width / metrics.monitor_height
+                            } else {
+                                16.0 / 9.0
+                            };
                             let preview_w = (ui.available_width() - 24.0).clamp(320.0, 800.0);
                             let preview_h = preview_w / aspect;
-                            
-                            let (rect, _response) = ui.allocate_exact_size(vec2(preview_w, preview_h), egui::Sense::hover());
-                            
+
+                            let (rect, _response) = ui.allocate_exact_size(
+                                vec2(preview_w, preview_h),
+                                egui::Sense::hover(),
+                            );
+
                             let grid_rect = if layout.block_taskbar {
                                 egui::Rect::from_min_max(
                                     egui::pos2(
@@ -2960,8 +3011,10 @@ impl CrosshairApp {
                                         rect.min.y + metrics.work_top * preview_h,
                                     ),
                                     egui::pos2(
-                                        rect.min.x + (metrics.work_left + metrics.work_width) * preview_w,
-                                        rect.min.y + (metrics.work_top + metrics.work_height) * preview_h,
+                                        rect.min.x
+                                            + (metrics.work_left + metrics.work_width) * preview_w,
+                                        rect.min.y
+                                            + (metrics.work_top + metrics.work_height) * preview_h,
                                     ),
                                 )
                             } else {
@@ -2973,7 +3026,7 @@ impl CrosshairApp {
                             let mut split_hovered_or_dragged = false;
                             let mut active_col_splits = Vec::new();
                             let mut active_row_splits = Vec::new();
-                            
+
                             // Check / interact with column splits (vertical lines)
                             for c in 1..layout.cols {
                                 let split_x = grid_rect.min.x + col_starts[c] * grid_w;
@@ -2982,30 +3035,32 @@ impl CrosshairApp {
                                     egui::pos2(split_x + 5.0, grid_rect.max.y),
                                 );
                                 let split_id = ui.make_persistent_id((layout.id, "col_split", c));
-                                let split_resp = ui.interact(split_rect, split_id, egui::Sense::drag());
-                                
+                                let split_resp =
+                                    ui.interact(split_rect, split_id, egui::Sense::drag());
+
                                 if split_resp.hovered() || split_resp.dragged() {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                                     split_hovered_or_dragged = true;
                                     active_col_splits.push(split_x);
                                 }
-                                
+
                                 if split_resp.dragged() {
                                     let delta = split_resp.drag_delta().x;
                                     if delta != 0.0 {
                                         let c_sum: f32 = layout.col_ratios.iter().sum();
                                         let d_frac = delta / grid_w;
-                                        let new_prev_ratio = layout.col_ratios[c-1] + d_frac * c_sum;
+                                        let new_prev_ratio =
+                                            layout.col_ratios[c - 1] + d_frac * c_sum;
                                         let new_next_ratio = layout.col_ratios[c] - d_frac * c_sum;
                                         if new_prev_ratio >= 0.05 && new_next_ratio >= 0.05 {
-                                            layout.col_ratios[c-1] = new_prev_ratio;
+                                            layout.col_ratios[c - 1] = new_prev_ratio;
                                             layout.col_ratios[c] = new_next_ratio;
                                             live_sync = true;
                                         }
                                     }
                                 }
                             }
-                            
+
                             // Check / interact with row splits (horizontal lines)
                             for r in 1..layout.rows {
                                 let split_y = grid_rect.min.y + row_starts[r] * grid_h;
@@ -3014,30 +3069,32 @@ impl CrosshairApp {
                                     egui::pos2(grid_rect.max.x, split_y + 5.0),
                                 );
                                 let split_id = ui.make_persistent_id((layout.id, "row_split", r));
-                                let split_resp = ui.interact(split_rect, split_id, egui::Sense::drag());
-                                
+                                let split_resp =
+                                    ui.interact(split_rect, split_id, egui::Sense::drag());
+
                                 if split_resp.hovered() || split_resp.dragged() {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
                                     split_hovered_or_dragged = true;
                                     active_row_splits.push(split_y);
                                 }
-                                
+
                                 if split_resp.dragged() {
                                     let delta = split_resp.drag_delta().y;
                                     if delta != 0.0 {
                                         let r_sum: f32 = layout.row_ratios.iter().sum();
                                         let d_frac = delta / grid_h;
-                                        let new_prev_ratio = layout.row_ratios[r-1] + d_frac * r_sum;
+                                        let new_prev_ratio =
+                                            layout.row_ratios[r - 1] + d_frac * r_sum;
                                         let new_next_ratio = layout.row_ratios[r] - d_frac * r_sum;
                                         if new_prev_ratio >= 0.05 && new_next_ratio >= 0.05 {
-                                            layout.row_ratios[r-1] = new_prev_ratio;
+                                            layout.row_ratios[r - 1] = new_prev_ratio;
                                             layout.row_ratios[r] = new_next_ratio;
                                             live_sync = true;
                                         }
                                     }
                                 }
                             }
-                            
+
                             let mut hovered_row_col = None;
                             if !split_hovered_or_dragged {
                                 for cell in &layout.cells {
@@ -3046,40 +3103,52 @@ impl CrosshairApp {
                                     }
                                     let end_row = (cell.row + cell.row_span).min(layout.rows);
                                     let end_col = (cell.col + cell.col_span).min(layout.cols);
-                                    
+
                                     let x1 = grid_rect.min.x + col_starts[cell.col] * grid_w;
                                     let y1 = grid_rect.min.y + row_starts[cell.row] * grid_h;
                                     let x2 = grid_rect.min.x + col_starts[end_col] * grid_w;
                                     let y2 = grid_rect.min.y + row_starts[end_row] * grid_h;
-                                    
+
                                     let cell_rect = egui::Rect::from_min_max(
                                         egui::pos2(x1, y1),
-                                        egui::pos2(x2, y2)
-                                    ).shrink(2.0);
-                                    
+                                        egui::pos2(x2, y2),
+                                    )
+                                    .shrink(2.0);
+
                                     if ui.rect_contains_pointer(cell_rect) {
                                         hovered_row_col = Some((cell.row, cell.col));
                                         break;
                                     }
                                 }
                             }
-                            
-                            ui.painter().rect_filled(
-                                rect,
-                                4.0,
-                                ui.visuals().extreme_bg_color
-                            );
-                            
+
+                            ui.painter()
+                                .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
+
                             // Draw hatched taskbar overlay regions if block_taskbar is checked
                             if layout.block_taskbar {
-                                let hatch_bg = egui::Color32::from_rgba_unmultiplied(220, 50, 50, 40);
-                                let hatch_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(220, 50, 50, 120));
-                                let text_color = egui::Color32::from_rgba_unmultiplied(220, 50, 50, 180);
-                                
+                                let hatch_bg =
+                                    egui::Color32::from_rgba_unmultiplied(220, 50, 50, 40);
+                                let hatch_stroke = egui::Stroke::new(
+                                    1.0,
+                                    egui::Color32::from_rgba_unmultiplied(220, 50, 50, 120),
+                                );
+                                let text_color =
+                                    egui::Color32::from_rgba_unmultiplied(220, 50, 50, 180);
+
                                 // Top taskbar
                                 if grid_rect.min.y > rect.min.y {
-                                    let r_top = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, grid_rect.min.y));
-                                    Self::draw_hatched_rect(ui.painter(), r_top, hatch_bg, hatch_stroke, 12.0);
+                                    let r_top = egui::Rect::from_min_max(
+                                        rect.min,
+                                        egui::pos2(rect.max.x, grid_rect.min.y),
+                                    );
+                                    Self::draw_hatched_rect(
+                                        ui.painter(),
+                                        r_top,
+                                        hatch_bg,
+                                        hatch_stroke,
+                                        12.0,
+                                    );
                                     if r_top.height() > 10.0 {
                                         ui.painter().text(
                                             r_top.center(),
@@ -3092,8 +3161,17 @@ impl CrosshairApp {
                                 }
                                 // Bottom taskbar
                                 if grid_rect.max.y < rect.max.y {
-                                    let r_bottom = egui::Rect::from_min_max(egui::pos2(rect.min.x, grid_rect.max.y), rect.max);
-                                    Self::draw_hatched_rect(ui.painter(), r_bottom, hatch_bg, hatch_stroke, 12.0);
+                                    let r_bottom = egui::Rect::from_min_max(
+                                        egui::pos2(rect.min.x, grid_rect.max.y),
+                                        rect.max,
+                                    );
+                                    Self::draw_hatched_rect(
+                                        ui.painter(),
+                                        r_bottom,
+                                        hatch_bg,
+                                        hatch_stroke,
+                                        12.0,
+                                    );
                                     if r_bottom.height() > 10.0 {
                                         ui.painter().text(
                                             r_bottom.center(),
@@ -3106,8 +3184,17 @@ impl CrosshairApp {
                                 }
                                 // Left taskbar
                                 if grid_rect.min.x > rect.min.x {
-                                    let r_left = egui::Rect::from_min_max(rect.min, egui::pos2(grid_rect.min.x, rect.max.y));
-                                    Self::draw_hatched_rect(ui.painter(), r_left, hatch_bg, hatch_stroke, 12.0);
+                                    let r_left = egui::Rect::from_min_max(
+                                        rect.min,
+                                        egui::pos2(grid_rect.min.x, rect.max.y),
+                                    );
+                                    Self::draw_hatched_rect(
+                                        ui.painter(),
+                                        r_left,
+                                        hatch_bg,
+                                        hatch_stroke,
+                                        12.0,
+                                    );
                                     if r_left.width() > 10.0 {
                                         ui.painter().text(
                                             r_left.center(),
@@ -3120,8 +3207,17 @@ impl CrosshairApp {
                                 }
                                 // Right taskbar
                                 if grid_rect.max.x < rect.max.x {
-                                    let r_right = egui::Rect::from_min_max(egui::pos2(grid_rect.max.x, rect.min.y), rect.max);
-                                    Self::draw_hatched_rect(ui.painter(), r_right, hatch_bg, hatch_stroke, 12.0);
+                                    let r_right = egui::Rect::from_min_max(
+                                        egui::pos2(grid_rect.max.x, rect.min.y),
+                                        rect.max,
+                                    );
+                                    Self::draw_hatched_rect(
+                                        ui.painter(),
+                                        r_right,
+                                        hatch_bg,
+                                        hatch_stroke,
+                                        12.0,
+                                    );
                                     if r_right.width() > 10.0 {
                                         ui.painter().text(
                                             r_right.center(),
@@ -3133,41 +3229,60 @@ impl CrosshairApp {
                                     }
                                 }
                             }
-                            
+
                             let mut merge_action = None;
                             let cells_to_draw = layout.cells.clone();
                             for cell in &cells_to_draw {
                                 if cell.row >= layout.rows || cell.col >= layout.cols {
                                     continue;
                                 }
-                                
+
                                 let end_row = (cell.row + cell.row_span).min(layout.rows);
                                 let end_col = (cell.col + cell.col_span).min(layout.cols);
-                                
+
                                 let x1 = grid_rect.min.x + col_starts[cell.col] * grid_w;
                                 let y1 = grid_rect.min.y + row_starts[cell.row] * grid_h;
                                 let x2 = grid_rect.min.x + col_starts[end_col] * grid_w;
                                 let y2 = grid_rect.min.y + row_starts[end_row] * grid_h;
-                                
+
                                 let cell_rect = egui::Rect::from_min_max(
                                     egui::pos2(x1, y1),
-                                    egui::pos2(x2, y2)
-                                ).shrink(2.0);
-                                
-                                let is_selected = self.selected_layout_cell == Some((layout.id, cell.row, cell.col));
-                                
-                                let is_in_drag_merge_range = if let Some((start_layout_id, start_row, start_col)) = self.drag_start_layout_cell {
-                                    if start_layout_id == layout.id {
-                                        if let Some((hover_row, hover_col)) = hovered_row_col {
-                                            let cell_a_opt = layout.cells.iter().find(|c| c.row == start_row && c.col == start_col);
-                                            let cell_b_opt = layout.cells.iter().find(|c| c.row == hover_row && c.col == hover_col);
-                                            if let (Some(cell_a), Some(cell_b)) = (cell_a_opt, cell_b_opt) {
-                                                let r1 = cell_a.row.min(cell_b.row);
-                                                let c1 = cell_a.col.min(cell_b.col);
-                                                let r2 = (cell_a.row + cell_a.row_span - 1).max(cell_b.row + cell_b.row_span - 1);
-                                                let c2 = (cell_a.col + cell_a.col_span - 1).max(cell_b.col + cell_b.col_span - 1);
-                                                
-                                                cell.row >= r1 && cell.col >= c1 && (cell.row + cell.row_span - 1) <= r2 && (cell.col + cell.col_span - 1) <= c2
+                                    egui::pos2(x2, y2),
+                                )
+                                .shrink(2.0);
+
+                                let is_selected = self.selected_layout_cell
+                                    == Some((layout.id, cell.row, cell.col));
+
+                                let is_in_drag_merge_range =
+                                    if let Some((start_layout_id, start_row, start_col)) =
+                                        self.drag_start_layout_cell
+                                    {
+                                        if start_layout_id == layout.id {
+                                            if let Some((hover_row, hover_col)) = hovered_row_col {
+                                                let cell_a_opt = layout.cells.iter().find(|c| {
+                                                    c.row == start_row && c.col == start_col
+                                                });
+                                                let cell_b_opt = layout.cells.iter().find(|c| {
+                                                    c.row == hover_row && c.col == hover_col
+                                                });
+                                                if let (Some(cell_a), Some(cell_b)) =
+                                                    (cell_a_opt, cell_b_opt)
+                                                {
+                                                    let r1 = cell_a.row.min(cell_b.row);
+                                                    let c1 = cell_a.col.min(cell_b.col);
+                                                    let r2 = (cell_a.row + cell_a.row_span - 1)
+                                                        .max(cell_b.row + cell_b.row_span - 1);
+                                                    let c2 = (cell_a.col + cell_a.col_span - 1)
+                                                        .max(cell_b.col + cell_b.col_span - 1);
+
+                                                    cell.row >= r1
+                                                        && cell.col >= c1
+                                                        && (cell.row + cell.row_span - 1) <= r2
+                                                        && (cell.col + cell.col_span - 1) <= c2
+                                                } else {
+                                                    false
+                                                }
                                             } else {
                                                 false
                                             }
@@ -3176,42 +3291,46 @@ impl CrosshairApp {
                                         }
                                     } else {
                                         false
-                                    }
-                                } else {
-                                    false
-                                };
-                                
-                                let cell_id = ui.make_persistent_id((layout.id, "cell", cell.row, cell.col));
+                                    };
+
+                                let cell_id =
+                                    ui.make_persistent_id((layout.id, "cell", cell.row, cell.col));
                                 let cell_sense = if split_hovered_or_dragged {
                                     egui::Sense::hover()
                                 } else {
                                     egui::Sense::click_and_drag()
                                 };
                                 let cell_resp = ui.interact(cell_rect, cell_id, cell_sense);
-                                
+
                                 if cell_resp.drag_started() {
-                                    self.drag_start_layout_cell = Some((layout.id, cell.row, cell.col));
+                                    self.drag_start_layout_cell =
+                                        Some((layout.id, cell.row, cell.col));
                                 }
-                                
+
                                 if cell_resp.drag_stopped() {
-                                    if let Some((start_layout_id, start_row, start_col)) = self.drag_start_layout_cell {
+                                    if let Some((start_layout_id, start_row, start_col)) =
+                                        self.drag_start_layout_cell
+                                    {
                                         if start_layout_id == layout.id {
                                             merge_action = Some((start_row, start_col));
                                         }
                                     }
                                     self.drag_start_layout_cell = None;
                                 }
-                                
+
                                 if cell_resp.clicked() {
-                                    if self.selected_layout_cell == Some((layout.id, cell.row, cell.col)) {
+                                    if self.selected_layout_cell
+                                        == Some((layout.id, cell.row, cell.col))
+                                    {
                                         self.selected_layout_cell = None;
                                     } else {
-                                        self.selected_layout_cell = Some((layout.id, cell.row, cell.col));
+                                        self.selected_layout_cell =
+                                            Some((layout.id, cell.row, cell.col));
                                     }
                                 }
-                                
+
                                 cell_resp.surrender_focus();
-                                
+
                                 let fill_color = if is_selected {
                                     Color32::from_rgba_premultiplied(0, 120, 215, 80)
                                 } else if is_in_drag_merge_range {
@@ -3221,7 +3340,7 @@ impl CrosshairApp {
                                 } else {
                                     Color32::from_rgba_premultiplied(128, 128, 128, 20)
                                 };
-                                
+
                                 let border_color = if is_selected {
                                     Color32::from_rgb(0, 120, 215)
                                 } else if is_in_drag_merge_range {
@@ -3229,9 +3348,13 @@ impl CrosshairApp {
                                 } else {
                                     ui.visuals().widgets.noninteractive.bg_stroke.color
                                 };
-                                
-                                let stroke_width = if is_selected || is_in_drag_merge_range { 2.0 } else { 1.0 };
-                                
+
+                                let stroke_width = if is_selected || is_in_drag_merge_range {
+                                    2.0
+                                } else {
+                                    1.0
+                                };
+
                                 ui.painter().rect(
                                     cell_rect,
                                     2.0,
@@ -3241,22 +3364,33 @@ impl CrosshairApp {
                                 );
 
                                 if !split_hovered_or_dragged && cell_resp.hovered() {
-                                    if let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
-                                        let norm_dx = (pointer_pos.x - cell_rect.center().x) / cell_rect.width();
-                                        let norm_dy = (pointer_pos.y - cell_rect.center().y) / cell_rect.height();
-                                        
+                                    if let Some(pointer_pos) =
+                                        ui.ctx().input(|i| i.pointer.hover_pos())
+                                    {
+                                        let norm_dx = (pointer_pos.x - cell_rect.center().x)
+                                            / cell_rect.width();
+                                        let norm_dy = (pointer_pos.y - cell_rect.center().y)
+                                            / cell_rect.height();
+
                                         if norm_dx.abs() > norm_dy.abs() {
                                             Self::draw_dashed_line(
                                                 ui.painter(),
                                                 egui::pos2(cell_rect.center().x, cell_rect.min.y),
                                                 egui::pos2(cell_rect.center().x, cell_rect.max.y),
-                                                egui::Stroke::new(2.5, Color32::from_rgb(255, 69, 0)),
+                                                egui::Stroke::new(
+                                                    2.5,
+                                                    Color32::from_rgb(255, 69, 0),
+                                                ),
                                                 8.0,
                                                 4.0,
                                             );
-                                            
+
                                             if cell_resp.secondary_clicked() {
-                                                if let Some(cell_idx) = layout.cells.iter().position(|c| c.row == cell.row && c.col == cell.col) {
+                                                if let Some(cell_idx) =
+                                                    layout.cells.iter().position(|c| {
+                                                        c.row == cell.row && c.col == cell.col
+                                                    })
+                                                {
                                                     Self::split_cell_vertical(layout, cell_idx);
                                                     Self::sanitize_layout(layout);
                                                     self.selected_layout_cell = None;
@@ -3268,13 +3402,20 @@ impl CrosshairApp {
                                                 ui.painter(),
                                                 egui::pos2(cell_rect.min.x, cell_rect.center().y),
                                                 egui::pos2(cell_rect.max.x, cell_rect.center().y),
-                                                egui::Stroke::new(2.5, Color32::from_rgb(255, 69, 0)),
+                                                egui::Stroke::new(
+                                                    2.5,
+                                                    Color32::from_rgb(255, 69, 0),
+                                                ),
                                                 8.0,
                                                 4.0,
                                             );
-                                            
+
                                             if cell_resp.secondary_clicked() {
-                                                if let Some(cell_idx) = layout.cells.iter().position(|c| c.row == cell.row && c.col == cell.col) {
+                                                if let Some(cell_idx) =
+                                                    layout.cells.iter().position(|c| {
+                                                        c.row == cell.row && c.col == cell.col
+                                                    })
+                                                {
                                                     Self::split_cell_horizontal(layout, cell_idx);
                                                     Self::sanitize_layout(layout);
                                                     self.selected_layout_cell = None;
@@ -3284,69 +3425,101 @@ impl CrosshairApp {
                                         }
                                     }
                                 }
-                                
+
                                 let label_text = if let Some(title) = &cell.target_window_title {
                                     let simplified = Self::simplify_window_title(title);
                                     Self::truncate_window_title(&simplified, 16)
                                 } else {
                                     format!("{},{}", cell.row, cell.col)
                                 };
-                                
+
                                 let text_color = if is_selected {
                                     ui.visuals().widgets.active.text_color()
                                 } else {
                                     ui.visuals().widgets.noninteractive.text_color()
                                 };
-                                
+
                                 ui.painter().text(
                                     cell_rect.center(),
                                     egui::Align2::CENTER_CENTER,
                                     label_text,
                                     egui::FontId::proportional(11.0),
-                                    text_color
+                                    text_color,
                                 );
                             }
-                            
+
                             // Draw highlight line segments for columns
                             for split_x in active_col_splits {
                                 ui.painter().line_segment(
-                                    [egui::pos2(split_x, grid_rect.min.y), egui::pos2(split_x, grid_rect.max.y)],
-                                    egui::Stroke::new(2.0, ui.visuals().widgets.active.fg_stroke.color),
+                                    [
+                                        egui::pos2(split_x, grid_rect.min.y),
+                                        egui::pos2(split_x, grid_rect.max.y),
+                                    ],
+                                    egui::Stroke::new(
+                                        2.0,
+                                        ui.visuals().widgets.active.fg_stroke.color,
+                                    ),
                                 );
                             }
                             // Draw highlight line segments for rows
                             for split_y in active_row_splits {
                                 ui.painter().line_segment(
-                                    [egui::pos2(grid_rect.min.x, split_y), egui::pos2(grid_rect.max.x, split_y)],
-                                    egui::Stroke::new(2.0, ui.visuals().widgets.active.fg_stroke.color),
+                                    [
+                                        egui::pos2(grid_rect.min.x, split_y),
+                                        egui::pos2(grid_rect.max.x, split_y),
+                                    ],
+                                    egui::Stroke::new(
+                                        2.0,
+                                        ui.visuals().widgets.active.fg_stroke.color,
+                                    ),
                                 );
                             }
-                            
+
                             if let Some((start_row, start_col)) = merge_action {
                                 if let Some((end_row, end_col)) = hovered_row_col {
                                     if (start_row, start_col) != (end_row, end_col) {
-                                        let cell_a_opt = layout.cells.iter().find(|c| c.row == start_row && c.col == start_col).cloned();
-                                        let cell_b_opt = layout.cells.iter().find(|c| c.row == end_row && c.col == end_col).cloned();
-                                        if let (Some(cell_a), Some(cell_b)) = (cell_a_opt, cell_b_opt) {
+                                        let cell_a_opt = layout
+                                            .cells
+                                            .iter()
+                                            .find(|c| c.row == start_row && c.col == start_col)
+                                            .cloned();
+                                        let cell_b_opt = layout
+                                            .cells
+                                            .iter()
+                                            .find(|c| c.row == end_row && c.col == end_col)
+                                            .cloned();
+                                        if let (Some(cell_a), Some(cell_b)) =
+                                            (cell_a_opt, cell_b_opt)
+                                        {
                                             let r1 = cell_a.row.min(cell_b.row);
                                             let c1 = cell_a.col.min(cell_b.col);
-                                            let r2 = (cell_a.row + cell_a.row_span - 1).max(cell_b.row + cell_b.row_span - 1);
-                                            let c2 = (cell_a.col + cell_a.col_span - 1).max(cell_b.col + cell_b.col_span - 1);
-                                            
+                                            let r2 = (cell_a.row + cell_a.row_span - 1)
+                                                .max(cell_b.row + cell_b.row_span - 1);
+                                            let c2 = (cell_a.col + cell_a.col_span - 1)
+                                                .max(cell_b.col + cell_b.col_span - 1);
+
                                             let new_cell = WindowLayoutCell {
                                                 row: r1,
                                                 col: c1,
                                                 row_span: r2 - r1 + 1,
                                                 col_span: c2 - c1 + 1,
-                                                target_window_title: cell_a.target_window_title.clone().or(cell_b.target_window_title.clone()),
-                                                extra_target_window_titles: if !cell_a.extra_target_window_titles.is_empty() {
+                                                target_window_title: cell_a
+                                                    .target_window_title
+                                                    .clone()
+                                                    .or(cell_b.target_window_title.clone()),
+                                                extra_target_window_titles: if !cell_a
+                                                    .extra_target_window_titles
+                                                    .is_empty()
+                                                {
                                                     cell_a.extra_target_window_titles.clone()
                                                 } else {
                                                     cell_b.extra_target_window_titles.clone()
                                                 },
-                                                match_duplicate_window_titles: cell_a.match_duplicate_window_titles || cell_b.match_duplicate_window_titles,
+                                                match_duplicate_window_titles: cell_a
+                                                    .match_duplicate_window_titles
+                                                    || cell_b.match_duplicate_window_titles,
                                             };
-                                            
+
                                             layout.cells.insert(0, new_cell);
                                             Self::sanitize_layout(layout);
                                             live_sync = true;
@@ -3358,9 +3531,11 @@ impl CrosshairApp {
                         });
                         ui.end_row();
                     });
-                
+
                 let last_sel_id = ui.make_persistent_id("last_selected_layout_cell");
-                let last_selected: Option<(u32, usize, usize)> = ui.data_mut(|d| d.get_temp::<Option<(u32, usize, usize)>>(last_sel_id)).flatten();
+                let last_selected: Option<(u32, usize, usize)> = ui
+                    .data_mut(|d| d.get_temp::<Option<(u32, usize, usize)>>(last_sel_id))
+                    .flatten();
                 let current_selected = self.selected_layout_cell;
                 let selection_changed = current_selected != last_selected;
                 if selection_changed {
@@ -3369,24 +3544,39 @@ impl CrosshairApp {
 
                 if let Some((sel_layout_id, sel_row, sel_col)) = self.selected_layout_cell {
                     if sel_layout_id == layout.id {
-                        if let Some(cell_idx) = layout.cells.iter().position(|c| c.row == sel_row && c.col == sel_col) {
+                        if let Some(cell_idx) = layout
+                            .cells
+                            .iter()
+                            .position(|c| c.row == sel_row && c.col == sel_col)
+                        {
                             ui.add_space(8.0);
-                            let header_resp = ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("Cell ({}, {}) Settings", sel_row, sel_col)).strong());
-                            }).response;
+                            let header_resp = ui
+                                .horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "Cell ({}, {}) Settings",
+                                            sel_row, sel_col
+                                        ))
+                                        .strong(),
+                                    );
+                                })
+                                .response;
 
                             if selection_changed {
                                 header_resp.scroll_to_me(Some(egui::Align::Center));
                             }
-                            
+
                             let mut cell_modified = false;
-                            
+
                             let mut row_span = layout.cells[cell_idx].row_span;
                             let mut col_span = layout.cells[cell_idx].col_span;
-                            let mut target_window_title = layout.cells[cell_idx].target_window_title.clone();
-                            let mut extra_target_window_titles = layout.cells[cell_idx].extra_target_window_titles.clone();
-                            let mut match_duplicate_window_titles = layout.cells[cell_idx].match_duplicate_window_titles;
-                            
+                            let mut target_window_title =
+                                layout.cells[cell_idx].target_window_title.clone();
+                            let mut extra_target_window_titles =
+                                layout.cells[cell_idx].extra_target_window_titles.clone();
+                            let mut match_duplicate_window_titles =
+                                layout.cells[cell_idx].match_duplicate_window_titles;
+
                             egui::Grid::new((layout.id, "cell-settings-grid", sel_row, sel_col))
                                 .num_columns(2)
                                 .spacing([14.0, 8.0])
@@ -3395,28 +3585,45 @@ impl CrosshairApp {
                                     ui.horizontal(|ui| {
                                         ui.label(Self::tr_lang(language, "Row span", "Hợp dòng"));
                                         let max_row_span = layout.rows - sel_row;
-                                        if ui.add(DragValue::new(&mut row_span).range(1..=max_row_span)).changed() {
+                                        if ui
+                                            .add(
+                                                DragValue::new(&mut row_span)
+                                                    .range(1..=max_row_span),
+                                            )
+                                            .changed()
+                                        {
                                             cell_modified = true;
                                         }
                                         ui.label(Self::tr_lang(language, "Col span", "Hợp cột"));
                                         let max_col_span = layout.cols - sel_col;
-                                        if ui.add(DragValue::new(&mut col_span).range(1..=max_col_span)).changed() {
+                                        if ui
+                                            .add(
+                                                DragValue::new(&mut col_span)
+                                                    .range(1..=max_col_span),
+                                            )
+                                            .changed()
+                                        {
                                             cell_modified = true;
                                         }
                                     });
                                     ui.end_row();
-                                    
-                                    ui.label(Self::tr_lang(language, "Target Window", "Cửa sổ mục tiêu"));
-                                    let dropdown_changed = Self::render_multi_window_targets_with_duplicate_mode(
-                                        ui,
+
+                                    ui.label(Self::tr_lang(
                                         language,
-                                        (layout.id, "cell-target-picker", sel_row, sel_col),
-                                        Self::tr_lang(language, "Focus", "Cửa sổ đang focus"),
-                                        &mut target_window_title,
-                                        &mut extra_target_window_titles,
-                                        &mut match_duplicate_window_titles,
-                                        &self.open_windows,
-                                    );
+                                        "Target Window",
+                                        "Cửa sổ mục tiêu",
+                                    ));
+                                    let dropdown_changed =
+                                        Self::render_multi_window_targets_with_duplicate_mode(
+                                            ui,
+                                            language,
+                                            (layout.id, "cell-target-picker", sel_row, sel_col),
+                                            Self::tr_lang(language, "Focus", "Cửa sổ đang focus"),
+                                            &mut target_window_title,
+                                            &mut extra_target_window_titles,
+                                            &mut match_duplicate_window_titles,
+                                            &self.open_windows,
+                                        );
                                     if dropdown_changed {
                                         cell_modified = true;
                                     }
@@ -3424,8 +3631,9 @@ impl CrosshairApp {
 
                                     // Render cell estimated resolution info
                                     ui.label(Self::tr_lang(language, "Resolution", "Độ phân giải"));
-                                    let (mon_w, mon_h) = Self::get_monitor_work_size(layout.block_taskbar);
-                                    
+                                    let (mon_w, mon_h) =
+                                        Self::get_monitor_work_size(layout.block_taskbar);
+
                                     let r_sum: f32 = layout.row_ratios.iter().sum();
                                     let c_sum: f32 = layout.col_ratios.iter().sum();
                                     let mut row_starts = vec![0.0];
@@ -3441,22 +3649,36 @@ impl CrosshairApp {
                                         col_starts.push(acc);
                                     }
 
-                                    let cell_w_frac = col_starts[col_starts.len().min(sel_col + layout.cells[cell_idx].col_span)] - col_starts[sel_col];
-                                    let cell_h_frac = row_starts[row_starts.len().min(sel_row + layout.cells[cell_idx].row_span)] - row_starts[sel_row];
+                                    let cell_w_frac = col_starts[col_starts
+                                        .len()
+                                        .min(sel_col + layout.cells[cell_idx].col_span)]
+                                        - col_starts[sel_col];
+                                    let cell_h_frac = row_starts[row_starts
+                                        .len()
+                                        .min(sel_row + layout.cells[cell_idx].row_span)]
+                                        - row_starts[sel_row];
                                     let cell_w = (cell_w_frac * mon_w).round() as i32;
                                     let cell_h = (cell_h_frac * mon_h).round() as i32;
-                                    let info_text = format!("{} x {} ({:.0}% x {:.0}%)", cell_w, cell_h, cell_w_frac * 100.0, cell_h_frac * 100.0);
+                                    let info_text = format!(
+                                        "{} x {} ({:.0}% x {:.0}%)",
+                                        cell_w,
+                                        cell_h,
+                                        cell_w_frac * 100.0,
+                                        cell_h_frac * 100.0
+                                    );
                                     ui.label(RichText::new(info_text).strong());
                                     ui.end_row();
                                 });
-                            
+
                             if cell_modified {
                                 layout.cells[cell_idx].row_span = row_span;
                                 layout.cells[cell_idx].col_span = col_span;
                                 layout.cells[cell_idx].target_window_title = target_window_title;
-                                layout.cells[cell_idx].extra_target_window_titles = extra_target_window_titles;
-                                layout.cells[cell_idx].match_duplicate_window_titles = match_duplicate_window_titles;
-                                
+                                layout.cells[cell_idx].extra_target_window_titles =
+                                    extra_target_window_titles;
+                                layout.cells[cell_idx].match_duplicate_window_titles =
+                                    match_duplicate_window_titles;
+
                                 Self::sanitize_layout(layout);
                                 live_sync = true;
                             }
@@ -3464,7 +3686,7 @@ impl CrosshairApp {
                     }
                 }
             });
-            
+
             if let Some((target, status)) = next_capture_target.take() {
                 self.begin_capture(target, status);
             }
@@ -3474,11 +3696,13 @@ impl CrosshairApp {
             if run_layout_now {
                 let layout = self.state.window_layouts[index].clone();
                 let layout_name = layout.name.clone();
-                let _ = self.overlay_tx.send(OverlayCommand::ApplyWindowLayout(layout));
+                let _ = self
+                    .overlay_tx
+                    .send(OverlayCommand::ApplyWindowLayout(layout));
                 self.status = format!("Applied layout preset {}.", layout_name);
             }
         }
-        
+
         if live_sync {
             self.persist_window_layouts();
         }
@@ -3580,12 +3804,13 @@ impl CrosshairApp {
         };
 
         if should_request {
-            self.window_preview_requested.insert(cache_id, Instant::now());
-            
+            self.window_preview_requested
+                .insert(cache_id, Instant::now());
+
             let ui_tx = self.ui_tx.clone();
             let target_title = target_window_title.cloned();
             let extra_titles = extra_target_window_titles.to_vec();
-            
+
             std::thread::spawn(move || {
                 if let Some(frame) = crate::window_list::capture_window_preview_with_candidates(
                     target_title.as_deref(),
@@ -3604,7 +3829,9 @@ impl CrosshairApp {
             });
         }
 
-        self.zoom_preview_cache.get(&cache_id).map(|cache| cache.view.clone())
+        self.zoom_preview_cache
+            .get(&cache_id)
+            .map(|cache| cache.view.clone())
     }
 
     pub(crate) fn pin_preview_for_target(
@@ -3632,7 +3859,8 @@ impl CrosshairApp {
         };
 
         if should_request {
-            self.window_preview_requested.insert(cache_id, Instant::now());
+            self.window_preview_requested
+                .insert(cache_id, Instant::now());
 
             let ui_tx = self.ui_tx.clone();
             let target_title = target_window_title.cloned();
@@ -3658,7 +3886,9 @@ impl CrosshairApp {
             });
         }
 
-        self.zoom_preview_cache.get(&cache_id).map(|cache| cache.view.clone())
+        self.zoom_preview_cache
+            .get(&cache_id)
+            .map(|cache| cache.view.clone())
     }
 
     pub(crate) fn zoom_preview_for_preset(
