@@ -1679,6 +1679,10 @@ fn default_binary_target_color() -> RgbaColor {
     }
 }
 
+fn default_binary_target_color_option() -> Option<RgbaColor> {
+    Some(default_binary_target_color())
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum PinOverlayStyle {
     #[default]
@@ -1723,8 +1727,10 @@ pub struct PinPreset {
     pub binary_threshold: u8,
     #[serde(default)]
     pub binary_mode: PinBinaryMode,
-    #[serde(default = "default_binary_target_color")]
-    pub binary_target_color: RgbaColor,
+    #[serde(default = "default_binary_target_color_option")]
+    pub binary_target_color: Option<RgbaColor>,
+    #[serde(default)]
+    pub binary_target_colors: Vec<RgbaColor>,
 }
 
 impl PinPreset {
@@ -1756,8 +1762,50 @@ impl PinPreset {
             binary_filter: false,
             binary_threshold: 128,
             binary_mode: PinBinaryMode::Grayscale,
-            binary_target_color: default_binary_target_color(),
+            binary_target_color: default_binary_target_color_option(),
+            binary_target_colors: Vec::new(),
         }
+    }
+
+    pub fn binary_target_colors(&self) -> Vec<RgbaColor> {
+        if !self.binary_target_colors.is_empty() {
+            return self.binary_target_colors.clone();
+        }
+        self.binary_target_color.into_iter().collect()
+    }
+
+    pub fn add_binary_target_color(&mut self, color: RgbaColor) {
+        if self.binary_target_colors.is_empty()
+            && let Some(existing) = self.binary_target_color
+        {
+            self.binary_target_colors.push(existing);
+        }
+        self.binary_target_colors.push(color);
+        self.binary_target_color = self.binary_target_colors.first().copied();
+    }
+
+    pub fn remove_binary_target_color_at(&mut self, index: usize) -> bool {
+        if self.binary_target_colors.is_empty() {
+            if self.binary_target_color.is_some() && index == 0 {
+                self.binary_target_color = None;
+                return true;
+            }
+            return false;
+        }
+
+        if index >= self.binary_target_colors.len() {
+            return false;
+        }
+
+        self.binary_target_colors = self
+            .binary_target_colors
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(i, color)| (i != index).then_some(color))
+            .collect();
+        self.binary_target_color = self.binary_target_colors.first().copied();
+        true
     }
 }
 

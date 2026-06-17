@@ -918,20 +918,166 @@ impl CrosshairApp {
                                     ui.end_row();
                                 }
                                 PinBinaryMode::ColorSimilarity => {
-                                    ui.label(Self::tr_lang(language, "Target Color", "Màu mục tiêu"));
-                                    ui.horizontal(|ui| {
-                                        live_sync |= Self::edit_rgba_color(ui, &mut preset.binary_target_color).changed();
-                                        let picker_btn = ui.add_sized(
-                                            [24.0, 18.0],
-                                            Button::new(Self::material_icon_text(0xe3b8, 14.0)),
-                                        ).on_hover_text(Self::tr_lang(
-                                            language,
-                                            "Pick color from screen",
-                                            "Lấy màu từ màn hình",
-                                        ));
-                                        if picker_btn.clicked() {
-                                            begin_color_picker_preset_id = Some(preset.id);
+                                    ui.label(Self::tr_lang(language, "Target Color", "Mau muc tieu"));
+                                    ui.vertical(|ui| {
+                                        let colors = preset.binary_target_colors();
+                                        if colors.is_empty() {
+                                            ui.monospace("None");
+                                        } else {
+                                            let mut remove_color_index = None;
+                                            egui::Grid::new((preset.id, "pin-color-grid"))
+                                                .num_columns(8)
+                                                .min_col_width(0.0)
+                                                .spacing([ui.spacing().item_spacing.x, 4.0])
+                                                .show(ui, |ui| {
+                                                    for (index, color) in colors.iter().copied().enumerate() {
+                                                        if Self::image_search_color_tile(ui, color).clicked() {
+                                                            remove_color_index = Some(index);
+                                                        }
+                                                        if (index + 1) % 8 == 0 {
+                                                            ui.end_row();
+                                                        }
+                                                    }
+                                                });
+                                            if let Some(index) = remove_color_index
+                                                && preset.remove_binary_target_color_at(index)
+                                            {
+                                                live_sync = true;
+                                            }
                                         }
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            if Self::image_search_add_color_button(ui, language).clicked() {
+                                                begin_color_picker_preset_id = Some(preset.id);
+                                            }
+
+                                            let popup_id =
+                                                ui.make_persistent_id((preset.id, "pin-manual-color-popup"));
+                                            let mut popup_open = ui
+                                                .ctx()
+                                                .data(|data| data.get_temp::<bool>(popup_id))
+                                                .unwrap_or(false);
+
+                                            let manual_button = ui
+                                                .add_sized(
+                                                    [24.0, 21.0],
+                                                    Button::new(Self::material_icon_text(0xe40a, 18.0)),
+                                                )
+                                                .on_hover_text(Self::tr_lang(
+                                                    language,
+                                                    "Manual color input",
+                                                    "Chon mau thu cong",
+                                                ));
+
+                                            if manual_button.clicked() {
+                                                popup_open = true;
+                                            }
+
+                                            let mut added_color = false;
+
+                                            let popup_response = egui::Popup::from_response(&manual_button)
+                                                .id(popup_id)
+                                                .open_bool(&mut popup_open)
+                                                .align(egui::RectAlign::BOTTOM_START)
+                                                .layout(egui::Layout::top_down_justified(egui::Align::Min))
+                                                .width(220.0)
+                                                .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                                                .show(|ui| {
+                                                    ui.set_min_width(220.0);
+                                                    ui.label(Self::tr_lang(
+                                                        language,
+                                                        "Manual color",
+                                                        "Chon mau thu cong",
+                                                    ));
+                                                    ui.separator();
+
+                                                    let mut color32 = Color32::from_rgba_unmultiplied(
+                                                        self.vision_manual_color.r,
+                                                        self.vision_manual_color.g,
+                                                        self.vision_manual_color.b,
+                                                        self.vision_manual_color.a,
+                                                    );
+                                                    if egui::color_picker::color_picker_color32(
+                                                        ui,
+                                                        &mut color32,
+                                                        egui::color_picker::Alpha::Opaque,
+                                                    ) {
+                                                        self.vision_manual_color.r = color32.r();
+                                                        self.vision_manual_color.g = color32.g();
+                                                        self.vision_manual_color.b = color32.b();
+                                                        self.vision_manual_color.a = color32.a();
+                                                        self.vision_manual_color_hex = format!(
+                                                            "{:02X}{:02X}{:02X}",
+                                                            self.vision_manual_color.r,
+                                                            self.vision_manual_color.g,
+                                                            self.vision_manual_color.b
+                                                        );
+                                                    }
+
+                                                    ui.add_space(4.0);
+
+                                                    ui.horizontal(|ui| {
+                                                        ui.label("#");
+                                                        let hex_resp = ui.add(
+                                                            TextEdit::singleline(
+                                                                &mut self.vision_manual_color_hex,
+                                                            )
+                                                            .hint_text("RRGGBB"),
+                                                        );
+                                                        if hex_resp.changed() {
+                                                            let hex = self
+                                                                .vision_manual_color_hex
+                                                                .trim()
+                                                                .trim_start_matches('#');
+                                                            if hex.len() == 6
+                                                                && let Ok(color_val) =
+                                                                    u32::from_str_radix(hex, 16)
+                                                            {
+                                                                self.vision_manual_color.r =
+                                                                    ((color_val >> 16) & 0xFF) as u8;
+                                                                self.vision_manual_color.g =
+                                                                    ((color_val >> 8) & 0xFF) as u8;
+                                                                self.vision_manual_color.b =
+                                                                    (color_val & 0xFF) as u8;
+                                                            }
+                                                        }
+                                                    });
+
+                                                    ui.add_space(8.0);
+
+                                                    if ui
+                                                        .button(Self::tr_lang(
+                                                            language,
+                                                            "Add color",
+                                                            "Them mau",
+                                                        ))
+                                                        .clicked()
+                                                    {
+                                                        added_color = true;
+                                                    }
+                                                });
+
+                                            if added_color {
+                                                preset.add_binary_target_color(self.vision_manual_color);
+                                                live_sync = true;
+                                                popup_open = false;
+                                            }
+
+                                            if popup_open
+                                                && let Some(pointer_pos) = ui.ctx().pointer_hover_pos()
+                                            {
+                                                let mut keep_open_rect = manual_button.rect.expand(10.0);
+                                                if let Some(popup) = &popup_response {
+                                                    keep_open_rect = keep_open_rect
+                                                        .union(popup.response.rect.expand(10.0));
+                                                }
+                                                if !keep_open_rect.contains(pointer_pos) {
+                                                    popup_open = false;
+                                                }
+                                            }
+                                            ui.ctx().data_mut(|data| data.insert_temp(popup_id, popup_open));
+                                        });
                                     });
                                     ui.end_row();
 

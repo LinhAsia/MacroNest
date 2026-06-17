@@ -8425,17 +8425,29 @@ mod windows_overlay {
         .is_ok()
     }
 
-    unsafe fn is_native_focus_highlight_target(hwnd: HWND) -> bool {
-        if hwnd.0.is_null() || is_internal_app_window(hwnd) || looks_like_main_ui_window(hwnd) {
-            return false;
-        }
-
-        if !windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)).as_bool() {
-            return false;
+    unsafe fn normalize_native_focus_highlight_target(hwnd: HWND) -> HWND {
+        if hwnd.0.is_null() {
+            return hwnd;
         }
 
         let root = GetAncestor(hwnd, GA_ROOT);
-        if root.0.is_null() || root != hwnd {
+        if root.0.is_null() {
+            hwnd
+        } else {
+            root
+        }
+    }
+
+    unsafe fn is_native_focus_highlight_target(hwnd: HWND) -> bool {
+        let target = normalize_native_focus_highlight_target(hwnd);
+        if target.0.is_null()
+            || is_internal_app_window(target)
+            || looks_like_main_ui_window(target)
+        {
+            return false;
+        }
+
+        if !windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(target)).as_bool() {
             return false;
         }
 
@@ -9174,16 +9186,17 @@ mod windows_overlay {
             return;
         }
 
-        if runtime.active_focus_highlight_hwnd == Some(foreground) {
+        let target = normalize_native_focus_highlight_target(foreground);
+        if runtime.active_focus_highlight_hwnd == Some(target) {
             return;
         }
 
         clear_native_focus_highlight(runtime);
-        if is_native_focus_highlight_target(foreground) {
-            let _ = set_native_border_color(foreground, FOCUS_HIGHLIGHT_BORDER_COLOR);
-            let _ = paint_focus_highlight_overlay(runtime, foreground);
-            runtime.active_focus_highlight_hwnd = Some(foreground);
-            ACTIVE_HIGHLIGHT_HWND.store(foreground.0 as isize, Ordering::Relaxed);
+        if is_native_focus_highlight_target(target) {
+            let _ = set_native_border_color(target, FOCUS_HIGHLIGHT_BORDER_COLOR);
+            let _ = paint_focus_highlight_overlay(runtime, target);
+            runtime.active_focus_highlight_hwnd = Some(target);
+            ACTIVE_HIGHLIGHT_HWND.store(target.0 as isize, Ordering::Relaxed);
             sync_window_location_hook_state(runtime);
         }
     }
@@ -9444,8 +9457,9 @@ mod windows_overlay {
                 
                 let mut binarized = vec![0u8; crop_w * crop_h * 4];
                 let threshold = preset.binary_threshold;
+                let threshold_sq = (threshold as i32).pow(2);
                 let binary_mode = preset.binary_mode;
-                let target_color = preset.binary_target_color;
+                let target_colors = preset.binary_target_colors();
                 
                 for y in 0..crop_h {
                     let src_row_offset = (crop_y + y) * width * 4;
@@ -9465,10 +9479,13 @@ mod windows_overlay {
                                 if gray >= threshold { 255 } else { 0 }
                             }
                             crate::model::PinBinaryMode::ColorSimilarity => {
-                                let dist_sq = (r as i32 - target_color.r as i32).pow(2)
-                                    + (g as i32 - target_color.g as i32).pow(2)
-                                    + (b as i32 - target_color.b as i32).pow(2);
-                                if dist_sq <= (threshold as i32).pow(2) {
+                                let matched = target_colors.iter().any(|target_color| {
+                                    let dist_sq = (r as i32 - target_color.r as i32).pow(2)
+                                        + (g as i32 - target_color.g as i32).pow(2)
+                                        + (b as i32 - target_color.b as i32).pow(2);
+                                    dist_sq <= threshold_sq
+                                });
+                                if matched {
                                     255
                                 } else {
                                     0
