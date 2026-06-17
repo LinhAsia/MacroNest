@@ -91,14 +91,6 @@ mod windows_impl {
         windows
     }
 
-    pub fn capture_window_preview(
-        title: Option<&str>,
-        max_dimension: u32,
-    ) -> Option<WindowPreviewFrame> {
-        let hwnd = find_window_handle(title)?;
-        unsafe { capture_window_preview_from_hwnd(hwnd, max_dimension.max(64), false) }
-    }
-
     pub fn capture_window_preview_with_candidates(
         primary_title: Option<&str>,
         extra_titles: &[String],
@@ -1106,13 +1098,6 @@ mod fallback {
 
     pub fn list_open_windows() -> Vec<WindowInfo> {
         Vec::new()
-    }
-
-    pub fn capture_window_preview(
-        _title: Option<&str>,
-        _max_dimension: u32,
-    ) -> Option<WindowPreviewFrame> {
-        None
     }
 
     pub fn capture_window_preview_with_candidates(

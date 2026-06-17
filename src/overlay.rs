@@ -186,7 +186,7 @@ mod windows_overlay {
             TimerPreset, VideoPreset, VisionPreset, VisionSettings, WindowAnchor, WindowExpandControls,
             WindowExpandDirection, WindowFocusPreset, WindowPreset,
         },
-        render::{RenderedCrosshair, RenderedSvgImage, render_crosshair, render_svg_image},
+        render::{RenderedSvgImage, render_crosshair, render_svg_image},
         storage::AppPaths,
         window_list,
     };
@@ -18068,15 +18068,6 @@ mod windows_overlay {
         std::process::exit(0);
     }
 
-    unsafe fn find_window_by_title(title: &str) -> Option<HWND> {
-        let mut found = None;
-        let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
-            Some(find_window_by_selector_proc),
-            LPARAM((&mut (title, &mut found)) as *mut _ as isize),
-        );
-        found
-    }
-
     unsafe fn find_window_by_selector_excluding(
         title: &str,
         match_duplicate_window_titles: bool,
@@ -18111,24 +18102,6 @@ mod windows_overlay {
             LPARAM((&mut payload) as *mut _ as isize),
         );
         found
-    }
-
-    unsafe extern "system" fn find_window_by_selector_proc(
-        hwnd: HWND,
-        lparam: LPARAM,
-    ) -> windows::core::BOOL {
-        let (target, found) = &mut *(lparam.0 as *mut (&str, &mut Option<HWND>));
-        let clean_target = strip_rule_suffix(*target);
-        if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() {
-            return true.into();
-        }
-
-        if window_matches_selector(hwnd, clean_target) {
-            **found = Some(hwnd);
-            return false.into();
-        }
-
-        true.into()
     }
 
     unsafe extern "system" fn find_window_by_selector_excluding_proc(
@@ -18312,94 +18285,6 @@ mod windows_overlay {
         } else {
             Some(String::from_utf16_lossy(&buffer[..copied as usize]))
         }
-    }
-
-    unsafe fn paint_overlay(
-        hwnd: HWND,
-        style: &CrosshairStyle,
-        rendered: RenderedCrosshair,
-    ) -> Result<()> {
-        let window_x = style.x_offset - rendered.center_x;
-        let window_y = style.y_offset - rendered.center_y;
-        let _ = SetWindowPos(
-            hwnd,
-            Some(HWND_TOPMOST),
-            window_x,
-            window_y,
-            rendered.width as i32,
-            rendered.height as i32,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        );
-        let screen_dc = GetDC(None);
-        if screen_dc.0.is_null() {
-            bail!("Failed to acquire the screen DC");
-        }
-
-        let mem_dc = CreateCompatibleDC(Some(screen_dc));
-        if mem_dc.0.is_null() {
-            let _ = ReleaseDC(None, screen_dc);
-            bail!("Failed to create a memory DC");
-        }
-
-        let mut bitmap_info = BITMAPINFO::default();
-        bitmap_info.bmiHeader = BITMAPINFOHEADER {
-            biSize: size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: rendered.width as i32,
-            biHeight: -(rendered.height as i32),
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            ..Default::default()
-        };
-        let mut bits = std::ptr::null_mut();
-        let bitmap = CreateDIBSection(
-            Some(mem_dc),
-            &bitmap_info,
-            DIB_RGB_COLORS,
-            &mut bits,
-            None,
-            0,
-        )?;
-        if bitmap.0.is_null() {
-            let _ = DeleteDC(mem_dc);
-            let _ = ReleaseDC(None, screen_dc);
-            bail!("Failed to create the DIB surface");
-        }
-
-        let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
-        let bgra = rgba_to_bgra(&rendered.rgba);
-        std::ptr::copy_nonoverlapping(bgra.as_ptr(), bits as *mut u8, bgra.len());
-        let destination = POINT {
-            x: window_x,
-            y: window_y,
-        };
-        let source = POINT { x: 0, y: 0 };
-        let size = SIZE {
-            cx: rendered.width as i32,
-            cy: rendered.height as i32,
-        };
-        let blend = BLENDFUNCTION {
-            BlendOp: AC_SRC_OVER as u8,
-            BlendFlags: 0,
-            SourceConstantAlpha: 255,
-            AlphaFormat: AC_SRC_ALPHA as u8,
-        };
-        let _ = UpdateLayeredWindow(
-            hwnd,
-            Some(screen_dc),
-            Some(&destination),
-            Some(&size),
-            Some(mem_dc),
-            Some(&source),
-            COLORREF(0),
-            Some(&blend),
-            ULW_ALPHA,
-        );
-        let _ = SelectObject(mem_dc, old_bitmap);
-        let _ = DeleteObject(HGDIOBJ(bitmap.0));
-        let _ = DeleteDC(mem_dc);
-        let _ = ReleaseDC(None, screen_dc);
-        Ok(())
     }
 
     unsafe fn paint_mouse_trail(hwnd: HWND, points: &[POINT], marker: Option<POINT>) -> Result<()> {
