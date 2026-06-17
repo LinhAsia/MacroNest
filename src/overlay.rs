@@ -497,7 +497,7 @@ mod windows_overlay {
             center_y: i32,
             size: f32,
         },
-        ShowQuickKeyDisplay(Option<String>),
+        ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
             enabled: bool,
             trigger: Option<HotkeyBinding>,
@@ -1104,6 +1104,35 @@ mod windows_overlay {
         }
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    enum QuickKeyDisplayLane {
+        Keyboard,
+        Mouse,
+    }
+
+    #[derive(Debug, Clone)]
+    enum QuickKeyDisplayUpdate {
+        Press {
+            text: String,
+            identity: String,
+            lane: QuickKeyDisplayLane,
+            held: bool,
+        },
+        Release {
+            identity: String,
+        },
+    }
+
+    #[derive(Clone)]
+    struct QuickKeyDisplayEntry {
+        text: String,
+        identity: String,
+        lane: QuickKeyDisplayLane,
+        slot: usize,
+        held: bool,
+        hide_at: Instant,
+    }
+
     struct Runtime {
         rx: Receiver<OverlayCommand>,
         ui_tx: Sender<UiCommand>,
@@ -1133,8 +1162,8 @@ mod windows_overlay {
         quick_key_display_center_x: i32,
         quick_key_display_center_y: i32,
         quick_key_display_size: f32,
-        quick_key_display_entries: Vec<String>,
-        quick_key_display_hide_at: Option<Instant>,
+        quick_key_display_entries: Vec<QuickKeyDisplayEntry>,
+        quick_key_display_slot_memory: HashMap<String, usize>,
         tray_menu: HMENU,
         keyboard_hook: HHOOK,
         mouse_hook: HHOOK,
@@ -1693,7 +1722,7 @@ mod windows_overlay {
                 quick_key_display_center_y: GetSystemMetrics(SM_CYSCREEN).max(1) / 2,
                 quick_key_display_size: 36.0,
                 quick_key_display_entries: Vec::new(),
-                quick_key_display_hide_at: None,
+                quick_key_display_slot_memory: HashMap::new(),
                 tray_menu,
                 keyboard_hook: HHOOK::default(),
                 mouse_hook: HHOOK::default(),
@@ -2147,7 +2176,7 @@ mod windows_overlay {
                             let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
                             let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
                             runtime.quick_key_display_entries.clear();
-                            runtime.quick_key_display_hide_at = None;
+                            runtime.quick_key_display_slot_memory.clear();
                             let _ = ShowWindow(runtime.key_display_hwnd, SW_HIDE);
                         } else {
                             clear_transient_input_state();
@@ -4820,132 +4849,157 @@ mod windows_overlay {
             .collect()
     }
 
-    fn quick_key_display_entry_base_and_count(entry: &str) -> (String, u32) {
-        if let Some((base, suffix)) = entry.rsplit_once(" (x")
-            && let Some(value) = suffix.strip_suffix(')')
-            && let Ok(count) = value.parse::<u32>()
-            && count > 1
-        {
-            return (base.to_owned(), count);
-        }
-        (entry.to_owned(), 1)
+    fn quick_key_display_is_mouse_key_name(key_name: &str) -> bool {
+        key_name.starts_with("Mouse")
     }
 
-    fn quick_key_display_format_entry(text: &str, count: u32) -> String {
-        if count > 1 {
-            format!("{text} (x{count})")
+    fn quick_key_display_is_wheel_key_name(key_name: &str) -> bool {
+        matches!(key_name, "MouseWheelUp" | "MouseWheelDown")
+    }
+
+    fn quick_key_display_lane_for_key_name(key_name: &str) -> QuickKeyDisplayLane {
+        if quick_key_display_is_mouse_key_name(key_name) {
+            QuickKeyDisplayLane::Mouse
         } else {
-            text.to_owned()
+            QuickKeyDisplayLane::Keyboard
         }
     }
 
-    fn quick_key_display_should_replace(previous: &str, next: &str) -> bool {
-        let previous_parts = quick_key_display_parts(previous);
-        let next_parts = quick_key_display_parts(next);
-        !previous_parts.is_empty()
-            && next_parts.len() >= previous_parts.len()
-            && previous_parts
-                .iter()
-                .zip(next_parts.iter())
-                .all(|(left, right)| left.eq_ignore_ascii_case(right))
+    fn quick_key_display_modifier_flags() -> (bool, bool, bool, bool) {
+        let hook_state = HOOK_STATE.lock();
+        (
+            hook_state.ctrl,
+            hook_state.alt,
+            hook_state.shift,
+            hook_state.win,
+        )
     }
 
-    fn quick_key_display_text_for_event(
-        key_name: &str,
-        is_key_down: bool,
-        is_key_up: bool,
-    ) -> Option<String> {
-        if !is_key_down && !is_key_up {
+    fn quick_key_display_identity_for_key_name(key_name: &str) -> Option<String> {
+        if quick_key_display_is_wheel_key_name(key_name) {
+            return Some(format!("wheel:{key_name}"));
+        }
+        if quick_key_display_is_mouse_key_name(key_name) {
+            return Some(format!("mouse:{key_name}"));
+        }
+        if hotkey::is_modifier_key_name(key_name) {
+            return None;
+        }
+        let (ctrl, alt, shift, win) = quick_key_display_modifier_flags();
+        Some(format!(
+            "keyboard:{key_name}|c:{}|a:{}|s:{}|w:{}",
+            ctrl as u8, alt as u8, shift as u8, win as u8
+        ))
+    }
+
+    fn quick_key_display_text_for_key_name(key_name: &str) -> Option<String> {
+        if !quick_key_display_is_mouse_key_name(key_name)
+            && hotkey::is_modifier_key_name(key_name)
+        {
             return None;
         }
 
-        let mut combo_keys = {
-            let hook_state = HOOK_STATE.lock();
-            hook_state
-                .held_inputs
-                .iter()
-                .cloned()
-                .chain(hook_state.held_mouse_buttons.iter().cloned())
-                .collect::<Vec<_>>()
-        };
-        if is_key_down {
-            combo_keys.push(key_name.to_owned());
-        } else if is_key_up {
-            combo_keys.retain(|existing| !existing.eq_ignore_ascii_case(key_name));
+        let (ctrl, alt, shift, win) = quick_key_display_modifier_flags();
+        let mut parts = Vec::<String>::new();
+        if ctrl {
+            parts.push("Ctrl".to_owned());
         }
-        combo_keys.retain(|key| !key.trim().is_empty());
-        combo_keys.sort_by(|a, b| {
-            let rank_a = hotkey_binding_rank(a);
-            let rank_b = hotkey_binding_rank(b);
-            rank_a
-                .cmp(&rank_b)
-                .then_with(|| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()))
-        });
-        combo_keys.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-        if combo_keys.is_empty() {
-            return None;
+        if alt {
+            parts.push("Alt".to_owned());
         }
-
-        let key = combo_keys
-            .iter()
-            .rev()
-            .find(|key| !hotkey::is_modifier_key_name(key))
-            .cloned()
-            .or_else(|| combo_keys.last().cloned())
-            .unwrap_or_default();
-        let binding = HotkeyBinding {
-            ctrl: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Ctrl")),
-            alt: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Alt")),
-            shift: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Shift")),
-            win: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Win")),
-            key,
-            combo_keys,
-        };
-        let labels = hotkey::binding_key_names(&binding)
-            .into_iter()
-            .map(|key| quick_key_display_label(&key))
-            .collect::<Vec<_>>();
-        if labels.is_empty() {
+        if shift {
+            parts.push("Shift".to_owned());
+        }
+        if win {
+            parts.push("Win".to_owned());
+        }
+        parts.push(quick_key_display_label(key_name));
+        if parts.is_empty() {
             None
         } else {
-            Some(labels.join("+"))
+            Some(parts.join(" + "))
         }
     }
 
-    fn push_quick_key_display_entry(runtime: &mut Runtime, text: String) {
-        const QUICK_KEY_DISPLAY_MAX_ENTRIES: usize = 4;
+    fn quick_key_display_release_expired_entries(runtime: &mut Runtime, now: Instant) {
+        runtime.quick_key_display_entries.retain(|entry| {
+            entry.held || entry.hide_at > now
+        });
+    }
 
-        let should_append_duplicate = runtime.quick_key_display_hide_at.is_some();
-        match runtime.quick_key_display_entries.last_mut() {
-            Some(last) => {
-                let (last_base, last_count) = quick_key_display_entry_base_and_count(last);
-                if last_base.eq_ignore_ascii_case(&text) {
-                    *last = quick_key_display_format_entry(&text, last_count.saturating_add(1));
-                } else if !should_append_duplicate
-                    && quick_key_display_should_replace(&last_base, &text)
-                {
-                    *last = quick_key_display_format_entry(&text, 1);
-                } else {
-                    runtime
-                        .quick_key_display_entries
-                        .push(quick_key_display_format_entry(&text, 1));
-                    if runtime.quick_key_display_entries.len() > QUICK_KEY_DISPLAY_MAX_ENTRIES {
-                        let drop_count = runtime.quick_key_display_entries.len()
-                            - QUICK_KEY_DISPLAY_MAX_ENTRIES;
-                        runtime.quick_key_display_entries.drain(0..drop_count);
-                    }
-                }
-            }
-            _ => {
-                runtime
-                    .quick_key_display_entries
-                    .push(quick_key_display_format_entry(&text, 1));
-                if runtime.quick_key_display_entries.len() > QUICK_KEY_DISPLAY_MAX_ENTRIES {
-                    let drop_count =
-                        runtime.quick_key_display_entries.len() - QUICK_KEY_DISPLAY_MAX_ENTRIES;
-                    runtime.quick_key_display_entries.drain(0..drop_count);
-                }
-            }
+    fn quick_key_display_allocate_slot(
+        runtime: &Runtime,
+        lane: QuickKeyDisplayLane,
+        preferred_slot: Option<usize>,
+    ) -> usize {
+        let used_slots = runtime
+            .quick_key_display_entries
+            .iter()
+            .filter(|entry| entry.lane == lane)
+            .map(|entry| entry.slot)
+            .collect::<HashSet<_>>();
+        if let Some(slot) = preferred_slot
+            && !used_slots.contains(&slot)
+        {
+            return slot;
+        }
+        let mut slot = 0usize;
+        while used_slots.contains(&slot) {
+            slot = slot.saturating_add(1);
+        }
+        slot
+    }
+
+    fn quick_key_display_press_entry(
+        runtime: &mut Runtime,
+        text: String,
+        identity: String,
+        lane: QuickKeyDisplayLane,
+        held: bool,
+    ) {
+        let now = Instant::now();
+        quick_key_display_release_expired_entries(runtime, now);
+
+        let existing_slot = runtime
+            .quick_key_display_entries
+            .iter()
+            .find(|entry| entry.identity == identity)
+            .map(|entry| entry.slot);
+        runtime
+            .quick_key_display_entries
+            .retain(|entry| entry.identity != identity);
+
+        let preferred_slot = existing_slot.or_else(|| {
+            runtime
+                .quick_key_display_slot_memory
+                .get(&identity)
+                .copied()
+        });
+        let slot = quick_key_display_allocate_slot(runtime, lane, preferred_slot);
+        runtime
+            .quick_key_display_slot_memory
+            .insert(identity.clone(), slot);
+        runtime.quick_key_display_entries.push(QuickKeyDisplayEntry {
+            text,
+            identity,
+            lane,
+            slot,
+            held,
+            hide_at: now + QUICK_KEY_DISPLAY_DISPLAY_DURATION,
+        });
+    }
+
+    fn quick_key_display_release_entry(runtime: &mut Runtime, identity: &str) {
+        let now = Instant::now();
+        if let Some(entry) = runtime
+            .quick_key_display_entries
+            .iter_mut()
+            .find(|entry| entry.identity == identity)
+        {
+            entry.held = false;
+            entry.hide_at = entry
+                .hide_at
+                .max(now + QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION);
         }
     }
 
@@ -4972,27 +5026,56 @@ mod windows_overlay {
             .max((cap_height as f32 * 0.92).round()) as i32
     }
 
-    fn quick_key_display_layout_size(entries: &[String], font_size: f32) -> (i32, i32) {
+    fn quick_key_display_entry_width(label: &str, font_size: f32, cap_height: i32) -> i32 {
+        let parts = quick_key_display_parts(label);
+        let combo_gap = (font_size * 0.14).round().max(4.0) as i32;
+        let plus_width = (font_size * 0.48).round().max(10.0) as i32;
+        let mut width = 0i32;
+        for (part_index, part) in parts.iter().enumerate() {
+            width += quick_key_display_keycap_width(part, font_size, cap_height);
+            if part_index + 1 < parts.len() {
+                width += combo_gap * 2 + plus_width;
+            }
+        }
+        width
+    }
+
+    fn quick_key_display_layout_size(entries: &[QuickKeyDisplayEntry], font_size: f32) -> (i32, i32) {
         let cap_height = (font_size * 1.12 + 18.0).round().max(44.0) as i32;
         let outer_pad_x = (font_size * 0.46).round().max(16.0) as i32;
         let outer_pad_y = (font_size * 0.34).round().max(10.0) as i32;
-        let combo_gap = (font_size * 0.14).round().max(4.0) as i32;
-        let plus_width = (font_size * 0.48).round().max(10.0) as i32;
         let entry_gap = (font_size * 0.52).round().max(18.0) as i32;
+        let barrier_gap = (font_size * 0.62).round().max(20.0) as i32;
+        let keyboard = entries
+            .iter()
+            .filter(|entry| entry.lane == QuickKeyDisplayLane::Keyboard)
+            .collect::<Vec<_>>();
+        let mouse = entries
+            .iter()
+            .filter(|entry| entry.lane == QuickKeyDisplayLane::Mouse)
+            .collect::<Vec<_>>();
 
-        let mut width = outer_pad_x * 2;
-        for (entry_index, entry) in entries.iter().enumerate() {
-            let parts = quick_key_display_parts(entry);
-            for (part_index, part) in parts.iter().enumerate() {
-                width += quick_key_display_keycap_width(part, font_size, cap_height);
-                if part_index + 1 < parts.len() {
-                    width += combo_gap * 2 + plus_width;
-                }
-            }
-            if entry_index + 1 < entries.len() {
-                width += entry_gap;
-            }
-        }
+        let lane_width = |lane_entries: &[&QuickKeyDisplayEntry]| -> i32 {
+            lane_entries
+                .iter()
+                .enumerate()
+                .fold(0, |acc, (index, entry)| {
+                    acc + quick_key_display_entry_width(&entry.text, font_size, cap_height)
+                        + if index + 1 < lane_entries.len() {
+                            entry_gap
+                        } else {
+                            0
+                        }
+                })
+        };
+        let keyboard_width = lane_width(&keyboard);
+        let mouse_width = lane_width(&mouse);
+        let center_gap = if keyboard_width > 0 && mouse_width > 0 {
+            barrier_gap
+        } else {
+            0
+        };
+        let width = outer_pad_x * 2 + keyboard_width + center_gap + mouse_width;
 
         let height = cap_height + outer_pad_y * 2 + 6;
         (width.max(cap_height), height.max(cap_height))
@@ -5039,14 +5122,30 @@ mod windows_overlay {
     }
 
     fn update_quick_key_display_key(key_name: &str, is_key_down: bool, is_key_up: bool) {
-        let display = if is_key_down {
-            quick_key_display_text_for_event(key_name, is_key_down, false)
-        } else if is_key_up {
-            None
-        } else {
-            quick_key_display_text_for_event(key_name, is_key_down, is_key_up)
-        };
-        send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(display));
+        if is_key_down {
+            if let (Some(text), Some(identity)) = (
+                quick_key_display_text_for_key_name(key_name),
+                quick_key_display_identity_for_key_name(key_name),
+            ) {
+                send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(
+                    QuickKeyDisplayUpdate::Press {
+                        text,
+                        identity,
+                        lane: quick_key_display_lane_for_key_name(key_name),
+                        held: !quick_key_display_is_wheel_key_name(key_name),
+                    },
+                ));
+            }
+            return;
+        }
+
+        if is_key_up
+            && let Some(identity) = quick_key_display_identity_for_key_name(key_name)
+        {
+            send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(
+                QuickKeyDisplayUpdate::Release { identity },
+            ));
+        }
     }
 
     fn screen_draw_capture_should_swallow_binding(binding: &HotkeyBinding) -> bool {
@@ -5562,29 +5661,32 @@ mod windows_overlay {
                     runtime.quick_key_display_size = size.clamp(18.0, 96.0);
                     if !enabled {
                         runtime.quick_key_display_entries.clear();
-                        runtime.quick_key_display_hide_at = None;
+                        runtime.quick_key_display_slot_memory.clear();
                     }
                     let _ = refresh_quick_key_display(runtime);
                 }
 
-                OverlayCommand::ShowQuickKeyDisplay(text) => {
-                    match text.and_then(|value| {
-                        let trimmed = value.trim();
-                        if trimmed.is_empty() {
-                            None
-                        } else {
-                            Some(trimmed.to_owned())
-                        }
-                    }) {
-                        Some(text) => {
-                            push_quick_key_display_entry(runtime, text);
-                            runtime.quick_key_display_hide_at = None;
-                        }
-                        None => {
-                            if !runtime.quick_key_display_entries.is_empty() {
-                                runtime.quick_key_display_hide_at =
-                                    Some(Instant::now() + QUICK_KEY_DISPLAY_HIDE_DELAY);
+                OverlayCommand::ShowQuickKeyDisplay(update) => {
+                    match update {
+                        QuickKeyDisplayUpdate::Press {
+                            text,
+                            identity,
+                            lane,
+                            held,
+                        } => {
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                quick_key_display_press_entry(
+                                    runtime,
+                                    trimmed.to_owned(),
+                                    identity,
+                                    lane,
+                                    held,
+                                );
                             }
+                        }
+                        QuickKeyDisplayUpdate::Release { identity } => {
+                            quick_key_display_release_entry(runtime, &identity);
                         }
                     }
                     let _ = refresh_quick_key_display(runtime);
@@ -5955,17 +6057,11 @@ mod windows_overlay {
     fn refresh_quick_key_display(runtime: &mut Runtime) -> Result<()> {
         if is_ui_in_foreground() || !runtime.quick_key_display_enabled {
             runtime.quick_key_display_entries.clear();
-            runtime.quick_key_display_hide_at = None;
             let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
             return Ok(());
         }
 
-        if let Some(hide_at) = runtime.quick_key_display_hide_at
-            && Instant::now() >= hide_at
-        {
-            runtime.quick_key_display_entries.clear();
-            runtime.quick_key_display_hide_at = None;
-        }
+        quick_key_display_release_expired_entries(runtime, Instant::now());
 
         if runtime.quick_key_display_entries.is_empty() {
             let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
@@ -7838,8 +7934,7 @@ mod windows_overlay {
         }
 
         if runtime.quick_key_display_enabled
-            && (!runtime.quick_key_display_entries.is_empty()
-                || runtime.quick_key_display_hide_at.is_some())
+            && !runtime.quick_key_display_entries.is_empty()
         {
             return 33;
         }
@@ -7878,7 +7973,8 @@ mod windows_overlay {
 
     const DWM_COLOR_DEFAULT: u32 = 0xFFFF_FFFF;
     const FOCUS_HIGHLIGHT_BORDER_COLOR: u32 = 0x00B6_E07E;
-    const QUICK_KEY_DISPLAY_HIDE_DELAY: Duration = Duration::from_millis(700);
+    const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(1200);
+    const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(340);
 
     unsafe fn set_native_border_color(hwnd: HWND, color: u32) -> bool {
         if hwnd.0.is_null() {
@@ -9393,7 +9489,7 @@ mod windows_overlay {
 
     unsafe fn paint_quick_key_display(
         hwnd: HWND,
-        entries: &[String],
+        entries: &[QuickKeyDisplayEntry],
         font_size: f32,
         window_x: i32,
         window_y: i32,
@@ -9441,14 +9537,49 @@ mod windows_overlay {
         let combo_gap = (font_size * 0.14).round().max(4.0) as i32;
         let plus_width = (font_size * 0.48).round().max(10.0) as i32;
         let entry_gap = (font_size * 0.52).round().max(18.0) as i32;
+        let barrier_gap = (font_size * 0.62).round().max(20.0) as i32;
+
+        let mut keyboard_entries = entries
+            .iter()
+            .filter(|entry| entry.lane == QuickKeyDisplayLane::Keyboard)
+            .collect::<Vec<_>>();
+        keyboard_entries.sort_by_key(|entry| entry.slot);
+
+        let mut mouse_entries = entries
+            .iter()
+            .filter(|entry| entry.lane == QuickKeyDisplayLane::Mouse)
+            .collect::<Vec<_>>();
+        mouse_entries.sort_by_key(|entry| entry.slot);
+
+        let lane_width = |lane_entries: &[&QuickKeyDisplayEntry]| -> i32 {
+            lane_entries
+                .iter()
+                .enumerate()
+                .fold(0, |acc, (index, entry)| {
+                    acc + quick_key_display_entry_width(&entry.text, font_size, cap_height)
+                        + if index + 1 < lane_entries.len() {
+                            entry_gap
+                        } else {
+                            0
+                        }
+                })
+        };
+        let keyboard_width = lane_width(&keyboard_entries);
+        let mouse_width = lane_width(&mouse_entries);
+        let center_gap = if keyboard_width > 0 && mouse_width > 0 {
+            barrier_gap
+        } else {
+            0
+        };
 
         let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
-        let mut cursor_x = outer_pad_x;
         let cap_y = outer_pad_y;
-        let entry_count = entries.len().max(1) as f32;
-        for (entry_index, entry) in entries.iter().enumerate() {
-            let alpha_scale = 0.56 + (((entry_index + 1) as f32 / entry_count) * 0.44);
-            let parts = quick_key_display_parts(entry);
+        let keyboard_right_edge = outer_pad_x + keyboard_width;
+        let mouse_left_edge = outer_pad_x + keyboard_width + center_gap;
+
+        let mut draw_entry = |entry: &QuickKeyDisplayEntry, entry_left: i32, alpha_scale: f32| {
+            let mut cursor_x = entry_left;
+            let parts = quick_key_display_parts(&entry.text);
             for (part_index, part) in parts.iter().enumerate() {
                 let palette = quick_key_display_palette(part);
                 let (base_fill, inner_fill, border, text_color) =
@@ -9548,9 +9679,25 @@ mod windows_overlay {
                     cursor_x += plus_width + combo_gap;
                 }
             }
-            if entry_index + 1 < entries.len() {
-                cursor_x += entry_gap;
-            }
+        };
+
+        let keyboard_count = keyboard_entries.len().max(1) as f32;
+        let mut cursor_right = keyboard_right_edge;
+        for (entry_index, entry) in keyboard_entries.iter().enumerate() {
+            let alpha_scale = 0.56 + (((entry_index + 1) as f32 / keyboard_count) * 0.44);
+            let entry_width = quick_key_display_entry_width(&entry.text, font_size, cap_height);
+            let entry_left = cursor_right - entry_width;
+            draw_entry(entry, entry_left, alpha_scale);
+            cursor_right = entry_left - entry_gap;
+        }
+
+        let mouse_count = mouse_entries.len().max(1) as f32;
+        let mut cursor_left = mouse_left_edge;
+        for (entry_index, entry) in mouse_entries.iter().enumerate() {
+            let alpha_scale = 0.56 + (((entry_index + 1) as f32 / mouse_count) * 0.44);
+            draw_entry(entry, cursor_left, alpha_scale);
+            cursor_left += quick_key_display_entry_width(&entry.text, font_size, cap_height)
+                + entry_gap;
         }
 
         let pixmap_data = pixmap.data();
@@ -19837,6 +19984,26 @@ mod fallback {
         },
         storage::AppPaths,
     };
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum QuickKeyDisplayLane {
+        Keyboard,
+        Mouse,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum QuickKeyDisplayUpdate {
+        Press {
+            text: String,
+            identity: String,
+            lane: QuickKeyDisplayLane,
+            held: bool,
+        },
+        Release {
+            identity: String,
+        },
+    }
+
     #[derive(Debug, Clone)]
     pub enum OverlayCommand {
         Update(CrosshairStyle),
@@ -19873,7 +20040,7 @@ mod fallback {
             center_y: i32,
             size: f32,
         },
-        ShowQuickKeyDisplay(Option<String>),
+        ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
             enabled: bool,
             trigger: Option<HotkeyBinding>,
