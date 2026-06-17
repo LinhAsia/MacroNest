@@ -5752,6 +5752,7 @@ mod windows_overlay {
             let _ = paint_screen_draw_overlay(hwnd);
         } else {
             set_screen_draw_refresh_timer(hwnd, false);
+            let _ = clear_screen_draw_overlay_window(hwnd);
             let _ = ShowWindow(hwnd, SW_HIDE);
         }
     }
@@ -5897,6 +5898,57 @@ mod windows_overlay {
         state.surface_bits_len = 0;
         state.surface_width = 0;
         state.surface_height = 0;
+    }
+
+    unsafe fn clear_screen_draw_overlay_window(hwnd: HWND) -> Result<()> {
+        let screen_dc = GetDC(None);
+        let mem_dc = CreateCompatibleDC(Some(screen_dc));
+        let bitmap_info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: 1,
+                biHeight: -1,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits_ptr: *mut c_void = null_mut();
+        let bitmap = CreateDIBSection(
+            Some(mem_dc),
+            &bitmap_info,
+            DIB_RGB_COLORS,
+            &mut bits_ptr,
+            None,
+            0,
+        )?;
+        let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
+        let pixels = std::slice::from_raw_parts_mut(bits_ptr as *mut u8, 4);
+        pixels.fill(0);
+        let blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: AC_SRC_ALPHA as u8,
+        };
+        let _ = UpdateLayeredWindow(
+            hwnd,
+            Some(screen_dc),
+            Some(&POINT { x: 0, y: 0 }),
+            Some(&SIZE { cx: 1, cy: 1 }),
+            Some(mem_dc),
+            Some(&POINT { x: 0, y: 0 }),
+            COLORREF(0),
+            Some(&blend),
+            ULW_ALPHA,
+        );
+        let _ = SelectObject(mem_dc, old_bitmap);
+        let _ = DeleteObject(HGDIOBJ(bitmap.0));
+        let _ = DeleteDC(mem_dc);
+        let _ = ReleaseDC(None, screen_dc);
+        Ok(())
     }
 
     fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
@@ -6437,6 +6489,25 @@ mod windows_overlay {
         {
             render_screen_draw_stroke_skia(&mut pixmap, &stroke);
         }
+        let toolbar_x = state_guard.toolbar_x;
+        let toolbar_y = state_guard.toolbar_y;
+        let toolbar_color = state_guard.color;
+        let toolbar_brush_size = state_guard.brush_size;
+        let toolbar_eraser = state_guard.eraser;
+        let toolbar_smoothing = state_guard.smoothing;
+        let toolbar_smoothing_amount = state_guard.smoothing_amount;
+        draw_screen_draw_toolbar_rgba(
+            state_guard.frame_rgba.as_mut_slice(),
+            width,
+            height,
+            toolbar_x,
+            toolbar_y,
+            toolbar_color,
+            toolbar_brush_size,
+            toolbar_eraser,
+            toolbar_smoothing,
+            toolbar_smoothing_amount,
+        );
 
         let _ = SetWindowPos(
             hwnd,
@@ -6445,7 +6516,7 @@ mod windows_overlay {
             screen_y,
             screen_w,
             screen_h,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            SWP_NOACTIVATE,
         );
 
         let screen_dc = GetDC(None);
@@ -6459,7 +6530,6 @@ mod windows_overlay {
             width,
             dirty_rect,
         );
-        draw_screen_draw_toolbar(pixels, width, height, &state_guard);
         let surface_dc = HDC(state_guard.surface_dc as *mut c_void);
         state_guard.pending_repaint = false;
         state_guard.last_present_at = Some(Instant::now());
@@ -6529,371 +6599,168 @@ mod windows_overlay {
         filtered
     }
 
-    fn draw_screen_draw_line(
-        pixels: &mut [u8],
-        width: usize,
-        height: usize,
-        from: POINT,
-        to: POINT,
-        color: RgbaColor,
-        size: f32,
-        eraser: bool,
-    ) {
-        let dx = to.x - from.x;
-        let dy = to.y - from.y;
-        let steps = dx.abs().max(dy.abs()).max(1);
-        for step in 0..=steps {
-            let t = step as f32 / steps as f32;
-            let x = from.x as f32 + dx as f32 * t;
-            let y = from.y as f32 + dy as f32 * t;
-            draw_screen_draw_circle(
-                pixels,
-                width,
-                height,
-                x.round() as i32,
-                y.round() as i32,
-                size,
-                color,
-                eraser,
-            );
-        }
-    }
-
-    fn draw_screen_draw_circle(
-        pixels: &mut [u8],
-        width: usize,
-        height: usize,
-        cx: i32,
-        cy: i32,
-        size: f32,
-        color: RgbaColor,
-        eraser: bool,
-    ) {
-        let radius = (size.max(1.0) / 2.0).ceil() as i32;
-        let radius_sq = radius * radius;
-        for y in (cy - radius).max(0)..=(cy + radius).min(height as i32 - 1) {
-            for x in (cx - radius).max(0)..=(cx + radius).min(width as i32 - 1) {
-                let dx = x - cx;
-                let dy = y - cy;
-                if dx * dx + dy * dy <= radius_sq {
-                    let index = ((y as usize * width) + x as usize) * 4;
-                    if eraser {
-                        pixels[index] = 0;
-                        pixels[index + 1] = 0;
-                        pixels[index + 2] = 0;
-                        pixels[index + 3] = 0;
-                    } else {
-                        blend_screen_draw_pixel(&mut pixels[index..index + 4], color);
-                    }
-                }
-            }
-        }
-    }
-
-    fn blend_screen_draw_pixel(dst: &mut [u8], color: RgbaColor) {
-        let src_a = color.a as u32;
-        let inv_a = 255 - src_a;
-        let src_b = (color.b as u32 * src_a) / 255;
-        let src_g = (color.g as u32 * src_a) / 255;
-        let src_r = (color.r as u32 * src_a) / 255;
-        dst[0] = (src_b + (dst[0] as u32 * inv_a) / 255).min(255) as u8;
-        dst[1] = (src_g + (dst[1] as u32 * inv_a) / 255).min(255) as u8;
-        dst[2] = (src_r + (dst[2] as u32 * inv_a) / 255).min(255) as u8;
-        dst[3] = (src_a + (dst[3] as u32 * inv_a) / 255).min(255) as u8;
-    }
-
-    fn draw_screen_draw_toolbar(
-        pixels: &mut [u8],
-        width: usize,
-        height: usize,
-        state: &ScreenDrawState,
-    ) {
-        let x = state.toolbar_x;
-        let y = state.toolbar_y;
-        fill_screen_draw_rounded_rect(
-            pixels,
-            width,
-            height,
-            x + 2,
-            y + 4,
-            332,
-            72,
-            16,
-            RgbaColor { r: 0, g: 0, b: 0, a: 72 },
-        );
-        fill_screen_draw_rounded_rect(
-            pixels,
-            width,
-            height,
-            x,
-            y,
-            332,
-            72,
-            16,
-            RgbaColor { r: 28, g: 36, b: 48, a: 232 },
-        );
-        fill_screen_draw_rounded_rect(
-            pixels,
-            width,
-            height,
-            x + 1,
-            y + 1,
-            330,
-            26,
-            15,
-            RgbaColor { r: 255, g: 255, b: 255, a: 12 },
-        );
-        fill_screen_draw_rounded_rect(
-            pixels,
-            width,
-            height,
-            x + 294,
-            y + 10,
-            26,
-            20,
-            8,
-            RgbaColor { r: 82, g: 96, b: 120, a: 214 },
-        );
-        draw_screen_draw_line(
-            pixels,
-            width,
-            height,
-            POINT { x: x + 301, y: y + 16 },
-            POINT { x: x + 313, y: y + 24 },
-            RgbaColor::WHITE,
-            2.0,
-            false,
-        );
-        draw_screen_draw_line(
-            pixels,
-            width,
-            height,
-            POINT { x: x + 313, y: y + 16 },
-            POINT { x: x + 301, y: y + 24 },
-            RgbaColor::WHITE,
-            2.0,
-            false,
-        );
-        fill_screen_draw_rounded_rect(
-            pixels,
-            width,
-            height,
-            x + 14,
-            y + 20,
-            36,
-            36,
-            10,
-            state.color,
-        );
-        fill_screen_draw_rounded_rect(
-            pixels,
-            width,
-            height,
-            x + 13,
-            y + 19,
-            38,
-            38,
-            11,
-            RgbaColor { r: 236, g: 244, b: 255, a: 84 },
-        );
-        fill_screen_draw_rounded_rect(
-            pixels,
-            width,
-            height,
-            x + 15,
-            y + 21,
-            34,
-            34,
-            10,
-            state.color,
-        );
-
-        draw_screen_draw_slider(
-            pixels,
-            width,
-            height,
-            x + 68,
-            y + 38,
-            90,
-            ((state.brush_size - 2.0) / 78.0).clamp(0.0, 1.0),
-        );
-
-        let eraser_fill = if state.eraser {
-            RgbaColor { r: 100, g: 188, b: 156, a: 255 }
-        } else {
-            RgbaColor { r: 76, g: 90, b: 112, a: 220 }
-        };
-        fill_screen_draw_rounded_rect(pixels, width, height, x + 172, y + 20, 36, 36, 10, eraser_fill);
-        draw_screen_draw_line(
-            pixels,
-            width,
-            height,
-            POINT { x: x + 180, y: y + 46 },
-            POINT { x: x + 200, y: y + 30 },
-            RgbaColor::WHITE,
-            3.0,
-            false,
-        );
-
-        let smooth_fill = if state.smoothing {
-            RgbaColor { r: 100, g: 188, b: 156, a: 255 }
-        } else {
-            RgbaColor { r: 76, g: 90, b: 112, a: 220 }
-        };
-        fill_screen_draw_rounded_rect(pixels, width, height, x + 224, y + 24, 28, 28, 8, smooth_fill);
-        if state.smoothing {
-            draw_screen_draw_line(
-                pixels,
-                width,
-                height,
-                POINT { x: x + 230, y: y + 38 },
-                POINT { x: x + 237, y: y + 45 },
-                RgbaColor::WHITE,
-                2.0,
-                false,
-            );
-            draw_screen_draw_line(
-                pixels,
-                width,
-                height,
-                POINT { x: x + 237, y: y + 45 },
-                POINT { x: x + 247, y: y + 31 },
-                RgbaColor::WHITE,
-                2.0,
-                false,
-            );
-        }
-
-        draw_screen_draw_slider(
-            pixels,
-            width,
-            height,
-            x + 264,
-            y + 38,
-            54,
-            state.smoothing_amount.clamp(0.0, 1.0),
-        );
-    }
-
-    fn draw_screen_draw_slider(
-        pixels: &mut [u8],
-        width: usize,
-        height: usize,
-        x: i32,
-        y: i32,
-        slider_width: i32,
+    fn draw_screen_draw_slider_skia(
+        pixmap: &mut tiny_skia::Pixmap,
+        x: f32,
+        y: f32,
+        slider_width: f32,
         value: f32,
     ) {
-        fill_screen_draw_rounded_rect(
-            pixels,
-            width,
-            height,
+        fill_skia_rounded_rect(
+            pixmap,
             x,
-            y - 3,
+            y - 3.0,
             slider_width,
-            6,
-            3,
-            RgbaColor { r: 90, g: 108, b: 132, a: 224 },
+            6.0,
+            3.0,
+            [90, 108, 132, 224],
         );
-        fill_screen_draw_rounded_rect(
-            pixels,
-            width,
-            height,
+        fill_skia_rounded_rect(
+            pixmap,
             x,
-            y - 3,
-            (value.clamp(0.0, 1.0) * slider_width as f32).round() as i32,
-            6,
-            3,
-            RgbaColor { r: 120, g: 214, b: 176, a: 224 },
+            y - 3.0,
+            value.clamp(0.0, 1.0) * slider_width,
+            6.0,
+            3.0,
+            [120, 214, 176, 224],
         );
-        let knob_x = x + (value.clamp(0.0, 1.0) * slider_width as f32).round() as i32;
-        draw_screen_draw_circle(
-            pixels,
-            width,
-            height,
-            knob_x,
-            y,
-            12.0,
-            RgbaColor {
-                r: 244,
-                g: 248,
-                b: 255,
-                a: 255,
-            },
-            false,
-        );
+        let knob_x = x + value.clamp(0.0, 1.0) * slider_width;
+        draw_skia_circle_fill(pixmap, knob_x, y, 11.0, [244, 248, 255, 255]);
+        draw_skia_circle_outline(pixmap, knob_x, y, 11.0, [255, 255, 255, 66], 1.0);
+        draw_skia_circle_fill(pixmap, knob_x, y, 4.0, [64, 84, 108, 140]);
     }
 
-    fn fill_screen_draw_rounded_rect(
+    fn draw_screen_draw_toolbar_rgba(
         pixels: &mut [u8],
         width: usize,
         height: usize,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
-        radius: i32,
+        toolbar_x: i32,
+        toolbar_y: i32,
         color: RgbaColor,
+        brush_size: f32,
+        eraser: bool,
+        smoothing: bool,
+        smoothing_amount: f32,
     ) {
-        let radius = radius.max(0);
-        let inner_left = x + radius;
-        let inner_right = x + w - radius - 1;
-        let inner_top = y + radius;
-        let inner_bottom = y + h - radius - 1;
-        for py in y.max(0)..(y + h).min(height as i32) {
-            for px in x.max(0)..(x + w).min(width as i32) {
-                let inside = if radius <= 0
-                    || (px >= inner_left && px <= inner_right)
-                    || (py >= inner_top && py <= inner_bottom)
-                {
-                    true
-                } else {
-                    let corner_x = if px < inner_left { inner_left } else { inner_right };
-                    let corner_y = if py < inner_top { inner_top } else { inner_bottom };
-                    let dx = px - corner_x;
-                    let dy = py - corner_y;
-                    dx * dx + dy * dy <= radius * radius
-                };
-                if inside {
-                    let index = ((py as usize * width) + px as usize) * 4;
-                    blend_screen_draw_pixel(&mut pixels[index..index + 4], color);
+        let toolbar_w = 332usize;
+        let toolbar_h = 72usize;
+        let mut pixmap = match tiny_skia::Pixmap::new(toolbar_w as u32, toolbar_h as u32) {
+            Some(pixmap) => pixmap,
+            None => return,
+        };
+
+        fill_skia_rounded_rect(&mut pixmap, 2.0, 4.0, 328.0, 68.0, 16.0, [0, 0, 0, 72]);
+        fill_skia_rounded_rect(&mut pixmap, 0.0, 0.0, 332.0, 72.0, 16.0, [28, 36, 48, 232]);
+        fill_skia_rounded_rect(&mut pixmap, 1.0, 1.0, 330.0, 26.0, 15.0, [255, 255, 255, 12]);
+        stroke_skia_rounded_rect(&mut pixmap, 0.5, 0.5, 331.0, 71.0, 16.0, 1.0, [220, 232, 248, 32]);
+
+        fill_skia_rounded_rect(&mut pixmap, 294.0, 10.0, 26.0, 20.0, 8.0, [82, 96, 120, 214]);
+        draw_skia_line(&mut pixmap, 301.0, 16.0, 313.0, 24.0, [255, 255, 255, 255], 2.0);
+        draw_skia_line(&mut pixmap, 313.0, 16.0, 301.0, 24.0, [255, 255, 255, 255], 2.0);
+
+        fill_skia_rounded_rect(&mut pixmap, 13.0, 19.0, 38.0, 38.0, 11.0, [236, 244, 255, 84]);
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            15.0,
+            21.0,
+            34.0,
+            34.0,
+            10.0,
+            [color.r, color.g, color.b, color.a],
+        );
+        stroke_skia_rounded_rect(&mut pixmap, 14.5, 20.5, 35.0, 35.0, 10.0, 1.0, [255, 255, 255, 48]);
+
+        draw_screen_draw_slider_skia(
+            &mut pixmap,
+            68.0,
+            38.0,
+            90.0,
+            ((brush_size - 2.0) / 78.0).clamp(0.0, 1.0),
+        );
+
+        let eraser_fill = if eraser {
+            [100, 188, 156, 255]
+        } else {
+            [76, 90, 112, 220]
+        };
+        fill_skia_rounded_rect(&mut pixmap, 172.0, 20.0, 36.0, 36.0, 10.0, eraser_fill);
+        stroke_skia_rounded_rect(&mut pixmap, 172.5, 20.5, 35.0, 35.0, 10.0, 1.0, [255, 255, 255, 34]);
+        {
+            let mut pb = tiny_skia::PathBuilder::new();
+            pb.move_to(182.0, 42.0);
+            pb.line_to(194.0, 30.0);
+            pb.line_to(201.0, 37.0);
+            pb.line_to(189.0, 49.0);
+            pb.close();
+            if let Some(path) = pb.finish() {
+                let mut paint = tiny_skia::Paint::default();
+                paint.set_color(tiny_skia::Color::from_rgba8(255, 255, 255, 248));
+                paint.anti_alias = true;
+                pixmap.fill_path(
+                    &path,
+                    &paint,
+                    tiny_skia::FillRule::Winding,
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
+            }
+        }
+        draw_skia_line(&mut pixmap, 186.0, 45.0, 196.0, 45.0, [62, 74, 92, 255], 2.0);
+
+        let smooth_fill = if smoothing {
+            [100, 188, 156, 255]
+        } else {
+            [76, 90, 112, 220]
+        };
+        fill_skia_rounded_rect(&mut pixmap, 224.0, 24.0, 28.0, 28.0, 8.0, smooth_fill);
+        stroke_skia_rounded_rect(&mut pixmap, 224.5, 24.5, 27.0, 27.0, 8.0, 1.0, [255, 255, 255, 34]);
+        if smoothing {
+            draw_skia_line(&mut pixmap, 230.0, 38.0, 237.0, 45.0, [255, 255, 255, 255], 2.0);
+            draw_skia_line(&mut pixmap, 237.0, 45.0, 247.0, 31.0, [255, 255, 255, 255], 2.0);
+        } else {
+            draw_skia_line(&mut pixmap, 230.0, 40.0, 246.0, 34.0, [255, 255, 255, 210], 2.0);
+            draw_skia_line(&mut pixmap, 230.0, 36.0, 246.0, 40.0, [255, 255, 255, 160], 1.4);
+        }
+
+        draw_screen_draw_slider_skia(
+            &mut pixmap,
+            264.0,
+            38.0,
+            54.0,
+            smoothing_amount.clamp(0.0, 1.0),
+        );
+
+        let data = pixmap.data();
+        let base_x = toolbar_x.max(0) as usize;
+        let base_y = toolbar_y.max(0) as usize;
+        for py in 0..toolbar_h {
+            let dst_y = base_y + py;
+            if dst_y >= height {
+                break;
+            }
+            for px in 0..toolbar_w {
+                let dst_x = base_x + px;
+                if dst_x >= width {
+                    break;
                 }
+                let src_offset = (py * toolbar_w + px) * 4;
+                let src_r = data[src_offset];
+                let src_g = data[src_offset + 1];
+                let src_b = data[src_offset + 2];
+                let src_a = data[src_offset + 3];
+                if src_a == 0 {
+                    continue;
+                }
+                let dst_offset = (dst_y * width + dst_x) * 4;
+                blend_premultiplied_rgba(
+                    &mut pixels[dst_offset..dst_offset + 4],
+                    src_r,
+                    src_g,
+                    src_b,
+                    src_a,
+                );
             }
         }
-    }
-
-    fn fill_screen_draw_rect(
-        pixels: &mut [u8],
-        width: usize,
-        height: usize,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
-        color: RgbaColor,
-    ) {
-        for py in y.max(0)..(y + h).min(height as i32) {
-            for px in x.max(0)..(x + w).min(width as i32) {
-                let index = ((py as usize * width) + px as usize) * 4;
-                blend_screen_draw_pixel(&mut pixels[index..index + 4], color);
-            }
-        }
-    }
-
-    fn stroke_screen_draw_rect(
-        pixels: &mut [u8],
-        width: usize,
-        height: usize,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
-        color: RgbaColor,
-    ) {
-        fill_screen_draw_rect(pixels, width, height, x, y, w, 2, color);
-        fill_screen_draw_rect(pixels, width, height, x, y + h - 2, w, 2, color);
-        fill_screen_draw_rect(pixels, width, height, x, y, 2, h, color);
-        fill_screen_draw_rect(pixels, width, height, x + w - 2, y, 2, h, color);
     }
 
     fn refresh_mouse_record_trail(runtime: &mut Runtime) -> Result<()> {
@@ -8714,6 +8581,15 @@ mod windows_overlay {
                 None,
             );
         }
+    }
+
+    fn blend_premultiplied_rgba(dst: &mut [u8], src_r: u8, src_g: u8, src_b: u8, src_a: u8) {
+        let inv_alpha = 255u32.saturating_sub(src_a as u32);
+        let dst_a = dst[3] as u32;
+        dst[0] = (src_r as u32 + (dst[0] as u32 * inv_alpha) / 255) as u8;
+        dst[1] = (src_g as u32 + (dst[1] as u32 * inv_alpha) / 255) as u8;
+        dst[2] = (src_b as u32 + (dst[2] as u32 * inv_alpha) / 255) as u8;
+        dst[3] = (src_a as u32 + (dst_a * inv_alpha) / 255).min(255) as u8;
     }
 
     fn blend_premultiplied_bgra(dst: &mut [u8], src_b: u8, src_g: u8, src_r: u8, src_a: u8) {
