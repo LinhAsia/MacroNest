@@ -1313,6 +1313,11 @@ impl CrosshairApp {
         );
     }
 
+    fn current_ocr_language_state(lang_code: &str) -> bool {
+        crate::ocr::clear_available_ocr_languages_cache();
+        crate::ocr::language_tag_matches(&crate::ocr::available_ocr_languages(), lang_code)
+    }
+
     fn ocr_capability_log_path(lang_code: &str, kind: OcrLanguageJobKind) -> Result<PathBuf> {
         let log_dir = std::env::temp_dir().join("MacroNest").join("ocr-logs");
         fs::create_dir_all(&log_dir)?;
@@ -1381,8 +1386,6 @@ impl CrosshairApp {
             }
 
             if started_at.elapsed() >= timeout {
-                let _ = Self::kill_process_tree(powershell_pid);
-                let _ = child.wait();
                 return Ok(124);
             }
 
@@ -1464,6 +1467,7 @@ impl CrosshairApp {
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let cancel_flag_for_job = cancel_flag.clone();
         let job = std::thread::spawn(move || -> Result<bool> {
+            let expect_installed = matches!(kind, OcrLanguageJobKind::Install);
             let mut dism_args = vec!["/Online".to_owned(), dism_action];
             dism_args.extend(capability_args_for_job);
             dism_args.push("/NoRestart".to_owned());
@@ -1475,12 +1479,23 @@ impl CrosshairApp {
                 &cancel_flag_for_job,
             )?;
             if exit_code == 124 {
+                if Self::current_ocr_language_state(&lang_code_for_job) == expect_installed {
+                    return Ok(false);
+                }
+                let action = match kind {
+                    OcrLanguageJobKind::Install => "install",
+                    OcrLanguageJobKind::Uninstall => "removal",
+                };
                 bail!(
-                    "Windows OCR install timed out after 10 minutes. Check the log at {}.",
+                    "Windows OCR {} is still running after 10 minutes. Wait a bit, then press Refresh. Check the log at {}.",
+                    action,
                     log_path_for_job.display()
                 );
             }
             if exit_code != 0 && exit_code != 3010 {
+                if Self::current_ocr_language_state(&lang_code_for_job) == expect_installed {
+                    return Ok(exit_code == 3010);
+                }
                 bail!(
                     "Windows returned exit code {}. Check the log at {}.",
                     exit_code,
@@ -1488,7 +1503,7 @@ impl CrosshairApp {
                 );
             }
 
-            if matches!(kind, OcrLanguageJobKind::Install) {
+            if expect_installed {
                 Self::wait_for_ocr_language_state(
                     &lang_code_for_job,
                     true,
