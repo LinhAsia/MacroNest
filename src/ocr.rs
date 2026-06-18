@@ -1,7 +1,7 @@
-use crate::model::UiLanguage;
 use anyhow::{Result, bail};
-use once_cell::sync::Lazy;
-use parking_lot::Mutex;
+
+pub const OCR_ENGLISH_CODE: &str = "en-US";
+pub const OCR_ENGLISH_LABEL: &str = "English (en-US)";
 
 #[derive(Debug, Clone)]
 pub struct OcrWord {
@@ -19,316 +19,12 @@ pub struct OcrResult {
 }
 
 #[cfg(windows)]
-static AVAILABLE_OCR_LANGUAGES_CACHE: Lazy<Mutex<Option<Vec<String>>>> =
-    Lazy::new(|| Mutex::new(None));
-
-pub const OCR_SUPPORTED_LANGUAGE_CATALOG: &[(&str, &str, &str)] = &[
-    (
-        "en-US",
-        "English (en-US)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "zh-CN",
-        "Chinese Simplified (zh-CN)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "zh-HK",
-        "Chinese Traditional Hong Kong (zh-HK)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "zh-TW",
-        "Chinese Traditional Taiwan (zh-TW)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "ja-JP",
-        "Japanese (ja-JP)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "ko-KR",
-        "Korean (ko-KR)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "de-DE",
-        "German (de-DE)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "fr-FR",
-        "French (fr-FR)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "fr-CA",
-        "French Canada (fr-CA)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "es-ES",
-        "Spanish (es-ES)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "es-MX",
-        "Spanish Mexico (es-MX)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "it-IT",
-        "Italian (it-IT)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "pt-BR",
-        "Portuguese Brazil (pt-BR)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "pt-PT",
-        "Portuguese Portugal (pt-PT)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "ru-RU",
-        "Russian (ru-RU)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "ar-SA",
-        "Arabic (ar-SA)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "bg-BG",
-        "Bulgarian (bg-BG)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "bs-LATN-BA",
-        "Bosnian Latin (bs-LATN-BA)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "cs-CZ",
-        "Czech (cs-CZ)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "da-DK",
-        "Danish (da-DK)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "el-GR",
-        "Greek (el-GR)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "fi-FI",
-        "Finnish (fi-FI)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "hr-HR",
-        "Croatian (hr-HR)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "hu-HU",
-        "Hungarian (hu-HU)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "nb-NO",
-        "Norwegian Bokmal (nb-NO)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "nl-NL",
-        "Dutch (nl-NL)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "pl-PL",
-        "Polish (pl-PL)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "ro-RO",
-        "Romanian (ro-RO)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "sk-SK",
-        "Slovak (sk-SK)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "sl-SI",
-        "Slovenian (sl-SI)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "sr-CYRL-RS",
-        "Serbian Cyrillic (sr-CYRL-RS)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "sr-LATN-RS",
-        "Serbian Latin (sr-LATN-RS)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "sv-SE",
-        "Swedish (sv-SE)",
-        "Install via Windows OCR capabilities",
-    ),
-    (
-        "tr-TR",
-        "Turkish (tr-TR)",
-        "Install via Windows OCR capabilities",
-    ),
-];
-
-#[cfg(windows)]
-pub fn available_ocr_languages() -> Vec<String> {
-    if let Some(cached) = AVAILABLE_OCR_LANGUAGES_CACHE.lock().clone() {
-        return cached;
-    }
-
-    use windows::Media::Ocr::OcrEngine;
-    let languages = match OcrEngine::AvailableRecognizerLanguages() {
-        Ok(langs) => langs
-            .into_iter()
-            .filter_map(|l| l.LanguageTag().ok().map(|t| t.to_string()))
-            .collect(),
-        Err(_) => vec![],
-    };
-
-    *AVAILABLE_OCR_LANGUAGES_CACHE.lock() = Some(languages.clone());
-    languages
-}
-
-#[cfg(windows)]
-pub fn clear_available_ocr_languages_cache() {
-    *AVAILABLE_OCR_LANGUAGES_CACHE.lock() = None;
-}
-
-#[cfg(not(windows))]
-pub fn clear_available_ocr_languages_cache() {}
-
-pub fn ocr_capability_name(lang_code: &str) -> Option<String> {
-    let code = lang_code.trim();
-    if code.is_empty() {
-        None
-    } else {
-        Some(format!("Language.OCR~~~{}~0.0.1.0", code))
-    }
-}
-
-pub fn basic_language_capability_name(lang_code: &str) -> Option<String> {
-    let code = lang_code.trim();
-    if code.is_empty() {
-        None
-    } else {
-        Some(format!("Language.Basic~~~{}~0.0.1.0", code))
-    }
-}
-
-pub fn language_tag_matches(tags: &[String], code: &str) -> bool {
-    fn canonical_language_tag(tag: &str) -> String {
-        let lower = tag.trim().to_lowercase();
-        let parts = lower.split('-').collect::<Vec<_>>();
-        if parts.is_empty() {
-            return lower;
-        }
-        if parts[0] == "zh" {
-            if let Some(region) = parts.iter().rev().find(|part| part.len() == 2) {
-                return format!("zh-{}", region);
-            }
-            if parts.iter().any(|part| *part == "hans") {
-                return "zh-cn".to_owned();
-            }
-            if parts.iter().any(|part| *part == "hant") {
-                return "zh-tw".to_owned();
-            }
-        }
-        lower
-    }
-
-    let code_lower = code.to_lowercase();
-    let canonical_code = canonical_language_tag(&code_lower);
-    tags.iter().any(|tag| {
-        let tag_lower = tag.to_lowercase();
-        let canonical_tag = canonical_language_tag(&tag_lower);
-        tag_lower == code_lower
-            || tag_lower.starts_with(&(code_lower.clone() + "-"))
-            || code_lower.starts_with(&(tag_lower + "-"))
-            || canonical_tag == canonical_code
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::language_tag_matches;
-
-    #[test]
-    fn matches_windows_simplified_chinese_tag() {
-        let tags = vec!["zh-Hans-CN".to_owned()];
-        assert!(language_tag_matches(&tags, "zh-CN"));
-    }
-
-    #[test]
-    fn matches_windows_hong_kong_traditional_chinese_tag() {
-        let tags = vec!["zh-Hant-HK".to_owned()];
-        assert!(language_tag_matches(&tags, "zh-HK"));
-    }
-
-    #[test]
-    fn does_not_cross_match_different_chinese_regions() {
-        let tags = vec!["zh-Hant-HK".to_owned()];
-        assert!(!language_tag_matches(&tags, "zh-CN"));
-    }
-}
-
-#[cfg(not(windows))]
-pub fn available_ocr_languages() -> Vec<String> {
-    vec![]
-}
-
-#[cfg(windows)]
-fn friendly_lang_not_installed_msg(language_code: &str) -> String {
-    let lang_name = match language_code {
-        "en" | "en-US" => "English",
-        "vi" => "Vietnamese",
-        "zh-Hans" => "Simplified Chinese",
-        "zh-Hant" => "Traditional Chinese",
-        "ja" => "Japanese",
-        "ko" => "Korean",
-        "fr" => "French",
-        "de" => "Deutsch (German)",
-        "es" => "Spanish",
-        "ru" => "Russian",
-        "th" => "Thai",
-        other => other,
-    };
-    crate::lang::translate(
-        UiLanguage::Vietnamese,
-        "OCR language '{}' is not installed on Windows.\nGo to Settings -> Time & Language -> Language & Region -> Add a language\nand install the Optional features -> Basic Typing / OCR package for that language.",
-    )
-    .unwrap_or(
-        "OCR language '{}' is not installed on Windows.\nGo to Settings -> Time & Language -> Language & Region -> Add a language\nand install the Optional features -> Basic Typing / OCR package for that language.",
-    )
-    .replace("{}", lang_name)
-}
-
-#[cfg(windows)]
-pub fn perform_ocr(rgba_bytes: &[u8], width: u32, height: u32, lang: &str) -> Result<OcrResult> {
+pub fn perform_ocr(
+    rgba_bytes: &[u8],
+    width: u32,
+    height: u32,
+    _lang: &str,
+) -> Result<OcrResult> {
     use windows::Globalization::Language;
     use windows::Graphics::Imaging::BitmapDecoder;
     use windows::Media::Ocr::OcrEngine;
@@ -344,8 +40,7 @@ pub fn perform_ocr(rgba_bytes: &[u8], width: u32, height: u32, lang: &str) -> Re
     let mut rgba_vec = rgba_bytes.to_vec();
     let mut scale_factor = 1;
 
-    // Windows OCR requires width and height of the image to be at least 40 pixels.
-    // If the captured region is too small, we upscale it to improve detection accuracy.
+    // Windows OCR needs a reasonable minimum image size to produce stable results.
     if w < 120 || h < 120 {
         scale_factor = if w < 40 || h < 40 { 4 } else { 2 };
         let new_w = w * scale_factor;
@@ -361,7 +56,6 @@ pub fn perform_ocr(rgba_bytes: &[u8], width: u32, height: u32, lang: &str) -> Re
         }
     }
 
-    // Convert RGBA to PNG in memory
     let mut png_bytes = Vec::new();
     {
         let mut cursor = std::io::Cursor::new(&mut png_bytes);
@@ -370,65 +64,23 @@ pub fn perform_ocr(rgba_bytes: &[u8], width: u32, height: u32, lang: &str) -> Re
         img.write_to(&mut cursor, image::ImageFormat::Png)?;
     }
 
-    // Create InMemoryRandomAccessStream
     let stream = InMemoryRandomAccessStream::new()?;
     let writer = DataWriter::CreateDataWriter(&stream)?;
     writer.WriteBytes(&png_bytes)?;
     writer.StoreAsync()?.get()?;
     writer.FlushAsync()?.get()?;
-
-    // Seek to beginning of stream
     stream.Seek(0)?;
 
-    // Create SoftwareBitmap via BitmapDecoder
     let decoder = BitmapDecoder::CreateAsync(&stream)?.get()?;
     let bitmap = decoder.GetSoftwareBitmapAsync()?.get()?;
 
-    // Initialize Windows OCR Engine
-    let ocr_engine = if lang.trim().is_empty() {
-        // Try creating from user preferred languages
-        match OcrEngine::TryCreateFromUserProfileLanguages() {
-            Ok(engine) => engine,
-            Err(_) => {
-                // Fallback to English
-                let language = Language::CreateLanguage(&HSTRING::from("en-US"))?;
-                // Check if English is supported before trying
-                if !OcrEngine::IsLanguageSupported(&language).unwrap_or(false) {
-                    bail!(
-                        "No OCR language pack is installed on this Windows system. Please go to Settings → Time & Language → Language & Region to install a language with OCR support."
-                    );
-                }
-                match OcrEngine::TryCreateFromLanguage(&language) {
-                    Ok(engine) => engine,
-                    Err(e) => bail!("Failed to create OCR engine for English: {}", e),
-                }
-            }
-        }
-    } else {
-        let language_code = lang.trim();
-        let language = Language::CreateLanguage(&HSTRING::from(language_code))?;
+    let language = Language::CreateLanguage(&HSTRING::from(OCR_ENGLISH_CODE))?;
+    if !OcrEngine::IsLanguageSupported(&language).unwrap_or(false) {
+        bail!("English OCR is not available on this Windows system.");
+    }
+    let ocr_engine = OcrEngine::TryCreateFromLanguage(&language)?;
 
-        // Check if language pack is installed before trying to create engine
-        if !OcrEngine::IsLanguageSupported(&language).unwrap_or(false) {
-            bail!("{}", friendly_lang_not_installed_msg(language_code));
-        }
-
-        match OcrEngine::TryCreateFromLanguage(&language) {
-            Ok(engine) => engine,
-            Err(e) => {
-                bail!(
-                    "{}\n(Details: {})",
-                    friendly_lang_not_installed_msg(language_code),
-                    e
-                );
-            }
-        }
-    };
-
-    // Recognize text
-    let ocr_result_async = ocr_engine.RecognizeAsync(&bitmap)?;
-    let ocr_result = ocr_result_async.get()?;
-
+    let ocr_result = ocr_engine.RecognizeAsync(&bitmap)?.get()?;
     let text = ocr_result.Text()?.to_string();
     let lines = ocr_result.Lines()?;
     let mut words = Vec::new();

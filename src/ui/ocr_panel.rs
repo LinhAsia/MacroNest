@@ -58,8 +58,6 @@ impl CrosshairApp {
         let mut run_test_preset_id = None;
         let mut preview_toggled_preset_id = None;
         let mut start_ocr_capture_preset_id = None;
-        let mut pending_ocr_language_settings: Option<(String, String)> = None;
-
         // Render card-based presets list
         for index in 0..self.state.ocr_presets.len() {
             let preset = &mut self.state.ocr_presets[index];
@@ -131,93 +129,9 @@ impl CrosshairApp {
                     .spacing([14.0, 8.0])
                     .min_col_width(110.0)
                     .show(ui, |ui| {
-                        // Language Code - Dropdown with popular languages
+                        // Language
                         ui.label(Self::tr_lang(language, "Language", "Language"));
-                        {
-                            let avail_langs = crate::ocr::available_ocr_languages();
-
-                            let current_code = preset.lang.clone().unwrap_or_default();
-                            let current_has_ocr = !current_code.is_empty()
-                                && crate::ocr::language_tag_matches(&avail_langs, &current_code);
-                            let current_label: String = crate::ocr::OCR_SUPPORTED_LANGUAGE_CATALOG
-                                .iter()
-                                .find(|(code, _, _)| {
-                                    crate::ocr::language_tag_matches(
-                                        std::slice::from_ref(&current_code),
-                                        code,
-                                    )
-                                })
-                                .map(|(_, label, _)| {
-                                    if current_code.is_empty() || current_has_ocr {
-                                        label.to_string()
-                                    } else {
-                                        format!("{label} [not installed]")
-                                    }
-                                })
-                                .unwrap_or_else(|| {
-                                    if current_code.is_empty() {
-                                        "Auto Detect".to_string()
-                                    } else if current_has_ocr {
-                                        current_code.clone()
-                                    } else {
-                                        format!("{} [not installed]", current_code)
-                                    }
-                                });
-
-                            ui.horizontal(|ui| {
-                                let cb = egui::ComboBox::from_id_salt((preset.id, "ocr-lang-combo"))
-                                    .selected_text(current_label.as_str())
-                                    .width(200.0)
-                                    .show_ui(ui, |ui| {
-                                        if ui
-                                            .selectable_label(
-                                                current_code.is_empty(),
-                                                "Auto Detect",
-                                            )
-                                            .on_hover_text(
-                                                "Use Windows OCR automatic language detection",
-                                            )
-                                            .clicked()
-                                        {
-                                            preset.lang = None;
-                                            live_sync = true;
-                                        }
-                                        for (code, label, hint) in crate::ocr::OCR_SUPPORTED_LANGUAGE_CATALOG {
-                                            let is_selected = crate::ocr::language_tag_matches(
-                                                std::slice::from_ref(&current_code),
-                                                code,
-                                            );
-                                            let has_ocr =
-                                                crate::ocr::language_tag_matches(&avail_langs, code);
-                                            let display = if has_ocr {
-                                                label.to_string()
-                                            } else {
-                                                format!("{} [not installed]", label)
-                                            };
-                                            let hover_msg = if has_ocr {
-                                                hint.to_string()
-                                            } else {
-                                                format!(
-                                                    "{} - Windows OCR for this language is not installed on this PC. Click to install it now.",
-                                                    hint
-                                                )
-                                            };
-                                            if ui.selectable_label(is_selected, &display)
-                                                .on_hover_text(hover_msg)
-                                                .clicked()
-                                            {
-                                                preset.lang = Some(code.to_string());
-                                                if !has_ocr {
-                                                    pending_ocr_language_settings =
-                                                        Some((code.to_string(), label.to_string()));
-                                                }
-                                                live_sync = true;
-                                            }
-                                        }
-                                    });
-                                let _ = cb;
-                            });
-                        }
+                        ui.label(crate::ocr::OCR_ENGLISH_LABEL);
                         ui.end_row();
 
                         // Scan Region (X, Y, W, H)
@@ -475,7 +389,6 @@ impl CrosshairApp {
                 self.state.ocr_test_y = preset.y;
                 self.state.ocr_test_width = preset.width;
                 self.state.ocr_test_height = preset.height;
-                self.state.ocr_test_lang = preset.lang.clone();
             }
             self.run_ocr_test(ui.ctx());
         }
@@ -489,10 +402,6 @@ impl CrosshairApp {
                 VisionCaptureTarget::OcrPreset(preset_id),
                 VisionCaptureMode::SearchRegion,
             );
-        }
-
-        if let Some((lang_code, display_name)) = pending_ocr_language_settings.take() {
-            self.install_ocr_language_capability(&lang_code, &display_name);
         }
 
         if live_sync {
@@ -564,7 +473,7 @@ impl CrosshairApp {
         changed
     }
 
-    fn run_ocr_test(&mut self, ctx: &egui::Context) {
+    fn run_ocr_test(&mut self, _ctx: &egui::Context) {
         self.state.ocr_test_running = true;
         self.state.ocr_test_error = None;
         self.state.ocr_test_result = None;
@@ -573,11 +482,14 @@ impl CrosshairApp {
         let y = self.state.ocr_test_y;
         let w = self.state.ocr_test_width;
         let h = self.state.ocr_test_height;
-        let lang = self.state.ocr_test_lang.clone().unwrap_or_default();
-
         // Capture virtual screen region
         if let Some(frame) = capture_virtual_screen_region(x, y, w, h) {
-            match perform_ocr(&frame.rgba, frame.width as u32, frame.height as u32, &lang) {
+            match perform_ocr(
+                &frame.rgba,
+                frame.width as u32,
+                frame.height as u32,
+                crate::ocr::OCR_ENGLISH_CODE,
+            ) {
                 Ok(res) => {
                     self.state.ocr_test_result = Some(res);
                 }
@@ -589,11 +501,6 @@ impl CrosshairApp {
             self.state.ocr_test_error = Some("Failed to capture screen region.".to_string());
         }
 
-        if crate::ui::app_state_needs_cjk_fallback(&self.state) {
-            crate::ui::configure_fonts(ctx, true);
-            self.last_applied_theme = None;
-            self.apply_theme(ctx);
-        }
         self.state.ocr_test_running = false;
         self.persist();
     }

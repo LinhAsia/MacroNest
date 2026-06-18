@@ -110,7 +110,6 @@ impl CrosshairApp {
         step: &mut MacroStep,
         live_sync: &mut bool,
         pending_ocr_step_capture: &mut Option<(u32, u32, usize)>,
-        pending_ocr_language_settings: &mut Option<(String, String)>,
     ) {
         let ctrl_height = ui.spacing().interact_size.y;
 
@@ -127,102 +126,16 @@ impl CrosshairApp {
             *pending_ocr_step_capture = Some((group_id, preset_id, step_index));
         }
 
-        let available_languages = crate::ocr::available_ocr_languages();
-        let current_language = step.ocr_lang.clone().unwrap_or_default();
-        let current_language_ready = !current_language.is_empty()
-            && crate::ocr::language_tag_matches(&available_languages, &current_language);
-        let language_label = crate::ocr::OCR_SUPPORTED_LANGUAGE_CATALOG
-            .iter()
-            .find(|(code, _, _)| {
-                crate::ocr::language_tag_matches(std::slice::from_ref(&current_language), code)
-            })
-            .map(|(_, label, _)| {
-                if current_language.is_empty() || current_language_ready {
-                    (*label).to_owned()
-                } else {
-                    format!("{label} [not installed]")
-                }
-            })
-            .unwrap_or(if current_language.is_empty() {
-                "Auto".to_owned()
-            } else if current_language_ready {
-                current_language.clone()
-            } else {
-                format!("{} [not installed]", current_language)
-            });
-
-        let short_label = match current_language.as_str() {
-            "" => "Auto",
-            "en" | "en-US" => "EN",
-            "zh-Hans" | "zh-CN" => "ZH",
-            "zh-Hant" | "zh-HK" | "zh-TW" => "ZHT",
-            "ja" | "ja-JP" => "JA",
-            "ko" | "ko-KR" => "KO",
-            "fr" | "fr-FR" | "fr-CA" => "FR",
-            "de" | "de-DE" => "DE",
-            "es" | "es-ES" | "es-MX" => "ES",
-            "ru" | "ru-RU" => "RU",
-            other => {
-                if other.starts_with("zh-Han") {
-                    "ZH"
-                } else if let Some(idx) = other.find('-') {
-                    &other[..idx]
-                } else {
-                    other
-                }
-            }
-        };
-
-        let combo_resp = egui::ComboBox::from_id_salt((group_id, preset_id, step_index, "ocr-step-lang"))
-            .width(56.0)
-            .selected_text(short_label)
-            .show_ui(ui, |ui| {
-                if ui
-                    .selectable_label(current_language.is_empty(), "Auto")
-                    .on_hover_text("Use Windows OCR automatic language detection")
-                    .clicked()
-                {
-                    step.ocr_lang = None;
-                    *live_sync = true;
-                }
-                for (code, label, hint) in crate::ocr::OCR_SUPPORTED_LANGUAGE_CATALOG {
-                    let is_selected = crate::ocr::language_tag_matches(
-                        std::slice::from_ref(&current_language),
-                        code,
-                    );
-                    let has_ocr = crate::ocr::language_tag_matches(&available_languages, code);
-
-                    let display = if has_ocr {
-                        label.to_string()
-                    } else {
-                        format!("{} [not installed]", label)
-                    };
-
-                    let response = ui.selectable_label(is_selected, &display);
-                    let hover_message = if has_ocr {
-                        hint.to_string()
-                    } else {
-                        format!(
-                            "{} - Windows OCR for this language is not installed on this PC. Click to install it now.",
-                            hint
-                        )
-                    };
-
-                    if response.on_hover_text(hover_message).clicked() {
-                        step.ocr_lang = Some(code.to_string());
-                        if !has_ocr {
-                            *pending_ocr_language_settings =
-                                Some((code.to_string(), label.to_string()));
-                        }
-                        *live_sync = true;
-                    }
-                }
-            });
-
-        combo_resp.response.on_hover_text(format!(
+        ui.add_sized(
+            [40.0, ctrl_height],
+            egui::Label::new(
+                egui::RichText::new("EN").color(ui.visuals().weak_text_color()),
+            ),
+        )
+        .on_hover_text(format!(
             "{}: {}",
             Self::tr_lang(language, "Language", "Language"),
-            language_label
+            crate::ocr::OCR_ENGLISH_LABEL,
         ));
 
         let target_id = ui.id().with((step_index, "ocr-target-text"));
