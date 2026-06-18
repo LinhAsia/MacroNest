@@ -2685,20 +2685,12 @@ impl CrosshairApp {
         } else {
             None
         };
-        if self.macro_folders_panel_open || !self.state.macro_folders.is_empty() {
-            let scope_note = if active_folder_name.is_some() {
-                Self::tr_lang(
-                    language,
-                    "Only macro groups in this folder can run while you are inside it.",
-                    "Khi bạn đang ở trong folder này, chỉ các macro group trong folder mới hoạt động.",
-                )
-            } else {
-                Self::tr_lang(
-                    language,
-                    "Tip: entering a folder limits macro activity to that folder until you go back out.",
-                    "Mẹo: khi bạn vào một folder, chỉ các macro group trong folder đó hoạt động cho tới khi bạn quay ra.",
-                )
-            };
+        if active_folder_name.is_some() {
+            let scope_note = Self::tr_lang(
+                language,
+                "Only macro groups in this folder can run while you are inside it.",
+                "Chỉ các macro group trong folder này mới hoạt động khi bạn đang ở đây.",
+            );
             egui::Frame::group(ui.style())
                 .fill(if ui.visuals().dark_mode {
                     Color32::from_rgba_premultiplied(26, 54, 84, 92)
