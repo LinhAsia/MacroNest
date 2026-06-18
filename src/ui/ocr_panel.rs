@@ -477,7 +477,7 @@ impl CrosshairApp {
                 self.state.ocr_test_height = preset.height;
                 self.state.ocr_test_lang = preset.lang.clone();
             }
-            self.run_ocr_test();
+            self.run_ocr_test(ui.ctx());
         }
 
         // Live preview sync
@@ -564,7 +564,7 @@ impl CrosshairApp {
         changed
     }
 
-    fn run_ocr_test(&mut self) {
+    fn run_ocr_test(&mut self, ctx: &egui::Context) {
         self.state.ocr_test_running = true;
         self.state.ocr_test_error = None;
         self.state.ocr_test_result = None;
@@ -589,6 +589,11 @@ impl CrosshairApp {
             self.state.ocr_test_error = Some("Failed to capture screen region.".to_string());
         }
 
+        if crate::ui::app_state_needs_cjk_fallback(&self.state) {
+            crate::ui::configure_fonts(ctx, true);
+            self.last_applied_theme = None;
+            self.apply_theme(ctx);
+        }
         self.state.ocr_test_running = false;
         self.persist();
     }
