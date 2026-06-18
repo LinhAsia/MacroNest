@@ -9,8 +9,7 @@ use directories::ProjectDirs;
 
 use crate::model::{AppState, CrosshairStyle, ProfileRecord, VietnameseInputMode, VisionPreset};
 
-const BUNDLED_ARDUINO_RAWHID_FIRMWARE: &[u8] =
-    include_bytes!("../assets/firmware-rawhid.hex");
+const BUNDLED_ARDUINO_RAWHID_FIRMWARE: &[u8] = include_bytes!("../assets/firmware-rawhid.hex");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StateLoadStatus {
@@ -530,7 +529,7 @@ impl AppPaths {
             }
         }
 
-        // Dọn dẹp triệt để các group bị lỗi deserialize cũ (chứa IfConditionType::Unknown) khỏi database
+        // Fully remove legacy groups that failed old deserialization (IfConditionType::Unknown) from the database
         state.macro_groups.retain(|group| {
             let has_unknown = group.presets.iter().any(|preset| {
                 preset.hold_stop_step.if_condition_type == crate::model::IfConditionType::Unknown
@@ -577,7 +576,9 @@ impl AppPaths {
                     let path = entry.path();
                     if path.is_file() {
                         if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                            if file_name.starts_with("state-recovery-") && file_name.ends_with(".json") {
+                            if file_name.starts_with("state-recovery-")
+                                && file_name.ends_with(".json")
+                            {
                                 let _ = fs::remove_file(path);
                             }
                         }
