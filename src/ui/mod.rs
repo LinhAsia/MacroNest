@@ -4109,7 +4109,7 @@ impl CrosshairApp {
             
             // Keep open if user is actively dragging or has a combobox/sub-popup open
             let is_dragging = ui.ctx().dragged_id().is_some();
-            let is_any_popup_open = ui.ctx().memory(|mem| mem.any_popup_open());
+            let is_any_popup_open = egui::Popup::is_any_open(ui.ctx());
             let is_interacting = is_active && (is_dragging || is_any_popup_open);
             
             if is_interacting {
