@@ -508,6 +508,7 @@ mod windows_overlay {
             center_y: i32,
             size: f32,
             mode: QuickKeyDisplayMode,
+            mascot_style: crate::model::MascotStyle,
         },
         ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
@@ -1200,6 +1201,7 @@ mod windows_overlay {
         quick_key_display_center_y: i32,
         quick_key_display_size: f32,
         quick_key_display_mode: QuickKeyDisplayMode,
+        quick_key_display_mascot_style: crate::model::MascotStyle,
         quick_key_display_entries: Vec<QuickKeyDisplayEntry>,
         quick_key_display_slot_memory: HashMap<String, usize>,
         quick_key_display_slot_labels: HashMap<(QuickKeyDisplayLane, usize), String>,
@@ -1958,6 +1960,7 @@ mod windows_overlay {
                 quick_key_display_center_y: GetSystemMetrics(SM_CYSCREEN).max(1) / 2,
                 quick_key_display_size: 36.0,
                 quick_key_display_mode: QuickKeyDisplayMode::Normal,
+                quick_key_display_mascot_style: crate::model::MascotStyle::Hachiware,
                 quick_key_display_entries: Vec::new(),
                 quick_key_display_slot_memory: HashMap::new(),
                 quick_key_display_slot_labels: HashMap::new(),
@@ -6528,12 +6531,14 @@ mod windows_overlay {
                     center_y,
                     size,
                     mode,
+                    mascot_style,
                 } => {
                     runtime.quick_key_display_enabled = enabled;
                     runtime.quick_key_display_center_x = center_x;
                     runtime.quick_key_display_center_y = center_y;
                     runtime.quick_key_display_size = size.clamp(18.0, 96.0);
                     runtime.quick_key_display_mode = mode;
+                    runtime.quick_key_display_mascot_style = mascot_style;
                     if !enabled {
                         runtime.quick_key_display_entries.clear();
                         runtime.quick_key_display_slot_memory.clear();
@@ -7004,6 +7009,7 @@ mod windows_overlay {
                     &entries,
                     font_size,
                     runtime.quick_key_display_mouse_offset,
+                    runtime.quick_key_display_mascot_style,
                     x,
                     y,
                     width,
@@ -12759,11 +12765,436 @@ mod windows_overlay {
         Ok(())
     }
 
+    // =========================================================================
+    // MASCOT CHARACTER DRAWING FUNCTIONS
+    // To swap the character, replace the three functions below.
+    // The rest of paint_mascot_quick_key_display (desk, keyboard, mouse) stays.
+    // =========================================================================
+
+    /// Draws the character's torso + ears into `pixmap`.
+    /// Called once in the first pass (behind the desk).
+    fn mascot_draw_body_and_ears(
+        pixmap: &mut tiny_skia::Pixmap,
+        scale: f32,
+        body_cx: f32, body_cy: f32, body_radius: f32,
+        head_cx: f32, head_cy: f32,
+        look_x: f32, look_y: f32,
+        recent_pulse: f32,
+    ) {
+        // Body shadow
+        fill_skia_circle(pixmap, body_cx, body_cy + 4.0 * scale, body_radius, [0, 0, 0, 22]);
+        // Body fill + outline
+        fill_skia_circle(pixmap, body_cx, body_cy, body_radius, [255, 255, 255, 255]);
+        stroke_skia_circle(pixmap, body_cx, body_cy, body_radius, 2.2 * scale, [45, 40, 42, 255]);
+
+        // Ear animation offsets
+        let ear_wiggle = recent_pulse * 3.0 * scale;
+        let ear_shift_x = -look_x * 0.4;
+        let ear_shift_y = -look_y * 0.4;
+
+        // Left Ear
+        let mut left_ear = tiny_skia::PathBuilder::new();
+        left_ear.move_to(head_cx - 42.0 * scale + ear_shift_x, head_cy - 22.0 * scale + ear_shift_y);
+        left_ear.quad_to(
+            head_cx - 43.0 * scale - ear_wiggle + ear_shift_x, head_cy - 48.0 * scale - ear_wiggle + ear_shift_y,
+            head_cx - 36.0 * scale - ear_wiggle + ear_shift_x, head_cy - 52.0 * scale - ear_wiggle + ear_shift_y,
+        );
+        left_ear.quad_to(
+            head_cx - 24.0 * scale + ear_shift_x, head_cy - 42.0 * scale + ear_shift_y,
+            head_cx - 18.0 * scale + ear_shift_x, head_cy - 38.0 * scale + ear_shift_y,
+        );
+        left_ear.close();
+        if let Some(path) = left_ear.finish() {
+            fill_skia_path(pixmap, &path, [100, 160, 230, 255]);
+            stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
+        }
+        // Left Inner Ear (pink)
+        let mut left_inner = tiny_skia::PathBuilder::new();
+        left_inner.move_to(head_cx - 37.0 * scale + ear_shift_x, head_cy - 24.0 * scale + ear_shift_y);
+        left_inner.line_to(head_cx - 34.0 * scale - ear_wiggle + ear_shift_x, head_cy - 45.0 * scale - ear_wiggle + ear_shift_y);
+        left_inner.line_to(head_cx - 23.0 * scale + ear_shift_x, head_cy - 34.0 * scale + ear_shift_y);
+        left_inner.close();
+        if let Some(path) = left_inner.finish() { fill_skia_path(pixmap, &path, [255, 200, 210, 255]); }
+
+        // Right Ear
+        let mut right_ear = tiny_skia::PathBuilder::new();
+        right_ear.move_to(head_cx + 18.0 * scale + ear_shift_x, head_cy - 38.0 * scale + ear_shift_y);
+        right_ear.quad_to(
+            head_cx + 24.0 * scale + ear_shift_x, head_cy - 42.0 * scale + ear_shift_y,
+            head_cx + 36.0 * scale + ear_wiggle + ear_shift_x, head_cy - 52.0 * scale + ear_wiggle + ear_shift_y,
+        );
+        right_ear.quad_to(
+            head_cx + 43.0 * scale + ear_wiggle + ear_shift_x, head_cy - 48.0 * scale + ear_wiggle + ear_shift_y,
+            head_cx + 42.0 * scale + ear_shift_x, head_cy - 22.0 * scale + ear_shift_y,
+        );
+        right_ear.close();
+        if let Some(path) = right_ear.finish() {
+            fill_skia_path(pixmap, &path, [100, 160, 230, 255]);
+            stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
+        }
+        // Right Inner Ear (pink)
+        let mut right_inner = tiny_skia::PathBuilder::new();
+        right_inner.move_to(head_cx + 23.0 * scale + ear_shift_x, head_cy - 34.0 * scale + ear_shift_y);
+        right_inner.line_to(head_cx + 34.0 * scale + ear_wiggle + ear_shift_x, head_cy - 45.0 * scale + ear_wiggle + ear_shift_y);
+        right_inner.line_to(head_cx + 37.0 * scale + ear_shift_x, head_cy - 24.0 * scale + ear_shift_y);
+        right_inner.close();
+        if let Some(path) = right_inner.finish() { fill_skia_path(pixmap, &path, [255, 200, 210, 255]); }
+    }
+
+    /// Draws the character's head, hair and all face features into `pixmap`.
+    /// Called twice: once in pass 1 (before desk) and once in pass 3 (on top of arms).
+    fn mascot_draw_head_and_face(
+        pixmap: &mut tiny_skia::Pixmap,
+        scale: f32,
+        head_cx: f32, head_cy: f32, head_radius: f32,
+        look_x: f32, look_y: f32,
+    ) {
+        // Head shadow + fill
+        fill_skia_circle(pixmap, head_cx, head_cy + 4.5 * scale, head_radius, [0, 0, 0, 28]);
+        fill_skia_circle(pixmap, head_cx, head_cy, head_radius, [255, 255, 255, 255]);
+
+        // Blue forehead hair patch
+        let hx = look_x * 0.15;
+        let hy = look_y * 0.15;
+        let mut hair = tiny_skia::PathBuilder::new();
+        hair.move_to(head_cx - 46.2 * scale + hx, head_cy - 8.0 * scale + hy);
+        hair.quad_to(head_cx - 40.0 * scale + hx, head_cy - 46.0 * scale + hy, head_cx + hx, head_cy - 47.0 * scale + hy);
+        hair.quad_to(head_cx + 40.0 * scale + hx, head_cy - 46.0 * scale + hy, head_cx + 46.2 * scale + hx, head_cy - 8.0 * scale + hy);
+        hair.quad_to(head_cx + 25.0 * scale + hx, head_cy - 4.0 * scale + hy, head_cx + 14.0 * scale + hx, head_cy + 8.0 * scale + hy);
+        hair.quad_to(head_cx + 6.0 * scale + hx, head_cy - 8.0 * scale + hy, head_cx + hx, head_cy - 12.0 * scale + hy);
+        hair.quad_to(head_cx - 6.0 * scale + hx, head_cy - 8.0 * scale + hy, head_cx - 14.0 * scale + hx, head_cy + 8.0 * scale + hy);
+        hair.quad_to(head_cx - 25.0 * scale + hx, head_cy - 4.0 * scale + hy, head_cx - 46.2 * scale + hx, head_cy - 8.0 * scale + hy);
+        hair.close();
+        if let Some(path) = hair.finish() {
+            fill_skia_path(pixmap, &path, [100, 160, 230, 255]);
+            stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
+        }
+
+        // Head outline
+        stroke_skia_circle(pixmap, head_cx, head_cy, head_radius, 2.2 * scale, [45, 40, 42, 255]);
+
+        // Eyes
+        let eye_w = 8.5 * scale;
+        let eye_h = 10.5 * scale;
+        for (ex, ey) in [
+            (head_cx - 18.0 * scale + look_x, head_cy + 4.0 * scale + look_y),
+            (head_cx + 18.0 * scale + look_x, head_cy + 4.0 * scale + look_y),
+        ] {
+            fill_skia_rounded_rect(pixmap, ex - eye_w * 0.5, ey - eye_h * 0.5, eye_w, eye_h, 4.2 * scale, [45, 40, 42, 255]);
+            fill_skia_circle(pixmap, ex - 1.5 * scale, ey - 2.2 * scale, 3.2 * scale, [255, 255, 255, 255]);
+            fill_skia_circle(pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.6 * scale, [255, 255, 255, 255]);
+        }
+        // Eyebrows
+        fill_skia_circle(pixmap, head_cx - 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
+        fill_skia_circle(pixmap, head_cx + 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
+        // Cheek blush
+        for i in 0..3_i32 {
+            let boff = (i as f32 - 1.0) * 3.5 * scale;
+            let mut bl = tiny_skia::PathBuilder::new();
+            bl.move_to(head_cx - 32.0 * scale + boff - 1.5 * scale + look_x, head_cy + 13.0 * scale + 3.0 * scale + look_y);
+            bl.line_to(head_cx - 32.0 * scale + boff + 1.5 * scale + look_x, head_cy + 13.0 * scale - 3.0 * scale + look_y);
+            if let Some(p) = bl.finish() { stroke_skia_path(pixmap, &p, [255, 120, 140, 220], 1.8 * scale); }
+            let mut br = tiny_skia::PathBuilder::new();
+            br.move_to(head_cx + 32.0 * scale + boff - 1.5 * scale + look_x, head_cy + 13.0 * scale + 3.0 * scale + look_y);
+            br.line_to(head_cx + 32.0 * scale + boff + 1.5 * scale + look_x, head_cy + 13.0 * scale - 3.0 * scale + look_y);
+            if let Some(p) = br.finish() { stroke_skia_path(pixmap, &p, [255, 120, 140, 220], 1.8 * scale); }
+        }
+        // Mouth
+        let mut mouth = tiny_skia::PathBuilder::new();
+        mouth.move_to(head_cx - 5.0 * scale + look_x, head_cy + 14.0 * scale + look_y);
+        mouth.quad_to(head_cx - 2.5 * scale + look_x, head_cy + 17.5 * scale + look_y, head_cx + look_x, head_cy + 14.5 * scale + look_y);
+        mouth.quad_to(head_cx + 2.5 * scale + look_x, head_cy + 17.5 * scale + look_y, head_cx + 5.0 * scale + look_x, head_cy + 14.0 * scale + look_y);
+        if let Some(p) = mouth.finish() { stroke_skia_path(pixmap, &p, [45, 40, 42, 255], 2.0 * scale); }
+    }
+
+    /// Draws the character's arms + shoulder joints into `pixmap`.
+    /// Called in pass 2 (on top of keyboard, under the head).
+    fn mascot_draw_arms(
+        pixmap: &mut tiny_skia::Pixmap,
+        scale: f32,
+        body_cx: f32, body_cy: f32,
+        left_paw_target: (f32, f32),
+        right_paw_target: (f32, f32),
+        paw_press: f32,
+        paw_glow: [u8; 4],
+    ) {
+        let left_shoulder_cx = body_cx - 20.0 * scale;
+        let left_shoulder_cy = body_cy - 4.0 * scale;
+        let right_shoulder_cx = body_cx + 20.0 * scale;
+        let right_shoulder_cy = body_cy - 4.0 * scale;
+
+        let left_paw_x = left_paw_target.0;
+        let left_paw_y = left_paw_target.1 + paw_press;
+        let right_paw_x = right_paw_target.0;
+        let right_paw_y = right_paw_target.1 + paw_press;
+
+        // Compute arm direction normals for shoulder width
+        let (ux_l, uy_l) = { let d = ((left_paw_x - left_shoulder_cx).powi(2) + (left_paw_y - left_shoulder_cy).powi(2)).sqrt().max(1.0); ((left_paw_x - left_shoulder_cx) / d, (left_paw_y - left_shoulder_cy) / d) };
+        let (px_l, py_l) = (-uy_l, ux_l);
+        let left_shoulder_top    = (left_shoulder_cx + px_l * 12.5 * scale, left_shoulder_cy + py_l * 12.5 * scale);
+        let left_shoulder_bottom = (left_shoulder_cx - px_l * 12.5 * scale, left_shoulder_cy - py_l * 12.5 * scale);
+
+        let (ux_r, uy_r) = { let d = ((right_paw_x - right_shoulder_cx).powi(2) + (right_paw_y - right_shoulder_cy).powi(2)).sqrt().max(1.0); ((right_paw_x - right_shoulder_cx) / d, (right_paw_y - right_shoulder_cy) / d) };
+        let (px_r, py_r) = (-uy_r, ux_r);
+        let right_shoulder_top    = (right_shoulder_cx - px_r * 12.5 * scale, right_shoulder_cy - py_r * 12.5 * scale);
+        let right_shoulder_bottom = (right_shoulder_cx + px_r * 12.5 * scale, right_shoulder_cy + py_r * 12.5 * scale);
+
+        // Shoulder cap circles drawn first so arm paths render on top
+        let cap_r = 13.0 * scale;
+        fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, paw_glow);
+        stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, 2.2 * scale, [45, 40, 42, 255]);
+        fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, paw_glow);
+        stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, 2.2 * scale, [45, 40, 42, 255]);
+
+        // Left arm: fill closed, stroke open (shoulder side left open so body covers the gap)
+        let mut left_arm = tiny_skia::PathBuilder::new();
+        left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
+        left_arm.quad_to(left_paw_x - 16.0 * scale, left_paw_y - 12.0 * scale, left_paw_x - 10.0 * scale, left_paw_y + 4.0 * scale);
+        left_arm.quad_to(left_paw_x, left_paw_y + 14.0 * scale, left_paw_x + 10.0 * scale, left_paw_y + 2.0 * scale);
+        left_arm.quad_to(left_paw_x + 6.0 * scale, left_paw_y - 12.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
+        let left_arm_stroke = left_arm.clone();
+        left_arm.close();
+        if let Some(p) = left_arm.finish() { fill_skia_path(pixmap, &p, paw_glow); }
+        if let Some(p) = left_arm_stroke.finish() { stroke_skia_path(pixmap, &p, [45, 40, 42, 255], 2.2 * scale); }
+
+        // Right arm
+        let mut right_arm = tiny_skia::PathBuilder::new();
+        right_arm.move_to(right_shoulder_top.0, right_shoulder_top.1);
+        right_arm.quad_to(right_paw_x + 16.0 * scale, right_paw_y - 12.0 * scale, right_paw_x + 10.0 * scale, right_paw_y + 4.0 * scale);
+        right_arm.quad_to(right_paw_x, right_paw_y + 14.0 * scale, right_paw_x - 10.0 * scale, right_paw_y + 2.0 * scale);
+        right_arm.quad_to(right_paw_x - 6.0 * scale, right_paw_y - 12.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
+        let right_arm_stroke = right_arm.clone();
+        right_arm.close();
+        if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, paw_glow); }
+        if let Some(p) = right_arm_stroke.finish() { stroke_skia_path(pixmap, &p, [45, 40, 42, 255], 2.2 * scale); }
+    }
+    // =========================================================================
+
+    fn tung_sahur_draw_body_and_ears(
+        pixmap: &mut tiny_skia::Pixmap,
+        scale: f32,
+        _body_cx: f32, body_cy: f32, _body_radius: f32,
+        head_cx: f32, head_cy: f32,
+        _look_x: f32, _look_y: f32,
+        _recent_pulse: f32,
+    ) {
+        let left = head_cx - 24.0 * scale;
+        let top = head_cy - 48.0 * scale;
+        let width = 48.0 * scale;
+        let height = (body_cy + 42.0 * scale) - top;
+        let radius = 24.0 * scale;
+
+        // 1. Draw shadow
+        fill_skia_rounded_rect(
+            pixmap,
+            left + 2.0 * scale,
+            top + 4.0 * scale,
+            width,
+            height,
+            radius,
+            [0, 0, 0, 32],
+        );
+
+        // 2. Main wood fill
+        fill_skia_rounded_rect(
+            pixmap,
+            left,
+            top,
+            width,
+            height,
+            radius,
+            [156, 102, 51, 255],
+        );
+
+        // 3. Highlight line on left side
+        let mut hl = tiny_skia::PathBuilder::new();
+        hl.move_to(head_cx - 17.5 * scale, head_cy - 28.0 * scale);
+        hl.line_to(head_cx - 17.5 * scale, head_cy + 55.0 * scale);
+        if let Some(p) = hl.finish() {
+            stroke_skia_path(pixmap, &p, [185, 128, 75, 255], 3.2 * scale);
+        }
+
+        // 4. Wood grain lines
+        let grain_color = [115, 68, 30, 255];
+        let mut g1 = tiny_skia::PathBuilder::new();
+        g1.move_to(head_cx - 11.0 * scale, head_cy);
+        g1.line_to(head_cx - 11.0 * scale, head_cy + 65.0 * scale);
+        if let Some(p) = g1.finish() {
+            stroke_skia_path(pixmap, &p, grain_color, 1.5 * scale);
+        }
+        let mut g2 = tiny_skia::PathBuilder::new();
+        g2.move_to(head_cx + 13.0 * scale, head_cy - 18.0 * scale);
+        g2.line_to(head_cx + 13.0 * scale, head_cy + 45.0 * scale);
+        if let Some(p) = g2.finish() {
+            stroke_skia_path(pixmap, &p, grain_color, 1.5 * scale);
+        }
+
+        // 5. Main log outline
+        stroke_skia_rounded_rect(
+            pixmap,
+            left,
+            top,
+            width,
+            height,
+            radius,
+            2.2 * scale,
+            [45, 40, 42, 255],
+        );
+    }
+
+    fn tung_sahur_draw_head_and_face(
+        pixmap: &mut tiny_skia::Pixmap,
+        scale: f32,
+        head_cx: f32, head_cy: f32, _head_radius: f32,
+        look_x: f32, look_y: f32,
+    ) {
+        // Bulging eyeballs
+        let eye_r = 9.0 * scale;
+        let left_eye_cx = head_cx - 14.0 * scale + look_x;
+        let left_eye_cy = head_cy - 5.0 * scale + look_y;
+        let right_eye_cx = head_cx + 14.0 * scale + look_x;
+        let right_eye_cy = head_cy - 5.0 * scale + look_y;
+
+        let outline_color = [45, 40, 42, 255];
+
+        // Draw left eyeball
+        fill_skia_circle(pixmap, left_eye_cx, left_eye_cy, eye_r, [255, 255, 255, 255]);
+        stroke_skia_circle(pixmap, left_eye_cx, left_eye_cy, eye_r, 2.0 * scale, outline_color);
+
+        // Draw right eyeball
+        fill_skia_circle(pixmap, right_eye_cx, right_eye_cy, eye_r, [255, 255, 255, 255]);
+        stroke_skia_circle(pixmap, right_eye_cx, right_eye_cy, eye_r, 2.0 * scale, outline_color);
+
+        // Pupils (with subtle look shift)
+        let pupil_r = 4.5 * scale;
+        let left_pupil_cx = left_eye_cx + look_x * 0.15;
+        let left_pupil_cy = left_eye_cy + look_y * 0.15;
+        let right_pupil_cx = right_eye_cx + look_x * 0.15;
+        let right_pupil_cy = right_eye_cy + look_y * 0.15;
+
+        fill_skia_circle(pixmap, left_pupil_cx, left_pupil_cy, pupil_r, outline_color);
+        fill_skia_circle(pixmap, right_pupil_cx, right_pupil_cy, pupil_r, outline_color);
+
+        // Pupil reflection dots
+        fill_skia_circle(pixmap, left_pupil_cx - 1.5 * scale, left_pupil_cy - 1.5 * scale, 1.2 * scale, [255, 255, 255, 255]);
+        fill_skia_circle(pixmap, right_pupil_cx - 1.5 * scale, right_pupil_cy - 1.5 * scale, 1.2 * scale, [255, 255, 255, 255]);
+
+        // Long wooden nose
+        let mut nose = tiny_skia::PathBuilder::new();
+        nose.move_to(head_cx + look_x, head_cy - 4.0 * scale + look_y);
+        nose.line_to(head_cx - 3.5 * scale + look_x, head_cy + 8.0 * scale + look_y);
+        nose.line_to(head_cx + 3.5 * scale + look_x, head_cy + 8.0 * scale + look_y);
+        nose.close();
+        if let Some(p) = nose.finish() {
+            fill_skia_path(pixmap, &p, [170, 110, 60, 255]);
+            stroke_skia_path(pixmap, &p, outline_color, 1.8 * scale);
+        }
+
+        // Uncanny smile
+        let mut smile = tiny_skia::PathBuilder::new();
+        smile.move_to(head_cx - 16.0 * scale + look_x, head_cy + 18.0 * scale + look_y);
+        smile.quad_to(
+            head_cx + look_x, head_cy + 24.0 * scale + look_y,
+            head_cx + 16.0 * scale + look_x, head_cy + 18.0 * scale + look_y,
+        );
+        if let Some(p) = smile.finish() {
+            stroke_skia_path(pixmap, &p, outline_color, 2.2 * scale);
+        }
+
+        // Dimple/smile creases
+        let mut crease_l = tiny_skia::PathBuilder::new();
+        crease_l.move_to(head_cx - 17.5 * scale + look_x, head_cy + 15.0 * scale + look_y);
+        crease_l.line_to(head_cx - 14.5 * scale + look_x, head_cy + 21.0 * scale + look_y);
+        if let Some(p) = crease_l.finish() {
+            stroke_skia_path(pixmap, &p, outline_color, 1.6 * scale);
+        }
+
+        let mut crease_r = tiny_skia::PathBuilder::new();
+        crease_r.move_to(head_cx + 17.5 * scale + look_x, head_cy + 15.0 * scale + look_y);
+        crease_r.line_to(head_cx + 14.5 * scale + look_x, head_cy + 21.0 * scale + look_y);
+        if let Some(p) = crease_r.finish() {
+            stroke_skia_path(pixmap, &p, outline_color, 1.6 * scale);
+        }
+    }
+
+    fn tung_sahur_draw_arms(
+        pixmap: &mut tiny_skia::Pixmap,
+        scale: f32,
+        body_cx: f32, body_cy: f32,
+        left_paw_target: (f32, f32),
+        right_paw_target: (f32, f32),
+        paw_press: f32,
+        _paw_glow: [u8; 4],
+    ) {
+        let left_shoulder_cx = body_cx - 20.0 * scale;
+        let left_shoulder_cy = body_cy - 4.0 * scale;
+        let right_shoulder_cx = body_cx + 20.0 * scale;
+        let right_shoulder_cy = body_cy - 4.0 * scale;
+
+        let left_paw_x = left_paw_target.0;
+        let left_paw_y = left_paw_target.1 + paw_press;
+        let right_paw_x = right_paw_target.0;
+        let right_paw_y = right_paw_target.1 + paw_press;
+
+        let stroke_color = [45, 40, 42, 255];
+        let wood_color = [156, 102, 51, 255];
+
+        // Draw left arm (stick)
+        let mut left_arm = tiny_skia::PathBuilder::new();
+        left_arm.move_to(left_shoulder_cx, left_shoulder_cy);
+        left_arm.line_to(left_paw_x, left_paw_y);
+        if let Some(p) = left_arm.finish() {
+            stroke_skia_path(pixmap, &p, stroke_color, 3.0 * scale);
+        }
+
+        // Draw right arm (stick)
+        let mut right_arm = tiny_skia::PathBuilder::new();
+        right_arm.move_to(right_shoulder_cx, right_shoulder_cy);
+        right_arm.line_to(right_paw_x, right_paw_y);
+        if let Some(p) = right_arm.finish() {
+            stroke_skia_path(pixmap, &p, stroke_color, 3.0 * scale);
+        }
+
+        // Left drumstick (pestle/drumstick prop)
+        let mut pestle = tiny_skia::PathBuilder::new();
+        pestle.move_to(left_paw_x + 6.0 * scale, left_paw_y - 6.0 * scale);
+        pestle.line_to(left_paw_x - 14.0 * scale, left_paw_y + 14.0 * scale);
+        if let Some(p) = pestle.finish() {
+            stroke_skia_path(pixmap, &p, wood_color, 5.0 * scale);
+            stroke_skia_path(pixmap, &p, stroke_color, 1.8 * scale);
+        }
+
+        // Right bat (wooden baseball bat/club prop)
+        let mut bat = tiny_skia::PathBuilder::new();
+        bat.move_to(right_paw_x - 2.0 * scale, right_paw_y + 2.0 * scale);
+        bat.line_to(right_paw_x + 12.0 * scale, right_paw_y - 32.0 * scale);
+        if let Some(p) = bat.finish() {
+            stroke_skia_path(pixmap, &p, wood_color, 6.0 * scale);
+            stroke_skia_path(pixmap, &p, stroke_color, 1.8 * scale);
+        }
+
+        // Shoulder joints
+        let cap_r = 4.0 * scale;
+        fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, wood_color);
+        stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, 1.8 * scale, stroke_color);
+        fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, wood_color);
+        stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, 1.8 * scale, stroke_color);
+
+        // Draw hands (wooden circles)
+        fill_skia_circle(pixmap, left_paw_x, left_paw_y, 4.5 * scale, wood_color);
+        stroke_skia_circle(pixmap, left_paw_x, left_paw_y, 4.5 * scale, 1.8 * scale, stroke_color);
+
+        fill_skia_circle(pixmap, right_paw_x, right_paw_y, 4.5 * scale, wood_color);
+        stroke_skia_circle(pixmap, right_paw_x, right_paw_y, 4.5 * scale, 1.8 * scale, stroke_color);
+    }
+    // =========================================================================
+
     unsafe fn paint_mascot_quick_key_display(
         hwnd: HWND,
         entries: &[QuickKeyDisplayEntry],
         font_size: f32,
         mouse_offset: (f32, f32),
+        mascot_style: crate::model::MascotStyle,
         window_x: i32,
         window_y: i32,
         width: i32,
@@ -12923,222 +13354,16 @@ mod windows_overlay {
         let look_x = (mouse_offset.0 * 2.2).clamp(-6.0, 6.0) * scale;
         let look_y = (mouse_offset.1 * 1.8).clamp(-4.5, 4.5) * scale;
 
-        // 1. Draw Hachiware (sitting BEHIND the desk)
-        // Body Shadow
-        fill_skia_circle(
-            &mut pixmap,
-            body_cx,
-            body_cy + 4.0 * scale,
-            body_radius,
-            [0, 0, 0, 22],
-        );
-        // Body (White Circle)
-        fill_skia_circle(
-            &mut pixmap,
-            body_cx,
-            body_cy,
-            body_radius,
-            [255, 255, 255, 255],
-        );
-        stroke_skia_circle(
-            &mut pixmap,
-            body_cx,
-            body_cy,
-            body_radius,
-            2.2 * scale,
-            [45, 40, 42, 255],
-        );
-
-        // Hachiware Ears
-        let ear_wiggle = recent_pulse * 3.0 * scale;
-        let ear_shift_x = -look_x * 0.4;
-        let ear_shift_y = -look_y * 0.4;
-        // Left Ear
-        let mut left_ear = tiny_skia::PathBuilder::new();
-        left_ear.move_to(head_cx - 42.0 * scale + ear_shift_x, head_cy - 22.0 * scale + ear_shift_y);
-        left_ear.quad_to(
-            head_cx - 43.0 * scale - ear_wiggle + ear_shift_x, head_cy - 48.0 * scale - ear_wiggle + ear_shift_y,
-            head_cx - 36.0 * scale - ear_wiggle + ear_shift_x, head_cy - 52.0 * scale - ear_wiggle + ear_shift_y,
-        );
-        left_ear.quad_to(
-            head_cx - 24.0 * scale + ear_shift_x, head_cy - 42.0 * scale + ear_shift_y,
-            head_cx - 18.0 * scale + ear_shift_x, head_cy - 38.0 * scale + ear_shift_y,
-        );
-        left_ear.close();
-        if let Some(path) = left_ear.finish() {
-            fill_skia_path(&mut pixmap, &path, [100, 160, 230, 255]); // Blue
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
-        }
-        // Left Inner Ear (Pink)
-        let mut left_inner = tiny_skia::PathBuilder::new();
-        left_inner.move_to(head_cx - 37.0 * scale + ear_shift_x, head_cy - 24.0 * scale + ear_shift_y);
-        left_inner.line_to(head_cx - 34.0 * scale - ear_wiggle + ear_shift_x, head_cy - 45.0 * scale - ear_wiggle + ear_shift_y);
-        left_inner.line_to(head_cx - 23.0 * scale + ear_shift_x, head_cy - 34.0 * scale + ear_shift_y);
-        left_inner.close();
-        if let Some(path) = left_inner.finish() {
-            fill_skia_path(&mut pixmap, &path, [255, 200, 210, 255]);
-        }
-
-        // Right Ear
-        let mut right_ear = tiny_skia::PathBuilder::new();
-        right_ear.move_to(head_cx + 18.0 * scale + ear_shift_x, head_cy - 38.0 * scale + ear_shift_y);
-        right_ear.quad_to(
-            head_cx + 24.0 * scale + ear_shift_x, head_cy - 42.0 * scale + ear_shift_y,
-            head_cx + 36.0 * scale + ear_wiggle + ear_shift_x, head_cy - 52.0 * scale + ear_wiggle + ear_shift_y,
-        );
-        right_ear.quad_to(
-            head_cx + 43.0 * scale + ear_wiggle + ear_shift_x, head_cy - 48.0 * scale + ear_wiggle + ear_shift_y,
-            head_cx + 42.0 * scale + ear_shift_x, head_cy - 22.0 * scale + ear_shift_y,
-        );
-        right_ear.close();
-        if let Some(path) = right_ear.finish() {
-            fill_skia_path(&mut pixmap, &path, [100, 160, 230, 255]); // Blue
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
-        }
-        // Right Inner Ear (Pink)
-        let mut right_inner = tiny_skia::PathBuilder::new();
-        right_inner.move_to(head_cx + 23.0 * scale + ear_shift_x, head_cy - 34.0 * scale + ear_shift_y);
-        right_inner.line_to(head_cx + 34.0 * scale + ear_wiggle + ear_shift_x, head_cy - 45.0 * scale + ear_wiggle + ear_shift_y);
-        right_inner.line_to(head_cx + 37.0 * scale + ear_shift_x, head_cy - 24.0 * scale + ear_shift_y);
-        right_inner.close();
-        if let Some(path) = right_inner.finish() {
-            fill_skia_path(&mut pixmap, &path, [255, 200, 210, 255]);
-        }
-
-        // Head
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx,
-            head_cy + 4.5 * scale,
-            head_radius,
-            [0, 0, 0, 28],
-        );
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx,
-            head_cy,
-            head_radius,
-            [255, 255, 255, 255],
-        );
-
-        // Forehead Blue Hair Patch
-        let mut hair = tiny_skia::PathBuilder::new();
-        let hair_shift_x = look_x * 0.15;
-        let hair_shift_y = look_y * 0.15;
-        hair.move_to(head_cx - 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y);
-        hair.quad_to(
-            head_cx - 40.0 * scale + hair_shift_x, head_cy - 46.0 * scale + hair_shift_y,
-            head_cx + hair_shift_x, head_cy - 47.0 * scale + hair_shift_y
-        );
-        hair.quad_to(
-            head_cx + 40.0 * scale + hair_shift_x, head_cy - 46.0 * scale + hair_shift_y,
-            head_cx + 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y
-        );
-        hair.quad_to(
-            head_cx + 25.0 * scale + hair_shift_x, head_cy - 4.0 * scale + hair_shift_y,
-            head_cx + 14.0 * scale + hair_shift_x, head_cy + 8.0 * scale + hair_shift_y
-        );
-        hair.quad_to(
-            head_cx + 6.0 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y,
-            head_cx + hair_shift_x, head_cy - 12.0 * scale + hair_shift_y
-        );
-        hair.quad_to(
-            head_cx - 6.0 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y,
-            head_cx - 14.0 * scale + hair_shift_x, head_cy + 8.0 * scale + hair_shift_y
-        );
-        hair.quad_to(
-            head_cx - 25.0 * scale + hair_shift_x, head_cy - 4.0 * scale + hair_shift_y,
-            head_cx - 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y
-        );
-        hair.close();
-        if let Some(path) = hair.finish() {
-            fill_skia_path(&mut pixmap, &path, [100, 160, 230, 255]); // Blue patch
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
-        }
-
-        // Head Outline
-        stroke_skia_circle(
-            &mut pixmap,
-            head_cx,
-            head_cy,
-            head_radius,
-            2.2 * scale,
-            [45, 40, 42, 255],
-        );
-
-        // Eyes
-        let left_eye_x = head_cx - 18.0 * scale + look_x;
-        let left_eye_y = head_cy + 4.0 * scale + look_y;
-        let right_eye_x = head_cx + 18.0 * scale + look_x;
-        let right_eye_y = head_cy + 4.0 * scale + look_y;
-        let eye_w = 8.5 * scale;
-        let eye_h = 10.5 * scale;
-        
-        for (ex, ey) in [(left_eye_x, left_eye_y), (right_eye_x, right_eye_y)] {
-            // Main Black Oval
-            fill_skia_rounded_rect(
-                &mut pixmap,
-                ex - eye_w * 0.5,
-                ey - eye_h * 0.5,
-                eye_w,
-                eye_h,
-                4.2 * scale,
-                [45, 40, 42, 255],
-            );
-            // Large Highlight
-            fill_skia_circle(
-                &mut pixmap,
-                ex - 1.5 * scale,
-                ey - 2.2 * scale,
-                3.2 * scale,
-                [255, 255, 255, 255],
-            );
-            // Small Highlight
-            fill_skia_circle(
-                &mut pixmap,
-                ex + 2.0 * scale,
-                ey + 2.0 * scale,
-                1.6 * scale,
-                [255, 255, 255, 255],
-            );
-        }
-
-        // Eyebrows
-        fill_skia_circle(&mut pixmap, head_cx - 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
-        fill_skia_circle(&mut pixmap, head_cx + 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
-
-        // Cheek Blush
-        for i in 0..3 {
-            let offset = (i as f32 - 1.0) * 3.5 * scale;
-            // Left Cheek
-            let mut blush = tiny_skia::PathBuilder::new();
-            blush.move_to(head_cx - 32.0 * scale + offset - 1.5 * scale + look_x, head_cy + 13.0 * scale + 3.0 * scale + look_y);
-            blush.line_to(head_cx - 32.0 * scale + offset + 1.5 * scale + look_x, head_cy + 13.0 * scale - 3.0 * scale + look_y);
-            if let Some(path) = blush.finish() {
-                stroke_skia_path(&mut pixmap, &path, [255, 120, 140, 220], 1.8 * scale);
+        // 1. Draw mascot body+ears then head+face (sitting BEHIND the desk)
+        match mascot_style {
+            crate::model::MascotStyle::Hachiware => {
+                mascot_draw_body_and_ears(&mut pixmap, scale, body_cx, body_cy, body_radius, head_cx, head_cy, look_x, look_y, recent_pulse);
+                mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y);
             }
-            // Right Cheek
-            let mut blush2 = tiny_skia::PathBuilder::new();
-            blush2.move_to(head_cx + 32.0 * scale + offset - 1.5 * scale + look_x, head_cy + 13.0 * scale + 3.0 * scale + look_y);
-            blush2.line_to(head_cx + 32.0 * scale + offset + 1.5 * scale + look_x, head_cy + 13.0 * scale - 3.0 * scale + look_y);
-            if let Some(path) = blush2.finish() {
-                stroke_skia_path(&mut pixmap, &path, [255, 120, 140, 220], 1.8 * scale);
+            crate::model::MascotStyle::TungSahur => {
+                tung_sahur_draw_body_and_ears(&mut pixmap, scale, body_cx, body_cy, body_radius, head_cx, head_cy, look_x, look_y, recent_pulse);
+                tung_sahur_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y);
             }
-        }
-
-        // Mouth
-        let mut mouth = tiny_skia::PathBuilder::new();
-        mouth.move_to(head_cx - 5.0 * scale + look_x, head_cy + 14.0 * scale + look_y);
-        mouth.quad_to(
-            head_cx - 2.5 * scale + look_x, head_cy + 17.5 * scale + look_y,
-            head_cx + look_x, head_cy + 14.5 * scale + look_y,
-        );
-        mouth.quad_to(
-            head_cx + 2.5 * scale + look_x, head_cy + 17.5 * scale + look_y,
-            head_cx + 5.0 * scale + look_x, head_cy + 14.0 * scale + look_y,
-        );
-        if let Some(path) = mouth.finish() {
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.0 * scale);
         }
 
 
@@ -13718,56 +13943,23 @@ mod windows_overlay {
                 }
             }
         }
-
-        // Draw Arms onto the transparent pixmap and blend them on top of everything
+        // Draw arms pass: shoulder joints + arms on top of keyboard, under the head
         pixmap.data_mut().fill(0);
-
-        // Left Arm path
-        let mut left_arm_path = tiny_skia::PathBuilder::new();
-        left_arm_path.move_to(left_shoulder_top.0, left_shoulder_top.1);
-        left_arm_path.quad_to(
-            left_paw_x - 16.0 * scale, left_paw_y - 12.0 * scale,
-            left_paw_x - 10.0 * scale, left_paw_y + 4.0 * scale,
-        );
-        left_arm_path.quad_to(
-            left_paw_x, left_paw_y + 14.0 * scale,
-            left_paw_x + 10.0 * scale, left_paw_y + 2.0 * scale,
-        );
-        left_arm_path.quad_to(
-            left_paw_x + 6.0 * scale, left_paw_y - 12.0 * scale,
-            left_shoulder_bottom.0, left_shoulder_bottom.1,
-        );
-
-        // Close both arm paths so the shoulder connector segment is also stroked
-        left_arm_path.close();
-        if let Some(path) = left_arm_path.clone().finish() {
-            fill_skia_path(&mut pixmap, &path, paw_glow);
-        }
-        if let Some(path) = left_arm_path.finish() {
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
-        }
-
-        // Right Arm path
-        let mut right_arm_path = tiny_skia::PathBuilder::new();
-        right_arm_path.move_to(right_shoulder_top.0, right_shoulder_top.1);
-        right_arm_path.quad_to(
-            right_paw_x + 16.0 * scale, right_paw_y - 12.0 * scale,
-            right_paw_x + 10.0 * scale, right_paw_y + 4.0 * scale,
-        );
-        right_arm_path.quad_to(
-            right_paw_x, right_paw_y + 14.0 * scale,
-            right_paw_x - 10.0 * scale, right_paw_y + 2.0 * scale,
-        );
-        right_arm_path.quad_to(
-            right_paw_x - 6.0 * scale, right_paw_y - 12.0 * scale,
-            right_shoulder_bottom.0, right_shoulder_bottom.1,
-        );
-        right_arm_path.close();
-        if let Some(path) = right_arm_path.clone().finish() {
-            fill_skia_path(&mut pixmap, &path, paw_glow);
-        }
-        if let Some(path) = right_arm_path.finish() {
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
+        match mascot_style {
+            crate::model::MascotStyle::Hachiware => {
+                mascot_draw_arms(
+                    &mut pixmap, scale, body_cx, body_cy,
+                    left_paw_target, right_paw_target,
+                    paw_press, paw_glow,
+                );
+            }
+            crate::model::MascotStyle::TungSahur => {
+                tung_sahur_draw_arms(
+                    &mut pixmap, scale, body_cx, body_cy,
+                    left_paw_target, right_paw_target,
+                    paw_press, paw_glow,
+                );
+            }
         }
 
         // Blend arms on top of pixels DIB Section
@@ -13789,61 +13981,15 @@ mod windows_overlay {
             }
         }
 
-        // Redraw head+face on top of the blended arms so the head is always in front of the arms.
-        // This covers any arm outline strokes that would otherwise bleed onto the face.
+        // Redraw head+face on top of arms (head must always be in front of arms)
         pixmap.data_mut().fill(0);
-        fill_skia_circle(&mut pixmap, head_cx, head_cy + 4.5 * scale, head_radius, [0, 0, 0, 28]);
-        fill_skia_circle(&mut pixmap, head_cx, head_cy, head_radius, [255, 255, 255, 255]);
-        {
-            let hair_shift_x = look_x * 0.15;
-            let hair_shift_y = look_y * 0.15;
-            let mut hair = tiny_skia::PathBuilder::new();
-            hair.move_to(head_cx - 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y);
-            hair.quad_to(head_cx - 40.0 * scale + hair_shift_x, head_cy - 46.0 * scale + hair_shift_y, head_cx + hair_shift_x, head_cy - 47.0 * scale + hair_shift_y);
-            hair.quad_to(head_cx + 40.0 * scale + hair_shift_x, head_cy - 46.0 * scale + hair_shift_y, head_cx + 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y);
-            hair.quad_to(head_cx + 25.0 * scale + hair_shift_x, head_cy - 4.0 * scale + hair_shift_y, head_cx + 14.0 * scale + hair_shift_x, head_cy + 8.0 * scale + hair_shift_y);
-            hair.quad_to(head_cx + 6.0 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y, head_cx + hair_shift_x, head_cy - 12.0 * scale + hair_shift_y);
-            hair.quad_to(head_cx - 6.0 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y, head_cx - 14.0 * scale + hair_shift_x, head_cy + 8.0 * scale + hair_shift_y);
-            hair.quad_to(head_cx - 25.0 * scale + hair_shift_x, head_cy - 4.0 * scale + hair_shift_y, head_cx - 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y);
-            hair.close();
-            if let Some(path) = hair.finish() {
-                fill_skia_path(&mut pixmap, &path, [100, 160, 230, 255]);
-                stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
+        match mascot_style {
+            crate::model::MascotStyle::Hachiware => {
+                mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y);
             }
-        }
-        stroke_skia_circle(&mut pixmap, head_cx, head_cy, head_radius, 2.2 * scale, [45, 40, 42, 255]);
-        {
-            let left_eye_x = head_cx - 18.0 * scale + look_x;
-            let left_eye_y = head_cy + 4.0 * scale + look_y;
-            let right_eye_x = head_cx + 18.0 * scale + look_x;
-            let right_eye_y = head_cy + 4.0 * scale + look_y;
-            let eye_w = 8.5 * scale;
-            let eye_h = 10.5 * scale;
-            for (ex, ey) in [(left_eye_x, left_eye_y), (right_eye_x, right_eye_y)] {
-                fill_skia_rounded_rect(&mut pixmap, ex - eye_w * 0.5, ey - eye_h * 0.5, eye_w, eye_h, 4.2 * scale, [45, 40, 42, 255]);
-                fill_skia_circle(&mut pixmap, ex - 1.5 * scale, ey - 2.2 * scale, 3.2 * scale, [255, 255, 255, 255]);
-                fill_skia_circle(&mut pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.6 * scale, [255, 255, 255, 255]);
+            crate::model::MascotStyle::TungSahur => {
+                tung_sahur_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y);
             }
-            fill_skia_circle(&mut pixmap, head_cx - 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
-            fill_skia_circle(&mut pixmap, head_cx + 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
-        }
-        for i in 0..3_i32 {
-            let boff = (i as f32 - 1.0) * 3.5 * scale;
-            let mut bl = tiny_skia::PathBuilder::new();
-            bl.move_to(head_cx - 32.0 * scale + boff - 1.5 * scale + look_x, head_cy + 13.0 * scale + 3.0 * scale + look_y);
-            bl.line_to(head_cx - 32.0 * scale + boff + 1.5 * scale + look_x, head_cy + 13.0 * scale - 3.0 * scale + look_y);
-            if let Some(p) = bl.finish() { stroke_skia_path(&mut pixmap, &p, [255, 120, 140, 220], 1.8 * scale); }
-            let mut br = tiny_skia::PathBuilder::new();
-            br.move_to(head_cx + 32.0 * scale + boff - 1.5 * scale + look_x, head_cy + 13.0 * scale + 3.0 * scale + look_y);
-            br.line_to(head_cx + 32.0 * scale + boff + 1.5 * scale + look_x, head_cy + 13.0 * scale - 3.0 * scale + look_y);
-            if let Some(p) = br.finish() { stroke_skia_path(&mut pixmap, &p, [255, 120, 140, 220], 1.8 * scale); }
-        }
-        {
-            let mut mouth = tiny_skia::PathBuilder::new();
-            mouth.move_to(head_cx - 5.0 * scale + look_x, head_cy + 14.0 * scale + look_y);
-            mouth.quad_to(head_cx - 2.5 * scale + look_x, head_cy + 17.5 * scale + look_y, head_cx + look_x, head_cy + 14.5 * scale + look_y);
-            mouth.quad_to(head_cx + 2.5 * scale + look_x, head_cy + 17.5 * scale + look_y, head_cx + 5.0 * scale + look_x, head_cy + 14.0 * scale + look_y);
-            if let Some(p) = mouth.finish() { stroke_skia_path(&mut pixmap, &p, [45, 40, 42, 255], 2.0 * scale); }
         }
         let head_data = pixmap.data();
         for i in 0..total_pixels {
