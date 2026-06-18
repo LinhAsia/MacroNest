@@ -4079,17 +4079,21 @@ impl CrosshairApp {
         let current_time = ui.input(|i| i.time);
 
         // Helper to render interactive settings popup on hover
-        let mut render_popup = |ui: &mut egui::Ui, button_response: &egui::Response, action_kind: TitlebarQuickActionKind, draw_controls: &mut dyn FnMut(&mut egui::Ui) -> bool| {
+        let render_popup = |ui: &mut egui::Ui, button_response: &egui::Response, action_kind: TitlebarQuickActionKind, draw_controls: &mut dyn FnMut(&mut egui::Ui) -> bool| {
             let popup_id = ui.make_persistent_id(format!("qa-popup-state-{:?}", action_kind));
-            
-            // Get active popup state from context
+
+            // Persistent state IDs
             let active_qa_id = ui.make_persistent_id("active-quick-action-popup");
-            let mut active_qa = ui.ctx().data(|data| data.get_temp::<TitlebarQuickActionKind>(active_qa_id));
             let active_qa_time_id = ui.make_persistent_id("active-quick-action-popup-time");
+            // Track whether a sub-popup was open in the previous frame to give a one-frame buffer
+            let popup_was_open_id = ui.make_persistent_id(format!("qa-popup-was-open-{:?}", action_kind));
+
+            let mut active_qa = ui.ctx().data(|data| data.get_temp::<TitlebarQuickActionKind>(active_qa_id));
             let mut last_active_time = ui.ctx().data(|data| data.get_temp::<f64>(active_qa_time_id)).unwrap_or(0.0);
-            
+            let popup_was_open_prev = ui.ctx().data(|data| data.get_temp::<bool>(popup_was_open_id)).unwrap_or(false);
+
             let is_button_hovered = button_response.hovered();
-            
+
             // If the button is hovered, this action kind becomes the active one immediately
             if is_button_hovered {
                 last_active_time = current_time;
@@ -4103,25 +4107,31 @@ impl CrosshairApp {
                     });
                 }
             }
-            
+
             // Check if this action is the active one
             let is_active = active_qa == Some(action_kind);
-            
-            // Keep open if user is actively dragging or has a combobox/sub-popup open
+
+            // Keep open if user is actively dragging or has a combobox/sub-popup open (current or previous frame)
             let is_dragging = ui.ctx().dragged_id().is_some();
             let is_any_popup_open = egui::Popup::is_any_open(ui.ctx());
-            let is_interacting = is_active && (is_dragging || is_any_popup_open);
-            
+            // One-frame buffer: if popup was open last frame, treat this frame as interacting too
+            let is_interacting = is_active && (is_dragging || is_any_popup_open || popup_was_open_prev);
+
             if is_interacting {
                 last_active_time = current_time;
                 ui.ctx().data_mut(|data| {
                     data.insert_temp(active_qa_time_id, current_time);
                 });
             }
-            
+
+            // Store popup open state for next frame
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(popup_was_open_id, is_any_popup_open);
+            });
+
             let time_since_active = current_time - last_active_time;
             let should_show = is_active && (time_since_active < 0.25 || is_interacting);
-            
+
             if should_show {
                 let pos = button_response.rect.left_bottom() + vec2(-42.0, 4.0);
                 let mut content_rect = egui::Rect::NOTHING;
@@ -4141,13 +4151,14 @@ impl CrosshairApp {
                         content_rect = frame_response.response.rect;
                         frame_response.inner
                     });
-                
-                // If the pointer is over the popup or its inner content, keep it active
-                let is_popup_hovered = if let Some(mouse_pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
+
+                // Keep active if pointer is over the card, any sub-popup is open, or inner controls returned true
+                let mouse_in_card = if let Some(mouse_pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
                     content_rect.contains(mouse_pos)
                 } else {
                     false
-                } || area_response.inner;
+                };
+                let is_popup_hovered = mouse_in_card || is_any_popup_open || area_response.inner;
                 if is_popup_hovered {
                     ui.ctx().data_mut(|data| {
                         data.insert_temp(active_qa_time_id, current_time);
