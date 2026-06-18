@@ -561,9 +561,15 @@ impl CrosshairApp {
         if trimmed.is_empty() {
             return false;
         }
-        let looks_like_mojibake = ["Ãƒ", "Ã†", "Â", "â€", "â‚¬"]
-            .iter()
-            .any(|marker| trimmed.contains(marker));
+        let looks_like_mojibake = [
+            "\u{00C3}\u{0192}",
+            "\u{00C3}\u{2020}",
+            "\u{00C2}",
+            "\u{00E2}\u{20AC}",
+            "\u{00E2}\u{201A}\u{00AC}",
+        ]
+        .iter()
+        .any(|marker| trimmed.contains(marker));
         if !looks_like_mojibake {
             return false;
         }
@@ -1666,11 +1672,11 @@ impl CrosshairApp {
         mut on_clear_click: impl FnMut(),
     ) {
         ui.horizontal(|ui| {
-            // Nút bấm hình bàn phím để capture
+            // Keyboard capture button
             let keyboard_btn = ui
                 .add_sized(
                     [18.0, 18.0],
-                    egui::Button::new(Self::material_icon_text(0xe312, 14.0)) // icon bàn phím ⌨️
+                    egui::Button::new(Self::material_icon_text(0xe312, 14.0)) // keyboard icon
                         .fill(if active {
                             egui::Color32::from_rgba_premultiplied(72, 156, 116, 120)
                         } else {
@@ -1693,7 +1699,7 @@ impl CrosshairApp {
             if keyboard_btn.clicked() {
                 on_capture_click();
             }
-            // Hiển thị các phím tắt dạng chip
+            // Render assigned hotkeys as chips
             let keys: Vec<String> = keys_str
                 .split(',')
                 .map(str::trim)
@@ -2254,7 +2260,7 @@ impl CrosshairApp {
                             egui::TextEdit::singleline(&mut cond.target_color).hint_text("R,G,B"),
                         );
                         *live_sync |= resp_col.changed();
-                        // Swatch màu trực quan
+                        // Visual color swatch
                         let swatch_color = Self::parse_rgb_color(&cond.target_color)
                             .unwrap_or(egui::Color32::TRANSPARENT);
                         let (rect, _response) =
@@ -2264,7 +2270,7 @@ impl CrosshairApp {
                         let resp_tol =
                             ui.add(egui::DragValue::new(&mut cond.color_tolerance).range(0..=255));
                         *live_sync |= resp_tol.changed();
-                        // Nút pick tọa độ & màu từ màn hình
+                        // Pick coordinates and color from the screen
                         let pick_btn = ui
                             .add_sized(
                                 [18.0, 18.0],
@@ -2435,7 +2441,7 @@ impl CrosshairApp {
                             timer_names,
                             language,
                         );
-                        // Nút pick tọa độ từ màn hình
+                        // Pick coordinates from the screen
                         let pick_btn = ui
                             .add_sized(
                                 [18.0, 18.0],
@@ -2458,7 +2464,7 @@ impl CrosshairApp {
                         }
                     }
                     IfConditionType::PresetRunning => {
-                        // Bước 1: chọn group
+                        // Step 1: select a group
                         let sel_group_id = cond.running_preset_group_id;
                         let sel_group_label = sel_group_id
                             .and_then(|gid| {
@@ -2491,7 +2497,7 @@ impl CrosshairApp {
                                 }
                             }
                         });
-                        // Bước 2: chọn preset trong group đó
+                        // Step 2: select a preset inside that group
                         let group_presets: &[(u32, String)] = if let Some(gid) = sel_group_id {
                             all_groups
                                 .iter()
@@ -2689,7 +2695,7 @@ impl CrosshairApp {
             let scope_note = Self::tr_lang(
                 language,
                 "Only macro groups in this folder can run while you are inside it.",
-                "Chỉ các macro group trong folder này mới hoạt động khi bạn đang ở đây.",
+                "Only macro groups in this folder can run while you are inside it.",
             );
             egui::Frame::group(ui.style())
                 .fill(if ui.visuals().dark_mode {
@@ -3217,9 +3223,9 @@ impl CrosshairApp {
                             "Back to macro groups"
                         },
                         if back_to_folder_list {
-                            "Quay lại danh sách folder"
+                            "Back to folder list"
                         } else {
-                            "Quay lại danh sách macro group"
+                            "Back to macro groups"
                         },
                     ))
                     .clicked()
@@ -3835,7 +3841,7 @@ impl CrosshairApp {
                 ui.label(Self::tr_lang(
                     language,
                     "No macro groups match this search.",
-                    "Không có macro group nào khớp tìm kiếm này.",
+                    "No macro groups match this search.",
                 ));
             } else if !self.macro_folders_panel_open {
                 if root_group_count == 0 {
@@ -3856,7 +3862,7 @@ impl CrosshairApp {
                                 RichText::new(Self::tr_lang(
                                     language,
                                     "Create your first macro group",
-                                    "Tạo macro group đầu tiên",
+                                    "Create your first macro group",
                                 ))
                                 .strong()
                                 .size(17.0),
@@ -3865,7 +3871,7 @@ impl CrosshairApp {
                                 RichText::new(Self::tr_lang(
                                     language,
                                     "New users can start here.",
-                                    "Người mới có thể bắt đầu ngay tại đây.",
+                                    "New users can start here.",
                                 ))
                                 .small()
                                 .weak(),
@@ -3877,7 +3883,7 @@ impl CrosshairApp {
                                     Button::new(Self::tr_lang(
                                         language,
                                         "+ Add first macro group",
-                                        "+ Thêm macro group đầu tiên",
+                                        "+ Add first macro group",
                                     )),
                                 )
                             })
@@ -3893,7 +3899,7 @@ impl CrosshairApp {
                     ui.label(Self::tr_lang(
                         language,
                         "No macro groups outside folders match the current filter.",
-                        "Không có macro group ngoài folder nào khớp bộ lọc hiện tại.",
+                        "No macro groups outside folders match the current filter.",
                     ));
                 }
             } else if let Some(folder_id) = active_folder_view {
@@ -3915,7 +3921,7 @@ impl CrosshairApp {
                                 RichText::new(Self::tr_lang(
                                     language,
                                     "This folder has no macro groups yet",
-                                    "Folder này chưa có macro group nào",
+                                    "This folder has no macro groups yet",
                                 ))
                                 .strong()
                                 .size(17.0),
@@ -3924,7 +3930,7 @@ impl CrosshairApp {
                                 RichText::new(Self::tr_lang(
                                     language,
                                     "Create one here so users know where to start.",
-                                    "Tạo một cái ngay tại đây để ai cũng biết bắt đầu ở đâu.",
+                                    "Create one here so users know where to start.",
                                 ))
                                 .small()
                                 .weak(),
@@ -3936,7 +3942,7 @@ impl CrosshairApp {
                                     Button::new(Self::tr_lang(
                                         language,
                                         "+ Add first macro group",
-                                        "+ Thêm macro group đầu tiên",
+                                        "+ Add first macro group",
                                     )),
                                 )
                             })
@@ -3952,7 +3958,7 @@ impl CrosshairApp {
                     ui.label(Self::tr_lang(
                         language,
                         "No macro groups in this folder match the current filter.",
-                        "Không có macro group nào trong folder này khớp bộ lọc hiện tại.",
+                        "No macro groups in this folder match the current filter.",
                     ));
                 }
             }
@@ -4055,7 +4061,7 @@ impl CrosshairApp {
                                     RichText::new(Self::tr_lang(
                                         language,
                                         "Create your first folder",
-                                        "Tạo folder đầu tiên",
+                                        "Create your first folder",
                                     ))
                                     .strong()
                                     .size(17.0),
@@ -4064,7 +4070,7 @@ impl CrosshairApp {
                                     RichText::new(Self::tr_lang(
                                         language,
                                         "The first folder slot is here.",
-                                        "Ô đầu tiên của folder nằm ở đây.",
+                                        "The first folder slot is here.",
                                     ))
                                     .small()
                                     .weak(),
@@ -4076,7 +4082,7 @@ impl CrosshairApp {
                                         Button::new(Self::tr_lang(
                                             language,
                                             "+ Add first folder",
-                                            "+ Thêm folder đầu tiên",
+                                            "+ Add first folder",
                                         )),
                                     )
                                 })
@@ -4109,7 +4115,7 @@ impl CrosshairApp {
                                 RichText::new(Self::tr_lang(
                                     language,
                                     "Create your first macro group",
-                                    "Tạo macro group đầu tiên",
+                                    "Create your first macro group",
                                 ))
                                 .strong()
                                 .size(17.0),
@@ -4119,13 +4125,13 @@ impl CrosshairApp {
                                     Self::tr_lang(
                                         language,
                                         "This first macro group slot is inside the folder.",
-                                        "Ô macro group đầu tiên nằm ngay trong folder này.",
+                                        "This first macro group slot is inside the folder.",
                                     )
                                 } else {
                                     Self::tr_lang(
                                         language,
                                         "The first macro group slot is here.",
-                                        "Ô macro group đầu tiên nằm ở đây.",
+                                        "The first macro group slot is here.",
                                     )
                                 })
                                 .small()
@@ -4138,7 +4144,7 @@ impl CrosshairApp {
                                     Button::new(Self::tr_lang(
                                         language,
                                         "+ Add first macro group",
-                                        "+ Thêm macro group đầu tiên",
+                                        "+ Add first macro group",
                                     )),
                                 )
                             })
@@ -4219,7 +4225,7 @@ impl CrosshairApp {
                                                 .on_hover_text(Self::tr_lang(
                                                     language,
                                                     "Add the first macro group to this folder",
-                                                    "Thêm macro group đầu tiên vào folder này",
+                                                    "Add the first macro group to this folder"
                                                 ));
                                             if btn.clicked() {
                                                 add_clicked = true;
@@ -4434,7 +4440,7 @@ impl CrosshairApp {
                                     320.0,
                                     21.0,
                                     21.0,
-                                    Self::tr_lang(language, "Macro group name", "Tên macro group"),
+                                    Self::tr_lang(language, "Macro group name", "Macro group name"),
                                     false,
                                 );
                                 Self::apply_vietnamese_input_if_changed(
@@ -7103,14 +7109,14 @@ impl CrosshairApp {
                                                                                .hint_text(RichText::new("#RRGGBB").color(hint_color).weak()),
                                                                        );
                                                                        live_sync |= resp_col.changed();
-                                                                       // Swatch màu trực quan
+                                                                       // Visual color swatch
                                                                        let swatch_color = Self::parse_rgb_color(&step.if_target_color).unwrap_or(egui::Color32::TRANSPARENT);
                                                                        let (rect, _response) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
                                                                        ui.painter().rect_filled(rect, 3.0, swatch_color);
                                                                        ui.label(Self::tr_lang(language, "Tol:", "Tol:"));
                                                                        let resp_tol = ui.add(egui::DragValue::new(&mut step.if_color_tolerance).range(0..=255));
                                                                        live_sync |= resp_tol.changed();
-                                                                       // Nút pick màu + vị trí từ màn hình
+                                                                       // Pick color and position from the screen
                                                                        let pick_btn = ui.add_sized(
                                                                            [18.0, 18.0],
                                                                            egui::Button::new(Self::material_icon_text(0xe3b4, 14.0)),
@@ -7244,7 +7250,7 @@ impl CrosshairApp {
                                                                        );
                                                                        live_sync |= response2.changed();
                                                                        Self::render_variable_suggestions(ui, &response2, &mut step.key, &timer_names, language);
-                                                                       // Nút pick tọa độ chuột từ màn hình
+                                                                       // Pick mouse coordinates from the screen
                                                                        let pick_btn = ui.add_sized(
                                                                            [18.0, 18.0],
                                                                            egui::Button::new(Self::material_icon_text(0xe55c, 14.0)),
@@ -7260,7 +7266,7 @@ impl CrosshairApp {
                                                                            });
                                                                        }
                                                                    } else if step.if_condition_type == IfConditionType::PresetRunning {
-                                                                       // Bước 1: chọn group
+                                                                       // Step 1: select a group
                                                                        let sel_group_id = step.if_running_preset_group_id;
                                                                        let sel_group_label = sel_group_id
                                                                            .and_then(|gid| all_groups.iter().find(|(id, _, _)| *id == gid).map(|(_, name, _)| name.clone()))
@@ -7277,7 +7283,7 @@ impl CrosshairApp {
                                                                                    }
                                                                                }
                                                                            });
-                                                                       // Bước 2: chọn preset trong group đó
+                                                                       // Step 2: select a preset inside that group
                                                                        let group_presets: &[(u32, String)] = if let Some(gid) = sel_group_id {
                                                                            all_groups.iter()
                                                                                .find(|(id, _, _)| *id == gid)
@@ -10338,14 +10344,14 @@ impl CrosshairApp {
                                                                         live_sync |= resp_y.changed();
                                                                         let resp_col = Self::render_plain_text_edit(ui, &mut step.if_target_color, ui.id().with("regular-if-target-color"), 64.0, 100.0, 21.0, 21.0, "#RRGGBB", false);
                                                                         live_sync |= resp_col.changed();
-                                                                        // Swatch màu trực quan
+                                                                        // Visual color swatch
                                                                         let swatch_color = Self::parse_rgb_color(&step.if_target_color).unwrap_or(egui::Color32::TRANSPARENT);
                                                                         let (rect, _response) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
                                                                         ui.painter().rect_filled(rect, 3.0, swatch_color);
                                                                         ui.label(Self::tr_lang(language, "Tol:", "Tol:"));
                                                                         let resp_tol = ui.add(egui::DragValue::new(&mut step.if_color_tolerance).range(0..=255));
                                                                         live_sync |= resp_tol.changed();
-                                                                        // Nút pick màu + vị trí từ màn hình
+                                                                        // Pick color and position from the screen
                                                                         let pick_btn = ui.add_sized(
                                                                             [18.0, 18.0],
                                                                             egui::Button::new(Self::material_icon_text(0xe3b4, 14.0)),
@@ -10475,7 +10481,7 @@ impl CrosshairApp {
                                                                         );
                                                                         live_sync |= response2.changed();
                                                                         Self::render_variable_suggestions(ui, &response2, &mut step.key, &timer_names, language);
-                                                                        // Nút pick tọa độ chuột từ màn hình
+                                                                        // Pick mouse coordinates from the screen
                                                                         let pick_btn = ui.add_sized(
                                                                             [18.0, 18.0],
                                                                             egui::Button::new(Self::material_icon_text(0xe55c, 14.0)),
@@ -10491,7 +10497,7 @@ impl CrosshairApp {
                                                                             });
                                                                         }
                                                                     } else if step.if_condition_type == IfConditionType::PresetRunning {
-                                                                        // Bước 1: chọn group
+                                                                        // Step 1: select a group
                                                                         let sel_group_id = step.if_running_preset_group_id;
                                                                         let sel_group_label = sel_group_id
                                                                             .and_then(|gid| all_groups.iter().find(|(id, _, _)| *id == gid).map(|(_, name, _)| name.clone()))
@@ -10508,7 +10514,7 @@ impl CrosshairApp {
                                                                                     }
                                                                                 }
                                                                             });
-                                                                        // Bước 2: chọn preset trong group đó
+                                                                        // Step 2: select a preset inside that group
                                                                         let group_presets: &[(u32, String)] = if let Some(gid) = sel_group_id {
                                                                             all_groups.iter()
                                                                                 .find(|(id, _, _)| *id == gid)
@@ -11646,7 +11652,7 @@ impl CrosshairApp {
                                     &active_dragged_indices,
                                 );
                             }
-                            // Dynamic hover highlight for Loop and If blocks (Gợi ý 2)
+                            // Dynamic hover highlight for Loop and If blocks
                             let hover_pos = ui.ctx().pointer_interact_pos();
                             if let Some(pos) = hover_pos {
                                 struct BlockRange {
@@ -11686,7 +11692,7 @@ impl CrosshairApp {
                                         let end_rect = step_rects[block.end_idx];
                                         if start_rect != Rect::ZERO && end_rect != Rect::ZERO {
                                             let union_rect = start_rect.union(end_rect);
-                                            // Kiểm tra xem chuột có nằm trong union_rect bao gồm cả khoảng hở dọc không
+                                            // Check whether the pointer is inside the union rect, including the vertical gap
                                             if union_rect.contains(pos) {
                                                 match active_block {
                                                     None => active_block = Some(block),

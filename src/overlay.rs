@@ -6067,7 +6067,7 @@ mod windows_overlay {
                 }
 
                 OverlayCommand::ApplyMouseSensitivityPreset(preset_id) => {
-                    // Tách riêng để drop lock NGAY sau khi lấy dữ liệu, tránh deadlock
+                    // Split this out so the lock is dropped immediately after reading the data, avoiding deadlocks
 
                     let preset_opt = {
                         HOOK_STATE
