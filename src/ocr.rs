@@ -241,13 +241,59 @@ pub fn basic_language_capability_name(lang_code: &str) -> Option<String> {
 }
 
 pub fn language_tag_matches(tags: &[String], code: &str) -> bool {
+    fn canonical_language_tag(tag: &str) -> String {
+        let lower = tag.trim().to_lowercase();
+        let parts = lower.split('-').collect::<Vec<_>>();
+        if parts.is_empty() {
+            return lower;
+        }
+        if parts[0] == "zh" {
+            if let Some(region) = parts.iter().rev().find(|part| part.len() == 2) {
+                return format!("zh-{}", region);
+            }
+            if parts.iter().any(|part| *part == "hans") {
+                return "zh-cn".to_owned();
+            }
+            if parts.iter().any(|part| *part == "hant") {
+                return "zh-tw".to_owned();
+            }
+        }
+        lower
+    }
+
     let code_lower = code.to_lowercase();
+    let canonical_code = canonical_language_tag(&code_lower);
     tags.iter().any(|tag| {
         let tag_lower = tag.to_lowercase();
+        let canonical_tag = canonical_language_tag(&tag_lower);
         tag_lower == code_lower
             || tag_lower.starts_with(&(code_lower.clone() + "-"))
             || code_lower.starts_with(&(tag_lower + "-"))
+            || canonical_tag == canonical_code
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::language_tag_matches;
+
+    #[test]
+    fn matches_windows_simplified_chinese_tag() {
+        let tags = vec!["zh-Hans-CN".to_owned()];
+        assert!(language_tag_matches(&tags, "zh-CN"));
+    }
+
+    #[test]
+    fn matches_windows_hong_kong_traditional_chinese_tag() {
+        let tags = vec!["zh-Hant-HK".to_owned()];
+        assert!(language_tag_matches(&tags, "zh-HK"));
+    }
+
+    #[test]
+    fn does_not_cross_match_different_chinese_regions() {
+        let tags = vec!["zh-Hant-HK".to_owned()];
+        assert!(!language_tag_matches(&tags, "zh-CN"));
+    }
 }
 
 #[cfg(not(windows))]
