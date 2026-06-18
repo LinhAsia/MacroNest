@@ -4464,18 +4464,16 @@ impl CrosshairApp {
                                     ),
                                 );
                             } else {
-                                let response = ui.add_sized(
-                                    [name_width, 21.0],
-                                    TextEdit::singleline(&mut group.name)
-                                        .font(egui::FontId::proportional(17.0))
-                                        .margin(egui::Margin {
-                                            left: 5,
-                                            right: 3,
-                                            top: 1,
-                                            bottom: 0,
-                                        })
-                                        .text_color(ui.visuals().strong_text_color())
-                                        .horizontal_align(egui::Align::Center),
+                                let response = Self::render_expandable_text_edit(
+                                    ui,
+                                    &mut group.name,
+                                    ui.make_persistent_id((group.id, "macro-group-name")),
+                                    name_width,
+                                    320.0,
+                                    21.0,
+                                    21.0,
+                                    Self::tr_lang(language, "Macro group name", "Tên macro group"),
+                                    false,
                                 );
                                 Self::apply_vietnamese_input_if_changed(
                                     &response,
