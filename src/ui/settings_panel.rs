@@ -13,6 +13,9 @@ use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 impl CrosshairApp {
     pub(crate) fn render_settings_popup(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
@@ -1346,16 +1349,22 @@ impl CrosshairApp {
             Self::powershell_quote(&dism_path.to_string_lossy()),
             arg_list,
         );
-        let mut child = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                &script,
-            ])
-            .spawn()?;
+        let mut command = Command::new("powershell");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ]);
+        #[cfg(windows)]
+        {
+            command.creation_flags(0x08000000);
+        }
+        let mut child = command.spawn()?;
         let powershell_pid = child.id();
         let started_at = Instant::now();
         loop {
@@ -1479,12 +1488,16 @@ impl CrosshairApp {
                 );
             }
 
-            Self::wait_for_ocr_language_state(
-                &lang_code_for_job,
-                matches!(kind, OcrLanguageJobKind::Install),
-                Duration::from_secs(180),
-            )
-            .map_err(|error| anyhow::anyhow!("{} Log: {}", error, log_path_for_job.display()))?;
+            if matches!(kind, OcrLanguageJobKind::Install) {
+                Self::wait_for_ocr_language_state(
+                    &lang_code_for_job,
+                    true,
+                    Duration::from_secs(180),
+                )
+                .map_err(|error| {
+                    anyhow::anyhow!("{} Log: {}", error, log_path_for_job.display())
+                })?;
+            }
             Ok(exit_code == 3010)
         });
 
@@ -1500,7 +1513,7 @@ impl CrosshairApp {
                 display_name_owned
             ),
             OcrLanguageJobKind::Uninstall => format!(
-                "Removing OCR for {}. Accept the Windows admin prompt if it appears.",
+                "Removing OCR for {} in the background. Windows may show one admin confirmation.",
                 display_name_owned
             ),
         };
@@ -1582,7 +1595,7 @@ impl CrosshairApp {
                                 format!("Installing OCR for {}...", display_name)
                             }
                             OcrLanguageJobKind::Uninstall => {
-                                format!("Removing OCR for {}...", display_name)
+                                format!("Removing OCR for {} in the background...", display_name)
                             }
                         });
                     });
