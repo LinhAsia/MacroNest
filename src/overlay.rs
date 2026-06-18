@@ -5699,194 +5699,104 @@ mod windows_overlay {
 
     fn quick_key_display_mascot_keys() -> Vec<QuickKeyDisplayMascotKey> {
         let mut keys = Vec::new();
-        let base_x = 92.0;
-        let base_y = 161.0; // Shifted up by 13 units
-        let key_w = 12.0;
-        let key_h = 11.0;
+        let base_x = 95.0;
+        let base_y = 161.0;
+        let key_h = 10.5;
         let gap = 2.3;
         let row_step = key_h + gap;
+        let unit_w = 14.0;
 
-        push_quick_key_display_mascot_row(
-            &mut keys,
-            base_x,
-            base_y,
-            key_w,
-            key_h,
-            gap,
-            &[
-                ("Esc", &["Escape"], 1.4),
-                ("1", &["1"], 1.0),
-                ("2", &["2"], 1.0),
-                ("3", &["3"], 1.0),
-                ("4", &["4"], 1.0),
-                ("5", &["5"], 1.0),
-                ("6", &["6"], 1.0),
-                ("7", &["7"], 1.0),
-                ("8", &["8"], 1.0),
-                ("9", &["9"], 1.0),
-                ("0", &["0"], 1.0),
-                ("-", &["-"], 1.0),
-                ("=", &["="], 1.0),
-                ("Bk", &["Backspace"], 1.85),
-            ],
-        );
-        push_quick_key_display_mascot_row(
-            &mut keys,
-            base_x,
-            base_y + row_step,
-            key_w,
-            key_h,
-            gap,
-            &[
-                ("Tab", &["Tab"], 1.55),
-                ("Q", &["Q"], 1.0),
-                ("W", &["W"], 1.0),
-                ("E", &["E"], 1.0),
-                ("R", &["R"], 1.0),
-                ("T", &["T"], 1.0),
-                ("Y", &["Y"], 1.0),
-                ("U", &["U"], 1.0),
-                ("I", &["I"], 1.0),
-                ("O", &["O"], 1.0),
-                ("P", &["P"], 1.0),
-                ("[", &["["], 1.0),
-                ("]", &["]"], 1.0),
-                ("\\", &["\\"], 1.3),
-            ],
-        );
-        push_quick_key_display_mascot_row(
-            &mut keys,
-            base_x,
-            base_y + row_step * 2.0,
-            key_w,
-            key_h,
-            gap,
-            &[
-                ("Caps", &["CapsLock"], 1.9),
-                ("A", &["A"], 1.0),
-                ("S", &["S"], 1.0),
-                ("D", &["D"], 1.0),
-                ("F", &["F"], 1.0),
-                ("G", &["G"], 1.0),
-                ("H", &["H"], 1.0),
-                ("J", &["J"], 1.0),
-                ("K", &["K"], 1.0),
-                ("L", &["L"], 1.0),
-                (";", &[";"], 1.0),
-                ("'", &["'"], 1.0),
-                ("Enter", &["Enter"], 2.25),
-            ],
-        );
-        push_quick_key_display_mascot_row(
-            &mut keys,
-            base_x,
-            base_y + row_step * 3.0,
-            key_w,
-            key_h,
-            gap,
-            &[
-                ("Shift", &["Shift"], 2.35),
-                ("Z", &["Z"], 1.0),
-                ("X", &["X"], 1.0),
-                ("C", &["C"], 1.0),
-                ("V", &["V"], 1.0),
-                ("B", &["B"], 1.0),
-                ("N", &["N"], 1.0),
-                ("M", &["M"], 1.0),
-                (",", &[","], 1.0),
-                (".", &["."], 1.0),
-                ("/", &["/"], 1.0),
-                ("Shift", &["Shift"], 2.55),
-            ],
-        );
-        push_quick_key_display_mascot_row(
-            &mut keys,
-            base_x,
-            base_y + row_step * 4.0,
-            key_w,
-            key_h,
-            gap,
-            &[
-                ("Ctrl", &["LCtrl"], 1.5),
-                ("Win", &["Win"], 1.2),
-                ("Alt", &["LAlt"], 1.2),
-                ("Space", &["Space"], 6.25),
-                ("Alt", &["RAlt"], 1.2),
-                ("Fn", &["Apps"], 1.2),
-                ("Ctrl", &["RCtrl"], 2.75),
-            ],
-        );
+        let mut add_key = |label: &'static str, aliases: &'static [&'static str], u: f32, span: f32, row_idx: f32| {
+            let x = base_x + u * unit_w;
+            let y = base_y + row_idx * row_step;
+            let w = span * unit_w - gap;
+            keys.push(QuickKeyDisplayMascotKey {
+                label,
+                aliases,
+                x,
+                y,
+                w,
+                h: key_h,
+            });
+        };
 
-        // Append navigation block on the right
-        // Column 1 (X = 315.2)
-        keys.push(QuickKeyDisplayMascotKey {
-            label: "Ins",
-            aliases: &["Insert"],
-            x: 315.2,
-            y: base_y,
-            w: key_w,
-            h: key_h,
-        });
-        keys.push(QuickKeyDisplayMascotKey {
-            label: "Del",
-            aliases: &["Delete"],
-            x: 315.2,
-            y: base_y + row_step,
-            w: key_w,
-            h: key_h,
-        });
-        keys.push(QuickKeyDisplayMascotKey {
-            label: "PgUp",
-            aliases: &["PageUp", "Prior"],
-            x: 315.2,
-            y: base_y + row_step * 2.0,
-            w: key_w,
-            h: key_h,
-        });
-        keys.push(QuickKeyDisplayMascotKey {
-            label: "PgDn",
-            aliases: &["PageDown", "Next"],
-            x: 315.2,
-            y: base_y + row_step * 3.0,
-            w: key_w,
-            h: key_h,
-        });
-        keys.push(QuickKeyDisplayMascotKey {
-            label: "Left",
-            aliases: &["Left", "ArrowLeft"],
-            x: 315.2,
-            y: base_y + row_step * 4.0,
-            w: key_w,
-            h: key_h,
-        });
+        // Row 1
+        add_key("Esc", &["Escape"], 0.0, 1.0, 0.0);
+        add_key("1", &["1"], 1.0, 1.0, 0.0);
+        add_key("2", &["2"], 2.0, 1.0, 0.0);
+        add_key("3", &["3"], 3.0, 1.0, 0.0);
+        add_key("4", &["4"], 4.0, 1.0, 0.0);
+        add_key("5", &["5"], 5.0, 1.0, 0.0);
+        add_key("6", &["6"], 6.0, 1.0, 0.0);
+        add_key("7", &["7"], 7.0, 1.0, 0.0);
+        add_key("8", &["8"], 8.0, 1.0, 0.0);
+        add_key("9", &["9"], 9.0, 1.0, 0.0);
+        add_key("0", &["0"], 10.0, 1.0, 0.0);
+        add_key("-", &["-"], 11.0, 1.0, 0.0);
+        add_key("=", &["="], 12.0, 1.0, 0.0);
+        add_key("Bk", &["Backspace"], 13.0, 2.0, 0.0);
+        add_key("Ins", &["Insert"], 15.0, 1.0, 0.0);
 
-        // Column 2 (X = 329.5)
-        keys.push(QuickKeyDisplayMascotKey {
-            label: "Up",
-            aliases: &["Up", "ArrowUp"],
-            x: 329.5,
-            y: base_y + row_step * 3.0,
-            w: key_w,
-            h: key_h,
-        });
-        keys.push(QuickKeyDisplayMascotKey {
-            label: "Down",
-            aliases: &["Down", "ArrowDown"],
-            x: 329.5,
-            y: base_y + row_step * 4.0,
-            w: key_w,
-            h: key_h,
-        });
+        // Row 2
+        add_key("Tab", &["Tab"], 0.0, 1.5, 1.0);
+        add_key("Q", &["Q"], 1.5, 1.0, 1.0);
+        add_key("W", &["W"], 2.5, 1.0, 1.0);
+        add_key("E", &["E"], 3.5, 1.0, 1.0);
+        add_key("R", &["R"], 4.5, 1.0, 1.0);
+        add_key("T", &["T"], 5.5, 1.0, 1.0);
+        add_key("Y", &["Y"], 6.5, 1.0, 1.0);
+        add_key("U", &["U"], 7.5, 1.0, 1.0);
+        add_key("I", &["I"], 8.5, 1.0, 1.0);
+        add_key("O", &["O"], 9.5, 1.0, 1.0);
+        add_key("P", &["P"], 10.5, 1.0, 1.0);
+        add_key("[", &["["], 11.5, 1.0, 1.0);
+        add_key("]", &["]"], 12.5, 1.0, 1.0);
+        add_key("\\", &["\\"], 13.5, 1.5, 1.0);
+        add_key("Del", &["Delete"], 15.0, 1.0, 1.0);
 
-        // Column 3 (X = 343.8)
-        keys.push(QuickKeyDisplayMascotKey {
-            label: "Right",
-            aliases: &["Right", "ArrowRight"],
-            x: 343.8,
-            y: base_y + row_step * 4.0,
-            w: key_w,
-            h: key_h,
-        });
+        // Row 3
+        add_key("Caps", &["CapsLock"], 0.0, 1.75, 2.0);
+        add_key("A", &["A"], 1.75, 1.0, 2.0);
+        add_key("S", &["S"], 2.75, 1.0, 2.0);
+        add_key("D", &["D"], 3.75, 1.0, 2.0);
+        add_key("F", &["F"], 4.75, 1.0, 2.0);
+        add_key("G", &["G"], 5.75, 1.0, 2.0);
+        add_key("H", &["H"], 6.75, 1.0, 2.0);
+        add_key("J", &["J"], 7.75, 1.0, 2.0);
+        add_key("K", &["K"], 8.75, 1.0, 2.0);
+        add_key("L", &["L"], 9.75, 1.0, 2.0);
+        add_key(";", &[";"], 10.75, 1.0, 2.0);
+        add_key("'", &["'"], 11.75, 1.0, 2.0);
+        add_key("Enter", &["Enter"], 12.75, 2.25, 2.0);
+        add_key("PgUp", &["PageUp", "Prior"], 15.0, 1.0, 2.0);
+
+        // Row 4
+        add_key("Shift", &["Shift"], 0.0, 2.25, 3.0);
+        add_key("Z", &["Z"], 2.25, 1.0, 3.0);
+        add_key("X", &["X"], 3.25, 1.0, 3.0);
+        add_key("C", &["C"], 4.25, 1.0, 3.0);
+        add_key("V", &["V"], 5.25, 1.0, 3.0);
+        add_key("B", &["B"], 6.25, 1.0, 3.0);
+        add_key("N", &["N"], 7.25, 1.0, 3.0);
+        add_key("M", &["M"], 8.25, 1.0, 3.0);
+        add_key(",", &[","], 9.25, 1.0, 3.0);
+        add_key(".", &["."], 10.25, 1.0, 3.0);
+        add_key("/", &["/"], 11.25, 1.0, 3.0);
+        add_key("Shift", &["Shift"], 12.25, 1.75, 3.0);
+        add_key("Up", &["Up", "ArrowUp"], 14.0, 1.0, 3.0);
+        add_key("PgDn", &["PageDown", "Next"], 15.0, 1.0, 3.0);
+
+        // Row 5
+        add_key("Ctrl", &["LCtrl"], 0.0, 1.25, 4.0);
+        add_key("Win", &["Win"], 1.25, 1.25, 4.0);
+        add_key("Alt", &["LAlt"], 2.5, 1.25, 4.0);
+        add_key("Space", &["Space"], 3.75, 6.25, 4.0);
+        add_key("Alt", &["RAlt"], 10.0, 1.0, 4.0);
+        add_key("Fn", &["Apps"], 11.0, 1.0, 4.0);
+        add_key("Ctrl", &["RCtrl"], 12.0, 1.0, 4.0);
+        add_key("Left", &["Left", "ArrowLeft"], 13.0, 1.0, 4.0);
+        add_key("Down", &["Down", "ArrowDown"], 14.0, 1.0, 4.0);
+        add_key("Right", &["Right", "ArrowRight"], 15.0, 1.0, 4.0);
 
         keys
     }
@@ -12993,7 +12903,7 @@ mod windows_overlay {
 
         let keyboard_left = 90.0;
         let keyboard_top = 153.0; // Shifted keyboard up by 15 units
-        let keyboard_width = 270.0; // Expanded to contain the navigation keys neatly!
+        let keyboard_width = 232.0; // Adjusted width for perfect compact 65% alignment
         let keyboard_height = 71.0;
 
         // Animate Hachiware closer to the desk
@@ -13113,10 +13023,10 @@ mod windows_overlay {
             [255, 255, 255, 255],
         );
 
-        // Forehead Blue Hair Patch (Shifted slightly by look_x/y for 3D depth)
+        // Forehead Blue Hair Patch (Clamped to 0.15 scale to prevent detaching/sliding off the head when looking up/left!)
         let mut hair = tiny_skia::PathBuilder::new();
-        let hair_shift_x = look_x * 0.6;
-        let hair_shift_y = look_y * 0.6;
+        let hair_shift_x = look_x * 0.15;
+        let hair_shift_y = look_y * 0.15;
         hair.move_to(head_cx - 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y);
         hair.quad_to(
             head_cx - 40.0 * scale + hair_shift_x, head_cy - 46.0 * scale + hair_shift_y,
@@ -13248,7 +13158,7 @@ mod windows_overlay {
         );
 
         // 3D Desk (Front Lip and Top Surface)
-        let desk_extrusion = 12.0; // Made front lip thicker (was 8.0)
+        let desk_extrusion = 12.0;
         // Desk Front Lip
         fill_projected_rounded_quad(
             &mut pixmap,
@@ -13257,7 +13167,7 @@ mod windows_overlay {
             desk_width,
             desk_height - desk_extrusion,
             14.0,
-            [140, 108, 88, 255], // darker brown for 3D depth
+            [140, 108, 88, 255],
         );
         stroke_projected_rounded_quad(
             &mut pixmap,
@@ -13277,7 +13187,7 @@ mod windows_overlay {
             desk_width,
             desk_height - desk_extrusion,
             14.0,
-            [235, 215, 190, 255], // warm wood beige desk top
+            [235, 215, 190, 255],
         );
         stroke_projected_rounded_quad(
             &mut pixmap,
@@ -13302,7 +13212,7 @@ mod windows_overlay {
                 pb.line_to(pt.0, pt.1);
             }
             if let Some(path) = pb.finish() {
-                stroke_skia_path(pixmap, &path, [190, 160, 140, 110], 1.2 * scale); // subtle texture lines
+                stroke_skia_path(pixmap, &path, [190, 160, 140, 110], 1.2 * scale);
             }
         };
         draw_grain_line(&mut pixmap, desk_top + 15.0, 3.0);
@@ -13436,7 +13346,7 @@ mod windows_overlay {
         // 4. Mouse and Keyboard keys logic
         let keys = quick_key_display_mascot_keys();
         
-        // Mouse active state tracking: if mouse has moved from zero velocity/offset, or clicked
+        // Mouse active state tracking
         let mouse_active = (mouse_offset.0.abs() + mouse_offset.1.abs() > 0.05) || !held_mouse_buttons.is_empty();
 
         let mouse_flat_x = mouse_pad_left + 19.0 + mouse_offset.0 * 0.7;
@@ -13573,7 +13483,7 @@ mod windows_overlay {
                 if is_modifier {
                     [255, 255, 255]
                 } else {
-                    [70, 80, 95] // Dark grey
+                    [70, 80, 95]
                 }
             };
 
@@ -13643,11 +13553,22 @@ mod windows_overlay {
         );
 
         // Left Arm (Reaches to Left Paw Target)
-        // Position shoulders higher up (Y = 140 - 12 = 128) so they are fully above the desk top (146) and merge cleanly!
-        let left_shoulder_top = (body_cx - 28.0 * scale, body_cy - 12.0 * scale);
-        let left_shoulder_bottom = (body_cx - 10.0 * scale, body_cy + 4.0 * scale);
+        let left_shoulder_cx = body_cx - 20.0 * scale;
+        let left_shoulder_cy = body_cy - 4.0 * scale;
         let left_paw_x = left_paw_target.0;
         let left_paw_y = left_paw_target.1 + paw_press;
+        
+        let dx = left_paw_x - left_shoulder_cx;
+        let dy = left_paw_y - left_shoulder_cy;
+        let len = (dx*dx + dy*dy).sqrt().max(1.0);
+        let ux = dx / len;
+        let uy = dy / len;
+        let px = -uy;
+        let py = ux;
+        
+        // Offset perpendicular to the arm direction to maintain a constant thickness of 12.5 * scale on each side (total 25 * scale width)
+        let left_shoulder_top = (left_shoulder_cx + px * 12.5 * scale, left_shoulder_cy + py * 12.5 * scale);
+        let left_shoulder_bottom = (left_shoulder_cx - px * 12.5 * scale, left_shoulder_cy - py * 12.5 * scale);
         
         let mut left_arm_path = tiny_skia::PathBuilder::new();
         left_arm_path.move_to(left_shoulder_top.0, left_shoulder_top.1);
@@ -13676,10 +13597,22 @@ mod windows_overlay {
         }
 
         // Right Arm (Reaches to Right Paw Target)
-        let right_shoulder_top = (body_cx + 28.0 * scale, body_cy - 12.0 * scale);
-        let right_shoulder_bottom = (body_cx + 10.0 * scale, body_cy + 4.0 * scale);
+        let right_shoulder_cx = body_cx + 20.0 * scale;
+        let right_shoulder_cy = body_cy - 4.0 * scale;
         let right_paw_x = right_paw_target.0;
         let right_paw_y = right_paw_target.1 + paw_press;
+        
+        let dx = right_paw_x - right_shoulder_cx;
+        let dy = right_paw_y - right_shoulder_cy;
+        let len = (dx*dx + dy*dy).sqrt().max(1.0);
+        let ux = dx / len;
+        let uy = dy / len;
+        let px = -uy;
+        let py = ux;
+        
+        // Shift sign so that right_shoulder_top connects correctly to the right/top side of the right arm
+        let right_shoulder_top = (right_shoulder_cx - px * 12.5 * scale, right_shoulder_cy - py * 12.5 * scale);
+        let right_shoulder_bottom = (right_shoulder_cx + px * 12.5 * scale, right_shoulder_cy + py * 12.5 * scale);
         
         let mut right_arm_path = tiny_skia::PathBuilder::new();
         right_arm_path.move_to(right_shoulder_top.0, right_shoulder_top.1);
@@ -13755,7 +13688,7 @@ mod windows_overlay {
         let old_font = SelectObject(text_mem_dc, HGDIOBJ(font.0));
         let _ = SetBkMode(text_mem_dc, TRANSPARENT);
 
-        // Render each run separately in white, then alpha mask it with the target text color
+        // Render each run separately in white, then alpha mask it with the text color
         for run in &text_runs {
             text_pixels.fill(0);
             let _ = SetTextColor(text_mem_dc, COLORREF(0xffffff));
@@ -13784,7 +13717,7 @@ mod windows_overlay {
                 for x in left..right {
                     let pixel_index = y * (width as usize) + x;
                     let offset = pixel_index * 4;
-                    let mask = text_pixels[offset]; // GDI text is white, so R=G=B=mask
+                    let mask = text_pixels[offset];
                     if mask == 0 {
                         continue;
                     }
