@@ -13737,10 +13737,10 @@ mod windows_overlay {
             left_paw_x + 6.0 * scale, left_paw_y - 12.0 * scale,
             left_shoulder_bottom.0, left_shoulder_bottom.1,
         );
-        
-        let mut left_arm_fill = left_arm_path.clone();
-        left_arm_fill.close();
-        if let Some(path) = left_arm_fill.finish() {
+
+        // Close both arm paths so the shoulder connector segment is also stroked
+        left_arm_path.close();
+        if let Some(path) = left_arm_path.clone().finish() {
             fill_skia_path(&mut pixmap, &path, paw_glow);
         }
         if let Some(path) = left_arm_path.finish() {
@@ -13762,10 +13762,8 @@ mod windows_overlay {
             right_paw_x - 6.0 * scale, right_paw_y - 12.0 * scale,
             right_shoulder_bottom.0, right_shoulder_bottom.1,
         );
-        
-        let mut right_arm_fill = right_arm_path.clone();
-        right_arm_fill.close();
-        if let Some(path) = right_arm_fill.finish() {
+        right_arm_path.close();
+        if let Some(path) = right_arm_path.clone().finish() {
             fill_skia_path(&mut pixmap, &path, paw_glow);
         }
         if let Some(path) = right_arm_path.finish() {
@@ -13786,6 +13784,77 @@ mod windows_overlay {
                     src_b,
                     src_g,
                     src_r,
+                    src_a,
+                );
+            }
+        }
+
+        // Redraw head+face on top of the blended arms so the head is always in front of the arms.
+        // This covers any arm outline strokes that would otherwise bleed onto the face.
+        pixmap.data_mut().fill(0);
+        fill_skia_circle(&mut pixmap, head_cx, head_cy + 4.5 * scale, head_radius, [0, 0, 0, 28]);
+        fill_skia_circle(&mut pixmap, head_cx, head_cy, head_radius, [255, 255, 255, 255]);
+        {
+            let hair_shift_x = look_x * 0.15;
+            let hair_shift_y = look_y * 0.15;
+            let mut hair = tiny_skia::PathBuilder::new();
+            hair.move_to(head_cx - 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y);
+            hair.quad_to(head_cx - 40.0 * scale + hair_shift_x, head_cy - 46.0 * scale + hair_shift_y, head_cx + hair_shift_x, head_cy - 47.0 * scale + hair_shift_y);
+            hair.quad_to(head_cx + 40.0 * scale + hair_shift_x, head_cy - 46.0 * scale + hair_shift_y, head_cx + 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y);
+            hair.quad_to(head_cx + 25.0 * scale + hair_shift_x, head_cy - 4.0 * scale + hair_shift_y, head_cx + 14.0 * scale + hair_shift_x, head_cy + 8.0 * scale + hair_shift_y);
+            hair.quad_to(head_cx + 6.0 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y, head_cx + hair_shift_x, head_cy - 12.0 * scale + hair_shift_y);
+            hair.quad_to(head_cx - 6.0 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y, head_cx - 14.0 * scale + hair_shift_x, head_cy + 8.0 * scale + hair_shift_y);
+            hair.quad_to(head_cx - 25.0 * scale + hair_shift_x, head_cy - 4.0 * scale + hair_shift_y, head_cx - 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y);
+            hair.close();
+            if let Some(path) = hair.finish() {
+                fill_skia_path(&mut pixmap, &path, [100, 160, 230, 255]);
+                stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
+            }
+        }
+        stroke_skia_circle(&mut pixmap, head_cx, head_cy, head_radius, 2.2 * scale, [45, 40, 42, 255]);
+        {
+            let left_eye_x = head_cx - 18.0 * scale + look_x;
+            let left_eye_y = head_cy + 4.0 * scale + look_y;
+            let right_eye_x = head_cx + 18.0 * scale + look_x;
+            let right_eye_y = head_cy + 4.0 * scale + look_y;
+            let eye_w = 8.5 * scale;
+            let eye_h = 10.5 * scale;
+            for (ex, ey) in [(left_eye_x, left_eye_y), (right_eye_x, right_eye_y)] {
+                fill_skia_rounded_rect(&mut pixmap, ex - eye_w * 0.5, ey - eye_h * 0.5, eye_w, eye_h, 4.2 * scale, [45, 40, 42, 255]);
+                fill_skia_circle(&mut pixmap, ex - 1.5 * scale, ey - 2.2 * scale, 3.2 * scale, [255, 255, 255, 255]);
+                fill_skia_circle(&mut pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.6 * scale, [255, 255, 255, 255]);
+            }
+            fill_skia_circle(&mut pixmap, head_cx - 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
+            fill_skia_circle(&mut pixmap, head_cx + 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
+        }
+        for i in 0..3_i32 {
+            let boff = (i as f32 - 1.0) * 3.5 * scale;
+            let mut bl = tiny_skia::PathBuilder::new();
+            bl.move_to(head_cx - 32.0 * scale + boff - 1.5 * scale + look_x, head_cy + 13.0 * scale + 3.0 * scale + look_y);
+            bl.line_to(head_cx - 32.0 * scale + boff + 1.5 * scale + look_x, head_cy + 13.0 * scale - 3.0 * scale + look_y);
+            if let Some(p) = bl.finish() { stroke_skia_path(&mut pixmap, &p, [255, 120, 140, 220], 1.8 * scale); }
+            let mut br = tiny_skia::PathBuilder::new();
+            br.move_to(head_cx + 32.0 * scale + boff - 1.5 * scale + look_x, head_cy + 13.0 * scale + 3.0 * scale + look_y);
+            br.line_to(head_cx + 32.0 * scale + boff + 1.5 * scale + look_x, head_cy + 13.0 * scale - 3.0 * scale + look_y);
+            if let Some(p) = br.finish() { stroke_skia_path(&mut pixmap, &p, [255, 120, 140, 220], 1.8 * scale); }
+        }
+        {
+            let mut mouth = tiny_skia::PathBuilder::new();
+            mouth.move_to(head_cx - 5.0 * scale + look_x, head_cy + 14.0 * scale + look_y);
+            mouth.quad_to(head_cx - 2.5 * scale + look_x, head_cy + 17.5 * scale + look_y, head_cx + look_x, head_cy + 14.5 * scale + look_y);
+            mouth.quad_to(head_cx + 2.5 * scale + look_x, head_cy + 17.5 * scale + look_y, head_cx + 5.0 * scale + look_x, head_cy + 14.0 * scale + look_y);
+            if let Some(p) = mouth.finish() { stroke_skia_path(&mut pixmap, &p, [45, 40, 42, 255], 2.0 * scale); }
+        }
+        let head_data = pixmap.data();
+        for i in 0..total_pixels {
+            let offset = i * 4;
+            let src_a = head_data[offset + 3];
+            if src_a > 0 {
+                blend_premultiplied_bgra(
+                    &mut pixels[offset..offset + 4],
+                    head_data[offset + 2],
+                    head_data[offset + 1],
+                    head_data[offset],
                     src_a,
                 );
             }
