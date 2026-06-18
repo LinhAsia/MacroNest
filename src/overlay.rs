@@ -5824,7 +5824,7 @@ mod windows_overlay {
                 .as_secs_f32()
                 .min(1.0);
             let pulse = (1.0 - age / 0.05).clamp(0.0, 1.0); // Ultra fast decay for responsive hand retraction
-            strength = strength.max((pulse * 0.9) + 0.1);
+            strength = strength.max(pulse);
         }
         strength
     }
@@ -12884,7 +12884,7 @@ mod windows_overlay {
             pb.quad_to(project_point(left + w, top + h).0, project_point(left + w, top + h).1, br_h.0, br_h.1);
             pb.line_to(bl_h.0, bl_h.1);
             pb.quad_to(project_point(left, top + h).0, project_point(left, top + h).1, bl_v.0, bl_v.1);
-            pb.line_to(tl_v.0, tl_v.1); // Corrected typo here (changed from bl_v to tl_v to fix the top-left desk defect!)
+            pb.line_to(tl_v.0, tl_v.1);
             pb.quad_to(project_point(left, top).0, project_point(left, top).1, tl_h.0, tl_h.1);
             pb.close();
             
@@ -12897,22 +12897,22 @@ mod windows_overlay {
         let desk_left = 38.0;
         let desk_top = 146.0;
         let desk_width = 322.0;
-        let desk_height = 96.0; // Made slightly deeper
+        let desk_height = 96.0;
 
         let mouse_pad_left = 46.0;
 
         let keyboard_left = 90.0;
-        let keyboard_top = 153.0; // Shifted keyboard up by 15 units
-        let keyboard_width = 232.0; // Adjusted width for perfect compact 65% alignment
+        let keyboard_top = 153.0;
+        let keyboard_width = 232.0;
         let keyboard_height = 71.0;
 
         // Animate Hachiware closer to the desk
         let body_cx = 167.0 * scale;
-        let body_cy = 138.0 * scale; // Moved downwards (closer to desk top)
+        let body_cy = 138.0 * scale;
         let body_radius = 36.0 * scale;
         
         let head_cx = 168.0 * scale;
-        let head_cy = 92.0 * scale; // Moved downwards
+        let head_cy = 92.0 * scale;
         let head_radius = 47.0 * scale;
 
         let paw_press = if held_keys.is_empty() {
@@ -12951,7 +12951,7 @@ mod windows_overlay {
             [45, 40, 42, 255],
         );
 
-        // Hachiware Ears (Shifted opposite to look_x/y for 3D parallax!)
+        // Hachiware Ears
         let ear_wiggle = recent_pulse * 3.0 * scale;
         let ear_shift_x = -look_x * 0.4;
         let ear_shift_y = -look_y * 0.4;
@@ -13007,7 +13007,7 @@ mod windows_overlay {
             fill_skia_path(&mut pixmap, &path, [255, 200, 210, 255]);
         }
 
-        // Head (White Circle - remains centered for stable face rotation)
+        // Head
         fill_skia_circle(
             &mut pixmap,
             head_cx,
@@ -13023,7 +13023,7 @@ mod windows_overlay {
             [255, 255, 255, 255],
         );
 
-        // Forehead Blue Hair Patch (Clamped to 0.15 scale to prevent detaching/sliding off the head when looking up/left!)
+        // Forehead Blue Hair Patch
         let mut hair = tiny_skia::PathBuilder::new();
         let hair_shift_x = look_x * 0.15;
         let hair_shift_y = look_y * 0.15;
@@ -13068,7 +13068,7 @@ mod windows_overlay {
             [45, 40, 42, 255],
         );
 
-        // Eyes (Animate/shift by look_x and look_y for 3D turn!)
+        // Eyes
         let left_eye_x = head_cx - 18.0 * scale + look_x;
         let left_eye_y = head_cy + 4.0 * scale + look_y;
         let right_eye_x = head_cx + 18.0 * scale + look_x;
@@ -13105,11 +13105,11 @@ mod windows_overlay {
             );
         }
 
-        // Eyebrows (Shifted by look_x/y)
+        // Eyebrows
         fill_skia_circle(&mut pixmap, head_cx - 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
         fill_skia_circle(&mut pixmap, head_cx + 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
 
-        // Cheek Blush (Shifted by look_x/y)
+        // Cheek Blush
         for i in 0..3 {
             let offset = (i as f32 - 1.0) * 3.5 * scale;
             // Left Cheek
@@ -13128,7 +13128,7 @@ mod windows_overlay {
             }
         }
 
-        // Mouth (Shifted by look_x/y)
+        // Mouth
         let mut mouth = tiny_skia::PathBuilder::new();
         mouth.move_to(head_cx - 5.0 * scale + look_x, head_cy + 14.0 * scale + look_y);
         mouth.quad_to(
@@ -13353,13 +13353,30 @@ mod windows_overlay {
         let mouse_flat_y = keyboard_top + 23.0 + mouse_offset.1 * 0.56;
         let mouse_projected = project_point(mouse_flat_x, mouse_flat_y);
 
-        let mut left_paw_target = if mouse_active {
-            mouse_projected
+        // Detect mouse hover over the mascot window to trigger "reach towards cursor" animation
+        let mut cursor = POINT::default();
+        let hovered = if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
+            let rel_x = cursor.x - window_x;
+            let rel_y = cursor.y - window_y;
+            rel_x >= 0 && rel_x < width && rel_y >= 0 && rel_y < height
         } else {
-            project_point(130.0, 164.0) // Resting on the shifted keyboard
+            false
         };
-        let mut right_paw_target = project_point(214.0, 164.0); // Resting on the shifted keyboard
-        
+
+        let (mut left_paw_target, mut right_paw_target) = if hovered {
+            let cx = (cursor.x - window_x) as f32;
+            let cy = (cursor.y - window_y) as f32;
+            ((cx - 12.0 * scale, cy), (cx + 12.0 * scale, cy))
+        } else {
+            let l_target = if mouse_active {
+                mouse_projected
+            } else {
+                project_point(130.0, 164.0)
+            };
+            let r_target = project_point(214.0, 164.0);
+            (l_target, r_target)
+        };
+
         let mut left_paw_strength = 0.0f32;
         let mut right_paw_strength = 0.0f32;
 
@@ -13375,7 +13392,8 @@ mod windows_overlay {
             let key_target_y = key.y - 3.0 + key.h * 0.22;
             let key_proj_target = project_point(key_center_x, key_target_y);
 
-            if glow > 0.0 {
+            // Attract paws only when NOT hovered (hover cursor tracking takes priority!)
+            if glow > 0.0 && !hovered {
                 if mouse_active {
                     // Left hand is holding the mouse, so right hand handles ALL keypresses!
                     if glow > right_paw_strength {
@@ -13500,7 +13518,38 @@ mod windows_overlay {
             });
         }
 
-        // Draw Mouse
+        // Draw Mouse (Extruded 3D mouse drawing)
+        // Mouse drop shadow on pad
+        fill_projected_rounded_quad(
+            &mut pixmap,
+            mouse_flat_x - 7.0 + 1.5,
+            mouse_flat_y - 9.0 + 3.0,
+            14.0,
+            18.0,
+            6.0,
+            [0, 0, 0, 40],
+        );
+        // Mouse 3D base
+        fill_projected_rounded_quad(
+            &mut pixmap,
+            mouse_flat_x - 7.0,
+            mouse_flat_y - 9.0 + 2.0,
+            14.0,
+            18.0,
+            6.0,
+            [205, 215, 225, 255],
+        );
+        stroke_projected_rounded_quad(
+            &mut pixmap,
+            mouse_flat_x - 7.0,
+            mouse_flat_y - 9.0 + 2.0,
+            14.0,
+            18.0,
+            6.0,
+            [45, 40, 42, 255],
+            1.5 * scale,
+        );
+        // Mouse top surface
         fill_projected_rounded_quad(
             &mut pixmap,
             mouse_flat_x - 7.0,
@@ -13520,7 +13569,7 @@ mod windows_overlay {
             [45, 40, 42, 255],
             1.5 * scale,
         );
-        // Scroll wheel & button divisions
+        // Scroll wheel
         fill_projected_rounded_quad(
             &mut pixmap,
             mouse_flat_x - 1.0,
@@ -13543,8 +13592,7 @@ mod windows_overlay {
             stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.2 * scale);
         }
 
-
-        // 5. Draw Arms (drawn on top of the desk and keyboard frame!)
+        // 5. Arm Math (drawn later on top of GDI text!)
         let paw_fill = [255, 255, 255, 255];
         let paw_glow = quick_key_display_mix_rgba(
             paw_fill,
@@ -13552,93 +13600,37 @@ mod windows_overlay {
             recent_pulse * 0.45,
         );
 
-        // Left Arm (Reaches to Left Paw Target)
+        // Left Arm calculations
         let left_shoulder_cx = body_cx - 20.0 * scale;
         let left_shoulder_cy = body_cy - 4.0 * scale;
         let left_paw_x = left_paw_target.0;
         let left_paw_y = left_paw_target.1 + paw_press;
         
-        let dx = left_paw_x - left_shoulder_cx;
-        let dy = left_paw_y - left_shoulder_cy;
-        let len = (dx*dx + dy*dy).sqrt().max(1.0);
-        let ux = dx / len;
-        let uy = dy / len;
-        let px = -uy;
-        let py = ux;
-        
-        // Offset perpendicular to the arm direction to maintain a constant thickness of 12.5 * scale on each side (total 25 * scale width)
-        let left_shoulder_top = (left_shoulder_cx + px * 12.5 * scale, left_shoulder_cy + py * 12.5 * scale);
-        let left_shoulder_bottom = (left_shoulder_cx - px * 12.5 * scale, left_shoulder_cy - py * 12.5 * scale);
-        
-        let mut left_arm_path = tiny_skia::PathBuilder::new();
-        left_arm_path.move_to(left_shoulder_top.0, left_shoulder_top.1);
-        left_arm_path.quad_to(
-            left_paw_x - 16.0 * scale, left_paw_y - 12.0 * scale,
-            left_paw_x - 10.0 * scale, left_paw_y + 4.0 * scale,
-        );
-        left_arm_path.quad_to(
-            left_paw_x, left_paw_y + 14.0 * scale,
-            left_paw_x + 10.0 * scale, left_paw_y + 2.0 * scale,
-        );
-        left_arm_path.quad_to(
-            left_paw_x + 6.0 * scale, left_paw_y - 12.0 * scale,
-            left_shoulder_bottom.0, left_shoulder_bottom.1,
-        );
-        
-        // Fill closed path
-        let mut left_arm_fill = left_arm_path.clone();
-        left_arm_fill.close();
-        if let Some(path) = left_arm_fill.finish() {
-            fill_skia_path(&mut pixmap, &path, paw_glow);
-        }
-        // Stroke open path (no line at shoulder)
-        if let Some(path) = left_arm_path.finish() {
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
-        }
+        let dx_left = left_paw_x - left_shoulder_cx;
+        let dy_left = left_paw_y - left_shoulder_cy;
+        let len_left = (dx_left*dx_left + dy_left*dy_left).sqrt().max(1.0);
+        let ux_left = dx_left / len_left;
+        let uy_left = dy_left / len_left;
+        let px_left = -uy_left;
+        let py_left = ux_left;
+        let left_shoulder_top = (left_shoulder_cx + px_left * 12.5 * scale, left_shoulder_cy + py_left * 12.5 * scale);
+        let left_shoulder_bottom = (left_shoulder_cx - px_left * 12.5 * scale, left_shoulder_cy - py_left * 12.5 * scale);
 
-        // Right Arm (Reaches to Right Paw Target)
+        // Right Arm calculations
         let right_shoulder_cx = body_cx + 20.0 * scale;
         let right_shoulder_cy = body_cy - 4.0 * scale;
         let right_paw_x = right_paw_target.0;
         let right_paw_y = right_paw_target.1 + paw_press;
         
-        let dx = right_paw_x - right_shoulder_cx;
-        let dy = right_paw_y - right_shoulder_cy;
-        let len = (dx*dx + dy*dy).sqrt().max(1.0);
-        let ux = dx / len;
-        let uy = dy / len;
-        let px = -uy;
-        let py = ux;
-        
-        // Shift sign so that right_shoulder_top connects correctly to the right/top side of the right arm
-        let right_shoulder_top = (right_shoulder_cx - px * 12.5 * scale, right_shoulder_cy - py * 12.5 * scale);
-        let right_shoulder_bottom = (right_shoulder_cx + px * 12.5 * scale, right_shoulder_cy + py * 12.5 * scale);
-        
-        let mut right_arm_path = tiny_skia::PathBuilder::new();
-        right_arm_path.move_to(right_shoulder_top.0, right_shoulder_top.1);
-        right_arm_path.quad_to(
-            right_paw_x + 16.0 * scale, right_paw_y - 12.0 * scale,
-            right_paw_x + 10.0 * scale, right_paw_y + 4.0 * scale,
-        );
-        right_arm_path.quad_to(
-            right_paw_x, right_paw_y + 14.0 * scale,
-            right_paw_x - 10.0 * scale, right_paw_y + 2.0 * scale,
-        );
-        right_arm_path.quad_to(
-            right_paw_x - 6.0 * scale, right_paw_y - 12.0 * scale,
-            right_shoulder_bottom.0, right_shoulder_bottom.1,
-        );
-        
-        // Fill closed path
-        let mut right_arm_fill = right_arm_path.clone();
-        right_arm_fill.close();
-        if let Some(path) = right_arm_fill.finish() {
-            fill_skia_path(&mut pixmap, &path, paw_glow);
-        }
-        // Stroke open path (no line at shoulder)
-        if let Some(path) = right_arm_path.finish() {
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
-        }
+        let dx_right = right_paw_x - right_shoulder_cx;
+        let dy_right = right_paw_y - right_shoulder_cy;
+        let len_right = (dx_right*dx_right + dy_right*dy_right).sqrt().max(1.0);
+        let ux_right = dx_right / len_right;
+        let uy_right = dy_right / len_right;
+        let px_right = -uy_right;
+        let py_right = ux_right;
+        let right_shoulder_top = (right_shoulder_cx - px_right * 12.5 * scale, right_shoulder_cy - py_right * 12.5 * scale);
+        let right_shoulder_bottom = (right_shoulder_cx + px_right * 12.5 * scale, right_shoulder_cy + py_right * 12.5 * scale);
 
         let pixmap_data = pixmap.data();
         let total_pixels = width as usize * height as usize;
@@ -13739,6 +13731,78 @@ mod windows_overlay {
                         src_a,
                     );
                 }
+            }
+        }
+
+        // Draw Arms onto the transparent pixmap and blend them on top of everything
+        pixmap.data_mut().fill(0);
+
+        // Left Arm path
+        let mut left_arm_path = tiny_skia::PathBuilder::new();
+        left_arm_path.move_to(left_shoulder_top.0, left_shoulder_top.1);
+        left_arm_path.quad_to(
+            left_paw_x - 16.0 * scale, left_paw_y - 12.0 * scale,
+            left_paw_x - 10.0 * scale, left_paw_y + 4.0 * scale,
+        );
+        left_arm_path.quad_to(
+            left_paw_x, left_paw_y + 14.0 * scale,
+            left_paw_x + 10.0 * scale, left_paw_y + 2.0 * scale,
+        );
+        left_arm_path.quad_to(
+            left_paw_x + 6.0 * scale, left_paw_y - 12.0 * scale,
+            left_shoulder_bottom.0, left_shoulder_bottom.1,
+        );
+        
+        let mut left_arm_fill = left_arm_path.clone();
+        left_arm_fill.close();
+        if let Some(path) = left_arm_fill.finish() {
+            fill_skia_path(&mut pixmap, &path, paw_glow);
+        }
+        if let Some(path) = left_arm_path.finish() {
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
+        }
+
+        // Right Arm path
+        let mut right_arm_path = tiny_skia::PathBuilder::new();
+        right_arm_path.move_to(right_shoulder_top.0, right_shoulder_top.1);
+        right_arm_path.quad_to(
+            right_paw_x + 16.0 * scale, right_paw_y - 12.0 * scale,
+            right_paw_x + 10.0 * scale, right_paw_y + 4.0 * scale,
+        );
+        right_arm_path.quad_to(
+            right_paw_x, right_paw_y + 14.0 * scale,
+            right_paw_x - 10.0 * scale, right_paw_y + 2.0 * scale,
+        );
+        right_arm_path.quad_to(
+            right_paw_x - 6.0 * scale, right_paw_y - 12.0 * scale,
+            right_shoulder_bottom.0, right_shoulder_bottom.1,
+        );
+        
+        let mut right_arm_fill = right_arm_path.clone();
+        right_arm_fill.close();
+        if let Some(path) = right_arm_fill.finish() {
+            fill_skia_path(&mut pixmap, &path, paw_glow);
+        }
+        if let Some(path) = right_arm_path.finish() {
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
+        }
+
+        // Blend arms on top of pixels DIB Section
+        let arm_data = pixmap.data();
+        for i in 0..total_pixels {
+            let offset = i * 4;
+            let src_a = arm_data[offset + 3];
+            if src_a > 0 {
+                let src_r = arm_data[offset];
+                let src_g = arm_data[offset + 1];
+                let src_b = arm_data[offset + 2];
+                blend_premultiplied_bgra(
+                    &mut pixels[offset..offset + 4],
+                    src_b,
+                    src_g,
+                    src_r,
+                    src_a,
+                );
             }
         }
 
