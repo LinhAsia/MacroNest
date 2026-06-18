@@ -13210,7 +13210,15 @@ mod windows_overlay {
             fill_skia_path(pixmap, &path, [240, 240, 242, 255]); // white jacket
             stroke_skia_path(pixmap, &path, outline_color, 2.0 * scale);
         }
-        
+
+        // Shaded left-side jacket depth/seam
+        let mut seam_pb = tiny_skia::PathBuilder::new();
+        seam_pb.move_to(girl_body_cx - 18.0 * scale, girl_body_cy + 2.0 * scale);
+        seam_pb.line_to(girl_body_cx - 4.0 * scale, girl_body_cy + 36.0 * scale);
+        if let Some(path) = seam_pb.finish() {
+            stroke_skia_path(pixmap, &path, [200, 200, 205, 255], 1.2 * scale);
+        }
+
         // Shirt collar/inner shirt
         let mut shirt_pb = tiny_skia::PathBuilder::new();
         shirt_pb.move_to(girl_body_cx - 10.0 * scale, girl_body_cy + 2.0 * scale);
@@ -13221,6 +13229,33 @@ mod windows_overlay {
             fill_skia_path(pixmap, &path, [30, 28, 27, 255]); // dark inner shirt
             stroke_skia_path(pixmap, &path, outline_color, 1.8 * scale);
         }
+
+        // Coat lapels (Jacket collar folding back)
+        let mut lapel_l = tiny_skia::PathBuilder::new();
+        lapel_l.move_to(girl_body_cx - 17.0 * scale, girl_body_cy + 2.0 * scale);
+        lapel_l.line_to(girl_body_cx - 8.0 * scale, girl_body_cy + 2.0 * scale);
+        lapel_l.line_to(girl_body_cx - 13.0 * scale, girl_body_cy + 15.0 * scale);
+        lapel_l.close();
+        if let Some(path) = lapel_l.finish() {
+            fill_skia_path(pixmap, &path, [220, 220, 225, 255]);
+            stroke_skia_path(pixmap, &path, outline_color, 1.2 * scale);
+        }
+
+        let mut lapel_r = tiny_skia::PathBuilder::new();
+        lapel_r.move_to(girl_body_cx + 17.0 * scale, girl_body_cy + 2.0 * scale);
+        lapel_r.line_to(girl_body_cx + 8.0 * scale, girl_body_cy + 2.0 * scale);
+        lapel_r.line_to(girl_body_cx + 13.0 * scale, girl_body_cy + 15.0 * scale);
+        lapel_r.close();
+        if let Some(path) = lapel_r.finish() {
+            fill_skia_path(pixmap, &path, [220, 220, 225, 255]);
+            stroke_skia_path(pixmap, &path, outline_color, 1.2 * scale);
+        }
+
+        // Tiny copper coat buttons
+        fill_skia_circle(pixmap, girl_body_cx + 3.0 * scale, girl_body_cy + 20.0 * scale, 1.8 * scale, [180, 110, 60, 255]);
+        stroke_skia_circle(pixmap, girl_body_cx + 3.0 * scale, girl_body_cy + 20.0 * scale, 1.8 * scale, 1.0 * scale, outline_color);
+        fill_skia_circle(pixmap, girl_body_cx + 3.0 * scale, girl_body_cy + 28.0 * scale, 1.8 * scale, [180, 110, 60, 255]);
+        stroke_skia_circle(pixmap, girl_body_cx + 3.0 * scale, girl_body_cy + 28.0 * scale, 1.8 * scale, 1.0 * scale, outline_color);
 
         // 2. Draw Robot Body
         let robot_body_cx = 210.0 * scale;
@@ -13237,26 +13272,61 @@ mod windows_overlay {
             stroke_skia_path(pixmap, &path, outline_color, 2.0 * scale);
         }
 
-        // Mechanical neck joint
-        let mut neck_pb = tiny_skia::PathBuilder::new();
-        neck_pb.move_to(robot_body_cx - 4.0 * scale, robot_body_cy - 12.0 * scale);
-        neck_pb.line_to(robot_body_cx - 4.0 * scale, robot_body_cy);
-        neck_pb.line_to(robot_body_cx + 4.0 * scale, robot_body_cy);
-        neck_pb.line_to(robot_body_cx + 4.0 * scale, robot_body_cy - 12.0 * scale);
-        neck_pb.close();
-        if let Some(path) = neck_pb.finish() {
-            fill_skia_path(pixmap, &path, [100, 105, 110, 255]);
-            stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
+        // Breastplate overlay (3D armor panel)
+        let mut plate_pb = tiny_skia::PathBuilder::new();
+        plate_pb.move_to(robot_body_cx - 16.0 * scale, robot_body_cy + 26.0 * scale);
+        plate_pb.line_to(robot_body_cx - 12.0 * scale, robot_body_cy + 4.0 * scale);
+        plate_pb.line_to(robot_body_cx + 12.0 * scale, robot_body_cy + 4.0 * scale);
+        plate_pb.line_to(robot_body_cx + 16.0 * scale, robot_body_cy + 26.0 * scale);
+        plate_pb.close();
+        if let Some(path) = plate_pb.finish() {
+            fill_skia_path(pixmap, &path, [85, 90, 95, 255]); // lighter metallic panel
+            stroke_skia_path(pixmap, &path, outline_color, 1.2 * scale);
         }
 
-        // Keyhole symbol on Robot chest
-        let key_y = robot_body_cy + 12.0 * scale;
-        fill_skia_circle(pixmap, robot_body_cx, key_y - 2.0 * scale, 3.2 * scale, outline_color);
+        // Rivets on breastplate corners
+        let rivet_r = 1.0 * scale;
+        fill_skia_circle(pixmap, robot_body_cx - 10.0 * scale, robot_body_cy + 7.0 * scale, rivet_r, [140, 145, 150, 255]);
+        stroke_skia_circle(pixmap, robot_body_cx - 10.0 * scale, robot_body_cy + 7.0 * scale, rivet_r, 0.8 * scale, outline_color);
+        fill_skia_circle(pixmap, robot_body_cx + 10.0 * scale, robot_body_cy + 7.0 * scale, rivet_r, [140, 145, 150, 255]);
+        stroke_skia_circle(pixmap, robot_body_cx + 10.0 * scale, robot_body_cy + 7.0 * scale, rivet_r, 0.8 * scale, outline_color);
+
+        // Ribbed neck joint
+        for i in 0..3 {
+            let offset_y = -12.0 + (i as f32 * 4.0);
+            fill_skia_rounded_rect(
+                pixmap,
+                robot_body_cx - 5.0 * scale,
+                robot_body_cy + offset_y * scale,
+                10.0 * scale,
+                3.0 * scale,
+                1.0 * scale,
+                [100, 105, 110, 255],
+            );
+            stroke_skia_rounded_rect(
+                pixmap,
+                robot_body_cx - 5.0 * scale,
+                robot_body_cy + offset_y * scale,
+                10.0 * scale,
+                3.0 * scale,
+                1.0 * scale,
+                1.2 * scale,
+                outline_color,
+            );
+        }
+
+        // Glowing power core reactor on Robot chest
+        let core_y = robot_body_cy + 15.0 * scale;
+        fill_skia_circle(pixmap, robot_body_cx, core_y, 6.5 * scale, [30, 28, 27, 255]);
+        stroke_skia_circle(pixmap, robot_body_cx, core_y, 6.5 * scale, 1.5 * scale, outline_color);
+        fill_skia_circle(pixmap, robot_body_cx, core_y, 4.5 * scale, [120, 220, 255, 255]); // glowing core
+        fill_skia_circle(pixmap, robot_body_cx, core_y - 1.5 * scale, 2.0 * scale, outline_color); // inner keyhole circle
+        // keyhole slot
         let mut key_pb = tiny_skia::PathBuilder::new();
-        key_pb.move_to(robot_body_cx - 1.8 * scale, key_y - 2.0 * scale);
-        key_pb.line_to(robot_body_cx - 3.2 * scale, key_y + 8.0 * scale);
-        key_pb.line_to(robot_body_cx + 3.2 * scale, key_y + 8.0 * scale);
-        key_pb.line_to(robot_body_cx + 1.8 * scale, key_y - 2.0 * scale);
+        key_pb.move_to(robot_body_cx - 1.0 * scale, core_y - 1.5 * scale);
+        key_pb.line_to(robot_body_cx - 1.8 * scale, core_y + 3.0 * scale);
+        key_pb.line_to(robot_body_cx + 1.8 * scale, core_y + 3.0 * scale);
+        key_pb.line_to(robot_body_cx + 1.0 * scale, core_y - 1.5 * scale);
         key_pb.close();
         if let Some(path) = key_pb.finish() {
             fill_skia_path(pixmap, &path, outline_color);
@@ -13275,6 +13345,26 @@ mod windows_overlay {
         let girl_head_cy = 100.0 * scale;
         let girl_head_radius = 28.0 * scale;
 
+        // Tracy's Ears (drawn behind the head)
+        for offset_x in [-28.5, 28.5] {
+            let ex = girl_head_cx + offset_x * scale;
+            let ey = girl_head_cy + 3.0 * scale;
+            fill_skia_circle(pixmap, ex, ey, 4.5 * scale, [250, 225, 210, 255]);
+            stroke_skia_circle(pixmap, ex, ey, 4.5 * scale, 1.8 * scale, outline_color);
+            // Ear inner shadow line
+            let mut ear_pb = tiny_skia::PathBuilder::new();
+            if offset_x < 0.0 {
+                ear_pb.move_to(ex - 1.0 * scale, ey - 2.0 * scale);
+                ear_pb.quad_to(ex + 1.0 * scale, ey, ex - 1.0 * scale, ey + 2.0 * scale);
+            } else {
+                ear_pb.move_to(ex + 1.0 * scale, ey - 2.0 * scale);
+                ear_pb.quad_to(ex - 1.0 * scale, ey, ex + 1.0 * scale, ey + 2.0 * scale);
+            }
+            if let Some(path) = ear_pb.finish() {
+                stroke_skia_path(pixmap, &path, outline_color, 1.0 * scale);
+            }
+        }
+
         // Head shape
         fill_skia_circle(pixmap, girl_head_cx, girl_head_cy, girl_head_radius, [250, 225, 210, 255]);
 
@@ -13288,6 +13378,12 @@ mod windows_overlay {
             fill_skia_path(pixmap, &path, [95, 75, 135, 255]); // purple beanie
             stroke_skia_path(pixmap, &path, outline_color, 2.0 * scale);
         }
+
+        // Pom-pom on top of beanie
+        fill_skia_circle(pixmap, girl_head_cx, girl_head_cy - 43.0 * scale, 7.0 * scale, [95, 75, 135, 255]);
+        stroke_skia_circle(pixmap, girl_head_cx, girl_head_cy - 43.0 * scale, 7.0 * scale, 1.8 * scale, outline_color);
+        // Pom-pom center highlight
+        fill_skia_circle(pixmap, girl_head_cx - 2.0 * scale, girl_head_cy - 45.0 * scale, 2.5 * scale, [120, 100, 160, 255]);
 
         // Beanie ribbed cuff
         fill_skia_rounded_rect(pixmap, girl_head_cx - 29.0 * scale, girl_head_cy - 12.0 * scale, 58.0 * scale, 10.0 * scale, 3.0 * scale, [80, 60, 115, 255]);
@@ -13322,6 +13418,13 @@ mod windows_overlay {
         // Face outline
         stroke_skia_circle(pixmap, girl_head_cx, girl_head_cy, girl_head_radius, 2.0 * scale, outline_color);
 
+        // Cheek blush (soft pink glow)
+        for offset_x in [-14.0, 14.0] {
+            let bx = girl_head_cx + offset_x * scale;
+            let by = girl_head_cy + 9.0 * scale;
+            fill_skia_circle(pixmap, bx, by, 4.0 * scale, [255, 170, 170, 110]);
+        }
+
         // Button Eyes (stitches)
         for offset_x in [-10.0, 10.0] {
             let ex = girl_head_cx + offset_x * scale;
@@ -13338,6 +13441,8 @@ mod windows_overlay {
             if let Some(path) = x_pb.finish() {
                 stroke_skia_path(pixmap, &path, [240, 240, 240, 255], 1.2 * scale);
             }
+            // Glassy Highlight
+            fill_skia_circle(pixmap, ex - 1.8 * scale, ey - 1.8 * scale, 1.2 * scale, [255, 255, 255, 200]);
         }
 
         // Small wooden nose
@@ -13362,6 +13467,31 @@ mod windows_overlay {
         // 2. Draw Robot Head & Face
         let robot_head_cx = 210.0 * scale + look_x;
         let robot_head_cy = 92.0 * scale + look_y;
+
+        // Side bolts (ears)
+        for offset_x in [-28.0, 28.0] {
+            let bx = robot_head_cx + offset_x * scale;
+            let by = robot_head_cy;
+            fill_skia_rounded_rect(
+                pixmap,
+                if offset_x < 0.0 { bx } else { bx - 3.5 * scale },
+                by - 4.5 * scale,
+                3.5 * scale,
+                9.0 * scale,
+                1.0 * scale,
+                [110, 115, 118, 255],
+            );
+            stroke_skia_rounded_rect(
+                pixmap,
+                if offset_x < 0.0 { bx } else { bx - 3.5 * scale },
+                by - 4.5 * scale,
+                3.5 * scale,
+                9.0 * scale,
+                1.0 * scale,
+                1.2 * scale,
+                outline_color,
+            );
+        }
         
         // Robot ears/antennas (drawn behind the head)
         for offset_x in [-20.0, 20.0] {
@@ -13378,6 +13508,18 @@ mod windows_overlay {
                 stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
             }
         }
+
+        // Sleek central top antenna
+        let mut top_ant = tiny_skia::PathBuilder::new();
+        top_ant.move_to(robot_head_cx, robot_head_cy - 22.0 * scale);
+        top_ant.line_to(robot_head_cx, robot_head_cy - 38.0 * scale);
+        if let Some(path) = top_ant.finish() {
+            stroke_skia_path(pixmap, &path, [100, 105, 110, 255], 2.2 * scale);
+            stroke_skia_path(pixmap, &path, outline_color, 1.0 * scale);
+        }
+        // Glowing bulb at top antenna tip
+        fill_skia_circle(pixmap, robot_head_cx, robot_head_cy - 38.0 * scale, 3.5 * scale, [120, 220, 255, 255]);
+        stroke_skia_circle(pixmap, robot_head_cx, robot_head_cy - 38.0 * scale, 3.5 * scale, 1.2 * scale, outline_color);
 
         // CRT Screen Head: rounded rectangle
         let head_w = 54.0 * scale;
@@ -13402,6 +13544,14 @@ mod windows_overlay {
             outline_color,
         );
 
+        // Casing Highlight (glare effect on metallic casing)
+        let mut glare_pb = tiny_skia::PathBuilder::new();
+        glare_pb.move_to(robot_head_cx - head_w * 0.45, robot_head_cy - head_h * 0.4);
+        glare_pb.quad_to(robot_head_cx, robot_head_cy - head_h * 0.45, robot_head_cx + head_w * 0.45, robot_head_cy - head_h * 0.4);
+        if let Some(path) = glare_pb.finish() {
+            stroke_skia_path(pixmap, &path, [255, 255, 255, 80], 2.5 * scale);
+        }
+
         // Inner Screen (black)
         let scr_w = 44.0 * scale;
         let scr_h = 34.0 * scale;
@@ -13425,21 +13575,21 @@ mod windows_overlay {
             [15, 15, 17, 255],
         );
 
-        // Glowing digital eyes on screen (square outlines `[] []`)
+        // Glowing digital eyes (concentric circular details)
         for offset_x in [-11.0, 11.0] {
             let ex = robot_head_cx + offset_x * scale;
             let ey = robot_head_cy - 1.0 * scale;
-            let sq_size = 9.0 * scale;
-            stroke_skia_rounded_rect(
-                pixmap,
-                ex - sq_size * 0.5,
-                ey - sq_size * 0.5,
-                sq_size,
-                sq_size,
-                1.5 * scale,
-                2.0 * scale,
-                [120, 220, 255, 255], // bright glowing cyan
-            );
+            
+            // Outer soft glow ring
+            fill_skia_circle(pixmap, ex, ey, 5.5 * scale, [120, 220, 255, 60]);
+            stroke_skia_circle(pixmap, ex, ey, 5.5 * scale, 1.2 * scale, [120, 220, 255, 180]);
+            
+            // Inner glowing iris
+            fill_skia_circle(pixmap, ex, ey, 3.2 * scale, [120, 220, 255, 255]);
+            stroke_skia_circle(pixmap, ex, ey, 3.2 * scale, 1.0 * scale, outline_color);
+            
+            // Core tiny dot
+            fill_skia_circle(pixmap, ex - 0.8 * scale, ey - 0.8 * scale, 1.0 * scale, [255, 255, 255, 255]);
         }
     }
 
@@ -13457,48 +13607,76 @@ mod windows_overlay {
         let girl_body_cx = 120.0 * scale;
         let girl_body_cy = 142.0 * scale;
 
-        // Remote Controller in the center of her chest
-        let ctrl_w = 22.0 * scale;
-        let ctrl_h = 14.0 * scale;
+        // Remote Controller in the center of her chest (larger, more visible, higher up)
+        let ctrl_w = 34.0 * scale;
+        let ctrl_h = 22.0 * scale;
         let ctrl_x = girl_body_cx - ctrl_w * 0.5;
-        let ctrl_y = girl_body_cy + 10.0 * scale;
-        fill_skia_rounded_rect(pixmap, ctrl_x, ctrl_y, ctrl_w, ctrl_h, 3.0 * scale, [95, 75, 135, 255]); // purple body
-        stroke_skia_rounded_rect(pixmap, ctrl_x, ctrl_y, ctrl_w, ctrl_h, 3.0 * scale, 1.8 * scale, outline_color);
-        
+        let ctrl_y = girl_body_cy + 2.0 * scale;
+
+        // 3D Controller shadow
+        fill_skia_rounded_rect(pixmap, ctrl_x + 1.0 * scale, ctrl_y + 2.0 * scale, ctrl_w, ctrl_h, 3.5 * scale, [40, 30, 60, 100]);
+        // Controller main body
+        fill_skia_rounded_rect(pixmap, ctrl_x, ctrl_y, ctrl_w, ctrl_h, 3.5 * scale, [95, 75, 135, 255]); // purple body
+        stroke_skia_rounded_rect(pixmap, ctrl_x, ctrl_y, ctrl_w, ctrl_h, 3.5 * scale, 1.8 * scale, outline_color);
+
+        // Controller metallic side handles
+        fill_skia_rounded_rect(pixmap, ctrl_x - 3.0 * scale, ctrl_y + 4.0 * scale, 3.0 * scale, ctrl_h - 8.0 * scale, 1.5 * scale, [110, 115, 118, 255]);
+        stroke_skia_rounded_rect(pixmap, ctrl_x - 3.0 * scale, ctrl_y + 4.0 * scale, 3.0 * scale, ctrl_h - 8.0 * scale, 1.5 * scale, 1.2 * scale, outline_color);
+        fill_skia_rounded_rect(pixmap, ctrl_x + ctrl_w, ctrl_y + 4.0 * scale, 3.0 * scale, ctrl_h - 8.0 * scale, 1.5 * scale, [110, 115, 118, 255]);
+        stroke_skia_rounded_rect(pixmap, ctrl_x + ctrl_w, ctrl_y + 4.0 * scale, 3.0 * scale, ctrl_h - 8.0 * scale, 1.5 * scale, 1.2 * scale, outline_color);
+
         // Remote controller antenna
         let mut ant_pb = tiny_skia::PathBuilder::new();
-        ant_pb.move_to(girl_body_cx - 6.0 * scale, ctrl_y);
-        ant_pb.line_to(girl_body_cx - 6.0 * scale, ctrl_y - 6.0 * scale);
+        ant_pb.move_to(girl_body_cx - 8.0 * scale, ctrl_y);
+        ant_pb.line_to(girl_body_cx - 8.0 * scale, ctrl_y - 8.0 * scale);
         if let Some(path) = ant_pb.finish() {
             stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
         }
-        // Glowing LED light
-        fill_skia_circle(pixmap, girl_body_cx + 6.0 * scale, ctrl_y + 4.0 * scale, 1.5 * scale, [115, 245, 120, 255]); // green light
+        fill_skia_circle(pixmap, girl_body_cx - 8.0 * scale, ctrl_y - 8.0 * scale, 1.5 * scale, [180, 110, 60, 255]); // antenna copper tip
+
+        // Glowing red/green LED lights
+        fill_skia_circle(pixmap, girl_body_cx + 10.0 * scale, ctrl_y + 5.0 * scale, 1.5 * scale, [115, 245, 120, 255]); // green active light
+        fill_skia_circle(pixmap, girl_body_cx + 10.0 * scale, ctrl_y + 10.0 * scale, 1.5 * scale, [255, 100, 100, 255]); // red connection light
+
+        // Two joysticks (dials) on the remote
+        let js_y = ctrl_y + 11.0 * scale;
+        for offset_x in [-8.0, 3.0] {
+            let jx = girl_body_cx + offset_x * scale;
+            fill_skia_circle(pixmap, jx, js_y, 4.0 * scale, [50, 40, 75, 255]); // joystick base
+            stroke_skia_circle(pixmap, jx, js_y, 4.0 * scale, 1.0 * scale, outline_color);
+            fill_skia_circle(pixmap, jx - 0.5 * scale, js_y - 0.5 * scale, 2.0 * scale, [110, 115, 118, 255]); // joystick cap
+        }
 
         // Left arm to remote
         let mut gl_arm = tiny_skia::PathBuilder::new();
         gl_arm.move_to(girl_body_cx - 20.0 * scale, girl_body_cy + 8.0 * scale);
-        gl_arm.quad_to(girl_body_cx - 16.0 * scale, ctrl_y + 12.0 * scale, ctrl_x, ctrl_y + 7.0 * scale);
+        gl_arm.quad_to(girl_body_cx - 20.0 * scale, ctrl_y + 16.0 * scale, ctrl_x - 1.5 * scale, ctrl_y + 11.0 * scale);
         if let Some(path) = gl_arm.finish() {
-            stroke_skia_path(pixmap, &path, [240, 240, 242, 255], 5.0 * scale); // white sleeve
+            stroke_skia_path(pixmap, &path, [240, 240, 242, 255], 5.5 * scale); // white sleeve
             stroke_skia_path(pixmap, &path, outline_color, 2.0 * scale);
         }
         // Right arm to remote
         let mut gr_arm = tiny_skia::PathBuilder::new();
         gr_arm.move_to(girl_body_cx + 20.0 * scale, girl_body_cy + 8.0 * scale);
-        gr_arm.quad_to(girl_body_cx + 16.0 * scale, ctrl_y + 12.0 * scale, ctrl_x + ctrl_w, ctrl_y + 7.0 * scale);
+        gr_arm.quad_to(girl_body_cx + 20.0 * scale, ctrl_y + 16.0 * scale, ctrl_x + ctrl_w + 1.5 * scale, ctrl_y + 11.0 * scale);
         if let Some(path) = gr_arm.finish() {
-            stroke_skia_path(pixmap, &path, [240, 240, 242, 255], 5.0 * scale); // white sleeve
+            stroke_skia_path(pixmap, &path, [240, 240, 242, 255], 5.5 * scale); // white sleeve
             stroke_skia_path(pixmap, &path, outline_color, 2.0 * scale);
         }
 
-        // Small hands holding the controller
-        fill_skia_circle(pixmap, ctrl_x, ctrl_y + 7.0 * scale, 3.5 * scale, [250, 225, 210, 255]);
-        stroke_skia_circle(pixmap, ctrl_x, ctrl_y + 7.0 * scale, 3.5 * scale, 1.2 * scale, outline_color);
-        fill_skia_circle(pixmap, ctrl_x + ctrl_w, ctrl_y + 7.0 * scale, 3.5 * scale, [250, 225, 210, 255]);
-        stroke_skia_circle(pixmap, ctrl_x + ctrl_w, ctrl_y + 7.0 * scale, 3.5 * scale, 1.2 * scale, outline_color);
+        // Detailed hands wrapping around the sides
+        fill_skia_circle(pixmap, ctrl_x - 1.0 * scale, ctrl_y + 11.0 * scale, 4.0 * scale, [250, 225, 210, 255]);
+        stroke_skia_circle(pixmap, ctrl_x - 1.0 * scale, ctrl_y + 11.0 * scale, 4.0 * scale, 1.2 * scale, outline_color);
+        fill_skia_circle(pixmap, ctrl_x + ctrl_w + 1.0 * scale, ctrl_y + 11.0 * scale, 4.0 * scale, [250, 225, 210, 255]);
+        stroke_skia_circle(pixmap, ctrl_x + ctrl_w + 1.0 * scale, ctrl_y + 11.0 * scale, 4.0 * scale, 1.2 * scale, outline_color);
 
-        // 2. Draw Robot Arms (Mechanical joints typing on keys/mouse)
+        // Thumbs resting on top of the controller joysticks
+        fill_skia_circle(pixmap, girl_body_cx - 8.0 * scale, js_y - 1.0 * scale, 2.0 * scale, [250, 225, 210, 255]);
+        stroke_skia_circle(pixmap, girl_body_cx - 8.0 * scale, js_y - 1.0 * scale, 2.0 * scale, 1.0 * scale, outline_color);
+        fill_skia_circle(pixmap, girl_body_cx + 3.0 * scale, js_y - 1.0 * scale, 2.0 * scale, [250, 225, 210, 255]);
+        stroke_skia_circle(pixmap, girl_body_cx + 3.0 * scale, js_y - 1.0 * scale, 2.0 * scale, 1.0 * scale, outline_color);
+
+        // 2. Draw Robot Arms (Mechanical jointed arms bending at elbows)
         let robot_body_cx = 210.0 * scale;
         let robot_body_cy = 138.0 * scale;
         let left_shoulder_cx = robot_body_cx - 18.0 * scale;
@@ -13511,36 +13689,99 @@ mod windows_overlay {
         let right_paw_x = right_paw_target.0;
         let right_paw_y = right_paw_target.1 + paw_press;
 
-        // Shoulder joints (metal cogs)
-        let sh_r = 3.5 * scale;
+        // Shoulder joint caps (rounded shoulder armor pads)
+        let sh_r = 5.0 * scale;
         fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, sh_r, [100, 105, 110, 255]);
         stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, sh_r, 1.5 * scale, outline_color);
+        fill_skia_circle(pixmap, left_shoulder_cx - 1.0 * scale, left_shoulder_cy - 1.0 * scale, 2.0 * scale, [140, 145, 150, 255]); // highlight
+
         fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, sh_r, [100, 105, 110, 255]);
         stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, sh_r, 1.5 * scale, outline_color);
+        fill_skia_circle(pixmap, right_shoulder_cx - 1.0 * scale, right_shoulder_cy - 1.0 * scale, 2.0 * scale, [140, 145, 150, 255]); // highlight
 
-        // Left arm (iron segmented sticks)
-        let mut l_arm_pb = tiny_skia::PathBuilder::new();
-        l_arm_pb.move_to(left_shoulder_cx, left_shoulder_cy);
-        l_arm_pb.line_to(left_paw_x, left_paw_y);
-        if let Some(path) = l_arm_pb.finish() {
-            stroke_skia_path(pixmap, &path, [60, 62, 65, 255], 3.2 * scale);
+        // Jointed arm calculation - Left Elbow (bends outward/leftward)
+        let dx_l = left_paw_x - left_shoulder_cx;
+        let dy_l = left_paw_y - left_shoulder_cy;
+        let mid_x_l = (left_shoulder_cx + left_paw_x) * 0.5;
+        let mid_y_l = (left_shoulder_cy + left_paw_y) * 0.5;
+        let len_l = (dx_l*dx_l + dy_l*dy_l).sqrt().max(1.0);
+        let perp_x_l = -dy_l / len_l;
+        let perp_y_l = dx_l / len_l;
+        let elbow_x_l = mid_x_l + perp_x_l * 12.0 * scale;
+        let elbow_y_l = mid_y_l + perp_y_l * 12.0 * scale;
+
+        // Upper arm segment (thick metallic rod)
+        let mut l_upper = tiny_skia::PathBuilder::new();
+        l_upper.move_to(left_shoulder_cx, left_shoulder_cy);
+        l_upper.line_to(elbow_x_l, elbow_y_l);
+        if let Some(path) = l_upper.finish() {
+            stroke_skia_path(pixmap, &path, [60, 62, 65, 255], 5.0 * scale);
             stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
         }
 
-        // Right arm (iron segmented sticks)
-        let mut r_arm_pb = tiny_skia::PathBuilder::new();
-        r_arm_pb.move_to(right_shoulder_cx, right_shoulder_cy);
-        r_arm_pb.line_to(right_paw_x, right_paw_y);
-        if let Some(path) = r_arm_pb.finish() {
-            stroke_skia_path(pixmap, &path, [60, 62, 65, 255], 3.2 * scale);
+        // Elbow joint circle
+        fill_skia_circle(pixmap, elbow_x_l, elbow_y_l, 3.2 * scale, [110, 115, 118, 255]);
+        stroke_skia_circle(pixmap, elbow_x_l, elbow_y_l, 3.2 * scale, 1.2 * scale, outline_color);
+
+        // Lower arm segment (tapered metallic rod)
+        let mut l_fore = tiny_skia::PathBuilder::new();
+        l_fore.move_to(elbow_x_l, elbow_y_l);
+        l_fore.line_to(left_paw_x, left_paw_y);
+        if let Some(path) = l_fore.finish() {
+            stroke_skia_path(pixmap, &path, [80, 82, 85, 255], 4.0 * scale);
             stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
         }
 
-        // Hand cogs/joints (claws) typing
-        fill_skia_circle(pixmap, left_paw_x, left_paw_y, 4.0 * scale, [90, 95, 98, 255]);
-        stroke_skia_circle(pixmap, left_paw_x, left_paw_y, 4.0 * scale, 1.5 * scale, outline_color);
-        fill_skia_circle(pixmap, right_paw_x, right_paw_y, 4.0 * scale, [90, 95, 98, 255]);
-        stroke_skia_circle(pixmap, right_paw_x, right_paw_y, 4.0 * scale, 1.5 * scale, outline_color);
+        // Jointed arm calculation - Right Elbow (bends outward/rightward)
+        let dx_r = right_paw_x - right_shoulder_cx;
+        let dy_r = right_paw_y - right_shoulder_cy;
+        let mid_x_r = (right_shoulder_cx + right_paw_x) * 0.5;
+        let mid_y_r = (right_shoulder_cy + right_paw_y) * 0.5;
+        let len_r = (dx_r*dx_r + dy_r*dy_r).sqrt().max(1.0);
+        let perp_x_r = dy_r / len_r;
+        let perp_y_r = -dx_r / len_r;
+        let elbow_x_r = mid_x_r + perp_x_r * 12.0 * scale;
+        let elbow_y_r = mid_y_r + perp_y_r * 12.0 * scale;
+
+        // Upper arm segment
+        let mut r_upper = tiny_skia::PathBuilder::new();
+        r_upper.move_to(right_shoulder_cx, right_shoulder_cy);
+        r_upper.line_to(elbow_x_r, elbow_y_r);
+        if let Some(path) = r_upper.finish() {
+            stroke_skia_path(pixmap, &path, [60, 62, 65, 255], 5.0 * scale);
+            stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
+        }
+
+        // Elbow joint circle
+        fill_skia_circle(pixmap, elbow_x_r, elbow_y_r, 3.2 * scale, [110, 115, 118, 255]);
+        stroke_skia_circle(pixmap, elbow_x_r, elbow_y_r, 3.2 * scale, 1.2 * scale, outline_color);
+
+        // Lower arm segment
+        let mut r_fore = tiny_skia::PathBuilder::new();
+        r_fore.move_to(elbow_x_r, elbow_y_r);
+        r_fore.line_to(right_paw_x, right_paw_y);
+        if let Some(path) = r_fore.finish() {
+            stroke_skia_path(pixmap, &path, [80, 82, 85, 255], 4.0 * scale);
+            stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
+        }
+
+        // Paws (claws) typing with small claw prongs
+        for (px, py) in [(left_paw_x, left_paw_y), (right_paw_x, right_paw_y)] {
+            fill_skia_circle(pixmap, px, py, 4.0 * scale, [90, 95, 98, 255]);
+            stroke_skia_circle(pixmap, px, py, 4.0 * scale, 1.5 * scale, outline_color);
+            // Highlights on paws
+            fill_skia_circle(pixmap, px - 1.0 * scale, py - 1.0 * scale, 1.2 * scale, [140, 145, 150, 255]);
+            
+            // Draw two tiny curved claw fingers/prongs pointing downwards
+            let mut claw_pb = tiny_skia::PathBuilder::new();
+            claw_pb.move_to(px - 2.5 * scale, py + 1.0 * scale);
+            claw_pb.quad_to(px - 3.5 * scale, py + 5.0 * scale, px - 1.0 * scale, py + 6.0 * scale);
+            claw_pb.move_to(px + 2.5 * scale, py + 1.0 * scale);
+            claw_pb.quad_to(px + 3.5 * scale, py + 5.0 * scale, px + 1.0 * scale, py + 6.0 * scale);
+            if let Some(path) = claw_pb.finish() {
+                stroke_skia_path(pixmap, &path, outline_color, 1.2 * scale);
+            }
+        }
     }
 
     // =========================================================================
@@ -13929,46 +14170,95 @@ mod windows_overlay {
                 stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
             }
         } else {
-            // Draw Identity V Cipher Machine Crate Shadow & Base Crate
+            // Draw Identity V Cipher Machine Crate Shadow & Base Crate (3D Box structure)
             let crate_left = 68.0;
             let crate_top = 146.0;
             let crate_width = 254.0;
             let crate_height = 96.0;
             let crate_shadow_alpha = (90.0 + recent_pulse * 28.0).round() as u8;
             
-            // Crate Shadow on the ground/desk area
+            // Crate Shadow at the bottom (lowered to y = 276.0 because of the tall front face)
             fill_projected_rounded_quad(
                 &mut pixmap,
                 crate_left + 10.0,
-                crate_top + 72.0,
+                crate_top + 130.0,
                 crate_width - 20.0,
                 16.0,
                 8.0,
                 [0, 0, 0, crate_shadow_alpha],
             );
 
-            // Crate Front Face (wooden cargo box structure)
+            // 1. Diagonal metal strut supporting the side shelf (bolted to the side of the crate)
+            let mut strut_pb = tiny_skia::PathBuilder::new();
+            let pt_platform = project_point(50.0, 190.0);
+            let pt_crate = project_point(68.0, 235.0);
+            strut_pb.move_to(pt_platform.0, pt_platform.1);
+            strut_pb.line_to(pt_crate.0, pt_crate.1);
+            if let Some(path) = strut_pb.finish() {
+                stroke_skia_path(&mut pixmap, &path, [100, 105, 110, 255], 4.0 * scale);
+                stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 255], 1.5 * scale);
+            }
+            // Strut wall-plate/bracket details
+            let pt_bolt = project_point(68.0, 235.0);
+            fill_skia_circle(&mut pixmap, pt_bolt.0, pt_bolt.1, 3.5 * scale, [110, 115, 118, 255]);
+            stroke_skia_circle(&mut pixmap, pt_bolt.0, pt_bolt.1, 3.5 * scale, 1.2 * scale, [30, 28, 27, 255]);
+
+            // Side shelf platform supporting the mouse pad
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                42.0,
+                154.0,
+                28.0, // extends to overlap the crate left wall at 68.0
+                44.0,
+                4.0,
+                [78, 72, 68, 255], // same wood color as crate top
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                42.0,
+                154.0,
+                28.0,
+                44.0,
+                4.0,
+                [30, 28, 27, 255],
+                1.8 * scale,
+            );
+
+            // Crate Front Face (wooden cargo box structure, vertically dropped from y=226 to y=280)
             fill_projected_rounded_quad(
                 &mut pixmap,
                 crate_left,
-                crate_top + 12.0,
+                crate_top + 80.0, // starts at y = 226.0
                 crate_width,
-                crate_height - 12.0,
+                crate_height - 42.0, // goes to y = 280.0
                 8.0,
                 [52, 48, 46, 255], // dark grey-brown wood
             );
             stroke_projected_rounded_quad(
                 &mut pixmap,
                 crate_left,
-                crate_top + 12.0,
+                crate_top + 80.0,
                 crate_width,
-                crate_height - 12.0,
+                crate_height - 42.0,
                 8.0,
                 [30, 28, 27, 255],
                 2.2 * scale,
             );
 
-            // X Brace on front face of crate
+            // Vertical panel lines on Front Face (wood planks)
+            for offset_percent in [0.25, 0.5, 0.75] {
+                let px = crate_left + crate_width * offset_percent;
+                let mut pb = tiny_skia::PathBuilder::new();
+                let pt1 = project_point(px, crate_top + 80.0);
+                let pt2 = project_point(px, crate_top + 134.0); // y = 280.0
+                pb.move_to(pt1.0, pt1.1);
+                pb.line_to(pt2.0, pt2.1);
+                if let Some(path) = pb.finish() {
+                    stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 120], 1.5 * scale);
+                }
+            }
+
+            // X Brace on front face of crate (drawn on the new vertical panel)
             let draw_brace_line = |pixmap: &mut tiny_skia::Pixmap, x1: f32, y1: f32, x2: f32, y2: f32| {
                 let mut pb = tiny_skia::PathBuilder::new();
                 let pt1 = project_point(x1, y1);
@@ -13980,16 +14270,16 @@ mod windows_overlay {
                     stroke_skia_path(pixmap, &path, [30, 28, 27, 255], 1.5 * scale);
                 }
             };
-            draw_brace_line(&mut pixmap, crate_left + 16.0, crate_top + 20.0, crate_left + crate_width - 16.0, crate_top + crate_height - 8.0);
-            draw_brace_line(&mut pixmap, crate_left + crate_width - 16.0, crate_top + 20.0, crate_left + 16.0, crate_top + crate_height - 8.0);
+            draw_brace_line(&mut pixmap, crate_left + 16.0, crate_top + 88.0, crate_left + crate_width - 16.0, crate_top + 130.0);
+            draw_brace_line(&mut pixmap, crate_left + crate_width - 16.0, crate_top + 88.0, crate_left + 16.0, crate_top + 130.0);
 
-            // Crate Top Deck Surface
+            // Crate Top Deck Surface (horizontal projection from y=146 to y=230)
             fill_projected_rounded_quad(
                 &mut pixmap,
                 crate_left,
                 crate_top,
                 crate_width,
-                crate_height - 12.0,
+                crate_height - 12.0, // 84.0 height
                 8.0,
                 [78, 72, 68, 255], // slightly lighter wood surface
             );
