@@ -49,6 +49,9 @@ fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool)> {
     if normalize_focus_highlight_decoration(&mut state) {
         state_changed = true;
     }
+    if normalize_legacy_active_window_targets(&mut state) {
+        state_changed = true;
+    }
     state.show_window = true;
     Ok((state, state_changed))
 }
@@ -142,6 +145,134 @@ fn normalize_focus_highlight_decoration(state: &mut AppState) -> bool {
         state.focus_highlight_rainbow_legacy = false;
         changed = true;
     }
+    changed
+}
+
+fn normalize_legacy_active_window_targets(state: &mut AppState) -> bool {
+    fn normalize_target(target: &mut Option<String>, changed: &mut bool) {
+        if target.as_deref() == Some("[Active Window]") {
+            *target = None;
+            *changed = true;
+        }
+    }
+
+    fn normalize_extra_targets(extra_targets: &mut Vec<String>, changed: &mut bool) {
+        let original_len = extra_targets.len();
+        extra_targets.retain(|title| title != "[Active Window]");
+        if extra_targets.len() != original_len {
+            *changed = true;
+        }
+    }
+
+    fn normalize_target_set(
+        target: &mut Option<String>,
+        extra_targets: &mut Vec<String>,
+        match_duplicate_window_titles: &mut bool,
+        changed: &mut bool,
+    ) {
+        let had_active_window = target.as_deref() == Some("[Active Window]");
+        normalize_target(target, changed);
+        normalize_extra_targets(extra_targets, changed);
+        if had_active_window && *match_duplicate_window_titles {
+            *match_duplicate_window_titles = false;
+            *changed = true;
+        }
+    }
+
+    let mut changed = false;
+
+    for profile in &mut state.profiles {
+        normalize_target(&mut profile.target_window_title, &mut changed);
+        normalize_extra_targets(&mut profile.extra_target_window_titles, &mut changed);
+    }
+
+    for preset in &mut state.window_presets {
+        normalize_target_set(
+            &mut preset.target_window_title,
+            &mut preset.extra_target_window_titles,
+            &mut preset.match_duplicate_window_titles,
+            &mut changed,
+        );
+    }
+
+    for preset in &mut state.window_focus_presets {
+        normalize_target_set(
+            &mut preset.target_window_title,
+            &mut preset.extra_target_window_titles,
+            &mut preset.match_duplicate_window_titles,
+            &mut changed,
+        );
+    }
+
+    for layout in &mut state.window_layouts {
+        for cell in &mut layout.cells {
+            normalize_target_set(
+                &mut cell.target_window_title,
+                &mut cell.extra_target_window_titles,
+                &mut cell.match_duplicate_window_titles,
+                &mut changed,
+            );
+        }
+    }
+
+    for preset in &mut state.pin_presets {
+        normalize_target_set(
+            &mut preset.target_window_title,
+            &mut preset.extra_target_window_titles,
+            &mut preset.match_duplicate_window_titles,
+            &mut changed,
+        );
+    }
+
+    for preset in &mut state.zoom_presets {
+        normalize_target(&mut preset.target_window_title, &mut changed);
+        normalize_extra_targets(&mut preset.extra_target_window_titles, &mut changed);
+    }
+
+    for preset in &mut state.mouse_sensitivity_presets {
+        normalize_target_set(
+            &mut preset.target_window_title,
+            &mut preset.extra_target_window_titles,
+            &mut preset.match_duplicate_window_titles,
+            &mut changed,
+        );
+    }
+
+    for preset in &mut state.command_presets {
+        normalize_target_set(
+            &mut preset.target_window_title,
+            &mut preset.extra_target_window_titles,
+            &mut preset.match_duplicate_window_titles,
+            &mut changed,
+        );
+    }
+
+    for group in &mut state.macro_groups {
+        normalize_target_set(
+            &mut group.target_window_title,
+            &mut group.extra_target_window_titles,
+            &mut group.match_duplicate_window_titles,
+            &mut changed,
+        );
+        for preset in &mut group.presets {
+            normalize_target_set(
+                &mut preset.event_target_window_title,
+                &mut preset.event_extra_target_window_titles,
+                &mut preset.event_match_duplicate_window_titles,
+                &mut changed,
+            );
+        }
+    }
+
+    for preset in &mut state.vision_presets {
+        normalize_target_set(
+            &mut preset.target_window_title,
+            &mut preset.extra_target_window_titles,
+            &mut preset.match_duplicate_window_titles,
+            &mut changed,
+        );
+    }
+
     changed
 }
 

@@ -1,31 +1,24 @@
-use std::{
-    collections::HashSet,
-    mem::size_of,
-    os::raw::c_void,
-    thread,
-    time::Duration,
-};
+use std::{collections::HashSet, mem::size_of, os::raw::c_void, thread, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use windows::Win32::{
     Foundation::RECT,
     Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
-    Graphics::Gdi::{GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST, MonitorFromPoint},
+    Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint},
     System::Threading::{AttachThreadInput, GetCurrentThreadId},
     UI::Input::KeyboardAndMouse::{SetActiveWindow, SetFocus},
     UI::WindowsAndMessaging::{
         BringWindowToTop, GA_ROOT, GetAncestor, GetForegroundWindow, GetWindowRect,
-        GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic,
-        SW_RESTORE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-        SWP_NOZORDER, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos, ShowWindow,
+        GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, SW_RESTORE,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+        SetForegroundWindow, SetWindowPos, ShowWindow,
     },
 };
 
 use super::{
     HOOK_STATE, WindowFocusPreset, WindowPreset, calculate_window_bounds, ensure_window_restored,
     find_target_window_hwnd, is_internal_app_window, remove_window_title_bar,
-    resolve_window_target, restore_window_title_bar,
-    window_belongs_to_current_process,
+    resolve_window_target, restore_window_title_bar, window_belongs_to_current_process,
 };
 
 pub(super) fn apply_window_preset_by_id(spec: &str) -> Result<()> {
@@ -91,9 +84,9 @@ pub(super) fn focus_window_by_preset_id(spec: &str) -> Result<()> {
         focus_window_for_preset(&preset)
     } else {
         // Fallback: if spec matches no preset, treat it as a direct window title/selector
-        let is_specific = spec.strip_suffix(')').is_some_and(|prefix| {
-            prefix.rsplit_once(" (0x").is_some()
-        });
+        let is_specific = spec
+            .strip_suffix(')')
+            .is_some_and(|prefix| prefix.rsplit_once(" (0x").is_some());
         focus_window_for_title(Some(spec), &[], !is_specific, true)
     }
 }
@@ -183,35 +176,26 @@ fn focus_window_for_title(
     match_duplicate_window_titles: bool,
     prefer_other_if_foreground_matches: bool,
 ) -> Result<()> {
-    let is_active_window = target_title == Some("[Active Window]");
-    let hwnd = if is_active_window {
-        let fg = unsafe { GetForegroundWindow() };
-        if fg.0.is_null() {
-            bail!("No foreground window is available");
+    let is_specific = target_title.is_some_and(|t| {
+        if let Some(prefix) = t.strip_suffix(')')
+            && let Some((_, _)) = prefix.rsplit_once(" (0x")
+        {
+            true
+        } else {
+            false
         }
-        fg
-    } else {
-        let is_specific = target_title.is_some_and(|t| {
-            if let Some(prefix) = t.strip_suffix(')')
-                && let Some((_, _)) = prefix.rsplit_once(" (0x")
-            {
-                true
-            } else {
-                false
-            }
-        });
-        let prefer_other = prefer_other_if_foreground_matches && !is_specific;
-        find_target_window_hwnd(
-            target_title,
-            extra_target_titles,
-            match_duplicate_window_titles,
-            prefer_other,
-        )
-        .context("Target window was not found")?
-    };
+    });
+    let prefer_other = prefer_other_if_foreground_matches && !is_specific;
+    let hwnd = find_target_window_hwnd(
+        target_title,
+        extra_target_titles,
+        match_duplicate_window_titles,
+        prefer_other,
+    )
+    .context("Target window was not found")?;
     unsafe {
         let foreground = GetForegroundWindow();
-        if !is_active_window && foreground == hwnd && !IsIconic(hwnd).as_bool() {
+        if foreground == hwnd && !IsIconic(hwnd).as_bool() {
             return Ok(());
         }
         let current_thread = GetCurrentThreadId();
@@ -351,7 +335,12 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
                 mi.rcMonitor
             }
         } else {
-            RECT { left: 0, top: 0, right: 1920, bottom: 1080 }
+            RECT {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1080,
+            }
         }
     };
 
@@ -359,7 +348,13 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
     let total_h = (work_rect.bottom - work_rect.top) as f32;
 
     let row_ratios: Vec<f32> = {
-        let prov: Vec<f32> = layout.row_ratios.iter().take(rows).copied().map(|v| v.max(0.01)).collect();
+        let prov: Vec<f32> = layout
+            .row_ratios
+            .iter()
+            .take(rows)
+            .copied()
+            .map(|v| v.max(0.01))
+            .collect();
         if prov.len() == rows {
             let sum: f32 = prov.iter().sum();
             prov.iter().map(|v| v / sum).collect()
@@ -368,7 +363,13 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
         }
     };
     let col_ratios: Vec<f32> = {
-        let prov: Vec<f32> = layout.col_ratios.iter().take(cols).copied().map(|v| v.max(0.01)).collect();
+        let prov: Vec<f32> = layout
+            .col_ratios
+            .iter()
+            .take(cols)
+            .copied()
+            .map(|v| v.max(0.01))
+            .collect();
         if prov.len() == cols {
             let sum: f32 = prov.iter().sum();
             prov.iter().map(|v| v / sum).collect()
@@ -403,7 +404,11 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
         }
 
         let titles: Vec<&str> = std::iter::once(cell.target_window_title.as_deref())
-            .chain(cell.extra_target_window_titles.iter().map(|s| Some(s.as_str())))
+            .chain(
+                cell.extra_target_window_titles
+                    .iter()
+                    .map(|s| Some(s.as_str())),
+            )
             .flatten()
             .collect();
 
@@ -439,7 +444,9 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
             let clean_p_title = clean_title_suffix(p.title);
             let clean_win_title = clean_title_suffix(&win_title);
             let matches = if p.match_dup {
-                clean_win_title.to_lowercase().contains(&clean_p_title.to_lowercase())
+                clean_win_title
+                    .to_lowercase()
+                    .contains(&clean_p_title.to_lowercase())
             } else {
                 clean_win_title.eq_ignore_ascii_case(clean_p_title)
             };
@@ -506,16 +513,25 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
                 DWMWA_EXTENDED_FRAME_BOUNDS,
                 &mut fr as *mut _ as *mut c_void,
                 size_of::<RECT>() as u32,
-            ).is_ok();
+            )
+            .is_ok();
             let (li, ti, ri, bi) = if frame_ok {
-                (fr.left - wr.left, fr.top - wr.top, wr.right - fr.right, wr.bottom - fr.bottom)
+                (
+                    fr.left - wr.left,
+                    fr.top - wr.top,
+                    wr.right - fr.right,
+                    wr.bottom - fr.bottom,
+                )
             } else {
                 (0, 0, 0, 0)
             };
             let _ = SetWindowPos(
-                hwnd, None,
-                cell_x - li, cell_y - ti,
-                cell_w + li + ri, cell_h + ti + bi,
+                hwnd,
+                None,
+                cell_x - li,
+                cell_y - ti,
+                cell_w + li + ri,
+                cell_h + ti + bi,
                 SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER,
             );
         }
@@ -531,7 +547,11 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
                 let fg = GetForegroundWindow();
                 let cur_tid = GetCurrentThreadId();
                 let tgt_tid = GetWindowThreadProcessId(hwnd, None);
-                let fg_tid = if fg.0.is_null() { 0 } else { GetWindowThreadProcessId(fg, None) };
+                let fg_tid = if fg.0.is_null() {
+                    0
+                } else {
+                    GetWindowThreadProcessId(fg, None)
+                };
                 if fg_tid != 0 && fg_tid != cur_tid {
                     let _ = AttachThreadInput(fg_tid, cur_tid, true);
                 }
@@ -539,8 +559,24 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
                     let _ = AttachThreadInput(tgt_tid, cur_tid, true);
                 }
                 let _ = BringWindowToTop(hwnd);
-                let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-                let _ = SetWindowPos(hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_NOTOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                );
                 let _ = SetForegroundWindow(hwnd);
                 let _ = SetActiveWindow(hwnd);
                 let _ = SetFocus(Some(hwnd));

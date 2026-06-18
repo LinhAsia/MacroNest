@@ -1,9 +1,9 @@
 use crate::model::*;
-use crate::ocr::{OcrResult, perform_ocr};
+use crate::ocr::perform_ocr;
 use crate::overlay::OverlayCommand;
 use crate::ui::{CrosshairApp, VisionCaptureMode, VisionCaptureTarget};
 use crate::window_list::capture_virtual_screen_region;
-use eframe::egui::{self, Color32, RichText, Sense, vec2};
+use eframe::egui::{self, Color32, RichText};
 
 impl CrosshairApp {
     pub(crate) fn render_ocr_panel(&mut self, ui: &mut egui::Ui) {
@@ -24,7 +24,11 @@ impl CrosshairApp {
         // Add OCR preset button
         ui.horizontal(|ui| {
             if ui
-                .button(Self::tr_lang(language, "+ Add OCR preset", "+ Add OCR preset"))
+                .button(Self::tr_lang(
+                    language,
+                    "+ Add OCR preset",
+                    "+ Add OCR preset",
+                ))
                 .clicked()
             {
                 let mut id = 1;
@@ -83,7 +87,11 @@ impl CrosshairApp {
                             ui,
                             Self::material_icon_text(0xe037, 18.0),
                         )
-                        .on_hover_text(Self::tr_lang(language, "Run this OCR preset now", "Run this OCR preset now"));
+                        .on_hover_text(Self::tr_lang(
+                            language,
+                            "Run this OCR preset now",
+                            "Run this OCR preset now",
+                        ));
                         if run_response.clicked() {
                             run_test_preset_id = Some(preset.id);
                         }
@@ -129,14 +137,30 @@ impl CrosshairApp {
                             let avail_langs = crate::ocr::available_ocr_languages();
 
                             let current_code = preset.lang.clone().unwrap_or_default();
-                            let current_label: String = crate::ocr::OCR_SUPPORTED_LANGUAGE_CATALOG.iter()
-                                .find(|(code, _, _)| crate::ocr::language_tag_matches(&[current_code.clone()], code))
-                                .map(|(_, label, _)| label.to_string())
+                            let current_has_ocr = !current_code.is_empty()
+                                && crate::ocr::language_tag_matches(&avail_langs, &current_code);
+                            let current_label: String = crate::ocr::OCR_SUPPORTED_LANGUAGE_CATALOG
+                                .iter()
+                                .find(|(code, _, _)| {
+                                    crate::ocr::language_tag_matches(
+                                        std::slice::from_ref(&current_code),
+                                        code,
+                                    )
+                                })
+                                .map(|(_, label, _)| {
+                                    if current_code.is_empty() || current_has_ocr {
+                                        label.to_string()
+                                    } else {
+                                        format!("{label} [not installed]")
+                                    }
+                                })
                                 .unwrap_or_else(|| {
                                     if current_code.is_empty() {
                                         "Auto Detect".to_string()
-                                    } else {
+                                    } else if current_has_ocr {
                                         current_code.clone()
+                                    } else {
+                                        format!("{} [not installed]", current_code)
                                     }
                                 });
 
@@ -160,7 +184,7 @@ impl CrosshairApp {
                                         }
                                         for (code, label, hint) in crate::ocr::OCR_SUPPORTED_LANGUAGE_CATALOG {
                                             let is_selected = crate::ocr::language_tag_matches(
-                                                &[current_code.clone()],
+                                                std::slice::from_ref(&current_code),
                                                 code,
                                             );
                                             let has_ocr =
@@ -245,7 +269,11 @@ impl CrosshairApp {
 
                 // Region Editor Preview
                 ui.label(
-                    RichText::new(Self::tr_lang(language, "Visual Region Adjuster", "Visual Region Adjuster"))
+                    RichText::new(Self::tr_lang(
+                        language,
+                        "Visual Region Adjuster",
+                        "Visual Region Adjuster",
+                    ))
                     .strong(),
                 );
                 ui.add_space(4.0);
@@ -277,7 +305,11 @@ impl CrosshairApp {
                 ui.horizontal(|ui| {
                     if ui
                         .button(
-                            RichText::new(Self::tr_lang(language, "⚡ Test Capture and OCR Scan", "⚡ Test Capture and OCR Scan"))
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "⚡ Test Capture and OCR Scan",
+                                "⚡ Test Capture and OCR Scan",
+                            ))
                             .strong()
                             .color(Color32::from_rgb(0, 255, 170)),
                         )
@@ -311,14 +343,22 @@ impl CrosshairApp {
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new(Self::tr_lang(language, "Full Extracted Text:", "Full Extracted Text:"))
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Full Extracted Text:",
+                                        "Full Extracted Text:",
+                                    ))
                                     .strong(),
                                 );
                             });
                             ui.add_space(4.0);
 
                             let mut text_val_str = if res.text.trim().is_empty() {
-                                Self::tr_lang(language, "[No text found in region]", "[No text found in region]")
+                                Self::tr_lang(
+                                    language,
+                                    "[No text found in region]",
+                                    "[No text found in region]",
+                                )
                                 .to_string()
                             } else {
                                 res.text.clone()
@@ -350,7 +390,11 @@ impl CrosshairApp {
                                     ui.add_space(6.0);
                                     ui.horizontal(|ui| {
                                         ui.label(
-                                            RichText::new(Self::tr_lang(language, "💡 Extracted Numeric values:", "💡 Extracted Numeric values:"))
+                                            RichText::new(Self::tr_lang(
+                                                language,
+                                                "💡 Extracted Numeric values:",
+                                                "💡 Extracted Numeric values:",
+                                            ))
                                             .strong()
                                             .color(Color32::from_rgb(255, 232, 96)),
                                         );
@@ -363,7 +407,11 @@ impl CrosshairApp {
                         if !res.words.is_empty() {
                             ui.add_space(8.0);
                             ui.label(
-                                RichText::new(Self::tr_lang(language, "Detailed Words Coordinates:", "Detailed Words Coordinates:"))
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Detailed Words Coordinates:",
+                                    "Detailed Words Coordinates:",
+                                ))
                                 .strong(),
                             );
                             ui.add_space(4.0);

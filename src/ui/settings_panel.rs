@@ -1,6 +1,6 @@
 use crate::model::*;
 use crate::overlay::UiCommand;
-use crate::ui::{CrosshairApp, OcrLanguageOperationKind, UpdateStatus};
+use crate::ui::{CrosshairApp, UpdateStatus};
 use anyhow::{Result, bail};
 use eframe::egui::{
     self, Button, Color32, Frame, Margin, Order, RichText, Shadow, Stroke, TextEdit, WidgetText,
@@ -1271,38 +1271,33 @@ impl CrosshairApp {
         Path::new(&system_root).join("System32").join("dism.exe")
     }
 
-    pub(crate) fn install_ocr_language_capability(&mut self, lang_code: &str, display_name: &str) {
-        let Some(capability_name) = crate::ocr::ocr_capability_name(lang_code) else {
-            return;
-        };
-
+    fn focus_ocr_language_settings(&mut self, lang_code: &str) {
         crate::ocr::clear_available_ocr_languages_cache();
+        self.settings_popup_open = true;
         self.ocr_lang_pack_open = true;
         self.ocr_lang_settings_focus = Some(lang_code.to_owned());
-        self.ocr_lang_operation = Some((
-            lang_code.to_owned(),
-            OcrLanguageOperationKind::Install,
-            Instant::now(),
-        ));
+    }
 
-        let args = format!(
-            "/Online /Add-Capability /CapabilityName:{} /NoRestart",
-            capability_name
-        );
-        match crate::platform::launch_hidden_process_as_admin(&Self::ocr_dism_path(), Some(&args)) {
+    fn open_windows_ocr_language_settings(&mut self, lang_code: &str, display_name: &str) {
+        self.focus_ocr_language_settings(lang_code);
+        match crate::platform::open_url_in_browser("ms-settings:regionlanguage") {
             Ok(()) => {
                 self.status = format!(
-                    "Started Windows OCR install for {}. Click Refresh after the install finishes.",
+                    "Opened Windows language settings for {}. Install its OCR support there, then return to MacroNest and click Refresh.",
                     display_name
                 );
             }
             Err(error) => {
                 self.status = format!(
-                    "Failed to start OCR install for {}: {}",
+                    "Failed to open Windows language settings for {}: {}",
                     display_name, error
                 );
             }
         }
+    }
+
+    pub(crate) fn install_ocr_language_capability(&mut self, lang_code: &str, display_name: &str) {
+        self.open_windows_ocr_language_settings(lang_code, display_name);
     }
 
     fn uninstall_ocr_language_capability(&mut self, lang_code: &str, display_name: &str) {
@@ -1310,14 +1305,7 @@ impl CrosshairApp {
             return;
         };
 
-        crate::ocr::clear_available_ocr_languages_cache();
-        self.ocr_lang_pack_open = true;
-        self.ocr_lang_settings_focus = Some(lang_code.to_owned());
-        self.ocr_lang_operation = Some((
-            lang_code.to_owned(),
-            OcrLanguageOperationKind::Remove,
-            Instant::now(),
-        ));
+        self.focus_ocr_language_settings(lang_code);
 
         let args = format!(
             "/Online /Remove-Capability /CapabilityName:{} /NoRestart",
@@ -1341,14 +1329,12 @@ impl CrosshairApp {
 
     fn refresh_ocr_language_status(&mut self) {
         crate::ocr::clear_available_ocr_languages_cache();
-        self.ocr_lang_operation = None;
         self.status = "Refreshed Windows OCR language status.".to_owned();
     }
 
     pub(crate) fn render_ocr_language_settings(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
         let focused_lang = self.ocr_lang_settings_focus.clone();
-        let active_operation = self.ocr_lang_operation.clone();
 
         Self::settings_card_frame(ui).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
@@ -1373,6 +1359,22 @@ impl CrosshairApp {
                     {
                         self.refresh_ocr_language_status();
                     }
+                    if Self::settings_action_button(
+                        ui,
+                        Self::tr_lang(language, "Open Windows Settings", "Open Windows Settings"),
+                    )
+                    .clicked()
+                    {
+                        match crate::platform::open_url_in_browser("ms-settings:regionlanguage") {
+                            Ok(()) => {
+                                self.status = "Opened Windows language settings.".to_owned();
+                            }
+                            Err(error) => {
+                                self.status =
+                                    format!("Failed to open Windows language settings: {error}");
+                            }
+                        }
+                    }
                 });
                 ui.add_space(6.0);
                 ui.label(
@@ -1383,6 +1385,7 @@ impl CrosshairApp {
                 ui.add_space(8.0);
 
                 if let Some(lang_code) = focused_lang.as_deref() {
+                    let focused_is_ready = crate::ocr::language_tag_matches(&avail_langs, lang_code);
                     ui.label(
                         RichText::new(format!(
                             "{} {}",
@@ -1390,8 +1393,24 @@ impl CrosshairApp {
                             lang_code
                         ))
                         .small()
-                        .color(Color32::from_rgb(126, 224, 182)),
+                        .color(if focused_is_ready {
+                            Color32::from_rgb(126, 224, 182)
+                        } else {
+                            Color32::from_rgb(255, 216, 96)
+                        }),
                     );
+                    if !focused_is_ready {
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "This language is not OCR-ready yet. Open Windows Settings, install the language OCR package, then click Refresh here.",
+                                "This language is not OCR-ready yet. Open Windows Settings, install the language OCR package, then click Refresh here.",
+                            ))
+                            .small()
+                            .color(Color32::from_rgb(255, 216, 96)),
+                        );
+                    }
                     ui.add_space(6.0);
                 }
 
@@ -1403,15 +1422,6 @@ impl CrosshairApp {
                         for (lang_code, display_name, _) in crate::ocr::OCR_SUPPORTED_LANGUAGE_CATALOG {
                             let has_ocr = crate::ocr::language_tag_matches(&avail_langs, lang_code);
                             let is_focused = focused_lang.as_deref() == Some(*lang_code);
-                            let operation_for_lang = active_operation.as_ref().and_then(
-                                |(op_lang, kind, started_at)| {
-                                    if op_lang == lang_code {
-                                        Some((*kind, *started_at))
-                                    } else {
-                                        None
-                                    }
-                                },
-                            );
 
                             if has_ocr {
                                 ui.label(RichText::new("OK").color(Color32::from_rgb(126, 224, 182)));
@@ -1432,12 +1442,6 @@ impl CrosshairApp {
                             }
 
                             if has_ocr {
-                                if matches!(
-                                    operation_for_lang,
-                                    Some((OcrLanguageOperationKind::Install, _))
-                                ) {
-                                    self.ocr_lang_operation = None;
-                                }
                                 ui.horizontal(|ui| {
                                     ui.label(
                                         RichText::new(Self::tr_lang(language, "OCR ready", "OCR ready"))
@@ -1458,45 +1462,37 @@ impl CrosshairApp {
                                     }
                                 });
                             } else {
-                                if matches!(
-                                    operation_for_lang,
-                                    Some((OcrLanguageOperationKind::Remove, _))
-                                ) {
-                                    self.ocr_lang_operation = None;
-                                }
-                                if let Some((operation_kind, started_at)) = operation_for_lang {
-                                    let elapsed = started_at.elapsed().as_secs_f32();
-                                    let pulse = ((elapsed * 0.45).sin() + 1.0) * 0.5;
-                                    let progress = 0.12 + pulse * 0.76;
-                                    let label = match operation_kind {
-                                        OcrLanguageOperationKind::Install => {
-                                            Self::tr_lang(language, "Installing", "Installing")
-                                        }
-                                        OcrLanguageOperationKind::Remove => {
-                                            Self::tr_lang(language, "Removing", "Removing")
-                                        }
-                                    };
-                                    ui.vertical(|ui| {
-                                        ui.label(
-                                            RichText::new(label)
-                                                .small()
-                                                .color(Color32::from_rgb(255, 216, 96)),
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "Not installed",
+                                            "Not installed",
+                                        ))
+                                        .small()
+                                        .color(Color32::from_rgb(255, 216, 96)),
+                                    );
+                                    if Self::settings_action_button(
+                                        ui,
+                                        Self::tr_lang(
+                                            language,
+                                            "Open Settings",
+                                            "Open Settings",
+                                        ),
+                                    )
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Open Windows language settings so you can install OCR support for this language, then come back and click Refresh.",
+                                        "Open Windows language settings so you can install OCR support for this language, then come back and click Refresh.",
+                                    ))
+                                    .clicked()
+                                    {
+                                        self.open_windows_ocr_language_settings(
+                                            lang_code,
+                                            display_name,
                                         );
-                                        ui.add_sized(
-                                            [140.0, 16.0],
-                                            egui::ProgressBar::new(progress).show_percentage(),
-                                        );
-                                    });
-                                    ui.ctx().request_repaint_after(Duration::from_millis(80));
-                                } else if Self::settings_action_button(
-                                    ui,
-                                    Self::tr_lang(language, "Install", "Install"),
-                                )
-                                .on_hover_text(Self::tr_lang(language, "Install the Windows OCR capability for this language directly.", "Install the Windows OCR capability for this language directly."))
-                                .clicked()
-                                {
-                                    self.install_ocr_language_capability(lang_code, display_name);
-                                }
+                                    }
+                                });
                             }
 
                             ui.end_row();

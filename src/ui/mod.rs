@@ -644,12 +644,6 @@ pub(crate) enum MacroActionSubmenuKind {
     Funny,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OcrLanguageOperationKind {
-    Install,
-    Remove,
-}
-
 pub struct CrosshairApp {
     pub paths: AppPaths,
     pub state: AppState,
@@ -844,7 +838,6 @@ pub struct CrosshairApp {
     titlebar_guides_open: bool,
     ocr_lang_pack_open: bool,
     ocr_lang_settings_focus: Option<String>,
-    ocr_lang_operation: Option<(String, OcrLanguageOperationKind, Instant)>,
     pub show_share_buttons: bool,
     arduino_available_ports: Vec<String>,
     arduino_ports_last_refresh: Option<Instant>,
@@ -1085,7 +1078,6 @@ impl CrosshairApp {
             titlebar_guides_open: false,
             ocr_lang_pack_open: false,
             ocr_lang_settings_focus: None,
-            ocr_lang_operation: None,
             show_share_buttons: false,
             arduino_available_ports: Vec::new(),
             arduino_ports_last_refresh: None,
@@ -5496,47 +5488,43 @@ impl CrosshairApp {
         let selected_text = target
             .as_deref()
             .map(|current| {
-                if current == "[Active Window]" {
-                    Self::tr_lang(language, "[Active Window]", "[Active Window]").to_owned()
-                } else {
-                    let mut display = current.to_owned();
-                    let rules = [
-                        (" [Lowest]", "[Lowest on Screen]", "[Lowest on Screen]"),
-                        (" [Highest]", "[Highest on Screen]", "[Highest on Screen]"),
-                        (
-                            " [Leftmost]",
-                            "[Leftmost on Screen]",
-                            "[Leftmost on Screen]",
-                        ),
-                        (
-                            " [Rightmost]",
-                            "[Rightmost on Screen]",
-                            "[Rightmost on Screen]",
-                        ),
-                    ];
-                    let mut matched_rule = false;
-                    for (suffix, en_label, vi_label) in rules {
-                        if current.ends_with(suffix) {
-                            let base = current.strip_suffix(suffix).unwrap();
-                            let label = Self::tr_lang(language, en_label, vi_label);
-                            display = format!("{base} {label}");
-                            matched_rule = true;
-                            break;
-                        }
+                let mut display = current.to_owned();
+                let rules = [
+                    (" [Lowest]", "[Lowest on Screen]", "[Lowest on Screen]"),
+                    (" [Highest]", "[Highest on Screen]", "[Highest on Screen]"),
+                    (
+                        " [Leftmost]",
+                        "[Leftmost on Screen]",
+                        "[Leftmost on Screen]",
+                    ),
+                    (
+                        " [Rightmost]",
+                        "[Rightmost on Screen]",
+                        "[Rightmost on Screen]",
+                    ),
+                ];
+                let mut matched_rule = false;
+                for (suffix, en_label, vi_label) in rules {
+                    if current.ends_with(suffix) {
+                        let base = current.strip_suffix(suffix).unwrap();
+                        let label = Self::tr_lang(language, en_label, vi_label);
+                        display = format!("{base} {label}");
+                        matched_rule = true;
+                        break;
                     }
-                    if matched_rule {
-                        display
+                }
+                if matched_rule {
+                    display
+                } else {
+                    let base_title = Self::simplify_window_title(current);
+                    let selected_specific_duplicate = !*match_duplicate_window_titles
+                        && window_groups
+                            .iter()
+                            .any(|(title, selectors)| *title == base_title && selectors.len() > 1);
+                    if selected_specific_duplicate {
+                        current.to_owned()
                     } else {
-                        let base_title = Self::simplify_window_title(current);
-                        let selected_specific_duplicate = !*match_duplicate_window_titles
-                            && window_groups.iter().any(|(title, selectors)| {
-                                *title == base_title && selectors.len() > 1
-                            });
-                        if selected_specific_duplicate {
-                            current.to_owned()
-                        } else {
-                            base_title
-                        }
+                        base_title
                     }
                 }
             })
@@ -5561,19 +5549,6 @@ impl CrosshairApp {
                         expanded_title = None;
                         changed = true;
                     }
-                }
-
-                let active_window_label =
-                    Self::tr_lang(language, "[Active Window]", "[Active Window]");
-                let is_active_selected = target.as_deref() == Some("[Active Window]");
-                if ui
-                    .selectable_label(is_active_selected, active_window_label)
-                    .clicked()
-                {
-                    *target = Some("[Active Window]".to_owned());
-                    *match_duplicate_window_titles = false;
-                    expanded_title = None;
-                    changed = true;
                 }
                 ui.separator();
 

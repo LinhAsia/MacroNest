@@ -117,7 +117,11 @@ impl CrosshairApp {
         let pick_btn = egui::Button::new("⛶");
         if ui
             .add_sized([ctrl_height, ctrl_height], pick_btn)
-            .on_hover_text(Self::tr_lang(language, "Pick area - Drag on screen to select the OCR scan region", "Pick area - Drag on screen to select the OCR scan region"))
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Pick area - Drag on screen to select the OCR scan region",
+                "Pick area - Drag on screen to select the OCR scan region",
+            ))
             .clicked()
         {
             *pending_ocr_step_capture = Some((group_id, preset_id, step_index));
@@ -125,16 +129,26 @@ impl CrosshairApp {
 
         let available_languages = crate::ocr::available_ocr_languages();
         let current_language = step.ocr_lang.clone().unwrap_or_default();
+        let current_language_ready = !current_language.is_empty()
+            && crate::ocr::language_tag_matches(&available_languages, &current_language);
         let language_label = crate::ocr::OCR_SUPPORTED_LANGUAGE_CATALOG
             .iter()
             .find(|(code, _, _)| {
-                crate::ocr::language_tag_matches(&[current_language.clone()], code)
+                crate::ocr::language_tag_matches(std::slice::from_ref(&current_language), code)
             })
-            .map(|(_, label, _)| *label)
+            .map(|(_, label, _)| {
+                if current_language.is_empty() || current_language_ready {
+                    (*label).to_owned()
+                } else {
+                    format!("{label} [not installed]")
+                }
+            })
             .unwrap_or(if current_language.is_empty() {
-                "Auto"
+                "Auto".to_owned()
+            } else if current_language_ready {
+                current_language.clone()
             } else {
-                current_language.as_str()
+                format!("{} [not installed]", current_language)
             });
 
         let short_label = match current_language.as_str() {
@@ -173,7 +187,7 @@ impl CrosshairApp {
                 }
                 for (code, label, hint) in crate::ocr::OCR_SUPPORTED_LANGUAGE_CATALOG {
                     let is_selected = crate::ocr::language_tag_matches(
-                        &[current_language.clone()],
+                        std::slice::from_ref(&current_language),
                         code,
                     );
                     let has_ocr = crate::ocr::language_tag_matches(&available_languages, code);
