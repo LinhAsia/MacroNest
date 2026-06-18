@@ -13187,6 +13187,362 @@ mod windows_overlay {
         fill_skia_circle(pixmap, right_paw_x, right_paw_y, 4.5 * scale, wood_color);
         stroke_skia_circle(pixmap, right_paw_x, right_paw_y, 4.5 * scale, 1.8 * scale, stroke_color);
     }
+
+    fn mechanic_robot_draw_body_and_ears(
+        pixmap: &mut tiny_skia::Pixmap,
+        scale: f32,
+        _look_x: f32, _look_y: f32,
+        _recent_pulse: f32,
+    ) {
+        let outline_color = [30, 28, 27, 255];
+
+        // 1. Draw Mechanic (Tracy) Body
+        let girl_body_cx = 120.0 * scale;
+        let girl_body_cy = 142.0 * scale;
+        // White coat/jacket body shape
+        let mut coat_pb = tiny_skia::PathBuilder::new();
+        coat_pb.move_to(girl_body_cx - 24.0 * scale, girl_body_cy + 36.0 * scale);
+        coat_pb.line_to(girl_body_cx - 18.0 * scale, girl_body_cy + 2.0 * scale);
+        coat_pb.line_to(girl_body_cx + 18.0 * scale, girl_body_cy + 2.0 * scale);
+        coat_pb.line_to(girl_body_cx + 24.0 * scale, girl_body_cy + 36.0 * scale);
+        coat_pb.close();
+        if let Some(path) = coat_pb.finish() {
+            fill_skia_path(pixmap, &path, [240, 240, 242, 255]); // white jacket
+            stroke_skia_path(pixmap, &path, outline_color, 2.0 * scale);
+        }
+        
+        // Shirt collar/inner shirt
+        let mut shirt_pb = tiny_skia::PathBuilder::new();
+        shirt_pb.move_to(girl_body_cx - 10.0 * scale, girl_body_cy + 2.0 * scale);
+        shirt_pb.line_to(girl_body_cx, girl_body_cy + 14.0 * scale);
+        shirt_pb.line_to(girl_body_cx + 10.0 * scale, girl_body_cy + 2.0 * scale);
+        shirt_pb.close();
+        if let Some(path) = shirt_pb.finish() {
+            fill_skia_path(pixmap, &path, [30, 28, 27, 255]); // dark inner shirt
+            stroke_skia_path(pixmap, &path, outline_color, 1.8 * scale);
+        }
+
+        // 2. Draw Robot Body
+        let robot_body_cx = 210.0 * scale;
+        let robot_body_cy = 138.0 * scale;
+        // Torso: trapezoid with rounded metallic shoulders
+        let mut torso_pb = tiny_skia::PathBuilder::new();
+        torso_pb.move_to(robot_body_cx - 20.0 * scale, robot_body_cy + 30.0 * scale);
+        torso_pb.line_to(robot_body_cx - 16.0 * scale, robot_body_cy);
+        torso_pb.line_to(robot_body_cx + 16.0 * scale, robot_body_cy);
+        torso_pb.line_to(robot_body_cx + 20.0 * scale, robot_body_cy + 30.0 * scale);
+        torso_pb.close();
+        if let Some(path) = torso_pb.finish() {
+            fill_skia_path(pixmap, &path, [65, 70, 75, 255]); // dark metallic iron
+            stroke_skia_path(pixmap, &path, outline_color, 2.0 * scale);
+        }
+
+        // Mechanical neck joint
+        let mut neck_pb = tiny_skia::PathBuilder::new();
+        neck_pb.move_to(robot_body_cx - 4.0 * scale, robot_body_cy - 12.0 * scale);
+        neck_pb.line_to(robot_body_cx - 4.0 * scale, robot_body_cy);
+        neck_pb.line_to(robot_body_cx + 4.0 * scale, robot_body_cy);
+        neck_pb.line_to(robot_body_cx + 4.0 * scale, robot_body_cy - 12.0 * scale);
+        neck_pb.close();
+        if let Some(path) = neck_pb.finish() {
+            fill_skia_path(pixmap, &path, [100, 105, 110, 255]);
+            stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
+        }
+
+        // Keyhole symbol on Robot chest
+        let key_y = robot_body_cy + 12.0 * scale;
+        fill_skia_circle(pixmap, robot_body_cx, key_y - 2.0 * scale, 3.2 * scale, outline_color);
+        let mut key_pb = tiny_skia::PathBuilder::new();
+        key_pb.move_to(robot_body_cx - 1.8 * scale, key_y - 2.0 * scale);
+        key_pb.line_to(robot_body_cx - 3.2 * scale, key_y + 8.0 * scale);
+        key_pb.line_to(robot_body_cx + 3.2 * scale, key_y + 8.0 * scale);
+        key_pb.line_to(robot_body_cx + 1.8 * scale, key_y - 2.0 * scale);
+        key_pb.close();
+        if let Some(path) = key_pb.finish() {
+            fill_skia_path(pixmap, &path, outline_color);
+        }
+    }
+
+    fn mechanic_robot_draw_head_and_face(
+        pixmap: &mut tiny_skia::Pixmap,
+        scale: f32,
+        look_x: f32, look_y: f32,
+    ) {
+        let outline_color = [30, 28, 27, 255];
+
+        // 1. Draw Mechanic (Tracy) Head & Face
+        let girl_head_cx = 120.0 * scale;
+        let girl_head_cy = 100.0 * scale;
+        let girl_head_radius = 28.0 * scale;
+
+        // Head shape
+        fill_skia_circle(pixmap, girl_head_cx, girl_head_cy, girl_head_radius, [250, 225, 210, 255]);
+
+        // Beanie cap (purple) behind hair
+        let mut beanie_pb = tiny_skia::PathBuilder::new();
+        beanie_pb.move_to(girl_head_cx - 28.5 * scale, girl_head_cy - 2.0 * scale);
+        beanie_pb.quad_to(girl_head_cx - 24.0 * scale, girl_head_cy - 38.0 * scale, girl_head_cx, girl_head_cy - 40.0 * scale);
+        beanie_pb.quad_to(girl_head_cx + 24.0 * scale, girl_head_cy - 38.0 * scale, girl_head_cx + 28.5 * scale, girl_head_cy - 2.0 * scale);
+        beanie_pb.close();
+        if let Some(path) = beanie_pb.finish() {
+            fill_skia_path(pixmap, &path, [95, 75, 135, 255]); // purple beanie
+            stroke_skia_path(pixmap, &path, outline_color, 2.0 * scale);
+        }
+
+        // Beanie ribbed cuff
+        fill_skia_rounded_rect(pixmap, girl_head_cx - 29.0 * scale, girl_head_cy - 12.0 * scale, 58.0 * scale, 10.0 * scale, 3.0 * scale, [80, 60, 115, 255]);
+        stroke_skia_rounded_rect(pixmap, girl_head_cx - 29.0 * scale, girl_head_cy - 12.0 * scale, 58.0 * scale, 10.0 * scale, 3.0 * scale, 1.8 * scale, outline_color);
+
+        // Glasses on beanie
+        for offset_x in [-11.0, 11.0] {
+            let gx = girl_head_cx + offset_x * scale;
+            let gy = girl_head_cy - 18.0 * scale;
+            // Lens
+            fill_skia_circle(pixmap, gx, gy, 6.0 * scale, [210, 200, 230, 255]);
+            stroke_skia_circle(pixmap, gx, gy, 6.0 * scale, 1.8 * scale, [70, 50, 105, 255]);
+        }
+        // Glasses bridge
+        let mut bridge_pb = tiny_skia::PathBuilder::new();
+        bridge_pb.move_to(girl_head_cx - 5.0 * scale, girl_head_cy - 18.0 * scale);
+        bridge_pb.line_to(girl_head_cx + 5.0 * scale, girl_head_cy - 18.0 * scale);
+        if let Some(path) = bridge_pb.finish() {
+            stroke_skia_path(pixmap, &path, [70, 50, 105, 255], 2.2 * scale);
+        }
+
+        // Curly Hair framing the face
+        let curly_positions = [
+            (-26.0, 8.0), (-25.0, -10.0), (-22.0, -22.0),
+            (26.0, 8.0), (25.0, -10.0), (22.0, -22.0)
+        ];
+        for (hx, hy) in curly_positions {
+            fill_skia_circle(pixmap, girl_head_cx + hx * scale, girl_head_cy + hy * scale, 7.5 * scale, [230, 160, 115, 255]); // orange curly locks
+            stroke_skia_circle(pixmap, girl_head_cx + hx * scale, girl_head_cy + hy * scale, 7.5 * scale, 1.5 * scale, outline_color);
+        }
+
+        // Face outline
+        stroke_skia_circle(pixmap, girl_head_cx, girl_head_cy, girl_head_radius, 2.0 * scale, outline_color);
+
+        // Button Eyes (stitches)
+        for offset_x in [-10.0, 10.0] {
+            let ex = girl_head_cx + offset_x * scale;
+            let ey = girl_head_cy - 2.5 * scale;
+            // Button base
+            fill_skia_circle(pixmap, ex, ey, 5.0 * scale, [40, 38, 37, 255]);
+            stroke_skia_circle(pixmap, ex, ey, 5.0 * scale, 1.5 * scale, outline_color);
+            // Stitch X
+            let mut x_pb = tiny_skia::PathBuilder::new();
+            x_pb.move_to(ex - 2.5 * scale, ey - 2.5 * scale);
+            x_pb.line_to(ex + 2.5 * scale, ey + 2.5 * scale);
+            x_pb.move_to(ex + 2.5 * scale, ey - 2.5 * scale);
+            x_pb.line_to(ex - 2.5 * scale, ey + 2.5 * scale);
+            if let Some(path) = x_pb.finish() {
+                stroke_skia_path(pixmap, &path, [240, 240, 240, 255], 1.2 * scale);
+            }
+        }
+
+        // Small wooden nose
+        let mut nose_pb = tiny_skia::PathBuilder::new();
+        nose_pb.move_to(girl_head_cx, girl_head_cy + 3.0 * scale);
+        nose_pb.line_to(girl_head_cx - 2.0 * scale, girl_head_cy + 8.5 * scale);
+        nose_pb.line_to(girl_head_cx + 2.0 * scale, girl_head_cy + 8.5 * scale);
+        nose_pb.close();
+        if let Some(path) = nose_pb.finish() {
+            fill_skia_path(pixmap, &path, [170, 110, 60, 255]);
+            stroke_skia_path(pixmap, &path, outline_color, 1.2 * scale);
+        }
+
+        // Small cute smile
+        let mut smile_pb = tiny_skia::PathBuilder::new();
+        smile_pb.move_to(girl_head_cx - 6.0 * scale, girl_head_cy + 15.0 * scale);
+        smile_pb.quad_to(girl_head_cx, girl_head_cy + 18.0 * scale, girl_head_cx + 6.0 * scale, girl_head_cy + 15.0 * scale);
+        if let Some(path) = smile_pb.finish() {
+            stroke_skia_path(pixmap, &path, outline_color, 1.8 * scale);
+        }
+
+        // 2. Draw Robot Head & Face
+        let robot_head_cx = 210.0 * scale + look_x;
+        let robot_head_cy = 92.0 * scale + look_y;
+        
+        // Robot ears/antennas (drawn behind the head)
+        for offset_x in [-20.0, 20.0] {
+            let sign = if offset_x < 0.0 { -1.0 } else { 1.0 };
+            let mut ant_pb = tiny_skia::PathBuilder::new();
+            let start_x = robot_head_cx + offset_x * scale;
+            let start_y = robot_head_cy - 12.0 * scale;
+            let end_x = robot_head_cx + (offset_x + sign * 6.0) * scale;
+            let end_y = robot_head_cy - 34.0 * scale;
+            ant_pb.move_to(start_x, start_y);
+            ant_pb.line_to(end_x, end_y);
+            if let Some(path) = ant_pb.finish() {
+                stroke_skia_path(pixmap, &path, [65, 70, 75, 255], 3.5 * scale);
+                stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
+            }
+        }
+
+        // CRT Screen Head: rounded rectangle
+        let head_w = 54.0 * scale;
+        let head_h = 44.0 * scale;
+        fill_skia_rounded_rect(
+            pixmap,
+            robot_head_cx - head_w * 0.5,
+            robot_head_cy - head_h * 0.5,
+            head_w,
+            head_h,
+            8.0 * scale,
+            [65, 70, 75, 255], // metallic grey-black
+        );
+        stroke_skia_rounded_rect(
+            pixmap,
+            robot_head_cx - head_w * 0.5,
+            robot_head_cy - head_h * 0.5,
+            head_w,
+            head_h,
+            8.0 * scale,
+            2.2 * scale,
+            outline_color,
+        );
+
+        // Inner Screen (black)
+        let scr_w = 44.0 * scale;
+        let scr_h = 34.0 * scale;
+        fill_skia_rounded_rect(
+            pixmap,
+            robot_head_cx - scr_w * 0.5,
+            robot_head_cy - scr_h * 0.5,
+            scr_w,
+            scr_h,
+            5.0 * scale,
+            [25, 25, 28, 255], // pitch black screen
+        );
+        stroke_skia_rounded_rect(
+            pixmap,
+            robot_head_cx - scr_w * 0.5,
+            robot_head_cy - scr_h * 0.5,
+            scr_w,
+            scr_h,
+            5.0 * scale,
+            1.5 * scale,
+            [15, 15, 17, 255],
+        );
+
+        // Glowing digital eyes on screen (square outlines `[] []`)
+        for offset_x in [-11.0, 11.0] {
+            let ex = robot_head_cx + offset_x * scale;
+            let ey = robot_head_cy - 1.0 * scale;
+            let sq_size = 9.0 * scale;
+            stroke_skia_rounded_rect(
+                pixmap,
+                ex - sq_size * 0.5,
+                ey - sq_size * 0.5,
+                sq_size,
+                sq_size,
+                1.5 * scale,
+                2.0 * scale,
+                [120, 220, 255, 255], // bright glowing cyan
+            );
+        }
+    }
+
+    fn mechanic_robot_draw_arms(
+        pixmap: &mut tiny_skia::Pixmap,
+        scale: f32,
+        left_paw_target: (f32, f32),
+        right_paw_target: (f32, f32),
+        paw_press: f32,
+        _paw_glow: [u8; 4],
+    ) {
+        let outline_color = [30, 28, 27, 255];
+
+        // 1. Draw Mechanic (Tracy) Arms and Remote controller
+        let girl_body_cx = 120.0 * scale;
+        let girl_body_cy = 142.0 * scale;
+
+        // Remote Controller in the center of her chest
+        let ctrl_w = 22.0 * scale;
+        let ctrl_h = 14.0 * scale;
+        let ctrl_x = girl_body_cx - ctrl_w * 0.5;
+        let ctrl_y = girl_body_cy + 10.0 * scale;
+        fill_skia_rounded_rect(pixmap, ctrl_x, ctrl_y, ctrl_w, ctrl_h, 3.0 * scale, [95, 75, 135, 255]); // purple body
+        stroke_skia_rounded_rect(pixmap, ctrl_x, ctrl_y, ctrl_w, ctrl_h, 3.0 * scale, 1.8 * scale, outline_color);
+        
+        // Remote controller antenna
+        let mut ant_pb = tiny_skia::PathBuilder::new();
+        ant_pb.move_to(girl_body_cx - 6.0 * scale, ctrl_y);
+        ant_pb.line_to(girl_body_cx - 6.0 * scale, ctrl_y - 6.0 * scale);
+        if let Some(path) = ant_pb.finish() {
+            stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
+        }
+        // Glowing LED light
+        fill_skia_circle(pixmap, girl_body_cx + 6.0 * scale, ctrl_y + 4.0 * scale, 1.5 * scale, [115, 245, 120, 255]); // green light
+
+        // Left arm to remote
+        let mut gl_arm = tiny_skia::PathBuilder::new();
+        gl_arm.move_to(girl_body_cx - 20.0 * scale, girl_body_cy + 8.0 * scale);
+        gl_arm.quad_to(girl_body_cx - 16.0 * scale, ctrl_y + 12.0 * scale, ctrl_x, ctrl_y + 7.0 * scale);
+        if let Some(path) = gl_arm.finish() {
+            stroke_skia_path(pixmap, &path, [240, 240, 242, 255], 5.0 * scale); // white sleeve
+            stroke_skia_path(pixmap, &path, outline_color, 2.0 * scale);
+        }
+        // Right arm to remote
+        let mut gr_arm = tiny_skia::PathBuilder::new();
+        gr_arm.move_to(girl_body_cx + 20.0 * scale, girl_body_cy + 8.0 * scale);
+        gr_arm.quad_to(girl_body_cx + 16.0 * scale, ctrl_y + 12.0 * scale, ctrl_x + ctrl_w, ctrl_y + 7.0 * scale);
+        if let Some(path) = gr_arm.finish() {
+            stroke_skia_path(pixmap, &path, [240, 240, 242, 255], 5.0 * scale); // white sleeve
+            stroke_skia_path(pixmap, &path, outline_color, 2.0 * scale);
+        }
+
+        // Small hands holding the controller
+        fill_skia_circle(pixmap, ctrl_x, ctrl_y + 7.0 * scale, 3.5 * scale, [250, 225, 210, 255]);
+        stroke_skia_circle(pixmap, ctrl_x, ctrl_y + 7.0 * scale, 3.5 * scale, 1.2 * scale, outline_color);
+        fill_skia_circle(pixmap, ctrl_x + ctrl_w, ctrl_y + 7.0 * scale, 3.5 * scale, [250, 225, 210, 255]);
+        stroke_skia_circle(pixmap, ctrl_x + ctrl_w, ctrl_y + 7.0 * scale, 3.5 * scale, 1.2 * scale, outline_color);
+
+        // 2. Draw Robot Arms (Mechanical joints typing on keys/mouse)
+        let robot_body_cx = 210.0 * scale;
+        let robot_body_cy = 138.0 * scale;
+        let left_shoulder_cx = robot_body_cx - 18.0 * scale;
+        let left_shoulder_cy = robot_body_cy + 6.0 * scale;
+        let right_shoulder_cx = robot_body_cx + 18.0 * scale;
+        let right_shoulder_cy = robot_body_cy + 6.0 * scale;
+
+        let left_paw_x = left_paw_target.0;
+        let left_paw_y = left_paw_target.1 + paw_press;
+        let right_paw_x = right_paw_target.0;
+        let right_paw_y = right_paw_target.1 + paw_press;
+
+        // Shoulder joints (metal cogs)
+        let sh_r = 3.5 * scale;
+        fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, sh_r, [100, 105, 110, 255]);
+        stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, sh_r, 1.5 * scale, outline_color);
+        fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, sh_r, [100, 105, 110, 255]);
+        stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, sh_r, 1.5 * scale, outline_color);
+
+        // Left arm (iron segmented sticks)
+        let mut l_arm_pb = tiny_skia::PathBuilder::new();
+        l_arm_pb.move_to(left_shoulder_cx, left_shoulder_cy);
+        l_arm_pb.line_to(left_paw_x, left_paw_y);
+        if let Some(path) = l_arm_pb.finish() {
+            stroke_skia_path(pixmap, &path, [60, 62, 65, 255], 3.2 * scale);
+            stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
+        }
+
+        // Right arm (iron segmented sticks)
+        let mut r_arm_pb = tiny_skia::PathBuilder::new();
+        r_arm_pb.move_to(right_shoulder_cx, right_shoulder_cy);
+        r_arm_pb.line_to(right_paw_x, right_paw_y);
+        if let Some(path) = r_arm_pb.finish() {
+            stroke_skia_path(pixmap, &path, [60, 62, 65, 255], 3.2 * scale);
+            stroke_skia_path(pixmap, &path, outline_color, 1.5 * scale);
+        }
+
+        // Hand cogs/joints (claws) typing
+        fill_skia_circle(pixmap, left_paw_x, left_paw_y, 4.0 * scale, [90, 95, 98, 255]);
+        stroke_skia_circle(pixmap, left_paw_x, left_paw_y, 4.0 * scale, 1.5 * scale, outline_color);
+        fill_skia_circle(pixmap, right_paw_x, right_paw_y, 4.0 * scale, [90, 95, 98, 255]);
+        stroke_skia_circle(pixmap, right_paw_x, right_paw_y, 4.0 * scale, 1.5 * scale, outline_color);
+    }
+
     // =========================================================================
 
     unsafe fn paint_mascot_quick_key_display(
@@ -13368,205 +13724,513 @@ mod windows_overlay {
                 tung_sahur_draw_body_and_ears(&mut pixmap, scale, body_cx, body_cy, body_radius, head_cx, head_cy, look_x, look_y, recent_pulse);
                 tung_sahur_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y);
             }
-        }
-
-
-        // 2. Draw 3D Desk Shadow & Desk
-        // Desk Shadow
-        let shadow_alpha = (90.0 + recent_pulse * 28.0).round() as u8;
-        fill_projected_rounded_quad(
-            &mut pixmap,
-            desk_left + 22.0,
-            desk_top + 70.0,
-            desk_width - 44.0,
-            16.0,
-            8.0,
-            [0, 0, 0, shadow_alpha],
-        );
-
-        // 3D Desk (Front Lip and Top Surface)
-        let desk_extrusion = 12.0;
-        // Desk Front Lip
-        fill_projected_rounded_quad(
-            &mut pixmap,
-            desk_left,
-            desk_top + desk_extrusion,
-            desk_width,
-            desk_height - desk_extrusion,
-            14.0,
-            [140, 108, 88, 255],
-        );
-        stroke_projected_rounded_quad(
-            &mut pixmap,
-            desk_left,
-            desk_top + desk_extrusion,
-            desk_width,
-            desk_height - desk_extrusion,
-            14.0,
-            [45, 40, 42, 255],
-            2.2 * scale,
-        );
-        // Desk Top Surface
-        fill_projected_rounded_quad(
-            &mut pixmap,
-            desk_left,
-            desk_top,
-            desk_width,
-            desk_height - desk_extrusion,
-            14.0,
-            [235, 215, 190, 255],
-        );
-        stroke_projected_rounded_quad(
-            &mut pixmap,
-            desk_left,
-            desk_top,
-            desk_width,
-            desk_height - desk_extrusion,
-            14.0,
-            [45, 40, 42, 255],
-            2.2 * scale,
-        );
-
-        // 3D Wood Grain Texture lines (perspective projected)
-        let draw_grain_line = |pixmap: &mut tiny_skia::Pixmap, y_val: f32, wave_height: f32| {
-            let mut pb = tiny_skia::PathBuilder::new();
-            let start = project_point(desk_left, y_val);
-            pb.move_to(start.0, start.1);
-            for i in 1..=10 {
-                let x_coord = desk_left + desk_width * (i as f32 / 10.0);
-                let offset_y = ((i as f32 * 1.5).sin() * wave_height);
-                let pt = project_point(x_coord, y_val + offset_y);
-                pb.line_to(pt.0, pt.1);
+            crate::model::MascotStyle::MechanicRobot => {
+                mechanic_robot_draw_body_and_ears(&mut pixmap, scale, look_x, look_y, recent_pulse);
+                mechanic_robot_draw_head_and_face(&mut pixmap, scale, look_x, look_y);
             }
-            if let Some(path) = pb.finish() {
-                stroke_skia_path(pixmap, &path, [190, 160, 140, 110], 1.2 * scale);
+        }
+
+
+        if mascot_style != crate::model::MascotStyle::MechanicRobot {
+            // 2. Draw 3D Desk Shadow & Desk
+            // Desk Shadow
+            let shadow_alpha = (90.0 + recent_pulse * 28.0).round() as u8;
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                desk_left + 22.0,
+                desk_top + 70.0,
+                desk_width - 44.0,
+                16.0,
+                8.0,
+                [0, 0, 0, shadow_alpha],
+            );
+
+            // 3D Desk (Front Lip and Top Surface)
+            let desk_extrusion = 12.0;
+            // Desk Front Lip
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                desk_left,
+                desk_top + desk_extrusion,
+                desk_width,
+                desk_height - desk_extrusion,
+                14.0,
+                [140, 108, 88, 255],
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                desk_left,
+                desk_top + desk_extrusion,
+                desk_width,
+                desk_height - desk_extrusion,
+                14.0,
+                [45, 40, 42, 255],
+                2.2 * scale,
+            );
+            // Desk Top Surface
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                desk_left,
+                desk_top,
+                desk_width,
+                desk_height - desk_extrusion,
+                14.0,
+                [235, 215, 190, 255],
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                desk_left,
+                desk_top,
+                desk_width,
+                desk_height - desk_extrusion,
+                14.0,
+                [45, 40, 42, 255],
+                2.2 * scale,
+            );
+
+            // 3D Wood Grain Texture lines (perspective projected)
+            let draw_grain_line = |pixmap: &mut tiny_skia::Pixmap, y_val: f32, wave_height: f32| {
+                let mut pb = tiny_skia::PathBuilder::new();
+                let start = project_point(desk_left, y_val);
+                pb.move_to(start.0, start.1);
+                for i in 1..=10 {
+                    let x_coord = desk_left + desk_width * (i as f32 / 10.0);
+                    let offset_y = ((i as f32 * 1.5).sin() * wave_height);
+                    let pt = project_point(x_coord, y_val + offset_y);
+                    pb.line_to(pt.0, pt.1);
+                }
+                if let Some(path) = pb.finish() {
+                    stroke_skia_path(pixmap, &path, [190, 160, 140, 110], 1.2 * scale);
+                }
+            };
+            draw_grain_line(&mut pixmap, desk_top + 15.0, 3.0);
+            draw_grain_line(&mut pixmap, desk_top + 45.0, 4.0);
+            draw_grain_line(&mut pixmap, desk_top + 70.0, 2.0);
+
+            // Scratch wood detail on bottom-right front desk edge
+            let mut scratch = tiny_skia::PathBuilder::new();
+            let pt1 = project_point(desk_left + desk_width * 0.64, desk_top + desk_height - 12.0);
+            let pt2 = project_point(desk_left + desk_width * 0.65, desk_top + desk_height - 5.0);
+            let pt3 = project_point(desk_left + desk_width * 0.67, desk_top + desk_height - 12.0);
+            scratch.move_to(pt1.0, pt1.1);
+            scratch.line_to(pt2.0, pt2.1);
+            scratch.line_to(pt3.0, pt3.1);
+            if let Some(path) = scratch.finish() {
+                stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
             }
-        };
-        draw_grain_line(&mut pixmap, desk_top + 15.0, 3.0);
-        draw_grain_line(&mut pixmap, desk_top + 45.0, 4.0);
-        draw_grain_line(&mut pixmap, desk_top + 70.0, 2.0);
 
-        // Scratch wood detail on bottom-right front desk edge
-        let mut scratch = tiny_skia::PathBuilder::new();
-        let pt1 = project_point(desk_left + desk_width * 0.64, desk_top + desk_height - 12.0);
-        let pt2 = project_point(desk_left + desk_width * 0.65, desk_top + desk_height - 5.0);
-        let pt3 = project_point(desk_left + desk_width * 0.67, desk_top + desk_height - 12.0);
-        scratch.move_to(pt1.0, pt1.1);
-        scratch.line_to(pt2.0, pt2.1);
-        scratch.line_to(pt3.0, pt3.1);
-        if let Some(path) = scratch.finish() {
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
-        }
+            // 3. Draw 3D Keyboard Frame & Mouse Pad
+            // Keyboard Shadow on Desk
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                keyboard_left + 2.0,
+                keyboard_top + 4.0,
+                keyboard_width,
+                keyboard_height,
+                14.0,
+                [0, 0, 0, 32],
+            );
+            // Bezel Frame shadow (3D extrusion depth)
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                keyboard_left,
+                keyboard_top + 4.0,
+                keyboard_width,
+                keyboard_height - 4.0,
+                14.0,
+                [175, 185, 195, 255],
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                keyboard_left,
+                keyboard_top,
+                keyboard_width,
+                keyboard_height,
+                14.0,
+                [45, 40, 42, 255],
+                2.0 * scale,
+            );
+            // Frame Top Surface
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                keyboard_left,
+                keyboard_top,
+                keyboard_width,
+                keyboard_height - 4.0,
+                14.0,
+                [238, 242, 246, 255],
+            );
+            // Keyboard inner slot
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                keyboard_left + 4.0,
+                keyboard_top + 4.0,
+                keyboard_width - 8.0,
+                keyboard_height - 12.0,
+                10.0,
+                [205, 218, 230, 255],
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                keyboard_left + 4.0,
+                keyboard_top + 4.0,
+                keyboard_width - 8.0,
+                keyboard_height - 12.0,
+                10.0,
+                [45, 40, 42, 255],
+                1.2 * scale,
+            );
+            // Inner slot highlight for 3D depth
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                keyboard_left + 4.0,
+                keyboard_top + 4.0,
+                keyboard_width - 8.0,
+                keyboard_height - 12.0,
+                10.0,
+                [255, 255, 255, 128],
+                1.0 * scale,
+            );
 
-
-        // 3. Draw 3D Keyboard Frame & Mouse Pad
-        // Keyboard Shadow on Desk
-        fill_projected_rounded_quad(
-            &mut pixmap,
-            keyboard_left + 2.0,
-            keyboard_top + 4.0,
-            keyboard_width,
-            keyboard_height,
-            14.0,
-            [0, 0, 0, 32],
-        );
-        // Bezel Frame shadow (3D extrusion depth)
-        fill_projected_rounded_quad(
-            &mut pixmap,
-            keyboard_left,
-            keyboard_top + 4.0,
-            keyboard_width,
-            keyboard_height - 4.0,
-            14.0,
-            [175, 185, 195, 255],
-        );
-        stroke_projected_rounded_quad(
-            &mut pixmap,
-            keyboard_left,
-            keyboard_top,
-            keyboard_width,
-            keyboard_height,
-            14.0,
-            [45, 40, 42, 255],
-            2.0 * scale,
-        );
-        // Frame Top Surface
-        fill_projected_rounded_quad(
-            &mut pixmap,
-            keyboard_left,
-            keyboard_top,
-            keyboard_width,
-            keyboard_height - 4.0,
-            14.0,
-            [238, 242, 246, 255],
-        );
-        // Keyboard inner slot
-        fill_projected_rounded_quad(
-            &mut pixmap,
-            keyboard_left + 4.0,
-            keyboard_top + 4.0,
-            keyboard_width - 8.0,
-            keyboard_height - 12.0,
-            10.0,
-            [205, 218, 230, 255],
-        );
-        stroke_projected_rounded_quad(
-            &mut pixmap,
-            keyboard_left + 4.0,
-            keyboard_top + 4.0,
-            keyboard_width - 8.0,
-            keyboard_height - 12.0,
-            10.0,
-            [45, 40, 42, 255],
-            1.2 * scale,
-        );
-        // Inner slot highlight for 3D depth
-        stroke_projected_rounded_quad(
-            &mut pixmap,
-            keyboard_left + 4.0,
-            keyboard_top + 4.0,
-            keyboard_width - 8.0,
-            keyboard_height - 12.0,
-            10.0,
-            [255, 255, 255, 128],
-            1.0 * scale,
-        );
-
-        // 3D Perspective Mouse Pad (Drawn as a projected ellipse path!)
-        let mut pad_pb = tiny_skia::PathBuilder::new();
-        let pad_cx = mouse_pad_left + 19.0;
-        let pad_cy = keyboard_top + 23.0;
-        let pad_r = 19.0;
-        
-        let start_pt = project_point(pad_cx + pad_r, pad_cy);
-        pad_pb.move_to(start_pt.0, start_pt.1);
-        for i in 1..=32 {
-            let angle = (i as f32) * 2.0 * std::f32::consts::PI / 32.0;
-            let px = pad_cx + pad_r * angle.cos();
-            let py = pad_cy + pad_r * angle.sin();
-            let pt = project_point(px, py);
-            pad_pb.line_to(pt.0, pt.1);
-        }
-        pad_pb.close();
-        if let Some(path) = pad_pb.finish() {
-            // Shadow
-            let mut shadow_pb = tiny_skia::PathBuilder::new();
-            let s_start = project_point(pad_cx + pad_r, pad_cy + 3.0);
-            shadow_pb.move_to(s_start.0, s_start.1);
+            // 3D Perspective Mouse Pad (Drawn as a projected ellipse path!)
+            let mut pad_pb = tiny_skia::PathBuilder::new();
+            let pad_cx = mouse_pad_left + 19.0;
+            let pad_cy = keyboard_top + 23.0;
+            let pad_r = 19.0;
+            
+            let start_pt = project_point(pad_cx + pad_r, pad_cy);
+            pad_pb.move_to(start_pt.0, start_pt.1);
             for i in 1..=32 {
                 let angle = (i as f32) * 2.0 * std::f32::consts::PI / 32.0;
                 let px = pad_cx + pad_r * angle.cos();
-                let py = pad_cy + 3.0 + pad_r * angle.sin();
+                let py = pad_cy + pad_r * angle.sin();
                 let pt = project_point(px, py);
-                shadow_pb.line_to(pt.0, pt.1);
+                pad_pb.line_to(pt.0, pt.1);
             }
-            shadow_pb.close();
-            if let Some(s_path) = shadow_pb.finish() {
-                fill_skia_path(&mut pixmap, &s_path, [0, 0, 0, 32]);
+            pad_pb.close();
+            if let Some(path) = pad_pb.finish() {
+                // Shadow
+                let mut shadow_pb = tiny_skia::PathBuilder::new();
+                let s_start = project_point(pad_cx + pad_r, pad_cy + 3.0);
+                shadow_pb.move_to(s_start.0, s_start.1);
+                for i in 1..=32 {
+                    let angle = (i as f32) * 2.0 * std::f32::consts::PI / 32.0;
+                    let px = pad_cx + pad_r * angle.cos();
+                    let py = pad_cy + 3.0 + pad_r * angle.sin();
+                    let pt = project_point(px, py);
+                    shadow_pb.line_to(pt.0, pt.1);
+                }
+                shadow_pb.close();
+                if let Some(s_path) = shadow_pb.finish() {
+                    fill_skia_path(&mut pixmap, &s_path, [0, 0, 0, 32]);
+                }
+                
+                fill_skia_path(&mut pixmap, &path, [147, 206, 244, 255]);
+                stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
+            }
+        } else {
+            // Draw Identity V Cipher Machine Crate Shadow & Base Crate
+            let crate_left = 68.0;
+            let crate_top = 146.0;
+            let crate_width = 254.0;
+            let crate_height = 96.0;
+            let crate_shadow_alpha = (90.0 + recent_pulse * 28.0).round() as u8;
+            
+            // Crate Shadow on the ground/desk area
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                crate_left + 10.0,
+                crate_top + 72.0,
+                crate_width - 20.0,
+                16.0,
+                8.0,
+                [0, 0, 0, crate_shadow_alpha],
+            );
+
+            // Crate Front Face (wooden cargo box structure)
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                crate_left,
+                crate_top + 12.0,
+                crate_width,
+                crate_height - 12.0,
+                8.0,
+                [52, 48, 46, 255], // dark grey-brown wood
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                crate_left,
+                crate_top + 12.0,
+                crate_width,
+                crate_height - 12.0,
+                8.0,
+                [30, 28, 27, 255],
+                2.2 * scale,
+            );
+
+            // X Brace on front face of crate
+            let draw_brace_line = |pixmap: &mut tiny_skia::Pixmap, x1: f32, y1: f32, x2: f32, y2: f32| {
+                let mut pb = tiny_skia::PathBuilder::new();
+                let pt1 = project_point(x1, y1);
+                let pt2 = project_point(x2, y2);
+                pb.move_to(pt1.0, pt1.1);
+                pb.line_to(pt2.0, pt2.1);
+                if let Some(path) = pb.finish() {
+                    stroke_skia_path(pixmap, &path, [75, 68, 64, 255], 6.0 * scale);
+                    stroke_skia_path(pixmap, &path, [30, 28, 27, 255], 1.5 * scale);
+                }
+            };
+            draw_brace_line(&mut pixmap, crate_left + 16.0, crate_top + 20.0, crate_left + crate_width - 16.0, crate_top + crate_height - 8.0);
+            draw_brace_line(&mut pixmap, crate_left + crate_width - 16.0, crate_top + 20.0, crate_left + 16.0, crate_top + crate_height - 8.0);
+
+            // Crate Top Deck Surface
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                crate_left,
+                crate_top,
+                crate_width,
+                crate_height - 12.0,
+                8.0,
+                [78, 72, 68, 255], // slightly lighter wood surface
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                crate_left,
+                crate_top,
+                crate_width,
+                crate_height - 12.0,
+                8.0,
+                [30, 28, 27, 255],
+                2.2 * scale,
+            );
+
+            // Wood planks lines on Top Surface
+            for offset_percent in [0.25, 0.5, 0.75] {
+                let px = crate_left + crate_width * offset_percent;
+                let mut pb = tiny_skia::PathBuilder::new();
+                let pt1 = project_point(px, crate_top);
+                let pt2 = project_point(px, crate_top + crate_height - 12.0);
+                pb.move_to(pt1.0, pt1.1);
+                pb.line_to(pt2.0, pt2.1);
+                if let Some(path) = pb.finish() {
+                    stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 80], 1.2 * scale);
+                }
+            }
+
+            // 2. Tall Antenna Pole
+            let pole_x = 72.0;
+            let pole_top_y = 15.0;
+            let pole_bottom_y = crate_top + crate_height - 10.0;
+            
+            // Vertical rod
+            let mut pole_pb = tiny_skia::PathBuilder::new();
+            let pt_top = project_point(pole_x, pole_top_y);
+            let pt_bottom = project_point(pole_x, pole_bottom_y);
+            pole_pb.move_to(pt_top.0, pt_top.1);
+            pole_pb.line_to(pt_bottom.0, pt_bottom.1);
+            if let Some(path) = pole_pb.finish() {
+                stroke_skia_path(&mut pixmap, &path, [75, 72, 70, 255], 4.5 * scale);
+                stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 255], 1.5 * scale);
+            }
+
+            // Yellow Crosspiece / Insulators at the top
+            let mut cross_pb = tiny_skia::PathBuilder::new();
+            let c_left = project_point(pole_x - 18.0, pole_top_y + 4.0);
+            let c_right = project_point(pole_x + 18.0, pole_top_y + 4.0);
+            cross_pb.move_to(c_left.0, c_left.1);
+            cross_pb.line_to(c_right.0, c_right.1);
+            if let Some(path) = cross_pb.finish() {
+                stroke_skia_path(&mut pixmap, &path, [225, 185, 60, 255], 4.0 * scale);
+                stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 255], 1.2 * scale);
             }
             
-            fill_skia_path(&mut pixmap, &path, [147, 206, 244, 255]);
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
+            // Top loop structure
+            let mut loop_pb = tiny_skia::PathBuilder::new();
+            let l_start = project_point(pole_x, pole_top_y);
+            let l_top1 = project_point(pole_x - 8.0, pole_top_y - 6.0);
+            let l_top2 = project_point(pole_x + 8.0, pole_top_y - 6.0);
+            loop_pb.move_to(l_start.0, l_start.1);
+            loop_pb.quad_to(l_top1.0, l_top1.1, project_point(pole_x, pole_top_y - 10.0).0, project_point(pole_x, pole_top_y - 10.0).1);
+            loop_pb.quad_to(l_top2.0, l_top2.1, l_start.0, l_start.1);
+            if let Some(path) = loop_pb.finish() {
+                stroke_skia_path(&mut pixmap, &path, [225, 185, 60, 255], 3.0 * scale);
+                stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 255], 1.0 * scale);
+            }
+
+            // Insulator pins
+            for offset_x in [-14.0, 0.0, 14.0] {
+                let mut pin_pb = tiny_skia::PathBuilder::new();
+                let pin_start = project_point(pole_x + offset_x, pole_top_y + 4.0);
+                let pin_end = project_point(pole_x + offset_x, pole_top_y + 11.0);
+                pin_pb.move_to(pin_start.0, pin_start.1);
+                pin_pb.line_to(pin_end.0, pin_end.1);
+                if let Some(path) = pin_pb.finish() {
+                    stroke_skia_path(&mut pixmap, &path, [225, 185, 60, 255], 2.5 * scale);
+                    stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 255], 1.0 * scale);
+                }
+            }
+
+            // Red circle emblem/badge in the middle
+            let badge_y = 88.0;
+            let badge_proj = project_point(pole_x, badge_y);
+            fill_skia_circle(&mut pixmap, badge_proj.0, badge_proj.1, 10.0 * scale, [185, 45, 45, 255]);
+            stroke_skia_circle(&mut pixmap, badge_proj.0, badge_proj.1, 10.0 * scale, 1.8 * scale, [30, 28, 27, 255]);
+            fill_skia_circle(&mut pixmap, badge_proj.0, badge_proj.1, 6.5 * scale, [245, 245, 245, 255]);
+            
+            // Draw a simple letter 'U' shape inside badge
+            let mut u_pb = tiny_skia::PathBuilder::new();
+            let u1 = project_point(pole_x - 3.0, badge_y - 3.5);
+            let u2 = project_point(pole_x - 3.0, badge_y + 1.0);
+            let u3 = project_point(pole_x + 3.0, badge_y + 1.0);
+            let u4 = project_point(pole_x + 3.0, badge_y - 3.5);
+            u_pb.move_to(u1.0, u1.1);
+            u_pb.line_to(u2.0, u2.1);
+            u_pb.quad_to(project_point(pole_x, badge_y + 3.5).0, project_point(pole_x, badge_y + 3.5).1, u3.0, u3.1);
+            u_pb.line_to(u4.0, u4.1);
+            if let Some(path) = u_pb.finish() {
+                stroke_skia_path(&mut pixmap, &path, [185, 45, 45, 255], 2.0 * scale);
+            }
+
+            // Red pulley dial/wheel
+            let dial_y = 62.0;
+            let dial_proj = project_point(pole_x, dial_y);
+            fill_skia_circle(&mut pixmap, dial_proj.0, dial_proj.1, 5.0 * scale, [185, 45, 45, 255]);
+            stroke_skia_circle(&mut pixmap, dial_proj.0, dial_proj.1, 5.0 * scale, 1.5 * scale, [30, 28, 27, 255]);
+
+            // 3. Typewriter Casing (surrounding the keyboard area)
+            // Casing Base
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                keyboard_left - 4.0,
+                keyboard_top,
+                keyboard_width + 8.0,
+                keyboard_height - 6.0,
+                8.0,
+                [68, 72, 75, 255], // metallic dark grey
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                keyboard_left - 4.0,
+                keyboard_top,
+                keyboard_width + 8.0,
+                keyboard_height - 6.0,
+                8.0,
+                [30, 28, 27, 255],
+                2.2 * scale,
+            );
+
+            // Keyboard slot/well
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                keyboard_left + 2.0,
+                keyboard_top + 8.0,
+                keyboard_width - 4.0,
+                keyboard_height - 20.0,
+                6.0,
+                [42, 45, 48, 255], // recessed black slot
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                keyboard_left + 2.0,
+                keyboard_top + 8.0,
+                keyboard_width - 4.0,
+                keyboard_height - 20.0,
+                6.0,
+                [30, 28, 27, 255],
+                1.5 * scale,
+            );
+
+            // Horizontal Copper Roller (Rulo xoay) at the back of the keys
+            let roller_left = keyboard_left + 16.0;
+            let roller_width = keyboard_width - 32.0;
+            let roller_top = keyboard_top + 2.0;
+            let roller_height = 8.0;
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                roller_left,
+                roller_top,
+                roller_width,
+                roller_height,
+                2.0,
+                [180, 110, 60, 255], // copper cylinder
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                roller_left,
+                roller_top,
+                roller_width,
+                roller_height,
+                2.0,
+                [30, 28, 27, 255],
+                1.5 * scale,
+            );
+            // Roller ribs/segments
+            for step in 1..8 {
+                let rx = roller_left + roller_width * (step as f32 / 8.0);
+                let mut r_pb = tiny_skia::PathBuilder::new();
+                let pt1 = project_point(rx, roller_top);
+                let pt2 = project_point(rx, roller_top + roller_height);
+                r_pb.move_to(pt1.0, pt1.1);
+                r_pb.line_to(pt2.0, pt2.1);
+                if let Some(path) = r_pb.finish() {
+                    stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 255], 1.2 * scale);
+                }
+            }
+
+            // Paper holder backplate rising behind the roller
+            let backplate_left = keyboard_left + 30.0;
+            let backplate_width = keyboard_width - 60.0;
+            let backplate_top = keyboard_top - 15.0;
+            let backplate_height = 15.0;
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                backplate_left,
+                backplate_top,
+                backplate_width,
+                backplate_height,
+                3.0,
+                [90, 95, 98, 255],
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                backplate_left,
+                backplate_top,
+                backplate_width,
+                backplate_height,
+                3.0,
+                [30, 28, 27, 255],
+                1.8 * scale,
+            );
+
+            // Metal side wheels/gears
+            for gear_x in [keyboard_left - 4.0, keyboard_left + keyboard_width + 4.0] {
+                let gear_proj = project_point(gear_x, keyboard_top + 18.0);
+                fill_skia_circle(&mut pixmap, gear_proj.0, gear_proj.1, 7.5 * scale, [110, 115, 118, 255]);
+                stroke_skia_circle(&mut pixmap, gear_proj.0, gear_proj.1, 7.5 * scale, 1.8 * scale, [30, 28, 27, 255]);
+                // gear center cap
+                fill_skia_circle(&mut pixmap, gear_proj.0, gear_proj.1, 2.5 * scale, [180, 110, 60, 255]);
+            }
+
+            // 4. Custom Mouse Pad (rusty iron plate on the side)
+            let mut pad_pb = tiny_skia::PathBuilder::new();
+            let pad_cx = mouse_pad_left + 19.0;
+            let pad_cy = keyboard_top + 23.0;
+            let pad_r = 19.0;
+            let start_pt = project_point(pad_cx + pad_r, pad_cy);
+            pad_pb.move_to(start_pt.0, start_pt.1);
+            for i in 1..=32 {
+                let angle = (i as f32) * 2.0 * std::f32::consts::PI / 32.0;
+                let px = pad_cx + pad_r * angle.cos();
+                let py = pad_cy + pad_r * angle.sin();
+                let pt = project_point(px, py);
+                pad_pb.line_to(pt.0, pt.1);
+            }
+            pad_pb.close();
+            if let Some(path) = pad_pb.finish() {
+                fill_skia_path(&mut pixmap, &path, [85, 80, 78, 255]); // rust plate
+                stroke_skia_path(&mut pixmap, &path, [180, 140, 70, 255], 2.2 * scale); // brass border
+                stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 255], 1.0 * scale);
+            }
         }
 
 
@@ -13964,6 +14628,13 @@ mod windows_overlay {
                     paw_press, paw_glow,
                 );
             }
+            crate::model::MascotStyle::MechanicRobot => {
+                mechanic_robot_draw_arms(
+                    &mut pixmap, scale,
+                    left_paw_target, right_paw_target,
+                    paw_press, paw_glow,
+                );
+            }
         }
 
         // Blend arms on top of pixels DIB Section
@@ -13993,6 +14664,9 @@ mod windows_overlay {
             }
             crate::model::MascotStyle::TungSahur => {
                 tung_sahur_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y);
+            }
+            crate::model::MascotStyle::MechanicRobot => {
+                mechanic_robot_draw_head_and_face(&mut pixmap, scale, look_x, look_y);
             }
         }
         let head_data = pixmap.data();
