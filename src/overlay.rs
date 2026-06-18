@@ -5810,14 +5810,10 @@ mod windows_overlay {
                 ("Ctrl", &["Ctrl"], 1.5),
                 ("Win", &["Win"], 1.2),
                 ("Alt", &["Alt"], 1.2),
-                ("Space", &["Space"], 4.9),
+                ("Space", &["Space"], 6.25),
                 ("Alt", &["Alt"], 1.2),
                 ("Fn", &["Apps"], 1.2),
-                ("Ctrl", &["Ctrl"], 1.5),
-                ("<", &["Left"], 1.0),
-                ("^", &["Up"], 1.0),
-                ("v", &["Down"], 1.0),
-                (">", &["Right"], 1.0),
+                ("Ctrl", &["Ctrl"], 2.75),
             ],
         );
 
@@ -12836,7 +12832,73 @@ mod windows_overlay {
             )
         };
 
-        // Flipped Layout: Mouse pad on Left, Keyboard on Center-Right
+        // 3D Perspective mapping helper
+        let project_point = |x: f32, y: f32| -> (f32, f32) {
+            let vanish_y = 50.0 * scale;
+            let reference_y = 246.0 * scale;
+            let p_scale = 0.52 + 0.48 * ((y - vanish_y) / (reference_y - vanish_y)).clamp(0.0, 1.0);
+            let center_x = 168.0 * scale; // Center of the layout
+            let px = center_x + (x - center_x) * p_scale;
+            (px, y)
+        };
+
+        let fill_projected_rounded_quad = |pixmap: &mut tiny_skia::Pixmap, left: f32, top: f32, w: f32, h: f32, radius: f32, color: [u8; 4]| {
+            let r = radius;
+            let tl_h = project_point(left + r, top);
+            let tl_v = project_point(left, top + r);
+            let tr_h = project_point(left + w - r, top);
+            let tr_v = project_point(left + w, top + r);
+            let br_h = project_point(left + w - r, top + h);
+            let br_v = project_point(left + w, top + h - r);
+            let bl_h = project_point(left + r, top + h);
+            let bl_v = project_point(left, top + h - r);
+            
+            let mut pb = tiny_skia::PathBuilder::new();
+            pb.move_to(tl_h.0, tl_h.1);
+            pb.line_to(tr_h.0, tr_h.1);
+            pb.quad_to(project_point(left + w, top).0, project_point(left + w, top).1, tr_v.0, tr_v.1);
+            pb.line_to(br_v.0, br_v.1);
+            pb.quad_to(project_point(left + w, top + h).0, project_point(left + w, top + h).1, br_h.0, br_h.1);
+            pb.line_to(bl_h.0, bl_h.1);
+            pb.quad_to(project_point(left, top + h).0, project_point(left, top + h).1, bl_v.0, bl_v.1);
+            pb.line_to(tl_v.0, tl_v.1);
+            pb.quad_to(project_point(left, top).0, project_point(left, top).1, tl_h.0, tl_h.1);
+            pb.close();
+            
+            if let Some(path) = pb.finish() {
+                fill_skia_path(pixmap, &path, color);
+            }
+        };
+
+        let stroke_projected_rounded_quad = |pixmap: &mut tiny_skia::Pixmap, left: f32, top: f32, w: f32, h: f32, radius: f32, color: [u8; 4], stroke_width: f32| {
+            let r = radius;
+            let tl_h = project_point(left + r, top);
+            let tl_v = project_point(left, top + r);
+            let tr_h = project_point(left + w - r, top);
+            let tr_v = project_point(left + w, top + r);
+            let br_h = project_point(left + w - r, top + h);
+            let br_v = project_point(left + w, top + h - r);
+            let bl_h = project_point(left + r, top + h);
+            let bl_v = project_point(left, top + h - r);
+            
+            let mut pb = tiny_skia::PathBuilder::new();
+            pb.move_to(tl_h.0, tl_h.1);
+            pb.line_to(tr_h.0, tr_h.1);
+            pb.quad_to(project_point(left + w, top).0, project_point(left + w, top).1, tr_v.0, tr_v.1);
+            pb.line_to(br_v.0, br_v.1);
+            pb.quad_to(project_point(left + w, top + h).0, project_point(left + w, top + h).1, br_h.0, br_h.1);
+            pb.line_to(bl_h.0, bl_h.1);
+            pb.quad_to(project_point(left, top + h).0, project_point(left, top + h).1, bl_v.0, bl_v.1);
+            pb.line_to(bl_v.0, bl_v.1);
+            pb.quad_to(project_point(left, top).0, project_point(left, top).1, tl_h.0, tl_h.1);
+            pb.close();
+            
+            if let Some(path) = pb.finish() {
+                stroke_skia_path(pixmap, &path, color, stroke_width);
+            }
+        };
+
+        // Layout dimensions (flat coordinate space before 3D projection)
         let desk_left = 38.0 * scale;
         let desk_top = 146.0 * scale;
         let desk_width = 322.0 * scale;
@@ -12866,70 +12928,7 @@ mod windows_overlay {
             3.0 * scale
         };
 
-        // Desk Shadow
-        let shadow_alpha = (90.0 + recent_pulse * 28.0).round() as u8;
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            desk_left + 22.0 * scale,
-            desk_top + 70.0 * scale,
-            desk_width - 44.0 * scale,
-            16.0 * scale,
-            8.0 * scale,
-            [0, 0, 0, shadow_alpha],
-        );
-
-        // 3D Desk (Front Lip and Top Surface)
-        let desk_extrusion = 8.0 * scale;
-        // Desk Front Lip
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            desk_left,
-            desk_top + desk_extrusion,
-            desk_width,
-            desk_height - desk_extrusion,
-            14.0 * scale,
-            [140, 108, 88, 255], // darker brown for 3D depth
-        );
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            desk_left,
-            desk_top + desk_extrusion,
-            desk_width,
-            desk_height - desk_extrusion,
-            14.0 * scale,
-            2.2 * scale,
-            [45, 40, 42, 255],
-        );
-        // Desk Top Surface
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            desk_left,
-            desk_top,
-            desk_width,
-            desk_height - desk_extrusion,
-            14.0 * scale,
-            [235, 215, 190, 255], // warm wood beige desk top
-        );
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            desk_left,
-            desk_top,
-            desk_width,
-            desk_height - desk_extrusion,
-            14.0 * scale,
-            2.2 * scale,
-            [45, 40, 42, 255],
-        );
-
-        // Scratch wood detail on bottom-right front desk edge (Exactly like reference image)
-        let mut scratch = tiny_skia::PathBuilder::new();
-        scratch.move_to(desk_left + desk_width * 0.64, desk_top + desk_height - 12.0 * scale);
-        scratch.line_to(desk_left + desk_width * 0.65, desk_top + desk_height - 5.0 * scale);
-        scratch.line_to(desk_left + desk_width * 0.67, desk_top + desk_height - 12.0 * scale);
-        if let Some(path) = scratch.finish() {
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
-        }
-
+        // 1. Draw Hachiware (sitting BEHIND the desk)
         // Body Shadow
         fill_skia_circle(
             &mut pixmap,
@@ -12954,273 +12953,6 @@ mod windows_overlay {
             2.2 * scale,
             [45, 40, 42, 255],
         );
-
-        // 3D Keyboard Frame
-        // Frame Bezel Shadow
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            keyboard_left,
-            keyboard_top + 4.0 * scale,
-            keyboard_width,
-            keyboard_height - 4.0 * scale,
-            14.0 * scale,
-            [175, 185, 195, 255],
-        );
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            keyboard_left,
-            keyboard_top,
-            keyboard_width,
-            keyboard_height,
-            14.0 * scale,
-            2.0 * scale,
-            [45, 40, 42, 255],
-        );
-        // Frame Top Surface
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            keyboard_left,
-            keyboard_top,
-            keyboard_width,
-            keyboard_height - 4.0 * scale,
-            14.0 * scale,
-            [238, 242, 246, 255],
-        );
-        // Keyboard inner slot
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            keyboard_left + 4.0 * scale,
-            keyboard_top + 4.0 * scale,
-            keyboard_width - 8.0 * scale,
-            keyboard_height - 12.0 * scale,
-            10.0 * scale,
-            [205, 218, 230, 255],
-        );
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            keyboard_left + 4.0 * scale,
-            keyboard_top + 4.0 * scale,
-            keyboard_width - 8.0 * scale,
-            keyboard_height - 12.0 * scale,
-            10.0 * scale,
-            1.2 * scale,
-            [45, 40, 42, 255],
-        );
-
-        // Mouse Pad (Light Blue Circular pad on Left)
-        fill_skia_circle(
-            &mut pixmap,
-            mouse_pad_left + 19.0 * scale,
-            mouse_pad_top + 23.0 * scale + 2.0 * scale,
-            19.0 * scale,
-            [160, 180, 200, 255],
-        );
-        fill_skia_circle(
-            &mut pixmap,
-            mouse_pad_left + 19.0 * scale,
-            mouse_pad_top + 23.0 * scale,
-            19.0 * scale,
-            [147, 206, 244, 255],
-        );
-        stroke_skia_circle(
-            &mut pixmap,
-            mouse_pad_left + 19.0 * scale,
-            mouse_pad_top + 23.0 * scale,
-            19.0 * scale,
-            1.8 * scale,
-            [45, 40, 42, 255],
-        );
-
-        // Keys setup & logic
-        let keys = quick_key_display_mascot_keys();
-        let mouse_x = mouse_pad_left + 19.0 * scale + mouse_offset.0 * scale * 0.7;
-        let mouse_y = mouse_pad_top + 23.0 * scale + mouse_offset.1 * scale * 0.56;
-
-        let mut left_paw_target = (mouse_x, mouse_y);
-        let mut right_paw_target = (204.0 * scale, (180.0 - 3.0) * scale);
-        let mut left_paw_strength = 0.0f32;
-        let mut right_paw_strength = 0.0f32;
-
-        let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
-
-        for key in &keys {
-            let strength =
-                quick_key_display_mascot_key_strength(key.aliases, &held_keys, entries, now);
-            let key_left = key.x * scale;
-            let key_top = (key.y - 3.0) * scale;
-            let key_width = key.w * scale;
-            let key_height = key.h * scale;
-            let key_radius = 2.4 * scale;
-            let glow = strength.clamp(0.0, 1.0);
-            let key_center_x = key_left + key_width * 0.5;
-            let key_target_y = key_top + key_height * 0.22;
-            let keyboard_mid_x = keyboard_left + keyboard_width * 0.5;
-
-            if glow > 0.0 {
-                if key_center_x < keyboard_mid_x && glow > left_paw_strength {
-                    left_paw_target = (key_center_x, key_target_y);
-                    left_paw_strength = glow;
-                }
-                if key_center_x >= keyboard_mid_x && glow > right_paw_strength {
-                    right_paw_target = (key_center_x, key_target_y);
-                    right_paw_strength = glow;
-                }
-            }
-
-            let is_modifier = matches!(
-                key.label,
-                "Esc" | "Tab" | "Caps" | "Shift" | "Ctrl" | "Win" | "Alt" | "Enter" | "Bk" | "Space"
-            );
-
-            let base_fill = if glow > 0.0 {
-                quick_key_display_mix_rgba(
-                    if is_modifier { [100, 180, 240, 245] } else { [245, 250, 255, 245] },
-                    [115, 220, 255, 255],
-                    glow * 0.86,
-                )
-            } else {
-                if is_modifier {
-                    [140, 185, 225, 235] // pastel blue
-                } else {
-                    [250, 250, 252, 245] // warm white
-                }
-            };
-
-            let border_color = quick_key_display_mix_rgba(
-                [45, 40, 42, 255],
-                [239, 252, 255, 255],
-                glow * 0.42,
-            );
-
-            // 3D Keycap base/extrusion
-            fill_skia_rounded_rect(
-                &mut pixmap,
-                key_left,
-                key_top + 1.8 * scale,
-                key_width,
-                key_height,
-                key_radius,
-                [45, 40, 42, 64],
-            );
-            stroke_skia_rounded_rect(
-                &mut pixmap,
-                key_left,
-                key_top + 1.8 * scale,
-                key_width,
-                key_height,
-                key_radius,
-                1.0 * scale,
-                [45, 40, 42, 255],
-            );
-            // Keycap top surface
-            fill_skia_rounded_rect(
-                &mut pixmap,
-                key_left,
-                key_top - glow * 1.4 * scale,
-                key_width,
-                key_height,
-                key_radius,
-                base_fill,
-            );
-            stroke_skia_rounded_rect(
-                &mut pixmap,
-                key_left,
-                key_top - glow * 1.4 * scale,
-                key_width,
-                key_height,
-                key_radius,
-                1.1 * scale,
-                border_color,
-            );
-
-            let text_color = if glow > 0.0 {
-                [255, 255, 255]
-            } else {
-                if is_modifier {
-                    [255, 255, 255]
-                } else {
-                    [70, 80, 95]
-                }
-            };
-
-            text_runs.push(QuickKeyDisplayTextRun {
-                text: key.label.to_owned(),
-                rect: RECT {
-                    left: (key_left) as i32,
-                    top: (key_top - glow * 1.4 * scale - 1.2 * scale) as i32,
-                    right: (key_left + key_width) as i32,
-                    bottom: (key_top - glow * 1.4 * scale + key_height - 1.2 * scale) as i32,
-                },
-                color: quick_key_display_colorref(text_color[0], text_color[1], text_color[2]),
-                alpha: 0.95,
-            });
-        }
-
-        // Camera (Bottom-Left)
-        let cam_x = 44.0 * scale;
-        let cam_y = 206.0 * scale;
-        let cam_w = 26.0 * scale;
-        let cam_h = 17.0 * scale;
-        fill_skia_rounded_rect(&mut pixmap, cam_x, cam_y, cam_w, cam_h, 3.0 * scale, [60, 58, 62, 255]);
-        stroke_skia_rounded_rect(&mut pixmap, cam_x, cam_y, cam_w, cam_h, 3.0 * scale, 1.5 * scale, [45, 40, 42, 255]);
-        fill_skia_rounded_rect(&mut pixmap, cam_x, cam_y - 2.0 * scale, cam_w, 4.0 * scale, 1.0 * scale, [210, 215, 220, 255]);
-        stroke_skia_rounded_rect(&mut pixmap, cam_x, cam_y - 2.0 * scale, cam_w, 4.0 * scale, 1.0 * scale, 1.2 * scale, [45, 40, 42, 255]);
-        fill_skia_circle(&mut pixmap, cam_x + cam_w * 0.5, cam_y + cam_h * 0.5, 5.0 * scale, [180, 185, 190, 255]);
-        fill_skia_circle(&mut pixmap, cam_x + cam_w * 0.5, cam_y + cam_h * 0.5, 3.5 * scale, [40, 42, 45, 255]);
-        stroke_skia_circle(&mut pixmap, cam_x + cam_w * 0.5, cam_y + cam_h * 0.5, 5.0 * scale, 1.2 * scale, [45, 40, 42, 255]);
-        fill_skia_rounded_rect(&mut pixmap, cam_x + 3.0 * scale, cam_y - 4.0 * scale, 4.0 * scale, 3.0 * scale, 0.5 * scale, [210, 215, 220, 255]);
-        stroke_skia_rounded_rect(&mut pixmap, cam_x + 3.0 * scale, cam_y - 4.0 * scale, 4.0 * scale, 3.0 * scale, 0.5 * scale, 1.0 * scale, [45, 40, 42, 255]);
-
-        // Mouse Drawing
-        let left_mouse_strength = quick_key_display_mascot_key_strength(
-            &["MouseLeft"],
-            &held_mouse_buttons,
-            entries,
-            now,
-        );
-        let right_mouse_strength = quick_key_display_mascot_key_strength(
-            &["MouseRight"],
-            &held_mouse_buttons,
-            entries,
-            now,
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            mouse_x - 7.0 * scale,
-            mouse_y - 9.0 * scale,
-            14.0 * scale,
-            18.0 * scale,
-            6.0 * scale,
-            [250, 250, 252, 255],
-        );
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            mouse_x - 7.0 * scale,
-            mouse_y - 9.0 * scale,
-            14.0 * scale,
-            18.0 * scale,
-            6.0 * scale,
-            1.5 * scale,
-            [45, 40, 42, 255],
-        );
-        // Scroll wheel & button divisions
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            mouse_x - 1.0 * scale,
-            mouse_y - 6.0 * scale,
-            2.0 * scale,
-            4.0 * scale,
-            0.8 * scale,
-            [80, 85, 90, 255],
-        );
-        let mut div = tiny_skia::PathBuilder::new();
-        div.move_to(mouse_x - 6.8 * scale, mouse_y - 1.0 * scale);
-        div.line_to(mouse_x + 6.8 * scale, mouse_y - 1.0 * scale);
-        div.move_to(mouse_x, mouse_y - 9.0 * scale);
-        div.line_to(mouse_x, mouse_y - 1.0 * scale);
-        if let Some(path) = div.finish() {
-            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.2 * scale);
-        }
 
         // Hachiware Ears
         let ear_wiggle = recent_pulse * 3.0 * scale;
@@ -13410,7 +13142,395 @@ mod windows_overlay {
             stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.0 * scale);
         }
 
-        // Bezier Limbs/Arms (Reaching dynamically to keyboard and mouse)
+
+        // 2. Draw 3D Desk Shadow & Desk
+        // Desk Shadow
+        let shadow_alpha = (90.0 + recent_pulse * 28.0).round() as u8;
+        fill_projected_rounded_quad(
+            &mut pixmap,
+            desk_left / scale + 22.0,
+            desk_top / scale + 70.0,
+            desk_width / scale - 44.0,
+            16.0,
+            8.0,
+            [0, 0, 0, shadow_alpha],
+        );
+
+        // 3D Desk (Front Lip and Top Surface)
+        let desk_extrusion = 8.0;
+        // Desk Front Lip
+        fill_projected_rounded_quad(
+            &mut pixmap,
+            desk_left / scale,
+            desk_top / scale + desk_extrusion,
+            desk_width / scale,
+            desk_height / scale - desk_extrusion,
+            14.0,
+            [140, 108, 88, 255], // darker brown for 3D depth
+        );
+        stroke_projected_rounded_quad(
+            &mut pixmap,
+            desk_left / scale,
+            desk_top / scale + desk_extrusion,
+            desk_width / scale,
+            desk_height / scale - desk_extrusion,
+            14.0,
+            [45, 40, 42, 255],
+            2.2 * scale,
+        );
+        // Desk Top Surface
+        fill_projected_rounded_quad(
+            &mut pixmap,
+            desk_left / scale,
+            desk_top / scale,
+            desk_width / scale,
+            desk_height / scale - desk_extrusion,
+            14.0,
+            [235, 215, 190, 255], // warm wood beige desk top
+        );
+        stroke_projected_rounded_quad(
+            &mut pixmap,
+            desk_left / scale,
+            desk_top / scale,
+            desk_width / scale,
+            desk_height / scale - desk_extrusion,
+            14.0,
+            [45, 40, 42, 255],
+            2.2 * scale,
+        );
+
+        // 3D Wood Grain Texture lines (perspective projected)
+        let draw_grain_line = |pixmap: &mut tiny_skia::Pixmap, y_val: f32, wave_height: f32| {
+            let mut pb = tiny_skia::PathBuilder::new();
+            let start = project_point(desk_left / scale, y_val);
+            pb.move_to(start.0, start.1);
+            for i in 1..=10 {
+                let x_coord = desk_left / scale + (desk_width / scale) * (i as f32 / 10.0);
+                let offset_y = ((i as f32 * 1.5).sin() * wave_height);
+                let pt = project_point(x_coord, y_val + offset_y);
+                pb.line_to(pt.0, pt.1);
+            }
+            if let Some(path) = pb.finish() {
+                stroke_skia_path(pixmap, &path, [190, 160, 140, 110], 1.2 * scale); // subtle texture lines
+            }
+        };
+        draw_grain_line(&mut pixmap, desk_top / scale + 15.0, 3.0);
+        draw_grain_line(&mut pixmap, desk_top / scale + 45.0, 4.0);
+        draw_grain_line(&mut pixmap, desk_top / scale + 70.0, 2.0);
+
+        // Scratch wood detail on bottom-right front desk edge
+        let mut scratch = tiny_skia::PathBuilder::new();
+        let pt1 = project_point(desk_left / scale + (desk_width / scale) * 0.64, desk_top / scale + desk_height / scale - 12.0);
+        let pt2 = project_point(desk_left / scale + (desk_width / scale) * 0.65, desk_top / scale + desk_height / scale - 5.0);
+        let pt3 = project_point(desk_left / scale + (desk_width / scale) * 0.67, desk_top / scale + desk_height / scale - 12.0);
+        scratch.move_to(pt1.0, pt1.1);
+        scratch.line_to(pt2.0, pt2.1);
+        scratch.line_to(pt3.0, pt3.1);
+        if let Some(path) = scratch.finish() {
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
+        }
+
+
+        // 3. Draw 3D Keyboard Frame & Mouse Pad
+        // Keyboard Shadow on Desk
+        fill_projected_rounded_quad(
+            &mut pixmap,
+            keyboard_left / scale + 2.0,
+            keyboard_top / scale + 4.0,
+            keyboard_width / scale,
+            keyboard_height / scale,
+            14.0,
+            [0, 0, 0, 32],
+        );
+        // Bezel Frame shadow (3D extrusion depth)
+        fill_projected_rounded_quad(
+            &mut pixmap,
+            keyboard_left / scale,
+            keyboard_top / scale + 4.0,
+            keyboard_width / scale,
+            keyboard_height / scale - 4.0,
+            14.0,
+            [175, 185, 195, 255],
+        );
+        stroke_projected_rounded_quad(
+            &mut pixmap,
+            keyboard_left / scale,
+            keyboard_top / scale,
+            keyboard_width / scale,
+            keyboard_height / scale,
+            14.0,
+            [45, 40, 42, 255],
+            2.0 * scale,
+        );
+        // Frame Top Surface
+        fill_projected_rounded_quad(
+            &mut pixmap,
+            keyboard_left / scale,
+            keyboard_top / scale,
+            keyboard_width / scale,
+            keyboard_height / scale - 4.0,
+            14.0,
+            [238, 242, 246, 255],
+        );
+        // Keyboard inner slot
+        fill_projected_rounded_quad(
+            &mut pixmap,
+            keyboard_left / scale + 4.0,
+            keyboard_top / scale + 4.0,
+            keyboard_width / scale - 8.0,
+            keyboard_height / scale - 12.0,
+            10.0,
+            [205, 218, 230, 255],
+        );
+        stroke_projected_rounded_quad(
+            &mut pixmap,
+            keyboard_left / scale + 4.0,
+            keyboard_top / scale + 4.0,
+            keyboard_width / scale - 8.0,
+            keyboard_height / scale - 12.0,
+            10.0,
+            [45, 40, 42, 255],
+            1.2 * scale,
+        );
+        // Inner slot highlight for 3D depth
+        stroke_projected_rounded_quad(
+            &mut pixmap,
+            keyboard_left / scale + 4.0,
+            keyboard_top / scale + 4.0,
+            keyboard_width / scale - 8.0,
+            keyboard_height / scale - 12.0,
+            10.0,
+            [255, 255, 255, 128],
+            1.0 * scale,
+        );
+
+        // Mouse Pad Shadow and Pad (Circular pad on Left)
+        fill_skia_circle(
+            &mut pixmap,
+            project_point(mouse_pad_left / scale + 19.0, mouse_pad_top / scale + 23.0 + 3.0).0,
+            project_point(mouse_pad_left / scale + 19.0, mouse_pad_top / scale + 23.0 + 3.0).1,
+            19.0 * scale,
+            [0, 0, 0, 32],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            project_point(mouse_pad_left / scale + 19.0, mouse_pad_top / scale + 23.0).0,
+            project_point(mouse_pad_left / scale + 19.0, mouse_pad_top / scale + 23.0).1,
+            19.0 * scale,
+            [147, 206, 244, 255],
+        );
+        stroke_skia_circle(
+            &mut pixmap,
+            project_point(mouse_pad_left / scale + 19.0, mouse_pad_top / scale + 23.0).0,
+            project_point(mouse_pad_left / scale + 19.0, mouse_pad_top / scale + 23.0).1,
+            19.0 * scale,
+            1.8 * scale,
+            [45, 40, 42, 255],
+        );
+
+
+        // 4. Mouse and Keyboard keys logic
+        let keys = quick_key_display_mascot_keys();
+        
+        // Mouse active state tracking: if mouse has moved from zero velocity/offset, or clicked
+        let mouse_active = (mouse_offset.0.abs() + mouse_offset.1.abs() > 0.05) || !held_mouse_buttons.is_empty();
+
+        let mouse_flat_x = mouse_pad_left / scale + 19.0 + mouse_offset.0 * 0.7;
+        let mouse_flat_y = mouse_pad_top / scale + 23.0 + mouse_offset.1 * 0.56;
+        let mouse_projected = project_point(mouse_flat_x, mouse_flat_y);
+
+        let mut left_paw_target = if mouse_active {
+            mouse_projected
+        } else {
+            project_point(130.0, 177.0) // Resting on the keyboard
+        };
+        let mut right_paw_target = project_point(214.0, 177.0); // Resting on the keyboard
+        
+        let mut left_paw_strength = 0.0f32;
+        let mut right_paw_strength = 0.0f32;
+
+        let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
+
+        for key in &keys {
+            let strength =
+                quick_key_display_mascot_key_strength(key.aliases, &held_keys, entries, now);
+            let glow = strength.clamp(0.0, 1.0);
+            
+            // Project keycap's midpoint for target paw alignment
+            let key_center_x = key.x + key.w * 0.5;
+            let key_target_y = key.y - 3.0 + key.h * 0.22;
+            let key_proj_target = project_point(key_center_x, key_target_y);
+
+            if glow > 0.0 {
+                if mouse_active {
+                    // Left hand is holding the mouse, so right hand handles ALL keypresses!
+                    if glow > right_paw_strength {
+                        right_paw_target = key_proj_target;
+                        right_paw_strength = glow;
+                    }
+                } else {
+                    // Both hands are on the keyboard, split keys by midpoint
+                    let keyboard_mid_x = keyboard_left / scale + keyboard_width / scale * 0.5;
+                    if key_center_x < keyboard_mid_x {
+                        if glow > left_paw_strength {
+                            left_paw_target = key_proj_target;
+                            left_paw_strength = glow;
+                        }
+                    } else {
+                        if glow > right_paw_strength {
+                            right_paw_target = key_proj_target;
+                            right_paw_strength = glow;
+                        }
+                    }
+                }
+            }
+
+            let is_modifier = matches!(
+                key.label,
+                "Esc" | "Tab" | "Caps" | "Shift" | "Ctrl" | "Win" | "Alt" | "Enter" | "Bk" | "Space"
+            );
+
+            let base_fill = if glow > 0.0 {
+                quick_key_display_mix_rgba(
+                    if is_modifier { [100, 180, 240, 245] } else { [245, 250, 255, 245] },
+                    [115, 220, 255, 255],
+                    glow * 0.86,
+                )
+            } else {
+                if is_modifier {
+                    [140, 185, 225, 235] // pastel blue
+                } else {
+                    [250, 250, 252, 245] // warm white
+                }
+            };
+
+            let border_color = quick_key_display_mix_rgba(
+                [45, 40, 42, 255],
+                [239, 252, 255, 255],
+                glow * 0.42,
+            );
+
+            // 3D Keycap rendering with perspective projection
+            let key_radius = 2.4;
+            // 3D Keycap base/extrusion
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                key.x,
+                key.y - 3.0 + 1.8,
+                key.w,
+                key.h,
+                key_radius,
+                [45, 40, 42, 64],
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                key.x,
+                key.y - 3.0 + 1.8,
+                key.w,
+                key.h,
+                key_radius,
+                [45, 40, 42, 255],
+                1.0 * scale,
+            );
+
+            // Keycap top surface (compresses slightly downwards on glow/press)
+            let offset_press = -glow * 1.4;
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                key.x,
+                key.y - 3.0 + offset_press,
+                key.w,
+                key.h,
+                key_radius,
+                base_fill,
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                key.x,
+                key.y - 3.0 + offset_press,
+                key.w,
+                key.h,
+                key_radius,
+                border_color,
+                1.1 * scale,
+            );
+
+            // Compute exact projected bounding box to position the text run label
+            let tl = project_point(key.x, key.y - 3.0 + offset_press);
+            let br = project_point(key.x + key.w, key.y - 3.0 + offset_press + key.h);
+            let key_left = tl.0;
+            let key_top = tl.1;
+            let key_width = br.0 - tl.0;
+            let key_height = br.1 - tl.1;
+
+            let text_color = if glow > 0.0 {
+                [255, 255, 255]
+            } else {
+                if is_modifier {
+                    [255, 255, 255]
+                } else {
+                    [70, 80, 95] // Dark grey
+                }
+            };
+
+            text_runs.push(QuickKeyDisplayTextRun {
+                text: key.label.to_owned(),
+                rect: RECT {
+                    left: key_left as i32,
+                    top: (key_top - 1.2 * scale) as i32,
+                    right: (key_left + key_width) as i32,
+                    bottom: (key_top + key_height - 1.2 * scale) as i32,
+                },
+                color: quick_key_display_colorref(text_color[0], text_color[1], text_color[2]),
+                alpha: 0.95,
+            });
+        }
+
+        // Draw Mouse
+        fill_projected_rounded_quad(
+            &mut pixmap,
+            mouse_flat_x - 7.0,
+            mouse_flat_y - 9.0,
+            14.0,
+            18.0,
+            6.0,
+            [250, 250, 252, 255],
+        );
+        stroke_projected_rounded_quad(
+            &mut pixmap,
+            mouse_flat_x - 7.0,
+            mouse_flat_y - 9.0,
+            14.0,
+            18.0,
+            6.0,
+            [45, 40, 42, 255],
+            1.5 * scale,
+        );
+        // Scroll wheel & button divisions
+        fill_projected_rounded_quad(
+            &mut pixmap,
+            mouse_flat_x - 1.0,
+            mouse_flat_y - 6.0,
+            2.0,
+            4.0,
+            0.8,
+            [80, 85, 90, 255],
+        );
+        let mut div = tiny_skia::PathBuilder::new();
+        let div1 = project_point(mouse_flat_x - 6.8, mouse_flat_y - 1.0);
+        let div2 = project_point(mouse_flat_x + 6.8, mouse_flat_y - 1.0);
+        let div3 = project_point(mouse_flat_x, mouse_flat_y - 9.0);
+        let div4 = project_point(mouse_flat_x, mouse_flat_y - 1.0);
+        div.move_to(div1.0, div1.1);
+        div.line_to(div2.0, div2.1);
+        div.move_to(div3.0, div3.1);
+        div.line_to(div4.0, div4.1);
+        if let Some(path) = div.finish() {
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.2 * scale);
+        }
+
+
+        // 5. Draw Arms (drawn on top of the desk and keyboard frame!)
         let paw_fill = [255, 255, 255, 255];
         let paw_glow = quick_key_display_mix_rgba(
             paw_fill,
@@ -13418,7 +13538,7 @@ mod windows_overlay {
             recent_pulse * 0.45,
         );
 
-        // Left Arm (Reaches down-left to Mouse)
+        // Left Arm (Reaches to Left Paw Target)
         let mut left_arm = tiny_skia::PathBuilder::new();
         let left_shoulder_top = (body_cx - 28.0 * scale, body_cy + 2.0 * scale);
         let left_shoulder_bottom = (body_cx - 10.0 * scale, body_cy + 22.0 * scale);
@@ -13444,7 +13564,7 @@ mod windows_overlay {
             stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
         }
 
-        // Right Arm (Reaches down-right to Keyboard keys)
+        // Right Arm (Reaches to Right Paw Target)
         let mut right_arm = tiny_skia::PathBuilder::new();
         let right_shoulder_top = (body_cx + 28.0 * scale, body_cy + 2.0 * scale);
         let right_shoulder_bottom = (body_cx + 10.0 * scale, body_cy + 22.0 * scale);
@@ -13493,13 +13613,12 @@ mod windows_overlay {
         )?;
         let old_text_bitmap = SelectObject(text_mem_dc, HGDIOBJ(text_bitmap.0));
         let text_pixels = std::slice::from_raw_parts_mut(text_bits_ptr as *mut u8, bytes_len);
-        text_pixels.fill(0);
 
         let font_name = "Segoe UI"
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
-        let key_font_size = (6.0 * scale).round() as i32;
+        let key_font_size = (7.0 * scale).round() as i32;
         let font = CreateFontW(
             -key_font_size.max(1),
             0,
@@ -13518,16 +13637,11 @@ mod windows_overlay {
         );
         let old_font = SelectObject(text_mem_dc, HGDIOBJ(font.0));
         let _ = SetBkMode(text_mem_dc, TRANSPARENT);
+
+        // Render each run separately in white, then alpha mask it with the target text color
         for run in &text_runs {
-            let (base_r, base_g, base_b) = quick_key_display_colorref_components(run.color);
-            let alpha = run.alpha.clamp(0.0, 1.0);
-            let scaled_r = ((base_r as f32) * alpha).round().clamp(0.0, 255.0) as u8;
-            let scaled_g = ((base_g as f32) * alpha).round().clamp(0.0, 255.0) as u8;
-            let scaled_b = ((base_b as f32) * alpha).round().clamp(0.0, 255.0) as u8;
-            let _ = SetTextColor(
-                text_mem_dc,
-                quick_key_display_colorref(scaled_r, scaled_g, scaled_b),
-            );
+            text_pixels.fill(0);
+            let _ = SetTextColor(text_mem_dc, COLORREF(0xffffff));
             let mut wide = run
                 .text
                 .encode_utf16()
@@ -13540,25 +13654,42 @@ mod windows_overlay {
                 &mut rect,
                 DT_CENTER | DT_SINGLELINE | DT_VCENTER,
             );
-        }
 
-        // Blend GDI text into pixels buffer
-        for i in 0..total_pixels {
-            let offset = i * 4;
-            let text_b = text_pixels[offset];
-            let text_g = text_pixels[offset + 1];
-            let text_r = text_pixels[offset + 2];
-            let text_a = text_b.max(text_g).max(text_r);
-            if text_a == 0 {
-                continue;
+            let (r, g, b) = quick_key_display_colorref_components(run.color);
+            let run_alpha = run.alpha.clamp(0.0, 1.0);
+
+            let left = rect.left.max(0) as usize;
+            let right = (rect.right as usize).min(width as usize);
+            let top = rect.top.max(0) as usize;
+            let bottom = (rect.bottom as usize).min(height as usize);
+
+            for y in top..bottom {
+                for x in left..right {
+                    let pixel_index = y * (width as usize) + x;
+                    let offset = pixel_index * 4;
+                    let mask = text_pixels[offset]; // GDI text is white, so R=G=B=mask
+                    if mask == 0 {
+                        continue;
+                    }
+
+                    let src_a = (((mask as f32) * run_alpha) as u32).min(255) as u8;
+                    if src_a == 0 {
+                        continue;
+                    }
+
+                    let src_r = ((r as u32 * src_a as u32) / 255) as u8;
+                    let src_g = ((g as u32 * src_a as u32) / 255) as u8;
+                    let src_b = ((b as u32 * src_a as u32) / 255) as u8;
+
+                    blend_premultiplied_bgra(
+                        &mut pixels[offset..offset + 4],
+                        src_b,
+                        src_g,
+                        src_r,
+                        src_a,
+                    );
+                }
             }
-            blend_premultiplied_bgra(
-                &mut pixels[offset..offset + 4],
-                text_b,
-                text_g,
-                text_r,
-                text_a,
-            );
         }
 
         let size = SIZE {
