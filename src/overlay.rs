@@ -65,7 +65,7 @@ mod windows_overlay {
         ptr::null_mut,
         sync::{
             Arc,
-            atomic::{AtomicBool, AtomicIsize, Ordering},
+            atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering},
         },
         thread,
         time::{Duration, Instant},
@@ -242,6 +242,13 @@ mod windows_overlay {
     static SCREEN_DRAW_STATE: Lazy<Mutex<ScreenDrawState>> =
         Lazy::new(|| Mutex::new(ScreenDrawState::default()));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
+    static LAST_MOUSE_MOVE_TIME_MS: AtomicU64 = AtomicU64::new(0);
+    static BASE_INSTANT: Lazy<Instant> = Lazy::new(Instant::now);
+
+    fn record_mouse_activity_timestamp() {
+        let elapsed = Instant::now().saturating_duration_since(*BASE_INSTANT).as_millis() as u64;
+        LAST_MOUSE_MOVE_TIME_MS.store(elapsed, Ordering::Relaxed);
+    }
 
     pub(crate) static HOOK_STATE: Lazy<Mutex<HookState>> =
         Lazy::new(|| Mutex::new(HookState::default()));
@@ -3131,6 +3138,8 @@ mod windows_overlay {
             if injected {
                 return CallNextHookEx(None, code, wparam, lparam);
             }
+
+            record_mouse_activity_timestamp();
 
             let message = wparam.0 as u32;
             if message == WM_MOUSEWHEEL {
@@ -14528,7 +14537,10 @@ mod windows_overlay {
         let keys = quick_key_display_mascot_keys();
 
         // Mouse active state tracking
-        let mouse_active = (mouse_offset.0.abs() + mouse_offset.1.abs() > 0.05) || !held_mouse_buttons.is_empty();
+        let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed);
+        let current_ms = Instant::now().saturating_duration_since(*BASE_INSTANT).as_millis() as u64;
+        let is_mouse_moving = current_ms.saturating_sub(last_move_ms) < 80;
+        let mouse_active = is_mouse_moving || !held_mouse_buttons.is_empty();
 
         let mouse_flat_x = mouse_pad_left + 19.0 + mouse_offset.0 * 0.7;
         let mouse_flat_y = keyboard_top + 23.0 + mouse_offset.1 * 0.56;
