@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU32},
+        atomic::AtomicU32,
     },
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -99,12 +99,6 @@ pub(crate) enum AudioEditorTarget {
     Exit,
     Library(u32),
     Preset(u32),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OcrLanguageJobKind {
-    Install,
-    Uninstall,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -795,12 +789,6 @@ pub struct CrosshairApp {
     opencv_download_job: Option<JoinHandle<Result<()>>>,
     opencv_download_progress: Arc<AtomicU32>,
     opencv_installed: bool,
-    ocr_language_job: Option<JoinHandle<Result<bool>>>,
-    ocr_language_job_target: Option<(OcrLanguageJobKind, String, String)>,
-    ocr_language_job_started_at: Option<Instant>,
-    ocr_language_job_log_path: Option<PathBuf>,
-    ocr_language_job_cancel_flag: Arc<AtomicBool>,
-    ocr_language_feedback: Option<(bool, String)>,
     interception_download_job: Option<JoinHandle<Result<()>>>,
     interception_download_progress: Arc<AtomicU32>,
     interception_package_downloaded: bool,
@@ -851,8 +839,6 @@ pub struct CrosshairApp {
     macro_referenced_variables_cache: Option<Vec<String>>,
     variable_inspector_open: bool,
     titlebar_guides_open: bool,
-    ocr_lang_pack_open: bool,
-    ocr_lang_settings_focus: Option<String>,
     pub show_share_buttons: bool,
     arduino_available_ports: Vec<String>,
     arduino_ports_last_refresh: Option<Instant>,
@@ -1034,12 +1020,6 @@ impl CrosshairApp {
             opencv_download_job: None,
             opencv_download_progress: Arc::new(AtomicU32::new(0)),
             opencv_installed,
-            ocr_language_job: None,
-            ocr_language_job_target: None,
-            ocr_language_job_started_at: None,
-            ocr_language_job_log_path: None,
-            ocr_language_job_cancel_flag: Arc::new(AtomicBool::new(false)),
-            ocr_language_feedback: None,
             interception_download_job: None,
             interception_download_progress: Arc::new(AtomicU32::new(0)),
             interception_package_downloaded: paths.interception_zip.exists()
@@ -1097,8 +1077,6 @@ impl CrosshairApp {
 
             variable_inspector_open: false,
             titlebar_guides_open: false,
-            ocr_lang_pack_open: false,
-            ocr_lang_settings_focus: None,
             show_share_buttons: false,
             arduino_available_ports: Vec::new(),
             arduino_ports_last_refresh: None,
@@ -11598,73 +11576,9 @@ impl eframe::App for CrosshairApp {
             }
         }
 
-        if let Some(job) = &self.ocr_language_job {
-            if job.is_finished() {
-                let job = self.ocr_language_job.take().unwrap();
-                let target = self.ocr_language_job_target.take();
-                self.ocr_language_job_started_at = None;
-                self.ocr_language_job_cancel_flag = Arc::new(AtomicBool::new(false));
-                crate::ocr::clear_available_ocr_languages_cache();
-                match (job.join(), target) {
-                    (Ok(Ok(restart_required)), Some((kind, lang_code, display_name))) => {
-                        self.ocr_lang_settings_focus = Some(lang_code);
-                        self.status = match (kind, restart_required) {
-                            (OcrLanguageJobKind::Install, true) => format!(
-                                "Installed OCR for {}. Windows requested a restart to finish setup.",
-                                display_name
-                            ),
-                            (OcrLanguageJobKind::Install, false) => {
-                                format!("Installed OCR for {}.", display_name)
-                            }
-                            (OcrLanguageJobKind::Uninstall, true) => format!(
-                                "Removed OCR for {}. Windows requested a restart to finish cleanup.",
-                                display_name
-                            ),
-                            (OcrLanguageJobKind::Uninstall, false) => {
-                                format!(
-                                    "Removed OCR for {}. If Windows still shows the old OCR state briefly, press Refresh or reopen the app.",
-                                    display_name
-                                )
-                            }
-                        };
-                        self.ocr_language_feedback = Some((false, self.status.clone()));
-                    }
-                    (Ok(Err(error)), Some((kind, lang_code, display_name))) => {
-                        self.ocr_lang_settings_focus = Some(lang_code);
-                        self.status = match kind {
-                            OcrLanguageJobKind::Install => {
-                                format!("OCR install failed for {}: {}", display_name, error)
-                            }
-                            OcrLanguageJobKind::Uninstall => {
-                                format!("OCR removal failed for {}: {}", display_name, error)
-                            }
-                        };
-                        self.ocr_language_feedback = Some((true, self.status.clone()));
-                    }
-                    (Err(_), Some((kind, lang_code, display_name))) => {
-                        self.ocr_lang_settings_focus = Some(lang_code);
-                        self.status = match kind {
-                            OcrLanguageJobKind::Install => {
-                                format!("OCR install thread panicked for {}.", display_name)
-                            }
-                            OcrLanguageJobKind::Uninstall => {
-                                format!("OCR removal thread panicked for {}.", display_name)
-                            }
-                        };
-                        self.ocr_language_feedback = Some((true, self.status.clone()));
-                    }
-                    (Ok(Ok(_)), None) | (Ok(Err(_)), None) | (Err(_), None) => {
-                        self.status =
-                            "OCR language job finished without target metadata.".to_owned();
-                        self.ocr_language_feedback = Some((true, self.status.clone()));
-                    }
-                }
-            }
-        }
-
         self.poll_custom_ai_generation(ctx);
 
-        if self.command_ai_job.is_some() || self.ocr_language_job.is_some() {
+        if self.command_ai_job.is_some() {
             ctx.request_repaint_after(Duration::from_millis(33));
         }
 

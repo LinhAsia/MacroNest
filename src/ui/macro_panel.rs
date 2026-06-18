@@ -4000,7 +4000,6 @@ impl CrosshairApp {
         )> = None;
         let mut pending_open_ai_preset_id: Option<u32> = None;
         let mut pending_ocr_step_capture: Option<(u32, u32, usize)> = None;
-        let mut pending_ocr_language_settings: Option<(String, String)> = None;
         let command_presets_snapshot = self.state.command_presets.clone();
         let macro_group_virtualization_margin = 480.0;
         let all_presets: Vec<(u32, String)> = self.state.macro_groups.iter().flat_map(|g| &g.presets).map(|p| (p.id, Self::format_macro_trigger_ui(language, p))).collect();
@@ -9543,7 +9542,6 @@ impl CrosshairApp {
                                                             step,
                                                             &mut live_sync,
                                                             &mut pending_ocr_step_capture,
-                                                            &mut pending_ocr_language_settings,
                                                         );
                                                     }
                                                                                                 } else if step.action == MacroAction::PlaySoundPreset {
@@ -11910,9 +11908,6 @@ impl CrosshairApp {
                             crate::ui::VisionCaptureTarget::OcrStepRegion { group_id: gid, preset_id: pid, step_index: sidx },
                             crate::ui::VisionCaptureMode::SearchRegion,
                         );
-                    }
-                    if let Some((lang_code, display_name)) = pending_ocr_language_settings.take() {
-                        self.install_ocr_language_capability(&lang_code, &display_name);
                     }
                     if cancel_active_capture {
                         self.cancel_capture();

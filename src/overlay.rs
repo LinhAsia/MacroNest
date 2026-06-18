@@ -15680,30 +15680,23 @@ mod windows_overlay {
         match condition_type {
             IfConditionType::OcrMatch => {
                 let preset_id = ocr_preset_id.unwrap_or(0);
-                let (x, y, w, h, lang) = {
+                let (x, y, w, h) = {
                     let hook_state = HOOK_STATE.lock();
                     if let Some(preset) = hook_state.ocr_presets.iter().find(|p| p.id == preset_id)
                     {
-                        (
-                            preset.x,
-                            preset.y,
-                            preset.width,
-                            preset.height,
-                            preset.lang.clone(),
-                        )
+                        (preset.x, preset.y, preset.width, preset.height)
                     } else {
                         return false;
                     }
                 };
                 let w = w.max(10);
                 let h = h.max(10);
-                let lang_str = lang.as_deref().unwrap_or("en");
                 if let Some(frame) = window_list::capture_virtual_screen_region(x, y, w, h) {
                     if let Ok(res) = crate::ocr::perform_ocr(
                         &frame.rgba,
                         frame.width as u32,
                         frame.height as u32,
-                        lang_str,
+                        crate::ocr::OCR_ENGLISH_CODE,
                     ) {
                         let target_text = ocr_target_text.trim();
                         if target_text.is_empty() {
@@ -16193,36 +16186,23 @@ mod windows_overlay {
 
     fn execute_ocr_action_step(step: &crate::model::MacroStep) {
         let preset_id = step.key.trim().parse::<u32>().ok().unwrap_or(0);
-        let (x, y, w, h, lang) = {
+        let (x, y, w, h) = {
             let hook_state = HOOK_STATE.lock();
             if let Some(preset) = hook_state.ocr_presets.iter().find(|p| p.id == preset_id) {
-                (
-                    preset.x,
-                    preset.y,
-                    preset.width,
-                    preset.height,
-                    preset.lang.clone(),
-                )
+                (preset.x, preset.y, preset.width, preset.height)
             } else {
-                (
-                    step.x,
-                    step.y,
-                    step.ocr_width,
-                    step.ocr_height,
-                    step.ocr_lang.clone(),
-                )
+                (step.x, step.y, step.ocr_width, step.ocr_height)
             }
         };
         let w = w.max(10);
         let h = h.max(10);
-        let lang_str = lang.as_deref().unwrap_or("en");
         let mut success = 0;
         if let Some(frame) = window_list::capture_virtual_screen_region(x, y, w, h) {
             if let Ok(res) = crate::ocr::perform_ocr(
                 &frame.rgba,
                 frame.width as u32,
                 frame.height as u32,
-                lang_str,
+                crate::ocr::OCR_ENGLISH_CODE,
             ) {
                 let full_text = res.text.clone();
                 // 0. Store full raw text regardless of target_text

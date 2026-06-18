@@ -1264,8 +1264,6 @@ pub struct MacroStep {
     #[serde(default)]
     pub ocr_numeric_var: String,
     #[serde(default)]
-    pub ocr_lang: Option<String>,
-    #[serde(default)]
     pub ocr_text_var: String,
     #[serde(default)]
     pub vision_pos_var_x: String,
@@ -1367,7 +1365,6 @@ impl Default for MacroStep {
             ocr_pos_var_x: String::new(),
             ocr_pos_var_y: String::new(),
             ocr_numeric_var: String::new(),
-            ocr_lang: None,
             ocr_text_var: String::new(),
             vision_pos_var_x: String::new(),
             vision_pos_var_y: String::new(),
@@ -2718,7 +2715,6 @@ pub struct OcrPreset {
     pub y: i32,
     pub width: i32,
     pub height: i32,
-    pub lang: Option<String>,
     pub target_text: String,
     pub success_var: String,
     pub pos_var_x: String,
@@ -2738,7 +2734,6 @@ impl OcrPreset {
             y: 0,
             width: 320,
             height: 180,
-            lang: None,
             target_text: String::new(),
             success_var: String::new(),
             pos_var_x: String::new(),
@@ -2887,8 +2882,6 @@ pub struct AppState {
     pub ocr_test_width: i32,
     #[serde(default)]
     pub ocr_test_height: i32,
-    #[serde(default)]
-    pub ocr_test_lang: Option<String>,
     #[serde(skip)]
     pub ocr_test_running: bool,
     #[serde(skip)]
@@ -3008,7 +3001,6 @@ impl Default for AppState {
             ocr_test_y: 0,
             ocr_test_width: 320,
             ocr_test_height: 180,
-            ocr_test_lang: None,
             ocr_test_running: false,
             ocr_test_error: None,
             ocr_test_result: None,
