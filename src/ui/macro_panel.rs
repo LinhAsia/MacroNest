@@ -3801,15 +3801,14 @@ impl CrosshairApp {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum RenderItem {
             FolderHeader(u32),
+            AddFolder,
+            AddMacroGroup(Option<u32>),
             MacroGroup(usize),
         }
         let search_query = self.macro_preset_search_query.trim().to_owned();
         Self::sort_macro_groups(&mut self.state.macro_groups);
         let mut render_items = Vec::new();
         if self.macro_folders_panel_open {
-            if self.state.macro_folders.is_empty() {
-                ui.label(Self::tr_lang(language, "No folders yet. Macro groups can stay outside folders if you want.", "No folders yet. Macro groups can stay outside folders if you want."));
-            }
             if let Some(active_folder_id) = self.active_macro_folder_view {
                 for (index, group) in self.state.macro_groups.iter().enumerate() {
                     if group.folder_id == Some(active_folder_id) {
@@ -3823,9 +3822,16 @@ impl CrosshairApp {
                         }
                     }
                 }
+                if render_items.is_empty() && search_query.is_empty() {
+                    render_items.push(RenderItem::AddMacroGroup(Some(active_folder_id)));
+                }
             } else {
-                for folder in &self.state.macro_folders {
-                    render_items.push(RenderItem::FolderHeader(folder.id));
+                if self.state.macro_folders.is_empty() && search_query.is_empty() {
+                    render_items.push(RenderItem::AddFolder);
+                } else {
+                    for folder in &self.state.macro_folders {
+                        render_items.push(RenderItem::FolderHeader(folder.id));
+                    }
                 }
             }
         } else {
@@ -3840,6 +3846,9 @@ impl CrosshairApp {
                         }
                     }
                 }
+            }
+            if render_items.is_empty() && search_query.is_empty() {
+                render_items.push(RenderItem::AddMacroGroup(None));
             }
         }
         let root_group_count = self
@@ -4065,6 +4074,126 @@ impl CrosshairApp {
             .collect();
         for item in render_items.into_iter().take(lazy_render_limit) {
             match item {
+                RenderItem::AddFolder => {
+                    let create_folder =
+                        Self::show_folder_card(ui, false, false, |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(12.0);
+                                ui.label(
+                                    Self::material_icon_text(0xe145, 28.0).color(
+                                        if ui.visuals().dark_mode {
+                                            Color32::from_rgb(255, 196, 120)
+                                        } else {
+                                            Color32::from_rgb(204, 122, 40)
+                                        },
+                                    ),
+                                );
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Create your first folder",
+                                        "Tạo folder đầu tiên",
+                                    ))
+                                    .strong()
+                                    .size(17.0),
+                                );
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "The first folder slot is here.",
+                                        "Ô đầu tiên của folder nằm ở đây.",
+                                    ))
+                                    .small()
+                                    .weak(),
+                                );
+                                ui.add_space(6.0);
+                                Self::with_emphasized_button_hover(ui, |ui| {
+                                    ui.add_sized(
+                                        [220.0, 30.0],
+                                        Button::new(Self::tr_lang(
+                                            language,
+                                            "+ Add first folder",
+                                            "+ Thêm folder đầu tiên",
+                                        )),
+                                    )
+                                })
+                                .clicked()
+                            })
+                            .inner
+                        })
+                        .0;
+                    if create_folder {
+                        self.add_macro_folder();
+                        self.persist();
+                    }
+                    ui.add_space(4.0);
+                }
+                RenderItem::AddMacroGroup(target_folder_id) => {
+                    let create_group = Self::show_preset_card(ui, false, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(10.0);
+                            ui.label(
+                                Self::material_icon_text(0xe145, 28.0).color(
+                                    if ui.visuals().dark_mode {
+                                        Color32::from_rgb(132, 214, 255)
+                                    } else {
+                                        Color32::from_rgb(36, 112, 198)
+                                    },
+                                ),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Create your first macro group",
+                                    "Tạo macro group đầu tiên",
+                                ))
+                                .strong()
+                                .size(17.0),
+                            );
+                            ui.label(
+                                RichText::new(if target_folder_id.is_some() {
+                                    Self::tr_lang(
+                                        language,
+                                        "This first macro group slot is inside the folder.",
+                                        "Ô macro group đầu tiên nằm ngay trong folder này.",
+                                    )
+                                } else {
+                                    Self::tr_lang(
+                                        language,
+                                        "The first macro group slot is here.",
+                                        "Ô macro group đầu tiên nằm ở đây.",
+                                    )
+                                })
+                                .small()
+                                .weak(),
+                            );
+                            ui.add_space(6.0);
+                            Self::with_emphasized_button_hover(ui, |ui| {
+                                ui.add_sized(
+                                    [220.0, 30.0],
+                                    Button::new(Self::tr_lang(
+                                        language,
+                                        "+ Add first macro group",
+                                        "+ Thêm macro group đầu tiên",
+                                    )),
+                                )
+                            })
+                            .clicked()
+                        })
+                        .inner
+                    });
+                    if create_group {
+                        if let Some(folder_id) = target_folder_id {
+                            self.add_macro_group_to_folder(folder_id);
+                        } else {
+                            self.add_macro_group();
+                        }
+                        self.persist();
+                    }
+                    ui.add_space(4.0);
+                }
                 RenderItem::FolderHeader(folder_id) => {
                     let folder = self.state.macro_folders.iter().find(|f| f.id == folder_id).unwrap();
                     let folder_group_count = self
