@@ -1116,7 +1116,11 @@ impl CrosshairApp {
             Self::show_instant_hover_tooltip(
                 ui,
                 &response,
-                Self::tr_lang(language, "Mouse\nOpen mouse click, wheel, and move actions.", "Mouse\nOpen mouse click, wheel, and move actions."),
+                Self::tr_lang(
+                    language,
+                    "Mouse\nOpen mouse click, wheel, and move actions.",
+                    "Mouse\nOpen mouse click, wheel, and move actions.",
+                ),
             );
         }
     }
@@ -1261,7 +1265,11 @@ impl CrosshairApp {
             Self::show_instant_hover_tooltip(
                 ui,
                 &response,
-                Self::tr_lang(language, "Image\nOpen image search start, trigger, and stop actions.", "Image\nOpen image search start, trigger, and stop actions."),
+                Self::tr_lang(
+                    language,
+                    "Image\nOpen image search start, trigger, and stop actions.",
+                    "Image\nOpen image search start, trigger, and stop actions.",
+                ),
             );
         }
     }
@@ -1403,7 +1411,11 @@ impl CrosshairApp {
             Self::show_instant_hover_tooltip(
                 ui,
                 &response,
-                Self::tr_lang(language, "Timer\nOpen start, pause, and stop timer actions.", "Timer\nOpen start, pause, and stop timer actions."),
+                Self::tr_lang(
+                    language,
+                    "Timer\nOpen start, pause, and stop timer actions.",
+                    "Timer\nOpen start, pause, and stop timer actions.",
+                ),
             );
         }
     }
@@ -1500,7 +1512,11 @@ impl CrosshairApp {
                                 .stroke(Self::ai_badge_stroke());
                             if ui
                                 .add(ai_btn)
-                                .on_hover_text(Self::tr_lang(language, "Generate or edit command with AI", "Generate or edit command with AI"))
+                                .on_hover_text(Self::tr_lang(
+                                    language,
+                                    "Generate or edit command with AI",
+                                    "Generate or edit command with AI",
+                                ))
                                 .clicked()
                             {
                                 trigger_ai = true;
@@ -1561,7 +1577,11 @@ impl CrosshairApp {
                             let name_changed = ui
                                 .add(
                                     TextEdit::singleline(&mut step.key)
-                                        .hint_text(Self::tr_lang(language, "Enter name...", "Enter name..."))
+                                        .hint_text(Self::tr_lang(
+                                            language,
+                                            "Enter name...",
+                                            "Enter name...",
+                                        ))
                                         .desired_width(180.0),
                                 )
                                 .changed();
@@ -1578,9 +1598,17 @@ impl CrosshairApp {
                                     .trim()
                                     .is_empty();
                             let btn_text = if resolved_preset.is_some() {
-                                Self::tr_lang(language, "Update custom preset", "Update custom preset")
+                                Self::tr_lang(
+                                    language,
+                                    "Update custom preset",
+                                    "Update custom preset",
+                                )
                             } else {
-                                Self::tr_lang(language, "Save as custom preset", "Save as custom preset")
+                                Self::tr_lang(
+                                    language,
+                                    "Save as custom preset",
+                                    "Save as custom preset",
+                                )
                             };
                             if ui
                                 .add_enabled(save_enabled, egui::Button::new(btn_text))
@@ -1675,13 +1703,21 @@ impl CrosshairApp {
             if keys.is_empty() {
                 if active {
                     ui.label(
-                        egui::RichText::new(Self::tr_lang(language, "Capturing...", "Capturing..."))
-                            .color(egui::Color32::from_rgb(255, 232, 96))
-                            .strong(),
+                        egui::RichText::new(Self::tr_lang(
+                            language,
+                            "Capturing...",
+                            "Capturing...",
+                        ))
+                        .color(egui::Color32::from_rgb(255, 232, 96))
+                        .strong(),
                     );
                 } else {
                     ui.label(
-                        egui::RichText::new(Self::tr_lang(language, "No key assigned", "No key assigned"))
+                        egui::RichText::new(Self::tr_lang(
+                            language,
+                            "No key assigned",
+                            "No key assigned",
+                        ))
                         .weak()
                         .italics(),
                     );
@@ -1694,7 +1730,11 @@ impl CrosshairApp {
                             egui::Button::new(egui::RichText::new(key).monospace())
                                 .min_size(egui::vec2(0.0, 20.0)),
                         )
-                        .on_hover_text(Self::tr_lang(language, "Click to remove this key", "Click to remove this key"));
+                        .on_hover_text(Self::tr_lang(
+                            language,
+                            "Click to remove this key",
+                            "Click to remove this key",
+                        ));
                     if chip_btn.clicked() {
                         remove_key = Some(key.clone());
                     }
@@ -1789,7 +1829,11 @@ impl CrosshairApp {
                             },
                         )),
                 )
-                .on_hover_text(Self::tr_lang(language, "Click to capture one key", "Click to capture one key"));
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Click to capture one key",
+                    "Click to capture one key",
+                ));
             if capture_btn.clicked() {
                 on_capture_click();
             }
@@ -1816,7 +1860,11 @@ impl CrosshairApp {
                                 }
                             });
                             ui.separator();
-                            ui.label(Self::tr_lang(language, "Numbers & Symbols", "Numbers & Symbols"));
+                            ui.label(Self::tr_lang(
+                                language,
+                                "Numbers & Symbols",
+                                "Numbers & Symbols",
+                            ));
                             ui.horizontal_wrapped(|ui| {
                                 for key in NUMBERS {
                                     add_key(ui, key);
@@ -1848,7 +1896,11 @@ impl CrosshairApp {
                                 }
                             });
                             ui.separator();
-                            ui.label(Self::tr_lang(language, "Modifiers & Locks", "Modifiers & Locks"));
+                            ui.label(Self::tr_lang(
+                                language,
+                                "Modifiers & Locks",
+                                "Modifiers & Locks",
+                            ));
                             ui.horizontal_wrapped(|ui| {
                                 for key in MODIFIERS {
                                     add_key(ui, key);
@@ -1857,18 +1909,30 @@ impl CrosshairApp {
                         });
                 })
             });
-            add_menu.response.on_hover_text(Self::tr_lang(language, "Manually add a key", "Manually add a key"));
+            add_menu.response.on_hover_text(Self::tr_lang(
+                language,
+                "Manually add a key",
+                "Manually add a key",
+            ));
             let keys = Self::split_key_list(keys_str);
             if keys.is_empty() {
                 if active {
                     ui.label(
-                        egui::RichText::new(Self::tr_lang(language, "Capturing...", "Capturing..."))
-                            .color(egui::Color32::from_rgb(255, 232, 96))
-                            .strong(),
+                        egui::RichText::new(Self::tr_lang(
+                            language,
+                            "Capturing...",
+                            "Capturing...",
+                        ))
+                        .color(egui::Color32::from_rgb(255, 232, 96))
+                        .strong(),
                     );
                 } else {
                     ui.label(
-                        egui::RichText::new(Self::tr_lang(language, "No key assigned", "No key assigned"))
+                        egui::RichText::new(Self::tr_lang(
+                            language,
+                            "No key assigned",
+                            "No key assigned",
+                        ))
                         .weak()
                         .italics(),
                     );
@@ -1880,7 +1944,11 @@ impl CrosshairApp {
                             egui::Button::new(egui::RichText::new(key).monospace())
                                 .min_size(egui::vec2(0.0, row_height)),
                         )
-                        .on_hover_text(Self::tr_lang(language, "Click to remove this key", "Click to remove this key"));
+                        .on_hover_text(Self::tr_lang(
+                            language,
+                            "Click to remove this key",
+                            "Click to remove this key",
+                        ));
                     if chip_btn.clicked() && Self::remove_key_list_value(keys_str, key) {
                         on_change();
                     }
@@ -1958,9 +2026,7 @@ impl CrosshairApp {
                     IfConditionType::VisionMatch => {
                         Self::tr_lang(language, "Vision Match", "Vision Match")
                     }
-                    IfConditionType::KeyHeld => {
-                        Self::tr_lang(language, "Input Held", "Input Held")
-                    }
+                    IfConditionType::KeyHeld => Self::tr_lang(language, "Input Held", "Input Held"),
                     IfConditionType::MouseHeld => {
                         Self::tr_lang(language, "Input Held", "Input Held")
                     }
@@ -1970,9 +2036,7 @@ impl CrosshairApp {
                     IfConditionType::PresetRunning => {
                         Self::tr_lang(language, "Preset Running", "Preset Running")
                     }
-                    IfConditionType::OcrMatch => {
-                        Self::tr_lang(language, "OCR Match", "OCR Match")
-                    }
+                    IfConditionType::OcrMatch => Self::tr_lang(language, "OCR Match", "OCR Match"),
                     _ => "-",
                 };
                 egui::ComboBox::from_id_salt((
@@ -2103,7 +2167,11 @@ impl CrosshairApp {
                                     .size(10.0)
                                     .color(egui::Color32::from_rgb(0, 191, 255)),
                             )
-                            .on_hover_text(Self::tr_lang(language, "Evaluated left expression", "Evaluated left expression"));
+                            .on_hover_text(Self::tr_lang(
+                                language,
+                                "Evaluated left expression",
+                                "Evaluated left expression",
+                            ));
                         }
                     }
                     IfConditionType::OcrMatch => {
@@ -2202,7 +2270,11 @@ impl CrosshairApp {
                                 [18.0, 18.0],
                                 egui::Button::new(Self::material_icon_text(0xe3b4, 14.0)),
                             )
-                            .on_hover_text(Self::tr_lang(language, "Click on screen to capture position & color", "Click on screen to capture position & color"));
+                            .on_hover_text(Self::tr_lang(
+                                language,
+                                "Click on screen to capture position & color",
+                                "Click on screen to capture position & color",
+                            ));
                         if pick_btn.clicked() {
                             *pending_pick_target = Some(MouseMoveAbsoluteCaptureTarget {
                                 group_id: Some(group_id),
@@ -2369,7 +2441,11 @@ impl CrosshairApp {
                                 [18.0, 18.0],
                                 egui::Button::new(Self::material_icon_text(0xe55c, 14.0)),
                             )
-                            .on_hover_text(Self::tr_lang(language, "Click on screen to capture coordinate", "Click on screen to capture coordinate"));
+                            .on_hover_text(Self::tr_lang(
+                                language,
+                                "Click on screen to capture coordinate",
+                                "Click on screen to capture coordinate",
+                            ));
                         if pick_btn.clicked() {
                             *pending_pick_target = Some(MouseMoveAbsoluteCaptureTarget {
                                 group_id: Some(group_id),
@@ -2391,7 +2467,9 @@ impl CrosshairApp {
                                     .find(|(id, _, _)| *id == gid)
                                     .map(|(_, name, _)| name.clone())
                             })
-                            .unwrap_or_else(|| Self::tr_lang(language, "Group", "Group").to_owned());
+                            .unwrap_or_else(|| {
+                                Self::tr_lang(language, "Group", "Group").to_owned()
+                            });
                         egui::ComboBox::from_id_salt((
                             group_id,
                             preset_id,
@@ -2427,7 +2505,10 @@ impl CrosshairApp {
                         let selected_label = selected_id
                             .and_then(|id| {
                                 if id == 0 {
-                                    Some(Self::tr_lang(language, "Any Preset", "Any Preset").to_owned())
+                                    Some(
+                                        Self::tr_lang(language, "Any Preset", "Any Preset")
+                                            .to_owned(),
+                                    )
                                 } else {
                                     group_presets
                                         .iter()
@@ -2476,7 +2557,11 @@ impl CrosshairApp {
                     ui.spacing_mut().button_padding = egui::vec2(0.0, 0.0);
                     ui.spacing_mut().interact_size = egui::vec2(18.0, 18.0);
                     ui.add_sized([18.0, 18.0], btn_minus)
-                        .on_hover_text(Self::tr_lang(language, "Remove condition", "Remove condition"))
+                        .on_hover_text(Self::tr_lang(
+                            language,
+                            "Remove condition",
+                            "Remove condition",
+                        ))
                         .clicked()
                 });
                 if btn_minus_clicked.inner {
@@ -2604,6 +2689,7 @@ impl CrosshairApp {
         };
         if self.active_macro_folder_view.is_some() && active_folder_for_controls.is_none() {
             self.active_macro_folder_view = None;
+            self.sync_active_macro_folder_scope();
         }
         let active_folder_name = if self.macro_folders_panel_open {
             self.active_macro_folder_view.and_then(|folder_id| {
@@ -2621,6 +2707,49 @@ impl CrosshairApp {
         } else {
             None
         };
+        if self.macro_folders_panel_open || !self.state.macro_folders.is_empty() {
+            let scope_note = if active_folder_name.is_some() {
+                Self::tr_lang(
+                    language,
+                    "Only macro groups in this folder can run while you are inside it.",
+                    "Khi bạn đang ở trong folder này, chỉ các macro group trong folder mới hoạt động.",
+                )
+            } else {
+                Self::tr_lang(
+                    language,
+                    "Tip: entering a folder limits macro activity to that folder until you go back out.",
+                    "Mẹo: khi bạn vào một folder, chỉ các macro group trong folder đó hoạt động cho tới khi bạn quay ra.",
+                )
+            };
+            egui::Frame::group(ui.style())
+                .fill(if ui.visuals().dark_mode {
+                    Color32::from_rgba_premultiplied(26, 54, 84, 92)
+                } else {
+                    Color32::from_rgba_premultiplied(224, 240, 255, 220)
+                })
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    if ui.visuals().dark_mode {
+                        Color32::from_rgb(92, 176, 255)
+                    } else {
+                        Color32::from_rgb(72, 136, 208)
+                    },
+                ))
+                .inner_margin(egui::Margin::symmetric(8, 6))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(Self::material_icon_text(0xe88e, 16.0).color(
+                            if ui.visuals().dark_mode {
+                                Color32::from_rgb(148, 214, 255)
+                            } else {
+                                Color32::from_rgb(44, 104, 184)
+                            },
+                        ));
+                        ui.label(RichText::new(scope_note).small());
+                    });
+                });
+            ui.add_space(8.0);
+        }
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             egui::Frame::group(ui.style())
@@ -2696,7 +2825,11 @@ impl CrosshairApp {
                                 .corner_radius(6.0),
                         )
                     })
-                    .on_hover_text(Self::tr_lang(language, "Capture macro hotkey", "Capture macro hotkey"))
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Capture macro hotkey",
+                        "Capture macro hotkey",
+                    ))
                     .clicked()
                     {
                         if macro_hotkey_capture_active {
@@ -2704,7 +2837,11 @@ impl CrosshairApp {
                         } else {
                             self.begin_capture(
                                 macro_hotkey_capture_target,
-                                Self::tr_lang(language, "Press a hotkey for Macro On / Off.", "Press a hotkey for Macro On / Off.")
+                                Self::tr_lang(
+                                    language,
+                                    "Press a hotkey for Macro On / Off.",
+                                    "Press a hotkey for Macro On / Off.",
+                                )
                                 .to_owned(),
                             );
                         }
@@ -2717,7 +2854,11 @@ impl CrosshairApp {
                                     .min_size(vec2(0.0, 28.0)),
                             )
                         })
-                        .on_hover_text(Self::tr_lang(language, "Click to remove this hotkey", "Click to remove this hotkey"))
+                        .on_hover_text(Self::tr_lang(
+                            language,
+                            "Click to remove this hotkey",
+                            "Click to remove this hotkey",
+                        ))
                         .clicked()
                         {
                             self.state.macros_master_hotkey = None;
@@ -2737,7 +2878,11 @@ impl CrosshairApp {
                         )),
                 )
             })
-            .on_hover_text(Self::tr_lang(language, "Add macro group", "Add macro group"))
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Add macro group",
+                "Add macro group",
+            ))
             .clicked()
             {
                 if let Some(folder_id) = active_folder_for_controls {
@@ -2789,7 +2934,11 @@ impl CrosshairApp {
                         .min_size(egui::vec2(72.0, 28.0)),
                 );
                 if import_button
-                    .on_hover_text(Self::tr_lang(language, "Import macro group from clipboard", "Import macro group from clipboard"))
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Import macro group from clipboard",
+                        "Import macro group from clipboard",
+                    ))
                     .clicked()
                 {
                     self.import_macro_group_from_clipboard(None, None);
@@ -2815,7 +2964,11 @@ impl CrosshairApp {
                         .stroke(egui::Stroke::new(1.0, paste_stroke)),
                 )
             })
-            .on_hover_text(Self::tr_lang(language, "Paste macro groups", "Paste macro groups"))
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Paste macro groups",
+                "Paste macro groups",
+            ))
             .clicked()
             {
                 self.paste_macro_groups_into_folder(paste_target_folder);
@@ -2840,7 +2993,11 @@ impl CrosshairApp {
                         .stroke(egui::Stroke::new(1.0, copy_stroke)),
                 )
             })
-            .on_hover_text(Self::tr_lang(language, "Copy selected macro groups", "Copy selected macro groups"))
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Copy selected macro groups",
+                "Copy selected macro groups",
+            ))
             .clicked()
             {
                 self.copy_selected_macro_groups();
@@ -2865,7 +3022,11 @@ impl CrosshairApp {
                         .stroke(egui::Stroke::new(1.0, cut_stroke)),
                 )
             })
-            .on_hover_text(Self::tr_lang(language, "Cut selected macro groups", "Cut selected macro groups"))
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Cut selected macro groups",
+                "Cut selected macro groups",
+            ))
             .clicked()
             {
                 self.cut_selected_macro_groups();
@@ -2890,7 +3051,11 @@ impl CrosshairApp {
                         .stroke(egui::Stroke::new(1.0, trash_stroke)),
                 )
             })
-            .on_hover_text(Self::tr_lang(language, "Delete selected macro groups", "Delete selected macro groups"))
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Delete selected macro groups",
+                "Delete selected macro groups",
+            ))
             .clicked()
             {
                 self.remove_selected_macro_groups();
@@ -2918,7 +3083,11 @@ impl CrosshairApp {
                         )),
                 )
             })
-            .on_hover_text(Self::tr_lang(language, "Show star macros only", "Show star macros only"))
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Show star macros only",
+                "Show star macros only",
+            ))
             .clicked()
             {
                 self.macro_groups_favorite_filter = if star_filter_active {
@@ -3016,7 +3185,11 @@ impl CrosshairApp {
                                 .corner_radius(6.0),
                         )
                     })
-                    .on_hover_text(Self::tr_lang(language, "Variable manager", "Variable manager"))
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Variable manager",
+                        "Variable manager",
+                    ))
                     .clicked()
                     {
                         self.variable_inspector_open = !self.variable_inspector_open;
@@ -3041,7 +3214,11 @@ impl CrosshairApp {
                         )),
                 )
             })
-            .on_hover_text(Self::tr_lang(language, "Show / hide macro folders", "Show / hide macro folders"))
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Show / hide macro folders",
+                "Show / hide macro folders",
+            ))
             .clicked()
             {
                 self.macro_folders_panel_open = !self.macro_folders_panel_open;
@@ -3068,7 +3245,11 @@ impl CrosshairApp {
                                     ui.visuals().widgets.noninteractive.bg_stroke.color,
                                 )),
                         )
-                        .on_hover_text(Self::tr_lang(language, "Back to folder list", "Back to folder list"))
+                        .on_hover_text(Self::tr_lang(
+                            language,
+                            "Back to folder list",
+                            "Back to folder list",
+                        ))
                         .clicked()
                     {
                         self.set_active_macro_folder_view(None);
@@ -3105,7 +3286,11 @@ impl CrosshairApp {
                 let response = ui.add_sized(
                     [260.0, 24.0],
                     TextEdit::singleline(&mut self.macro_preset_search_query).hint_text(
-                        RichText::new(Self::tr_lang(language, "Search macro groups and presets", "Search macro groups and presets"))
+                        RichText::new(Self::tr_lang(
+                            language,
+                            "Search macro groups and presets",
+                            "Search macro groups and presets",
+                        ))
                         .weak(),
                     ),
                 );
@@ -3186,6 +3371,7 @@ impl CrosshairApp {
             self.active_macro_folder_view = None;
         } else if self.active_macro_folder_view.is_some() && active_folder_name.is_none() {
             self.active_macro_folder_view = None;
+            self.sync_active_macro_folder_scope();
         }
         if false {
             ui.horizontal_wrapped(|ui| {
@@ -3656,8 +3842,149 @@ impl CrosshairApp {
                 }
             }
         }
-        if !self.macro_folders_panel_open && render_items.is_empty() {
-            ui.label(Self::tr_lang(language, "No macro groups outside folders.", "No macro groups outside folders."));
+        let root_group_count = self
+            .state
+            .macro_groups
+            .iter()
+            .filter(|group| group.folder_id.is_none())
+            .count();
+        let active_folder_group_count = self
+            .active_macro_folder_view
+            .map(|folder_id| {
+                self.state
+                    .macro_groups
+                    .iter()
+                    .filter(|group| group.folder_id == Some(folder_id))
+                    .count()
+            })
+            .unwrap_or(0);
+        if render_items.is_empty() {
+            if !search_query.is_empty() {
+                ui.label(Self::tr_lang(
+                    language,
+                    "No macro groups match this search.",
+                    "Không có macro group nào khớp tìm kiếm này.",
+                ));
+            } else if !self.macro_folders_panel_open {
+                if root_group_count == 0 {
+                    let add_first_group = Self::show_preset_card(ui, false, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(10.0);
+                            ui.label(
+                                Self::material_icon_text(0xe145, 28.0).color(
+                                    if ui.visuals().dark_mode {
+                                        Color32::from_rgb(132, 214, 255)
+                                    } else {
+                                        Color32::from_rgb(36, 112, 198)
+                                    },
+                                ),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Create your first macro group",
+                                    "Tạo macro group đầu tiên",
+                                ))
+                                .strong()
+                                .size(17.0),
+                            );
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "New users can start here.",
+                                    "Người mới có thể bắt đầu ngay tại đây.",
+                                ))
+                                .small()
+                                .weak(),
+                            );
+                            ui.add_space(6.0);
+                            Self::with_emphasized_button_hover(ui, |ui| {
+                                ui.add_sized(
+                                    [220.0, 30.0],
+                                    Button::new(Self::tr_lang(
+                                        language,
+                                        "+ Add first macro group",
+                                        "+ Thêm macro group đầu tiên",
+                                    )),
+                                )
+                            })
+                            .clicked()
+                        })
+                        .inner
+                    });
+                    if add_first_group {
+                        self.add_macro_group();
+                        self.persist();
+                    }
+                } else {
+                    ui.label(Self::tr_lang(
+                        language,
+                        "No macro groups outside folders match the current filter.",
+                        "Không có macro group ngoài folder nào khớp bộ lọc hiện tại.",
+                    ));
+                }
+            } else if self.active_macro_folder_view.is_some() {
+                if active_folder_group_count == 0 {
+                    let folder_id = self.active_macro_folder_view.unwrap();
+                    let add_first_group = Self::show_preset_card(ui, false, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(10.0);
+                            ui.label(
+                                Self::material_icon_text(0xe145, 28.0).color(
+                                    if ui.visuals().dark_mode {
+                                        Color32::from_rgb(132, 214, 255)
+                                    } else {
+                                        Color32::from_rgb(36, 112, 198)
+                                    },
+                                ),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "This folder has no macro groups yet",
+                                    "Folder này chưa có macro group nào",
+                                ))
+                                .strong()
+                                .size(17.0),
+                            );
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Create one here so users know where to start.",
+                                    "Tạo một cái ngay tại đây để ai cũng biết bắt đầu ở đâu.",
+                                ))
+                                .small()
+                                .weak(),
+                            );
+                            ui.add_space(6.0);
+                            Self::with_emphasized_button_hover(ui, |ui| {
+                                ui.add_sized(
+                                    [220.0, 30.0],
+                                    Button::new(Self::tr_lang(
+                                        language,
+                                        "+ Add first macro group",
+                                        "+ Thêm macro group đầu tiên",
+                                    )),
+                                )
+                            })
+                            .clicked()
+                        })
+                        .inner
+                    });
+                    if add_first_group {
+                        self.add_macro_group_to_folder(folder_id);
+                        self.persist();
+                    }
+                } else {
+                    ui.label(Self::tr_lang(
+                        language,
+                        "No macro groups in this folder match the current filter.",
+                        "Không có macro group nào trong folder này khớp bộ lọc hiện tại.",
+                    ));
+                }
+            }
         }
         let total_render_items = render_items.len();
         let mut lazy_render_limit = self.macro_panel_render_limit.min(total_render_items);
@@ -3756,6 +4083,7 @@ impl CrosshairApp {
                     let last_rect: Option<egui::Rect> = ui.ctx().data(|data| data.get_temp(rect_key));
                     let hovered = last_rect.map_or(false, |rect| ui.rect_contains_pointer(rect));
                     let mut delete_clicked = false;
+                    let mut add_clicked = false;
                     let (inner_res, frame_response) = Self::show_folder_card(ui, folder_has_enabled_content, hovered, |ui| {
                         ui.horizontal(|ui| {
                             let icon_btn = ui.add_sized(
@@ -3781,26 +4109,58 @@ impl CrosshairApp {
                                         .replace("{}", &folder_group_count.to_string()),
                                 ),
                             );
-                            let delete_response = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let btn = Self::sound_style_remove_button(ui);
-                                if btn.clicked() {
-                                    delete_clicked = true;
-                                }
-                                btn
-                            }).inner;
-                            (icon_btn, name_response, delete_response)
+                            let (add_response, delete_response) = ui
+                                .with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let delete_btn = Self::sound_style_remove_button(ui);
+                                        if delete_btn.clicked() {
+                                            delete_clicked = true;
+                                        }
+                                        let add_btn = if folder_group_count == 0 {
+                                            let btn = ui
+                                                .add_sized(
+                                                    [28.0, 21.0],
+                                                    Button::new(Self::material_icon_text(
+                                                        0xe145, 16.0,
+                                                    )),
+                                                )
+                                                .on_hover_text(Self::tr_lang(
+                                                    language,
+                                                    "Add the first macro group to this folder",
+                                                    "Thêm macro group đầu tiên vào folder này",
+                                                ));
+                                            if btn.clicked() {
+                                                add_clicked = true;
+                                            }
+                                            Some(btn)
+                                        } else {
+                                            None
+                                        };
+                                        (add_btn, delete_btn)
+                                    },
+                                )
+                                .inner;
+                            (icon_btn, name_response, add_response, delete_response)
                         })
                     });
-                    let (icon_btn, name_response, delete_response) = inner_res.inner;
+                    let (icon_btn, name_response, add_response, delete_response) = inner_res.inner;
                     ui.ctx().data_mut(|data| data.insert_temp(rect_key, frame_response.rect));
                     let card_hovered = frame_response.hovered();
-                    let pointer_in_widgets = ui.rect_contains_pointer(name_response.rect) || ui.rect_contains_pointer(delete_response.rect);
+                    let pointer_in_widgets = ui.rect_contains_pointer(name_response.rect)
+                        || ui.rect_contains_pointer(delete_response.rect)
+                        || add_response
+                            .as_ref()
+                            .is_some_and(|response| ui.rect_contains_pointer(response.rect));
                     let card_clicked = card_hovered && ui.input(|i| i.pointer.any_click());
                     if card_hovered && !pointer_in_widgets {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
                     if ((card_clicked && !pointer_in_widgets && !delete_clicked && !name_response.has_focus()) || icon_btn.clicked()) && !self.confirm_delete_folder_id.is_some() {
                         enter_folder_id = Some(folder_id);
+                    }
+                    if add_clicked {
+                        add_group_to_folder_id = Some(folder_id);
                     }
                     if delete_clicked {
                         if folder_group_count > 0 {
@@ -12222,8 +12582,12 @@ impl CrosshairApp {
             ui.columns(2, |columns| {
                 columns[0].vertical(|ui| {
                     ui.label(
-                        RichText::new(Self::tr_lang(language, "Fixed Variables", "Fixed Variables"))
-                            .strong(),
+                        RichText::new(Self::tr_lang(
+                            language,
+                            "Fixed Variables",
+                            "Fixed Variables",
+                        ))
+                        .strong(),
                     );
                     ui.add_space(4.0);
                     let id_const_name = ui.id().with("new_const_name");
@@ -12337,7 +12701,11 @@ impl CrosshairApp {
                             });
                     } else {
                         ui.label(
-                            RichText::new(Self::tr_lang(language, "No fixed variables yet.", "No fixed variables yet."))
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "No fixed variables yet.",
+                                "No fixed variables yet.",
+                            ))
                             .weak(),
                         );
                     }
@@ -12345,11 +12713,19 @@ impl CrosshairApp {
 
                 columns[1].vertical(|ui| {
                     ui.label(
-                        RichText::new(Self::tr_lang(language, "Runtime Variables", "Runtime Variables"))
-                            .strong(),
+                        RichText::new(Self::tr_lang(
+                            language,
+                            "Runtime Variables",
+                            "Runtime Variables",
+                        ))
+                        .strong(),
                     );
                     ui.label(
-                        RichText::new(Self::tr_lang(language, "These values change while macros are running.", "These values change while macros are running."))
+                        RichText::new(Self::tr_lang(
+                            language,
+                            "These values change while macros are running.",
+                            "These values change while macros are running.",
+                        ))
                         .size(11.0)
                         .weak(),
                     );
@@ -12380,7 +12756,11 @@ impl CrosshairApp {
                             });
                     } else {
                         ui.label(
-                            RichText::new(Self::tr_lang(language, "No runtime variables yet.", "No runtime variables yet."))
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "No runtime variables yet.",
+                                "No runtime variables yet.",
+                            ))
                             .weak(),
                         );
                     }
@@ -12862,7 +13242,11 @@ impl CrosshairApp {
             Self::show_instant_hover_tooltip(
                 ui,
                 &response,
-                Self::tr_lang(language, "Geometry\nOpen draw, show, hide, and clear geometry actions.", "Geometry\nOpen draw, show, hide, and clear geometry actions."),
+                Self::tr_lang(
+                    language,
+                    "Geometry\nOpen draw, show, hide, and clear geometry actions.",
+                    "Geometry\nOpen draw, show, hide, and clear geometry actions.",
+                ),
             );
         }
     }
@@ -12990,7 +13374,11 @@ impl CrosshairApp {
             Self::show_instant_hover_tooltip(
                 ui,
                 &response,
-                Self::tr_lang(language, "AudioSense\nOpen pitch audio actions.", "AudioSense\nOpen pitch audio actions."),
+                Self::tr_lang(
+                    language,
+                    "AudioSense\nOpen pitch audio actions.",
+                    "AudioSense\nOpen pitch audio actions.",
+                ),
             );
         }
     }
@@ -13271,7 +13659,11 @@ impl CrosshairApp {
             Self::show_instant_hover_tooltip(
                 ui,
                 &response,
-                Self::tr_lang(language, "Funny\nOpen meme reply actions.", "Funny\nOpen meme reply actions."),
+                Self::tr_lang(
+                    language,
+                    "Funny\nOpen meme reply actions.",
+                    "Funny\nOpen meme reply actions.",
+                ),
             );
         }
     }
@@ -13649,7 +14041,11 @@ impl CrosshairApp {
     ) {
         step.geometry_spec.visible = true;
         ui.add_space(4.0);
-        ui.weak(Self::tr_lang(language, "Filled fields override the selected preset.", "Filled fields override the selected preset."));
+        ui.weak(Self::tr_lang(
+            language,
+            "Filled fields override the selected preset.",
+            "Filled fields override the selected preset.",
+        ));
         ui.add_space(4.0);
 
         let preset_id = macro_preset_id;
@@ -14178,7 +14574,11 @@ impl CrosshairApp {
         let icon = if is_active { 0xe8f5 } else { 0xe8f4 }; // 0xe8f5: open eye, 0xe8f4: closed eye
         let preview_btn = egui::Button::new(Self::material_icon_text(icon, icon_size));
         let tooltip = if is_active {
-            Self::tr_lang(language, "Stop active overlay/preview", "Stop active overlay/preview")
+            Self::tr_lang(
+                language,
+                "Stop active overlay/preview",
+                "Stop active overlay/preview",
+            )
         } else {
             Self::tr_lang(language, "Preview/Show overlay", "Preview/Show overlay")
         };
@@ -14690,7 +15090,9 @@ impl CrosshairApp {
                 .width(108.0)
                 .selected_text(match settings.source {
                     AudioSenseSource::System => Self::tr_lang(language, "System", "System"),
-                    AudioSenseSource::Microphone => Self::tr_lang(language, "Microphone", "Microphone"),
+                    AudioSenseSource::Microphone => {
+                        Self::tr_lang(language, "Microphone", "Microphone")
+                    }
                 })
                 .show_ui(ui, |ui| {
                     *live_sync |= ui
@@ -14712,7 +15114,8 @@ impl CrosshairApp {
                 ComboBox::from_id_salt((id_prefix, "device"))
                     .width(176.0)
                     .selected_text(settings.input_device_name.clone().unwrap_or_else(|| {
-                        Self::tr_lang(language, "Default microphone", "Default microphone").to_owned()
+                        Self::tr_lang(language, "Default microphone", "Default microphone")
+                            .to_owned()
                     }))
                     .show_ui(ui, |ui| {
                         if ui

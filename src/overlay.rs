@@ -457,6 +457,7 @@ mod windows_overlay {
         UpdateGroqSettings(crate::model::GroqSettings),
         PreviewHudPreset(Vec<HudPreset>),
         UpdateMacroPresets(Vec<MacroGroup>),
+        SetActiveMacroFolderScope(Option<u32>),
         UpdateAudioSettings(AudioSettings),
         PlayVideoPreset(u32),
         PlayVideoPresetFrom(u32, u64),
@@ -970,6 +971,7 @@ mod windows_overlay {
         command_presets: Vec<CommandPreset>,
         groq_settings: crate::model::GroqSettings,
         macro_groups: Vec<MacroGroup>,
+        active_macro_folder_scope: Option<u32>,
         macros_master_enabled: bool,
         windows_key_locked: bool,
         macros_master_hotkey: Option<HotkeyBinding>,
@@ -1068,6 +1070,7 @@ mod windows_overlay {
                 command_presets: Vec::new(),
                 groq_settings: crate::model::GroqSettings::default(),
                 macro_groups: Vec::new(),
+                active_macro_folder_scope: None,
                 macros_master_enabled: true,
                 windows_key_locked: false,
                 macros_master_hotkey: None,
@@ -1171,6 +1174,7 @@ mod windows_overlay {
         pin_presets: Vec<PinPreset>,
         mouse_path_presets: Vec<MousePathPreset>,
         macro_groups: Vec<MacroGroup>,
+        active_macro_folder_scope: Option<u32>,
         audio_settings: AudioSettings,
         registered_window_hotkeys: HashMap<i32, WindowHotkeyAction>,
         registered_macro_hotkeys: HashMap<i32, MacroPreset>,
@@ -1924,6 +1928,7 @@ mod windows_overlay {
                 pin_presets: Vec::new(),
                 mouse_path_presets: Vec::new(),
                 macro_groups: Vec::new(),
+                active_macro_folder_scope: None,
                 audio_settings: AudioSettings::default(),
                 registered_window_hotkeys: HashMap::new(),
                 registered_macro_hotkeys: HashMap::new(),
@@ -3972,6 +3977,10 @@ mod windows_overlay {
             let hook_state = HOOK_STATE.lock();
             let mut found = None;
             for group in &hook_state.macro_groups {
+                if !macro_group_scope_matches(group, hook_state.active_macro_folder_scope) {
+                    continue;
+                }
+
                 for preset in &group.presets {
                     if let Some(record_hotkey) = &preset.record_hotkey {
                         if hotkey::binding_matches(record_hotkey, binding) {
@@ -4111,6 +4120,10 @@ mod windows_overlay {
         active.trigger.key.eq_ignore_ascii_case(&binding.key)
     }
 
+    fn macro_group_scope_matches(group: &MacroGroup, active_folder_scope: Option<u32>) -> bool {
+        active_folder_scope.is_none() || group.folder_id == active_folder_scope
+    }
+
     fn binding_matches_any_hold_macro(binding: &HotkeyBinding) -> bool {
         let hook_state = HOOK_STATE.lock();
         if !hook_state.macros_master_enabled {
@@ -4119,6 +4132,7 @@ mod windows_overlay {
 
         hook_state.macro_groups.iter().any(|group| {
             group.enabled
+                && macro_group_scope_matches(group, hook_state.active_macro_folder_scope)
                 && macro_target_matches(group)
                 && group.presets.iter().any(|preset| {
                     preset.enabled
@@ -4194,6 +4208,10 @@ mod windows_overlay {
                 Vec::new();
             for group in &hook_state.macro_groups {
                 if !group.enabled {
+                    continue;
+                }
+
+                if !macro_group_scope_matches(group, hook_state.active_macro_folder_scope) {
                     continue;
                 }
 
@@ -4284,11 +4302,12 @@ mod windows_overlay {
         let is_record_hotkey = {
             let hook_state = HOOK_STATE.lock();
             hook_state.macro_groups.iter().any(|g| {
-                g.presets.iter().any(|p| {
-                    p.record_hotkey
-                        .as_ref()
-                        .is_some_and(|h| hotkey::binding_matches(h, binding))
-                })
+                macro_group_scope_matches(g, hook_state.active_macro_folder_scope)
+                    && g.presets.iter().any(|p| {
+                        p.record_hotkey
+                            .as_ref()
+                            .is_some_and(|h| hotkey::binding_matches(h, binding))
+                    })
             }) || hook_state.mouse_path_presets.iter().any(|p| {
                 p.record_hotkey
                     .as_ref()
@@ -4427,6 +4446,10 @@ mod windows_overlay {
         let mut matched_blocking_macro = false;
         for group in &hook_state.macro_groups {
             if !group.enabled {
+                continue;
+            }
+
+            if !macro_group_scope_matches(group, hook_state.active_macro_folder_scope) {
                 continue;
             }
 
@@ -4575,6 +4598,10 @@ mod windows_overlay {
             let hook_state = HOOK_STATE.lock();
             for group in &hook_state.macro_groups {
                 if !group.enabled {
+                    continue;
+                }
+
+                if !macro_group_scope_matches(group, hook_state.active_macro_folder_scope) {
                     continue;
                 }
 
@@ -6124,6 +6151,25 @@ mod windows_overlay {
                     for (&preset_id, &is_enabled) in &next_enabled {
                         if is_enabled {
                             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
+                        }
+                    }
+                }
+
+                OverlayCommand::SetActiveMacroFolderScope(folder_id) => {
+                    runtime.active_macro_folder_scope = folder_id;
+                    HOOK_STATE.lock().active_macro_folder_scope = folder_id;
+                    if folder_id.is_some() {
+                        let preset_ids_to_stop = runtime
+                            .macro_groups
+                            .iter()
+                            .filter(|group| {
+                                !macro_group_scope_matches(group, runtime.active_macro_folder_scope)
+                            })
+                            .flat_map(|group| group.presets.iter().map(|preset| preset.id))
+                            .collect::<Vec<_>>();
+                        for preset_id in preset_ids_to_stop {
+                            STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
+                            deactivate_hold_macro(preset_id);
                         }
                     }
                 }
@@ -14202,7 +14248,14 @@ mod windows_overlay {
                     .presets
                     .iter()
                     .find(|preset| preset.id == preset_id)
-                    .map(|preset| group.enabled && preset.enabled)
+                    .map(|preset| {
+                        group.enabled
+                            && macro_group_scope_matches(
+                                group,
+                                hook_state.active_macro_folder_scope,
+                            )
+                            && preset.enabled
+                    })
             })
             .unwrap_or(false)
     }
@@ -19418,7 +19471,10 @@ mod windows_overlay {
 
             let mut matches = Vec::new();
             for group in &hook_state.macro_groups {
-                if !group.enabled || !macro_target_matches(group) {
+                if !group.enabled
+                    || !macro_group_scope_matches(group, hook_state.active_macro_folder_scope)
+                    || !macro_target_matches(group)
+                {
                     continue;
                 }
 
@@ -22728,6 +22784,7 @@ mod fallback {
         ApplyWindowLayout(WindowLayout),
         UpdateWindowExpandControls(WindowExpandControls),
         UpdateMacroPresets(Vec<MacroGroup>),
+        SetActiveMacroFolderScope(Option<u32>),
         UpdateAudioSettings(AudioSettings),
         PlayVideoPreset(u32),
         PlayVideoPresetFrom(u32, u64),

@@ -1138,6 +1138,7 @@ impl CrosshairApp {
         self.sync_keyboard_arrow_mouse_settings();
         self.sync_macro_delay_settings();
         self.sync_macro_presets();
+        self.sync_active_macro_folder_scope();
         self.sync_audio_settings();
         self.sync_groq_settings();
         self.sync_vision_presets();
@@ -1188,6 +1189,24 @@ impl CrosshairApp {
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateMacroPresets(macro_groups));
+    }
+
+    fn sync_active_macro_folder_scope(&self) {
+        let active_folder_scope = if self.macro_folders_panel_open {
+            self.active_macro_folder_view.filter(|folder_id| {
+                self.state
+                    .macro_folders
+                    .iter()
+                    .any(|folder| folder.id == *folder_id)
+            })
+        } else {
+            None
+        };
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::SetActiveMacroFolderScope(
+                active_folder_scope,
+            ));
     }
 
     fn sync_macro_master_enabled(&self) {
@@ -8826,6 +8845,7 @@ impl CrosshairApp {
     fn set_active_macro_folder_view(&mut self, folder_id: Option<u32>) {
         self.active_macro_folder_view = folder_id;
         self.selected_macro_groups.clear();
+        self.sync_active_macro_folder_scope();
     }
 
     fn copy_selected_macro_groups(&mut self) {
