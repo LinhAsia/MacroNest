@@ -102,8 +102,9 @@ pub(crate) enum AudioEditorTarget {
     Preset(u32),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum TitlebarQuickActionKind {
+    #[default]
     Taskbar,
     WindowsKey,
     WindowPin,
@@ -4080,13 +4081,46 @@ impl CrosshairApp {
         // Helper to render interactive settings popup on hover
         let mut render_popup = |ui: &mut egui::Ui, button_response: &egui::Response, action_kind: TitlebarQuickActionKind, draw_controls: &mut dyn FnMut(&mut egui::Ui) -> bool| {
             let popup_id = ui.make_persistent_id(format!("qa-popup-state-{:?}", action_kind));
-            let hover_time_id = ui.make_persistent_id(format!("qa-popup-hover-time-{:?}", action_kind));
             
-            let last_hover_time = ui.ctx().data(|data| data.get_temp::<f64>(hover_time_id)).unwrap_or(0.0);
-            let mut currently_hovered = button_response.hovered();
-            let was_open = current_time - last_hover_time < 0.25;
+            // Get active popup state from context
+            let active_qa_id = ui.make_persistent_id("active-quick-action-popup");
+            let mut active_qa = ui.ctx().data(|data| data.get_temp::<TitlebarQuickActionKind>(active_qa_id));
+            let active_qa_time_id = ui.make_persistent_id("active-quick-action-popup-time");
+            let mut last_active_time = ui.ctx().data(|data| data.get_temp::<f64>(active_qa_time_id)).unwrap_or(0.0);
             
-            if was_open {
+            let is_button_hovered = button_response.hovered();
+            
+            // If the button is hovered, this action kind becomes the active one immediately
+            if is_button_hovered {
+                if active_qa != Some(action_kind) {
+                    active_qa = Some(action_kind);
+                    last_active_time = current_time;
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(active_qa_id, action_kind);
+                        data.insert_temp(active_qa_time_id, current_time);
+                    });
+                }
+            }
+            
+            // Check if this action is the active one
+            let is_active = active_qa == Some(action_kind);
+            
+            // Keep open if user is actively dragging or has a combobox/sub-popup open
+            let is_dragging = ui.ctx().dragged_id().is_some();
+            let is_any_popup_open = ui.ctx().memory(|mem| mem.any_popup_open());
+            let is_interacting = is_active && (is_dragging || is_any_popup_open);
+            
+            if is_interacting {
+                last_active_time = current_time;
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(active_qa_time_id, current_time);
+                });
+            }
+            
+            let time_since_active = current_time - last_active_time;
+            let should_show = is_active && (time_since_active < 0.25 || is_interacting);
+            
+            if should_show {
                 let pos = button_response.rect.left_bottom() + vec2(-42.0, 4.0);
                 let area_response = egui::Area::new(popup_id)
                     .order(egui::Order::Tooltip)
@@ -4104,14 +4138,20 @@ impl CrosshairApp {
                             .inner
                     });
                 
-                let is_hovered = area_response.response.hovered() || ui.rect_contains_pointer(area_response.response.rect);
-                if is_hovered || area_response.inner {
-                    currently_hovered = true;
+                // If the pointer is over the popup or its inner content, keep it active
+                let is_popup_hovered = area_response.response.hovered() || ui.rect_contains_pointer(area_response.response.rect);
+                if is_popup_hovered || area_response.inner {
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(active_qa_time_id, current_time);
+                    });
                 }
-            }
-            
-            if currently_hovered {
-                ui.ctx().data_mut(|data| data.insert_temp(hover_time_id, current_time));
+            } else {
+                // If this was the active action but the decay expired, clear it
+                if is_active {
+                    ui.ctx().data_mut(|data| {
+                        data.remove_temp::<TitlebarQuickActionKind>(active_qa_id);
+                    });
+                }
             }
         };
 
