@@ -1310,6 +1310,58 @@ impl CrosshairApp {
         );
     }
 
+    fn ocr_capability_log_path(lang_code: &str, kind: OcrLanguageJobKind) -> Result<PathBuf> {
+        let log_dir = std::env::temp_dir().join("MacroNest").join("ocr-logs");
+        fs::create_dir_all(&log_dir)?;
+        let safe_lang = lang_code
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        let action = match kind {
+            OcrLanguageJobKind::Install => "install",
+            OcrLanguageJobKind::Uninstall => "remove",
+        };
+        Ok(log_dir.join(format!("{}-{}.log", action, safe_lang)))
+    }
+
+    fn run_dism_capability_command(
+        dism_path: &Path,
+        args: &[String],
+        timeout: Duration,
+    ) -> Result<i32> {
+        let arg_list = args
+            .iter()
+            .map(|arg| format!("'{}'", Self::powershell_quote(arg)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let timeout_ms = timeout.as_millis().min(u128::from(u32::MAX)) as u32;
+        let script = format!(
+            "$p = Start-Process -FilePath '{}' -ArgumentList @({}) -Verb RunAs -WindowStyle Hidden -PassThru; if (-not $p.WaitForExit({})) {{ try {{ $p.Kill() }} catch {{}}; exit 124 }}; exit $p.ExitCode",
+            Self::powershell_quote(&dism_path.to_string_lossy()),
+            arg_list,
+            timeout_ms,
+        );
+        let status = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                &script,
+            ])
+            .status()?;
+        status
+            .code()
+            .ok_or_else(|| anyhow::anyhow!("Windows OCR installer exited without a code"))
+    }
+
     fn start_ocr_language_job(
         &mut self,
         lang_code: &str,
@@ -1321,9 +1373,27 @@ impl CrosshairApp {
             return;
         }
 
-        let Some(capability_name) = crate::ocr::ocr_capability_name(lang_code) else {
-            self.status = format!("Unsupported OCR language code: {}", lang_code);
-            return;
+        let capability_args = match kind {
+            OcrLanguageJobKind::Install => match (
+                crate::ocr::basic_language_capability_name(lang_code),
+                crate::ocr::ocr_capability_name(lang_code),
+            ) {
+                (Some(basic_capability), Some(ocr_capability)) => vec![
+                    format!("/CapabilityName:{}", basic_capability),
+                    format!("/CapabilityName:{}", ocr_capability),
+                ],
+                _ => {
+                    self.status = format!("Unsupported OCR language code: {}", lang_code);
+                    return;
+                }
+            },
+            OcrLanguageJobKind::Uninstall => match crate::ocr::ocr_capability_name(lang_code) {
+                Some(ocr_capability) => vec![format!("/CapabilityName:{}", ocr_capability)],
+                None => {
+                    self.status = format!("Unsupported OCR language code: {}", lang_code);
+                    return;
+                }
+            },
         };
 
         self.focus_ocr_language_settings(lang_code);
@@ -1332,40 +1402,43 @@ impl CrosshairApp {
         let display_name_owned = display_name.to_owned();
         let lang_code_owned = lang_code.to_owned();
         let lang_code_for_job = lang_code_owned.clone();
-        let capability_arg = format!("/CapabilityName:{}", capability_name);
         let dism_action = match kind {
             OcrLanguageJobKind::Install => "/Add-Capability",
             OcrLanguageJobKind::Uninstall => "/Remove-Capability",
-        };
+        }
+        .to_owned();
+        let capability_args_for_job = capability_args.clone();
         let job = std::thread::spawn(move || -> Result<bool> {
-            let script = format!(
-                "$p = Start-Process -FilePath '{}' -ArgumentList @('/Online', '{}', '{}', '/NoRestart') -Verb RunAs -WindowStyle Hidden -PassThru -Wait; exit $p.ExitCode",
-                Self::powershell_quote(&dism_path.to_string_lossy()),
-                Self::powershell_quote(dism_action),
-                Self::powershell_quote(&capability_arg),
-            );
-            let status = Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    &script,
-                ])
-                .status()?;
-            let exit_code = status
-                .code()
-                .ok_or_else(|| anyhow::anyhow!("Windows OCR installer exited without a code"))?;
+            let log_path = Self::ocr_capability_log_path(&lang_code_for_job, kind)?;
+            let mut dism_args = vec!["/Online".to_owned(), dism_action];
+            dism_args.extend(capability_args_for_job);
+            dism_args.push("/NoRestart".to_owned());
+            dism_args.push(format!("/LogPath:{}", log_path.display()));
+            let exit_code = Self::run_dism_capability_command(
+                &dism_path,
+                &dism_args,
+                Duration::from_secs(600),
+            )?;
+            if exit_code == 124 {
+                bail!(
+                    "Windows OCR install timed out after 10 minutes. Check the log at {}.",
+                    log_path.display()
+                );
+            }
             if exit_code != 0 && exit_code != 3010 {
-                bail!("Windows returned exit code {}", exit_code);
+                bail!(
+                    "Windows returned exit code {}. Check the log at {}.",
+                    exit_code,
+                    log_path.display()
+                );
             }
 
             Self::wait_for_ocr_language_state(
                 &lang_code_for_job,
                 matches!(kind, OcrLanguageJobKind::Install),
                 Duration::from_secs(180),
-            )?;
+            )
+            .map_err(|error| anyhow::anyhow!("{} Log: {}", error, log_path.display()))?;
             Ok(exit_code == 3010)
         });
 
@@ -1373,7 +1446,7 @@ impl CrosshairApp {
         self.ocr_language_job_target = Some((kind, lang_code_owned, display_name_owned.clone()));
         self.status = match kind {
             OcrLanguageJobKind::Install => format!(
-                "Installing OCR for {}. Accept the Windows admin prompt if it appears.",
+                "Installing OCR for {}. Windows may need a few minutes to download the language files.",
                 display_name_owned
             ),
             OcrLanguageJobKind::Uninstall => format!(
