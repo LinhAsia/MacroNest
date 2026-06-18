@@ -13941,7 +13941,7 @@ mod windows_overlay {
         let head_cy = 92.0 * scale;
         let head_radius = 47.0 * scale;
 
-        let paw_press = if held_keys.is_empty() {
+        let paw_press = if held_keys.is_empty() && held_mouse_buttons.is_empty() {
             recent_pulse * 2.4 * scale
         } else {
             3.0 * scale
