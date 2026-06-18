@@ -2,7 +2,10 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::PathBuf,
-    sync::{Arc, atomic::AtomicU32},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU32},
+    },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -794,6 +797,10 @@ pub struct CrosshairApp {
     opencv_installed: bool,
     ocr_language_job: Option<JoinHandle<Result<bool>>>,
     ocr_language_job_target: Option<(OcrLanguageJobKind, String, String)>,
+    ocr_language_job_started_at: Option<Instant>,
+    ocr_language_job_log_path: Option<PathBuf>,
+    ocr_language_job_cancel_flag: Arc<AtomicBool>,
+    ocr_language_feedback: Option<(bool, String)>,
     interception_download_job: Option<JoinHandle<Result<()>>>,
     interception_download_progress: Arc<AtomicU32>,
     interception_package_downloaded: bool,
@@ -1029,6 +1036,10 @@ impl CrosshairApp {
             opencv_installed,
             ocr_language_job: None,
             ocr_language_job_target: None,
+            ocr_language_job_started_at: None,
+            ocr_language_job_log_path: None,
+            ocr_language_job_cancel_flag: Arc::new(AtomicBool::new(false)),
+            ocr_language_feedback: None,
             interception_download_job: None,
             interception_download_progress: Arc::new(AtomicU32::new(0)),
             interception_package_downloaded: paths.interception_zip.exists()
@@ -11591,6 +11602,8 @@ impl eframe::App for CrosshairApp {
             if job.is_finished() {
                 let job = self.ocr_language_job.take().unwrap();
                 let target = self.ocr_language_job_target.take();
+                self.ocr_language_job_started_at = None;
+                self.ocr_language_job_cancel_flag = Arc::new(AtomicBool::new(false));
                 crate::ocr::clear_available_ocr_languages_cache();
                 match (job.join(), target) {
                     (Ok(Ok(restart_required)), Some((kind, lang_code, display_name))) => {
@@ -11611,6 +11624,7 @@ impl eframe::App for CrosshairApp {
                                 format!("Removed OCR for {}.", display_name)
                             }
                         };
+                        self.ocr_language_feedback = Some((false, self.status.clone()));
                     }
                     (Ok(Err(error)), Some((kind, lang_code, display_name))) => {
                         self.ocr_lang_settings_focus = Some(lang_code);
@@ -11622,6 +11636,7 @@ impl eframe::App for CrosshairApp {
                                 format!("OCR removal failed for {}: {}", display_name, error)
                             }
                         };
+                        self.ocr_language_feedback = Some((true, self.status.clone()));
                     }
                     (Err(_), Some((kind, lang_code, display_name))) => {
                         self.ocr_lang_settings_focus = Some(lang_code);
@@ -11633,10 +11648,12 @@ impl eframe::App for CrosshairApp {
                                 format!("OCR removal thread panicked for {}.", display_name)
                             }
                         };
+                        self.ocr_language_feedback = Some((true, self.status.clone()));
                     }
                     (Ok(Ok(_)), None) | (Ok(Err(_)), None) | (Err(_), None) => {
                         self.status =
                             "OCR language job finished without target metadata.".to_owned();
+                        self.ocr_language_feedback = Some((true, self.status.clone()));
                     }
                 }
             }

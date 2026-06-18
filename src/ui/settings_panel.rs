@@ -1334,20 +1334,19 @@ impl CrosshairApp {
         dism_path: &Path,
         args: &[String],
         timeout: Duration,
+        cancel_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<i32> {
         let arg_list = args
             .iter()
             .map(|arg| format!("'{}'", Self::powershell_quote(arg)))
             .collect::<Vec<_>>()
             .join(", ");
-        let timeout_ms = timeout.as_millis().min(u128::from(u32::MAX)) as u32;
         let script = format!(
-            "$p = Start-Process -FilePath '{}' -ArgumentList @({}) -Verb RunAs -WindowStyle Hidden -PassThru; if (-not $p.WaitForExit({})) {{ try {{ $p.Kill() }} catch {{}}; exit 124 }}; exit $p.ExitCode",
+            "$p = Start-Process -FilePath '{}' -ArgumentList @({}) -Verb RunAs -WindowStyle Hidden -PassThru -Wait; exit $p.ExitCode",
             Self::powershell_quote(&dism_path.to_string_lossy()),
             arg_list,
-            timeout_ms,
         );
-        let status = Command::new("powershell")
+        let mut child = Command::new("powershell")
             .args([
                 "-NoProfile",
                 "-NonInteractive",
@@ -1356,10 +1355,46 @@ impl CrosshairApp {
                 "-Command",
                 &script,
             ])
+            .spawn()?;
+        let powershell_pid = child.id();
+        let started_at = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait()? {
+                return status
+                    .code()
+                    .ok_or_else(|| anyhow::anyhow!("Windows OCR installer exited without a code"));
+            }
+
+            if cancel_flag.load(Ordering::SeqCst) {
+                let _ = Self::kill_process_tree(powershell_pid);
+                let _ = child.wait();
+                bail!("Cancelled the Windows OCR install request.");
+            }
+
+            if started_at.elapsed() >= timeout {
+                let _ = Self::kill_process_tree(powershell_pid);
+                let _ = child.wait();
+                return Ok(124);
+            }
+
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+
+    fn kill_process_tree(process_id: u32) -> Result<()> {
+        let status = Command::new("taskkill")
+            .args(["/PID", &process_id.to_string(), "/T", "/F"])
             .status()?;
-        status
-            .code()
-            .ok_or_else(|| anyhow::anyhow!("Windows OCR installer exited without a code"))
+        if status.success() {
+            return Ok(());
+        }
+
+        let exit_code = status.code().unwrap_or_default();
+        if exit_code == 128 || exit_code == 255 {
+            return Ok(());
+        }
+
+        bail!("taskkill returned exit code {}", exit_code);
     }
 
     fn start_ocr_language_job(
@@ -1402,34 +1437,45 @@ impl CrosshairApp {
         let display_name_owned = display_name.to_owned();
         let lang_code_owned = lang_code.to_owned();
         let lang_code_for_job = lang_code_owned.clone();
+        let log_path = match Self::ocr_capability_log_path(&lang_code_owned, kind) {
+            Ok(path) => path,
+            Err(error) => {
+                self.status = format!("Failed to prepare OCR log file: {}", error);
+                self.ocr_language_feedback = Some((true, self.status.clone()));
+                return;
+            }
+        };
+        let log_path_for_job = log_path.clone();
         let dism_action = match kind {
             OcrLanguageJobKind::Install => "/Add-Capability",
             OcrLanguageJobKind::Uninstall => "/Remove-Capability",
         }
         .to_owned();
         let capability_args_for_job = capability_args.clone();
+        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel_flag_for_job = cancel_flag.clone();
         let job = std::thread::spawn(move || -> Result<bool> {
-            let log_path = Self::ocr_capability_log_path(&lang_code_for_job, kind)?;
             let mut dism_args = vec!["/Online".to_owned(), dism_action];
             dism_args.extend(capability_args_for_job);
             dism_args.push("/NoRestart".to_owned());
-            dism_args.push(format!("/LogPath:{}", log_path.display()));
+            dism_args.push(format!("/LogPath:{}", log_path_for_job.display()));
             let exit_code = Self::run_dism_capability_command(
                 &dism_path,
                 &dism_args,
                 Duration::from_secs(600),
+                &cancel_flag_for_job,
             )?;
             if exit_code == 124 {
                 bail!(
                     "Windows OCR install timed out after 10 minutes. Check the log at {}.",
-                    log_path.display()
+                    log_path_for_job.display()
                 );
             }
             if exit_code != 0 && exit_code != 3010 {
                 bail!(
                     "Windows returned exit code {}. Check the log at {}.",
                     exit_code,
-                    log_path.display()
+                    log_path_for_job.display()
                 );
             }
 
@@ -1438,12 +1484,16 @@ impl CrosshairApp {
                 matches!(kind, OcrLanguageJobKind::Install),
                 Duration::from_secs(180),
             )
-            .map_err(|error| anyhow::anyhow!("{} Log: {}", error, log_path.display()))?;
+            .map_err(|error| anyhow::anyhow!("{} Log: {}", error, log_path_for_job.display()))?;
             Ok(exit_code == 3010)
         });
 
         self.ocr_language_job = Some(job);
         self.ocr_language_job_target = Some((kind, lang_code_owned, display_name_owned.clone()));
+        self.ocr_language_job_started_at = Some(Instant::now());
+        self.ocr_language_job_log_path = Some(log_path);
+        self.ocr_language_job_cancel_flag = cancel_flag;
+        self.ocr_language_feedback = None;
         self.status = match kind {
             OcrLanguageJobKind::Install => format!(
                 "Installing OCR for {}. Windows may need a few minutes to download the language files.",
@@ -1454,6 +1504,17 @@ impl CrosshairApp {
                 display_name_owned
             ),
         };
+    }
+
+    fn cancel_ocr_language_job(&mut self) {
+        if self.ocr_language_job.is_none() {
+            return;
+        }
+
+        self.ocr_language_job_cancel_flag
+            .store(true, Ordering::SeqCst);
+        self.status = "Stopping the current OCR language job...".to_owned();
+        self.ocr_language_feedback = Some((true, self.status.clone()));
     }
 
     pub(crate) fn install_ocr_language_capability(&mut self, lang_code: &str, display_name: &str) {
@@ -1505,6 +1566,14 @@ impl CrosshairApp {
                     .weak(),
                 );
                 if let Some((kind, _, display_name)) = active_job.as_ref() {
+                    let elapsed = self
+                        .ocr_language_job_started_at
+                        .map(|started_at| started_at.elapsed())
+                        .unwrap_or_default();
+                    let elapsed_text =
+                        format!("{:02}:{:02}", elapsed.as_secs() / 60, elapsed.as_secs() % 60);
+                    let cancel_requested =
+                        self.ocr_language_job_cancel_flag.load(Ordering::SeqCst);
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.spinner();
@@ -1517,7 +1586,61 @@ impl CrosshairApp {
                             }
                         });
                     });
+                    ui.label(
+                        RichText::new(format!("Elapsed: {}", elapsed_text))
+                            .small()
+                            .color(Color32::from_rgb(255, 216, 96)),
+                    );
+                    if let Some(log_path) = self.ocr_language_job_log_path.clone() {
+                        ui.label(
+                            RichText::new(format!("Log: {}", log_path.display()))
+                                .small()
+                                .weak(),
+                        );
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_enabled(
+                                    !cancel_requested,
+                                    Button::new("Cancel").min_size(vec2(92.0, 28.0)),
+                                )
+                                .clicked()
+                            {
+                                self.cancel_ocr_language_job();
+                            }
+                            if Self::settings_action_button(ui, "Open log folder").clicked() {
+                                if let Some(folder) = log_path.parent() {
+                                    if let Err(error) =
+                                        crate::platform::open_folder_in_explorer(folder)
+                                    {
+                                        self.status =
+                                            format!("Failed to open OCR log folder: {}", error);
+                                        self.ocr_language_feedback =
+                                            Some((true, self.status.clone()));
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    if cancel_requested {
+                        ui.label(
+                            RichText::new("Stopping the Windows OCR job...")
+                                .small()
+                                .color(Color32::from_rgb(255, 216, 96)),
+                        );
+                    }
                     ui.ctx().request_repaint();
+                }
+                if let Some((is_error, message)) = self.ocr_language_feedback.as_ref() {
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(message)
+                            .small()
+                            .color(if *is_error {
+                                Color32::from_rgb(255, 160, 160)
+                            } else {
+                                Color32::from_rgb(126, 224, 182)
+                            }),
+                    );
                 }
                 ui.add_space(8.0);
 
