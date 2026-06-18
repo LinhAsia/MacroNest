@@ -102,7 +102,7 @@ pub(crate) enum AudioEditorTarget {
     Preset(u32),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TitlebarQuickActionKind {
     Taskbar,
     WindowsKey,
@@ -4073,13 +4073,53 @@ impl CrosshairApp {
         let pinned_window_active = pin_window_available
             && window_list::is_window_topmost(&self.quick_action_window_selector);
         let mut keep_menu_open = false;
-        let action_width = 112.0;
-        let action_height = 192.0;
+        let action_width = 104.0;
+        let action_height = 100.0;
+        let current_time = ui.input(|i| i.time);
+
+        // Helper to render interactive settings popup on hover
+        let mut render_popup = |ui: &mut egui::Ui, button_response: &egui::Response, action_kind: TitlebarQuickActionKind, draw_controls: &mut dyn FnMut(&mut egui::Ui) -> bool| {
+            let popup_id = ui.make_persistent_id(format!("qa-popup-state-{:?}", action_kind));
+            let hover_time_id = ui.make_persistent_id(format!("qa-popup-hover-time-{:?}", action_kind));
+            
+            let last_hover_time = ui.ctx().data(|data| data.get_temp::<f64>(hover_time_id)).unwrap_or(0.0);
+            let mut currently_hovered = button_response.hovered();
+            let was_open = current_time - last_hover_time < 0.25;
+            
+            if was_open {
+                let pos = button_response.rect.left_bottom() + vec2(-42.0, 4.0);
+                let area_response = egui::Area::new(popup_id)
+                    .order(egui::Order::Tooltip)
+                    .fixed_pos(pos)
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style())
+                            .rounding(8.0)
+                            .inner_margin(8.0)
+                            .stroke(egui::Stroke::new(1.0, ui.visuals().window_stroke.color))
+                            .show(ui, |ui| {
+                                ui.set_width(180.0);
+                                ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
+                                draw_controls(ui)
+                            })
+                            .inner
+                    });
+                
+                let is_hovered = area_response.response.hovered() || ui.rect_contains_pointer(area_response.response.rect);
+                if is_hovered || area_response.inner {
+                    currently_hovered = true;
+                }
+            }
+            
+            if currently_hovered {
+                ui.ctx().data_mut(|data| data.insert_temp(hover_time_id, current_time));
+            }
+        };
 
         Grid::new("titlebar-quick-actions-grid")
             .num_columns(5)
-            .spacing([20.0, 16.0])
+            .spacing([16.0, 12.0])
             .show(ui, |ui| {
+                // Taskbar Action
                 ui.allocate_ui_with_layout(
                     vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
@@ -4149,10 +4189,10 @@ impl CrosshairApp {
                                 );
                             },
                         );
-                        ui.add_space(12.0);
                     },
                 );
 
+                // WindowsKey Action
                 ui.allocate_ui_with_layout(
                     vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
@@ -4214,10 +4254,10 @@ impl CrosshairApp {
                                 );
                             },
                         );
-                        ui.add_space(12.0);
                     },
                 );
 
+                // WindowPin Action
                 ui.allocate_ui_with_layout(
                     vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
@@ -4294,78 +4334,87 @@ impl CrosshairApp {
                                 ));
                             },
                         );
-                        let selected_window_text = if self.quick_action_window_selector.is_empty() {
-                            Self::tr_lang(self.state.ui_language, "Select window", "Select window")
-                                .to_owned()
-                        } else {
-                            Self::truncate_window_title(
-                                &Self::quick_action_window_display(
-                                    &self.quick_action_window_selector,
-                                    &self.open_windows,
-                                ),
-                                9,
-                            )
-                        };
-                        ui.set_min_width(action_width);
-                        ui.set_max_width(action_width);
-                        let selector_popup_id =
-                            ui.make_persistent_id("quick-action-window-selector-popup");
-                        let mut selector_popup_open = ui
-                            .ctx()
-                            .data(|data| data.get_temp::<bool>(selector_popup_id))
-                            .unwrap_or(false);
-                        let selector_button = Button::new(
-                            RichText::new(format!("{selected_window_text}  v")).size(10.0),
-                        )
-                        .fill(Color32::from_rgba_premultiplied(60, 60, 60, 220));
-                        let selector_response = ui.add_sized([action_width, 22.0], selector_button);
-                        if selector_response.clicked() {
-                            selector_popup_open = !selector_popup_open;
-                            keep_menu_open = true;
-                        }
-                        let mut close_selector_popup = false;
-                        let selector_popup_result = egui::Popup::from_response(&selector_response)
-                            .id(selector_popup_id)
-                            .open_bool(&mut selector_popup_open)
-                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                            .align(egui::RectAlign::BOTTOM_START)
-                            .width(132.0)
-                            .show(|ui| {
-                                ui.set_min_width(132.0);
-                                ui.set_max_width(132.0);
-                                for selector in &self.open_windows {
-                                    let display_title = Self::quick_action_window_display(
-                                        selector,
-                                        &self.open_windows,
-                                    );
-                                    let truncated_title =
-                                        Self::truncate_window_title(&display_title, 20);
-                                    let selected = self.quick_action_window_selector == *selector;
-                                    let response = ui.add_sized(
-                                        [132.0, 20.0],
-                                        egui::Button::new(truncated_title).selected(selected),
-                                    );
-                                    if response.clicked() {
-                                        self.quick_action_window_selector = selector.clone();
-                                        close_selector_popup = true;
-                                        keep_menu_open = true;
-                                    }
-                                    response.on_hover_text(Self::selector_base_title(selector));
+
+                        // Popup settings
+                        let mut keep_open = false;
+                        render_popup(ui, &button_response, TitlebarQuickActionKind::WindowPin, &mut |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.label(RichText::new(Self::tr_lang(self.state.ui_language, "Target Window", "Target Window")).size(10.0));
+                                
+                                let selected_window_text = if self.quick_action_window_selector.is_empty() {
+                                    Self::tr_lang(self.state.ui_language, "Select window", "Select window").to_owned()
+                                } else {
+                                    Self::truncate_window_title(
+                                        &Self::quick_action_window_display(
+                                            &self.quick_action_window_selector,
+                                            &self.open_windows,
+                                        ),
+                                        16,
+                                    )
+                                };
+                                
+                                let selector_popup_id = ui.make_persistent_id("quick-action-window-selector-popup");
+                                let mut selector_popup_open = ui
+                                    .ctx()
+                                    .data(|data| data.get_temp::<bool>(selector_popup_id))
+                                    .unwrap_or(false);
+                                
+                                let selector_button = Button::new(RichText::new(format!("{selected_window_text}  v")).size(10.0))
+                                    .fill(Color32::from_rgba_premultiplied(60, 60, 60, 220));
+                                let selector_response = ui.add_sized([164.0, 22.0], selector_button);
+                                if selector_response.clicked() {
+                                    selector_popup_open = !selector_popup_open;
                                 }
-                            });
-                        let _ = selector_popup_result;
-                        if close_selector_popup {
-                            selector_popup_open = false;
-                        }
-                        if selector_popup_open {
+                                
+                                let mut close_selector_popup = false;
+                                let selector_popup_result = egui::Popup::from_response(&selector_response)
+                                    .id(selector_popup_id)
+                                    .open_bool(&mut selector_popup_open)
+                                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                    .align(egui::RectAlign::BOTTOM_START)
+                                    .width(164.0)
+                                    .show(|ui| {
+                                        ui.set_min_width(164.0);
+                                        ui.set_max_width(164.0);
+                                        for selector in &self.open_windows {
+                                            let display_title = Self::quick_action_window_display(
+                                                selector,
+                                                &self.open_windows,
+                                            );
+                                            let truncated_title =
+                                                Self::truncate_window_title(&display_title, 20);
+                                            let selected = self.quick_action_window_selector == *selector;
+                                            let response = ui.add_sized(
+                                                [164.0, 20.0],
+                                                egui::Button::new(truncated_title).selected(selected),
+                                            );
+                                            if response.clicked() {
+                                                self.quick_action_window_selector = selector.clone();
+                                                close_selector_popup = true;
+                                            }
+                                            response.on_hover_text(Self::selector_base_title(selector));
+                                        }
+                                    });
+                                let _ = selector_popup_result;
+                                if close_selector_popup {
+                                    selector_popup_open = false;
+                                }
+                                if selector_popup_open {
+                                    keep_open = true;
+                                }
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(selector_popup_id, selector_popup_open);
+                                });
+                                selector_popup_open
+                            }).inner
+                        });
+                        if keep_open {
                             keep_menu_open = true;
                         }
-                        ui.ctx().data_mut(|data| {
-                            data.insert_temp(selector_popup_id, selector_popup_open);
-                        });
                     },
                 );
 
+                // FocusHighlight Action
                 ui.allocate_ui_with_layout(
                     vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
@@ -4396,14 +4445,14 @@ impl CrosshairApp {
                             .to_owned();
                         }
 
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
                         let focus_label = Self::tr_lang(
                             self.state.ui_language,
                             "Focus highlight",
                             "Focus highlight",
                         );
                         ui.allocate_ui_with_layout(
-                            vec2(92.0, 20.0),
+                            vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(
@@ -4418,48 +4467,27 @@ impl CrosshairApp {
                             },
                         );
 
-                        ui.add_space(4.0);
-                        // Color picker row
-                        ui.allocate_ui_with_layout(
-                            vec2(92.0, 22.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
+                        // Popup settings
+                        render_popup(ui, &button_response, TitlebarQuickActionKind::FocusHighlight, &mut |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(Self::tr_lang(self.state.ui_language, "Color", "Color")).size(10.0));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        let color_changed = Self::edit_rgba_color(
+                                            ui,
+                                            &mut self.state.focus_highlight_color,
+                                        )
+                                        .changed();
+                                        if color_changed {
+                                            self.sync_focus_highlight_config();
+                                            self.persist();
+                                        }
+                                    });
+                                });
+                                
                                 ui.add_space(4.0);
-                                let color_changed = Self::edit_rgba_color(
-                                    ui,
-                                    &mut self.state.focus_highlight_color,
-                                )
-                                .changed();
-                                if color_changed {
-                                    self.sync_focus_highlight_config();
-                                    self.persist();
-                                }
-                                ui.add_space(4.0);
-                                ui.add(egui::Label::new(
-                                    RichText::new(Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Color",
-                                        "Color",
-                                    ))
-                                    .size(10.0),
-                                ));
-                            },
-                        );
-
-                        ui.add_space(2.0);
-                        ui.allocate_ui_with_layout(
-                            vec2(92.0, 40.0),
-                            egui::Layout::top_down(egui::Align::Center),
-                            |ui| {
-                                ui.add(egui::Label::new(
-                                    RichText::new(Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Decoration",
-                                        "Decoration",
-                                    ))
-                                    .size(10.0),
-                                ));
-                                ui.add_space(2.0);
+                                ui.label(RichText::new(Self::tr_lang(self.state.ui_language, "Decoration", "Decoration")).size(10.0));
+                                
                                 let selected_text = match self.state.focus_highlight_decoration {
                                     FocusHighlightDecoration::Plain => {
                                         Self::tr_lang(self.state.ui_language, "Plain", "Plain")
@@ -4482,7 +4510,7 @@ impl CrosshairApp {
                                 };
                                 let decoration_changed =
                                     egui::ComboBox::from_id_salt("focus-highlight-decoration")
-                                        .width(116.0)
+                                        .width(164.0)
                                         .selected_text(selected_text)
                                         .show_ui(ui, |ui| {
                                             let mut changed = false;
@@ -4538,14 +4566,13 @@ impl CrosshairApp {
                                     self.sync_focus_highlight_config();
                                     self.persist();
                                 }
-                            },
-                        );
-
-                        ui.add_space(4.0);
+                                false
+                            }).inner
+                        });
                     },
                 );
 
-                // Protractor tool
+                // Protractor Action
                 ui.allocate_ui_with_layout(
                     vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
@@ -4583,11 +4610,11 @@ impl CrosshairApp {
                             .to_owned();
                         }
 
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
                         let proto_label =
                             Self::tr_lang(self.state.ui_language, "Protractor", "Protractor");
                         ui.allocate_ui_with_layout(
-                            vec2(92.0, 20.0),
+                            vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(
@@ -4601,13 +4628,11 @@ impl CrosshairApp {
                                 ));
                             },
                         );
-
-                        ui.add_space(4.0);
                     },
                 );
                 ui.end_row();
 
-                // Get Coordinates tool
+                // Get Coordinates Action
                 ui.allocate_ui_with_layout(
                     vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
@@ -4628,14 +4653,14 @@ impl CrosshairApp {
                             );
                         }
 
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
                         let coords_label = Self::tr_lang(
                             self.state.ui_language,
                             "Get Coordinates",
                             "Get Coordinates",
                         );
                         ui.allocate_ui_with_layout(
-                            vec2(92.0, 20.0),
+                            vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(
@@ -4650,13 +4675,9 @@ impl CrosshairApp {
                             },
                         );
 
-                        ui.add_space(4.0);
-                        // Checkbox Copy X
-                        ui.allocate_ui_with_layout(
-                            vec2(92.0, 22.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                ui.add_space(4.0);
+                        // Popup settings
+                        render_popup(ui, &button_response, TitlebarQuickActionKind::GetCoordinates, &mut |ui| {
+                            ui.vertical_centered(|ui| {
                                 let copy_x_changed = ui
                                     .checkbox(
                                         &mut self.state.quick_actions_copy_x,
@@ -4671,16 +4692,7 @@ impl CrosshairApp {
                                 if copy_x_changed {
                                     self.persist();
                                 }
-                            },
-                        );
-
-                        ui.add_space(2.0);
-                        // Checkbox Copy Y
-                        ui.allocate_ui_with_layout(
-                            vec2(92.0, 22.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                ui.add_space(4.0);
+                                
                                 let copy_y_changed = ui
                                     .checkbox(
                                         &mut self.state.quick_actions_copy_y,
@@ -4695,14 +4707,13 @@ impl CrosshairApp {
                                 if copy_y_changed {
                                     self.persist();
                                 }
-                            },
-                        );
-
-                        ui.add_space(4.0);
+                                false
+                            }).inner
+                        });
                     },
                 );
 
-                // Get Color tool
+                // Get Color Action
                 ui.allocate_ui_with_layout(
                     vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
@@ -4723,11 +4734,11 @@ impl CrosshairApp {
                             );
                         }
 
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
                         let color_label =
                             Self::tr_lang(self.state.ui_language, "Get Color", "Get Color");
                         ui.allocate_ui_with_layout(
-                            vec2(92.0, 20.0),
+                            vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(
@@ -4742,13 +4753,9 @@ impl CrosshairApp {
                             },
                         );
 
-                        ui.add_space(4.0);
-                        // Checkbox Copy Color
-                        ui.allocate_ui_with_layout(
-                            vec2(92.0, 22.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                ui.add_space(4.0);
+                        // Popup settings
+                        render_popup(ui, &button_response, TitlebarQuickActionKind::GetColor, &mut |ui| {
+                            ui.vertical_centered(|ui| {
                                 let copy_color_changed = ui
                                     .checkbox(
                                         &mut self.state.quick_actions_copy_color,
@@ -4763,13 +4770,13 @@ impl CrosshairApp {
                                 if copy_color_changed {
                                     self.persist();
                                 }
-                            },
-                        );
-
-                        ui.add_space(26.0);
+                                false
+                            }).inner
+                        });
                     },
                 );
 
+                // KeyDisplay Action
                 ui.allocate_ui_with_layout(
                     vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
@@ -4803,9 +4810,9 @@ impl CrosshairApp {
                             .to_owned();
                         }
 
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
                         ui.allocate_ui_with_layout(
-                            vec2(92.0, 20.0),
+                            vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(
@@ -4826,12 +4833,9 @@ impl CrosshairApp {
                             },
                         );
 
-                        ui.add_space(2.0);
-                        ui.allocate_ui_with_layout(
-                            vec2(92.0, 22.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                ui.add_space(2.0);
+                        // Popup settings
+                        render_popup(ui, &button_response, TitlebarQuickActionKind::KeyDisplay, &mut |ui| {
+                            ui.vertical_centered(|ui| {
                                 ui.label(
                                     RichText::new(Self::tr_lang(
                                         self.state.ui_language,
@@ -4842,7 +4846,7 @@ impl CrosshairApp {
                                 );
                                 let mode_before = self.state.quick_key_display_mode;
                                 egui::ComboBox::from_id_salt("quick-key-display-mode")
-                                    .width(52.0)
+                                    .width(164.0)
                                     .selected_text(match self.state.quick_key_display_mode {
                                         QuickKeyDisplayMode::Normal => "Normal",
                                         QuickKeyDisplayMode::Mascot => "Mascot",
@@ -4863,15 +4867,8 @@ impl CrosshairApp {
                                     self.sync_quick_key_display_config();
                                     self.persist();
                                 }
-                            },
-                        );
-
-                        if self.state.quick_key_display_mode == QuickKeyDisplayMode::Mascot {
-                            ui.add_space(2.0);
-                            ui.allocate_ui_with_layout(
-                                vec2(92.0, 22.0),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
+                                
+                                if self.state.quick_key_display_mode == QuickKeyDisplayMode::Mascot {
                                     ui.add_space(2.0);
                                     ui.label(
                                         RichText::new(Self::tr_lang(
@@ -4883,7 +4880,7 @@ impl CrosshairApp {
                                     );
                                     let preset_before = self.state.quick_key_display_mascot_style;
                                     egui::ComboBox::from_id_salt("quick-key-display-mascot-preset")
-                                        .width(52.0)
+                                        .width(164.0)
                                         .selected_text(match self.state.quick_key_display_mascot_style {
                                             crate::model::MascotStyle::Hachiware => "Hachiware",
                                             crate::model::MascotStyle::TungSahur => "Tung Sahur",
@@ -4904,99 +4901,95 @@ impl CrosshairApp {
                                         self.sync_quick_key_display_config();
                                         self.persist();
                                     }
-                                },
-                            );
-                        }
-
-                        ui.add_space(2.0);
-                        ui.allocate_ui_with_layout(
-                            vec2(92.0, 20.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                ui.add_space(1.0);
-                                ui.label(RichText::new("X").size(10.0));
-                                let x_changed = ui
-                                    .add_sized(
-                                        [26.0, 20.0],
-                                        egui::DragValue::new(&mut self.state.quick_key_display_x)
-                                            .speed(1.0),
-                                    )
-                                    .changed();
-                                ui.label(RichText::new("Y").size(10.0));
-                                let y_changed = ui
-                                    .add_sized(
-                                        [26.0, 20.0],
-                                        egui::DragValue::new(&mut self.state.quick_key_display_y)
-                                            .speed(1.0),
-                                    )
-                                    .changed();
-                                if x_changed || y_changed {
-                                    self.sync_quick_key_display_config();
-                                    self.persist();
                                 }
-                            },
-                        );
-
-                        ui.add_space(2.0);
-                        ui.allocate_ui_with_layout(
-                            vec2(92.0, 20.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                ui.add_space(4.0);
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Size",
-                                        "Size",
-                                    ))
-                                    .size(10.0),
-                                );
-                                let size_changed = ui
-                                    .add_sized(
-                                        [40.0, 20.0],
-                                        egui::DragValue::new(
-                                            &mut self.state.quick_key_display_size,
+                                
+                                ui.add_space(2.0);
+                                egui::Grid::new("quick-key-display-xy-grid")
+                                    .spacing(vec2(8.0, 4.0))
+                                    .show(ui, |ui| {
+                                        ui.label(RichText::new("X").size(10.0));
+                                        let x_changed = ui
+                                            .add_sized(
+                                                [146.0, 20.0],
+                                                egui::DragValue::new(&mut self.state.quick_key_display_x)
+                                                    .speed(1.0),
+                                            )
+                                            .changed();
+                                        ui.end_row();
+                                        ui.label(RichText::new("Y").size(10.0));
+                                        let y_changed = ui
+                                            .add_sized(
+                                                [146.0, 20.0],
+                                                egui::DragValue::new(&mut self.state.quick_key_display_y)
+                                                    .speed(1.0),
+                                            )
+                                            .changed();
+                                        ui.end_row();
+                                        if x_changed || y_changed {
+                                            self.sync_quick_key_display_config();
+                                            self.persist();
+                                        }
+                                    });
+                                
+                                ui.add_space(2.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Size",
+                                            "Size",
+                                        ))
+                                        .size(10.0),
+                                    );
+                                    let size_changed = ui
+                                        .add_sized(
+                                            [132.0, 20.0],
+                                            egui::DragValue::new(
+                                                &mut self.state.quick_key_display_size,
+                                            )
+                                            .range(18.0..=96.0)
+                                            .speed(1.0),
                                         )
-                                        .range(18.0..=96.0)
-                                        .speed(1.0),
+                                        .changed();
+                                    if size_changed {
+                                        self.sync_quick_key_display_config();
+                                        self.persist();
+                                    }
+                                });
+                                
+                                ui.add_space(4.0);
+                                if ui
+                                    .add_sized(
+                                        [164.0, 20.0],
+                                        Button::new(if is_pick_active {
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Picking...",
+                                                "Picking...",
+                                            )
+                                        } else {
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Pick point",
+                                                "Pick point",
+                                            )
+                                        }),
                                     )
-                                    .changed();
-                                if size_changed {
-                                    self.sync_quick_key_display_config();
-                                    self.persist();
+                                    .clicked()
+                                {
+                                    self.begin_image_search_capture(
+                                        ui.ctx(),
+                                        VisionCaptureTarget::QuickActionsKeyDisplayPosition,
+                                        VisionCaptureMode::SinglePixel,
+                                    );
                                 }
-                            },
-                        );
-
-                        ui.add_space(2.0);
-                        if ui
-                            .add_sized(
-                                [74.0, 20.0],
-                                Button::new(if is_pick_active {
-                                    Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Picking...",
-                                        "Picking...",
-                                    )
-                                } else {
-                                    Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Pick point",
-                                        "Pick point",
-                                    )
-                                }),
-                            )
-                            .clicked()
-                        {
-                            self.begin_image_search_capture(
-                                ui.ctx(),
-                                VisionCaptureTarget::QuickActionsKeyDisplayPosition,
-                                VisionCaptureMode::SinglePixel,
-                            );
-                        }
+                                false
+                            }).inner
+                        });
                     },
                 );
 
+                // ScreenDraw Action
                 ui.allocate_ui_with_layout(
                     vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
@@ -5019,9 +5012,9 @@ impl CrosshairApp {
                             .to_owned();
                         }
 
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
                         ui.allocate_ui_with_layout(
-                            vec2(92.0, 20.0),
+                            vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
                                 ui.add(egui::Label::new(RichText::new("Draw").size(11.0).color(
@@ -5034,140 +5027,156 @@ impl CrosshairApp {
                             },
                         );
 
-                        ui.add_space(2.0);
-                        let pass_changed = ui
-                            .checkbox(
-                                &mut self.state.quick_screen_draw_pass_trigger_through,
-                                RichText::new(Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Pass through",
-                                    "Pass through",
-                                ))
-                                .size(10.0),
-                            )
-                            .changed();
-                        if pass_changed {
-                            self.sync_quick_screen_draw_config();
-                            self.persist();
-                        }
-
-                        ui.add_space(2.0);
-                        let capture_active = self.capture_target.as_ref().is_some_and(|target| {
-                            matches!(target, CaptureRequest::QuickScreenDrawHotkey)
+                        // Popup settings
+                        let mut keep_open = false;
+                        render_popup(ui, &button_response, TitlebarQuickActionKind::ScreenDraw, &mut |ui| {
+                            ui.vertical_centered(|ui| {
+                                let pass_changed = ui
+                                    .checkbox(
+                                        &mut self.state.quick_screen_draw_pass_trigger_through,
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Pass through",
+                                            "Pass through",
+                                        ))
+                                        .size(10.0),
+                                    )
+                                    .changed();
+                                if pass_changed {
+                                    self.sync_quick_screen_draw_config();
+                                    self.persist();
+                                }
+                                
+                                ui.add_space(4.0);
+                                let capture_active = self.capture_target.as_ref().is_some_and(|target| {
+                                    matches!(target, CaptureRequest::QuickScreenDrawHotkey)
+                                });
+                                let preview_binding = if capture_active {
+                                    self.capture_hotkey_combo_keys
+                                        .as_ref()
+                                        .map(|keys| Self::hotkey_binding_from_combo_keys(keys.clone()))
+                                        .or_else(|| self.state.quick_screen_draw_hotkey.clone())
+                                } else {
+                                    self.state.quick_screen_draw_hotkey.clone()
+                                };
+                                let capture_time = ui.ctx().input(|input| input.time) as f32;
+                                let pulse = if capture_active {
+                                    0.5 + 0.5 * (capture_time * 6.0).sin().abs()
+                                } else {
+                                    0.0
+                                };
+                                let capture_fill = if capture_active {
+                                    Color32::from_rgba_premultiplied(
+                                        (88.0 + pulse * 28.0) as u8,
+                                        (84.0 + pulse * 28.0) as u8,
+                                        (44.0 + pulse * 10.0) as u8,
+                                        255,
+                                    )
+                                } else {
+                                    ui.visuals().widgets.inactive.bg_fill
+                                };
+                                let capture_stroke = if capture_active {
+                                    Color32::from_rgb(255, 232, 96)
+                                } else {
+                                    ui.visuals().widgets.inactive.bg_stroke.color
+                                };
+                                if ui
+                                    .add_sized(
+                                        [164.0, 22.0],
+                                        Button::new(Self::material_icon_text(0xe312, 14.0))
+                                            .fill(capture_fill)
+                                            .stroke(egui::Stroke::new(1.0, capture_stroke)),
+                                    )
+                                    .on_hover_text(if capture_active {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Cancel capture",
+                                            "Cancel capture",
+                                        )
+                                    } else {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Capture draw hotkey",
+                                            "Capture draw hotkey",
+                                        )
+                                    })
+                                    .clicked()
+                                {
+                                    if capture_active {
+                                        self.cancel_capture();
+                                    } else {
+                                        self.begin_capture(
+                                            CaptureRequest::QuickScreenDrawHotkey,
+                                            "Press the key that toggles screen drawing.".to_owned(),
+                                        );
+                                    }
+                                }
+                                
+                                ui.add_space(4.0);
+                                if let Some(binding) = preview_binding.as_ref() {
+                                    let label =
+                                        Self::format_binding_ui(self.state.ui_language, Some(binding));
+                                    let chip = if capture_active && self.capture_hotkey_combo_keys.is_some()
+                                    {
+                                        Button::new(RichText::new(label).monospace())
+                                            .min_size(vec2(164.0, 22.0))
+                                            .fill(Color32::from_rgba_premultiplied(72, 156, 116, 120))
+                                            .stroke(egui::Stroke::new(
+                                                1.0,
+                                                Color32::from_rgb(126, 224, 182),
+                                            ))
+                                    } else {
+                                        Button::new(RichText::new(label).monospace())
+                                            .min_size(vec2(164.0, 22.0))
+                                    };
+                                    let chip_response = ui.add_sized([164.0, 22.0], chip).on_hover_text(if capture_active {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Captured key preview",
+                                            "Captured key preview",
+                                        )
+                                    } else {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Click to clear this hotkey",
+                                            "Click to clear this hotkey",
+                                        )
+                                    });
+                                    if chip_response.clicked() && !capture_active {
+                                        self.state.quick_screen_draw_hotkey = None;
+                                        self.sync_quick_screen_draw_config();
+                                        self.persist();
+                                        self.status = "Cleared screen draw toggle key.".to_owned();
+                                    }
+                                } else {
+                                    ui.add_sized(
+                                        [164.0, 22.0],
+                                        egui::Label::new(
+                                            RichText::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Not set",
+                                                "Not set",
+                                            ))
+                                            .size(10.0)
+                                            .weak(),
+                                        ),
+                                    );
+                                }
+                                if capture_active {
+                                    keep_open = true;
+                                }
+                                capture_active
+                            }).inner
                         });
-                        let preview_binding = if capture_active {
-                            self.capture_hotkey_combo_keys
-                                .as_ref()
-                                .map(|keys| Self::hotkey_binding_from_combo_keys(keys.clone()))
-                                .or_else(|| self.state.quick_screen_draw_hotkey.clone())
-                        } else {
-                            self.state.quick_screen_draw_hotkey.clone()
-                        };
-                        let capture_time = ui.ctx().input(|input| input.time) as f32;
-                        let pulse = if capture_active {
-                            0.5 + 0.5 * (capture_time * 6.0).sin().abs()
-                        } else {
-                            0.0
-                        };
-                        let capture_fill = if capture_active {
-                            Color32::from_rgba_premultiplied(
-                                (88.0 + pulse * 28.0) as u8,
-                                (84.0 + pulse * 28.0) as u8,
-                                (44.0 + pulse * 10.0) as u8,
-                                255,
-                            )
-                        } else {
-                            ui.visuals().widgets.inactive.bg_fill
-                        };
-                        let capture_stroke = if capture_active {
-                            Color32::from_rgb(255, 232, 96)
-                        } else {
-                            ui.visuals().widgets.inactive.bg_stroke.color
-                        };
-                        if ui
-                            .add_sized(
-                                [28.0, 22.0],
-                                Button::new(Self::material_icon_text(0xe312, 14.0))
-                                    .fill(capture_fill)
-                                    .stroke(egui::Stroke::new(1.0, capture_stroke)),
-                            )
-                            .on_hover_text(if capture_active {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Cancel capture",
-                                    "Cancel capture",
-                                )
-                            } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Capture draw hotkey",
-                                    "Capture draw hotkey",
-                                )
-                            })
-                            .clicked()
-                        {
-                            if capture_active {
-                                self.cancel_capture();
-                            } else {
-                                self.begin_capture(
-                                    CaptureRequest::QuickScreenDrawHotkey,
-                                    "Press the key that toggles screen drawing.".to_owned(),
-                                );
-                            }
-                        }
-
-                        ui.add_space(4.0);
-                        if let Some(binding) = preview_binding.as_ref() {
-                            let label =
-                                Self::format_binding_ui(self.state.ui_language, Some(binding));
-                            let chip = if capture_active && self.capture_hotkey_combo_keys.is_some()
-                            {
-                                Button::new(RichText::new(label).monospace())
-                                    .min_size(vec2(0.0, 22.0))
-                                    .fill(Color32::from_rgba_premultiplied(72, 156, 116, 120))
-                                    .stroke(egui::Stroke::new(
-                                        1.0,
-                                        Color32::from_rgb(126, 224, 182),
-                                    ))
-                            } else {
-                                Button::new(RichText::new(label).monospace())
-                                    .min_size(vec2(0.0, 22.0))
-                            };
-                            let chip_response = ui.add(chip).on_hover_text(if capture_active {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Captured key preview",
-                                    "Captured key preview",
-                                )
-                            } else {
-                                Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Click to clear this hotkey",
-                                    "Click to clear this hotkey",
-                                )
-                            });
-                            if chip_response.clicked() && !capture_active {
-                                self.state.quick_screen_draw_hotkey = None;
-                                self.sync_quick_screen_draw_config();
-                                self.persist();
-                                self.status = "Cleared screen draw toggle key.".to_owned();
-                            }
-                        } else {
-                            ui.label(
-                                RichText::new(Self::tr_lang(
-                                    self.state.ui_language,
-                                    "Not set",
-                                    "Not set",
-                                ))
-                                .size(10.0)
-                                .weak(),
-                            );
+                        if keep_open {
+                            keep_menu_open = true;
                         }
                     },
                 );
             });
         keep_menu_open
     }
+
 
     fn top_tab_button(&self, text: RichText, selected: bool, emphasized: bool) -> Button<'static> {
         let (fill, stroke) = match (self.state.ui_theme, selected, emphasized) {

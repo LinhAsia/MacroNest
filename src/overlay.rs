@@ -13350,9 +13350,13 @@ mod windows_overlay {
             3.0 * scale
         };
 
-        // Pseudo-3D head turn animation offsets based on mouse offset
-        let look_x = (mouse_offset.0 * 2.2).clamp(-6.0, 6.0) * scale;
-        let look_y = (mouse_offset.1 * 1.8).clamp(-4.5, 4.5) * scale;
+        // Pseudo-3D head turn animation offsets based on typing/interaction state
+        let is_interacting = !held_keys.is_empty() || !held_mouse_buttons.is_empty() || paw_press > 0.05 * scale;
+        let (look_x, look_y) = if is_interacting {
+            (0.0, 4.5 * scale) // focus on the keyboard (looking down)
+        } else {
+            (0.0, 0.0) // look straight ahead normally
+        };
 
         // 1. Draw mascot body+ears then head+face (sitting BEHIND the desk)
         match mascot_style {
