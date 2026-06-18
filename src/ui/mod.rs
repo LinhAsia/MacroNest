@@ -11621,7 +11621,10 @@ impl eframe::App for CrosshairApp {
                                 display_name
                             ),
                             (OcrLanguageJobKind::Uninstall, false) => {
-                                format!("Removed OCR for {}.", display_name)
+                                format!(
+                                    "Removed OCR for {}. If Windows still shows the old OCR state briefly, press Refresh or reopen the app.",
+                                    display_name
+                                )
                             }
                         };
                         self.ocr_language_feedback = Some((false, self.status.clone()));
