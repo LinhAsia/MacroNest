@@ -1191,17 +1191,31 @@ impl CrosshairApp {
             .send(OverlayCommand::UpdateMacroPresets(macro_groups));
     }
 
-    fn sync_active_macro_folder_scope(&self) {
-        let active_folder_scope = if self.macro_folders_panel_open {
-            self.active_macro_folder_view.filter(|folder_id| {
+    fn resolved_active_macro_folder_view(&self) -> Option<u32> {
+        if !self.macro_folders_panel_open {
+            return None;
+        }
+        self.active_macro_folder_view.filter(|folder_id| {
+            self.state
+                .macro_folders
+                .iter()
+                .any(|folder| folder.id == *folder_id)
+        })
+    }
+
+    fn active_macro_folder_name(&self) -> Option<String> {
+        self.resolved_active_macro_folder_view()
+            .and_then(|folder_id| {
                 self.state
                     .macro_folders
                     .iter()
-                    .any(|folder| folder.id == *folder_id)
+                    .find(|folder| folder.id == folder_id)
+                    .map(|folder| folder.name.clone())
             })
-        } else {
-            None
-        };
+    }
+
+    fn sync_active_macro_folder_scope(&self) {
+        let active_folder_scope = self.resolved_active_macro_folder_view();
         let _ = self
             .overlay_tx
             .send(OverlayCommand::SetActiveMacroFolderScope(
@@ -8846,6 +8860,32 @@ impl CrosshairApp {
         self.active_macro_folder_view = folder_id;
         self.selected_macro_groups.clear();
         self.sync_active_macro_folder_scope();
+    }
+
+    fn open_macro_folder_mode(&mut self) {
+        self.macro_folders_panel_open = true;
+        self.set_active_macro_folder_view(None);
+    }
+
+    fn close_macro_folder_mode(&mut self) {
+        self.macro_folders_panel_open = false;
+        self.set_active_macro_folder_view(None);
+    }
+
+    fn normalize_macro_folder_view_state(&mut self) {
+        if !self.macro_folders_panel_open {
+            if self.active_macro_folder_view.is_some() {
+                self.set_active_macro_folder_view(None);
+            } else {
+                self.sync_active_macro_folder_scope();
+            }
+            return;
+        }
+        if self.active_macro_folder_view.is_some()
+            && self.resolved_active_macro_folder_view().is_none()
+        {
+            self.set_active_macro_folder_view(None);
+        }
     }
 
     fn copy_selected_macro_groups(&mut self) {

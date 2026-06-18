@@ -2677,33 +2677,11 @@ impl CrosshairApp {
                 .insert_temp(egui::Id::new("arrow_down_pressed"), arrow_down_pressed);
             mem.data.insert_temp(egui::Id::new("any_popup_open"), false);
         });
-        let active_folder_for_controls = if self.macro_folders_panel_open {
-            self.active_macro_folder_view.filter(|folder_id| {
-                self.state
-                    .macro_folders
-                    .iter()
-                    .any(|folder| folder.id == *folder_id)
-            })
-        } else {
-            None
-        };
-        if self.active_macro_folder_view.is_some() && active_folder_for_controls.is_none() {
-            self.active_macro_folder_view = None;
-            self.sync_active_macro_folder_scope();
-        }
-        let active_folder_name = if self.macro_folders_panel_open {
-            self.active_macro_folder_view.and_then(|folder_id| {
-                self.state
-                    .macro_folders
-                    .iter()
-                    .find(|folder| folder.id == folder_id)
-                    .map(|folder| folder.name.clone())
-            })
-        } else {
-            None
-        };
+        self.normalize_macro_folder_view_state();
+        let active_folder_for_controls = self.resolved_active_macro_folder_view();
+        let active_folder_name = self.active_macro_folder_name();
         let paste_target_folder = if active_folder_name.is_some() {
-            self.active_macro_folder_view
+            active_folder_for_controls
         } else {
             None
         };
@@ -3221,13 +3199,14 @@ impl CrosshairApp {
             ))
             .clicked()
             {
-                self.macro_folders_panel_open = !self.macro_folders_panel_open;
-                if !self.macro_folders_panel_open {
-                    self.set_active_macro_folder_view(None);
+                if self.macro_folders_panel_open {
+                    self.close_macro_folder_mode();
+                } else {
+                    self.open_macro_folder_mode();
                 }
             }
             if self.macro_folders_panel_open {
-                let back_to_folder_list = self.active_macro_folder_view.is_some();
+                let back_to_folder_list = active_folder_for_controls.is_some();
                 if ui
                     .add_sized(
                         [28.0, 28.0],
@@ -3256,18 +3235,10 @@ impl CrosshairApp {
                     if back_to_folder_list {
                         self.set_active_macro_folder_view(None);
                     } else {
-                        self.macro_folders_panel_open = false;
-                        self.set_active_macro_folder_view(None);
+                        self.close_macro_folder_mode();
                     }
                 }
-                if let Some(folder_id) = self.active_macro_folder_view {
-                    let folder_name = self
-                        .state
-                        .macro_folders
-                        .iter()
-                        .find(|f| f.id == folder_id)
-                        .map(|f| f.name.clone())
-                        .unwrap_or_default();
+                if let Some(folder_name) = active_folder_name.clone() {
                     ui.label(
                         RichText::new(folder_name)
                             .strong()
@@ -3290,8 +3261,7 @@ impl CrosshairApp {
                     {
                         self.add_macro_folder();
                         self.persist();
-                        self.macro_folders_panel_open = true;
-                        self.active_macro_folder_view = None;
+                        self.open_macro_folder_mode();
                     }
                 }
             }
@@ -3370,23 +3340,8 @@ impl CrosshairApp {
         let mut cancel_mouse_path_draw_capture = false;
         let capture_target_snapshot = self.capture_target.clone();
         let capture_hotkey_combo_keys_snapshot = self.capture_hotkey_combo_keys.clone();
-        let active_folder_name = if self.macro_folders_panel_open {
-            self.active_macro_folder_view.and_then(|folder_id| {
-                self.state
-                    .macro_folders
-                    .iter()
-                    .find(|folder| folder.id == folder_id)
-                    .map(|folder| folder.name.clone())
-            })
-        } else {
-            None
-        };
-        if !self.macro_folders_panel_open {
-            self.active_macro_folder_view = None;
-        } else if self.active_macro_folder_view.is_some() && active_folder_name.is_none() {
-            self.active_macro_folder_view = None;
-            self.sync_active_macro_folder_scope();
-        }
+        let active_folder_name = self.active_macro_folder_name();
+        self.normalize_macro_folder_view_state();
         if false {
             ui.horizontal_wrapped(|ui| {
             let master_label = if self.state.macros_master_enabled {
@@ -3519,9 +3474,10 @@ impl CrosshairApp {
                 .on_hover_text(Self::tr_lang(language, "Show / hide macro folders", "Show / hide macro folders"))
                 .clicked()
             {
-                self.macro_folders_panel_open = !self.macro_folders_panel_open;
-                if !self.macro_folders_panel_open {
-                    self.set_active_macro_folder_view(None);
+                if self.macro_folders_panel_open {
+                    self.close_macro_folder_mode();
+                } else {
+                    self.open_macro_folder_mode();
                 }
             }
             // Render Global Constants on toolbar
@@ -3819,11 +3775,12 @@ impl CrosshairApp {
             AddMacroGroup(Option<u32>),
             MacroGroup(usize),
         }
+        let active_folder_view = self.resolved_active_macro_folder_view();
         let search_query = self.macro_preset_search_query.trim().to_owned();
         Self::sort_macro_groups(&mut self.state.macro_groups);
         let mut render_items = Vec::new();
         if self.macro_folders_panel_open {
-            if let Some(active_folder_id) = self.active_macro_folder_view {
+            if let Some(active_folder_id) = active_folder_view {
                 for (index, group) in self.state.macro_groups.iter().enumerate() {
                     if group.folder_id == Some(active_folder_id) {
                         if Self::macro_group_matches_search_query(group, &search_query) {
@@ -3872,7 +3829,7 @@ impl CrosshairApp {
             .filter(|group| group.folder_id.is_none())
             .count();
         let active_folder_group_count = self
-            .active_macro_folder_view
+            .resolved_active_macro_folder_view()
             .map(|folder_id| {
                 self.state
                     .macro_groups
@@ -3947,9 +3904,8 @@ impl CrosshairApp {
                         "Không có macro group ngoài folder nào khớp bộ lọc hiện tại.",
                     ));
                 }
-            } else if self.active_macro_folder_view.is_some() {
+            } else if let Some(folder_id) = active_folder_view {
                 if active_folder_group_count == 0 {
-                    let folder_id = self.active_macro_folder_view.unwrap();
                     let add_first_group = Self::show_preset_card(ui, false, |ui| {
                         ui.vertical_centered(|ui| {
                             ui.add_space(10.0);
