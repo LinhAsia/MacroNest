@@ -5660,6 +5660,8 @@ mod windows_overlay {
         w: f32,
         h: f32,
     }
+    unsafe impl Send for QuickKeyDisplayMascotKey {}
+    unsafe impl Sync for QuickKeyDisplayMascotKey {}
 
     fn quick_key_display_mascot_scale(font_size: f32) -> f32 {
         (font_size / 36.0).clamp(0.72, 2.4)
@@ -5697,108 +5699,104 @@ mod windows_overlay {
         }
     }
 
-    fn quick_key_display_mascot_keys() -> Vec<QuickKeyDisplayMascotKey> {
-        let mut keys = Vec::new();
-        let base_x = 95.0;
-        let base_y = 161.0;
-        let key_h = 10.5;
-        let gap = 2.3;
-        let row_step = key_h + gap;
-        let unit_w = 14.0;
+    fn quick_key_display_mascot_keys() -> &'static [QuickKeyDisplayMascotKey] {
+        static KEYS: Lazy<Vec<QuickKeyDisplayMascotKey>> = Lazy::new(|| {
+            let mut keys = Vec::new();
+            let base_x = 95.0;
+            let base_y = 161.0;
+            let key_h = 10.5;
+            let gap = 2.3;
+            let row_step = key_h + gap;
+            let unit_w = 14.0;
 
-        let mut add_key = |label: &'static str, aliases: &'static [&'static str], u: f32, span: f32, row_idx: f32| {
-            let x = base_x + u * unit_w;
-            let y = base_y + row_idx * row_step;
-            let w = span * unit_w - gap;
-            keys.push(QuickKeyDisplayMascotKey {
-                label,
-                aliases,
-                x,
-                y,
-                w,
-                h: key_h,
-            });
-        };
+            let mut add_key = |label: &'static str, aliases: &'static [&'static str], u: f32, span: f32, row_idx: f32| {
+                let x = base_x + u * unit_w;
+                let y = base_y + row_idx * row_step;
+                let w = span * unit_w - gap;
+                keys.push(QuickKeyDisplayMascotKey { label, aliases, x, y, w, h: key_h });
+            };
 
-        // Row 1
-        add_key("Esc", &["Escape"], 0.0, 1.0, 0.0);
-        add_key("1", &["1"], 1.0, 1.0, 0.0);
-        add_key("2", &["2"], 2.0, 1.0, 0.0);
-        add_key("3", &["3"], 3.0, 1.0, 0.0);
-        add_key("4", &["4"], 4.0, 1.0, 0.0);
-        add_key("5", &["5"], 5.0, 1.0, 0.0);
-        add_key("6", &["6"], 6.0, 1.0, 0.0);
-        add_key("7", &["7"], 7.0, 1.0, 0.0);
-        add_key("8", &["8"], 8.0, 1.0, 0.0);
-        add_key("9", &["9"], 9.0, 1.0, 0.0);
-        add_key("0", &["0"], 10.0, 1.0, 0.0);
-        add_key("-", &["-"], 11.0, 1.0, 0.0);
-        add_key("=", &["="], 12.0, 1.0, 0.0);
-        add_key("Bk", &["Backspace"], 13.0, 2.0, 0.0);
-        add_key("Ins", &["Insert"], 15.0, 1.0, 0.0);
+            // Row 1
+            add_key("Esc", &["Escape"], 0.0, 1.0, 0.0);
+            add_key("1", &["1"], 1.0, 1.0, 0.0);
+            add_key("2", &["2"], 2.0, 1.0, 0.0);
+            add_key("3", &["3"], 3.0, 1.0, 0.0);
+            add_key("4", &["4"], 4.0, 1.0, 0.0);
+            add_key("5", &["5"], 5.0, 1.0, 0.0);
+            add_key("6", &["6"], 6.0, 1.0, 0.0);
+            add_key("7", &["7"], 7.0, 1.0, 0.0);
+            add_key("8", &["8"], 8.0, 1.0, 0.0);
+            add_key("9", &["9"], 9.0, 1.0, 0.0);
+            add_key("0", &["0"], 10.0, 1.0, 0.0);
+            add_key("-", &["-"], 11.0, 1.0, 0.0);
+            add_key("=", &["="], 12.0, 1.0, 0.0);
+            add_key("Bk", &["Backspace"], 13.0, 2.0, 0.0);
+            add_key("Ins", &["Insert"], 15.0, 1.0, 0.0);
 
-        // Row 2
-        add_key("Tab", &["Tab"], 0.0, 1.5, 1.0);
-        add_key("Q", &["Q"], 1.5, 1.0, 1.0);
-        add_key("W", &["W"], 2.5, 1.0, 1.0);
-        add_key("E", &["E"], 3.5, 1.0, 1.0);
-        add_key("R", &["R"], 4.5, 1.0, 1.0);
-        add_key("T", &["T"], 5.5, 1.0, 1.0);
-        add_key("Y", &["Y"], 6.5, 1.0, 1.0);
-        add_key("U", &["U"], 7.5, 1.0, 1.0);
-        add_key("I", &["I"], 8.5, 1.0, 1.0);
-        add_key("O", &["O"], 9.5, 1.0, 1.0);
-        add_key("P", &["P"], 10.5, 1.0, 1.0);
-        add_key("[", &["["], 11.5, 1.0, 1.0);
-        add_key("]", &["]"], 12.5, 1.0, 1.0);
-        add_key("\\", &["\\"], 13.5, 1.5, 1.0);
-        add_key("Del", &["Delete"], 15.0, 1.0, 1.0);
+            // Row 2
+            add_key("Tab", &["Tab"], 0.0, 1.5, 1.0);
+            add_key("Q", &["Q"], 1.5, 1.0, 1.0);
+            add_key("W", &["W"], 2.5, 1.0, 1.0);
+            add_key("E", &["E"], 3.5, 1.0, 1.0);
+            add_key("R", &["R"], 4.5, 1.0, 1.0);
+            add_key("T", &["T"], 5.5, 1.0, 1.0);
+            add_key("Y", &["Y"], 6.5, 1.0, 1.0);
+            add_key("U", &["U"], 7.5, 1.0, 1.0);
+            add_key("I", &["I"], 8.5, 1.0, 1.0);
+            add_key("O", &["O"], 9.5, 1.0, 1.0);
+            add_key("P", &["P"], 10.5, 1.0, 1.0);
+            add_key("[", &["["], 11.5, 1.0, 1.0);
+            add_key("]", &["]"], 12.5, 1.0, 1.0);
+            add_key("\\", &["\\"], 13.5, 1.5, 1.0);
+            add_key("Del", &["Delete"], 15.0, 1.0, 1.0);
 
-        // Row 3
-        add_key("Caps", &["CapsLock"], 0.0, 1.75, 2.0);
-        add_key("A", &["A"], 1.75, 1.0, 2.0);
-        add_key("S", &["S"], 2.75, 1.0, 2.0);
-        add_key("D", &["D"], 3.75, 1.0, 2.0);
-        add_key("F", &["F"], 4.75, 1.0, 2.0);
-        add_key("G", &["G"], 5.75, 1.0, 2.0);
-        add_key("H", &["H"], 6.75, 1.0, 2.0);
-        add_key("J", &["J"], 7.75, 1.0, 2.0);
-        add_key("K", &["K"], 8.75, 1.0, 2.0);
-        add_key("L", &["L"], 9.75, 1.0, 2.0);
-        add_key(";", &[";"], 10.75, 1.0, 2.0);
-        add_key("'", &["'"], 11.75, 1.0, 2.0);
-        add_key("Enter", &["Enter"], 12.75, 2.25, 2.0);
-        add_key("PgUp", &["PageUp", "Prior"], 15.0, 1.0, 2.0);
+            // Row 3
+            add_key("Caps", &["CapsLock"], 0.0, 1.75, 2.0);
+            add_key("A", &["A"], 1.75, 1.0, 2.0);
+            add_key("S", &["S"], 2.75, 1.0, 2.0);
+            add_key("D", &["D"], 3.75, 1.0, 2.0);
+            add_key("F", &["F"], 4.75, 1.0, 2.0);
+            add_key("G", &["G"], 5.75, 1.0, 2.0);
+            add_key("H", &["H"], 6.75, 1.0, 2.0);
+            add_key("J", &["J"], 7.75, 1.0, 2.0);
+            add_key("K", &["K"], 8.75, 1.0, 2.0);
+            add_key("L", &["L"], 9.75, 1.0, 2.0);
+            add_key(";", &[";"], 10.75, 1.0, 2.0);
+            add_key("'", &["'"], 11.75, 1.0, 2.0);
+            add_key("Enter", &["Enter"], 12.75, 2.25, 2.0);
+            add_key("PgUp", &["PageUp", "Prior"], 15.0, 1.0, 2.0);
 
-        // Row 4
-        add_key("Shift", &["Shift"], 0.0, 2.25, 3.0);
-        add_key("Z", &["Z"], 2.25, 1.0, 3.0);
-        add_key("X", &["X"], 3.25, 1.0, 3.0);
-        add_key("C", &["C"], 4.25, 1.0, 3.0);
-        add_key("V", &["V"], 5.25, 1.0, 3.0);
-        add_key("B", &["B"], 6.25, 1.0, 3.0);
-        add_key("N", &["N"], 7.25, 1.0, 3.0);
-        add_key("M", &["M"], 8.25, 1.0, 3.0);
-        add_key(",", &[","], 9.25, 1.0, 3.0);
-        add_key(".", &["."], 10.25, 1.0, 3.0);
-        add_key("/", &["/"], 11.25, 1.0, 3.0);
-        add_key("Shift", &["Shift"], 12.25, 1.75, 3.0);
-        add_key("Up", &["Up", "ArrowUp"], 14.0, 1.0, 3.0);
-        add_key("PgDn", &["PageDown", "Next"], 15.0, 1.0, 3.0);
+            // Row 4
+            add_key("Shift", &["Shift"], 0.0, 2.25, 3.0);
+            add_key("Z", &["Z"], 2.25, 1.0, 3.0);
+            add_key("X", &["X"], 3.25, 1.0, 3.0);
+            add_key("C", &["C"], 4.25, 1.0, 3.0);
+            add_key("V", &["V"], 5.25, 1.0, 3.0);
+            add_key("B", &["B"], 6.25, 1.0, 3.0);
+            add_key("N", &["N"], 7.25, 1.0, 3.0);
+            add_key("M", &["M"], 8.25, 1.0, 3.0);
+            add_key(",", &[","], 9.25, 1.0, 3.0);
+            add_key(".", &["."], 10.25, 1.0, 3.0);
+            add_key("/", &["/"], 11.25, 1.0, 3.0);
+            add_key("Shift", &["Shift"], 12.25, 1.75, 3.0);
+            add_key("Up", &["Up", "ArrowUp"], 14.0, 1.0, 3.0);
+            add_key("PgDn", &["PageDown", "Next"], 15.0, 1.0, 3.0);
 
-        // Row 5
-        add_key("Ctrl", &["LCtrl"], 0.0, 1.25, 4.0);
-        add_key("Win", &["Win"], 1.25, 1.25, 4.0);
-        add_key("Alt", &["LAlt"], 2.5, 1.25, 4.0);
-        add_key("Space", &["Space"], 3.75, 6.25, 4.0);
-        add_key("Alt", &["RAlt"], 10.0, 1.0, 4.0);
-        add_key("Fn", &["Apps"], 11.0, 1.0, 4.0);
-        add_key("Ctrl", &["RCtrl"], 12.0, 1.0, 4.0);
-        add_key("Left", &["Left", "ArrowLeft"], 13.0, 1.0, 4.0);
-        add_key("Down", &["Down", "ArrowDown"], 14.0, 1.0, 4.0);
-        add_key("Right", &["Right", "ArrowRight"], 15.0, 1.0, 4.0);
+            // Row 5
+            add_key("Ctrl", &["LCtrl"], 0.0, 1.25, 4.0);
+            add_key("Win", &["Win"], 1.25, 1.25, 4.0);
+            add_key("Alt", &["LAlt"], 2.5, 1.25, 4.0);
+            add_key("Space", &["Space"], 3.75, 6.25, 4.0);
+            add_key("Alt", &["RAlt"], 10.0, 1.0, 4.0);
+            add_key("Fn", &["Apps"], 11.0, 1.0, 4.0);
+            add_key("Ctrl", &["RCtrl"], 12.0, 1.0, 4.0);
+            add_key("Left", &["Left", "ArrowLeft"], 13.0, 1.0, 4.0);
+            add_key("Down", &["Down", "ArrowDown"], 14.0, 1.0, 4.0);
+            add_key("Right", &["Right", "ArrowRight"], 15.0, 1.0, 4.0);
 
-        keys
+            keys
+        });
+        &KEYS
     }
 
     fn quick_key_display_alias_match(key_name: &str, aliases: &[&str]) -> bool {
@@ -13345,7 +13343,7 @@ mod windows_overlay {
 
         // 4. Mouse and Keyboard keys logic
         let keys = quick_key_display_mascot_keys();
-        
+
         // Mouse active state tracking
         let mouse_active = (mouse_offset.0.abs() + mouse_offset.1.abs() > 0.05) || !held_mouse_buttons.is_empty();
 
@@ -13353,66 +13351,43 @@ mod windows_overlay {
         let mouse_flat_y = keyboard_top + 23.0 + mouse_offset.1 * 0.56;
         let mouse_projected = project_point(mouse_flat_x, mouse_flat_y);
 
-        // Detect mouse hover over the mascot window to trigger "reach towards cursor" animation
-        let mut cursor = POINT::default();
-        let hovered = if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
-            let rel_x = cursor.x - window_x;
-            let rel_y = cursor.y - window_y;
-            rel_x >= 0 && rel_x < width && rel_y >= 0 && rel_y < height
-        } else {
-            false
-        };
-
-        let (mut left_paw_target, mut right_paw_target) = if hovered {
-            let cx = (cursor.x - window_x) as f32;
-            let cy = (cursor.y - window_y) as f32;
-            ((cx - 12.0 * scale, cy), (cx + 12.0 * scale, cy))
-        } else {
-            let l_target = if mouse_active {
-                mouse_projected
-            } else {
-                project_point(130.0, 164.0)
-            };
-            let r_target = project_point(214.0, 164.0);
-            (l_target, r_target)
-        };
+        let l_target = if mouse_active { mouse_projected } else { project_point(130.0, 164.0) };
+        let mut left_paw_target = l_target;
+        let mut right_paw_target = project_point(214.0, 164.0);
 
         let mut left_paw_strength = 0.0f32;
         let mut right_paw_strength = 0.0f32;
 
         let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
 
-        for key in &keys {
+        for key in keys {
             let strength =
                 quick_key_display_mascot_key_strength(key.aliases, &held_keys, entries, now);
             let glow = strength.clamp(0.0, 1.0);
-            
+
             // Project keycap's midpoint for target paw alignment
             let key_center_x = key.x + key.w * 0.5;
             let key_target_y = key.y - 3.0 + key.h * 0.22;
             let key_proj_target = project_point(key_center_x, key_target_y);
 
-            // Attract paws only when NOT hovered (hover cursor tracking takes priority!)
-            if glow > 0.0 && !hovered {
+            if glow > 0.0 {
                 if mouse_active {
-                    // Left hand is holding the mouse, so right hand handles ALL keypresses!
+                    // Left hand is on mouse, right hand handles all keypresses
                     if glow > right_paw_strength {
                         right_paw_target = key_proj_target;
                         right_paw_strength = glow;
                     }
                 } else {
-                    // Both hands are on the keyboard, split keys by midpoint
+                    // Both hands on keyboard, split by midpoint
                     let keyboard_mid_x = keyboard_left + keyboard_width * 0.5;
                     if key_center_x < keyboard_mid_x {
                         if glow > left_paw_strength {
                             left_paw_target = key_proj_target;
                             left_paw_strength = glow;
                         }
-                    } else {
-                        if glow > right_paw_strength {
-                            right_paw_target = key_proj_target;
-                            right_paw_strength = glow;
-                        }
+                    } else if glow > right_paw_strength {
+                        right_paw_target = key_proj_target;
+                        right_paw_strength = glow;
                     }
                 }
             }
@@ -13656,28 +13631,38 @@ mod windows_overlay {
         let old_text_bitmap = SelectObject(text_mem_dc, HGDIOBJ(text_bitmap.0));
         let text_pixels = std::slice::from_raw_parts_mut(text_bits_ptr as *mut u8, bytes_len);
 
-        let font_name = "Segoe UI"
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
         let key_font_size = (7.0 * scale).round() as i32;
-        let font = CreateFontW(
-            -key_font_size.max(1),
-            0,
-            0,
-            0,
-            FW_BOLD.0 as i32,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            ANTIALIASED_QUALITY,
-            FF_DONTCARE.0 as u32,
-            PCWSTR(font_name.as_ptr()),
-        );
-        let old_font = SelectObject(text_mem_dc, HGDIOBJ(font.0));
+        // Cache font per-thread to avoid kernel object creation every frame.
+        // Safety: this thread_local is only accessed from the overlay paint thread (single-threaded GDI context).
+        thread_local! {
+            static CACHED_FONT: std::cell::Cell<(i32, isize)> = const { std::cell::Cell::new((0, 0)) };
+        }
+        let font_handle = CACHED_FONT.with(|cell| {
+            let (cached_size, cached_raw) = cell.get();
+            if cached_size == key_font_size && cached_raw != 0 {
+                windows::Win32::Graphics::Gdi::HFONT(cached_raw as *mut c_void)
+            } else {
+                // Delete old cached font if any
+                if cached_raw != 0 {
+                    let _ = DeleteObject(HGDIOBJ(cached_raw as *mut c_void));
+                }
+                let font_name_buf: Vec<u16> = "Segoe UI"
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+                let new_font = CreateFontW(
+                    -key_font_size.max(1), 0, 0, 0,
+                    FW_BOLD.0 as i32, 0, 0, 0,
+                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                    CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+                    FF_DONTCARE.0 as u32,
+                    PCWSTR(font_name_buf.as_ptr()),
+                );
+                cell.set((key_font_size, new_font.0 as isize));
+                new_font
+            }
+        });
+        let old_font = SelectObject(text_mem_dc, HGDIOBJ(font_handle.0));
         let _ = SetBkMode(text_mem_dc, TRANSPARENT);
 
         // Render each run separately in white, then alpha mask it with the text color
@@ -13833,7 +13818,7 @@ mod windows_overlay {
             ULW_ALPHA,
         );
         let _ = SelectObject(text_mem_dc, old_font);
-        let _ = DeleteObject(HGDIOBJ(font.0));
+        // Font is cached in thread_local; do not delete it here.
         let _ = SelectObject(text_mem_dc, old_text_bitmap);
         let _ = DeleteObject(HGDIOBJ(text_bitmap.0));
         let _ = DeleteDC(text_mem_dc);
