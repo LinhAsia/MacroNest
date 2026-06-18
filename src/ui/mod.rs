@@ -4143,7 +4143,11 @@ impl CrosshairApp {
                     });
                 
                 // If the pointer is over the popup or its inner content, keep it active
-                let is_popup_hovered = ui.rect_contains_pointer(content_rect) || area_response.inner;
+                let is_popup_hovered = if let Some(mouse_pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
+                    content_rect.contains(mouse_pos)
+                } else {
+                    false
+                } || area_response.inner;
                 if is_popup_hovered {
                     ui.ctx().data_mut(|data| {
                         data.insert_temp(active_qa_time_id, current_time);
