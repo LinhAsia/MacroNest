@@ -87,7 +87,7 @@ mod windows_overlay {
                     ClientToScreen, CreateCompatibleDC, CreateDIBSection, CreateFontW,
                     CreateRectRgn, DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
                     DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint,
-                    FF_DONTCARE, FW_MEDIUM, GetDC, GetMonitorInfoW, HDC, HGDIOBJ,
+                    FF_DONTCARE, FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW, HDC, HGDIOBJ,
                     MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow, OUT_DEFAULT_PRECIS,
                     PAINTSTRUCT, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetTextColor,
                     SetWindowRgn, StretchDIBits, TRANSPARENT,
@@ -128,23 +128,23 @@ mod windows_overlay {
                 WindowsAndMessaging::{
                     AppendMenuW, CREATESTRUCTW, CallNextHookEx, CreatePopupMenu, CreateWindowExW,
                     DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW,
-                    EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWLP_USERDATA, GetAncestor,
+                    EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor,
                     GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
-                    GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
-                    GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTTRANSPARENT, HWND_TOPMOST,
+                    GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
+                    GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTCAPTION, HTTRANSPARENT, HWND_TOPMOST,
                     IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE,
                     LoadCursorW, LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG,
                     MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN,
                     SM_CYSCREEN, SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE,
-                    SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+                    SW_SHOWNA, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
                     SWP_SHOWWINDOW, SetCursorPos, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
-                    SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
+                    SetWindowLongW, SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
                     TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
                     UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
                     WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
-                    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
+                    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_EXITSIZEMOVE, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
                     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-                    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCHITTEST,
+                    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE, WM_NCHITTEST,
                     WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER,
                     WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION, WS_EX_LAYERED,
                     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
@@ -851,6 +851,10 @@ mod windows_overlay {
             target: MouseMoveAbsoluteCaptureTarget,
             result: NativeCaptureResult,
             capture_frame: Option<crate::window_list::ScreenCaptureFrame>,
+        },
+        MascotDragged {
+            x: i32,
+            y: i32,
         },
     }
 
@@ -2434,6 +2438,16 @@ mod windows_overlay {
                 CONTROLLER_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
                 if let Some(runtime) = runtime_mut(hwnd) {
                     // let _ = add_tray_icon(hwnd); // Removed: Tray icon only appears when hidden
+                    SetWindowLongPtrW(
+                        runtime.hud_hwnd,
+                        WINDOW_LONG_PTR_INDEX(GWLP_USERDATA.0),
+                        runtime as *mut Runtime as isize,
+                    );
+                    SetWindowLongPtrW(
+                        runtime.key_display_hwnd,
+                        WINDOW_LONG_PTR_INDEX(GWLP_USERDATA.0),
+                        runtime as *mut Runtime as isize,
+                    );
 
                     let _ =
                         RegisterHotKey(Some(hwnd), HOTKEY_ID, MOD_CONTROL | MOD_ALT, b'X' as u32);
@@ -2821,16 +2835,56 @@ mod windows_overlay {
     unsafe extern "system" fn hud_wnd_proc(
         hwnd: HWND,
         msg: u32,
-        _wparam: WPARAM,
-        _lparam: LPARAM,
+        wparam: WPARAM,
+        lparam: LPARAM,
     ) -> LRESULT {
         match msg {
             WM_NCHITTEST => {
-                return LRESULT(HTTRANSPARENT as isize);
+                if let Some(runtime) = runtime_mut(hwnd) {
+                    if hwnd == runtime.key_display_hwnd
+                        && runtime.quick_key_display_enabled
+                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
+                    {
+                        return LRESULT(HTCAPTION as isize);
+                    }
+                }
+                LRESULT(HTTRANSPARENT as isize)
+            }
+
+            WM_MOVE => {
+                if let Some(runtime) = runtime_mut(hwnd) {
+                    if hwnd == runtime.key_display_hwnd
+                        && runtime.quick_key_display_enabled
+                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
+                    {
+                        let x = (lparam.0 & 0xffff) as i16 as i32;
+                        let y = ((lparam.0 >> 16) & 0xffff) as i16 as i32;
+                        let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+                        let (width, height) = quick_key_display_mascot_layout_size(font_size);
+                        runtime.quick_key_display_center_x = x + (width / 2);
+                        runtime.quick_key_display_center_y = y + (height / 2);
+                    }
+                }
+                LRESULT(0)
+            }
+
+            WM_EXITSIZEMOVE => {
+                if let Some(runtime) = runtime_mut(hwnd) {
+                    if hwnd == runtime.key_display_hwnd
+                        && runtime.quick_key_display_enabled
+                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
+                    {
+                        let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
+                            x: runtime.quick_key_display_center_x,
+                            y: runtime.quick_key_display_center_y,
+                        });
+                    }
+                }
+                LRESULT(0)
             }
 
             WM_MOUSEACTIVATE => {
-                return LRESULT(MA_NOACTIVATE as isize);
+                LRESULT(MA_NOACTIVATE as isize)
             }
 
             windows::Win32::UI::WindowsAndMessaging::WM_PAINT => {
@@ -2840,7 +2894,7 @@ mod windows_overlay {
                 LRESULT(0)
             }
 
-            _ => DefWindowProcW(hwnd, msg, _wparam, _lparam),
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
 
@@ -6501,6 +6555,22 @@ mod windows_overlay {
                         runtime.quick_key_display_mouse_velocity = (0.0, 0.0);
                         runtime.quick_key_display_last_cursor_pos = None;
                     }
+                    let mut ex_style = GetWindowLongW(runtime.key_display_hwnd, GWL_EXSTYLE) as u32;
+                    if enabled && mode == QuickKeyDisplayMode::Mascot {
+                        ex_style &= !WS_EX_TRANSPARENT.0;
+                    } else {
+                        ex_style |= WS_EX_TRANSPARENT.0;
+                    }
+                    let _ = SetWindowLongW(runtime.key_display_hwnd, GWL_EXSTYLE, ex_style as i32);
+                    let _ = SetWindowPos(
+                        runtime.key_display_hwnd,
+                        None,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
+                    );
                     let _ = refresh_quick_key_display(runtime);
                 }
 
@@ -12221,6 +12291,34 @@ mod windows_overlay {
         }
     }
 
+    fn stroke_skia_circle(
+        pixmap: &mut tiny_skia::Pixmap,
+        center_x: f32,
+        center_y: f32,
+        radius: f32,
+        stroke_width: f32,
+        color: [u8; 4],
+    ) {
+        if let Some(path) = tiny_skia::PathBuilder::from_circle(center_x, center_y, radius) {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color(tiny_skia::Color::from_rgba8(
+                color[0], color[1], color[2], color[3],
+            ));
+            paint.anti_alias = true;
+            let stroke = tiny_skia::Stroke {
+                width: stroke_width,
+                ..Default::default()
+            };
+            pixmap.stroke_path(
+                &path,
+                &paint,
+                &stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    }
+
     fn fill_skia_rounded_rect(
         pixmap: &mut tiny_skia::Pixmap,
         left: f32,
@@ -12721,12 +12819,7 @@ mod windows_overlay {
 
         let scale = quick_key_display_mascot_scale(font_size);
         let now = Instant::now();
-        let epoch_t = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|value| value.as_secs_f32())
-            .unwrap_or(0.0);
-        let idle_bob = (epoch_t * 2.5).sin() * 2.2 * scale;
-        let ear_wiggle = (epoch_t * 3.3).sin() * 1.2 * scale;
+        
         let recent_pulse = entries.iter().fold(0.0f32, |acc, entry| {
             let age = now
                 .saturating_duration_since(entry.shown_at)
@@ -12743,251 +12836,342 @@ mod windows_overlay {
             )
         };
 
-        let desk_left = 42.0 * scale;
-        let desk_top = 150.0 * scale;
-        let desk_width = 334.0 * scale;
-        let desk_height = 96.0 * scale;
-        let keyboard_left = 92.0 * scale;
-        let keyboard_top = 166.0 * scale;
-        let keyboard_width = 214.0 * scale;
-        let keyboard_height = 78.0 * scale;
-        let mouse_pad_left = 314.0 * scale;
-        let mouse_pad_top = 173.0 * scale;
-        let mouse_pad_width = 40.0 * scale;
-        let mouse_pad_height = 48.0 * scale;
-        let body_left = 104.0 * scale;
-        let body_top = 106.0 * scale + idle_bob * 0.3;
-        let body_width = 116.0 * scale;
-        let body_height = 74.0 * scale;
-        let head_cx = 160.0 * scale;
-        let head_cy = 78.0 * scale + idle_bob;
-        let head_radius = 56.0 * scale;
+        // Flipped Layout: Mouse pad on Left, Keyboard on Center-Right
+        let desk_left = 38.0 * scale;
+        let desk_top = 146.0 * scale;
+        let desk_width = 322.0 * scale;
+        let desk_height = 92.0 * scale;
+
+        let mouse_pad_left = 46.0 * scale;
+        let mouse_pad_top = 168.0 * scale;
+        let mouse_pad_width = 38.0 * scale;
+        let mouse_pad_height = 46.0 * scale;
+
+        let keyboard_left = 90.0 * scale;
+        let keyboard_top = 168.0 * scale;
+        let keyboard_width = 217.0 * scale;
+        let keyboard_height = 71.0 * scale;
+
+        let body_cx = 167.0 * scale;
+        let body_cy = 134.0 * scale;
+        let body_radius = 36.0 * scale;
+        
+        let head_cx = 168.0 * scale;
+        let head_cy = 88.0 * scale;
+        let head_radius = 47.0 * scale;
+
         let paw_press = if held_keys.is_empty() {
-            recent_pulse * 3.2 * scale
+            recent_pulse * 2.4 * scale
         } else {
-            4.2 * scale
+            3.0 * scale
         };
 
+        // Desk Shadow
         let shadow_alpha = (90.0 + recent_pulse * 28.0).round() as u8;
         fill_skia_rounded_rect(
             &mut pixmap,
-            desk_left + 10.0 * scale,
-            desk_top + 74.0 * scale,
-            desk_width - 20.0 * scale,
-            20.0 * scale,
-            10.0 * scale,
+            desk_left + 22.0 * scale,
+            desk_top + 70.0 * scale,
+            desk_width - 44.0 * scale,
+            16.0 * scale,
+            8.0 * scale,
             [0, 0, 0, shadow_alpha],
         );
 
-        let mut tail_path = tiny_skia::PathBuilder::new();
-        tail_path.move_to(96.0 * scale, 162.0 * scale);
-        tail_path.quad_to(
-            36.0 * scale,
-            110.0 * scale,
-            58.0 * scale,
-            48.0 * scale + idle_bob * 0.4,
-        );
-        tail_path.quad_to(
-            66.0 * scale,
-            24.0 * scale,
-            96.0 * scale,
-            36.0 * scale + ear_wiggle,
-        );
-        if let Some(path) = tail_path.finish() {
-            stroke_skia_path(&mut pixmap, &path, [122, 96, 88, 230], 18.0 * scale);
-            stroke_skia_path(&mut pixmap, &path, [164, 140, 132, 170], 8.0 * scale);
-        }
-
+        // 3D Desk (Front Lip and Top Surface)
+        let desk_extrusion = 8.0 * scale;
+        // Desk Front Lip
         fill_skia_rounded_rect(
             &mut pixmap,
-            body_left,
-            body_top,
-            body_width,
-            body_height,
-            24.0 * scale,
-            [237, 241, 245, 210],
+            desk_left,
+            desk_top + desk_extrusion,
+            desk_width,
+            desk_height - desk_extrusion,
+            14.0 * scale,
+            [140, 108, 88, 255], // darker brown for 3D depth
         );
-        fill_skia_rounded_rect(
+        stroke_skia_rounded_rect(
             &mut pixmap,
-            body_left + 6.0 * scale,
-            body_top + 7.0 * scale,
-            body_width - 12.0 * scale,
-            body_height - 10.0 * scale,
-            20.0 * scale,
-            [252, 253, 255, 228],
+            desk_left,
+            desk_top + desk_extrusion,
+            desk_width,
+            desk_height - desk_extrusion,
+            14.0 * scale,
+            2.2 * scale,
+            [45, 40, 42, 255],
         );
-
+        // Desk Top Surface
         fill_skia_rounded_rect(
             &mut pixmap,
             desk_left,
             desk_top,
             desk_width,
-            desk_height,
+            desk_height - desk_extrusion,
             14.0 * scale,
-            [116, 83, 63, 235],
+            [235, 215, 190, 255], // warm wood beige desk top
         );
-        fill_skia_rounded_rect(
+        stroke_skia_rounded_rect(
             &mut pixmap,
-            desk_left + 5.0 * scale,
-            desk_top + 5.0 * scale,
-            desk_width - 10.0 * scale,
-            desk_height - 16.0 * scale,
-            11.0 * scale,
-            [150, 110, 84, 215],
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            desk_left + 7.0 * scale,
-            desk_top + 7.0 * scale,
-            desk_width - 14.0 * scale,
-            18.0 * scale,
-            10.0 * scale,
-            [255, 232, 210, 40],
+            desk_left,
+            desk_top,
+            desk_width,
+            desk_height - desk_extrusion,
+            14.0 * scale,
+            2.2 * scale,
+            [45, 40, 42, 255],
         );
 
+        // Scratch wood detail on bottom-right front desk edge (Exactly like reference image)
+        let mut scratch = tiny_skia::PathBuilder::new();
+        scratch.move_to(desk_left + desk_width * 0.64, desk_top + desk_height - 12.0 * scale);
+        scratch.line_to(desk_left + desk_width * 0.65, desk_top + desk_height - 5.0 * scale);
+        scratch.line_to(desk_left + desk_width * 0.67, desk_top + desk_height - 12.0 * scale);
+        if let Some(path) = scratch.finish() {
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
+        }
+
+        // Body Shadow
+        fill_skia_circle(
+            &mut pixmap,
+            body_cx,
+            body_cy + 4.0 * scale,
+            body_radius,
+            [0, 0, 0, 22],
+        );
+        // Body (White Circle)
+        fill_skia_circle(
+            &mut pixmap,
+            body_cx,
+            body_cy,
+            body_radius,
+            [255, 255, 255, 255],
+        );
+        stroke_skia_circle(
+            &mut pixmap,
+            body_cx,
+            body_cy,
+            body_radius,
+            2.2 * scale,
+            [45, 40, 42, 255],
+        );
+
+        // 3D Keyboard Frame
+        // Frame Bezel Shadow
         fill_skia_rounded_rect(
             &mut pixmap,
-            keyboard_left + 4.0 * scale,
-            keyboard_top + 9.0 * scale,
+            keyboard_left,
+            keyboard_top + 4.0 * scale,
             keyboard_width,
-            keyboard_height,
-            18.0 * scale,
-            [8, 10, 18, 72],
+            keyboard_height - 4.0 * scale,
+            14.0 * scale,
+            [175, 185, 195, 255],
         );
-        fill_skia_rounded_rect(
+        stroke_skia_rounded_rect(
             &mut pixmap,
             keyboard_left,
             keyboard_top,
             keyboard_width,
             keyboard_height,
-            16.0 * scale,
-            [222, 231, 240, 245],
+            14.0 * scale,
+            2.0 * scale,
+            [45, 40, 42, 255],
         );
+        // Frame Top Surface
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            keyboard_left,
+            keyboard_top,
+            keyboard_width,
+            keyboard_height - 4.0 * scale,
+            14.0 * scale,
+            [238, 242, 246, 255],
+        );
+        // Keyboard inner slot
         fill_skia_rounded_rect(
             &mut pixmap,
             keyboard_left + 4.0 * scale,
             keyboard_top + 4.0 * scale,
             keyboard_width - 8.0 * scale,
             keyboard_height - 12.0 * scale,
-            14.0 * scale,
-            [242, 248, 255, 238],
-        );
-
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            mouse_pad_left + 2.0 * scale,
-            mouse_pad_top + 6.0 * scale,
-            mouse_pad_width,
-            mouse_pad_height,
-            11.0 * scale,
-            [7, 10, 16, 72],
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            mouse_pad_left,
-            mouse_pad_top,
-            mouse_pad_width,
-            mouse_pad_height,
             10.0 * scale,
-            [84, 114, 92, 228],
+            [205, 218, 230, 255],
         );
-        fill_skia_rounded_rect(
+        stroke_skia_rounded_rect(
             &mut pixmap,
-            mouse_pad_left + 3.0 * scale,
-            mouse_pad_top + 3.0 * scale,
-            mouse_pad_width - 6.0 * scale,
-            mouse_pad_height - 8.0 * scale,
-            8.0 * scale,
-            [112, 144, 118, 190],
+            keyboard_left + 4.0 * scale,
+            keyboard_top + 4.0 * scale,
+            keyboard_width - 8.0 * scale,
+            keyboard_height - 12.0 * scale,
+            10.0 * scale,
+            1.2 * scale,
+            [45, 40, 42, 255],
         );
 
+        // Mouse Pad (Light Blue Circular pad on Left)
+        fill_skia_circle(
+            &mut pixmap,
+            mouse_pad_left + 19.0 * scale,
+            mouse_pad_top + 23.0 * scale + 2.0 * scale,
+            19.0 * scale,
+            [160, 180, 200, 255],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            mouse_pad_left + 19.0 * scale,
+            mouse_pad_top + 23.0 * scale,
+            19.0 * scale,
+            [147, 206, 244, 255],
+        );
+        stroke_skia_circle(
+            &mut pixmap,
+            mouse_pad_left + 19.0 * scale,
+            mouse_pad_top + 23.0 * scale,
+            19.0 * scale,
+            1.8 * scale,
+            [45, 40, 42, 255],
+        );
+
+        // Keys setup & logic
         let keys = quick_key_display_mascot_keys();
-        let label_font_size = (font_size * 0.32).round().clamp(8.0, 14.0) as i32;
+        let mouse_x = mouse_pad_left + 19.0 * scale + mouse_offset.0 * scale * 0.7;
+        let mouse_y = mouse_pad_top + 23.0 * scale + mouse_offset.1 * scale * 0.56;
+
+        let mut left_paw_target = (mouse_x, mouse_y);
+        let mut right_paw_target = (204.0 * scale, (180.0 - 3.0) * scale);
+        let mut left_paw_strength = 0.0f32;
+        let mut right_paw_strength = 0.0f32;
+
         let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
+
         for key in &keys {
             let strength =
                 quick_key_display_mascot_key_strength(key.aliases, &held_keys, entries, now);
             let key_left = key.x * scale;
-            let key_top = key.y * scale;
+            let key_top = (key.y - 3.0) * scale;
             let key_width = key.w * scale;
             let key_height = key.h * scale;
-            let key_radius = 4.2 * scale;
+            let key_radius = 2.4 * scale;
             let glow = strength.clamp(0.0, 1.0);
+            let key_center_x = key_left + key_width * 0.5;
+            let key_target_y = key_top + key_height * 0.22;
+            let keyboard_mid_x = keyboard_left + keyboard_width * 0.5;
+
+            if glow > 0.0 {
+                if key_center_x < keyboard_mid_x && glow > left_paw_strength {
+                    left_paw_target = (key_center_x, key_target_y);
+                    left_paw_strength = glow;
+                }
+                if key_center_x >= keyboard_mid_x && glow > right_paw_strength {
+                    right_paw_target = (key_center_x, key_target_y);
+                    right_paw_strength = glow;
+                }
+            }
+
+            let is_modifier = matches!(
+                key.label,
+                "Esc" | "Tab" | "Caps" | "Shift" | "Ctrl" | "Win" | "Alt" | "Enter" | "Bk" | "Space"
+            );
+
             let base_fill = if glow > 0.0 {
                 quick_key_display_mix_rgba(
-                    [240, 247, 255, 235],
+                    if is_modifier { [100, 180, 240, 245] } else { [245, 250, 255, 245] },
                     [115, 220, 255, 255],
                     glow * 0.86,
                 )
             } else {
-                [243, 248, 253, 232]
+                if is_modifier {
+                    [140, 185, 225, 235] // pastel blue
+                } else {
+                    [250, 250, 252, 245] // warm white
+                }
             };
-            let border = quick_key_display_mix_rgba(
-                [166, 182, 201, 190],
+
+            let border_color = quick_key_display_mix_rgba(
+                [45, 40, 42, 255],
                 [239, 252, 255, 255],
-                glow * 0.72,
+                glow * 0.42,
             );
-            let top_gloss = quick_key_display_mix_rgba(
-                [255, 255, 255, 46],
-                [255, 255, 255, 96],
-                glow * 0.64,
-            );
+
+            // 3D Keycap base/extrusion
             fill_skia_rounded_rect(
                 &mut pixmap,
                 key_left,
-                key_top + 2.2 * scale,
+                key_top + 1.8 * scale,
                 key_width,
                 key_height,
                 key_radius,
-                [5, 8, 14, (36.0 + glow * 42.0).round() as u8],
+                [45, 40, 42, 64],
             );
+            stroke_skia_rounded_rect(
+                &mut pixmap,
+                key_left,
+                key_top + 1.8 * scale,
+                key_width,
+                key_height,
+                key_radius,
+                1.0 * scale,
+                [45, 40, 42, 255],
+            );
+            // Keycap top surface
             fill_skia_rounded_rect(
                 &mut pixmap,
                 key_left,
-                key_top - glow * 1.6 * scale,
+                key_top - glow * 1.4 * scale,
                 key_width,
                 key_height,
                 key_radius,
                 base_fill,
             );
-            fill_skia_rounded_rect(
-                &mut pixmap,
-                key_left + 1.1 * scale,
-                key_top + 1.2 * scale - glow * 1.1 * scale,
-                key_width - 2.2 * scale,
-                (key_height * 0.44).max(1.0),
-                (key_radius - 1.0 * scale).max(1.6 * scale),
-                top_gloss,
-            );
             stroke_skia_rounded_rect(
                 &mut pixmap,
-                key_left + 0.5,
-                key_top + 0.5 - glow * 1.5 * scale,
-                (key_width - 1.0).max(1.0),
-                (key_height - 1.0).max(1.0),
+                key_left,
+                key_top - glow * 1.4 * scale,
+                key_width,
+                key_height,
                 key_radius,
-                0.9 * scale.max(1.0),
-                border,
+                1.1 * scale,
+                border_color,
             );
 
-            let text_color = quick_key_display_mix_rgba(
-                [96, 107, 130, 255],
-                [18, 45, 62, 255],
-                glow * 0.72,
-            );
+            let text_color = if glow > 0.0 {
+                [255, 255, 255]
+            } else {
+                if is_modifier {
+                    [255, 255, 255]
+                } else {
+                    [70, 80, 95]
+                }
+            };
+
             text_runs.push(QuickKeyDisplayTextRun {
                 text: key.label.to_owned(),
                 rect: RECT {
-                    left: (key_left + 1.5 * scale).round() as i32,
-                    top: (key_top - glow * 1.4 * scale).round() as i32,
-                    right: (key_left + key_width - 1.5 * scale).round() as i32,
-                    bottom: (key_top + key_height).round() as i32,
+                    left: (key_left) as i32,
+                    top: (key_top - glow * 1.4 * scale - 1.2 * scale) as i32,
+                    right: (key_left + key_width) as i32,
+                    bottom: (key_top - glow * 1.4 * scale + key_height - 1.2 * scale) as i32,
                 },
                 color: quick_key_display_colorref(text_color[0], text_color[1], text_color[2]),
-                alpha: 0.72 + glow * 0.28,
+                alpha: 0.95,
             });
         }
 
+        // Camera (Bottom-Left)
+        let cam_x = 44.0 * scale;
+        let cam_y = 206.0 * scale;
+        let cam_w = 26.0 * scale;
+        let cam_h = 17.0 * scale;
+        fill_skia_rounded_rect(&mut pixmap, cam_x, cam_y, cam_w, cam_h, 3.0 * scale, [60, 58, 62, 255]);
+        stroke_skia_rounded_rect(&mut pixmap, cam_x, cam_y, cam_w, cam_h, 3.0 * scale, 1.5 * scale, [45, 40, 42, 255]);
+        fill_skia_rounded_rect(&mut pixmap, cam_x, cam_y - 2.0 * scale, cam_w, 4.0 * scale, 1.0 * scale, [210, 215, 220, 255]);
+        stroke_skia_rounded_rect(&mut pixmap, cam_x, cam_y - 2.0 * scale, cam_w, 4.0 * scale, 1.0 * scale, 1.2 * scale, [45, 40, 42, 255]);
+        fill_skia_circle(&mut pixmap, cam_x + cam_w * 0.5, cam_y + cam_h * 0.5, 5.0 * scale, [180, 185, 190, 255]);
+        fill_skia_circle(&mut pixmap, cam_x + cam_w * 0.5, cam_y + cam_h * 0.5, 3.5 * scale, [40, 42, 45, 255]);
+        stroke_skia_circle(&mut pixmap, cam_x + cam_w * 0.5, cam_y + cam_h * 0.5, 5.0 * scale, 1.2 * scale, [45, 40, 42, 255]);
+        fill_skia_rounded_rect(&mut pixmap, cam_x + 3.0 * scale, cam_y - 4.0 * scale, 4.0 * scale, 3.0 * scale, 0.5 * scale, [210, 215, 220, 255]);
+        stroke_skia_rounded_rect(&mut pixmap, cam_x + 3.0 * scale, cam_y - 4.0 * scale, 4.0 * scale, 3.0 * scale, 0.5 * scale, 1.0 * scale, [45, 40, 42, 255]);
+
+        // Mouse Drawing
         let left_mouse_strength = quick_key_display_mascot_key_strength(
             &["MouseLeft"],
             &held_mouse_buttons,
@@ -13000,262 +13184,291 @@ mod windows_overlay {
             entries,
             now,
         );
-        let wheel_up_strength =
-            quick_key_display_recent_entry_strength(&["MouseWheelUp"], entries, now);
-        let wheel_down_strength =
-            quick_key_display_recent_entry_strength(&["MouseWheelDown"], entries, now);
-        let mouse_center_x = mouse_pad_left + mouse_pad_width * 0.5 + mouse_offset.0 * scale * 0.7;
-        let mouse_center_y =
-            mouse_pad_top + mouse_pad_height * 0.52 + mouse_offset.1 * scale * 0.56;
         fill_skia_rounded_rect(
             &mut pixmap,
-            mouse_center_x - 10.0 * scale,
-            mouse_center_y - 8.0 * scale + 4.0 * scale,
-            20.0 * scale,
-            26.0 * scale,
-            9.0 * scale,
-            [0, 0, 0, 56],
+            mouse_x - 7.0 * scale,
+            mouse_y - 9.0 * scale,
+            14.0 * scale,
+            18.0 * scale,
+            6.0 * scale,
+            [250, 250, 252, 255],
         );
-        fill_skia_rounded_rect(
+        stroke_skia_rounded_rect(
             &mut pixmap,
-            mouse_center_x - 10.0 * scale,
-            mouse_center_y - 8.0 * scale,
-            20.0 * scale,
-            26.0 * scale,
-            9.0 * scale,
-            [228, 236, 243, 238],
+            mouse_x - 7.0 * scale,
+            mouse_y - 9.0 * scale,
+            14.0 * scale,
+            18.0 * scale,
+            6.0 * scale,
+            1.5 * scale,
+            [45, 40, 42, 255],
         );
+        // Scroll wheel & button divisions
         fill_skia_rounded_rect(
             &mut pixmap,
-            mouse_center_x - 8.7 * scale,
-            mouse_center_y - 6.9 * scale,
-            8.0 * scale,
-            9.0 * scale,
+            mouse_x - 1.0 * scale,
+            mouse_y - 6.0 * scale,
+            2.0 * scale,
             4.0 * scale,
-            quick_key_display_mix_rgba(
-                [247, 250, 255, 210],
-                [124, 220, 255, 255],
-                left_mouse_strength * 0.82,
-            ),
+            0.8 * scale,
+            [80, 85, 90, 255],
         );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            mouse_center_x + 0.7 * scale,
-            mouse_center_y - 6.9 * scale,
-            8.0 * scale,
-            9.0 * scale,
-            4.0 * scale,
-            quick_key_display_mix_rgba(
-                [247, 250, 255, 210],
-                [124, 220, 255, 255],
-                right_mouse_strength * 0.82,
-            ),
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            mouse_center_x - 1.2 * scale,
-            mouse_center_y - 4.5 * scale,
-            2.4 * scale,
-            6.2 * scale,
-            1.2 * scale,
-            [126, 146, 164, 230],
-        );
-
-        if wheel_up_strength > 0.0 || wheel_down_strength > 0.0 {
-            let wheel_dir = if wheel_up_strength >= wheel_down_strength {
-                -1.0
-            } else {
-                1.0
-            };
-            let wheel_alpha = ((wheel_up_strength.max(wheel_down_strength)) * 180.0)
-                .round()
-                .clamp(0.0, 255.0) as u8;
-            let mut pb = tiny_skia::PathBuilder::new();
-            pb.move_to(mouse_center_x + 15.0 * scale, mouse_center_y);
-            pb.line_to(
-                mouse_center_x + 25.0 * scale,
-                mouse_center_y + wheel_dir * 5.0 * scale,
-            );
-            pb.line_to(mouse_center_x + 21.0 * scale, mouse_center_y);
-            if let Some(path) = pb.finish() {
-                fill_skia_path(&mut pixmap, &path, [128, 245, 255, wheel_alpha]);
-            }
+        let mut div = tiny_skia::PathBuilder::new();
+        div.move_to(mouse_x - 6.8 * scale, mouse_y - 1.0 * scale);
+        div.line_to(mouse_x + 6.8 * scale, mouse_y - 1.0 * scale);
+        div.move_to(mouse_x, mouse_y - 9.0 * scale);
+        div.line_to(mouse_x, mouse_y - 1.0 * scale);
+        if let Some(path) = div.finish() {
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.2 * scale);
         }
 
-        let paw_fill = [239, 244, 249, 255];
-        let paw_glow = quick_key_display_mix_rgba(
-            paw_fill,
-            [122, 220, 255, 255],
-            recent_pulse * 0.45,
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            102.0 * scale,
-            137.0 * scale + paw_press,
-            44.0 * scale,
-            24.0 * scale,
-            12.0 * scale,
-            paw_glow,
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            207.0 * scale,
-            137.0 * scale + paw_press,
-            44.0 * scale,
-            24.0 * scale,
-            12.0 * scale,
-            paw_glow,
-        );
-
+        // Hachiware Ears
+        let ear_wiggle = recent_pulse * 3.0 * scale;
+        // Left Ear
         let mut left_ear = tiny_skia::PathBuilder::new();
-        left_ear.move_to(head_cx - 38.0 * scale, head_cy - 16.0 * scale);
-        left_ear.line_to(head_cx - 22.0 * scale, head_cy - 65.0 * scale - ear_wiggle);
-        left_ear.line_to(head_cx - 3.0 * scale, head_cy - 22.0 * scale);
+        left_ear.move_to(head_cx - 42.0 * scale, head_cy - 22.0 * scale);
+        left_ear.quad_to(
+            head_cx - 43.0 * scale, head_cy - 48.0 * scale - ear_wiggle,
+            head_cx - 36.0 * scale, head_cy - 52.0 * scale - ear_wiggle,
+        );
+        left_ear.quad_to(
+            head_cx - 24.0 * scale, head_cy - 42.0 * scale,
+            head_cx - 18.0 * scale, head_cy - 38.0 * scale,
+        );
         left_ear.close();
         if let Some(path) = left_ear.finish() {
-            fill_skia_path(&mut pixmap, &path, [244, 248, 252, 255]);
+            fill_skia_path(&mut pixmap, &path, [100, 160, 230, 255]); // Blue
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
         }
-        let mut right_ear = tiny_skia::PathBuilder::new();
-        right_ear.move_to(head_cx + 10.0 * scale, head_cy - 18.0 * scale);
-        right_ear.line_to(head_cx + 34.0 * scale, head_cy - 66.0 * scale + ear_wiggle);
-        right_ear.line_to(head_cx + 50.0 * scale, head_cy - 14.0 * scale);
-        right_ear.close();
-        if let Some(path) = right_ear.finish() {
-            fill_skia_path(&mut pixmap, &path, [120, 96, 104, 248]);
+        // Left Inner Ear (Pink)
+        let mut left_inner = tiny_skia::PathBuilder::new();
+        left_inner.move_to(head_cx - 37.0 * scale, head_cy - 24.0 * scale);
+        left_inner.line_to(head_cx - 34.0 * scale, head_cy - 45.0 * scale - ear_wiggle);
+        left_inner.line_to(head_cx - 23.0 * scale, head_cy - 34.0 * scale);
+        left_inner.close();
+        if let Some(path) = left_inner.finish() {
+            fill_skia_path(&mut pixmap, &path, [255, 200, 210, 255]);
         }
 
+        // Right Ear
+        let mut right_ear = tiny_skia::PathBuilder::new();
+        right_ear.move_to(head_cx + 18.0 * scale, head_cy - 38.0 * scale);
+        right_ear.quad_to(
+            head_cx + 24.0 * scale, head_cy - 42.0 * scale,
+            head_cx + 36.0 * scale, head_cy - 52.0 * scale + ear_wiggle,
+        );
+        right_ear.quad_to(
+            head_cx + 43.0 * scale, head_cy - 48.0 * scale + ear_wiggle,
+            head_cx + 42.0 * scale, head_cy - 22.0 * scale,
+        );
+        right_ear.close();
+        if let Some(path) = right_ear.finish() {
+            fill_skia_path(&mut pixmap, &path, [100, 160, 230, 255]); // Blue
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
+        }
+        // Right Inner Ear (Pink)
+        let mut right_inner = tiny_skia::PathBuilder::new();
+        right_inner.move_to(head_cx + 23.0 * scale, head_cy - 34.0 * scale);
+        right_inner.line_to(head_cx + 34.0 * scale, head_cy - 45.0 * scale + ear_wiggle);
+        right_inner.line_to(head_cx + 37.0 * scale, head_cy - 24.0 * scale);
+        right_inner.close();
+        if let Some(path) = right_inner.finish() {
+            fill_skia_path(&mut pixmap, &path, [255, 200, 210, 255]);
+        }
+
+        // Head (White Circle)
         fill_skia_circle(
             &mut pixmap,
             head_cx,
-            head_cy + 6.0 * scale,
+            head_cy + 4.5 * scale,
             head_radius,
-            [0, 0, 0, 34],
+            [0, 0, 0, 28],
         );
         fill_skia_circle(
             &mut pixmap,
             head_cx,
             head_cy,
             head_radius,
-            [246, 250, 255, 255],
-        );
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx - 7.0 * scale,
-            head_cy - 12.0 * scale,
-            head_radius * 0.7,
-            [255, 255, 255, 42],
+            [255, 255, 255, 255],
         );
 
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx - 26.0 * scale,
-            head_cy + 4.0 * scale,
-            8.0 * scale,
-            [45, 49, 66, 250],
+        // Forehead Blue Hair Patch (Hachiware hair pattern)
+        let mut hair = tiny_skia::PathBuilder::new();
+        hair.move_to(head_cx - 46.2 * scale, head_cy - 8.0 * scale);
+        hair.quad_to(
+            head_cx - 40.0 * scale, head_cy - 46.0 * scale,
+            head_cx, head_cy - 47.0 * scale
         );
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx + 18.0 * scale,
-            head_cy + 4.0 * scale,
-            8.0 * scale,
-            [45, 49, 66, 250],
+        hair.quad_to(
+            head_cx + 40.0 * scale, head_cy - 46.0 * scale,
+            head_cx + 46.2 * scale, head_cy - 8.0 * scale
         );
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx - 23.0 * scale,
-            head_cy + 1.5 * scale,
-            2.6 * scale,
-            [255, 255, 255, 250],
+        hair.quad_to(
+            head_cx + 25.0 * scale, head_cy - 4.0 * scale,
+            head_cx + 14.0 * scale, head_cy + 8.0 * scale
         );
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx + 21.0 * scale,
-            head_cy + 1.5 * scale,
-            2.6 * scale,
-            [255, 255, 255, 250],
+        hair.quad_to(
+            head_cx + 6.0 * scale, head_cy - 8.0 * scale,
+            head_cx, head_cy - 12.0 * scale
         );
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx - 42.0 * scale,
-            head_cy + 18.0 * scale,
-            10.0 * scale,
-            [255, 182, 198, 165],
+        hair.quad_to(
+            head_cx - 6.0 * scale, head_cy - 8.0 * scale,
+            head_cx - 14.0 * scale, head_cy + 8.0 * scale
         );
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx + 34.0 * scale,
-            head_cy + 18.0 * scale,
-            10.0 * scale,
-            [255, 182, 198, 165],
+        hair.quad_to(
+            head_cx - 25.0 * scale, head_cy - 4.0 * scale,
+            head_cx - 46.2 * scale, head_cy - 8.0 * scale
         );
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx - 1.0 * scale,
-            head_cy + 12.0 * scale,
-            5.2 * scale,
-            [68, 54, 64, 236],
-        );
-        let mut mouth = tiny_skia::PathBuilder::new();
-        mouth.move_to(head_cx - 10.0 * scale, head_cy + 23.0 * scale);
-        mouth.quad_to(
-            head_cx - 5.0 * scale,
-            head_cy + 30.0 * scale,
-            head_cx,
-            head_cy + 25.0 * scale,
-        );
-        mouth.quad_to(
-            head_cx + 5.0 * scale,
-            head_cy + 30.0 * scale,
-            head_cx + 10.0 * scale,
-            head_cy + 23.0 * scale,
-        );
-        if let Some(path) = mouth.finish() {
-            stroke_skia_path(&mut pixmap, &path, [80, 66, 76, 230], 2.0 * scale);
+        hair.close();
+        if let Some(path) = hair.finish() {
+            fill_skia_path(&mut pixmap, &path, [100, 160, 230, 255]); // Blue patch
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
         }
 
-        for whisker_dir in [-1.0f32, 1.0] {
-            for whisker_y in [12.0f32, 21.0] {
-                let x0 = head_cx + whisker_dir * 14.0 * scale;
-                let x1 = head_cx + whisker_dir * 40.0 * scale;
-                let y0 = head_cy + whisker_y * scale * 0.25;
-                let y1 = y0 + (if whisker_y < 15.0 { -4.0 } else { 3.0 }) * scale;
-                let mut pb = tiny_skia::PathBuilder::new();
-                pb.move_to(x0, y0);
-                pb.line_to(x1, y1);
-                if let Some(path) = pb.finish() {
-                    stroke_skia_path(&mut pixmap, &path, [126, 132, 146, 150], 1.2 * scale);
-                }
+        // Head Outline
+        stroke_skia_circle(
+            &mut pixmap,
+            head_cx,
+            head_cy,
+            head_radius,
+            2.2 * scale,
+            [45, 40, 42, 255],
+        );
+
+        // Eyes (Shiny Anime highlights)
+        let left_eye_x = head_cx - 18.0 * scale;
+        let left_eye_y = head_cy + 4.0 * scale;
+        let right_eye_x = head_cx + 18.0 * scale;
+        let right_eye_y = head_cy + 4.0 * scale;
+        let eye_w = 8.5 * scale;
+        let eye_h = 10.5 * scale;
+        
+        for (ex, ey) in [(left_eye_x, left_eye_y), (right_eye_x, right_eye_y)] {
+            // Main Black Oval
+            fill_skia_rounded_rect(
+                &mut pixmap,
+                ex - eye_w * 0.5,
+                ey - eye_h * 0.5,
+                eye_w,
+                eye_h,
+                4.2 * scale,
+                [45, 40, 42, 255],
+            );
+            // Large Highlight
+            fill_skia_circle(
+                &mut pixmap,
+                ex - 1.5 * scale,
+                ey - 2.2 * scale,
+                3.2 * scale,
+                [255, 255, 255, 255],
+            );
+            // Small Highlight
+            fill_skia_circle(
+                &mut pixmap,
+                ex + 2.0 * scale,
+                ey + 2.0 * scale,
+                1.6 * scale,
+                [255, 255, 255, 255],
+            );
+        }
+
+        // Eyebrows
+        fill_skia_circle(&mut pixmap, head_cx - 18.0 * scale, head_cy - 7.5 * scale, 1.2 * scale, [45, 40, 42, 255]);
+        fill_skia_circle(&mut pixmap, head_cx + 18.0 * scale, head_cy - 7.5 * scale, 1.2 * scale, [45, 40, 42, 255]);
+
+        // Cheek Blush (Diagonal hand-drawn lines ///)
+        for i in 0..3 {
+            let offset = (i as f32 - 1.0) * 3.5 * scale;
+            // Left Cheek
+            let mut blush = tiny_skia::PathBuilder::new();
+            blush.move_to(head_cx - 32.0 * scale + offset - 1.5 * scale, head_cy + 13.0 * scale + 3.0 * scale);
+            blush.line_to(head_cx - 32.0 * scale + offset + 1.5 * scale, head_cy + 13.0 * scale - 3.0 * scale);
+            if let Some(path) = blush.finish() {
+                stroke_skia_path(&mut pixmap, &path, [255, 120, 140, 220], 1.8 * scale);
+            }
+            // Right Cheek
+            let mut blush2 = tiny_skia::PathBuilder::new();
+            blush2.move_to(head_cx + 32.0 * scale + offset - 1.5 * scale, head_cy + 13.0 * scale + 3.0 * scale);
+            blush2.line_to(head_cx + 32.0 * scale + offset + 1.5 * scale, head_cy + 13.0 * scale - 3.0 * scale);
+            if let Some(path) = blush2.finish() {
+                stroke_skia_path(&mut pixmap, &path, [255, 120, 140, 220], 1.8 * scale);
             }
         }
 
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx + 4.0 * scale,
-            head_cy - 45.0 * scale,
-            8.0 * scale,
-            [81, 158, 232, 255],
+        // Mouth (Cute cat w mouth)
+        let mut mouth = tiny_skia::PathBuilder::new();
+        mouth.move_to(head_cx - 5.0 * scale, head_cy + 14.0 * scale);
+        mouth.quad_to(
+            head_cx - 2.5 * scale, head_cy + 17.5 * scale,
+            head_cx, head_cy + 14.5 * scale,
         );
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx - 17.0 * scale,
-            head_cy - 43.0 * scale,
-            14.0 * scale,
-            [98, 180, 248, 250],
+        mouth.quad_to(
+            head_cx + 2.5 * scale, head_cy + 17.5 * scale,
+            head_cx + 5.0 * scale, head_cy + 14.0 * scale,
         );
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx + 24.0 * scale,
-            head_cy - 43.0 * scale,
-            14.0 * scale,
-            [98, 180, 248, 250],
+        if let Some(path) = mouth.finish() {
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.0 * scale);
+        }
+
+        // Bezier Limbs/Arms (Reaching dynamically to keyboard and mouse)
+        let paw_fill = [255, 255, 255, 255];
+        let paw_glow = quick_key_display_mix_rgba(
+            paw_fill,
+            [122, 220, 255, 255],
+            recent_pulse * 0.45,
         );
-        fill_skia_circle(
-            &mut pixmap,
-            head_cx - 9.0 * scale,
-            head_cy - 47.0 * scale,
-            8.0 * scale,
-            [255, 255, 255, 42],
+
+        // Left Arm (Reaches down-left to Mouse)
+        let mut left_arm = tiny_skia::PathBuilder::new();
+        let left_shoulder_top = (body_cx - 28.0 * scale, body_cy + 2.0 * scale);
+        let left_shoulder_bottom = (body_cx - 10.0 * scale, body_cy + 22.0 * scale);
+        let left_paw_x = left_paw_target.0;
+        let left_paw_y = left_paw_target.1 + paw_press;
+        
+        left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
+        left_arm.quad_to(
+            left_paw_x - 16.0 * scale, left_paw_y - 12.0 * scale,
+            left_paw_x - 10.0 * scale, left_paw_y + 4.0 * scale,
         );
+        left_arm.quad_to(
+            left_paw_x, left_paw_y + 14.0 * scale,
+            left_paw_x + 10.0 * scale, left_paw_y + 2.0 * scale,
+        );
+        left_arm.quad_to(
+            left_paw_x + 6.0 * scale, left_paw_y - 12.0 * scale,
+            left_shoulder_bottom.0, left_shoulder_bottom.1,
+        );
+        left_arm.close();
+        if let Some(path) = left_arm.finish() {
+            fill_skia_path(&mut pixmap, &path, paw_glow);
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
+        }
+
+        // Right Arm (Reaches down-right to Keyboard keys)
+        let mut right_arm = tiny_skia::PathBuilder::new();
+        let right_shoulder_top = (body_cx + 28.0 * scale, body_cy + 2.0 * scale);
+        let right_shoulder_bottom = (body_cx + 10.0 * scale, body_cy + 22.0 * scale);
+        let right_paw_x = right_paw_target.0;
+        let right_paw_y = right_paw_target.1 + paw_press;
+        
+        right_arm.move_to(right_shoulder_top.0, right_shoulder_top.1);
+        right_arm.quad_to(
+            right_paw_x + 16.0 * scale, right_paw_y - 12.0 * scale,
+            right_paw_x + 10.0 * scale, right_paw_y + 4.0 * scale,
+        );
+        right_arm.quad_to(
+            right_paw_x, right_paw_y + 14.0 * scale,
+            right_paw_x - 10.0 * scale, right_paw_y + 2.0 * scale,
+        );
+        right_arm.quad_to(
+            right_paw_x - 6.0 * scale, right_paw_y - 12.0 * scale,
+            right_shoulder_bottom.0, right_shoulder_bottom.1,
+        );
+        right_arm.close();
+        if let Some(path) = right_arm.finish() {
+            fill_skia_path(&mut pixmap, &path, paw_glow);
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
+        }
 
         let pixmap_data = pixmap.data();
         let total_pixels = width as usize * height as usize;
@@ -13267,6 +13480,7 @@ mod windows_overlay {
             pixels[offset + 3] = pixmap_data[offset + 3];
         }
 
+        // Render key label text runs using GDI
         let text_mem_dc = CreateCompatibleDC(Some(screen_dc));
         let mut text_bits_ptr: *mut c_void = std::ptr::null_mut();
         let text_bitmap = CreateDIBSection(
@@ -13285,12 +13499,13 @@ mod windows_overlay {
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
+        let key_font_size = (6.0 * scale).round() as i32;
         let font = CreateFontW(
-            -label_font_size.max(1),
+            -key_font_size.max(1),
             0,
             0,
             0,
-            FW_MEDIUM.0 as i32,
+            FW_BOLD.0 as i32,
             0,
             0,
             0,
@@ -13327,6 +13542,7 @@ mod windows_overlay {
             );
         }
 
+        // Blend GDI text into pixels buffer
         for i in 0..total_pixels {
             let offset = i * 4;
             let text_b = text_pixels[offset];
@@ -13371,7 +13587,6 @@ mod windows_overlay {
             Some(&blend),
             ULW_ALPHA,
         );
-
         let _ = SelectObject(text_mem_dc, old_font);
         let _ = DeleteObject(HGDIOBJ(font.0));
         let _ = SelectObject(text_mem_dc, old_text_bitmap);
@@ -23855,6 +24070,10 @@ mod fallback {
             smoothing_amount: f32,
         },
         VideoPlaybackFinished(u32),
+        MascotDragged {
+            x: i32,
+            y: i32,
+        },
     }
 
     pub struct OverlayHandle;
