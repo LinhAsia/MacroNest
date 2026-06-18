@@ -10736,6 +10736,12 @@ impl eframe::App for CrosshairApp {
                     self.quit_requested = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
+                UiCommand::MascotDragged { x, y } => {
+                    self.state.quick_key_display_x = x;
+                    self.state.quick_key_display_y = y;
+                    self.persist();
+                    ctx.request_repaint();
+                }
                 UiCommand::StartupIconLoaded(icon) => {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(icon)));
                 }
