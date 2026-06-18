@@ -4092,12 +4092,14 @@ impl CrosshairApp {
             
             // If the button is hovered, this action kind becomes the active one immediately
             if is_button_hovered {
+                last_active_time = current_time;
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(active_qa_time_id, current_time);
+                });
                 if active_qa != Some(action_kind) {
                     active_qa = Some(action_kind);
-                    last_active_time = current_time;
                     ui.ctx().data_mut(|data| {
                         data.insert_temp(active_qa_id, action_kind);
-                        data.insert_temp(active_qa_time_id, current_time);
                     });
                 }
             }
@@ -4122,11 +4124,12 @@ impl CrosshairApp {
             
             if should_show {
                 let pos = button_response.rect.left_bottom() + vec2(-42.0, 4.0);
+                let mut content_rect = egui::Rect::NOTHING;
                 let area_response = egui::Area::new(popup_id)
                     .order(egui::Order::Tooltip)
                     .fixed_pos(pos)
                     .show(ui.ctx(), |ui| {
-                        egui::Frame::popup(ui.style())
+                        let frame_response = egui::Frame::popup(ui.style())
                             .rounding(8.0)
                             .inner_margin(8.0)
                             .stroke(egui::Stroke::new(1.0, ui.visuals().window_stroke.color))
@@ -4134,13 +4137,14 @@ impl CrosshairApp {
                                 ui.set_width(180.0);
                                 ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
                                 draw_controls(ui)
-                            })
-                            .inner
+                            });
+                        content_rect = frame_response.response.rect;
+                        frame_response.inner
                     });
                 
                 // If the pointer is over the popup or its inner content, keep it active
-                let is_popup_hovered = area_response.response.hovered() || ui.rect_contains_pointer(area_response.response.rect);
-                if is_popup_hovered || area_response.inner {
+                let is_popup_hovered = ui.rect_contains_pointer(content_rect) || area_response.inner;
+                if is_popup_hovered {
                     ui.ctx().data_mut(|data| {
                         data.insert_temp(active_qa_time_id, current_time);
                     });
