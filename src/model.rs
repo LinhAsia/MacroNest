@@ -252,6 +252,13 @@ fn default_quick_key_display_size() -> f32 {
     36.0
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum QuickKeyDisplayMode {
+    #[default]
+    Normal,
+    Mascot,
+}
+
 fn default_screen_draw_color() -> RgbaColor {
     RgbaColor {
         r: 0,
@@ -2903,6 +2910,8 @@ pub struct AppState {
     #[serde(default = "default_quick_key_display_size")]
     pub quick_key_display_size: f32,
     #[serde(default)]
+    pub quick_key_display_mode: QuickKeyDisplayMode,
+    #[serde(default)]
     pub quick_screen_draw_enabled: bool,
     #[serde(default)]
     pub quick_screen_draw_hotkey: Option<HotkeyBinding>,
@@ -3011,6 +3020,7 @@ impl Default for AppState {
             quick_key_display_x: default_quick_key_display_x(),
             quick_key_display_y: default_quick_key_display_y(),
             quick_key_display_size: default_quick_key_display_size(),
+            quick_key_display_mode: QuickKeyDisplayMode::Normal,
             quick_screen_draw_enabled: false,
             quick_screen_draw_hotkey: None,
             quick_screen_draw_pass_trigger_through: false,

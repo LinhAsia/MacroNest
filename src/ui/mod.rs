@@ -30,8 +30,9 @@ use crate::{
         MacroAction, MacroFolder, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode,
         MasterMacroGroupState, MasterMacroPresetState, MasterPreset, MasterWindowFocusPresetState,
         MasterWindowPresetState, MasterZoomPresetState, MousePathEvent, MousePathEventKind,
-        ProfileRecord, RgbaColor, SoundLibraryItem, TimerPreset, UiLanguage, UiThemeMode,
-        VideoClipSettings, VietnameseInputMode, WindowAnchor, WindowExpandDirection, WindowPreset,
+        ProfileRecord, QuickKeyDisplayMode, RgbaColor, SoundLibraryItem, TimerPreset,
+        UiLanguage, UiThemeMode, VideoClipSettings, VietnameseInputMode, WindowAnchor,
+        WindowExpandDirection, WindowPreset,
     },
     overlay::{OverlayCommand, UiCommand},
     storage::AppPaths,
@@ -1269,6 +1270,7 @@ impl CrosshairApp {
                 center_x: self.state.quick_key_display_x,
                 center_y: self.state.quick_key_display_y,
                 size: self.state.quick_key_display_size,
+                mode: self.state.quick_key_display_mode,
             });
     }
 
@@ -4071,7 +4073,7 @@ impl CrosshairApp {
             && window_list::is_window_topmost(&self.quick_action_window_selector);
         let mut keep_menu_open = false;
         let action_width = 112.0;
-        let action_height = 168.0;
+        let action_height = 192.0;
 
         Grid::new("titlebar-quick-actions-grid")
             .num_columns(5)
@@ -4820,6 +4822,46 @@ impl CrosshairApp {
                                         },
                                     ),
                                 ));
+                            },
+                        );
+
+                        ui.add_space(2.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 22.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Mode",
+                                        "Mode",
+                                    ))
+                                    .size(10.0),
+                                );
+                                let mode_before = self.state.quick_key_display_mode;
+                                egui::ComboBox::from_id_salt("quick-key-display-mode")
+                                    .width(52.0)
+                                    .selected_text(match self.state.quick_key_display_mode {
+                                        QuickKeyDisplayMode::Normal => "Normal",
+                                        QuickKeyDisplayMode::Mascot => "Mascot",
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(
+                                            &mut self.state.quick_key_display_mode,
+                                            QuickKeyDisplayMode::Normal,
+                                            "Normal",
+                                        );
+                                        ui.selectable_value(
+                                            &mut self.state.quick_key_display_mode,
+                                            QuickKeyDisplayMode::Mascot,
+                                            "Mascot",
+                                        );
+                                    });
+                                if self.state.quick_key_display_mode != mode_before {
+                                    self.sync_quick_key_display_config();
+                                    self.persist();
+                                }
                             },
                         );
 

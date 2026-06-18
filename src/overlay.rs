@@ -178,8 +178,9 @@ mod windows_overlay {
             CrosshairStyle, GeometryShapeKind, GeometrySpec, HotkeyBinding, HudPreset,
             IfConditionType, MacroAction, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode,
             MousePathEvent, MousePathEventKind, MousePathPreset, MouseSensitivityPreset,
-            PinOverlayStyle, PinPreset, ProfileRecord, RgbaColor, SoundLibraryItem, SoundPreset,
-            TimerPreset, VideoPreset, VisionPreset, VisionSettings, WindowAnchor,
+            PinOverlayStyle, PinPreset, ProfileRecord, QuickKeyDisplayMode, RgbaColor,
+            SoundLibraryItem, SoundPreset, TimerPreset, VideoPreset, VisionPreset,
+            VisionSettings, WindowAnchor,
             WindowExpandControls, WindowExpandDirection, WindowFocusPreset, WindowPreset,
         },
         render::{RenderedSvgImage, render_crosshair, render_svg_image},
@@ -506,6 +507,7 @@ mod windows_overlay {
             center_x: i32,
             center_y: i32,
             size: f32,
+            mode: QuickKeyDisplayMode,
         },
         ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
@@ -1193,9 +1195,13 @@ mod windows_overlay {
         quick_key_display_center_x: i32,
         quick_key_display_center_y: i32,
         quick_key_display_size: f32,
+        quick_key_display_mode: QuickKeyDisplayMode,
         quick_key_display_entries: Vec<QuickKeyDisplayEntry>,
         quick_key_display_slot_memory: HashMap<String, usize>,
         quick_key_display_slot_labels: HashMap<(QuickKeyDisplayLane, usize), String>,
+        quick_key_display_mouse_offset: (f32, f32),
+        quick_key_display_mouse_velocity: (f32, f32),
+        quick_key_display_last_cursor_pos: Option<POINT>,
         tray_menu: HMENU,
         keyboard_hook: HHOOK,
         mouse_hook: HHOOK,
@@ -1947,9 +1953,13 @@ mod windows_overlay {
                 quick_key_display_center_x: GetSystemMetrics(SM_CXSCREEN).max(1) / 2,
                 quick_key_display_center_y: GetSystemMetrics(SM_CYSCREEN).max(1) / 2,
                 quick_key_display_size: 36.0,
+                quick_key_display_mode: QuickKeyDisplayMode::Normal,
                 quick_key_display_entries: Vec::new(),
                 quick_key_display_slot_memory: HashMap::new(),
                 quick_key_display_slot_labels: HashMap::new(),
+                quick_key_display_mouse_offset: (0.0, 0.0),
+                quick_key_display_mouse_velocity: (0.0, 0.0),
+                quick_key_display_last_cursor_pos: None,
                 tray_menu,
                 keyboard_hook: HHOOK::default(),
                 mouse_hook: HHOOK::default(),
@@ -5587,6 +5597,250 @@ mod windows_overlay {
         (width.max(cap_height), height.max(cap_height))
     }
 
+    #[derive(Clone, Copy)]
+    struct QuickKeyDisplayMascotKey {
+        label: &'static str,
+        aliases: &'static [&'static str],
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    }
+
+    fn quick_key_display_mascot_scale(font_size: f32) -> f32 {
+        (font_size / 36.0).clamp(0.72, 2.4)
+    }
+
+    fn quick_key_display_mascot_layout_size(font_size: f32) -> (i32, i32) {
+        let scale = quick_key_display_mascot_scale(font_size);
+        (
+            (430.0 * scale).round() as i32,
+            (290.0 * scale).round() as i32,
+        )
+    }
+
+    fn push_quick_key_display_mascot_row(
+        keys: &mut Vec<QuickKeyDisplayMascotKey>,
+        base_x: f32,
+        y: f32,
+        key_w: f32,
+        key_h: f32,
+        gap: f32,
+        row: &[(&'static str, &'static [&'static str], f32)],
+    ) {
+        let mut x = base_x;
+        for (label, aliases, span) in row {
+            let width = key_w * *span + gap * (span.ceil().max(1.0) - 1.0);
+            keys.push(QuickKeyDisplayMascotKey {
+                label,
+                aliases,
+                x,
+                y,
+                w: width,
+                h: key_h,
+            });
+            x += width + gap;
+        }
+    }
+
+    fn quick_key_display_mascot_keys() -> Vec<QuickKeyDisplayMascotKey> {
+        let mut keys = Vec::new();
+        let base_x = 92.0;
+        let base_y = 174.0;
+        let key_w = 12.0;
+        let key_h = 11.0;
+        let gap = 2.3;
+        let row_step = key_h + gap;
+
+        push_quick_key_display_mascot_row(
+            &mut keys,
+            base_x,
+            base_y,
+            key_w,
+            key_h,
+            gap,
+            &[
+                ("Esc", &["Escape"], 1.4),
+                ("1", &["1"], 1.0),
+                ("2", &["2"], 1.0),
+                ("3", &["3"], 1.0),
+                ("4", &["4"], 1.0),
+                ("5", &["5"], 1.0),
+                ("6", &["6"], 1.0),
+                ("7", &["7"], 1.0),
+                ("8", &["8"], 1.0),
+                ("9", &["9"], 1.0),
+                ("0", &["0"], 1.0),
+                ("-", &["-"], 1.0),
+                ("=", &["="], 1.0),
+                ("Bk", &["Backspace"], 1.85),
+            ],
+        );
+        push_quick_key_display_mascot_row(
+            &mut keys,
+            base_x,
+            base_y + row_step,
+            key_w,
+            key_h,
+            gap,
+            &[
+                ("Tab", &["Tab"], 1.55),
+                ("Q", &["Q"], 1.0),
+                ("W", &["W"], 1.0),
+                ("E", &["E"], 1.0),
+                ("R", &["R"], 1.0),
+                ("T", &["T"], 1.0),
+                ("Y", &["Y"], 1.0),
+                ("U", &["U"], 1.0),
+                ("I", &["I"], 1.0),
+                ("O", &["O"], 1.0),
+                ("P", &["P"], 1.0),
+                ("[", &["["], 1.0),
+                ("]", &["]"], 1.0),
+                ("\\", &["\\"], 1.3),
+            ],
+        );
+        push_quick_key_display_mascot_row(
+            &mut keys,
+            base_x,
+            base_y + row_step * 2.0,
+            key_w,
+            key_h,
+            gap,
+            &[
+                ("Caps", &["CapsLock"], 1.9),
+                ("A", &["A"], 1.0),
+                ("S", &["S"], 1.0),
+                ("D", &["D"], 1.0),
+                ("F", &["F"], 1.0),
+                ("G", &["G"], 1.0),
+                ("H", &["H"], 1.0),
+                ("J", &["J"], 1.0),
+                ("K", &["K"], 1.0),
+                ("L", &["L"], 1.0),
+                (";", &[";"], 1.0),
+                ("'", &["'"], 1.0),
+                ("Enter", &["Enter"], 2.25),
+            ],
+        );
+        push_quick_key_display_mascot_row(
+            &mut keys,
+            base_x,
+            base_y + row_step * 3.0,
+            key_w,
+            key_h,
+            gap,
+            &[
+                ("Shift", &["Shift"], 2.35),
+                ("Z", &["Z"], 1.0),
+                ("X", &["X"], 1.0),
+                ("C", &["C"], 1.0),
+                ("V", &["V"], 1.0),
+                ("B", &["B"], 1.0),
+                ("N", &["N"], 1.0),
+                ("M", &["M"], 1.0),
+                (",", &[","], 1.0),
+                (".", &["."], 1.0),
+                ("/", &["/"], 1.0),
+                ("Shift", &["Shift"], 2.55),
+            ],
+        );
+        push_quick_key_display_mascot_row(
+            &mut keys,
+            base_x,
+            base_y + row_step * 4.0,
+            key_w,
+            key_h,
+            gap,
+            &[
+                ("Ctrl", &["Ctrl"], 1.5),
+                ("Win", &["Win"], 1.2),
+                ("Alt", &["Alt"], 1.2),
+                ("Space", &["Space"], 4.9),
+                ("Alt", &["Alt"], 1.2),
+                ("Fn", &["Apps"], 1.2),
+                ("Ctrl", &["Ctrl"], 1.5),
+                ("<", &["Left"], 1.0),
+                ("^", &["Up"], 1.0),
+                ("v", &["Down"], 1.0),
+                (">", &["Right"], 1.0),
+            ],
+        );
+
+        keys
+    }
+
+    fn quick_key_display_alias_match(key_name: &str, aliases: &[&str]) -> bool {
+        aliases.iter().any(|alias| key_name.eq_ignore_ascii_case(alias))
+    }
+
+    fn quick_key_display_recent_entry_strength(
+        aliases: &[&str],
+        entries: &[QuickKeyDisplayEntry],
+        now: Instant,
+    ) -> f32 {
+        let mut strength: f32 = 0.0;
+        for entry in entries {
+            if !entry
+                .combo_keys
+                .iter()
+                .any(|key_name| quick_key_display_alias_match(key_name, aliases))
+            {
+                continue;
+            }
+            let age = now
+                .saturating_duration_since(entry.shown_at)
+                .as_secs_f32()
+                .min(1.0);
+            let pulse = (1.0 - age / 0.24).clamp(0.0, 1.0);
+            strength = strength.max((pulse * 0.9) + 0.1);
+        }
+        strength
+    }
+
+    fn quick_key_display_mascot_key_strength(
+        aliases: &[&str],
+        held_keys: &HashSet<String>,
+        entries: &[QuickKeyDisplayEntry],
+        now: Instant,
+    ) -> f32 {
+        let held = held_keys
+            .iter()
+            .any(|key_name| quick_key_display_alias_match(key_name, aliases));
+        if held {
+            return 1.0;
+        }
+        quick_key_display_recent_entry_strength(aliases, entries, now)
+    }
+
+    fn update_quick_key_display_mascot_mouse(runtime: &mut Runtime) {
+        let mut cursor = POINT::default();
+        if unsafe { GetCursorPos(&mut cursor) }.is_err() {
+            runtime.quick_key_display_last_cursor_pos = None;
+            return;
+        }
+
+        let (mut offset_x, mut offset_y) = runtime.quick_key_display_mouse_offset;
+        let (mut velocity_x, mut velocity_y) = runtime.quick_key_display_mouse_velocity;
+        if let Some(last) = runtime.quick_key_display_last_cursor_pos {
+            let delta_x = (cursor.x - last.x) as f32;
+            let delta_y = (cursor.y - last.y) as f32;
+            velocity_x += delta_x.clamp(-30.0, 30.0) * 0.08;
+            velocity_y += delta_y.clamp(-30.0, 30.0) * 0.08;
+        }
+
+        velocity_x += -offset_x * 0.08;
+        velocity_y += -offset_y * 0.08;
+        velocity_x *= 0.78;
+        velocity_y *= 0.78;
+        offset_x = (offset_x + velocity_x).clamp(-18.0, 18.0);
+        offset_y = (offset_y + velocity_y).clamp(-14.0, 14.0);
+
+        runtime.quick_key_display_mouse_offset = (offset_x, offset_y);
+        runtime.quick_key_display_mouse_velocity = (velocity_x, velocity_y);
+        runtime.quick_key_display_last_cursor_pos = Some(cursor);
+    }
+
     fn quick_key_display_colorref(r: u8, g: u8, b: u8) -> COLORREF {
         COLORREF((r as u32) | ((g as u32) << 8) | ((b as u32) << 16))
     }
@@ -6232,15 +6486,20 @@ mod windows_overlay {
                     center_x,
                     center_y,
                     size,
+                    mode,
                 } => {
                     runtime.quick_key_display_enabled = enabled;
                     runtime.quick_key_display_center_x = center_x;
                     runtime.quick_key_display_center_y = center_y;
                     runtime.quick_key_display_size = size.clamp(18.0, 96.0);
+                    runtime.quick_key_display_mode = mode;
                     if !enabled {
                         runtime.quick_key_display_entries.clear();
                         runtime.quick_key_display_slot_memory.clear();
                         runtime.quick_key_display_slot_labels.clear();
+                        runtime.quick_key_display_mouse_offset = (0.0, 0.0);
+                        runtime.quick_key_display_mouse_velocity = (0.0, 0.0);
+                        runtime.quick_key_display_last_cursor_pos = None;
                     }
                     let _ = refresh_quick_key_display(runtime);
                 }
@@ -6647,29 +6906,53 @@ mod windows_overlay {
         quick_key_display_reconcile_held_entries(runtime);
         quick_key_display_release_expired_entries(runtime, Instant::now());
 
-        if runtime.quick_key_display_entries.is_empty() {
+        if runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal
+            && runtime.quick_key_display_entries.is_empty()
+        {
             runtime.quick_key_display_slot_memory.clear();
             runtime.quick_key_display_slot_labels.clear();
             let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
             return Ok(());
         }
+
+        if runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot {
+            update_quick_key_display_mascot_mouse(runtime);
+        }
+
         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
         let entries = runtime.quick_key_display_entries.clone();
         let slot_labels = runtime.quick_key_display_slot_labels.clone();
-        let (width, height) = quick_key_display_layout_size(&entries, &slot_labels, font_size);
+        let (width, height) = match runtime.quick_key_display_mode {
+            QuickKeyDisplayMode::Normal => {
+                quick_key_display_layout_size(&entries, &slot_labels, font_size)
+            }
+            QuickKeyDisplayMode::Mascot => quick_key_display_mascot_layout_size(font_size),
+        };
         let x = runtime.quick_key_display_center_x - (width / 2);
         let y = runtime.quick_key_display_center_y - (height / 2);
         unsafe {
-            paint_quick_key_display(
-                runtime.key_display_hwnd,
-                &entries,
-                &slot_labels,
-                font_size,
-                x,
-                y,
-                width,
-                height,
-            )
+            match runtime.quick_key_display_mode {
+                QuickKeyDisplayMode::Normal => paint_quick_key_display(
+                    runtime.key_display_hwnd,
+                    &entries,
+                    &slot_labels,
+                    font_size,
+                    x,
+                    y,
+                    width,
+                    height,
+                ),
+                QuickKeyDisplayMode::Mascot => paint_mascot_quick_key_display(
+                    runtime.key_display_hwnd,
+                    &entries,
+                    font_size,
+                    runtime.quick_key_display_mouse_offset,
+                    x,
+                    y,
+                    width,
+                    height,
+                ),
+            }
         }
     }
 
@@ -8711,7 +8994,10 @@ mod windows_overlay {
             return 16;
         }
 
-        if runtime.quick_key_display_enabled && !runtime.quick_key_display_entries.is_empty() {
+        if runtime.quick_key_display_enabled
+            && (runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
+                || !runtime.quick_key_display_entries.is_empty())
+        {
             return 16;
         }
 
@@ -8749,10 +9035,6 @@ mod windows_overlay {
             || MOUSE_PATH_PREVIEW.lock().is_some();
         if recording_active {
             return 16;
-        }
-
-        if runtime.quick_key_display_enabled && !runtime.quick_key_display_entries.is_empty() {
-            return 33;
         }
 
         if is_ui_in_foreground() {
@@ -11908,6 +12190,37 @@ mod windows_overlay {
         Ok(())
     }
 
+    fn fill_skia_path(
+        pixmap: &mut tiny_skia::Pixmap,
+        path: &tiny_skia::Path,
+        color: [u8; 4],
+    ) {
+        let mut paint = tiny_skia::Paint::default();
+        paint.set_color(tiny_skia::Color::from_rgba8(
+            color[0], color[1], color[2], color[3],
+        ));
+        paint.anti_alias = true;
+        pixmap.fill_path(
+            path,
+            &paint,
+            tiny_skia::FillRule::Winding,
+            tiny_skia::Transform::identity(),
+            None,
+        );
+    }
+
+    fn fill_skia_circle(
+        pixmap: &mut tiny_skia::Pixmap,
+        center_x: f32,
+        center_y: f32,
+        radius: f32,
+        color: [u8; 4],
+    ) {
+        if let Some(path) = tiny_skia::PathBuilder::from_circle(center_x, center_y, radius) {
+            fill_skia_path(pixmap, &path, color);
+        }
+    }
+
     fn fill_skia_rounded_rect(
         pixmap: &mut tiny_skia::Pixmap,
         left: f32,
@@ -11934,18 +12247,7 @@ mod windows_overlay {
         pb.quad_to(left, top, left + radius, top);
         pb.close();
         if let Some(path) = pb.finish() {
-            let mut paint = tiny_skia::Paint::default();
-            paint.set_color(tiny_skia::Color::from_rgba8(
-                color[0], color[1], color[2], color[3],
-            ));
-            paint.anti_alias = true;
-            pixmap.fill_path(
-                &path,
-                &paint,
-                tiny_skia::FillRule::Winding,
-                tiny_skia::Transform::identity(),
-                None,
-            );
+            fill_skia_path(pixmap, &path, color);
         }
     }
 
@@ -12296,6 +12598,717 @@ mod windows_overlay {
             let scaled_b = ((base_b as f32) * run.alpha.clamp(0.0, 1.0))
                 .round()
                 .clamp(0.0, 255.0) as u8;
+            let _ = SetTextColor(
+                text_mem_dc,
+                quick_key_display_colorref(scaled_r, scaled_g, scaled_b),
+            );
+            let mut wide = run
+                .text
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let mut rect = run.rect;
+            let _ = DrawTextW(
+                text_mem_dc,
+                &mut wide,
+                &mut rect,
+                DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+            );
+        }
+
+        for i in 0..total_pixels {
+            let offset = i * 4;
+            let text_b = text_pixels[offset];
+            let text_g = text_pixels[offset + 1];
+            let text_r = text_pixels[offset + 2];
+            let text_a = text_b.max(text_g).max(text_r);
+            if text_a == 0 {
+                continue;
+            }
+            blend_premultiplied_bgra(
+                &mut pixels[offset..offset + 4],
+                text_b,
+                text_g,
+                text_r,
+                text_a,
+            );
+        }
+
+        let size = SIZE {
+            cx: width,
+            cy: height,
+        };
+        let src_pt = POINT { x: 0, y: 0 };
+        let pos = POINT {
+            x: window_x,
+            y: window_y,
+        };
+        let blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: AC_SRC_ALPHA as u8,
+        };
+        let _ = UpdateLayeredWindow(
+            hwnd,
+            Some(screen_dc),
+            Some(&pos),
+            Some(&size),
+            Some(mem_dc),
+            Some(&src_pt),
+            COLORREF(0),
+            Some(&blend),
+            ULW_ALPHA,
+        );
+
+        let _ = SelectObject(text_mem_dc, old_font);
+        let _ = DeleteObject(HGDIOBJ(font.0));
+        let _ = SelectObject(text_mem_dc, old_text_bitmap);
+        let _ = DeleteObject(HGDIOBJ(text_bitmap.0));
+        let _ = DeleteDC(text_mem_dc);
+        let _ = SelectObject(mem_dc, old_bitmap);
+        let _ = DeleteObject(HGDIOBJ(bitmap.0));
+        let _ = DeleteDC(mem_dc);
+        let _ = ReleaseDC(None, screen_dc);
+        let _ = ShowWindow(hwnd, SW_SHOWNA);
+        Ok(())
+    }
+
+    unsafe fn paint_mascot_quick_key_display(
+        hwnd: HWND,
+        entries: &[QuickKeyDisplayEntry],
+        font_size: f32,
+        mouse_offset: (f32, f32),
+        window_x: i32,
+        window_y: i32,
+        width: i32,
+        height: i32,
+    ) -> Result<()> {
+        let window_x = window_x.max(0);
+        let window_y = window_y.max(0);
+        let width = width.max(1);
+        let height = height.max(1);
+        let screen_dc = GetDC(None);
+        let mem_dc = CreateCompatibleDC(Some(screen_dc));
+        let bitmap_info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits_ptr: *mut c_void = std::ptr::null_mut();
+        let bitmap = CreateDIBSection(
+            Some(mem_dc),
+            &bitmap_info,
+            DIB_RGB_COLORS,
+            &mut bits_ptr,
+            None,
+            0,
+        )?;
+        let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
+        let bytes_len = (width as usize) * (height as usize) * 4;
+        let pixels = std::slice::from_raw_parts_mut(bits_ptr as *mut u8, bytes_len);
+        pixels.fill(0);
+
+        let mut pixmap = tiny_skia::Pixmap::new(width as u32, height as u32)
+            .ok_or_else(|| anyhow::anyhow!("Failed to allocate mascot key display pixmap"))?;
+
+        let scale = quick_key_display_mascot_scale(font_size);
+        let now = Instant::now();
+        let epoch_t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_secs_f32())
+            .unwrap_or(0.0);
+        let idle_bob = (epoch_t * 2.5).sin() * 2.2 * scale;
+        let ear_wiggle = (epoch_t * 3.3).sin() * 1.2 * scale;
+        let recent_pulse = entries.iter().fold(0.0f32, |acc, entry| {
+            let age = now
+                .saturating_duration_since(entry.shown_at)
+                .as_secs_f32()
+                .min(1.0);
+            acc.max((1.0 - age / 0.22).clamp(0.0, 1.0))
+        });
+
+        let (held_keys, held_mouse_buttons) = {
+            let hook_state = HOOK_STATE.lock();
+            (
+                hook_state.held_inputs.clone(),
+                hook_state.held_mouse_buttons.clone(),
+            )
+        };
+
+        let desk_left = 42.0 * scale;
+        let desk_top = 150.0 * scale;
+        let desk_width = 334.0 * scale;
+        let desk_height = 96.0 * scale;
+        let keyboard_left = 92.0 * scale;
+        let keyboard_top = 166.0 * scale;
+        let keyboard_width = 214.0 * scale;
+        let keyboard_height = 78.0 * scale;
+        let mouse_pad_left = 314.0 * scale;
+        let mouse_pad_top = 173.0 * scale;
+        let mouse_pad_width = 40.0 * scale;
+        let mouse_pad_height = 48.0 * scale;
+        let body_left = 104.0 * scale;
+        let body_top = 106.0 * scale + idle_bob * 0.3;
+        let body_width = 116.0 * scale;
+        let body_height = 74.0 * scale;
+        let head_cx = 160.0 * scale;
+        let head_cy = 78.0 * scale + idle_bob;
+        let head_radius = 56.0 * scale;
+        let paw_press = if held_keys.is_empty() {
+            recent_pulse * 3.2 * scale
+        } else {
+            4.2 * scale
+        };
+
+        let shadow_alpha = (90.0 + recent_pulse * 28.0).round() as u8;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            desk_left + 10.0 * scale,
+            desk_top + 74.0 * scale,
+            desk_width - 20.0 * scale,
+            20.0 * scale,
+            10.0 * scale,
+            [0, 0, 0, shadow_alpha],
+        );
+
+        let mut tail_path = tiny_skia::PathBuilder::new();
+        tail_path.move_to(96.0 * scale, 162.0 * scale);
+        tail_path.quad_to(
+            36.0 * scale,
+            110.0 * scale,
+            58.0 * scale,
+            48.0 * scale + idle_bob * 0.4,
+        );
+        tail_path.quad_to(
+            66.0 * scale,
+            24.0 * scale,
+            96.0 * scale,
+            36.0 * scale + ear_wiggle,
+        );
+        if let Some(path) = tail_path.finish() {
+            stroke_skia_path(&mut pixmap, &path, [122, 96, 88, 230], 18.0 * scale);
+            stroke_skia_path(&mut pixmap, &path, [164, 140, 132, 170], 8.0 * scale);
+        }
+
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            body_left,
+            body_top,
+            body_width,
+            body_height,
+            24.0 * scale,
+            [237, 241, 245, 210],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            body_left + 6.0 * scale,
+            body_top + 7.0 * scale,
+            body_width - 12.0 * scale,
+            body_height - 10.0 * scale,
+            20.0 * scale,
+            [252, 253, 255, 228],
+        );
+
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            desk_left,
+            desk_top,
+            desk_width,
+            desk_height,
+            14.0 * scale,
+            [116, 83, 63, 235],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            desk_left + 5.0 * scale,
+            desk_top + 5.0 * scale,
+            desk_width - 10.0 * scale,
+            desk_height - 16.0 * scale,
+            11.0 * scale,
+            [150, 110, 84, 215],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            desk_left + 7.0 * scale,
+            desk_top + 7.0 * scale,
+            desk_width - 14.0 * scale,
+            18.0 * scale,
+            10.0 * scale,
+            [255, 232, 210, 40],
+        );
+
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            keyboard_left + 4.0 * scale,
+            keyboard_top + 9.0 * scale,
+            keyboard_width,
+            keyboard_height,
+            18.0 * scale,
+            [8, 10, 18, 72],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            keyboard_left,
+            keyboard_top,
+            keyboard_width,
+            keyboard_height,
+            16.0 * scale,
+            [222, 231, 240, 245],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            keyboard_left + 4.0 * scale,
+            keyboard_top + 4.0 * scale,
+            keyboard_width - 8.0 * scale,
+            keyboard_height - 12.0 * scale,
+            14.0 * scale,
+            [242, 248, 255, 238],
+        );
+
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            mouse_pad_left + 2.0 * scale,
+            mouse_pad_top + 6.0 * scale,
+            mouse_pad_width,
+            mouse_pad_height,
+            11.0 * scale,
+            [7, 10, 16, 72],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            mouse_pad_left,
+            mouse_pad_top,
+            mouse_pad_width,
+            mouse_pad_height,
+            10.0 * scale,
+            [84, 114, 92, 228],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            mouse_pad_left + 3.0 * scale,
+            mouse_pad_top + 3.0 * scale,
+            mouse_pad_width - 6.0 * scale,
+            mouse_pad_height - 8.0 * scale,
+            8.0 * scale,
+            [112, 144, 118, 190],
+        );
+
+        let keys = quick_key_display_mascot_keys();
+        let label_font_size = (font_size * 0.32).round().clamp(8.0, 14.0) as i32;
+        let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
+        for key in &keys {
+            let strength =
+                quick_key_display_mascot_key_strength(key.aliases, &held_keys, entries, now);
+            let key_left = key.x * scale;
+            let key_top = key.y * scale;
+            let key_width = key.w * scale;
+            let key_height = key.h * scale;
+            let key_radius = 4.2 * scale;
+            let glow = strength.clamp(0.0, 1.0);
+            let base_fill = if glow > 0.0 {
+                quick_key_display_mix_rgba(
+                    [240, 247, 255, 235],
+                    [115, 220, 255, 255],
+                    glow * 0.86,
+                )
+            } else {
+                [243, 248, 253, 232]
+            };
+            let border = quick_key_display_mix_rgba(
+                [166, 182, 201, 190],
+                [239, 252, 255, 255],
+                glow * 0.72,
+            );
+            let top_gloss = quick_key_display_mix_rgba(
+                [255, 255, 255, 46],
+                [255, 255, 255, 96],
+                glow * 0.64,
+            );
+            fill_skia_rounded_rect(
+                &mut pixmap,
+                key_left,
+                key_top + 2.2 * scale,
+                key_width,
+                key_height,
+                key_radius,
+                [5, 8, 14, (36.0 + glow * 42.0).round() as u8],
+            );
+            fill_skia_rounded_rect(
+                &mut pixmap,
+                key_left,
+                key_top - glow * 1.6 * scale,
+                key_width,
+                key_height,
+                key_radius,
+                base_fill,
+            );
+            fill_skia_rounded_rect(
+                &mut pixmap,
+                key_left + 1.1 * scale,
+                key_top + 1.2 * scale - glow * 1.1 * scale,
+                key_width - 2.2 * scale,
+                (key_height * 0.44).max(1.0),
+                (key_radius - 1.0 * scale).max(1.6 * scale),
+                top_gloss,
+            );
+            stroke_skia_rounded_rect(
+                &mut pixmap,
+                key_left + 0.5,
+                key_top + 0.5 - glow * 1.5 * scale,
+                (key_width - 1.0).max(1.0),
+                (key_height - 1.0).max(1.0),
+                key_radius,
+                0.9 * scale.max(1.0),
+                border,
+            );
+
+            let text_color = quick_key_display_mix_rgba(
+                [96, 107, 130, 255],
+                [18, 45, 62, 255],
+                glow * 0.72,
+            );
+            text_runs.push(QuickKeyDisplayTextRun {
+                text: key.label.to_owned(),
+                rect: RECT {
+                    left: (key_left + 1.5 * scale).round() as i32,
+                    top: (key_top - glow * 1.4 * scale).round() as i32,
+                    right: (key_left + key_width - 1.5 * scale).round() as i32,
+                    bottom: (key_top + key_height).round() as i32,
+                },
+                color: quick_key_display_colorref(text_color[0], text_color[1], text_color[2]),
+                alpha: 0.72 + glow * 0.28,
+            });
+        }
+
+        let left_mouse_strength = quick_key_display_mascot_key_strength(
+            &["MouseLeft"],
+            &held_mouse_buttons,
+            entries,
+            now,
+        );
+        let right_mouse_strength = quick_key_display_mascot_key_strength(
+            &["MouseRight"],
+            &held_mouse_buttons,
+            entries,
+            now,
+        );
+        let wheel_up_strength =
+            quick_key_display_recent_entry_strength(&["MouseWheelUp"], entries, now);
+        let wheel_down_strength =
+            quick_key_display_recent_entry_strength(&["MouseWheelDown"], entries, now);
+        let mouse_center_x = mouse_pad_left + mouse_pad_width * 0.5 + mouse_offset.0 * scale * 0.7;
+        let mouse_center_y =
+            mouse_pad_top + mouse_pad_height * 0.52 + mouse_offset.1 * scale * 0.56;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            mouse_center_x - 10.0 * scale,
+            mouse_center_y - 8.0 * scale + 4.0 * scale,
+            20.0 * scale,
+            26.0 * scale,
+            9.0 * scale,
+            [0, 0, 0, 56],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            mouse_center_x - 10.0 * scale,
+            mouse_center_y - 8.0 * scale,
+            20.0 * scale,
+            26.0 * scale,
+            9.0 * scale,
+            [228, 236, 243, 238],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            mouse_center_x - 8.7 * scale,
+            mouse_center_y - 6.9 * scale,
+            8.0 * scale,
+            9.0 * scale,
+            4.0 * scale,
+            quick_key_display_mix_rgba(
+                [247, 250, 255, 210],
+                [124, 220, 255, 255],
+                left_mouse_strength * 0.82,
+            ),
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            mouse_center_x + 0.7 * scale,
+            mouse_center_y - 6.9 * scale,
+            8.0 * scale,
+            9.0 * scale,
+            4.0 * scale,
+            quick_key_display_mix_rgba(
+                [247, 250, 255, 210],
+                [124, 220, 255, 255],
+                right_mouse_strength * 0.82,
+            ),
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            mouse_center_x - 1.2 * scale,
+            mouse_center_y - 4.5 * scale,
+            2.4 * scale,
+            6.2 * scale,
+            1.2 * scale,
+            [126, 146, 164, 230],
+        );
+
+        if wheel_up_strength > 0.0 || wheel_down_strength > 0.0 {
+            let wheel_dir = if wheel_up_strength >= wheel_down_strength {
+                -1.0
+            } else {
+                1.0
+            };
+            let wheel_alpha = ((wheel_up_strength.max(wheel_down_strength)) * 180.0)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            let mut pb = tiny_skia::PathBuilder::new();
+            pb.move_to(mouse_center_x + 15.0 * scale, mouse_center_y);
+            pb.line_to(
+                mouse_center_x + 25.0 * scale,
+                mouse_center_y + wheel_dir * 5.0 * scale,
+            );
+            pb.line_to(mouse_center_x + 21.0 * scale, mouse_center_y);
+            if let Some(path) = pb.finish() {
+                fill_skia_path(&mut pixmap, &path, [128, 245, 255, wheel_alpha]);
+            }
+        }
+
+        let paw_fill = [239, 244, 249, 255];
+        let paw_glow = quick_key_display_mix_rgba(
+            paw_fill,
+            [122, 220, 255, 255],
+            recent_pulse * 0.45,
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            102.0 * scale,
+            137.0 * scale + paw_press,
+            44.0 * scale,
+            24.0 * scale,
+            12.0 * scale,
+            paw_glow,
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            207.0 * scale,
+            137.0 * scale + paw_press,
+            44.0 * scale,
+            24.0 * scale,
+            12.0 * scale,
+            paw_glow,
+        );
+
+        let mut left_ear = tiny_skia::PathBuilder::new();
+        left_ear.move_to(head_cx - 38.0 * scale, head_cy - 16.0 * scale);
+        left_ear.line_to(head_cx - 22.0 * scale, head_cy - 65.0 * scale - ear_wiggle);
+        left_ear.line_to(head_cx - 3.0 * scale, head_cy - 22.0 * scale);
+        left_ear.close();
+        if let Some(path) = left_ear.finish() {
+            fill_skia_path(&mut pixmap, &path, [244, 248, 252, 255]);
+        }
+        let mut right_ear = tiny_skia::PathBuilder::new();
+        right_ear.move_to(head_cx + 10.0 * scale, head_cy - 18.0 * scale);
+        right_ear.line_to(head_cx + 34.0 * scale, head_cy - 66.0 * scale + ear_wiggle);
+        right_ear.line_to(head_cx + 50.0 * scale, head_cy - 14.0 * scale);
+        right_ear.close();
+        if let Some(path) = right_ear.finish() {
+            fill_skia_path(&mut pixmap, &path, [120, 96, 104, 248]);
+        }
+
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx,
+            head_cy + 6.0 * scale,
+            head_radius,
+            [0, 0, 0, 34],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx,
+            head_cy,
+            head_radius,
+            [246, 250, 255, 255],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx - 7.0 * scale,
+            head_cy - 12.0 * scale,
+            head_radius * 0.7,
+            [255, 255, 255, 42],
+        );
+
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx - 26.0 * scale,
+            head_cy + 4.0 * scale,
+            8.0 * scale,
+            [45, 49, 66, 250],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx + 18.0 * scale,
+            head_cy + 4.0 * scale,
+            8.0 * scale,
+            [45, 49, 66, 250],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx - 23.0 * scale,
+            head_cy + 1.5 * scale,
+            2.6 * scale,
+            [255, 255, 255, 250],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx + 21.0 * scale,
+            head_cy + 1.5 * scale,
+            2.6 * scale,
+            [255, 255, 255, 250],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx - 42.0 * scale,
+            head_cy + 18.0 * scale,
+            10.0 * scale,
+            [255, 182, 198, 165],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx + 34.0 * scale,
+            head_cy + 18.0 * scale,
+            10.0 * scale,
+            [255, 182, 198, 165],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx - 1.0 * scale,
+            head_cy + 12.0 * scale,
+            5.2 * scale,
+            [68, 54, 64, 236],
+        );
+        let mut mouth = tiny_skia::PathBuilder::new();
+        mouth.move_to(head_cx - 10.0 * scale, head_cy + 23.0 * scale);
+        mouth.quad_to(
+            head_cx - 5.0 * scale,
+            head_cy + 30.0 * scale,
+            head_cx,
+            head_cy + 25.0 * scale,
+        );
+        mouth.quad_to(
+            head_cx + 5.0 * scale,
+            head_cy + 30.0 * scale,
+            head_cx + 10.0 * scale,
+            head_cy + 23.0 * scale,
+        );
+        if let Some(path) = mouth.finish() {
+            stroke_skia_path(&mut pixmap, &path, [80, 66, 76, 230], 2.0 * scale);
+        }
+
+        for whisker_dir in [-1.0f32, 1.0] {
+            for whisker_y in [12.0f32, 21.0] {
+                let x0 = head_cx + whisker_dir * 14.0 * scale;
+                let x1 = head_cx + whisker_dir * 40.0 * scale;
+                let y0 = head_cy + whisker_y * scale * 0.25;
+                let y1 = y0 + (if whisker_y < 15.0 { -4.0 } else { 3.0 }) * scale;
+                let mut pb = tiny_skia::PathBuilder::new();
+                pb.move_to(x0, y0);
+                pb.line_to(x1, y1);
+                if let Some(path) = pb.finish() {
+                    stroke_skia_path(&mut pixmap, &path, [126, 132, 146, 150], 1.2 * scale);
+                }
+            }
+        }
+
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx + 4.0 * scale,
+            head_cy - 45.0 * scale,
+            8.0 * scale,
+            [81, 158, 232, 255],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx - 17.0 * scale,
+            head_cy - 43.0 * scale,
+            14.0 * scale,
+            [98, 180, 248, 250],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx + 24.0 * scale,
+            head_cy - 43.0 * scale,
+            14.0 * scale,
+            [98, 180, 248, 250],
+        );
+        fill_skia_circle(
+            &mut pixmap,
+            head_cx - 9.0 * scale,
+            head_cy - 47.0 * scale,
+            8.0 * scale,
+            [255, 255, 255, 42],
+        );
+
+        let pixmap_data = pixmap.data();
+        let total_pixels = width as usize * height as usize;
+        for i in 0..total_pixels {
+            let offset = i * 4;
+            pixels[offset] = pixmap_data[offset + 2];
+            pixels[offset + 1] = pixmap_data[offset + 1];
+            pixels[offset + 2] = pixmap_data[offset];
+            pixels[offset + 3] = pixmap_data[offset + 3];
+        }
+
+        let text_mem_dc = CreateCompatibleDC(Some(screen_dc));
+        let mut text_bits_ptr: *mut c_void = std::ptr::null_mut();
+        let text_bitmap = CreateDIBSection(
+            Some(text_mem_dc),
+            &bitmap_info,
+            DIB_RGB_COLORS,
+            &mut text_bits_ptr,
+            None,
+            0,
+        )?;
+        let old_text_bitmap = SelectObject(text_mem_dc, HGDIOBJ(text_bitmap.0));
+        let text_pixels = std::slice::from_raw_parts_mut(text_bits_ptr as *mut u8, bytes_len);
+        text_pixels.fill(0);
+
+        let font_name = "Segoe UI"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let font = CreateFontW(
+            -label_font_size.max(1),
+            0,
+            0,
+            0,
+            FW_MEDIUM.0 as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY,
+            FF_DONTCARE.0 as u32,
+            PCWSTR(font_name.as_ptr()),
+        );
+        let old_font = SelectObject(text_mem_dc, HGDIOBJ(font.0));
+        let _ = SetBkMode(text_mem_dc, TRANSPARENT);
+        for run in &text_runs {
+            let (base_r, base_g, base_b) = quick_key_display_colorref_components(run.color);
+            let alpha = run.alpha.clamp(0.0, 1.0);
+            let scaled_r = ((base_r as f32) * alpha).round().clamp(0.0, 255.0) as u8;
+            let scaled_g = ((base_g as f32) * alpha).round().clamp(0.0, 255.0) as u8;
+            let scaled_b = ((base_b as f32) * alpha).round().clamp(0.0, 255.0) as u8;
             let _ = SetTextColor(
                 text_mem_dc,
                 quick_key_display_colorref(scaled_r, scaled_g, scaled_b),
@@ -22725,7 +23738,8 @@ mod fallback {
     use crate::{
         model::{
             AudioSettings, CrosshairStyle, HotkeyBinding, MacroGroup, ProfileRecord, RgbaColor,
-            VisionPreset, WindowExpandControls, WindowFocusPreset, WindowLayout, WindowPreset,
+            QuickKeyDisplayMode, VisionPreset, WindowExpandControls, WindowFocusPreset,
+            WindowLayout, WindowPreset,
         },
         storage::AppPaths,
     };
@@ -22786,6 +23800,7 @@ mod fallback {
             center_x: i32,
             center_y: i32,
             size: f32,
+            mode: QuickKeyDisplayMode,
         },
         ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
