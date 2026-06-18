@@ -5700,7 +5700,7 @@ mod windows_overlay {
     fn quick_key_display_mascot_keys() -> Vec<QuickKeyDisplayMascotKey> {
         let mut keys = Vec::new();
         let base_x = 92.0;
-        let base_y = 174.0;
+        let base_y = 161.0; // Shifted up by 13 units
         let key_w = 12.0;
         let key_h = 11.0;
         let gap = 2.3;
@@ -5807,15 +5807,86 @@ mod windows_overlay {
             key_h,
             gap,
             &[
-                ("Ctrl", &["Ctrl"], 1.5),
+                ("Ctrl", &["LCtrl"], 1.5),
                 ("Win", &["Win"], 1.2),
-                ("Alt", &["Alt"], 1.2),
+                ("Alt", &["LAlt"], 1.2),
                 ("Space", &["Space"], 6.25),
-                ("Alt", &["Alt"], 1.2),
+                ("Alt", &["RAlt"], 1.2),
                 ("Fn", &["Apps"], 1.2),
-                ("Ctrl", &["Ctrl"], 2.75),
+                ("Ctrl", &["RCtrl"], 2.75),
             ],
         );
+
+        // Append navigation block on the right
+        // Column 1 (X = 315.2)
+        keys.push(QuickKeyDisplayMascotKey {
+            label: "Ins",
+            aliases: &["Insert"],
+            x: 315.2,
+            y: base_y,
+            w: key_w,
+            h: key_h,
+        });
+        keys.push(QuickKeyDisplayMascotKey {
+            label: "Del",
+            aliases: &["Delete"],
+            x: 315.2,
+            y: base_y + row_step,
+            w: key_w,
+            h: key_h,
+        });
+        keys.push(QuickKeyDisplayMascotKey {
+            label: "PgUp",
+            aliases: &["PageUp", "Prior"],
+            x: 315.2,
+            y: base_y + row_step * 2.0,
+            w: key_w,
+            h: key_h,
+        });
+        keys.push(QuickKeyDisplayMascotKey {
+            label: "PgDn",
+            aliases: &["PageDown", "Next"],
+            x: 315.2,
+            y: base_y + row_step * 3.0,
+            w: key_w,
+            h: key_h,
+        });
+        keys.push(QuickKeyDisplayMascotKey {
+            label: "Left",
+            aliases: &["Left", "ArrowLeft"],
+            x: 315.2,
+            y: base_y + row_step * 4.0,
+            w: key_w,
+            h: key_h,
+        });
+
+        // Column 2 (X = 329.5)
+        keys.push(QuickKeyDisplayMascotKey {
+            label: "Up",
+            aliases: &["Up", "ArrowUp"],
+            x: 329.5,
+            y: base_y + row_step * 3.0,
+            w: key_w,
+            h: key_h,
+        });
+        keys.push(QuickKeyDisplayMascotKey {
+            label: "Down",
+            aliases: &["Down", "ArrowDown"],
+            x: 329.5,
+            y: base_y + row_step * 4.0,
+            w: key_w,
+            h: key_h,
+        });
+
+        // Column 3 (X = 343.8)
+        keys.push(QuickKeyDisplayMascotKey {
+            label: "Right",
+            aliases: &["Right", "ArrowRight"],
+            x: 343.8,
+            y: base_y + row_step * 4.0,
+            w: key_w,
+            h: key_h,
+        });
 
         keys
     }
@@ -5842,7 +5913,7 @@ mod windows_overlay {
                 .saturating_duration_since(entry.shown_at)
                 .as_secs_f32()
                 .min(1.0);
-            let pulse = (1.0 - age / 0.24).clamp(0.0, 1.0);
+            let pulse = (1.0 - age / 0.05).clamp(0.0, 1.0); // Ultra fast decay for responsive hand retraction
             strength = strength.max((pulse * 0.9) + 0.1);
         }
         strength
@@ -5854,9 +5925,21 @@ mod windows_overlay {
         entries: &[QuickKeyDisplayEntry],
         now: Instant,
     ) -> f32 {
-        let held = held_keys
+        let mut held = held_keys
             .iter()
             .any(|key_name| quick_key_display_alias_match(key_name, aliases));
+        
+        // Dynamically query real-time physical key states for Left/Right Ctrl and Alt
+        if aliases.contains(&"LCtrl") {
+            held = unsafe { GetAsyncKeyState(0xA2) } as u16 & 0x8000 != 0;
+        } else if aliases.contains(&"RCtrl") {
+            held = unsafe { GetAsyncKeyState(0xA3) } as u16 & 0x8000 != 0;
+        } else if aliases.contains(&"LAlt") {
+            held = unsafe { GetAsyncKeyState(0xA4) } as u16 & 0x8000 != 0;
+        } else if aliases.contains(&"RAlt") {
+            held = unsafe { GetAsyncKeyState(0xA5) } as u16 & 0x8000 != 0;
+        }
+
         if held {
             return 1.0;
         }
@@ -12821,7 +12904,7 @@ mod windows_overlay {
                 .saturating_duration_since(entry.shown_at)
                 .as_secs_f32()
                 .min(1.0);
-            acc.max((1.0 - age / 0.22).clamp(0.0, 1.0))
+            acc.max((1.0 - age / 0.05).clamp(0.0, 1.0)) // Snap-back decay
         });
 
         let (held_keys, held_mouse_buttons) = {
@@ -12891,7 +12974,7 @@ mod windows_overlay {
             pb.quad_to(project_point(left + w, top + h).0, project_point(left + w, top + h).1, br_h.0, br_h.1);
             pb.line_to(bl_h.0, bl_h.1);
             pb.quad_to(project_point(left, top + h).0, project_point(left, top + h).1, bl_v.0, bl_v.1);
-            pb.line_to(bl_v.0, bl_v.1);
+            pb.line_to(tl_v.0, tl_v.1); // Corrected typo here (changed from bl_v to tl_v to fix the top-left desk defect!)
             pb.quad_to(project_point(left, top).0, project_point(left, top).1, tl_h.0, tl_h.1);
             pb.close();
             
@@ -12904,22 +12987,22 @@ mod windows_overlay {
         let desk_left = 38.0;
         let desk_top = 146.0;
         let desk_width = 322.0;
-        let desk_height = 92.0;
+        let desk_height = 96.0; // Made slightly deeper
 
         let mouse_pad_left = 46.0;
-        let mouse_pad_top = 168.0;
 
         let keyboard_left = 90.0;
-        let keyboard_top = 168.0;
-        let keyboard_width = 217.0;
+        let keyboard_top = 153.0; // Shifted keyboard up by 15 units
+        let keyboard_width = 270.0; // Expanded to contain the navigation keys neatly!
         let keyboard_height = 71.0;
 
+        // Animate Hachiware closer to the desk
         let body_cx = 167.0 * scale;
-        let body_cy = 134.0 * scale;
+        let body_cy = 138.0 * scale; // Moved downwards (closer to desk top)
         let body_radius = 36.0 * scale;
         
         let head_cx = 168.0 * scale;
-        let head_cy = 88.0 * scale;
+        let head_cy = 92.0 * scale; // Moved downwards
         let head_radius = 47.0 * scale;
 
         let paw_press = if held_keys.is_empty() {
@@ -12927,6 +13010,10 @@ mod windows_overlay {
         } else {
             3.0 * scale
         };
+
+        // Pseudo-3D head turn animation offsets based on mouse offset
+        let look_x = (mouse_offset.0 * 2.2).clamp(-6.0, 6.0) * scale;
+        let look_y = (mouse_offset.1 * 1.8).clamp(-4.5, 4.5) * scale;
 
         // 1. Draw Hachiware (sitting BEHIND the desk)
         // Body Shadow
@@ -12954,18 +13041,20 @@ mod windows_overlay {
             [45, 40, 42, 255],
         );
 
-        // Hachiware Ears
+        // Hachiware Ears (Shifted opposite to look_x/y for 3D parallax!)
         let ear_wiggle = recent_pulse * 3.0 * scale;
+        let ear_shift_x = -look_x * 0.4;
+        let ear_shift_y = -look_y * 0.4;
         // Left Ear
         let mut left_ear = tiny_skia::PathBuilder::new();
-        left_ear.move_to(head_cx - 42.0 * scale, head_cy - 22.0 * scale);
+        left_ear.move_to(head_cx - 42.0 * scale + ear_shift_x, head_cy - 22.0 * scale + ear_shift_y);
         left_ear.quad_to(
-            head_cx - 43.0 * scale, head_cy - 48.0 * scale - ear_wiggle,
-            head_cx - 36.0 * scale, head_cy - 52.0 * scale - ear_wiggle,
+            head_cx - 43.0 * scale - ear_wiggle + ear_shift_x, head_cy - 48.0 * scale - ear_wiggle + ear_shift_y,
+            head_cx - 36.0 * scale - ear_wiggle + ear_shift_x, head_cy - 52.0 * scale - ear_wiggle + ear_shift_y,
         );
         left_ear.quad_to(
-            head_cx - 24.0 * scale, head_cy - 42.0 * scale,
-            head_cx - 18.0 * scale, head_cy - 38.0 * scale,
+            head_cx - 24.0 * scale + ear_shift_x, head_cy - 42.0 * scale + ear_shift_y,
+            head_cx - 18.0 * scale + ear_shift_x, head_cy - 38.0 * scale + ear_shift_y,
         );
         left_ear.close();
         if let Some(path) = left_ear.finish() {
@@ -12974,9 +13063,9 @@ mod windows_overlay {
         }
         // Left Inner Ear (Pink)
         let mut left_inner = tiny_skia::PathBuilder::new();
-        left_inner.move_to(head_cx - 37.0 * scale, head_cy - 24.0 * scale);
-        left_inner.line_to(head_cx - 34.0 * scale, head_cy - 45.0 * scale - ear_wiggle);
-        left_inner.line_to(head_cx - 23.0 * scale, head_cy - 34.0 * scale);
+        left_inner.move_to(head_cx - 37.0 * scale + ear_shift_x, head_cy - 24.0 * scale + ear_shift_y);
+        left_inner.line_to(head_cx - 34.0 * scale - ear_wiggle + ear_shift_x, head_cy - 45.0 * scale - ear_wiggle + ear_shift_y);
+        left_inner.line_to(head_cx - 23.0 * scale + ear_shift_x, head_cy - 34.0 * scale + ear_shift_y);
         left_inner.close();
         if let Some(path) = left_inner.finish() {
             fill_skia_path(&mut pixmap, &path, [255, 200, 210, 255]);
@@ -12984,14 +13073,14 @@ mod windows_overlay {
 
         // Right Ear
         let mut right_ear = tiny_skia::PathBuilder::new();
-        right_ear.move_to(head_cx + 18.0 * scale, head_cy - 38.0 * scale);
+        right_ear.move_to(head_cx + 18.0 * scale + ear_shift_x, head_cy - 38.0 * scale + ear_shift_y);
         right_ear.quad_to(
-            head_cx + 24.0 * scale, head_cy - 42.0 * scale,
-            head_cx + 36.0 * scale, head_cy - 52.0 * scale + ear_wiggle,
+            head_cx + 24.0 * scale + ear_shift_x, head_cy - 42.0 * scale + ear_shift_y,
+            head_cx + 36.0 * scale + ear_wiggle + ear_shift_x, head_cy - 52.0 * scale + ear_wiggle + ear_shift_y,
         );
         right_ear.quad_to(
-            head_cx + 43.0 * scale, head_cy - 48.0 * scale + ear_wiggle,
-            head_cx + 42.0 * scale, head_cy - 22.0 * scale,
+            head_cx + 43.0 * scale + ear_wiggle + ear_shift_x, head_cy - 48.0 * scale + ear_wiggle + ear_shift_y,
+            head_cx + 42.0 * scale + ear_shift_x, head_cy - 22.0 * scale + ear_shift_y,
         );
         right_ear.close();
         if let Some(path) = right_ear.finish() {
@@ -13000,15 +13089,15 @@ mod windows_overlay {
         }
         // Right Inner Ear (Pink)
         let mut right_inner = tiny_skia::PathBuilder::new();
-        right_inner.move_to(head_cx + 23.0 * scale, head_cy - 34.0 * scale);
-        right_inner.line_to(head_cx + 34.0 * scale, head_cy - 45.0 * scale + ear_wiggle);
-        right_inner.line_to(head_cx + 37.0 * scale, head_cy - 24.0 * scale);
+        right_inner.move_to(head_cx + 23.0 * scale + ear_shift_x, head_cy - 34.0 * scale + ear_shift_y);
+        right_inner.line_to(head_cx + 34.0 * scale + ear_wiggle + ear_shift_x, head_cy - 45.0 * scale + ear_wiggle + ear_shift_y);
+        right_inner.line_to(head_cx + 37.0 * scale + ear_shift_x, head_cy - 24.0 * scale + ear_shift_y);
         right_inner.close();
         if let Some(path) = right_inner.finish() {
             fill_skia_path(&mut pixmap, &path, [255, 200, 210, 255]);
         }
 
-        // Head (White Circle)
+        // Head (White Circle - remains centered for stable face rotation)
         fill_skia_circle(
             &mut pixmap,
             head_cx,
@@ -13024,32 +13113,34 @@ mod windows_overlay {
             [255, 255, 255, 255],
         );
 
-        // Forehead Blue Hair Patch (Hachiware hair pattern)
+        // Forehead Blue Hair Patch (Shifted slightly by look_x/y for 3D depth)
         let mut hair = tiny_skia::PathBuilder::new();
-        hair.move_to(head_cx - 46.2 * scale, head_cy - 8.0 * scale);
+        let hair_shift_x = look_x * 0.6;
+        let hair_shift_y = look_y * 0.6;
+        hair.move_to(head_cx - 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y);
         hair.quad_to(
-            head_cx - 40.0 * scale, head_cy - 46.0 * scale,
-            head_cx, head_cy - 47.0 * scale
+            head_cx - 40.0 * scale + hair_shift_x, head_cy - 46.0 * scale + hair_shift_y,
+            head_cx + hair_shift_x, head_cy - 47.0 * scale + hair_shift_y
         );
         hair.quad_to(
-            head_cx + 40.0 * scale, head_cy - 46.0 * scale,
-            head_cx + 46.2 * scale, head_cy - 8.0 * scale
+            head_cx + 40.0 * scale + hair_shift_x, head_cy - 46.0 * scale + hair_shift_y,
+            head_cx + 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y
         );
         hair.quad_to(
-            head_cx + 25.0 * scale, head_cy - 4.0 * scale,
-            head_cx + 14.0 * scale, head_cy + 8.0 * scale
+            head_cx + 25.0 * scale + hair_shift_x, head_cy - 4.0 * scale + hair_shift_y,
+            head_cx + 14.0 * scale + hair_shift_x, head_cy + 8.0 * scale + hair_shift_y
         );
         hair.quad_to(
-            head_cx + 6.0 * scale, head_cy - 8.0 * scale,
-            head_cx, head_cy - 12.0 * scale
+            head_cx + 6.0 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y,
+            head_cx + hair_shift_x, head_cy - 12.0 * scale + hair_shift_y
         );
         hair.quad_to(
-            head_cx - 6.0 * scale, head_cy - 8.0 * scale,
-            head_cx - 14.0 * scale, head_cy + 8.0 * scale
+            head_cx - 6.0 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y,
+            head_cx - 14.0 * scale + hair_shift_x, head_cy + 8.0 * scale + hair_shift_y
         );
         hair.quad_to(
-            head_cx - 25.0 * scale, head_cy - 4.0 * scale,
-            head_cx - 46.2 * scale, head_cy - 8.0 * scale
+            head_cx - 25.0 * scale + hair_shift_x, head_cy - 4.0 * scale + hair_shift_y,
+            head_cx - 46.2 * scale + hair_shift_x, head_cy - 8.0 * scale + hair_shift_y
         );
         hair.close();
         if let Some(path) = hair.finish() {
@@ -13067,11 +13158,11 @@ mod windows_overlay {
             [45, 40, 42, 255],
         );
 
-        // Eyes (Shiny Anime highlights)
-        let left_eye_x = head_cx - 18.0 * scale;
-        let left_eye_y = head_cy + 4.0 * scale;
-        let right_eye_x = head_cx + 18.0 * scale;
-        let right_eye_y = head_cy + 4.0 * scale;
+        // Eyes (Animate/shift by look_x and look_y for 3D turn!)
+        let left_eye_x = head_cx - 18.0 * scale + look_x;
+        let left_eye_y = head_cy + 4.0 * scale + look_y;
+        let right_eye_x = head_cx + 18.0 * scale + look_x;
+        let right_eye_y = head_cy + 4.0 * scale + look_y;
         let eye_w = 8.5 * scale;
         let eye_h = 10.5 * scale;
         
@@ -13104,39 +13195,39 @@ mod windows_overlay {
             );
         }
 
-        // Eyebrows
-        fill_skia_circle(&mut pixmap, head_cx - 18.0 * scale, head_cy - 7.5 * scale, 1.2 * scale, [45, 40, 42, 255]);
-        fill_skia_circle(&mut pixmap, head_cx + 18.0 * scale, head_cy - 7.5 * scale, 1.2 * scale, [45, 40, 42, 255]);
+        // Eyebrows (Shifted by look_x/y)
+        fill_skia_circle(&mut pixmap, head_cx - 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
+        fill_skia_circle(&mut pixmap, head_cx + 18.0 * scale + look_x, head_cy - 7.5 * scale + look_y, 1.2 * scale, [45, 40, 42, 255]);
 
-        // Cheek Blush (Diagonal hand-drawn lines ///)
+        // Cheek Blush (Shifted by look_x/y)
         for i in 0..3 {
             let offset = (i as f32 - 1.0) * 3.5 * scale;
             // Left Cheek
             let mut blush = tiny_skia::PathBuilder::new();
-            blush.move_to(head_cx - 32.0 * scale + offset - 1.5 * scale, head_cy + 13.0 * scale + 3.0 * scale);
-            blush.line_to(head_cx - 32.0 * scale + offset + 1.5 * scale, head_cy + 13.0 * scale - 3.0 * scale);
+            blush.move_to(head_cx - 32.0 * scale + offset - 1.5 * scale + look_x, head_cy + 13.0 * scale + 3.0 * scale + look_y);
+            blush.line_to(head_cx - 32.0 * scale + offset + 1.5 * scale + look_x, head_cy + 13.0 * scale - 3.0 * scale + look_y);
             if let Some(path) = blush.finish() {
                 stroke_skia_path(&mut pixmap, &path, [255, 120, 140, 220], 1.8 * scale);
             }
             // Right Cheek
             let mut blush2 = tiny_skia::PathBuilder::new();
-            blush2.move_to(head_cx + 32.0 * scale + offset - 1.5 * scale, head_cy + 13.0 * scale + 3.0 * scale);
-            blush2.line_to(head_cx + 32.0 * scale + offset + 1.5 * scale, head_cy + 13.0 * scale - 3.0 * scale);
+            blush2.move_to(head_cx + 32.0 * scale + offset - 1.5 * scale + look_x, head_cy + 13.0 * scale + 3.0 * scale + look_y);
+            blush2.line_to(head_cx + 32.0 * scale + offset + 1.5 * scale + look_x, head_cy + 13.0 * scale - 3.0 * scale + look_y);
             if let Some(path) = blush2.finish() {
                 stroke_skia_path(&mut pixmap, &path, [255, 120, 140, 220], 1.8 * scale);
             }
         }
 
-        // Mouth (Cute cat w mouth)
+        // Mouth (Shifted by look_x/y)
         let mut mouth = tiny_skia::PathBuilder::new();
-        mouth.move_to(head_cx - 5.0 * scale, head_cy + 14.0 * scale);
+        mouth.move_to(head_cx - 5.0 * scale + look_x, head_cy + 14.0 * scale + look_y);
         mouth.quad_to(
-            head_cx - 2.5 * scale, head_cy + 17.5 * scale,
-            head_cx, head_cy + 14.5 * scale,
+            head_cx - 2.5 * scale + look_x, head_cy + 17.5 * scale + look_y,
+            head_cx + look_x, head_cy + 14.5 * scale + look_y,
         );
         mouth.quad_to(
-            head_cx + 2.5 * scale, head_cy + 17.5 * scale,
-            head_cx + 5.0 * scale, head_cy + 14.0 * scale,
+            head_cx + 2.5 * scale + look_x, head_cy + 17.5 * scale + look_y,
+            head_cx + 5.0 * scale + look_x, head_cy + 14.0 * scale + look_y,
         );
         if let Some(path) = mouth.finish() {
             stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 2.0 * scale);
@@ -13157,7 +13248,7 @@ mod windows_overlay {
         );
 
         // 3D Desk (Front Lip and Top Surface)
-        let desk_extrusion = 8.0;
+        let desk_extrusion = 12.0; // Made front lip thicker (was 8.0)
         // Desk Front Lip
         fill_projected_rounded_quad(
             &mut pixmap,
@@ -13304,30 +13395,42 @@ mod windows_overlay {
             1.0 * scale,
         );
 
-        // Mouse Pad Shadow and Pad (Circular pad on Left)
-        let pad_center = project_point(mouse_pad_left + 19.0, keyboard_top + 23.0);
-        fill_skia_circle(
-            &mut pixmap,
-            pad_center.0,
-            pad_center.1 + 3.0 * scale,
-            19.0 * scale,
-            [0, 0, 0, 32],
-        );
-        fill_skia_circle(
-            &mut pixmap,
-            pad_center.0,
-            pad_center.1,
-            19.0 * scale,
-            [147, 206, 244, 255],
-        );
-        stroke_skia_circle(
-            &mut pixmap,
-            pad_center.0,
-            pad_center.1,
-            19.0 * scale,
-            1.8 * scale,
-            [45, 40, 42, 255],
-        );
+        // 3D Perspective Mouse Pad (Drawn as a projected ellipse path!)
+        let mut pad_pb = tiny_skia::PathBuilder::new();
+        let pad_cx = mouse_pad_left + 19.0;
+        let pad_cy = keyboard_top + 23.0;
+        let pad_r = 19.0;
+        
+        let start_pt = project_point(pad_cx + pad_r, pad_cy);
+        pad_pb.move_to(start_pt.0, start_pt.1);
+        for i in 1..=32 {
+            let angle = (i as f32) * 2.0 * std::f32::consts::PI / 32.0;
+            let px = pad_cx + pad_r * angle.cos();
+            let py = pad_cy + pad_r * angle.sin();
+            let pt = project_point(px, py);
+            pad_pb.line_to(pt.0, pt.1);
+        }
+        pad_pb.close();
+        if let Some(path) = pad_pb.finish() {
+            // Shadow
+            let mut shadow_pb = tiny_skia::PathBuilder::new();
+            let s_start = project_point(pad_cx + pad_r, pad_cy + 3.0);
+            shadow_pb.move_to(s_start.0, s_start.1);
+            for i in 1..=32 {
+                let angle = (i as f32) * 2.0 * std::f32::consts::PI / 32.0;
+                let px = pad_cx + pad_r * angle.cos();
+                let py = pad_cy + 3.0 + pad_r * angle.sin();
+                let pt = project_point(px, py);
+                shadow_pb.line_to(pt.0, pt.1);
+            }
+            shadow_pb.close();
+            if let Some(s_path) = shadow_pb.finish() {
+                fill_skia_path(&mut pixmap, &s_path, [0, 0, 0, 32]);
+            }
+            
+            fill_skia_path(&mut pixmap, &path, [147, 206, 244, 255]);
+            stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
+        }
 
 
         // 4. Mouse and Keyboard keys logic
@@ -13343,9 +13446,9 @@ mod windows_overlay {
         let mut left_paw_target = if mouse_active {
             mouse_projected
         } else {
-            project_point(130.0, 177.0) // Resting on the keyboard
+            project_point(130.0, 164.0) // Resting on the shifted keyboard
         };
-        let mut right_paw_target = project_point(214.0, 177.0); // Resting on the keyboard
+        let mut right_paw_target = project_point(214.0, 164.0); // Resting on the shifted keyboard
         
         let mut left_paw_strength = 0.0f32;
         let mut right_paw_strength = 0.0f32;
@@ -13388,7 +13491,7 @@ mod windows_overlay {
 
             let is_modifier = matches!(
                 key.label,
-                "Esc" | "Tab" | "Caps" | "Shift" | "Ctrl" | "Win" | "Alt" | "Enter" | "Bk" | "Space"
+                "Esc" | "Tab" | "Caps" | "Shift" | "Ctrl" | "Win" | "Alt" | "Enter" | "Bk" | "Space" | "Ins" | "Del" | "PgUp" | "PgDn"
             );
 
             let base_fill = if glow > 0.0 {
@@ -13540,8 +13643,9 @@ mod windows_overlay {
         );
 
         // Left Arm (Reaches to Left Paw Target)
-        let left_shoulder_top = (body_cx - 28.0 * scale, body_cy + 2.0 * scale);
-        let left_shoulder_bottom = (body_cx - 10.0 * scale, body_cy + 22.0 * scale);
+        // Position shoulders higher up (Y = 140 - 12 = 128) so they are fully above the desk top (146) and merge cleanly!
+        let left_shoulder_top = (body_cx - 28.0 * scale, body_cy - 12.0 * scale);
+        let left_shoulder_bottom = (body_cx - 10.0 * scale, body_cy + 4.0 * scale);
         let left_paw_x = left_paw_target.0;
         let left_paw_y = left_paw_target.1 + paw_press;
         
@@ -13572,8 +13676,8 @@ mod windows_overlay {
         }
 
         // Right Arm (Reaches to Right Paw Target)
-        let right_shoulder_top = (body_cx + 28.0 * scale, body_cy + 2.0 * scale);
-        let right_shoulder_bottom = (body_cx + 10.0 * scale, body_cy + 22.0 * scale);
+        let right_shoulder_top = (body_cx + 28.0 * scale, body_cy - 12.0 * scale);
+        let right_shoulder_bottom = (body_cx + 10.0 * scale, body_cy + 4.0 * scale);
         let right_paw_x = right_paw_target.0;
         let right_paw_y = right_paw_target.1 + paw_press;
         
