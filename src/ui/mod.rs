@@ -98,6 +98,12 @@ pub(crate) enum AudioEditorTarget {
     Preset(u32),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OcrLanguageJobKind {
+    Install,
+    Uninstall,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TitlebarQuickActionKind {
     Taskbar,
@@ -786,6 +792,8 @@ pub struct CrosshairApp {
     opencv_download_job: Option<JoinHandle<Result<()>>>,
     opencv_download_progress: Arc<AtomicU32>,
     opencv_installed: bool,
+    ocr_language_job: Option<JoinHandle<Result<bool>>>,
+    ocr_language_job_target: Option<(OcrLanguageJobKind, String, String)>,
     interception_download_job: Option<JoinHandle<Result<()>>>,
     interception_download_progress: Arc<AtomicU32>,
     interception_package_downloaded: bool,
@@ -1019,6 +1027,8 @@ impl CrosshairApp {
             opencv_download_job: None,
             opencv_download_progress: Arc::new(AtomicU32::new(0)),
             opencv_installed,
+            ocr_language_job: None,
+            ocr_language_job_target: None,
             interception_download_job: None,
             interception_download_progress: Arc::new(AtomicU32::new(0)),
             interception_package_downloaded: paths.interception_zip.exists()
@@ -11577,9 +11587,64 @@ impl eframe::App for CrosshairApp {
             }
         }
 
+        if let Some(job) = &self.ocr_language_job {
+            if job.is_finished() {
+                let job = self.ocr_language_job.take().unwrap();
+                let target = self.ocr_language_job_target.take();
+                crate::ocr::clear_available_ocr_languages_cache();
+                match (job.join(), target) {
+                    (Ok(Ok(restart_required)), Some((kind, lang_code, display_name))) => {
+                        self.ocr_lang_settings_focus = Some(lang_code);
+                        self.status = match (kind, restart_required) {
+                            (OcrLanguageJobKind::Install, true) => format!(
+                                "Installed OCR for {}. Windows requested a restart to finish setup.",
+                                display_name
+                            ),
+                            (OcrLanguageJobKind::Install, false) => {
+                                format!("Installed OCR for {}.", display_name)
+                            }
+                            (OcrLanguageJobKind::Uninstall, true) => format!(
+                                "Removed OCR for {}. Windows requested a restart to finish cleanup.",
+                                display_name
+                            ),
+                            (OcrLanguageJobKind::Uninstall, false) => {
+                                format!("Removed OCR for {}.", display_name)
+                            }
+                        };
+                    }
+                    (Ok(Err(error)), Some((kind, lang_code, display_name))) => {
+                        self.ocr_lang_settings_focus = Some(lang_code);
+                        self.status = match kind {
+                            OcrLanguageJobKind::Install => {
+                                format!("OCR install failed for {}: {}", display_name, error)
+                            }
+                            OcrLanguageJobKind::Uninstall => {
+                                format!("OCR removal failed for {}: {}", display_name, error)
+                            }
+                        };
+                    }
+                    (Err(_), Some((kind, lang_code, display_name))) => {
+                        self.ocr_lang_settings_focus = Some(lang_code);
+                        self.status = match kind {
+                            OcrLanguageJobKind::Install => {
+                                format!("OCR install thread panicked for {}.", display_name)
+                            }
+                            OcrLanguageJobKind::Uninstall => {
+                                format!("OCR removal thread panicked for {}.", display_name)
+                            }
+                        };
+                    }
+                    (Ok(Ok(_)), None) | (Ok(Err(_)), None) | (Err(_), None) => {
+                        self.status =
+                            "OCR language job finished without target metadata.".to_owned();
+                    }
+                }
+            }
+        }
+
         self.poll_custom_ai_generation(ctx);
 
-        if self.command_ai_job.is_some() {
+        if self.command_ai_job.is_some() || self.ocr_language_job.is_some() {
             ctx.request_repaint_after(Duration::from_millis(33));
         }
 
