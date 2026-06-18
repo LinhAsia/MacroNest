@@ -1271,6 +1271,7 @@ impl CrosshairApp {
                 center_y: self.state.quick_key_display_y,
                 size: self.state.quick_key_display_size,
                 mode: self.state.quick_key_display_mode,
+                mascot_style: self.state.quick_key_display_mascot_style,
             });
     }
 
@@ -4864,6 +4865,48 @@ impl CrosshairApp {
                                 }
                             },
                         );
+
+                        if self.state.quick_key_display_mode == QuickKeyDisplayMode::Mascot {
+                            ui.add_space(2.0);
+                            ui.allocate_ui_with_layout(
+                                vec2(92.0, 22.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.add_space(2.0);
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Preset",
+                                            "Preset",
+                                        ))
+                                        .size(10.0),
+                                    );
+                                    let preset_before = self.state.quick_key_display_mascot_style;
+                                    egui::ComboBox::from_id_salt("quick-key-display-mascot-preset")
+                                        .width(52.0)
+                                        .selected_text(match self.state.quick_key_display_mascot_style {
+                                            crate::model::MascotStyle::Hachiware => "Hachiware",
+                                            crate::model::MascotStyle::TungSahur => "Tung Sahur",
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                &mut self.state.quick_key_display_mascot_style,
+                                                crate::model::MascotStyle::Hachiware,
+                                                "Hachiware",
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.state.quick_key_display_mascot_style,
+                                                crate::model::MascotStyle::TungSahur,
+                                                "Tung Sahur",
+                                            );
+                                        });
+                                    if self.state.quick_key_display_mascot_style != preset_before {
+                                        self.sync_quick_key_display_config();
+                                        self.persist();
+                                    }
+                                },
+                            );
+                        }
 
                         ui.add_space(2.0);
                         ui.allocate_ui_with_layout(
