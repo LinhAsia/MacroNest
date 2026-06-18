@@ -264,6 +264,7 @@ pub enum MascotStyle {
     #[default]
     Hachiware,
     TungSahur,
+    MechanicRobot,
 }
 
 fn default_screen_draw_color() -> RgbaColor {
