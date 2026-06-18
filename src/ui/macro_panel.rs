@@ -3227,6 +3227,39 @@ impl CrosshairApp {
                 }
             }
             if self.macro_folders_panel_open {
+                let back_to_folder_list = self.active_macro_folder_view.is_some();
+                if ui
+                    .add_sized(
+                        [28.0, 28.0],
+                        Button::new(Self::material_icon_text(0xe5c4, 18.0)) // arrow_back icon
+                            .fill(ui.visuals().faint_bg_color)
+                            .stroke(egui::Stroke::new(
+                                1.0,
+                                ui.visuals().widgets.noninteractive.bg_stroke.color,
+                            )),
+                    )
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        if back_to_folder_list {
+                            "Back to folder list"
+                        } else {
+                            "Back to macro groups"
+                        },
+                        if back_to_folder_list {
+                            "Quay lại danh sách folder"
+                        } else {
+                            "Quay lại danh sách macro group"
+                        },
+                    ))
+                    .clicked()
+                {
+                    if back_to_folder_list {
+                        self.set_active_macro_folder_view(None);
+                    } else {
+                        self.macro_folders_panel_open = false;
+                        self.set_active_macro_folder_view(None);
+                    }
+                }
                 if let Some(folder_id) = self.active_macro_folder_view {
                     let folder_name = self
                         .state
@@ -3235,25 +3268,6 @@ impl CrosshairApp {
                         .find(|f| f.id == folder_id)
                         .map(|f| f.name.clone())
                         .unwrap_or_default();
-                    if ui
-                        .add_sized(
-                            [28.0, 28.0],
-                            Button::new(Self::material_icon_text(0xe5c4, 18.0)) // arrow_back icon
-                                .fill(ui.visuals().faint_bg_color)
-                                .stroke(egui::Stroke::new(
-                                    1.0,
-                                    ui.visuals().widgets.noninteractive.bg_stroke.color,
-                                )),
-                        )
-                        .on_hover_text(Self::tr_lang(
-                            language,
-                            "Back to folder list",
-                            "Back to folder list",
-                        ))
-                        .clicked()
-                    {
-                        self.set_active_macro_folder_view(None);
-                    }
                     ui.label(
                         RichText::new(folder_name)
                             .strong()
