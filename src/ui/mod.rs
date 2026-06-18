@@ -4074,6 +4074,11 @@ impl CrosshairApp {
         let pinned_window_active = pin_window_available
             && window_list::is_window_topmost(&self.quick_action_window_selector);
         let mut keep_menu_open = false;
+        // Reset hover-card visibility flag each frame before render_popup calls
+        let qa_hover_card_key = egui::Id::new("qa-hover-card-visible");
+        ui.ctx().data_mut(|data| {
+            data.remove_temp::<bool>(qa_hover_card_key);
+        });
         let action_width = 104.0;
         let action_height = 100.0;
         let current_time = ui.input(|i| i.time);
@@ -4133,6 +4138,10 @@ impl CrosshairApp {
             let should_show = is_active && (time_since_active < 0.25 || is_interacting);
 
             if should_show {
+                // Mark that a hover card is visible this frame so the outer panel stays open
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(qa_hover_card_key, true);
+                });
                 let pos = button_response.rect.left_bottom() + vec2(-42.0, 4.0);
                 let mut content_rect = egui::Rect::NOTHING;
                 let area_response = egui::Area::new(popup_id)
@@ -5239,7 +5248,9 @@ impl CrosshairApp {
                     },
                 );
             });
-        keep_menu_open
+        // If any hover card is shown, keep the quick-actions panel open to survive CloseOnClickOutside
+        let any_hover_card_visible = ui.ctx().data(|data| data.get_temp::<bool>(qa_hover_card_key)).unwrap_or(false);
+        keep_menu_open || any_hover_card_visible
     }
 
 
