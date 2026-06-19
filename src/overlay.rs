@@ -243,6 +243,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(ScreenDrawState::default()));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
     static LAST_MOUSE_MOVE_TIME_MS: AtomicU64 = AtomicU64::new(0);
+    static HOOKS_THREAD: Lazy<Mutex<Option<(u32, thread::JoinHandle<()>)>>> =
+        Lazy::new(|| Mutex::new(None));
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -11539,35 +11541,56 @@ mod windows_overlay {
         }
     }
 
-    unsafe fn set_input_hooks_enabled(runtime: &mut Runtime, enabled: bool) -> Result<()> {
-        let instance = GetModuleHandleW(None)?;
+    unsafe fn set_input_hooks_enabled(_runtime: &Runtime, enabled: bool) -> Result<()> {
+        let mut guard = HOOKS_THREAD.lock();
         if enabled {
-            if runtime.keyboard_hook.0.is_null() {
-                runtime.keyboard_hook = SetWindowsHookExW(
-                    WH_KEYBOARD_LL,
-                    Some(low_level_keyboard_proc),
-                    Some(instance.into()),
-                    0,
-                )?;
-            }
+            if guard.is_none() {
+                let (tx, rx) = crossbeam_channel::bounded::<u32>(1);
+                let handle = thread::spawn(move || unsafe {
+                    let thread_id = windows::Win32::System::Threading::GetCurrentThreadId();
+                    let _ = tx.send(thread_id);
 
-            if runtime.mouse_hook.0.is_null() {
-                runtime.mouse_hook = SetWindowsHookExW(
-                    WH_MOUSE_LL,
-                    Some(low_level_mouse_proc),
-                    Some(instance.into()),
-                    0,
-                )?;
+                    let instance = GetModuleHandleW(None).unwrap();
+                    let keyboard_hook = SetWindowsHookExW(
+                        WH_KEYBOARD_LL,
+                        Some(low_level_keyboard_proc),
+                        Some(instance.into()),
+                        0,
+                    );
+                    let mouse_hook = SetWindowsHookExW(
+                        WH_MOUSE_LL,
+                        Some(low_level_mouse_proc),
+                        Some(instance.into()),
+                        0,
+                    );
+
+                    let mut message = MSG::default();
+                    while GetMessageW(&mut message, None, 0, 0).into() {
+                        let _ = TranslateMessage(&message);
+                        DispatchMessageW(&message);
+                    }
+
+                    if let Ok(hook) = keyboard_hook {
+                        let _ = UnhookWindowsHookEx(hook);
+                    }
+                    if let Ok(hook) = mouse_hook {
+                        let _ = UnhookWindowsHookEx(hook);
+                    }
+                });
+
+                if let Ok(thread_id) = rx.recv() {
+                    *guard = Some((thread_id, handle));
+                }
             }
         } else {
-            if !runtime.keyboard_hook.0.is_null() {
-                let _ = UnhookWindowsHookEx(runtime.keyboard_hook);
-                runtime.keyboard_hook = HHOOK::default();
-            }
-
-            if !runtime.mouse_hook.0.is_null() {
-                let _ = UnhookWindowsHookEx(runtime.mouse_hook);
-                runtime.mouse_hook = HHOOK::default();
+            if let Some((thread_id, handle)) = guard.take() {
+                let _ = windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW(
+                    thread_id,
+                    windows::Win32::UI::WindowsAndMessaging::WM_QUIT,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+                let _ = handle.join();
             }
         }
 
@@ -23464,13 +23487,7 @@ mod windows_overlay {
             }
         }
 
-        if !runtime.keyboard_hook.0.is_null() {
-            let _ = unsafe { UnhookWindowsHookEx(runtime.keyboard_hook) };
-        }
-
-        if !runtime.mouse_hook.0.is_null() {
-            let _ = unsafe { UnhookWindowsHookEx(runtime.mouse_hook) };
-        }
+        let _ = unsafe { set_input_hooks_enabled(runtime, false) };
 
         if !runtime.window_focus_event_hook.0.is_null() {
             let _ = unsafe { UnhookWinEvent(runtime.window_focus_event_hook) };
