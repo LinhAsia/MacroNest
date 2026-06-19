@@ -243,11 +243,10 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(ScreenDrawState::default()));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
     static LAST_MOUSE_MOVE_TIME_MS: AtomicU64 = AtomicU64::new(0);
-    static BASE_INSTANT: Lazy<Instant> = Lazy::new(Instant::now);
 
-    fn record_mouse_activity_timestamp() {
-        let elapsed = Instant::now().saturating_duration_since(*BASE_INSTANT).as_millis() as u64;
-        LAST_MOUSE_MOVE_TIME_MS.store(elapsed, Ordering::Relaxed);
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetTickCount() -> u32;
     }
 
     pub(crate) static HOOK_STATE: Lazy<Mutex<HookState>> =
@@ -3139,7 +3138,7 @@ mod windows_overlay {
                 return CallNextHookEx(None, code, wparam, lparam);
             }
 
-            record_mouse_activity_timestamp();
+            LAST_MOUSE_MOVE_TIME_MS.store(info.time as u64, Ordering::Relaxed);
 
             let message = wparam.0 as u32;
             if message == WM_MOUSEWHEEL {
@@ -14537,9 +14536,9 @@ mod windows_overlay {
         let keys = quick_key_display_mascot_keys();
 
         // Mouse active state tracking
-        let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed);
-        let current_ms = Instant::now().saturating_duration_since(*BASE_INSTANT).as_millis() as u64;
-        let is_mouse_moving = current_ms.saturating_sub(last_move_ms) < 80;
+        let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
+        let current_ms = unsafe { GetTickCount() };
+        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 80;
         let mouse_active = is_mouse_moving || !held_mouse_buttons.is_empty();
 
         let mouse_flat_x = mouse_pad_left + 19.0 + mouse_offset.0 * 0.7;
