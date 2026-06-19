@@ -221,8 +221,8 @@ impl CrosshairApp {
                         .button(
                             RichText::new(Self::tr_lang(
                                 language,
-                                "⚡ Test Capture and OCR Scan",
-                                "⚡ Test Capture and OCR Scan",
+                                "Test Capture and OCR Scan",
+                                "Test Capture and OCR Scan",
                             ))
                             .strong()
                             .color(Color32::from_rgb(0, 255, 170)),

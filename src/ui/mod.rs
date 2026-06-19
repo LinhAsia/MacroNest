@@ -11902,6 +11902,20 @@ impl eframe::App for CrosshairApp {
         if !keep_ocr_preview && self.disable_ocr_preview_modes() {
             self.persist();
         }
+        let keep_vision_preview = viewport_focused && self.state.active_panel == AppPanel::Vision;
+        if !keep_vision_preview {
+            let mut changed = false;
+            for preset in &mut self.state.vision_presets {
+                if preset.show_search_region_overlay {
+                    preset.show_search_region_overlay = false;
+                    changed = true;
+                }
+            }
+            if changed {
+                self.sync_vision_presets();
+                self.persist();
+            }
+        }
         let keep_geometry_preview =
             viewport_focused && self.state.active_panel == AppPanel::Geometry;
         if !keep_geometry_preview
