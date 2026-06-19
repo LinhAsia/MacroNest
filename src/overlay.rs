@@ -5891,9 +5891,8 @@ mod windows_overlay {
         let (mut offset_x, mut offset_y) = runtime.quick_key_display_mouse_offset;
         let (mut velocity_x, mut velocity_y) = runtime.quick_key_display_mouse_velocity;
         if let Some(last) = runtime.quick_key_display_last_cursor_pos {
-            // Invert the deltas so the mascot mouse movement matches the physical cursor direction naturally
-            let delta_x = -(cursor.x - last.x) as f32;
-            let delta_y = -(cursor.y - last.y) as f32;
+            let delta_x = (cursor.x - last.x) as f32;
+            let delta_y = (cursor.y - last.y) as f32;
             velocity_x += delta_x.clamp(-30.0, 30.0) * 0.08;
             velocity_y += delta_y.clamp(-30.0, 30.0) * 0.08;
         }
@@ -14917,21 +14916,21 @@ mod windows_overlay {
             [45, 40, 42, 255],
             1.5 * scale,
         );
-        // Scroll wheel
+        // Scroll wheel (at the bottom/front of the mouse, pointing in the same direction the character is facing)
         fill_projected_rounded_quad(
             &mut pixmap,
             mouse_flat_x - 1.0,
-            mouse_flat_y - 6.0,
+            mouse_flat_y + 2.0,
             2.0,
             4.0,
             0.8,
             [80, 85, 90, 255],
         );
         let mut div = tiny_skia::PathBuilder::new();
-        let div1 = project_point(mouse_flat_x - 6.8, mouse_flat_y - 1.0);
-        let div2 = project_point(mouse_flat_x + 6.8, mouse_flat_y - 1.0);
-        let div3 = project_point(mouse_flat_x, mouse_flat_y - 9.0);
-        let div4 = project_point(mouse_flat_x, mouse_flat_y - 1.0);
+        let div1 = project_point(mouse_flat_x - 6.8, mouse_flat_y + 1.0);
+        let div2 = project_point(mouse_flat_x + 6.8, mouse_flat_y + 1.0);
+        let div3 = project_point(mouse_flat_x, mouse_flat_y + 1.0);
+        let div4 = project_point(mouse_flat_x, mouse_flat_y + 9.0);
         div.move_to(div1.0, div1.1);
         div.line_to(div2.0, div2.1);
         div.move_to(div3.0, div3.1);
