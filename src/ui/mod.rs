@@ -5299,6 +5299,18 @@ impl CrosshairApp {
                                         ),
                                     );
                                 }
+
+                                ui.add_space(4.0);
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Hold trigger to capture screen region",
+                                        "Đè nút trigger để chụp vùng màn hình",
+                                    ))
+                                    .size(10.0)
+                                    .color(ui.visuals().weak_text_color()),
+                                );
+
                                 if capture_active {
                                     keep_open = true;
                                 }

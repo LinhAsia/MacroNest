@@ -1127,7 +1127,7 @@ mod windows_overlay {
                 last_scroll_up_at: None,
                 last_scroll_down_at: None,
                 quick_key_sound_enabled: false,
-                quick_key_sound_style: 0,
+                quick_key_sound_style: 2,
             }
         }
     }
