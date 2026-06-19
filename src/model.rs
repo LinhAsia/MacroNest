@@ -365,6 +365,10 @@ fn default_ocr_language_code() -> String {
     crate::ocr::OCR_DEFAULT_CODE.to_owned()
 }
 
+fn default_macro_step_ocr_language() -> String {
+    crate::ocr::OCR_ACTIVE_CODE.to_owned()
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum AppPanel {
     #[default]
@@ -1282,6 +1286,8 @@ pub struct MacroStep {
     pub ocr_numeric_var: String,
     #[serde(default)]
     pub ocr_text_var: String,
+    #[serde(default = "default_macro_step_ocr_language")]
+    pub ocr_language: String,
     #[serde(default)]
     pub vision_pos_var_x: String,
     #[serde(default)]
@@ -1383,6 +1389,7 @@ impl Default for MacroStep {
             ocr_pos_var_y: String::new(),
             ocr_numeric_var: String::new(),
             ocr_text_var: String::new(),
+            ocr_language: default_macro_step_ocr_language(),
             vision_pos_var_x: String::new(),
             vision_pos_var_y: String::new(),
             vision_found_var: String::new(),

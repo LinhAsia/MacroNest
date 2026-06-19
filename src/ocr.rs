@@ -1,11 +1,10 @@
 use anyhow::{Context, Result, anyhow, bail};
-use directories::ProjectDirs;
 use image::{DynamicImage, ImageBuffer, Rgba, imageops::FilterType};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -147,6 +146,17 @@ pub fn label_for_language_code(value: &str) -> &'static str {
         .unwrap_or(OCR_LANGUAGE_PACKS[0].label)
 }
 
+pub fn language_pack_for_code_public(value: &str) -> OcrLanguagePack {
+    #[cfg(windows)]
+    {
+        *language_pack_for_code(value)
+    }
+    #[cfg(not(windows))]
+    {
+        OCR_LANGUAGE_PACKS[0]
+    }
+}
+
 pub fn active_language_code() -> String {
     ACTIVE_LANGUAGE_CODE
         .lock()
@@ -185,71 +195,184 @@ fn language_pack_for_code(value: &str) -> &'static OcrLanguagePack {
 
 #[cfg(windows)]
 fn ocr_models_dir() -> Result<PathBuf> {
-    let dirs = ProjectDirs::from("com", "", "MacroNest")
-        .context("Failed to locate the MacroNest data folder for OCR models")?;
-    let dir = dirs.data_local_dir().join("ocr-models");
+    let dir = crate::storage::AppPaths::discover()?.ocr_dir;
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
 #[cfg(windows)]
-fn ensure_file_downloaded(path: &Path, file_name: &str) -> Result<()> {
-    if path.exists() && path.metadata().map(|meta| meta.len() > 0).unwrap_or(false) {
-        return Ok(());
-    }
+fn model_paths_for_pack(pack: &OcrLanguagePack) -> Result<(PathBuf, PathBuf, PathBuf)> {
+    let root = ocr_models_dir()?;
+    Ok((
+        root.join(OCR_DET_MODEL_FILE),
+        root.join(pack.rec_model_file),
+        root.join(pack.charset_file),
+    ))
+}
 
-    let url = format!("{OCR_MODELS_BASE_URL}/{file_name}");
+#[cfg(windows)]
+pub fn is_language_pack_installed(value: &str) -> bool {
+    let pack = language_pack_for_code(value);
+    model_paths_for_pack(pack)
+        .map(|(det_path, rec_path, charset_path)| {
+            [det_path, rec_path, charset_path]
+                .iter()
+                .all(|path| path.exists() && path.metadata().map(|meta| meta.len() > 0).unwrap_or(false))
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+pub fn is_language_pack_installed(_value: &str) -> bool {
+    false
+}
+
+#[cfg(windows)]
+pub fn installed_language_pack_size(value: &str) -> u64 {
+    let pack = language_pack_for_code(value);
+    model_paths_for_pack(pack)
+        .map(|(det_path, rec_path, charset_path)| {
+            [det_path, rec_path, charset_path]
+                .iter()
+                .filter_map(|path| path.metadata().ok().map(|meta| meta.len()))
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+#[cfg(not(windows))]
+pub fn installed_language_pack_size(_value: &str) -> u64 {
+    0
+}
+
+#[cfg(windows)]
+pub fn install_language_pack<F>(value: &str, mut progress: F) -> Result<()>
+where
+    F: FnMut(u64, u64),
+{
+    let pack = language_pack_for_code(value);
+    let files = {
+        let (det_path, rec_path, charset_path) = model_paths_for_pack(pack)?;
+        [
+            (det_path, OCR_DET_MODEL_FILE),
+            (rec_path, pack.rec_model_file),
+            (charset_path, pack.charset_file),
+        ]
+    };
+
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(120))
         .user_agent("MacroNest")
         .build()
         .context("Failed to create OCR download client")?;
-    let response = client
-        .get(&url)
-        .send()
-        .with_context(|| format!("Failed to download OCR model from {url}"))?
-        .error_for_status()
-        .with_context(|| format!("OCR model download returned an error for {url}"))?;
 
-    let bytes = response
-        .bytes()
-        .with_context(|| format!("Failed to read OCR model payload from {url}"))?;
-    if bytes.is_empty() {
-        bail!("Downloaded OCR model file is empty: {file_name}");
+    let mut total_size = 0_u64;
+    for (path, file_name) in &files {
+        if path.exists() && path.metadata().map(|meta| meta.len() > 0).unwrap_or(false) {
+            total_size = total_size.saturating_add(path.metadata().map(|meta| meta.len()).unwrap_or(0));
+            continue;
+        }
+        let url = format!("{OCR_MODELS_BASE_URL}/{file_name}");
+        let size = client
+            .head(&url)
+            .send()
+            .ok()
+            .and_then(|response| response.headers().get(reqwest::header::CONTENT_LENGTH).cloned())
+            .and_then(|value| value.to_str().ok()?.parse::<u64>().ok())
+            .unwrap_or(0);
+        total_size = total_size.saturating_add(size.max(1));
+    }
+    total_size = total_size.max(1);
+
+    let mut downloaded = 0_u64;
+    progress(downloaded, total_size);
+
+    for (path, file_name) in files {
+        if path.exists() && path.metadata().map(|meta| meta.len() > 0).unwrap_or(false) {
+            downloaded = downloaded.saturating_add(path.metadata().map(|meta| meta.len()).unwrap_or(0));
+            progress(downloaded.min(total_size), total_size);
+            continue;
+        }
+
+        let url = format!("{OCR_MODELS_BASE_URL}/{file_name}");
+        let mut response = client
+            .get(&url)
+            .send()
+            .with_context(|| format!("Failed to download OCR asset from {url}"))?
+            .error_for_status()
+            .with_context(|| format!("OCR asset download returned an error for {url}"))?;
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let temp_path = path.with_extension("tmp");
+        let mut file = fs::File::create(&temp_path)
+            .with_context(|| format!("Failed to create temporary OCR asset file {}", temp_path.display()))?;
+
+        use std::io::Read;
+        let mut buffer = [0u8; 16384];
+        loop {
+            let count = response.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            file.write_all(&buffer[..count])?;
+            downloaded = downloaded.saturating_add(count as u64);
+            progress(downloaded.min(total_size), total_size);
+        }
+        file.flush()?;
+        drop(file);
+        fs::rename(&temp_path, &path)
+            .with_context(|| format!("Failed to move OCR asset into place {}", path.display()))?;
     }
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn install_language_pack<F>(_value: &str, _progress: F) -> Result<()>
+where
+    F: FnMut(u64, u64),
+{
+    bail!("OCR is only supported on Windows.");
+}
+
+#[cfg(windows)]
+pub fn delete_language_pack(value: &str) -> Result<()> {
+    let pack = language_pack_for_code(value);
+    OCR_ENGINE_CACHE
+        .lock()
+        .map_err(|_| anyhow!("OCR engine cache lock was poisoned"))?
+        .remove(pack.code);
+    let (det_path, rec_path, charset_path) = model_paths_for_pack(pack)?;
+    let shared_det_is_still_needed = OCR_LANGUAGE_PACKS
+        .iter()
+        .filter(|other| other.code != pack.code)
+        .any(|other| is_language_pack_installed(other.code));
+    let _ = fs::remove_file(&rec_path);
+    let _ = fs::remove_file(&charset_path);
+    if !shared_det_is_still_needed {
+        let _ = fs::remove_file(&det_path);
     }
-    let temp_path = path.with_extension("tmp");
-    let mut file = fs::File::create(&temp_path)
-        .with_context(|| format!("Failed to create temporary OCR model file {}", temp_path.display()))?;
-    file.write_all(bytes.as_ref())
-        .with_context(|| format!("Failed to write OCR model file {}", temp_path.display()))?;
-    file.flush()?;
-    drop(file);
-    fs::rename(&temp_path, path)
-        .with_context(|| format!("Failed to move OCR model file into place {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn delete_language_pack(_value: &str) -> Result<()> {
     Ok(())
 }
 
 #[cfg(windows)]
-fn ensure_model_files(pack: &OcrLanguagePack) -> Result<(PathBuf, PathBuf, PathBuf)> {
-    let root = ocr_models_dir()?;
-    let det_path = root.join(OCR_DET_MODEL_FILE);
-    let rec_path = root.join(pack.rec_model_file);
-    let charset_path = root.join(pack.charset_file);
-
-    ensure_file_downloaded(&det_path, OCR_DET_MODEL_FILE)?;
-    ensure_file_downloaded(&rec_path, pack.rec_model_file)?;
-    ensure_file_downloaded(&charset_path, pack.charset_file)?;
-
-    Ok((det_path, rec_path, charset_path))
-}
-
-#[cfg(windows)]
 fn build_engine(pack: &OcrLanguagePack) -> Result<ocr_rs::OcrEngine> {
-    let (det_path, rec_path, charset_path) = ensure_model_files(pack)?;
+    let (det_path, rec_path, charset_path) = model_paths_for_pack(pack)?;
+    for path in [&det_path, &rec_path, &charset_path] {
+        if !path.exists() || path.metadata().map(|meta| meta.len() == 0).unwrap_or(true) {
+            bail!(
+                "OCR pack '{}' is not installed yet. Open Settings > Downloaded Tools and install it first.",
+                pack.label
+            );
+        }
+    }
     let threads = std::thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(4)

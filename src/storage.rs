@@ -27,6 +27,7 @@ pub struct AppPaths {
     pub vision_dir: PathBuf,
     pub vision_template_file: PathBuf,
     pub bin_dir: PathBuf,
+    pub ocr_dir: PathBuf,
     pub interception_zip: PathBuf,
     pub interception_package_dir: PathBuf,
     pub interception_installer_exe: PathBuf,
@@ -62,6 +63,7 @@ impl AppPaths {
         let vision_dir = root.join("vision");
         let vision_template_file = vision_dir.join("template.png");
         let bin_dir = root.join("bin");
+        let ocr_dir = root.join("ocr-models");
         let interception_zip = bin_dir.join("Interception.zip");
         let interception_package_dir = bin_dir.join("Interception");
         let interception_installer_exe = interception_package_dir
@@ -89,6 +91,7 @@ impl AppPaths {
             vision_dir,
             vision_template_file,
             bin_dir,
+            ocr_dir,
             interception_zip,
             interception_package_dir,
             interception_installer_exe,
@@ -107,6 +110,7 @@ impl AppPaths {
         fs::create_dir_all(&self.asset_dir)?;
         fs::create_dir_all(&self.vision_dir)?;
         fs::create_dir_all(&self.bin_dir)?;
+        fs::create_dir_all(&self.ocr_dir)?;
         ensure_opencv_videoio_ffmpeg_plugin(&self.opencv_videoio_ffmpeg_dll);
         ensure_bundled_file(
             &self.arduino_rawhid_firmware_hex,

@@ -289,6 +289,25 @@ pub fn app_state_needs_cjk_fallback(state: &AppState) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(windows)]
+fn add_windows_cjk_fallback_fonts(fonts: &mut FontDefinitions) {
+    for (font_key, path) in [
+        ("cjk_yahei", "C:\\Windows\\Fonts\\msyh.ttc"),
+        ("cjk_yugothic", "C:\\Windows\\Fonts\\YuGothM.ttc"),
+        ("cjk_meiryo", "C:\\Windows\\Fonts\\meiryo.ttc"),
+        ("cjk_msgothic", "C:\\Windows\\Fonts\\msgothic.ttc"),
+        ("cjk_malgun", "C:\\Windows\\Fonts\\malgun.ttf"),
+        ("cjk_simhei", "C:\\Windows\\Fonts\\simhei.ttf"),
+    ] {
+        if let Ok(font_bytes) = std::fs::read(path) {
+            fonts.font_data.insert(
+                font_key.to_owned(),
+                Arc::new(FontData::from_owned(font_bytes)),
+            );
+        }
+    }
+}
+
 pub fn configure_fonts(ctx: &egui::Context, load_cjk_fallback: bool) {
     let mut fonts = FontDefinitions {
         font_data: Default::default(),
@@ -313,13 +332,8 @@ pub fn configure_fonts(ctx: &egui::Context, load_cjk_fallback: bool) {
         ))),
     );
     #[cfg(windows)]
-    {
-        if load_cjk_fallback && let Ok(font_bytes) = std::fs::read("C:\\Windows\\Fonts\\msyh.ttc") {
-            fonts.font_data.insert(
-                "cjk_fallback".to_owned(),
-                Arc::new(FontData::from_owned(font_bytes)),
-            );
-        }
+    if load_cjk_fallback {
+        add_windows_cjk_fallback_fonts(&mut fonts);
     }
     let ui_family = FontFamily::Name(UI_SANS_FONT.into());
     fonts
@@ -355,17 +369,30 @@ pub fn configure_fonts(ctx: &egui::Context, load_cjk_fallback: bool) {
         .push(MATERIAL_ICONS_FONT.to_owned());
     #[cfg(windows)]
     {
-        if fonts.font_data.contains_key("cjk_fallback") {
+        let cjk_font_names = [
+            "cjk_yahei",
+            "cjk_yugothic",
+            "cjk_meiryo",
+            "cjk_msgothic",
+            "cjk_malgun",
+            "cjk_simhei",
+        ];
+        let loaded_cjk_fonts: Vec<String> = cjk_font_names
+            .iter()
+            .filter(|name| fonts.font_data.contains_key(**name))
+            .map(|name| (*name).to_owned())
+            .collect();
+        if !loaded_cjk_fonts.is_empty() {
             fonts
                 .families
                 .entry(FontFamily::Proportional)
                 .or_default()
-                .push("cjk_fallback".to_owned());
+                .extend(loaded_cjk_fonts.iter().cloned());
             fonts
                 .families
                 .entry(FontFamily::Monospace)
                 .or_default()
-                .push("cjk_fallback".to_owned());
+                .extend(loaded_cjk_fonts);
         }
     }
     ctx.set_fonts(fonts);
@@ -787,6 +814,8 @@ pub struct CrosshairApp {
     opencv_download_job: Option<JoinHandle<Result<()>>>,
     opencv_download_progress: Arc<AtomicU32>,
     opencv_installed: bool,
+    ocr_download_job: Option<JoinHandle<Result<()>>>,
+    ocr_download_progress: Arc<AtomicU32>,
     interception_download_job: Option<JoinHandle<Result<()>>>,
     interception_download_progress: Arc<AtomicU32>,
     interception_package_downloaded: bool,
@@ -1008,6 +1037,8 @@ impl CrosshairApp {
             opencv_download_job: None,
             opencv_download_progress: Arc::new(AtomicU32::new(0)),
             opencv_installed,
+            ocr_download_job: None,
+            ocr_download_progress: Arc::new(AtomicU32::new(0)),
             interception_download_job: None,
             interception_download_progress: Arc::new(AtomicU32::new(0)),
             interception_package_downloaded: paths.interception_zip.exists()
@@ -11802,6 +11833,26 @@ impl eframe::App for CrosshairApp {
                     }
                     Err(_) => {
                         self.status = "Download thread panicked.".to_owned();
+                    }
+                }
+            }
+        }
+
+        if let Some(job) = &self.ocr_download_job {
+            if job.is_finished() {
+                let job = self.ocr_download_job.take().unwrap();
+                match job.join() {
+                    Ok(Ok(())) => {
+                        self.status = format!(
+                            "OCR pack installed: {}",
+                            crate::ocr::label_for_language_code(&self.state.ocr_language)
+                        );
+                    }
+                    Ok(Err(error)) => {
+                        self.status = format!("OCR install failed: {error}");
+                    }
+                    Err(_) => {
+                        self.status = "OCR download thread panicked.".to_owned();
                     }
                 }
             }
