@@ -1743,6 +1743,8 @@ impl CrosshairApp {
                 preset.id = id;
                 Self::remap_macro_step_self_ref(&mut preset.hold_stop_step, source_preset_id, id);
                 Self::bind_trigger_macro_step_to_group(&mut preset.hold_stop_step, group_id);
+                Self::remap_macro_step_self_ref(&mut preset.press_stop_step, source_preset_id, id);
+                Self::bind_trigger_macro_step_to_group(&mut preset.press_stop_step, group_id);
                 for step in &mut preset.steps {
                     Self::remap_macro_step_self_ref(step, source_preset_id, id);
                     Self::bind_trigger_macro_step_to_group(step, group_id);
@@ -1839,6 +1841,12 @@ impl CrosshairApp {
                 for preset in &mut group.presets {
                     Self::remap_macro_step_group_refs(
                         &mut preset.hold_stop_step,
+                        &preset_id_map,
+                        source_group_id,
+                        id,
+                    );
+                    Self::remap_macro_step_group_refs(
+                        &mut preset.press_stop_step,
                         &preset_id_map,
                         source_group_id,
                         id,
@@ -3439,6 +3447,10 @@ impl CrosshairApp {
 
         if preset.hold_stop_step_enabled {
             Self::collect_vars_from_step(&preset.hold_stop_step, &mut vars);
+        }
+
+        if preset.press_stop_step_enabled {
+            Self::collect_vars_from_step(&preset.press_stop_step, &mut vars);
         }
 
         let mut list: Vec<String> = vars.into_iter().collect();
@@ -8505,10 +8517,17 @@ impl CrosshairApp {
                                 temp_preset.use_powershell = step.command_preset_use_powershell;
                             }
                         } else {
-                            temp_preset.command =
-                                preset.hold_stop_step.command_preset_command.clone();
-                            temp_preset.use_powershell =
-                                preset.hold_stop_step.command_preset_use_powershell;
+                            if preset.trigger_mode == crate::model::MacroTriggerMode::Hold {
+                                temp_preset.command =
+                                    preset.hold_stop_step.command_preset_command.clone();
+                                temp_preset.use_powershell =
+                                    preset.hold_stop_step.command_preset_use_powershell;
+                            } else {
+                                temp_preset.command =
+                                    preset.press_stop_step.command_preset_command.clone();
+                                temp_preset.use_powershell =
+                                    preset.press_stop_step.command_preset_use_powershell;
+                            }
                         }
                     }
                 }
@@ -8585,10 +8604,17 @@ impl CrosshairApp {
                                 step.key = temp_preset.name.clone();
                             }
                         } else {
-                            preset.hold_stop_step.command_preset_command = temp_preset.command;
-                            preset.hold_stop_step.command_preset_use_powershell =
-                                temp_preset.use_powershell;
-                            preset.hold_stop_step.key = temp_preset.name.clone();
+                            if preset.trigger_mode == crate::model::MacroTriggerMode::Hold {
+                                preset.hold_stop_step.command_preset_command = temp_preset.command;
+                                preset.hold_stop_step.command_preset_use_powershell =
+                                    temp_preset.use_powershell;
+                                preset.hold_stop_step.key = temp_preset.name.clone();
+                            } else {
+                                preset.press_stop_step.command_preset_command = temp_preset.command;
+                                preset.press_stop_step.command_preset_use_powershell =
+                                    temp_preset.use_powershell;
+                                preset.press_stop_step.key = temp_preset.name.clone();
+                            }
                         }
                         self.status = "Updated step command and preset name.".to_owned();
                     }
@@ -8724,6 +8750,16 @@ impl CrosshairApp {
                             p.hold_stop_step.command_preset_use_powershell = new_use_powershell;
                         }
                     }
+                    if p.press_stop_step.action == MacroAction::TriggerCommandPreset {
+                        let is_match = p.press_stop_step.key.trim() == old_name.trim()
+                            || p.press_stop_step.key.trim() == preset_id.to_string()
+                            || p.press_stop_step.key.trim() == new_name.trim();
+                        if is_match {
+                            p.press_stop_step.key = preset_id.to_string();
+                            p.press_stop_step.command_preset_command = new_command.clone();
+                            p.press_stop_step.command_preset_use_powershell = new_use_powershell;
+                        }
+                    }
                 }
             }
             new_name
@@ -8848,6 +8884,7 @@ impl CrosshairApp {
         preset.id = new_preset_id;
         preset.collapsed = true;
         Self::remap_macro_step_self_ref(&mut preset.hold_stop_step, old_preset_id, new_preset_id);
+        Self::remap_macro_step_self_ref(&mut preset.press_stop_step, old_preset_id, new_preset_id);
         for step in &mut preset.steps {
             Self::remap_macro_step_self_ref(step, old_preset_id, new_preset_id);
         }
@@ -8912,6 +8949,12 @@ impl CrosshairApp {
         for preset in &mut copied_group.presets {
             Self::remap_macro_step_group_refs(
                 &mut preset.hold_stop_step,
+                &preset_id_map,
+                source_group.id,
+                new_group_id,
+            );
+            Self::remap_macro_step_group_refs(
+                &mut preset.press_stop_step,
                 &preset_id_map,
                 source_group.id,
                 new_group_id,
@@ -9896,6 +9939,63 @@ impl CrosshairApp {
                         preset.hold_stop_step.key = binding.key.clone();
                         self.status = format!(
                             "Captured hold-stop input {} for macro {preset_id}.",
+                            binding.key
+                        );
+                    }
+                }
+                self.sync_macro_presets();
+            }
+            (
+                CaptureRequest::MacroPresetPressStopInput(group_id, preset_id),
+                CapturedInput::Binding(binding),
+            ) => {
+                if let Some(preset) = self
+                    .state
+                    .macro_groups
+                    .iter_mut()
+                    .find(|group| group.id == group_id)
+                    .and_then(|group| {
+                        group
+                            .presets
+                            .iter_mut()
+                            .find(|preset| preset.id == preset_id)
+                    })
+                {
+                    if matches!(
+                        preset.press_stop_step.action,
+                        MacroAction::LockKeys | MacroAction::UnlockKeys
+                    ) || (preset.press_stop_step.action == MacroAction::StopIfKeyPressed
+                        && preset.press_stop_step.get_break_loop_mode() == "StopKey")
+                    {
+                        let key = binding.key;
+                        let existing = preset
+                            .press_stop_step
+                            .key
+                            .split(',')
+                            .map(str::trim)
+                            .filter(|part| !part.is_empty())
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>();
+                        let label = if preset.press_stop_step.action == MacroAction::StopIfKeyPressed
+                        {
+                            "press-stop stop key"
+                        } else {
+                            "press-stop lock key"
+                        };
+                        if existing.iter().any(|part| part.eq_ignore_ascii_case(&key)) {
+                            self.status = format!("Key {key} is already in that {label} list.");
+                        } else if existing.is_empty() {
+                            preset.press_stop_step.key = key.clone();
+                            self.status = format!("Captured {label} {key} for macro {preset_id}.");
+                        } else {
+                            preset.press_stop_step.key =
+                                format!("{},{}", preset.press_stop_step.key.trim(), key);
+                            self.status = format!("Added {label} {key} for macro {preset_id}.");
+                        }
+                    } else {
+                        preset.press_stop_step.key = binding.key.clone();
+                        self.status = format!(
+                            "Captured press-stop input {} for macro {preset_id}.",
                             binding.key
                         );
                     }
