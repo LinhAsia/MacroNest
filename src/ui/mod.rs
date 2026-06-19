@@ -4211,7 +4211,7 @@ impl CrosshairApp {
                 let pos = button_response.rect.left_bottom() + vec2(-42.0, 4.0);
                 let mut content_rect = egui::Rect::NOTHING;
                 let area_response = egui::Area::new(popup_id)
-                    .order(egui::Order::Foreground)
+                    .order(egui::Order::Tooltip)
                     .fixed_pos(pos)
                     .show(ui.ctx(), |ui| {
                         let frame_response = egui::Frame::popup(ui.style())
