@@ -20,7 +20,7 @@
 | **🏷️ HUD Labels** | • Render custom text, active timers, and countdowns on the overlay | *Display variables value, progress, or execution steps.* |
 | **📜 Script Command** | • Execute CMD and PowerShell commands directly | *Run system-level scripts inside macro sequences.* |
 | **🖱️ Hardware Bypass** | • **Interception & Arduino**: Driver and hardware-level inputs for anti-cheat bypass<br>• **Mouse Path**: Record and replay smooth cursor trajectories | *Replay recorded mouse paths or adjust DPI sensitivity on the fly.* |
-| **⚡ Quick Actions** | • Fast toggle for taskbar visibility, Windows key lock, and window topmost pinning<br>• Highlight active windows (rainbow/cyber border), screen draw tool, protractor, and keystroke mascot overlay | *Quick system utility tools accessible directly from the title bar.* |
+| **⚡ Quick Actions** | • Fast toggle for taskbar visibility, Windows key lock, and window topmost pinning<br>• Highlight active windows (rainbow/cyber border), screen draw tool, protractor, keyboard ASMR click sounds (Blue/Brown/Red switches), and keystroke mascot overlay | *Quick system utility tools accessible directly from the title bar.* |
 
 ---
 

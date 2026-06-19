@@ -2939,6 +2939,10 @@ pub struct AppState {
     pub quick_screen_draw_smoothing: bool,
     #[serde(default = "default_screen_draw_smoothing_amount")]
     pub quick_screen_draw_smoothing_amount: f32,
+    #[serde(default)]
+    pub quick_key_sound_enabled: bool,
+    #[serde(default)]
+    pub quick_key_sound_style: u32,
 }
 
 impl Default for AppState {
@@ -3043,6 +3047,8 @@ impl Default for AppState {
             quick_screen_draw_brush_size: default_screen_draw_brush_size(),
             quick_screen_draw_smoothing: false,
             quick_screen_draw_smoothing_amount: default_screen_draw_smoothing_amount(),
+            quick_key_sound_enabled: false,
+            quick_key_sound_style: 0,
         }
     }
 }

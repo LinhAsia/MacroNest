@@ -528,6 +528,10 @@ mod windows_overlay {
             smoothing: bool,
             smoothing_amount: f32,
         },
+        UpdateKeySoundConfig {
+            enabled: bool,
+            style: u32,
+        },
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1021,6 +1025,8 @@ mod windows_overlay {
         held_mouse_buttons: HashSet<String>,
         last_scroll_up_at: Option<std::time::Instant>,
         last_scroll_down_at: Option<std::time::Instant>,
+        pub(crate) quick_key_sound_enabled: bool,
+        pub(crate) quick_key_sound_style: u32,
     }
 
     impl Default for HookState {
@@ -1120,6 +1126,8 @@ mod windows_overlay {
                 held_mouse_buttons: HashSet::new(),
                 last_scroll_up_at: None,
                 last_scroll_down_at: None,
+                quick_key_sound_enabled: false,
+                quick_key_sound_style: 0,
             }
         }
     }
@@ -2977,6 +2985,16 @@ mod windows_overlay {
             if is_key_event && !injected {
                 let is_key_down = matches!(msg, WM_KEYDOWN | WM_SYSKEYDOWN);
                 let is_key_up = matches!(msg, WM_KEYUP | WM_SYSKEYUP);
+
+                if is_key_down {
+                    let (sound_enabled, sound_style) = {
+                        let state = HOOK_STATE.lock();
+                        (state.quick_key_sound_enabled, state.quick_key_sound_style)
+                    };
+                    if sound_enabled {
+                        crate::audio::play_key_sound(sound_style);
+                    }
+                }
                 if is_key_down && info.vkCode == 0x1B && is_mouse_path_draw_capture_active() {
                     cancel_mouse_path_draw_capture("Mouse path draw cancelled.".to_owned());
                     update_modifier_state(info.vkCode, is_key_down);
@@ -6625,6 +6643,12 @@ mod windows_overlay {
                         }
                     }
                     let _ = refresh_quick_key_display(runtime);
+                }
+
+                OverlayCommand::UpdateKeySoundConfig { enabled, style } => {
+                    let mut hook_state = HOOK_STATE.lock();
+                    hook_state.quick_key_sound_enabled = enabled;
+                    hook_state.quick_key_sound_style = style;
                 }
 
                 OverlayCommand::UpdateScreenDrawConfig {

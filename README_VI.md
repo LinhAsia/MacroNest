@@ -20,7 +20,7 @@
 | **🏷️ Nhãn HUD hiển thị** | • Hiển thị văn bản, bộ đếm thời gian và đếm ngược trên màn hình overlay | *Hiển thị giá trị của biến hoặc các bước thực thi macro.* |
 | **📜 Chạy tập lệnh** | • Thực thi trực tiếp các tập lệnh CMD và PowerShell | *Chạy các lệnh hệ thống tích hợp trong chuỗi hành động macro.* |
 | **🖱️ Mô phỏng phần cứng** | • **Interception & Arduino**: Mô phỏng phím/chuột cấp trình điều khiển (driver) và phần cứng giúp vượt anti-cheat<br>• **Mouse Path**: Ghi và phát lại quỹ đạo di chuyển chuột mượt mà | *Phát lại đường chuột hoặc đổi độ nhạy DPI tức thời.* |
-| **⚡ Quick Actions (Nhanh)** | • Bật/tắt nhanh thanh tác vụ, khóa phím Windows, ghim cửa sổ luôn trên cùng<br>• Viền nổi bật cửa sổ active, công cụ vẽ màn hình, thước đo góc và linh vật gõ phím | *Các tiện ích hệ thống nhanh truy cập trực tiếp từ thanh tiêu đề.* |
+| **⚡ Quick Actions (Nhanh)** | • Bật/tắt nhanh thanh tác vụ, khóa phím Windows, ghim cửa sổ luôn trên cùng<br>• Viền nổi bật cửa sổ active, công cụ vẽ màn hình, thước đo góc, âm thanh gõ phím cơ ASMR (Blue/Brown/Red switch) và linh vật gõ phím | *Các tiện ích hệ thống nhanh truy cập trực tiếp từ thanh tiêu đề.* |
 
 ---
 
