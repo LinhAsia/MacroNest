@@ -126,16 +126,32 @@ impl CrosshairApp {
             *pending_ocr_step_capture = Some((group_id, preset_id, step_index));
         }
 
+        let active_code = crate::ocr::active_language_code();
+        let badge_text = match active_code.as_str() {
+            "multilingual" => "CJK",
+            "latin" => "LAT",
+            "korean" => "KOR",
+            "cyrillic" => "CYR",
+            "devanagari" => "DEV",
+            other => {
+                if other.len() <= 4 {
+                    other
+                } else {
+                    &other[..4]
+                }
+            }
+        };
         ui.add_sized(
             [40.0, ctrl_height],
             egui::Label::new(
-                egui::RichText::new("EN").color(ui.visuals().weak_text_color()),
+                egui::RichText::new(badge_text.to_ascii_uppercase())
+                    .color(ui.visuals().weak_text_color()),
             ),
         )
         .on_hover_text(format!(
             "{}: {}",
             Self::tr_lang(language, "Language", "Language"),
-            crate::ocr::OCR_ENGLISH_LABEL,
+            crate::ocr::active_language_label(),
         ));
 
         let target_id = ui.id().with((step_index, "ocr-target-text"));

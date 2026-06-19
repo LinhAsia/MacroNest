@@ -131,7 +131,7 @@ impl CrosshairApp {
                     .show(ui, |ui| {
                         // Language
                         ui.label(Self::tr_lang(language, "Language", "Language"));
-                        ui.label(crate::ocr::OCR_ENGLISH_LABEL);
+                        ui.label(crate::ocr::label_for_language_code(&self.state.ocr_language));
                         ui.end_row();
 
                         // Scan Region (X, Y, W, H)
@@ -488,7 +488,7 @@ impl CrosshairApp {
                 &frame.rgba,
                 frame.width as u32,
                 frame.height as u32,
-                crate::ocr::OCR_ENGLISH_CODE,
+                &self.state.ocr_language,
             ) {
                 Ok(res) => {
                     self.state.ocr_test_result = Some(res);

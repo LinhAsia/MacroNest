@@ -361,6 +361,10 @@ fn default_ocr_height() -> i32 {
     180
 }
 
+fn default_ocr_language_code() -> String {
+    crate::ocr::OCR_DEFAULT_CODE.to_owned()
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum AppPanel {
     #[default]
@@ -2821,6 +2825,8 @@ pub struct AppState {
     pub global_constants: Vec<(String, i32)>,
     #[serde(default)]
     pub ocr_presets: Vec<OcrPreset>,
+    #[serde(default = "default_ocr_language_code")]
+    pub ocr_language: String,
     #[serde(default)]
     pub next_ocr_preset_id: u32,
     #[serde(default)]
@@ -2953,6 +2959,7 @@ impl Default for AppState {
             macro_keyboard_key_press_delay_ms: 0,
             global_constants: Vec::new(),
             ocr_presets: Vec::new(),
+            ocr_language: default_ocr_language_code(),
             next_ocr_preset_id: 1,
             ocr_test_x: 0,
             ocr_test_y: 0,

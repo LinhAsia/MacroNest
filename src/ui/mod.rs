@@ -1078,6 +1078,8 @@ impl CrosshairApp {
             panel_warmup_frames_remaining: 1,
             warmed_panels: Vec::new(),
         };
+        app.state.ocr_language = crate::ocr::normalize_language_code(&app.state.ocr_language);
+        crate::ocr::set_active_language_code(&app.state.ocr_language);
         app.interception_installed = app.paths.interception_dll.exists();
         let mut pending_startup_persist = startup_state_dirty;
         if app.apply_startup_state_adjustments() {
@@ -6316,7 +6318,7 @@ impl CrosshairApp {
             ),
             MacroAction::OcrSearch => (
                 "macro_action_tooltip.ocr_search",
-                "Scan screen region via Windows OCR Native to extract text and numbers.",
+                "Scan a screen region with fast local PaddleOCR to extract text and numbers.",
             ),
             MacroAction::DrawGeometry => (
                 "macro_action_tooltip.draw_geometry",
