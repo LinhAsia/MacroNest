@@ -11759,8 +11759,67 @@ impl eframe::App for CrosshairApp {
                     source_window_key,
                     source_window_extra_keys,
                     match_duplicate_window_titles,
-                    frame,
+                    mut frame,
                 } => {
+                    if cache_id >= 100_000 {
+                        let preset_id = cache_id - 100_000;
+                        if let Some(preset) = self.state.pin_presets.iter().find(|p| p.id == preset_id) {
+                            if preset.binary_filter {
+                                let threshold = preset.binary_threshold;
+                                let threshold_sq = (threshold as i32).pow(2);
+                                let binary_mode = preset.binary_mode;
+                                let transparent_black = preset.binary_transparent_black;
+                                let transparent_white = preset.binary_transparent_white;
+                                let target_colors = preset.binary_target_colors();
+                                let single_target_color = preset.binary_target_color;
+
+                                for chunk in frame.rgba.chunks_exact_mut(4) {
+                                    let r = chunk[0];
+                                    let g = chunk[1];
+                                    let b = chunk[2];
+                                    let a = chunk[3];
+
+                                    let val = match binary_mode {
+                                        crate::model::PinBinaryMode::Grayscale => {
+                                            let gray = ((r as u32 * 299 + g as u32 * 587 + b as u32 * 114)
+                                                / 1000) as u8;
+                                            if gray >= threshold { 255 } else { 0 }
+                                        }
+                                        crate::model::PinBinaryMode::ColorSimilarity => {
+                                            let matched = if target_colors.is_empty() {
+                                                single_target_color.is_some_and(|target_color| {
+                                                    let dist_sq = (r as i32 - target_color.r as i32).pow(2)
+                                                        + (g as i32 - target_color.g as i32).pow(2)
+                                                        + (b as i32 - target_color.b as i32).pow(2);
+                                                    dist_sq <= threshold_sq
+                                                })
+                                            } else {
+                                                target_colors.iter().any(|target_color| {
+                                                    let dist_sq = (r as i32 - target_color.r as i32).pow(2)
+                                                        + (g as i32 - target_color.g as i32).pow(2)
+                                                        + (b as i32 - target_color.b as i32).pow(2);
+                                                    dist_sq <= threshold_sq
+                                                })
+                                            };
+                                            if matched { 255 } else { 0 }
+                                        }
+                                    };
+
+                                    chunk[0] = val;
+                                    chunk[1] = val;
+                                    chunk[2] = val;
+                                    chunk[3] = if transparent_black && !transparent_white {
+                                        if val == 0 { 0 } else { 255 }
+                                    } else if transparent_white && !transparent_black {
+                                        if val == 255 { 0 } else { 255 }
+                                    } else {
+                                        a
+                                    };
+                                }
+                            }
+                        }
+                    }
+
                     let image = ColorImage::from_rgba_unmultiplied(
                         [frame.width, frame.height],
                         &frame.rgba,
