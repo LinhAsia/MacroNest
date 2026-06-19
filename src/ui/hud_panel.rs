@@ -218,7 +218,7 @@ impl CrosshairApp {
         }
         self.sync_hud_preview(active_preview.as_ref());
         if changed {
-            self.persist_hud_presets();
+            self.persist_hud_presets_deferred(ui.ctx());
         }
 
         ui.add_space(16.0);
@@ -451,7 +451,7 @@ impl CrosshairApp {
         self.sync_timer_preview(active_timer_preview.as_ref());
 
         if timer_changed {
-            self.persist_timer_presets();
+            self.persist_timer_presets_deferred(ui.ctx());
         }
     }
 
@@ -885,6 +885,11 @@ impl CrosshairApp {
     pub(crate) fn persist_hud_presets(&mut self) {
         self.sync_hud_presets();
         self.persist();
+    }
+
+    pub(crate) fn persist_hud_presets_deferred(&mut self, ctx: &egui::Context) {
+        self.sync_hud_presets();
+        self.persist_deferred(ctx);
     }
 
     pub(crate) fn sync_hud_presets(&self) {

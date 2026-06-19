@@ -7,7 +7,6 @@ mod audiosense;
 mod hotkey;
 mod lang;
 mod macro_code;
-mod media;
 mod model;
 mod ocr;
 mod overlay;

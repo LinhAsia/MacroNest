@@ -403,7 +403,7 @@ impl CrosshairApp {
         }
 
         if live_sync {
-            self.persist_window_presets();
+            self.persist_window_presets_deferred(ui.ctx());
         }
         if let Some(id) = remove_id {
             self.state.window_presets.retain(|preset| preset.id != id);
@@ -619,7 +619,7 @@ impl CrosshairApp {
         }
 
         if live_sync {
-            self.persist_window_presets();
+            self.persist_window_presets_deferred(ui.ctx());
         }
         if let Some(id) = remove_id {
             self.state.zoom_presets.retain(|preset| preset.id != id);
@@ -1389,7 +1389,7 @@ impl CrosshairApp {
             live_sync = true;
         }
         if live_sync {
-            self.persist_window_presets();
+            self.persist_window_presets_deferred(ui.ctx());
         }
     }
 
@@ -2615,6 +2615,11 @@ impl CrosshairApp {
         self.persist();
     }
 
+    pub(crate) fn persist_window_presets_deferred(&mut self, ctx: &egui::Context) {
+        self.sync_window_presets();
+        self.persist_deferred(ctx);
+    }
+
     pub(crate) fn sync_window_presets(&self) {
         let _ = self.overlay_tx.send(OverlayCommand::UpdateWindowPresets(
             self.state.window_presets.clone(),
@@ -2635,6 +2640,11 @@ impl CrosshairApp {
     pub(crate) fn persist_window_layouts(&mut self) {
         self.sync_window_layouts();
         self.persist();
+    }
+
+    pub(crate) fn persist_window_layouts_deferred(&mut self, ctx: &egui::Context) {
+        self.sync_window_layouts();
+        self.persist_deferred(ctx);
     }
 
     pub(crate) fn sync_window_layouts(&self) {
@@ -4004,7 +4014,7 @@ impl CrosshairApp {
         }
 
         if live_sync {
-            self.persist_window_layouts();
+            self.persist_window_layouts_deferred(ui.ctx());
         }
         if let Some(id) = remove_id {
             self.state.window_layouts.retain(|l| l.id != id);

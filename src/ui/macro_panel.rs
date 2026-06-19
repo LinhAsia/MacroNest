@@ -5641,7 +5641,6 @@ impl CrosshairApp {
                                                             MacroAction::EnablePinPreset,
                                                             MacroAction::DisablePin,
                                                             MacroAction::PlaySoundPreset,
-                                                            MacroAction::PlayVideoPreset,
                                                             MacroAction::ApplyMouseSensitivityPreset,
                                                             MacroAction::LoopStart,
                                                             MacroAction::LoopEnd,
@@ -6502,49 +6501,6 @@ impl CrosshairApp {
                                                                 }
                                                             }
                                                         });
-                                                } else if step.action == MacroAction::PlayVideoPreset {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .audio_settings
-                                                                .video_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            Self::tr_lang(language, "Select video", "Select video").to_owned()
-                                                        });
-                                                    egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-video"))
-                                                        .width(134.0)
-                                                        .selected_text(selected_label)
-                                                        .show_ui(ui, |ui| {
-                                                            for preset_option in &self.state.audio_settings.video_presets {
-                                                                if ui
-                                                                    .selectable_label(selected_id == Some(preset_option.id), &preset_option.name)
-                                                                    .clicked()
-                                                                {
-                                                                    step.key = preset_option.id.to_string();
-                                                                    live_sync = true;
-                                                                    live_sync = true;
-                                                                }
-                                                            }
-                                                        });
-                                                    Self::render_overlay_eye_button(
-                                                        ui,
-                                                        language,
-                                                        step,
-                                                        group.id,
-                                                        preset.id,
-                                                        0,
-                                                        true,
-                                                        &self.state.hud_presets,
-                                                        &mut self.draw_geometry_step_preview_target,
-                                                        &self.overlay_tx,
-                                                        [18.0, 18.0],
-                                                        12.0,
-                                                    );
                                                 } else if step.action == MacroAction::UnlockKeys {
                                                     let capture_target =
                                                         CaptureRequest::MacroPresetHoldStopInput(group.id, preset.id);
@@ -7622,27 +7578,23 @@ impl CrosshairApp {
                                                 MacroAction::ShowHud
                                                     | MacroAction::EnableCrosshairProfile
                                                     | MacroAction::EnablePinPreset
-                                                    | MacroAction::PlayVideoPreset
                                             ) {
                                                 let duration_id = ui.id().with((group.id, preset.id, "duration-expr-hold-stop"));
                                                 ui.scope(|ui| {
                                                     ui.spacing_mut().item_spacing.x = 2.0;
                                                     ui.spacing_mut().interact_size.y = 21.0;
                                                     ui.spacing_mut().button_padding.y = 0.0;
-                                                    let is_video = step.action == MacroAction::PlayVideoPreset;
-                                                    let mut is_permanent = !is_video && (step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty());
-                                                    if !is_video {
-                                                        let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
-                                                        if cb_response.changed() {
-                                                            if is_permanent {
-                                                                step.duration_expr = "0".to_string();
-                                                            } else {
-                                                                step.duration_expr = "1500".to_string();
-                                                            }
-                                                            live_sync = true;
+                                                    let mut is_permanent = step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
+                                                    let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
+                                                    if cb_response.changed() {
+                                                        if is_permanent {
+                                                            step.duration_expr = "0".to_string();
+                                                        } else {
+                                                            step.duration_expr = "1500".to_string();
                                                         }
+                                                        live_sync = true;
                                                     }
-                                                    if is_video || !is_permanent {
+                                                    if !is_permanent {
                                                         let response = Self::render_variable_text_edit(ui, &mut step.duration_expr, duration_id, 74.0, 150.0,  21.0, 21.0, "0", false);
                                                         ui.weak("ms");
                                                         Self::apply_vietnamese_input_if_changed(
@@ -7855,7 +7807,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             MacroAction::EnablePinPreset,
                                                             MacroAction::DisablePin,
                                                             MacroAction::PlaySoundPreset,
-                                                            MacroAction::PlayVideoPreset,
                                                             MacroAction::ApplyMouseSensitivityPreset,
                                                             MacroAction::LoopStart,
                                                             MacroAction::LoopEnd,
@@ -8716,49 +8667,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                 }
                                                             }
                                                         });
-                                                } else if step.action == MacroAction::PlayVideoPreset {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .audio_settings
-                                                                .video_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            Self::tr_lang(language, "Select video", "Select video").to_owned()
-                                                        });
-                                                    egui::ComboBox::from_id_salt((group.id, preset.id, "press-stop-video"))
-                                                        .width(134.0)
-                                                        .selected_text(selected_label)
-                                                        .show_ui(ui, |ui| {
-                                                            for preset_option in &self.state.audio_settings.video_presets {
-                                                                if ui
-                                                                    .selectable_label(selected_id == Some(preset_option.id), &preset_option.name)
-                                                                    .clicked()
-                                                                {
-                                                                    step.key = preset_option.id.to_string();
-                                                                    live_sync = true;
-                                                                    live_sync = true;
-                                                                }
-                                                            }
-                                                        });
-                                                    Self::render_overlay_eye_button(
-                                                        ui,
-                                                        language,
-                                                        step,
-                                                        group.id,
-                                                        preset.id,
-                                                        0,
-                                                        true,
-                                                        &self.state.hud_presets,
-                                                        &mut self.draw_geometry_step_preview_target,
-                                                        &self.overlay_tx,
-                                                        [18.0, 18.0],
-                                                        12.0,
-                                                    );
                                                 } else if step.action == MacroAction::UnlockKeys {
                                                     let capture_target =
                                                         CaptureRequest::MacroPresetPressStopInput(group.id, preset.id);
@@ -9836,27 +9744,23 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 MacroAction::ShowHud
                                                     | MacroAction::EnableCrosshairProfile
                                                     | MacroAction::EnablePinPreset
-                                                    | MacroAction::PlayVideoPreset
                                             ) {
                                                 let duration_id = ui.id().with((group.id, preset.id, "duration-expr-hold-stop"));
                                                 ui.scope(|ui| {
                                                     ui.spacing_mut().item_spacing.x = 2.0;
                                                     ui.spacing_mut().interact_size.y = 21.0;
                                                     ui.spacing_mut().button_padding.y = 0.0;
-                                                    let is_video = step.action == MacroAction::PlayVideoPreset;
-                                                    let mut is_permanent = !is_video && (step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty());
-                                                    if !is_video {
-                                                        let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
-                                                        if cb_response.changed() {
-                                                            if is_permanent {
-                                                                step.duration_expr = "0".to_string();
-                                                            } else {
-                                                                step.duration_expr = "1500".to_string();
-                                                            }
-                                                            live_sync = true;
+                                                    let mut is_permanent = step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
+                                                    let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
+                                                    if cb_response.changed() {
+                                                        if is_permanent {
+                                                            step.duration_expr = "0".to_string();
+                                                        } else {
+                                                            step.duration_expr = "1500".to_string();
                                                         }
+                                                        live_sync = true;
                                                     }
-                                                    if is_video || !is_permanent {
+                                                    if !is_permanent {
                                                         let response = Self::render_variable_text_edit(ui, &mut step.duration_expr, duration_id, 74.0, 150.0,  21.0, 21.0, "0", false);
                                                         ui.weak("ms");
                                                         Self::apply_vietnamese_input_if_changed(
@@ -10871,8 +10775,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                 MacroAction::EnablePinPreset,
                                                                 MacroAction::DisablePin,
                                                                 MacroAction::PlaySoundPreset,
-                                                                MacroAction::PlayVideoPreset,
-                                                                MacroAction::ApplyMouseSensitivityPreset,
+                                                                    MacroAction::ApplyMouseSensitivityPreset,
                                                                 MacroAction::LoopStart,
                                                                 MacroAction::LoopEnd,
                                                                 MacroAction::StopIfKeyPressed,
@@ -11832,49 +11735,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                 }
                                                             }
                                                         });
-                                                } else if step.action == MacroAction::PlayVideoPreset {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .audio_settings
-                                                                .video_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select video", "Select video").to_owned());
-                                                    egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "video-preset-step"))
-                                                        .width(120.0)
-                                                        .selected_text(selected_label)
-                                                        .show_ui(ui, |ui| {
-                                                            for preset_option in &self.state.audio_settings.video_presets {
-                                                                if ui
-                                                                    .selectable_label(
-                                                                        selected_id == Some(preset_option.id),
-                                                                        &preset_option.name,
-                                                                    )
-                                                                    .clicked()
-                                                                {
-                                                                    step.key = preset_option.id.to_string();
-                                                                    live_sync = true;
-                                                                }
-                                                            }
-                                                        });
-                                                    Self::render_overlay_eye_button(
-                                                        ui,
-                                                        language,
-                                                        step,
-                                                        group.id,
-                                                        preset.id,
-                                                        step_index,
-                                                        false,
-                                                        &self.state.hud_presets,
-                                                        &mut self.draw_geometry_step_preview_target,
-                                                        &self.overlay_tx,
-                                                        [18.0, 18.0],
-                                                        12.0,
-                                                    );
                                                 } else if step.action == MacroAction::ApplyMouseSensitivityPreset {
                                                     live_sync |= ui.checkbox(&mut step.manual_mouse_sensitivity, Self::tr_lang(language, "Manual", "Manual")).changed();
                                                     if step.manual_mouse_sensitivity {
@@ -13425,16 +13285,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 MacroAction::DrawGeometry
                                                     | MacroAction::EnableCrosshairProfile
                                                     | MacroAction::EnablePinPreset
-                                                    | MacroAction::PlayVideoPreset
                                             ) {
                                                 let duration_id = ui.id().with((group.id, preset.id, step_index, "duration-expr-full"));
                                                 ui.scope(|ui| {
                                                     ui.spacing_mut().item_spacing.x = 2.0;
                                                     ui.spacing_mut().interact_size.y = 20.0;
                                                     ui.spacing_mut().button_padding.y = 0.0;
-                                                    let is_video = step.action == MacroAction::PlayVideoPreset;
-                                                    let mut is_permanent = !is_video && (step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty());
-                                                    let width_val = if is_video { 96.0 } else if is_permanent { 96.0 } else { 190.0 };
+                                                    let mut is_permanent = step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
+                                                    let width_val = if is_permanent { 96.0 } else { 190.0 };
                                                     let (rect, _) = ui.allocate_exact_size(egui::vec2(width_val, 21.0), egui::Sense::hover());
                                                     let mut child_ui = ui.new_child(
                                                         egui::UiBuilder::new()
@@ -13444,18 +13302,16 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     child_ui.spacing_mut().item_spacing.x = 2.0;
                                                     child_ui.spacing_mut().button_padding.y = 0.0;
                                                     child_ui.spacing_mut().interact_size.y = 21.0;
-                                                    if !is_video {
-                                                        let cb_response = child_ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
-                                                        if cb_response.changed() {
-                                                            if is_permanent {
-                                                                step.duration_expr = "0".to_string();
-                                                            } else {
-                                                                step.duration_expr = "1500".to_string();
-                                                            }
-                                                            live_sync = true;
+                                                    let cb_response = child_ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
+                                                    if cb_response.changed() {
+                                                        if is_permanent {
+                                                            step.duration_expr = "0".to_string();
+                                                        } else {
+                                                            step.duration_expr = "1500".to_string();
                                                         }
+                                                        live_sync = true;
                                                     }
-                                                    if is_video || !is_permanent {
+                                                    if !is_permanent {
                                                         let response = Self::render_variable_text_edit(
                                                             &mut child_ui,
                                                             &mut step.duration_expr,
@@ -16927,7 +16783,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
             }
             MacroAction::EnableCrosshairProfile => crate::overlay::is_crosshair_active(&step.key),
             MacroAction::EnablePinPreset => crate::overlay::is_pin_active(&step.key),
-            MacroAction::PlayVideoPreset => crate::overlay::is_video_active(&step.key),
             MacroAction::ShowHud => crate::overlay::is_hud_active(&step.key),
             _ => false,
         };
@@ -16963,9 +16818,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                     MacroAction::EnablePinPreset => {
                         crate::overlay::disable_pin_preset(&step.key);
                     }
-                    MacroAction::PlayVideoPreset => {
-                        let _ = overlay_tx.send(crate::overlay::OverlayCommand::StopVideoPlayback);
-                    }
                     MacroAction::ShowHud => {
                         crate::overlay::hide_hud_now();
                     }
@@ -16987,12 +16839,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                     MacroAction::EnablePinPreset => {
                         let _ = crate::overlay::enable_pin_preset(&step.key);
                     }
-                    MacroAction::PlayVideoPreset => {
-                        if let Ok(preset_id) = step.key.trim().parse::<u32>() {
-                            let _ = overlay_tx
-                                .send(crate::overlay::OverlayCommand::PlayVideoPreset(preset_id));
-                        }
-                    }
+
                     MacroAction::ShowHud => {
                         if let Ok(preset_id) = step.key.trim().parse::<u32>() {
                             if let Some(hud) = hud_presets.iter().find(|h| h.id == preset_id) {

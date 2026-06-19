@@ -172,14 +172,14 @@ mod windows_overlay {
     }
 
     use crate::{
-        ai, audio, audiosense, hotkey, media,
+        ai, audio, audiosense, hotkey,
         model::{
             ArduinoTransport, AudioSensePreset, AudioSenseSpec, AudioSettings, CommandPreset,
             CrosshairStyle, GeometryShapeKind, GeometrySpec, HotkeyBinding, HudPreset,
             IfConditionType, MacroAction, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode,
             MousePathEvent, MousePathEventKind, MousePathPreset, MouseSensitivityPreset,
             PinOverlayStyle, PinPreset, ProfileRecord, QuickKeyDisplayMode, RgbaColor,
-            SoundLibraryItem, SoundPreset, TimerPreset, VideoPreset, VisionPreset,
+            SoundLibraryItem, SoundPreset, TimerPreset, VisionPreset,
             VisionSettings, WindowAnchor,
             WindowExpandControls, WindowExpandDirection, WindowFocusPreset, WindowPreset,
         },
@@ -229,10 +229,6 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static HUD_PREVIEW_DISPLAY: Lazy<Mutex<Option<HudDisplayState>>> =
         Lazy::new(|| Mutex::new(None));
-    pub(crate) static ACTIVE_VIDEO_PRESET_ID: Lazy<Mutex<Option<u32>>> =
-        Lazy::new(|| Mutex::new(None));
-    pub(crate) static ACTIVE_VIDEO_EXPIRES: Lazy<Mutex<Option<Instant>>> =
-        Lazy::new(|| Mutex::new(None));
     static MOUSE_RECORDING: Lazy<Mutex<Option<MouseRecordingSession>>> =
         Lazy::new(|| Mutex::new(None));
     static MOUSE_PATH_PREVIEW: Lazy<Mutex<Option<MousePathPreviewSession>>> =
@@ -253,9 +249,6 @@ mod windows_overlay {
 
     pub(crate) static HOOK_STATE: Lazy<Mutex<HookState>> =
         Lazy::new(|| Mutex::new(HookState::default()));
-    static ACTIVE_VIDEO_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> = Lazy::new(|| Mutex::new(None));
-    static ACTIVE_VIDEO_THREAD: Lazy<Mutex<Option<thread::JoinHandle<()>>>> =
-        Lazy::new(|| Mutex::new(None));
     static ACTIVE_BIN_PIN_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> =
         Lazy::new(|| Mutex::new(None));
     static ACTIVE_BIN_PIN_THREAD: Lazy<Mutex<Option<thread::JoinHandle<()>>>> =
@@ -468,9 +461,6 @@ mod windows_overlay {
         UpdateMacroPresets(Vec<MacroGroup>),
         SetActiveMacroFolderScope(Option<u32>),
         UpdateAudioSettings(AudioSettings),
-        PlayVideoPreset(u32),
-        PlayVideoPresetFrom(u32, u64),
-        StopVideoPlayback,
         SetMacrosMasterEnabled(bool),
         SetWindowsKeyLocked(bool),
         SetNativeFocusHighlightEnabled(bool),
@@ -820,16 +810,6 @@ mod windows_overlay {
         AudioSenseDevicesLoaded {
             devices: Vec<String>,
         },
-        VideoFrameLoaded {
-            preset_id: u32,
-            path: String,
-            start_ms: u64,
-            max_width: i32,
-            max_height: i32,
-            width: usize,
-            height: usize,
-            rgba: Vec<u8>,
-        },
         WindowPreviewLoaded {
             cache_id: u32,
             source_window_key: Option<String>,
@@ -837,7 +817,6 @@ mod windows_overlay {
             match_duplicate_window_titles: bool,
             frame: crate::window_list::WindowPreviewFrame,
         },
-        VideoPlaybackFinished(u32),
         SetProtractorEnabled(bool),
         UpdateProtractorConfig {
             scale: f32,
@@ -1001,7 +980,6 @@ mod windows_overlay {
         current_style: CrosshairStyle,
         profiles: Vec<ProfileRecord>,
         sound_presets: Vec<SoundPreset>,
-        video_presets: Vec<VideoPreset>,
         sound_library: Vec<SoundLibraryItem>,
         active_hold_macros: HashMap<u32, ActiveHoldMacro>,
         timer_presets: Vec<TimerPreset>,
@@ -1102,7 +1080,6 @@ mod windows_overlay {
                 current_style: CrosshairStyle::default(),
                 profiles: Vec::new(),
                 sound_presets: Vec::new(),
-                video_presets: Vec::new(),
                 sound_library: Vec::new(),
                 active_hold_macros: HashMap::new(),
                 timer_presets: Vec::new(),
@@ -6526,20 +6503,7 @@ mod windows_overlay {
                 OverlayCommand::UpdateAudioSettings(settings) => {
                     let mut hook_state = HOOK_STATE.lock();
                     hook_state.sound_presets = settings.presets.clone();
-                    hook_state.video_presets = settings.video_presets.clone();
                     runtime.audio_settings = settings;
-                }
-
-                OverlayCommand::PlayVideoPreset(preset_id) => {
-                    let _ = play_video_preset_by_id(preset_id);
-                }
-
-                OverlayCommand::PlayVideoPresetFrom(preset_id, start_ms) => {
-                    let _ = play_video_preset_by_id_from(preset_id, start_ms);
-                }
-
-                OverlayCommand::StopVideoPlayback => {
-                    stop_active_video_preset_playback();
                 }
 
                 OverlayCommand::SetMacrosMasterEnabled(enabled) => {
@@ -9064,23 +9028,7 @@ mod windows_overlay {
             disable_pin_overlay();
         }
 
-        // Check active video expiration
-        let video_expired = {
-            let mut expires_guard = ACTIVE_VIDEO_EXPIRES.lock();
-            if let Some(exp) = *expires_guard {
-                if Instant::now() >= exp {
-                    *expires_guard = None;
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        };
-        if video_expired {
-            stop_active_video_preset_playback();
-        }
+
 
         let search_layer_is_empty =
             regions.is_empty() && preview_regions.is_empty() && static_geometry_shapes.is_empty();
@@ -15975,277 +15923,7 @@ mod windows_overlay {
         audio::play_clip_async(clip);
         Ok(())
     }
-
-    fn play_video_preset(spec: &str) -> Result<()> {
-        let preset_id = spec
-            .trim()
-            .parse::<u32>()
-            .context("Video preset id is invalid")?;
-        play_video_preset_by_id(preset_id)
-    }
-
-    fn play_video_preset_by_id(preset_id: u32) -> Result<()> {
-        let preset = {
-            let hook_state = HOOK_STATE.lock();
-            hook_state
-                .video_presets
-                .iter()
-                .find(|preset| preset.id == preset_id)
-                .cloned()
-                .context("Video preset was not found")?
-        };
-        let start_ms = preset.clip.start_ms;
-        spawn_video_preset_playback_from(preset, start_ms);
-        Ok(())
-    }
-
-    fn play_video_preset_by_id_from(preset_id: u32, start_ms: u64) -> Result<()> {
-        let preset = {
-            let hook_state = HOOK_STATE.lock();
-            hook_state
-                .video_presets
-                .iter()
-                .find(|preset| preset.id == preset_id)
-                .cloned()
-                .context("Video preset was not found")?
-        };
-        spawn_video_preset_playback_from(preset, start_ms);
-        Ok(())
-    }
-
-    fn stop_active_video_preset_playback() {
-        audio::stop_video_audio_preview();
-        let previous = {
-            let mut guard = ACTIVE_VIDEO_STOP.lock();
-            guard.take()
-        };
-        if let Some(previous) = previous {
-            previous.store(true, Ordering::Relaxed);
-        }
-        *ACTIVE_VIDEO_PRESET_ID.lock() = None;
-    }
-
-    fn spawn_video_preset_playback_from(preset: VideoPreset, start_ms: u64) {
-        if preset.clip.file_path.trim().is_empty() {
-            return;
-        }
-
-        stop_active_video_preset_playback();
-        let previous_thread = {
-            let mut guard = ACTIVE_VIDEO_THREAD.lock();
-            guard.take()
-        };
-        if let Some(handle) = previous_thread {
-            let _ = handle.join();
-        }
-
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        {
-            let mut guard = ACTIVE_VIDEO_STOP.lock();
-            guard.replace(stop_flag.clone());
-        }
-        *ACTIVE_VIDEO_PRESET_ID.lock() = Some(preset.id);
-        let handle = thread::spawn(move || {
-            let _ = unsafe { run_video_preset_window(&preset, start_ms, stop_flag.clone()) };
-            let mut guard = ACTIVE_VIDEO_STOP.lock();
-            if let Some(active) = guard.as_ref() {
-                if Arc::ptr_eq(active, &stop_flag) {
-                    *guard = None;
-                    *ACTIVE_VIDEO_PRESET_ID.lock() = None;
-                }
-            }
-        });
-        {
-            let mut guard = ACTIVE_VIDEO_THREAD.lock();
-            guard.replace(handle);
-        }
-    }
-
-    unsafe fn run_video_preset_window(
-        preset: &VideoPreset,
-        start_ms: u64,
-        stop_flag: Arc<AtomicBool>,
-    ) -> Result<()> {
-        let screen_w = GetSystemMetrics(SM_CXSCREEN).max(1);
-        let screen_h = GetSystemMetrics(SM_CYSCREEN).max(1);
-        let instance = HINSTANCE(GetModuleHandleW(None)?.0);
-        let hwnd = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
-            w!("CrosshairOverlay"),
-            w!("MacroNestVideoOverlay"),
-            WS_POPUP,
-            0,
-            0,
-            screen_w,
-            screen_h,
-            None,
-            None,
-            Some(instance),
-            None,
-        )?;
-        let screen_dc = GetDC(None);
-        let mem_dc = CreateCompatibleDC(Some(screen_dc));
-        let bitmap_info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: screen_w,
-                biHeight: -screen_h,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut bits_ptr: *mut c_void = std::ptr::null_mut();
-        let bitmap = CreateDIBSection(
-            Some(mem_dc),
-            &bitmap_info,
-            DIB_RGB_COLORS,
-            &mut bits_ptr,
-            None,
-            0,
-        )?;
-        let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
-        let (mut capture, metadata) = media::open_video_capture(&preset.clip.file_path, start_ms)?;
-        let chroma_key = if preset.clip.chroma_key_enabled {
-            Some((
-                preset.clip.chroma_key_color,
-                preset.clip.chroma_key_tolerance,
-            ))
-        } else {
-            None
-        };
-        let clip_end_ms = if preset.clip.end_ms > preset.clip.start_ms {
-            preset.clip.end_ms
-        } else if metadata.duration_ms > preset.clip.start_ms {
-            metadata.duration_ms
-        } else {
-            u64::MAX
-        };
-        let mut pt_src = POINT::default();
-        let mut pt_dst = POINT { x: 0, y: 0 };
-        let mut size_wnd = SIZE {
-            cx: screen_w,
-            cy: screen_h,
-        };
-        let mut blend = BLENDFUNCTION {
-            BlendOp: AC_SRC_OVER as u8,
-            BlendFlags: 0,
-            SourceConstantAlpha: 255,
-            AlphaFormat: AC_SRC_ALPHA as u8,
-        };
-        let _ = ShowWindow(hwnd, SW_SHOWNA);
-        let _ = audio::play_video_audio_preview(&preset.clip.file_path, start_ms, clip_end_ms);
-        let playback_start = Instant::now();
-        loop {
-            if stop_flag.load(Ordering::Relaxed) {
-                break;
-            }
-
-            let mut frame = Mat::default();
-            if !capture.read(&mut frame)? || frame.empty() {
-                break;
-            }
-
-            let position_ms = capture
-                .get(opencv::videoio::CAP_PROP_POS_MSEC)?
-                .round()
-                .max(0.0) as u64;
-            if position_ms > clip_end_ms {
-                break;
-            }
-
-            let elapsed_video_ms = position_ms.saturating_sub(start_ms);
-            let elapsed_real_ms = playback_start.elapsed().as_millis() as u64;
-            if elapsed_real_ms < elapsed_video_ms {
-                let wait_ms = elapsed_video_ms - elapsed_real_ms;
-                // Sleep for the bulk of wait time (avoiding imprecise Windows timer overhead)
-
-                if wait_ms > 10 {
-                    thread::sleep(Duration::from_millis(wait_ms - 5));
-                }
-
-                // Precise spin-yield loop for the remaining sub-milliseconds to guarantee flawless 60fps pacing
-
-                while (playback_start.elapsed().as_millis() as u64) < elapsed_video_ms {
-                    if stop_flag.load(Ordering::Relaxed) {
-                        break;
-                    }
-
-                    std::thread::yield_now();
-                }
-            } else if elapsed_real_ms > elapsed_video_ms + 100 {
-                // Lagging behind by more than 100ms, skip processing and rendering this frame to catch up.
-
-                // Do NOT use capture.set seek here because seeking is a very expensive keyframe decode operation
-
-                // that causes massive stuttering/frame jumping. Pure frame skipping is extremely fast.
-
-                continue;
-            }
-
-            let (pixels, video_w, video_h) =
-                media::frame_to_premultiplied_bgra(&frame, chroma_key, &preset.clip.resolution)?;
-            let video_bitmap_info = BITMAPINFO {
-                bmiHeader: BITMAPINFOHEADER {
-                    biSize: size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: video_w,
-                    biHeight: -video_h,
-                    biPlanes: 1,
-                    biBitCount: 32,
-                    biCompression: BI_RGB.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-            let _ = StretchDIBits(
-                mem_dc,
-                0,
-                0,
-                screen_w,
-                screen_h,
-                0,
-                0,
-                video_w,
-                video_h,
-                Some(pixels.as_ptr() as *const c_void),
-                &video_bitmap_info,
-                DIB_RGB_COLORS,
-                SRCCOPY,
-            );
-            let _ = UpdateLayeredWindow(
-                hwnd,
-                Some(screen_dc),
-                Some(&mut pt_dst),
-                Some(&mut size_wnd),
-                Some(mem_dc),
-                Some(&mut pt_src),
-                COLORREF(0),
-                Some(&mut blend),
-                ULW_ALPHA,
-            );
-        }
-
-        let _ = ShowWindow(hwnd, SW_HIDE);
-        let _ = SelectObject(mem_dc, old_bitmap);
-        let _ = DeleteObject(HGDIOBJ(bitmap.0));
-        let _ = DeleteDC(mem_dc);
-        let _ = ReleaseDC(None, screen_dc);
-        let _ = DestroyWindow(hwnd);
-        audio::stop_video_audio_preview();
-        let ui_tx = {
-            let state = HOOK_STATE.lock();
-            state.ui_tx.clone()
-        };
-        if let Some(tx) = ui_tx {
-            let _ = tx.send(UiCommand::VideoPlaybackFinished(preset.id));
-        }
-
-        Ok(())
-    }
-
-    fn play_mouse_path_preset(
+    fn play_mouse_path_preset(
         spec: &str,
         step: &MacroStep,
         preset_id: Option<u32>,
@@ -16733,16 +16411,7 @@ mod windows_overlay {
                 let _ = play_sound_preset(&step.key);
             }
 
-            MacroAction::PlayVideoPreset => {
-                let _ = play_video_preset(&step.key);
-                let duration = step.get_duration_ms();
-                let mut expires_guard = ACTIVE_VIDEO_EXPIRES.lock();
-                if duration > 0 {
-                    *expires_guard = Some(Instant::now() + Duration::from_millis(duration));
-                } else {
-                    *expires_guard = None;
-                }
-            }
+
 
             MacroAction::StartVisionSearch => {
                 let _ = start_vision_following(&step.key, Some(&step.if_variable_name));
@@ -17336,16 +17005,7 @@ mod windows_overlay {
                     let _ = play_sound_preset(&step.key);
                 }
 
-                MacroAction::PlayVideoPreset => {
-                    let _ = play_video_preset(&step.key);
-                    let duration = step.get_duration_ms();
-                    let mut expires_guard = ACTIVE_VIDEO_EXPIRES.lock();
-                    if duration > 0 {
-                        *expires_guard = Some(Instant::now() + Duration::from_millis(duration));
-                    } else {
-                        *expires_guard = None;
-                    }
-                }
+
 
                 MacroAction::StartVisionSearch => {
                     let _ = start_vision_following(&step.key, Some(&step.if_variable_name));
@@ -17932,16 +17592,7 @@ mod windows_overlay {
                     let _ = play_sound_preset(&step.key);
                 }
 
-                MacroAction::PlayVideoPreset => {
-                    let _ = play_video_preset(&step.key);
-                    let duration = step.get_duration_ms();
-                    let mut expires_guard = ACTIVE_VIDEO_EXPIRES.lock();
-                    if duration > 0 {
-                        *expires_guard = Some(Instant::now() + Duration::from_millis(duration));
-                    } else {
-                        *expires_guard = None;
-                    }
-                }
+
 
                 MacroAction::StartVisionSearch => {
                     let _ = start_vision_following(&step.key, Some(&step.if_variable_name));
@@ -19821,7 +19472,7 @@ mod windows_overlay {
                 | MacroAction::EnableZoomPreset
                 | MacroAction::DisableZoom
                 | MacroAction::PlaySoundPreset
-                | MacroAction::PlayVideoPreset
+
                 | MacroAction::StartVisionSearch
                 | MacroAction::ScanVisionOnce
                 | MacroAction::StopVisionWait
@@ -19977,7 +19628,7 @@ mod windows_overlay {
             | MacroAction::EnableZoomPreset
             | MacroAction::DisableZoom
             | MacroAction::PlaySoundPreset
-            | MacroAction::PlayVideoPreset
+
             | MacroAction::StartVisionSearch
             | MacroAction::ScanVisionOnce
             | MacroAction::StopVisionWait
@@ -25343,14 +24994,7 @@ mod windows_overlay {
         preview_state.as_ref().and_then(|h| h.preset_id) == Some(preset_id)
     }
 
-    pub(crate) fn is_video_active(preset_id_str: &str) -> bool {
-        let preset_id = match preset_id_str.trim().parse::<u32>() {
-            Ok(id) => id,
-            Err(_) => return false,
-        };
-        let video_id = ACTIVE_VIDEO_PRESET_ID.lock();
-        *video_id == Some(preset_id)
-    }
+
 }
 
 #[cfg(windows)]
@@ -25402,9 +25046,6 @@ mod fallback {
         UpdateMacroPresets(Vec<MacroGroup>),
         SetActiveMacroFolderScope(Option<u32>),
         UpdateAudioSettings(AudioSettings),
-        PlayVideoPreset(u32),
-        PlayVideoPresetFrom(u32, u64),
-        StopVideoPlayback,
         UpdateKeyboardArrowMouseSettings {
             enabled: bool,
             step_px: u32,
@@ -25476,7 +25117,6 @@ mod fallback {
             smoothing: bool,
             smoothing_amount: f32,
         },
-        VideoPlaybackFinished(u32),
         MascotDragged {
             x: i32,
             y: i32,
@@ -25534,9 +25174,7 @@ mod fallback {
         false
     }
 
-    pub(crate) fn is_video_active(_preset_id_str: &str) -> bool {
-        false
-    }
+
 
     pub(crate) fn enable_crosshair_profile(_spec: &str) -> Result<()> {
         Ok(())

@@ -406,7 +406,7 @@ impl CrosshairApp {
 
         if live_sync {
             self.sync_ocr_presets();
-            self.persist();
+            self.persist_deferred(ui.ctx());
         }
     }
 
