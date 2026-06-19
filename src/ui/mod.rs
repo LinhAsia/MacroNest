@@ -1110,6 +1110,7 @@ impl CrosshairApp {
             }
         }
         app.preload_primary_sound_preset_audio();
+        crate::audio::play_key_sound_vk(0, 0);
         app
     }
 
@@ -12468,6 +12469,9 @@ impl eframe::App for CrosshairApp {
                             active_count += 1;
                         }
                         if self.state.quick_screen_draw_enabled {
+                            active_count += 1;
+                        }
+                        if self.state.quick_key_sound_enabled {
                             active_count += 1;
                         }
                         if active_count > 0 {

@@ -823,6 +823,7 @@ impl KeySoundPlayer {
             thread::spawn(move || {
                 let sink = rodio::Sink::connect_new(&mixer);
                 sink.append(SamplesBuffer::new(channels, sample_rate, samples));
+                sink.play();
                 sink.sleep_until_end();
             });
         }
@@ -836,11 +837,17 @@ pub fn play_key_sound(style: u32) {
 }
 
 pub fn play_key_sound_vk(style: u32, vk: u32) {
-    let mut guard = KEY_SOUND_PLAYER.lock();
-    if guard.is_none() {
-        *guard = Some(KeySoundPlayer::new());
+    let is_none = KEY_SOUND_PLAYER.lock().is_none();
+    if is_none {
+        thread::spawn(|| {
+            let mut guard = KEY_SOUND_PLAYER.lock();
+            if guard.is_none() {
+                *guard = Some(KeySoundPlayer::new());
+            }
+        });
+        return;
     }
-    if let Some(player) = guard.as_ref() {
+    if let Some(player) = KEY_SOUND_PLAYER.lock().as_ref() {
         player.play_style(style, vk);
     }
 }
