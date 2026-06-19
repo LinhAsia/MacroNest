@@ -774,6 +774,7 @@ impl KeySoundStyle {
 
 struct KeySoundPlayer {
     styles: Vec<KeySoundStyle>,
+    stream: Option<rodio::OutputStream>,
 }
 
 impl KeySoundPlayer {
@@ -802,7 +803,8 @@ impl KeySoundPlayer {
             KeySoundStyle::from_bytes(SOUND_BOXNAVY, None, None, None),
             KeySoundStyle::from_bytes(SOUND_INKBLACK, None, None, None),
         ];
-        Self { styles }
+        let stream = rodio::OutputStreamBuilder::open_default_stream().ok();
+        Self { styles, stream }
     }
 
     /// Play immediately with no queue: spawn a thread per keypress so every keypress
@@ -816,16 +818,14 @@ impl KeySoundPlayer {
         let samples = samples.clone();
         let sample_rate = *sample_rate;
         let channels = *channels;
-        thread::spawn(move || {
-            let Ok(stream) = rodio::OutputStreamBuilder::open_default_stream() else {
-                return;
-            };
-            let sink = rodio::Sink::connect_new(stream.mixer());
-            sink.append(SamplesBuffer::new(channels, sample_rate, samples));
-            sink.sleep_until_end();
-            drop(sink);
-            drop(stream);
-        });
+        if let Some(stream) = &self.stream {
+            let mixer = stream.mixer().clone();
+            thread::spawn(move || {
+                let sink = rodio::Sink::connect_new(&mixer);
+                sink.append(SamplesBuffer::new(channels, sample_rate, samples));
+                sink.sleep_until_end();
+            });
+        }
     }
 }
 
