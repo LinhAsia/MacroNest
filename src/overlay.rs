@@ -14804,12 +14804,11 @@ mod windows_overlay {
 
         let pixmap_data = pixmap.data();
         let total_pixels = width as usize * height as usize;
-        for i in 0..total_pixels {
-            let offset = i * 4;
-            pixels[offset] = pixmap_data[offset + 2];
-            pixels[offset + 1] = pixmap_data[offset + 1];
-            pixels[offset + 2] = pixmap_data[offset];
-            pixels[offset + 3] = pixmap_data[offset + 3];
+        for (src, dest) in pixmap_data.chunks_exact(4).zip(pixels.chunks_exact_mut(4)) {
+            dest[0] = src[2];
+            dest[1] = src[1];
+            dest[2] = src[0];
+            dest[3] = src[3];
         }
 
         // Render key label text runs using GDI
@@ -14862,7 +14861,18 @@ mod windows_overlay {
 
         // Render each run separately in white, then alpha mask it with the text color
         for run in &text_runs {
-            text_pixels.fill(0);
+            // Clear only the bounding box of the text run to avoid clearing the entire canvas on every key
+            let rect_left = run.rect.left.max(0) as usize;
+            let rect_right = (run.rect.right as usize).min(width as usize);
+            let rect_top = run.rect.top.max(0) as usize;
+            let rect_bottom = (run.rect.bottom as usize).min(height as usize);
+            for y in rect_top..rect_bottom {
+                let start_idx = (y * width as usize + rect_left) * 4;
+                let end_idx = (y * width as usize + rect_right) * 4;
+                if start_idx < text_pixels.len() && end_idx <= text_pixels.len() {
+                    text_pixels[start_idx..end_idx].fill(0);
+                }
+            }
             let _ = SetTextColor(text_mem_dc, COLORREF(0xffffff));
             let mut wide = run
                 .text
@@ -14941,18 +14951,14 @@ mod windows_overlay {
 
         // Blend arms on top of pixels DIB Section
         let arm_data = pixmap.data();
-        for i in 0..total_pixels {
-            let offset = i * 4;
-            let src_a = arm_data[offset + 3];
+        for (src, dest) in arm_data.chunks_exact(4).zip(pixels.chunks_exact_mut(4)) {
+            let src_a = src[3];
             if src_a > 0 {
-                let src_r = arm_data[offset];
-                let src_g = arm_data[offset + 1];
-                let src_b = arm_data[offset + 2];
                 blend_premultiplied_bgra(
-                    &mut pixels[offset..offset + 4],
-                    src_b,
-                    src_g,
-                    src_r,
+                    dest,
+                    src[2],
+                    src[1],
+                    src[0],
                     src_a,
                 );
             }
@@ -14972,15 +14978,14 @@ mod windows_overlay {
             }
         }
         let head_data = pixmap.data();
-        for i in 0..total_pixels {
-            let offset = i * 4;
-            let src_a = head_data[offset + 3];
+        for (src, dest) in head_data.chunks_exact(4).zip(pixels.chunks_exact_mut(4)) {
+            let src_a = src[3];
             if src_a > 0 {
                 blend_premultiplied_bgra(
-                    &mut pixels[offset..offset + 4],
-                    head_data[offset + 2],
-                    head_data[offset + 1],
-                    head_data[offset],
+                    dest,
+                    src[2],
+                    src[1],
+                    src[0],
                     src_a,
                 );
             }
