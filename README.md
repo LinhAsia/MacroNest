@@ -47,3 +47,7 @@ These can be downloaded from the app settings:
 - OpenCV DLL for image search
 - Interception driver for low-level keyboard and mouse input
 - Arduino firmware for hardware input emulation
+
+## License
+
+Released under the MIT License. See [LICENSE](LICENSE).
