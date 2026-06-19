@@ -18821,12 +18821,12 @@ mod windows_overlay {
 
     fn execute_ocr_action_step(step: &crate::model::MacroStep) {
         let preset_id = step.key.trim().parse::<u32>().ok().unwrap_or(0);
-        let (x, y, w, h) = {
+        let (x, y, w, h, preset_target_text) = {
             let hook_state = HOOK_STATE.lock();
             if let Some(preset) = hook_state.ocr_presets.iter().find(|p| p.id == preset_id) {
-                (preset.x, preset.y, preset.width, preset.height)
+                (preset.x, preset.y, preset.width, preset.height, preset.target_text.clone())
             } else {
-                (step.x, step.y, step.ocr_width, step.ocr_height)
+                (step.x, step.y, step.ocr_width, step.ocr_height, String::new())
             }
         };
         let w = w.max(10);
@@ -18873,7 +18873,12 @@ mod windows_overlay {
 
                 // 2. Search for target_text if ocr_target_text is set
 
-                let target_text = step.ocr_target_text.trim();
+                let step_target = step.ocr_target_text.trim();
+                let target_text = if step_target.is_empty() {
+                    preset_target_text.trim()
+                } else {
+                    step_target
+                };
                 if !target_text.is_empty() {
                     if let Some((left, top, right, bottom)) =
                         find_ocr_target_bounds(&res.words, target_text)
@@ -20706,10 +20711,8 @@ mod windows_overlay {
             },
         };
         unsafe {
-            let sent = SendInput(&[input], size_of::<INPUT>() as i32);
-            if sent == 0 {
-                let _ = SetCursorPos(x, y);
-            }
+            let _ = SendInput(&[input], size_of::<INPUT>() as i32);
+            let _ = SetCursorPos(x, y);
         }
 
         Ok(())

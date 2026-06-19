@@ -11782,6 +11782,26 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             &mut live_sync,
                                                             &mut pending_ocr_step_capture,
                                                         );
+                                                    } else {
+                                                        let target_id = ui.id().with((step_index, "ocr-target-text"));
+                                                        let target_resp = Self::render_variable_text_edit(
+                                                            ui,
+                                                            &mut step.ocr_target_text,
+                                                            target_id,
+                                                            120.0,
+                                                            240.0,
+                                                            18.0,
+                                                            18.0,
+                                                            &Self::tr_lang(language, "Target Text", "Target Text"),
+                                                            false,
+                                                         );
+                                                         Self::apply_vietnamese_input_if_changed(
+                                                            &target_resp,
+                                                            self.state.vietnamese_input_enabled,
+                                                            self.state.vietnamese_input_mode,
+                                                            &mut step.ocr_target_text,
+                                                         );
+                                                         live_sync |= target_resp.changed();
                                                     }
                                                                                                 } else if step.action == MacroAction::PlaySoundPreset {
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
@@ -13731,11 +13751,22 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                  match step.action {
                                      MacroAction::OcrSearch => {
                                          has_hover_support = true;
+                                         let is_custom = step.key.trim().is_empty() || step.key.trim() == "0";
+                                         let selected_id = if is_custom { None } else { step.key.trim().parse::<u32>().ok() };
+                                         let (left, top, w, h) = if let Some(id) = selected_id {
+                                             if let Some(preset) = self.state.ocr_presets.iter().find(|p| p.id == id) {
+                                                 (preset.x, preset.y, preset.width, preset.height)
+                                             } else {
+                                                 (step.x, step.y, step.ocr_width, step.ocr_height)
+                                             }
+                                         } else {
+                                             (step.x, step.y, step.ocr_width, step.ocr_height)
+                                         };
                                          hover_regions.push(crate::overlay::VisionRegion {
-                                             left: step.x,
-                                             top: step.y,
-                                             width: step.ocr_width.max(10),
-                                             height: step.ocr_height.max(10),
+                                             left,
+                                             top,
+                                             width: w.max(10),
+                                             height: h.max(10),
                                              is_circle: false,
                                              angle_offset_deg: None,
                                              angle_span_deg: None,
