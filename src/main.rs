@@ -298,6 +298,7 @@ fn apply_process_startup_tuning(paths: &AppPaths) {
 }
 
 fn main() -> Result<()> {
+
     let args = std::env::args().collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--already-running-popup") {
         return run_popup_blob(PopupBlobKind::AlreadyRunning);

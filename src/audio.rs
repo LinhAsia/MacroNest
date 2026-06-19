@@ -730,7 +730,7 @@ fn decode_embedded_mp3(data: &'static [u8]) -> (Vec<f32>, u32, u16) {
     if let Ok(decoder) = rodio::Decoder::new(cursor) {
         let channels = decoder.channels();
         let sample_rate = decoder.sample_rate();
-        let samples: Vec<f32> = decoder.map(|s| s as f32 / i16::MAX as f32).collect();
+        let samples: Vec<f32> = decoder.collect();
         return (samples, sample_rate, channels);
     }
     (vec![0.0f32; 100], 44100, 1)
@@ -807,25 +807,23 @@ pub fn init_key_sound_player() {
         let (tx, rx) = crossbeam_channel::unbounded();
         *guard = Some(tx);
         thread::spawn(move || {
-            let Ok(stream) = rodio::OutputStreamBuilder::open_default_stream() else {
-                eprintln!("KeySoundPlayer failed to open default stream");
-                return;
-            };
-            let mixer = stream.mixer().clone();
-            while let Ok(msg) = rx.recv() {
-                match msg {
-                    KeySoundMessage::Play { samples, sample_rate, channels } => {
-                        let mixer_clone = mixer.clone();
-                        thread::spawn(move || {
-                            let sink = rodio::Sink::connect_new(&mixer_clone);
-                            sink.append(SamplesBuffer::new(channels, sample_rate, samples));
-                            sink.play();
-                            sink.sleep_until_end();
-                        });
+            if let Ok(stream) = rodio::OutputStreamBuilder::open_default_stream() {
+                let mixer = stream.mixer().clone();
+                while let Ok(msg) = rx.recv() {
+                    match msg {
+                        KeySoundMessage::Play { samples, sample_rate, channels } => {
+                            let mixer_clone = mixer.clone();
+                            thread::spawn(move || {
+                                let sink = rodio::Sink::connect_new(&mixer_clone);
+                                sink.append(SamplesBuffer::new(channels, sample_rate, samples));
+                                sink.play();
+                                sink.sleep_until_end();
+                            });
+                        }
                     }
                 }
+                drop(stream);
             }
-            drop(stream);
         });
     }
 }
@@ -855,3 +853,4 @@ pub fn play_key_sound_vk(style: u32, vk: u32) {
         });
     }
 }
+
