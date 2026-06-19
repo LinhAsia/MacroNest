@@ -2992,7 +2992,7 @@ mod windows_overlay {
                         (state.quick_key_sound_enabled, state.quick_key_sound_style)
                     };
                     if sound_enabled {
-                        crate::audio::play_key_sound(sound_style);
+                        crate::audio::play_key_sound_vk(sound_style, info.vkCode);
                     }
                 }
                 if is_key_down && info.vkCode == 0x1B && is_mouse_path_draw_capture_active() {

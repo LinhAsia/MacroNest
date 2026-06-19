@@ -710,131 +710,137 @@ fn decode_media_audio(path: &str) -> Result<CachedAudio> {
     })
 }
 
-fn generate_switch_sound(style: u32) -> Vec<f32> {
-    let sample_rate = 44100;
-    let mut samples = Vec::new();
-    
-    match style {
-        // Blue Switch (Clicky)
-        0 => {
-            let duration = 0.080;
-            let num_samples = (sample_rate as f32 * duration) as usize;
-            for i in 0..num_samples {
-                let t = i as f32 / sample_rate as f32;
-                
-                let noise = if t < 0.010 {
-                    let rand_val = ((t * 12345.67).sin() * 43758.545).fract() * 2.0 - 1.0;
-                    rand_val * (1.0 - t / 0.010) * 0.4
-                } else {
-                    0.0
-                };
-                
-                let tone = (t * 1800.0 * 2.0 * std::f32::consts::PI).sin() * (-45.0 * t).exp() * 0.4;
-                let housing = (t * 400.0 * 2.0 * std::f32::consts::PI).sin() * (-25.0 * t).exp() * 0.2;
-                
-                samples.push(noise + tone + housing);
-            }
-        }
-        // Brown Switch (Tactile)
-        1 => {
-            let duration = 0.100;
-            let num_samples = (sample_rate as f32 * duration) as usize;
-            for i in 0..num_samples {
-                let t = i as f32 / sample_rate as f32;
-                
-                let noise = if t < 0.015 {
-                    let rand_val = ((t * 12345.67).sin() * 43758.545).fract() * 2.0 - 1.0;
-                    rand_val * (1.0 - t / 0.015) * 0.15
-                } else {
-                    0.0
-                };
-                
-                let tone = (t * 800.0 * 2.0 * std::f32::consts::PI).sin() * (-35.0 * t).exp() * 0.35;
-                let housing = (t * 300.0 * 2.0 * std::f32::consts::PI).sin() * (-20.0 * t).exp() * 0.25;
-                
-                samples.push(noise + tone + housing);
-            }
-        }
-        // Red Switch (Linear / Thocky)
-        _ => {
-            let duration = 0.120;
-            let num_samples = (sample_rate as f32 * duration) as usize;
-            for i in 0..num_samples {
-                let t = i as f32 / sample_rate as f32;
-                
-                let tone = (t * 320.0 * 2.0 * std::f32::consts::PI).sin() * (-22.0 * t).exp() * 0.5;
-                let housing = (t * 160.0 * 2.0 * std::f32::consts::PI).sin() * (-15.0 * t).exp() * 0.3;
-                
-                samples.push(tone + housing);
-            }
+// Real keyboard sounds from kbs.im, embedded directly into the binary
+static SOUND_MXBLUE: &[u8] = include_bytes!("../assets/sounds/mxblue.mp3");
+static SOUND_MXBROWN: &[u8] = include_bytes!("../assets/sounds/mxbrown.mp3");
+static SOUND_CREAMS: &[u8] = include_bytes!("../assets/sounds/creams.mp3");
+static SOUND_CREAMS_SPACE: &[u8] = include_bytes!("../assets/sounds/creams_space.mp3");
+static SOUND_CREAMS_ENTER: &[u8] = include_bytes!("../assets/sounds/creams_enter.mp3");
+static SOUND_CREAMS_BACKSPACE: &[u8] = include_bytes!("../assets/sounds/creams_backspace.mp3");
+static SOUND_HOLYPANDA: &[u8] = include_bytes!("../assets/sounds/holypanda.mp3");
+static SOUND_ALPACA: &[u8] = include_bytes!("../assets/sounds/alpaca.mp3");
+static SOUND_TOPRE: &[u8] = include_bytes!("../assets/sounds/topre.mp3");
+static SOUND_BOXNAVY: &[u8] = include_bytes!("../assets/sounds/boxnavy.mp3");
+static SOUND_INKBLACK: &[u8] = include_bytes!("../assets/sounds/inkblack.mp3");
+
+/// Decode a static MP3 byte slice into f32 PCM samples.
+fn decode_embedded_mp3(data: &'static [u8]) -> (Vec<f32>, u32, u16) {
+    use std::io::Cursor;
+    let cursor = Cursor::new(data);
+    if let Ok(decoder) = rodio::Decoder::new(cursor) {
+        let channels = decoder.channels();
+        let sample_rate = decoder.sample_rate();
+        let samples: Vec<f32> = decoder.map(|s| s as f32 / i16::MAX as f32).collect();
+        return (samples, sample_rate, channels);
+    }
+    (vec![0.0f32; 100], 44100, 1)
+}
+
+struct KeySoundStyle {
+    /// generic key (most keys)
+    generic: (Vec<f32>, u32, u16),
+    /// spacebar
+    space: Option<(Vec<f32>, u32, u16)>,
+    /// enter / return
+    enter: Option<(Vec<f32>, u32, u16)>,
+    /// backspace
+    backspace: Option<(Vec<f32>, u32, u16)>,
+}
+
+impl KeySoundStyle {
+    fn from_bytes(
+        generic: &'static [u8],
+        space: Option<&'static [u8]>,
+        enter: Option<&'static [u8]>,
+        backspace: Option<&'static [u8]>,
+    ) -> Self {
+        Self {
+            generic: decode_embedded_mp3(generic),
+            space: space.map(decode_embedded_mp3),
+            enter: enter.map(decode_embedded_mp3),
+            backspace: backspace.map(decode_embedded_mp3),
         }
     }
-    
-    let mut max_val = 0.0f32;
-    for &s in &samples {
-        if s.abs() > max_val {
-            max_val = s.abs();
+
+    fn samples_for_vk(&self, vk: u32) -> &(Vec<f32>, u32, u16) {
+        match vk {
+            0x20 => self.space.as_ref().unwrap_or(&self.generic),   // VK_SPACE
+            0x0D => self.enter.as_ref().unwrap_or(&self.generic),   // VK_RETURN
+            0x08 => self.backspace.as_ref().unwrap_or(&self.generic), // VK_BACK
+            _ => &self.generic,
         }
     }
-    if max_val > 0.0 {
-        for s in &mut samples {
-            *s = (*s / max_val) * 0.8;
-        }
-    }
-    
-    samples
 }
 
 struct KeySoundPlayer {
-    _stream: rodio::OutputStream,
-    sink: rodio::Sink,
-    blue_samples: Vec<f32>,
-    brown_samples: Vec<f32>,
-    red_samples: Vec<f32>,
+    styles: Vec<KeySoundStyle>,
 }
 
 impl KeySoundPlayer {
-    fn new() -> Option<Self> {
-        if let Ok(stream) = rodio::OutputStreamBuilder::open_default_stream() {
-            let sink = Sink::connect_new(stream.mixer());
-            sink.play();
-            
-            let blue_samples = generate_switch_sound(0);
-            let brown_samples = generate_switch_sound(1);
-            let red_samples = generate_switch_sound(2);
-            
-            Some(Self {
-                _stream: stream,
-                sink,
-                blue_samples,
-                brown_samples,
-                red_samples,
-            })
-        } else {
-            None
-        }
+    fn new() -> Self {
+        // styles index matches quick_key_sound_style value:
+        // 0 = Cherry MX Blue (clicky)
+        // 1 = Cherry MX Brown (tactile)
+        // 2 = NovelKeys Creams (thocky linear)
+        // 3 = Holy Pandas (tactile thock)
+        // 4 = Alpacas (smooth linear)
+        // 5 = Topre (dome)
+        // 6 = Kailh Box Navy (clicky)
+        // 7 = Gateron Ink Black (linear)
+        let styles = vec![
+            KeySoundStyle::from_bytes(SOUND_MXBLUE, None, None, None),
+            KeySoundStyle::from_bytes(SOUND_MXBROWN, None, None, None),
+            KeySoundStyle::from_bytes(
+                SOUND_CREAMS,
+                Some(SOUND_CREAMS_SPACE),
+                Some(SOUND_CREAMS_ENTER),
+                Some(SOUND_CREAMS_BACKSPACE),
+            ),
+            KeySoundStyle::from_bytes(SOUND_HOLYPANDA, None, None, None),
+            KeySoundStyle::from_bytes(SOUND_ALPACA, None, None, None),
+            KeySoundStyle::from_bytes(SOUND_TOPRE, None, None, None),
+            KeySoundStyle::from_bytes(SOUND_BOXNAVY, None, None, None),
+            KeySoundStyle::from_bytes(SOUND_INKBLACK, None, None, None),
+        ];
+        Self { styles }
     }
 
-    fn play_style(&self, style: u32) {
-        let samples = match style {
-            0 => &self.blue_samples,
-            1 => &self.brown_samples,
-            _ => &self.red_samples,
-        };
-        let buffer = SamplesBuffer::new(1, 44100, samples.clone());
-        self.sink.append(buffer);
+    /// Play immediately with no queue: spawn a thread per keypress so every keypress
+    /// fires instantly regardless of how fast they arrive.
+    fn play_style(&self, style: u32, vk: u32) {
+        let idx = (style as usize).min(self.styles.len().saturating_sub(1));
+        let (samples, sample_rate, channels) = self.styles[idx].samples_for_vk(vk);
+        if samples.is_empty() {
+            return;
+        }
+        let samples = samples.clone();
+        let sample_rate = *sample_rate;
+        let channels = *channels;
+        thread::spawn(move || {
+            let Ok(stream) = rodio::OutputStreamBuilder::open_default_stream() else {
+                return;
+            };
+            let sink = rodio::Sink::connect_new(stream.mixer());
+            sink.append(SamplesBuffer::new(channels, sample_rate, samples));
+            sink.sleep_until_end();
+            drop(sink);
+            drop(stream);
+        });
     }
 }
 
 static KEY_SOUND_PLAYER: Lazy<Mutex<Option<KeySoundPlayer>>> = Lazy::new(|| Mutex::new(None));
 
 pub fn play_key_sound(style: u32) {
-    let mut guard = KEY_SOUND_PLAYER.lock();
-    if guard.is_none() {
-        *guard = KeySoundPlayer::new();
-    }
-    if let Some(player) = guard.as_ref() {
-        player.play_style(style);
-    }
+    play_key_sound_vk(style, 0);
 }
 
+pub fn play_key_sound_vk(style: u32, vk: u32) {
+    let mut guard = KEY_SOUND_PLAYER.lock();
+    if guard.is_none() {
+        *guard = Some(KeySoundPlayer::new());
+    }
+    if let Some(player) = guard.as_ref() {
+        player.play_style(style, vk);
+    }
+}
