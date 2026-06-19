@@ -33,9 +33,15 @@ The modules below are built to work with the macro system, so you can combine th
 Quick Actions are small utility tools in the title bar. They are useful for fast manual access, but they are separate from the macro feature list above.
 
 - Toggle taskbar visibility
-- Lock the Windows key
-- Pin windows on top
-- Open small utility tools from the title bar
+- Lock or unlock the Windows key
+- Pin a window on top
+- Highlight the active window
+- Use the protractor overlay
+- Get screen coordinates
+- Pick colors from the screen
+- Show key display overlay
+- Open the screen draw tool
+- Enable key sound effects
 
 ## Getting Started
 
