@@ -5369,35 +5369,37 @@ impl CrosshairApp {
                                 ui.label(
                                     RichText::new(Self::tr_lang(
                                         self.state.ui_language,
-                                        "Sound Style",
-                                        "Kiểu âm thanh",
+                                        "Switch Type",
+                                        "Loại phím",
                                     ))
                                     .size(10.0),
                                 );
                                 let style_before = self.state.quick_key_sound_style;
+                                const SWITCH_NAMES: &[&str] = &[
+                                    "Cherry MX Blue",
+                                    "Cherry MX Brown",
+                                    "NovelKeys Creams",
+                                    "Holy Pandas",
+                                    "Alpacas",
+                                    "Topre",
+                                    "Kailh Box Navy",
+                                    "Gateron Ink Black",
+                                ];
+                                let selected_name = SWITCH_NAMES
+                                    .get(self.state.quick_key_sound_style as usize)
+                                    .copied()
+                                    .unwrap_or(SWITCH_NAMES[0]);
                                 egui::ComboBox::from_id_salt("quick-key-sound-style")
                                     .width(164.0)
-                                    .selected_text(match self.state.quick_key_sound_style {
-                                        0 => "Blue Switch",
-                                        1 => "Brown Switch",
-                                        _ => "Red Switch (Thock)",
-                                    })
+                                    .selected_text(selected_name)
                                     .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut self.state.quick_key_sound_style,
-                                            0,
-                                            "Blue Switch",
-                                        );
-                                        ui.selectable_value(
-                                            &mut self.state.quick_key_sound_style,
-                                            1,
-                                            "Brown Switch",
-                                        );
-                                        ui.selectable_value(
-                                            &mut self.state.quick_key_sound_style,
-                                            2,
-                                            "Red Switch (Thock)",
-                                        );
+                                        for (idx, name) in SWITCH_NAMES.iter().enumerate() {
+                                            ui.selectable_value(
+                                                &mut self.state.quick_key_sound_style,
+                                                idx as u32,
+                                                *name,
+                                            );
+                                        }
                                     });
                                 if self.state.quick_key_sound_style != style_before {
                                     self.sync_quick_key_sound_config();
