@@ -5891,8 +5891,9 @@ mod windows_overlay {
         let (mut offset_x, mut offset_y) = runtime.quick_key_display_mouse_offset;
         let (mut velocity_x, mut velocity_y) = runtime.quick_key_display_mouse_velocity;
         if let Some(last) = runtime.quick_key_display_last_cursor_pos {
-            let delta_x = (cursor.x - last.x) as f32;
-            let delta_y = (cursor.y - last.y) as f32;
+            // Invert the deltas so the mascot mouse movement matches the physical cursor direction naturally
+            let delta_x = -(cursor.x - last.x) as f32;
+            let delta_y = -(cursor.y - last.y) as f32;
             velocity_x += delta_x.clamp(-30.0, 30.0) * 0.08;
             velocity_y += delta_y.clamp(-30.0, 30.0) * 0.08;
         }
@@ -7039,7 +7040,8 @@ mod windows_overlay {
             };
             let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
             let current_ms = unsafe { GetTickCount() };
-            let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 80;
+            // Retain the hand on the mouse for an additional 300ms (380ms total) before retracting
+            let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 380;
 
             let now = Instant::now();
             let recent_pulse = entries.iter().fold(0.0f32, |acc, entry| {
@@ -13354,6 +13356,32 @@ mod windows_overlay {
         fill_skia_circle(pixmap, girl_body_cx + 3.0 * scale, girl_body_cy + 28.0 * scale, 1.8 * scale, [180, 110, 60, 255]);
         stroke_skia_circle(pixmap, girl_body_cx + 3.0 * scale, girl_body_cy + 28.0 * scale, 1.8 * scale, 1.0 * scale, outline_color);
 
+        // Blue-purple mechanic marks on the jacket (from SVG)
+        fill_skia_rounded_rect(pixmap, girl_body_cx - 20.0 * scale, girl_body_cy + 12.0 * scale, 6.0 * scale, 2.5 * scale, 1.0 * scale, [95, 76, 255, 230]);
+        fill_skia_rounded_rect(pixmap, girl_body_cx - 21.0 * scale, girl_body_cy + 22.0 * scale, 7.5 * scale, 2.5 * scale, 1.0 * scale, [95, 76, 255, 230]);
+        fill_skia_rounded_rect(pixmap, girl_body_cx + 14.0 * scale, girl_body_cy + 12.0 * scale, 6.0 * scale, 2.5 * scale, 1.0 * scale, [95, 76, 255, 230]);
+        fill_skia_rounded_rect(pixmap, girl_body_cx + 13.5 * scale, girl_body_cy + 22.0 * scale, 7.5 * scale, 2.5 * scale, 1.0 * scale, [95, 76, 255, 230]);
+
+        // Purple glowing core (from SVG)
+        let core_cx = girl_body_cx;
+        let core_cy = girl_body_cy + 22.0 * scale;
+        fill_skia_circle(pixmap, core_cx, core_cy, 3.8 * scale, [177, 116, 255, 255]);
+        fill_skia_circle(pixmap, core_cx + 2.5 * scale, core_cy + 3.0 * scale, 1.6 * scale, [227, 197, 255, 255]);
+        // Star pattern inside core
+        let mut star_pb = tiny_skia::PathBuilder::new();
+        star_pb.move_to(core_cx, core_cy - 7.0 * scale);
+        star_pb.line_to(core_cx + 1.8 * scale, core_cy - 1.8 * scale);
+        star_pb.line_to(core_cx + 7.0 * scale, core_cy);
+        star_pb.line_to(core_cx + 1.8 * scale, core_cy + 1.8 * scale);
+        star_pb.line_to(core_cx, core_cy + 7.0 * scale);
+        star_pb.line_to(core_cx - 1.8 * scale, core_cy + 1.8 * scale);
+        star_pb.line_to(core_cx - 7.0 * scale, core_cy);
+        star_pb.line_to(core_cx - 1.8 * scale, core_cy - 1.8 * scale);
+        star_pb.close();
+        if let Some(path) = star_pb.finish() {
+            fill_skia_path(pixmap, &path, [168, 102, 255, 180]);
+        }
+
         // 2. Draw Robot Body
         let robot_body_cx = 210.0 * scale;
         let robot_body_cy = 138.0 * scale;
@@ -13523,23 +13551,37 @@ mod windows_overlay {
         }
 
         // Button Eyes (stitches)
-        for offset_x in [-10.0, 10.0] {
+        for offset_x in [-11.0, 11.0] {
             let ex = girl_head_cx + offset_x * scale;
             let ey = girl_head_cy - 2.5 * scale;
-            // Button base
-            fill_skia_circle(pixmap, ex, ey, 5.0 * scale, [40, 38, 37, 255]);
-            stroke_skia_circle(pixmap, ex, ey, 5.0 * scale, 1.5 * scale, outline_color);
+            // Outer button base (very dark purple-blue)
+            fill_skia_circle(pixmap, ex, ey, 6.2 * scale, [38, 35, 56, 255]);
+            stroke_skia_circle(pixmap, ex, ey, 6.2 * scale, 1.2 * scale, [45, 36, 61, 255]);
+            
+            // Inner button face (lighter indigo-blue)
+            fill_skia_circle(pixmap, ex, ey, 4.3 * scale, [57, 64, 111, 255]);
+            
             // Stitch X
             let mut x_pb = tiny_skia::PathBuilder::new();
-            x_pb.move_to(ex - 2.5 * scale, ey - 2.5 * scale);
-            x_pb.line_to(ex + 2.5 * scale, ey + 2.5 * scale);
-            x_pb.move_to(ex + 2.5 * scale, ey - 2.5 * scale);
-            x_pb.line_to(ex - 2.5 * scale, ey + 2.5 * scale);
+            x_pb.move_to(ex - 2.4 * scale, ey - 2.4 * scale);
+            x_pb.line_to(ex + 2.4 * scale, ey + 2.4 * scale);
+            x_pb.move_to(ex + 2.4 * scale, ey - 2.4 * scale);
+            x_pb.line_to(ex - 2.4 * scale, ey + 2.4 * scale);
             if let Some(path) = x_pb.finish() {
-                stroke_skia_path(pixmap, &path, [240, 240, 240, 255], 1.2 * scale);
+                stroke_skia_path(pixmap, &path, [244, 239, 255, 255], 1.3 * scale);
             }
+            
+            // Button holes
+            if offset_x < 0.0 {
+                fill_skia_circle(pixmap, ex, ey - 1.8 * scale, 0.6 * scale, [23, 22, 36, 255]);
+                fill_skia_circle(pixmap, ex, ey + 1.8 * scale, 0.6 * scale, [23, 22, 36, 255]);
+            } else {
+                fill_skia_circle(pixmap, ex - 1.8 * scale, ey, 0.6 * scale, [23, 22, 36, 255]);
+                fill_skia_circle(pixmap, ex + 1.8 * scale, ey, 0.6 * scale, [23, 22, 36, 255]);
+            }
+            
             // Glassy Highlight
-            fill_skia_circle(pixmap, ex - 1.8 * scale, ey - 1.8 * scale, 1.2 * scale, [255, 255, 255, 200]);
+            fill_skia_circle(pixmap, ex - 2.0 * scale, ey - 2.0 * scale, 1.0 * scale, [255, 255, 255, 180]);
         }
 
         // Small wooden nose
@@ -13553,12 +13595,32 @@ mod windows_overlay {
             stroke_skia_path(pixmap, &path, outline_color, 1.2 * scale);
         }
 
-        // Small cute smile
+        // Stitched doll mouth (from SVG)
         let mut smile_pb = tiny_skia::PathBuilder::new();
-        smile_pb.move_to(girl_head_cx - 6.0 * scale, girl_head_cy + 15.0 * scale);
-        smile_pb.quad_to(girl_head_cx, girl_head_cy + 18.0 * scale, girl_head_cx + 6.0 * scale, girl_head_cy + 15.0 * scale);
+        smile_pb.move_to(girl_head_cx - 13.0 * scale, girl_head_cy + 15.0 * scale);
+        smile_pb.quad_to(girl_head_cx, girl_head_cy + 22.0 * scale, girl_head_cx + 13.0 * scale, girl_head_cy + 15.0 * scale);
         if let Some(path) = smile_pb.finish() {
-            stroke_skia_path(pixmap, &path, outline_color, 1.8 * scale);
+            stroke_skia_path(pixmap, &path, [141, 63, 90, 255], 2.2 * scale);
+        }
+        // Mouth stitches
+        for i in 0..4 {
+            let t = (i as f32) / 3.0; // 0.0, 0.33, 0.67, 1.0
+            let p0_x = girl_head_cx - 13.0 * scale;
+            let p0_y = girl_head_cy + 15.0 * scale;
+            let p1_x = girl_head_cx;
+            let p1_y = girl_head_cy + 22.0 * scale;
+            let p2_x = girl_head_cx + 13.0 * scale;
+            let p2_y = girl_head_cy + 15.0 * scale;
+            
+            let bx = (1.0 - t).powi(2) * p0_x + 2.0 * (1.0 - t) * t * p1_x + t.powi(2) * p2_x;
+            let by = (1.0 - t).powi(2) * p0_y + 2.0 * (1.0 - t) * t * p1_y + t.powi(2) * p2_y;
+            
+            let mut stitch_pb = tiny_skia::PathBuilder::new();
+            stitch_pb.move_to(bx - 1.5 * scale, by - 3.5 * scale);
+            stitch_pb.line_to(bx + 1.5 * scale, by + 3.5 * scale);
+            if let Some(path) = stitch_pb.finish() {
+                stroke_skia_path(pixmap, &path, [111, 63, 75, 255], 1.5 * scale);
+            }
         }
 
         // 2. Draw Robot Head & Face
@@ -14404,85 +14466,112 @@ mod windows_overlay {
                 }
             }
 
-            // 2. Tall Antenna Pole
-            let pole_x = 72.0;
-            let pole_top_y = 15.0;
-            let pole_bottom_y = crate_top + crate_height - 10.0;
+            // 2. Tall Antenna Pole (anchored in a small block to the left of the crate)
+            let pole_x = 60.0;
+            let pole_top_y = 10.0;
+            let pole_bottom_y = 270.0;
+
+            // Anchor block on the ground for the pole (at the bottom left)
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                50.0,
+                260.0,
+                20.0,
+                20.0,
+                2.0,
+                [100, 105, 110, 255], // concrete/metal grey block
+            );
+            stroke_projected_rounded_quad(
+                &mut pixmap,
+                50.0,
+                260.0,
+                20.0,
+                20.0,
+                2.0,
+                [30, 28, 27, 255],
+                1.5 * scale,
+            );
             
-            // Vertical rod
+            // Vertical rod extending from anchor block straight up
             let mut pole_pb = tiny_skia::PathBuilder::new();
             let pt_top = project_point(pole_x, pole_top_y);
             let pt_bottom = project_point(pole_x, pole_bottom_y);
             pole_pb.move_to(pt_top.0, pt_top.1);
             pole_pb.line_to(pt_bottom.0, pt_bottom.1);
             if let Some(path) = pole_pb.finish() {
-                stroke_skia_path(&mut pixmap, &path, [75, 72, 70, 255], 4.5 * scale);
-                stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 255], 1.5 * scale);
+                stroke_skia_path(&mut pixmap, &path, [45, 42, 40, 255], 3.5 * scale); // dark rod
+                stroke_skia_path(&mut pixmap, &path, [20, 18, 17, 255], 1.2 * scale);
             }
 
-            // Yellow Crosspiece / Insulators at the top
-            let mut cross_pb = tiny_skia::PathBuilder::new();
-            let c_left = project_point(pole_x - 18.0, pole_top_y + 4.0);
-            let c_right = project_point(pole_x + 18.0, pole_top_y + 4.0);
-            cross_pb.move_to(c_left.0, c_left.1);
-            cross_pb.line_to(c_right.0, c_right.1);
-            if let Some(path) = cross_pb.finish() {
-                stroke_skia_path(&mut pixmap, &path, [225, 185, 60, 255], 4.0 * scale);
-                stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 255], 1.2 * scale);
+            // Junction Box/Clamp halfway down
+            let box_proj = project_point(pole_x, 120.0);
+            fill_skia_circle(&mut pixmap, box_proj.0, box_proj.1, 4.5 * scale, [90, 95, 98, 255]);
+            stroke_skia_circle(&mut pixmap, box_proj.0, box_proj.1, 4.5 * scale, 1.2 * scale, [30, 28, 27, 255]);
+            fill_skia_circle(&mut pixmap, box_proj.0, box_proj.1, 1.5 * scale, [45, 42, 40, 255]);
+
+            // Black horn / megaphone pointing slightly right and down (below the top)
+            let horn_proj = project_point(pole_x, 62.0);
+            let mut horn_pb = tiny_skia::PathBuilder::new();
+            horn_pb.move_to(horn_proj.0, horn_proj.1 - 1.0 * scale);
+            horn_pb.line_to(horn_proj.0 + 8.0 * scale, horn_proj.1 + 2.0 * scale);
+            horn_pb.line_to(horn_proj.0 + 6.0 * scale, horn_proj.1 + 6.0 * scale);
+            horn_pb.line_to(horn_proj.0, horn_proj.1 + 2.0 * scale);
+            horn_pb.close();
+            if let Some(path) = horn_pb.finish() {
+                fill_skia_path(&mut pixmap, &path, [30, 28, 27, 255]);
+                stroke_skia_path(&mut pixmap, &path, [15, 14, 13, 255], 1.0 * scale);
             }
-            
-            // Top loop structure
-            let mut loop_pb = tiny_skia::PathBuilder::new();
-            let l_start = project_point(pole_x, pole_top_y);
-            let l_top1 = project_point(pole_x - 8.0, pole_top_y - 6.0);
-            let l_top2 = project_point(pole_x + 8.0, pole_top_y - 6.0);
-            loop_pb.move_to(l_start.0, l_start.1);
-            loop_pb.quad_to(l_top1.0, l_top1.1, project_point(pole_x, pole_top_y - 10.0).0, project_point(pole_x, pole_top_y - 10.0).1);
-            loop_pb.quad_to(l_top2.0, l_top2.1, l_start.0, l_start.1);
-            if let Some(path) = loop_pb.finish() {
-                stroke_skia_path(&mut pixmap, &path, [225, 185, 60, 255], 3.0 * scale);
+            // Horn bell mouth
+            let bell_proj = project_point(pole_x + 7.0, 64.0);
+            fill_skia_circle(&mut pixmap, bell_proj.0, bell_proj.1, 2.5 * scale, [50, 48, 46, 255]);
+            stroke_skia_circle(&mut pixmap, bell_proj.0, bell_proj.1, 2.5 * scale, 0.8 * scale, [15, 14, 13, 255]);
+
+            // Top glowing horizontal loop/oval ring (Identity V signature)
+            let ring_proj = project_point(pole_x, 22.0);
+            let mut ring_pb = tiny_skia::PathBuilder::new();
+            let rx = 16.0 * scale;
+            let ry = 4.0 * scale;
+            ring_pb.move_to(ring_proj.0 - rx, ring_proj.1);
+            ring_pb.cubic_to(ring_proj.0 - rx, ring_proj.1 - ry, ring_proj.0 + rx, ring_proj.1 - ry, ring_proj.0 + rx, ring_proj.1);
+            ring_pb.cubic_to(ring_proj.0 + rx, ring_proj.1 + ry, ring_proj.0 - rx, ring_proj.1 + ry, ring_proj.0 - rx, ring_proj.1);
+            ring_pb.close();
+            if let Some(path) = ring_pb.finish() {
+                stroke_skia_path(&mut pixmap, &path, [255, 230, 100, 255], 3.2 * scale); // glowing golden ring
+                stroke_skia_path(&mut pixmap, &path, [180, 140, 50, 255], 1.2 * scale);
+            }
+
+            // Vertical crosspiece assembly crossing the ring
+            let mut cross_pb = tiny_skia::PathBuilder::new();
+            let pt_cross_top = project_point(pole_x, 6.0);
+            let pt_cross_bottom = project_point(pole_x, 32.0);
+            cross_pb.move_to(pt_cross_top.0, pt_cross_top.1);
+            cross_pb.line_to(pt_cross_bottom.0, pt_cross_bottom.1);
+            if let Some(path) = cross_pb.finish() {
+                stroke_skia_path(&mut pixmap, &path, [45, 42, 40, 255], 2.2 * scale);
+                stroke_skia_path(&mut pixmap, &path, [20, 18, 17, 255], 0.8 * scale);
+            }
+
+            // Top propeller/airplane/flag decoration
+            let top_proj = project_point(pole_x, 8.0);
+            let mut dec_pb = tiny_skia::PathBuilder::new();
+            dec_pb.move_to(top_proj.0 - 7.0 * scale, top_proj.1);
+            dec_pb.line_to(top_proj.0 + 7.0 * scale, top_proj.1);
+            dec_pb.move_to(top_proj.0, top_proj.1);
+            dec_pb.line_to(top_proj.0, top_proj.1 - 4.5 * scale);
+            dec_pb.line_to(top_proj.0 - 3.5 * scale, top_proj.1 - 3.0 * scale);
+            if let Some(path) = dec_pb.finish() {
+                stroke_skia_path(&mut pixmap, &path, [225, 185, 60, 255], 2.5 * scale);
                 stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 255], 1.0 * scale);
             }
 
-            // Insulator pins
-            for offset_x in [-14.0, 0.0, 14.0] {
-                let mut pin_pb = tiny_skia::PathBuilder::new();
-                let pin_start = project_point(pole_x + offset_x, pole_top_y + 4.0);
-                let pin_end = project_point(pole_x + offset_x, pole_top_y + 11.0);
-                pin_pb.move_to(pin_start.0, pin_start.1);
-                pin_pb.line_to(pin_end.0, pin_end.1);
-                if let Some(path) = pin_pb.finish() {
-                    stroke_skia_path(&mut pixmap, &path, [225, 185, 60, 255], 2.5 * scale);
-                    stroke_skia_path(&mut pixmap, &path, [30, 28, 27, 255], 1.0 * scale);
-                }
+            // Glowing yellow points/lights on the top assembly
+            let light1 = project_point(pole_x - 6.0, 12.0);
+            let light2 = project_point(pole_x + 6.0, 12.0);
+            let light3 = project_point(pole_x, 5.0);
+            for pt in [light1, light2, light3] {
+                fill_skia_circle(&mut pixmap, pt.0, pt.1, 1.8 * scale, [255, 235, 120, 255]);
+                stroke_skia_circle(&mut pixmap, pt.0, pt.1, 1.8 * scale, 0.6 * scale, [180, 140, 50, 255]);
             }
-
-            // Red circle emblem/badge in the middle
-            let badge_y = 88.0;
-            let badge_proj = project_point(pole_x, badge_y);
-            fill_skia_circle(&mut pixmap, badge_proj.0, badge_proj.1, 10.0 * scale, [185, 45, 45, 255]);
-            stroke_skia_circle(&mut pixmap, badge_proj.0, badge_proj.1, 10.0 * scale, 1.8 * scale, [30, 28, 27, 255]);
-            fill_skia_circle(&mut pixmap, badge_proj.0, badge_proj.1, 6.5 * scale, [245, 245, 245, 255]);
-            
-            // Draw a simple letter 'U' shape inside badge
-            let mut u_pb = tiny_skia::PathBuilder::new();
-            let u1 = project_point(pole_x - 3.0, badge_y - 3.5);
-            let u2 = project_point(pole_x - 3.0, badge_y + 1.0);
-            let u3 = project_point(pole_x + 3.0, badge_y + 1.0);
-            let u4 = project_point(pole_x + 3.0, badge_y - 3.5);
-            u_pb.move_to(u1.0, u1.1);
-            u_pb.line_to(u2.0, u2.1);
-            u_pb.quad_to(project_point(pole_x, badge_y + 3.5).0, project_point(pole_x, badge_y + 3.5).1, u3.0, u3.1);
-            u_pb.line_to(u4.0, u4.1);
-            if let Some(path) = u_pb.finish() {
-                stroke_skia_path(&mut pixmap, &path, [185, 45, 45, 255], 2.0 * scale);
-            }
-
-            // Red pulley dial/wheel
-            let dial_y = 62.0;
-            let dial_proj = project_point(pole_x, dial_y);
-            fill_skia_circle(&mut pixmap, dial_proj.0, dial_proj.1, 5.0 * scale, [185, 45, 45, 255]);
-            stroke_skia_circle(&mut pixmap, dial_proj.0, dial_proj.1, 5.0 * scale, 1.5 * scale, [30, 28, 27, 255]);
 
             // 3. Typewriter Casing (surrounding the keyboard area)
             // Casing Base
@@ -14627,7 +14716,8 @@ mod windows_overlay {
         // Mouse active state tracking
         let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
         let current_ms = unsafe { GetTickCount() };
-        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 80;
+        // Retain the hand on the mouse for an additional 300ms (380ms total) before retracting
+        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 380;
         let mouse_active = is_mouse_moving || !held_mouse_buttons.is_empty();
 
         let mouse_flat_x = mouse_pad_left + 19.0 + mouse_offset.0 * 0.7;
