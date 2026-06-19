@@ -411,6 +411,7 @@ impl CrosshairApp {
                 "https://github.com/NBaoLinh/MacroNest/releases/latest",
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
                 ui.hyperlink_to(
                     Self::tr_lang(language, "Star this repo", "Star repo này"),
                     "https://github.com/NBaoLinh/MacroNest",
