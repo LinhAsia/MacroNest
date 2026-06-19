@@ -4977,85 +4977,87 @@ impl CrosshairApp {
                                     }
                                 }
                                 
-                                ui.add_space(2.0);
-                                egui::Grid::new("quick-key-display-xy-grid")
-                                    .spacing(vec2(8.0, 4.0))
-                                    .show(ui, |ui| {
-                                        ui.label(RichText::new("X").size(10.0));
-                                        let x_changed = ui
+                                if self.state.quick_key_display_mode == QuickKeyDisplayMode::Normal {
+                                    ui.add_space(2.0);
+                                    egui::Grid::new("quick-key-display-xy-grid")
+                                        .spacing(vec2(8.0, 4.0))
+                                        .show(ui, |ui| {
+                                            ui.label(RichText::new("X").size(10.0));
+                                            let x_changed = ui
+                                                .add_sized(
+                                                    [146.0, 20.0],
+                                                    egui::DragValue::new(&mut self.state.quick_key_display_x)
+                                                        .speed(1.0),
+                                                )
+                                                .changed();
+                                            ui.end_row();
+                                            ui.label(RichText::new("Y").size(10.0));
+                                            let y_changed = ui
+                                                .add_sized(
+                                                    [146.0, 20.0],
+                                                    egui::DragValue::new(&mut self.state.quick_key_display_y)
+                                                        .speed(1.0),
+                                                )
+                                                .changed();
+                                            ui.end_row();
+                                            if x_changed || y_changed {
+                                                self.sync_quick_key_display_config();
+                                                self.persist();
+                                            }
+                                        });
+                                    
+                                    ui.add_space(2.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Size",
+                                                "Size",
+                                            ))
+                                            .size(10.0),
+                                        );
+                                        let size_changed = ui
                                             .add_sized(
-                                                [146.0, 20.0],
-                                                egui::DragValue::new(&mut self.state.quick_key_display_x)
-                                                    .speed(1.0),
+                                                [132.0, 20.0],
+                                                egui::DragValue::new(
+                                                    &mut self.state.quick_key_display_size,
+                                                )
+                                                .range(18.0..=96.0)
+                                                .speed(1.0),
                                             )
                                             .changed();
-                                        ui.end_row();
-                                        ui.label(RichText::new("Y").size(10.0));
-                                        let y_changed = ui
-                                            .add_sized(
-                                                [146.0, 20.0],
-                                                egui::DragValue::new(&mut self.state.quick_key_display_y)
-                                                    .speed(1.0),
-                                            )
-                                            .changed();
-                                        ui.end_row();
-                                        if x_changed || y_changed {
+                                        if size_changed {
                                             self.sync_quick_key_display_config();
                                             self.persist();
                                         }
                                     });
-                                
-                                ui.add_space(2.0);
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Size",
-                                            "Size",
-                                        ))
-                                        .size(10.0),
-                                    );
-                                    let size_changed = ui
+                                    
+                                    ui.add_space(4.0);
+                                    if ui
                                         .add_sized(
-                                            [132.0, 20.0],
-                                            egui::DragValue::new(
-                                                &mut self.state.quick_key_display_size,
-                                            )
-                                            .range(18.0..=96.0)
-                                            .speed(1.0),
+                                            [164.0, 20.0],
+                                            Button::new(if is_pick_active {
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Picking...",
+                                                    "Picking...",
+                                                )
+                                            } else {
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Pick point",
+                                                    "Pick point",
+                                                )
+                                            }),
                                         )
-                                        .changed();
-                                    if size_changed {
-                                        self.sync_quick_key_display_config();
-                                        self.persist();
+                                        .clicked()
+                                    {
+                                        self.begin_image_search_capture(
+                                            ui.ctx(),
+                                            VisionCaptureTarget::QuickActionsKeyDisplayPosition,
+                                            VisionCaptureMode::SinglePixel,
+                                        );
                                     }
-                                });
-                                
-                                ui.add_space(4.0);
-                                if ui
-                                    .add_sized(
-                                        [164.0, 20.0],
-                                        Button::new(if is_pick_active {
-                                            Self::tr_lang(
-                                                self.state.ui_language,
-                                                "Picking...",
-                                                "Picking...",
-                                            )
-                                        } else {
-                                            Self::tr_lang(
-                                                self.state.ui_language,
-                                                "Pick point",
-                                                "Pick point",
-                                            )
-                                        }),
-                                    )
-                                    .clicked()
-                                {
-                                    self.begin_image_search_capture(
-                                        ui.ctx(),
-                                        VisionCaptureTarget::QuickActionsKeyDisplayPosition,
-                                        VisionCaptureMode::SinglePixel,
-                                    );
                                 }
                                 false
                             }).inner
