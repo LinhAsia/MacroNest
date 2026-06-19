@@ -13068,223 +13068,7 @@ mod windows_overlay {
     }
     // =========================================================================
 
-    fn tung_sahur_draw_body_and_ears(
-        pixmap: &mut tiny_skia::Pixmap,
-        scale: f32,
-        _body_cx: f32, body_cy: f32, _body_radius: f32,
-        head_cx: f32, head_cy: f32,
-        _look_x: f32, _look_y: f32,
-        _recent_pulse: f32,
-    ) {
-        let left = head_cx - 24.0 * scale;
-        let top = head_cy - 48.0 * scale;
-        let width = 48.0 * scale;
-        let height = (body_cy + 42.0 * scale) - top;
-        let radius = 24.0 * scale;
 
-        // 1. Draw shadow
-        fill_skia_rounded_rect(
-            pixmap,
-            left + 2.0 * scale,
-            top + 4.0 * scale,
-            width,
-            height,
-            radius,
-            [0, 0, 0, 32],
-        );
-
-        // 2. Main wood fill
-        fill_skia_rounded_rect(
-            pixmap,
-            left,
-            top,
-            width,
-            height,
-            radius,
-            [156, 102, 51, 255],
-        );
-
-        // 3. Highlight line on left side
-        let mut hl = tiny_skia::PathBuilder::new();
-        hl.move_to(head_cx - 17.5 * scale, head_cy - 28.0 * scale);
-        hl.line_to(head_cx - 17.5 * scale, head_cy + 55.0 * scale);
-        if let Some(p) = hl.finish() {
-            stroke_skia_path(pixmap, &p, [185, 128, 75, 255], 3.2 * scale);
-        }
-
-        // 4. Wood grain lines
-        let grain_color = [115, 68, 30, 255];
-        let mut g1 = tiny_skia::PathBuilder::new();
-        g1.move_to(head_cx - 11.0 * scale, head_cy);
-        g1.line_to(head_cx - 11.0 * scale, head_cy + 65.0 * scale);
-        if let Some(p) = g1.finish() {
-            stroke_skia_path(pixmap, &p, grain_color, 1.5 * scale);
-        }
-        let mut g2 = tiny_skia::PathBuilder::new();
-        g2.move_to(head_cx + 13.0 * scale, head_cy - 18.0 * scale);
-        g2.line_to(head_cx + 13.0 * scale, head_cy + 45.0 * scale);
-        if let Some(p) = g2.finish() {
-            stroke_skia_path(pixmap, &p, grain_color, 1.5 * scale);
-        }
-
-        // 5. Main log outline
-        stroke_skia_rounded_rect(
-            pixmap,
-            left,
-            top,
-            width,
-            height,
-            radius,
-            2.2 * scale,
-            [45, 40, 42, 255],
-        );
-    }
-
-    fn tung_sahur_draw_head_and_face(
-        pixmap: &mut tiny_skia::Pixmap,
-        scale: f32,
-        head_cx: f32, head_cy: f32, _head_radius: f32,
-        look_x: f32, look_y: f32,
-    ) {
-        // Bulging eyeballs
-        let eye_r = 9.0 * scale;
-        let left_eye_cx = head_cx - 14.0 * scale + look_x;
-        let left_eye_cy = head_cy - 5.0 * scale + look_y;
-        let right_eye_cx = head_cx + 14.0 * scale + look_x;
-        let right_eye_cy = head_cy - 5.0 * scale + look_y;
-
-        let outline_color = [45, 40, 42, 255];
-
-        // Draw left eyeball
-        fill_skia_circle(pixmap, left_eye_cx, left_eye_cy, eye_r, [255, 255, 255, 255]);
-        stroke_skia_circle(pixmap, left_eye_cx, left_eye_cy, eye_r, 2.0 * scale, outline_color);
-
-        // Draw right eyeball
-        fill_skia_circle(pixmap, right_eye_cx, right_eye_cy, eye_r, [255, 255, 255, 255]);
-        stroke_skia_circle(pixmap, right_eye_cx, right_eye_cy, eye_r, 2.0 * scale, outline_color);
-
-        // Pupils (with subtle look shift)
-        let pupil_r = 4.5 * scale;
-        let left_pupil_cx = left_eye_cx + look_x * 0.15;
-        let left_pupil_cy = left_eye_cy + look_y * 0.15;
-        let right_pupil_cx = right_eye_cx + look_x * 0.15;
-        let right_pupil_cy = right_eye_cy + look_y * 0.15;
-
-        fill_skia_circle(pixmap, left_pupil_cx, left_pupil_cy, pupil_r, outline_color);
-        fill_skia_circle(pixmap, right_pupil_cx, right_pupil_cy, pupil_r, outline_color);
-
-        // Pupil reflection dots
-        fill_skia_circle(pixmap, left_pupil_cx - 1.5 * scale, left_pupil_cy - 1.5 * scale, 1.2 * scale, [255, 255, 255, 255]);
-        fill_skia_circle(pixmap, right_pupil_cx - 1.5 * scale, right_pupil_cy - 1.5 * scale, 1.2 * scale, [255, 255, 255, 255]);
-
-        // Long wooden nose
-        let mut nose = tiny_skia::PathBuilder::new();
-        nose.move_to(head_cx + look_x, head_cy - 4.0 * scale + look_y);
-        nose.line_to(head_cx - 3.5 * scale + look_x, head_cy + 8.0 * scale + look_y);
-        nose.line_to(head_cx + 3.5 * scale + look_x, head_cy + 8.0 * scale + look_y);
-        nose.close();
-        if let Some(p) = nose.finish() {
-            fill_skia_path(pixmap, &p, [170, 110, 60, 255]);
-            stroke_skia_path(pixmap, &p, outline_color, 1.8 * scale);
-        }
-
-        // Uncanny smile
-        let mut smile = tiny_skia::PathBuilder::new();
-        smile.move_to(head_cx - 16.0 * scale + look_x, head_cy + 18.0 * scale + look_y);
-        smile.quad_to(
-            head_cx + look_x, head_cy + 24.0 * scale + look_y,
-            head_cx + 16.0 * scale + look_x, head_cy + 18.0 * scale + look_y,
-        );
-        if let Some(p) = smile.finish() {
-            stroke_skia_path(pixmap, &p, outline_color, 2.2 * scale);
-        }
-
-        // Dimple/smile creases
-        let mut crease_l = tiny_skia::PathBuilder::new();
-        crease_l.move_to(head_cx - 17.5 * scale + look_x, head_cy + 15.0 * scale + look_y);
-        crease_l.line_to(head_cx - 14.5 * scale + look_x, head_cy + 21.0 * scale + look_y);
-        if let Some(p) = crease_l.finish() {
-            stroke_skia_path(pixmap, &p, outline_color, 1.6 * scale);
-        }
-
-        let mut crease_r = tiny_skia::PathBuilder::new();
-        crease_r.move_to(head_cx + 17.5 * scale + look_x, head_cy + 15.0 * scale + look_y);
-        crease_r.line_to(head_cx + 14.5 * scale + look_x, head_cy + 21.0 * scale + look_y);
-        if let Some(p) = crease_r.finish() {
-            stroke_skia_path(pixmap, &p, outline_color, 1.6 * scale);
-        }
-    }
-
-    fn tung_sahur_draw_arms(
-        pixmap: &mut tiny_skia::Pixmap,
-        scale: f32,
-        body_cx: f32, body_cy: f32,
-        left_paw_target: (f32, f32),
-        right_paw_target: (f32, f32),
-        paw_press: f32,
-        _paw_glow: [u8; 4],
-    ) {
-        let left_shoulder_cx = body_cx - 20.0 * scale;
-        let left_shoulder_cy = body_cy - 4.0 * scale;
-        let right_shoulder_cx = body_cx + 20.0 * scale;
-        let right_shoulder_cy = body_cy - 4.0 * scale;
-
-        let left_paw_x = left_paw_target.0;
-        let left_paw_y = left_paw_target.1 + paw_press;
-        let right_paw_x = right_paw_target.0;
-        let right_paw_y = right_paw_target.1 + paw_press;
-
-        let stroke_color = [45, 40, 42, 255];
-        let wood_color = [156, 102, 51, 255];
-
-        // Draw left arm (stick)
-        let mut left_arm = tiny_skia::PathBuilder::new();
-        left_arm.move_to(left_shoulder_cx, left_shoulder_cy);
-        left_arm.line_to(left_paw_x, left_paw_y);
-        if let Some(p) = left_arm.finish() {
-            stroke_skia_path(pixmap, &p, stroke_color, 3.0 * scale);
-        }
-
-        // Draw right arm (stick)
-        let mut right_arm = tiny_skia::PathBuilder::new();
-        right_arm.move_to(right_shoulder_cx, right_shoulder_cy);
-        right_arm.line_to(right_paw_x, right_paw_y);
-        if let Some(p) = right_arm.finish() {
-            stroke_skia_path(pixmap, &p, stroke_color, 3.0 * scale);
-        }
-
-        // Left drumstick (pestle/drumstick prop)
-        let mut pestle = tiny_skia::PathBuilder::new();
-        pestle.move_to(left_paw_x + 6.0 * scale, left_paw_y - 6.0 * scale);
-        pestle.line_to(left_paw_x - 14.0 * scale, left_paw_y + 14.0 * scale);
-        if let Some(p) = pestle.finish() {
-            stroke_skia_path(pixmap, &p, wood_color, 5.0 * scale);
-            stroke_skia_path(pixmap, &p, stroke_color, 1.8 * scale);
-        }
-
-        // Right bat (wooden baseball bat/club prop)
-        let mut bat = tiny_skia::PathBuilder::new();
-        bat.move_to(right_paw_x - 2.0 * scale, right_paw_y + 2.0 * scale);
-        bat.line_to(right_paw_x + 12.0 * scale, right_paw_y - 32.0 * scale);
-        if let Some(p) = bat.finish() {
-            stroke_skia_path(pixmap, &p, wood_color, 6.0 * scale);
-            stroke_skia_path(pixmap, &p, stroke_color, 1.8 * scale);
-        }
-
-        // Shoulder joints
-        let cap_r = 4.0 * scale;
-        fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, wood_color);
-        stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, 1.8 * scale, stroke_color);
-        fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, wood_color);
-        stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, 1.8 * scale, stroke_color);
-
-        // Draw hands (wooden circles)
-        fill_skia_circle(pixmap, left_paw_x, left_paw_y, 4.5 * scale, wood_color);
-        stroke_skia_circle(pixmap, left_paw_x, left_paw_y, 4.5 * scale, 1.8 * scale, stroke_color);
-
-        fill_skia_circle(pixmap, right_paw_x, right_paw_y, 4.5 * scale, wood_color);
-        stroke_skia_circle(pixmap, right_paw_x, right_paw_y, 4.5 * scale, 1.8 * scale, stroke_color);
-    }
 
     fn mechanic_robot_draw_body_and_ears(
         pixmap: &mut tiny_skia::Pixmap,
@@ -14119,10 +13903,7 @@ mod windows_overlay {
                 mascot_draw_body_and_ears(&mut pixmap, scale, body_cx, body_cy, body_radius, head_cx, head_cy, look_x, look_y, recent_pulse);
                 mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y);
             }
-            crate::model::MascotStyle::TungSahur => {
-                tung_sahur_draw_body_and_ears(&mut pixmap, scale, body_cx, body_cy, body_radius, head_cx, head_cy, look_x, look_y, recent_pulse);
-                tung_sahur_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y);
-            }
+
             crate::model::MascotStyle::MechanicRobot => {
                 mechanic_robot_draw_body_and_ears(&mut pixmap, scale, look_x, look_y, recent_pulse);
                 mechanic_robot_draw_head_and_face(&mut pixmap, scale, look_x, look_y);
@@ -15110,13 +14891,7 @@ mod windows_overlay {
                     paw_press, paw_glow,
                 );
             }
-            crate::model::MascotStyle::TungSahur => {
-                tung_sahur_draw_arms(
-                    &mut pixmap, scale, body_cx, body_cy,
-                    left_paw_target, right_paw_target,
-                    paw_press, paw_glow,
-                );
-            }
+
             crate::model::MascotStyle::MechanicRobot => {
                 mechanic_robot_draw_arms(
                     &mut pixmap, scale,
@@ -15147,9 +14922,7 @@ mod windows_overlay {
             crate::model::MascotStyle::Hachiware => {
                 mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y);
             }
-            crate::model::MascotStyle::TungSahur => {
-                tung_sahur_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y);
-            }
+
             crate::model::MascotStyle::MechanicRobot => {
                 mechanic_robot_draw_head_and_face(&mut pixmap, scale, look_x, look_y);
             }

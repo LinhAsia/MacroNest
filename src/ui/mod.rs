@@ -4963,7 +4963,6 @@ impl CrosshairApp {
                                         .width(164.0)
                                         .selected_text(match self.state.quick_key_display_mascot_style {
                                             crate::model::MascotStyle::Hachiware => "Hachiware",
-                                            crate::model::MascotStyle::TungSahur => "Tung Sahur",
                                             crate::model::MascotStyle::MechanicRobot => "Mechanic & Robot",
                                         })
                                         .show_ui(ui, |ui| {
@@ -4971,11 +4970,6 @@ impl CrosshairApp {
                                                 &mut self.state.quick_key_display_mascot_style,
                                                 crate::model::MascotStyle::Hachiware,
                                                 "Hachiware",
-                                            );
-                                            ui.selectable_value(
-                                                &mut self.state.quick_key_display_mascot_style,
-                                                crate::model::MascotStyle::TungSahur,
-                                                "Tung Sahur",
                                             );
                                             ui.selectable_value(
                                                 &mut self.state.quick_key_display_mascot_style,
