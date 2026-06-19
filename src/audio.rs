@@ -772,82 +772,86 @@ impl KeySoundStyle {
     }
 }
 
-struct KeySoundPlayer {
-    styles: Vec<KeySoundStyle>,
-    stream: Option<rodio::OutputStream>,
+enum KeySoundMessage {
+    Play {
+        samples: Vec<f32>,
+        sample_rate: u32,
+        channels: u16,
+    },
 }
 
-impl KeySoundPlayer {
-    fn new() -> Self {
-        // styles index matches quick_key_sound_style value:
-        // 0 = Cherry MX Blue (clicky)
-        // 1 = Cherry MX Brown (tactile)
-        // 2 = NovelKeys Creams (thocky linear)
-        // 3 = Holy Pandas (tactile thock)
-        // 4 = Alpacas (smooth linear)
-        // 5 = Topre (dome)
-        // 6 = Kailh Box Navy (clicky)
-        // 7 = Gateron Ink Black (linear)
-        let styles = vec![
-            KeySoundStyle::from_bytes(SOUND_MXBLUE, None, None, None),
-            KeySoundStyle::from_bytes(SOUND_MXBROWN, None, None, None),
-            KeySoundStyle::from_bytes(
-                SOUND_CREAMS,
-                Some(SOUND_CREAMS_SPACE),
-                Some(SOUND_CREAMS_ENTER),
-                Some(SOUND_CREAMS_BACKSPACE),
-            ),
-            KeySoundStyle::from_bytes(SOUND_HOLYPANDA, None, None, None),
-            KeySoundStyle::from_bytes(SOUND_ALPACA, None, None, None),
-            KeySoundStyle::from_bytes(SOUND_TOPRE, None, None, None),
-            KeySoundStyle::from_bytes(SOUND_BOXNAVY, None, None, None),
-            KeySoundStyle::from_bytes(SOUND_INKBLACK, None, None, None),
-        ];
-        let stream = rodio::OutputStreamBuilder::open_default_stream().ok();
-        Self { styles, stream }
-    }
+static KEY_SOUND_CHANNEL: Lazy<Mutex<Option<crossbeam_channel::Sender<KeySoundMessage>>>> =
+    Lazy::new(|| Mutex::new(None));
 
-    /// Play immediately with no queue: spawn a thread per keypress so every keypress
-    /// fires instantly regardless of how fast they arrive.
-    fn play_style(&self, style: u32, vk: u32) {
-        let idx = (style as usize).min(self.styles.len().saturating_sub(1));
-        let (samples, sample_rate, channels) = self.styles[idx].samples_for_vk(vk);
-        if samples.is_empty() {
-            return;
-        }
-        let samples = samples.clone();
-        let sample_rate = *sample_rate;
-        let channels = *channels;
-        if let Some(stream) = &self.stream {
+static KEY_SOUND_STYLES: Lazy<Vec<KeySoundStyle>> = Lazy::new(|| {
+    vec![
+        KeySoundStyle::from_bytes(SOUND_MXBLUE, None, None, None),
+        KeySoundStyle::from_bytes(SOUND_MXBROWN, None, None, None),
+        KeySoundStyle::from_bytes(
+            SOUND_CREAMS,
+            Some(SOUND_CREAMS_SPACE),
+            Some(SOUND_CREAMS_ENTER),
+            Some(SOUND_CREAMS_BACKSPACE),
+        ),
+        KeySoundStyle::from_bytes(SOUND_HOLYPANDA, None, None, None),
+        KeySoundStyle::from_bytes(SOUND_ALPACA, None, None, None),
+        KeySoundStyle::from_bytes(SOUND_TOPRE, None, None, None),
+        KeySoundStyle::from_bytes(SOUND_BOXNAVY, None, None, None),
+        KeySoundStyle::from_bytes(SOUND_INKBLACK, None, None, None),
+    ]
+});
+
+pub fn init_key_sound_player() {
+    let mut guard = KEY_SOUND_CHANNEL.lock();
+    if guard.is_none() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        *guard = Some(tx);
+        thread::spawn(move || {
+            let Ok(stream) = rodio::OutputStreamBuilder::open_default_stream() else {
+                eprintln!("KeySoundPlayer failed to open default stream");
+                return;
+            };
             let mixer = stream.mixer().clone();
-            thread::spawn(move || {
-                let sink = rodio::Sink::connect_new(&mixer);
-                sink.append(SamplesBuffer::new(channels, sample_rate, samples));
-                sink.play();
-                sink.sleep_until_end();
-            });
-        }
+            while let Ok(msg) = rx.recv() {
+                match msg {
+                    KeySoundMessage::Play { samples, sample_rate, channels } => {
+                        let mixer_clone = mixer.clone();
+                        thread::spawn(move || {
+                            let sink = rodio::Sink::connect_new(&mixer_clone);
+                            sink.append(SamplesBuffer::new(channels, sample_rate, samples));
+                            sink.play();
+                            sink.sleep_until_end();
+                        });
+                    }
+                }
+            }
+            drop(stream);
+        });
     }
 }
-
-static KEY_SOUND_PLAYER: Lazy<Mutex<Option<KeySoundPlayer>>> = Lazy::new(|| Mutex::new(None));
 
 pub fn play_key_sound(style: u32) {
     play_key_sound_vk(style, 0);
 }
 
 pub fn play_key_sound_vk(style: u32, vk: u32) {
-    let is_none = KEY_SOUND_PLAYER.lock().is_none();
-    if is_none {
-        thread::spawn(|| {
-            let mut guard = KEY_SOUND_PLAYER.lock();
-            if guard.is_none() {
-                *guard = Some(KeySoundPlayer::new());
-            }
-        });
+    let initialized = KEY_SOUND_CHANNEL.lock().is_some();
+    if !initialized {
+        init_key_sound_player();
         return;
     }
-    if let Some(player) = KEY_SOUND_PLAYER.lock().as_ref() {
-        player.play_style(style, vk);
+
+    let idx = (style as usize).min(KEY_SOUND_STYLES.len().saturating_sub(1));
+    let (samples, sample_rate, channels) = KEY_SOUND_STYLES[idx].samples_for_vk(vk);
+    if samples.is_empty() {
+        return;
+    }
+
+    if let Some(tx) = KEY_SOUND_CHANNEL.lock().as_ref() {
+        let _ = tx.send(KeySoundMessage::Play {
+            samples: samples.clone(),
+            sample_rate: *sample_rate,
+            channels: *channels,
+        });
     }
 }
