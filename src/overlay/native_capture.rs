@@ -1190,6 +1190,24 @@ unsafe fn draw_region_select_capture_to_dc(
     };
 
     let mut dimmed_bgra = state.dimmed_rgba.clone();
+
+    if let Some(rect) = region_select_rect(state) {
+        let select_w = rect.right - rect.left;
+        let select_h = rect.bottom - rect.top;
+        if select_w >= 2 && select_h >= 2 {
+            blit_rect(
+                &state.capture_frame.rgba,
+                state.width as usize,
+                &mut dimmed_bgra,
+                state.width as usize,
+                rect.left as usize,
+                rect.top as usize,
+                select_w as usize,
+                select_h as usize,
+            );
+        }
+    }
+
     for pixel in dimmed_bgra.chunks_exact_mut(4) {
         pixel.swap(0, 2);
     }
@@ -1214,27 +1232,6 @@ unsafe fn draw_region_select_capture_to_dc(
         let select_w = rect.right - rect.left;
         let select_h = rect.bottom - rect.top;
         if select_w >= 2 && select_h >= 2 {
-            let mut select_bgra = state.capture_frame.rgba.clone();
-            for pixel in select_bgra.chunks_exact_mut(4) {
-                pixel.swap(0, 2);
-            }
-
-            let _ = StretchDIBits(
-                hdc,
-                rect.left,
-                rect.top,
-                select_w,
-                select_h,
-                rect.left,
-                rect.top,
-                select_w,
-                select_h,
-                Some(select_bgra.as_ptr() as *const std::ffi::c_void),
-                &bmi,
-                DIB_RGB_COLORS,
-                SRCCOPY,
-            );
-
             let pen = CreatePen(PS_SOLID, 2, rgb(0, 160, 255));
             let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
             let _ = MoveToEx(hdc, rect.left, rect.top, None);
