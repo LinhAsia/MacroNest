@@ -1,5 +1,7 @@
 <p align="left">
-  <img src="assets/banner-v4.svg" alt="MacroNest Banner" width="100%" />
+  <a href="https://github.com/NBaoLinh/MacroNest">
+    <img src="assets/banner-v4.svg" alt="MacroNest Banner" width="100%" />
+  </a>
   <a href="https://github.com/NBaoLinh/MacroNest/stargazers"><img src="assets/star-button-v2.svg" alt="Star MacroNest" height="38" /></a>
   <a href="https://github.com/NBaoLinh/MacroNest/releases/latest"><img src="assets/download-button-v2.svg" alt="Download MacroNest" height="38" /></a>
 </p>
