@@ -12,6 +12,8 @@ It helps you automate keyboard, mouse, OCR, image search, overlays, window contr
 
 ## Key Features
 
+The modules below are built to work with the macro system, so you can combine them in the same macro flow.
+
 | Module | What it does | How macros use it |
 | :--- | :--- | :--- |
 | Macro Engine | Run key presses, mouse actions, loops, waits, and conditions | Build the main flow of your automation |
@@ -25,7 +27,15 @@ It helps you automate keyboard, mouse, OCR, image search, overlays, window contr
 | HUD Labels | Show text, timers, and countdowns on screen | Display values and progress while running |
 | Script Command | Run CMD and PowerShell commands | Call system scripts inside a macro |
 | Hardware Input | Use Interception, Arduino, and recorded mouse paths | Send input in different ways when needed |
-| Quick Actions | Toggle taskbar, lock Windows key, pin windows, and open small tools | Access common tools fast from the title bar |
+
+## Quick Actions
+
+Quick Actions are small utility tools in the title bar. They are useful for fast manual access, but they are separate from the macro feature list above.
+
+- Toggle taskbar visibility
+- Lock the Windows key
+- Pin windows on top
+- Open small utility tools from the title bar
 
 ## Getting Started
 
