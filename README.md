@@ -8,7 +8,7 @@
 
 > **MacroNest is a Windows desktop macro tool.**
 >
-> Automate keyboard, mouse, OCR, image search, color detect, geometry drawing, pin part of a window, crosshair overlays, commands, sound playback, HUD labels, window control, and more in one app.
+> Combine keyboard, mouse, OCR, image search, color detect, geometry drawing, pin part of a window, crosshair overlays, commands, sound playback, HUD labels, window control, and more in the same macro flow, with variables to build more flexible automation.
 
 ## Key Features
 
