@@ -410,11 +410,16 @@ impl CrosshairApp {
                 "NBaoLinh",
                 "https://github.com/NBaoLinh/MacroNest/releases/latest",
             );
-            ui.add_space(8.0);
-            ui.hyperlink_to(
-                Self::tr_lang(language, "⭐ Star this repo", "⭐ Star repo này"),
-                "https://github.com/NBaoLinh/MacroNest",
-            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.hyperlink_to(
+                    Self::tr_lang(language, "Star this repo", "Star repo này"),
+                    "https://github.com/NBaoLinh/MacroNest",
+                );
+                ui.hyperlink_to(
+                    Self::material_icon_text(0xe838, 13.0),
+                    "https://github.com/NBaoLinh/MacroNest",
+                );
+            });
         });
         ui.add_space(4.0);
         let full_width = ui.available_width();
