@@ -8,21 +8,24 @@ use windows::Win32::{
         BITMAPINFOHEADER, BI_RGB, DrawTextW, DT_CENTER, DT_SINGLELINE, DT_VCENTER, SetBkMode,
         SetTextColor, TRANSPARENT, CreateFontW, HFONT, FW_BOLD, DT_CALCRECT, DeleteObject, SRCCOPY,
         FONT_CHARSET, FONT_OUTPUT_PRECISION, FONT_CLIP_PRECISION, FONT_QUALITY,
-        CreatePen, MoveToEx, LineTo, PS_SOLID,
+        CreatePen, MoveToEx, LineTo, PS_SOLID, CreateSolidBrush, FillRect, Rectangle,
     },
     UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW,
         PostQuitMessage, RegisterClassW, ShowWindow, TranslateMessage,
         CS_HREDRAW, CS_VREDRAW, MSG, WNDCLASSW, WS_EX_TOPMOST, WS_EX_TOOLWINDOW,
-        WS_POPUP, SW_SHOW, SWP_NOACTIVATE, SetWindowPos, LoadCursorW, IDC_ARROW,
+        WS_POPUP, SW_SHOW, SWP_NOACTIVATE, SetWindowPos, LoadCursorW,
+        IDC_ARROW, IDC_SIZEALL, IDC_SIZENS, IDC_SIZEWE, IDC_SIZENWSE, IDC_SIZENESW,
         WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_KEYDOWN, WM_DESTROY,
+        WM_RBUTTONUP, WM_SETCURSOR,
         SW_HIDE, SW_SHOWNORMAL,
         WINDOW_EX_STYLE, WINDOW_STYLE, SWP_SHOWWINDOW, WM_CREATE,
         CREATESTRUCTW, WM_NCCREATE, GWLP_USERDATA, WINDOW_LONG_PTR_INDEX,
         PostMessageW, DestroyWindow, HWND_TOPMOST, SetWindowLongPtrW, GetWindowLongPtrW, GetCursorPos,
+        SetCursor, LoadImageW, IMAGE_CURSOR, LR_SHARED, HCURSOR,
     },
     UI::Input::KeyboardAndMouse::{
-        SetCapture, ReleaseCapture, VK_ESCAPE,
+        SetCapture, ReleaseCapture, VK_ESCAPE, VK_RETURN,
     },
 };
 use windows::core::w;
@@ -46,6 +49,14 @@ pub enum NativeCaptureMode {
         vietnamese: bool,
         dim_background: bool,
     },
+    RegionAdjust {
+        // Initial region in screen coordinates
+        initial_x: i32,
+        initial_y: i32,
+        initial_w: i32,
+        initial_h: i32,
+        vietnamese: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +74,18 @@ pub enum NativeCaptureResult {
         y: i32,
         color: Option<crate::model::RgbaColor>,
     },
+    AdjustedRegion {
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdjustDragKind {
+    Move,
+    N, NE, E, SE, S, SW, W, NW,
 }
 
 struct CaptureState {
@@ -79,6 +102,12 @@ struct CaptureState {
     current_point: Option<(i32, i32)>,
     protractor_points: Vec<(i32, i32)>,
 
+    // RegionAdjust state
+    adjust_rect: RECT,  // in window-local coords
+    adjust_drag: Option<AdjustDragKind>,
+    adjust_drag_origin: (i32, i32),    // cursor pos when drag started
+    adjust_rect_origin: RECT,          // rect state when drag started
+
     // Result
     result: NativeCaptureResult,
 }
@@ -92,6 +121,18 @@ impl CaptureState {
         height: i32,
         mode: NativeCaptureMode,
     ) -> Self {
+        let adjust_rect = if let NativeCaptureMode::RegionAdjust {
+            initial_x, initial_y, initial_w, initial_h, ..
+        } = mode {
+            RECT {
+                left: initial_x - left,
+                top: initial_y - top,
+                right: initial_x - left + initial_w,
+                bottom: initial_y - top + initial_h,
+            }
+        } else {
+            RECT::default()
+        };
         Self {
             dimmed_rgba: dim_capture_frame(&capture_frame),
             capture_frame,
@@ -103,6 +144,10 @@ impl CaptureState {
             start_point: None,
             current_point: None,
             protractor_points: Vec::new(),
+            adjust_rect,
+            adjust_drag: None,
+            adjust_drag_origin: (0, 0),
+            adjust_rect_origin: RECT::default(),
             result: NativeCaptureResult::Cancelled,
         }
     }
@@ -230,17 +275,27 @@ unsafe extern "system" fn capture_wnd_proc(
                 if GetCursorPos(&mut pt).is_ok() {
                     let rx = pt.x - state.left;
                     let ry = pt.y - state.top;
-                    state.start_point = Some((rx, ry));
-                    state.current_point = Some((rx, ry));
-                    SetCapture(hwnd);
-                    unsafe {
-                        let dirty = RECT {
-                            left: (rx - 8).max(0),
-                            top: (ry - 8).max(0),
-                            right: (rx + 8).min(state.width),
-                            bottom: (ry + 8).min(state.height),
-                        };
-                        InvalidateRect(hwnd, Some(&dirty), false);
+                    if matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) {
+                        // Determine drag kind from hit test
+                        let kind = adjust_hit_test(&state.adjust_rect, rx, ry);
+                        state.adjust_drag = Some(kind);
+                        state.adjust_drag_origin = (rx, ry);
+                        state.adjust_rect_origin = state.adjust_rect;
+                        SetCapture(hwnd);
+                        InvalidateRect(hwnd, None, false);
+                    } else {
+                        state.start_point = Some((rx, ry));
+                        state.current_point = Some((rx, ry));
+                        SetCapture(hwnd);
+                        unsafe {
+                            let dirty = RECT {
+                                left: (rx - 8).max(0),
+                                top: (ry - 8).max(0),
+                                right: (rx + 8).min(state.width),
+                                bottom: (ry + 8).min(state.height),
+                            };
+                            InvalidateRect(hwnd, Some(&dirty), false);
+                        }
                     }
                 }
             }
@@ -251,24 +306,36 @@ unsafe extern "system" fn capture_wnd_proc(
             if let Some(state) = state {
                 let mut pt = POINT::default();
                 if GetCursorPos(&mut pt).is_ok() {
-                    let previous_rect = if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
-                        region_select_rect(state)
-                    } else {
-                        None
-                    };
                     let rx = pt.x - state.left;
                     let ry = pt.y - state.top;
-                    state.current_point = Some((rx, ry));
-                    unsafe {
-                        if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
-                            let next_rect = region_select_rect(state);
-                            if let Some(dirty) = union_selection_dirty_rect(previous_rect, next_rect) {
-                                InvalidateRect(hwnd, Some(&dirty), false);
+                    if matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) {
+                        if let Some(drag) = state.adjust_drag {
+                            // Apply drag delta to rect
+                            let dx = rx - state.adjust_drag_origin.0;
+                            let dy = ry - state.adjust_drag_origin.1;
+                            let ro = state.adjust_rect_origin;
+                            let min_size = 4i32;
+                            state.adjust_rect = apply_adjust_drag(ro, drag, dx, dy, min_size, state.width, state.height);
+                        }
+                        InvalidateRect(hwnd, None, false);
+                    } else {
+                        let previous_rect = if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
+                            region_select_rect(state)
+                        } else {
+                            None
+                        };
+                        state.current_point = Some((rx, ry));
+                        unsafe {
+                            if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
+                                let next_rect = region_select_rect(state);
+                                if let Some(dirty) = union_selection_dirty_rect(previous_rect, next_rect) {
+                                    InvalidateRect(hwnd, Some(&dirty), false);
+                                } else {
+                                    InvalidateRect(hwnd, None, false);
+                                }
                             } else {
                                 InvalidateRect(hwnd, None, false);
                             }
-                        } else {
-                            InvalidateRect(hwnd, None, false);
                         }
                     }
                 }
@@ -285,6 +352,11 @@ unsafe extern "system" fn capture_wnd_proc(
                     let ry = pt.y - state.top;
 
                     match state.mode {
+                        NativeCaptureMode::RegionAdjust { .. } => {
+                            // End drag, keep rect as-is (confirm via Enter or right-click)
+                            state.adjust_drag = None;
+                            InvalidateRect(hwnd, None, false);
+                        }
                         NativeCaptureMode::RegionSelect { .. } => {
                             if let Some(start) = state.start_point {
                                 let x1 = start.0;
@@ -345,9 +417,48 @@ unsafe extern "system" fn capture_wnd_proc(
             }
             LRESULT(0)
         }
+        WM_RBUTTONUP => {
+            let state = get_state(hwnd);
+            if let Some(state) = state {
+                if matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) {
+                    // Right-click = confirm current rect
+                    let ar = state.adjust_rect;
+                    let rw = (ar.right - ar.left).abs();
+                    let rh = (ar.bottom - ar.top).abs();
+                    if rw >= 2 && rh >= 2 {
+                        state.result = NativeCaptureResult::AdjustedRegion {
+                            x: ar.left.min(ar.right) + state.left,
+                            y: ar.top.min(ar.bottom) + state.top,
+                            width: rw,
+                            height: rh,
+                        };
+                    }
+                    DestroyWindow(hwnd);
+                }
+            }
+            LRESULT(0)
+        }
         WM_KEYDOWN => {
+            let state = get_state(hwnd);
             if wparam.0 == VK_ESCAPE.0 as usize {
                 DestroyWindow(hwnd);
+            } else if wparam.0 == VK_RETURN.0 as usize {
+                if let Some(state) = state {
+                    if matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) {
+                        let ar = state.adjust_rect;
+                        let rw = (ar.right - ar.left).abs();
+                        let rh = (ar.bottom - ar.top).abs();
+                        if rw >= 2 && rh >= 2 {
+                            state.result = NativeCaptureResult::AdjustedRegion {
+                                x: ar.left.min(ar.right) + state.left,
+                                y: ar.top.min(ar.bottom) + state.top,
+                                width: rw,
+                                height: rh,
+                            };
+                        }
+                        DestroyWindow(hwnd);
+                    }
+                }
             }
             LRESULT(0)
         }
@@ -388,6 +499,227 @@ unsafe fn InvalidateRect(hwnd: HWND, rect: Option<&RECT>, erase: bool) {
     windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), Some(lp_rect), erase);
 }
 
+const ADJUST_HANDLE_RADIUS: i32 = 10;
+
+fn adjust_hit_test(r: &RECT, rx: i32, ry: i32) -> AdjustDragKind {
+    let cx = (r.left + r.right) / 2;
+    let cy = (r.top + r.bottom) / 2;
+    let hr = ADJUST_HANDLE_RADIUS;
+    // Check 8 handles in priority order: corners first, then edges
+    let handles = [
+        (r.left,  r.top,    AdjustDragKind::NW),
+        (r.right, r.top,    AdjustDragKind::NE),
+        (r.right, r.bottom, AdjustDragKind::SE),
+        (r.left,  r.bottom, AdjustDragKind::SW),
+        (cx,      r.top,    AdjustDragKind::N),
+        (r.right, cy,       AdjustDragKind::E),
+        (cx,      r.bottom, AdjustDragKind::S),
+        (r.left,  cy,       AdjustDragKind::W),
+    ];
+    for (hx, hy, kind) in handles {
+        if (rx - hx).abs() <= hr && (ry - hy).abs() <= hr {
+            return kind;
+        }
+    }
+    AdjustDragKind::Move
+}
+
+fn apply_adjust_drag(
+    origin: RECT,
+    drag: AdjustDragKind,
+    dx: i32,
+    dy: i32,
+    min_size: i32,
+    max_w: i32,
+    max_h: i32,
+) -> RECT {
+    let mut r = origin;
+    match drag {
+        AdjustDragKind::Move => {
+            let nw = (r.right - r.left).max(min_size);
+            let nh = (r.bottom - r.top).max(min_size);
+            r.left = (r.left + dx).clamp(0, max_w - nw);
+            r.top = (r.top + dy).clamp(0, max_h - nh);
+            r.right = r.left + nw;
+            r.bottom = r.top + nh;
+        }
+        AdjustDragKind::N => {
+            r.top = (r.top + dy).clamp(0, r.bottom - min_size);
+        }
+        AdjustDragKind::S => {
+            r.bottom = (r.bottom + dy).clamp(r.top + min_size, max_h);
+        }
+        AdjustDragKind::W => {
+            r.left = (r.left + dx).clamp(0, r.right - min_size);
+        }
+        AdjustDragKind::E => {
+            r.right = (r.right + dx).clamp(r.left + min_size, max_w);
+        }
+        AdjustDragKind::NW => {
+            r.top = (r.top + dy).clamp(0, r.bottom - min_size);
+            r.left = (r.left + dx).clamp(0, r.right - min_size);
+        }
+        AdjustDragKind::NE => {
+            r.top = (r.top + dy).clamp(0, r.bottom - min_size);
+            r.right = (r.right + dx).clamp(r.left + min_size, max_w);
+        }
+        AdjustDragKind::SE => {
+            r.bottom = (r.bottom + dy).clamp(r.top + min_size, max_h);
+            r.right = (r.right + dx).clamp(r.left + min_size, max_w);
+        }
+        AdjustDragKind::SW => {
+            r.bottom = (r.bottom + dy).clamp(r.top + min_size, max_h);
+            r.left = (r.left + dx).clamp(0, r.right - min_size);
+        }
+    }
+    r
+}
+
+unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<()> {
+    let ar = state.adjust_rect;
+    let sw = state.width as usize;
+    let sh = state.height as usize;
+
+    // Build dimmed BGRA buf, then un-dim the selected area
+    let mut bgra = state.dimmed_rgba.clone();
+
+    let sel_l = ar.left.clamp(0, state.width) as usize;
+    let sel_t = ar.top.clamp(0, state.height) as usize;
+    let sel_r = ar.right.clamp(0, state.width) as usize;
+    let sel_b = ar.bottom.clamp(0, state.height) as usize;
+    let sel_w = sel_r.saturating_sub(sel_l);
+    let sel_h = sel_b.saturating_sub(sel_t);
+    if sel_w > 0 && sel_h > 0 {
+        blit_rect(
+            &state.capture_frame.rgba,
+            sw,
+            &mut bgra,
+            sw,
+            sel_l, sel_t, sel_w, sel_h,
+        );
+    }
+
+    // RGBA -> BGRA swap
+    for pixel in bgra.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+
+    let mut bmi = BITMAPINFO::default();
+    bmi.bmiHeader = BITMAPINFOHEADER {
+        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+        biWidth: state.width,
+        biHeight: -state.height,
+        biPlanes: 1,
+        biBitCount: 32,
+        biCompression: BI_RGB.0,
+        ..Default::default()
+    };
+
+    let _ = StretchDIBits(
+        hdc,
+        0, 0, state.width, state.height,
+        0, 0, state.width, state.height,
+        Some(bgra.as_ptr() as *const std::ffi::c_void),
+        &bmi,
+        DIB_RGB_COLORS,
+        SRCCOPY,
+    );
+
+    // Draw selection border
+    let pen = CreatePen(PS_SOLID, 2, rgb(0, 160, 255));
+    let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+    let null_brush = windows::Win32::Graphics::Gdi::GetStockObject(
+        windows::Win32::Graphics::Gdi::NULL_BRUSH,
+    );
+    let old_brush = SelectObject(hdc, null_brush);
+    let _ = windows::Win32::Graphics::Gdi::Rectangle(hdc, ar.left, ar.top, ar.right, ar.bottom);
+    let _ = SelectObject(hdc, old_pen);
+    let _ = SelectObject(hdc, old_brush);
+    let _ = DeleteObject(HGDIOBJ(pen.0));
+
+    // Draw 8 resize handles (filled squares with blue border)
+    let hr = ADJUST_HANDLE_RADIUS as i32;
+    let cx = (ar.left + ar.right) / 2;
+    let cy = (ar.top + ar.bottom) / 2;
+    let handle_centers = [
+        (ar.left, ar.top), (cx, ar.top), (ar.right, ar.top),
+        (ar.right, cy),
+        (ar.right, ar.bottom), (cx, ar.bottom), (ar.left, ar.bottom),
+        (ar.left, cy),
+    ];
+    let h_fill = CreateSolidBrush(rgb(220, 238, 255));
+    let h_pen = CreatePen(PS_SOLID, 2, rgb(0, 130, 220));
+    let old_pen = SelectObject(hdc, HGDIOBJ(h_pen.0));
+    let old_brush = SelectObject(hdc, HGDIOBJ(h_fill.0));
+    for (hx, hy) in handle_centers {
+        let _ = windows::Win32::Graphics::Gdi::Rectangle(
+            hdc, hx - hr / 2, hy - hr / 2, hx + hr / 2, hy + hr / 2,
+        );
+    }
+    let _ = SelectObject(hdc, old_pen);
+    let _ = SelectObject(hdc, old_brush);
+    let _ = DeleteObject(HGDIOBJ(h_pen.0));
+    let _ = DeleteObject(HGDIOBJ(h_fill.0));
+
+    // Size label
+    let rw = (ar.right - ar.left).abs();
+    let rh = (ar.bottom - ar.top).abs();
+    let size_text = format!("{rw} x {rh}");
+    let font = CreateFontW(
+        18, 0, 0, 0, FW_BOLD.0 as i32,
+        0, 0, 0,
+        FONT_CHARSET(0), FONT_OUTPUT_PRECISION(0),
+        FONT_CLIP_PRECISION(0), FONT_QUALITY(0),
+        0, w!("Segoe UI"),
+    );
+    let old_font = SelectObject(hdc, HGDIOBJ(font.0));
+    let _ = SetBkMode(hdc, TRANSPARENT);
+    let _ = SetTextColor(hdc, rgb(255, 255, 255));
+    let mut sz_u16: Vec<u16> = size_text.encode_utf16().collect();
+    let label_y = if ar.top > 22 { ar.top - 22 } else { ar.bottom + 4 };
+    let mut lbl_rect = RECT { left: ar.left, top: label_y, right: ar.right, bottom: label_y + 20 };
+    let _ = DrawTextW(hdc, &mut sz_u16, &mut lbl_rect, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+    let _ = SelectObject(hdc, old_font);
+    let _ = DeleteObject(HGDIOBJ(font.0));
+
+    // Status bar pill
+    let status_text = "Drag to move/resize. Right-click or Enter to confirm. Esc to cancel.";
+    let font2 = CreateFontW(
+        22, 0, 0, 0, FW_BOLD.0 as i32,
+        0, 0, 0,
+        FONT_CHARSET(0), FONT_OUTPUT_PRECISION(0),
+        FONT_CLIP_PRECISION(0), FONT_QUALITY(0),
+        0, w!("Segoe UI"),
+    );
+    let old_font2 = SelectObject(hdc, HGDIOBJ(font2.0));
+    let _ = SetTextColor(hdc, rgb(255, 255, 255));
+    let mut txt_u16: Vec<u16> = status_text.encode_utf16().collect();
+    let mut calc_rect = RECT::default();
+    let _ = DrawTextW(hdc, &mut txt_u16, &mut calc_rect, DT_CALCRECT);
+    let text_w = calc_rect.right - calc_rect.left;
+    let text_h = calc_rect.bottom - calc_rect.top;
+    let pill_w = text_w + 48;
+    let pill_h = text_h + 16;
+    let pill_x = (state.width - pill_w) / 2;
+    let pill_y = 40;
+
+    let brush2 = CreateSolidBrush(rgb(12, 18, 28));
+    let pen2 = CreatePen(PS_SOLID, 1, rgb(110, 156, 210));
+    let old_brush2 = SelectObject(hdc, HGDIOBJ(brush2.0));
+    let old_pen2 = SelectObject(hdc, HGDIOBJ(pen2.0));
+    let _ = windows::Win32::Graphics::Gdi::RoundRect(hdc, pill_x, pill_y, pill_x + pill_w, pill_y + pill_h, 18, 18);
+    let mut text_rect = RECT { left: pill_x, top: pill_y, right: pill_x + pill_w, bottom: pill_y + pill_h };
+    let _ = DrawTextW(hdc, &mut txt_u16, &mut text_rect, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+    let _ = SelectObject(hdc, old_brush2);
+    let _ = SelectObject(hdc, old_pen2);
+    let _ = SelectObject(hdc, old_font2);
+    let _ = DeleteObject(HGDIOBJ(brush2.0));
+    let _ = DeleteObject(HGDIOBJ(pen2.0));
+    let _ = DeleteObject(HGDIOBJ(font2.0));
+
+    Ok(())
+}
+
 fn blit_rect(
     src: &[u8],
     src_w: usize,
@@ -409,6 +741,7 @@ fn blit_rect(
         }
     }
 }
+
 
 fn protractor_circle_too_small(state: &CaptureState) -> bool {
     if state.protractor_points.len() != 2 {
@@ -518,6 +851,10 @@ fn draw_rounded_rect(
 unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<()> {
     if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
         draw_region_select_capture_to_dc(hdc, state)?;
+        return Ok(());
+    }
+    if matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) {
+        draw_region_adjust_to_dc(hdc, state)?;
         return Ok(());
     }
 
@@ -669,6 +1006,9 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
                 let path = pb.finish().unwrap();
                 pixmap.stroke_path(&path, &ch_paint, &stroke, tiny_skia::Transform::identity(), None);
             }
+        }
+        NativeCaptureMode::RegionAdjust { .. } => {
+            // Handled by early return above
         }
     }
 
@@ -916,6 +1256,13 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
                 "Click a point on screen to capture. Press Esc to cancel."
             }
         }
+        NativeCaptureMode::RegionAdjust { vietnamese, .. } => {
+            if vietnamese {
+                "Kéo các viền hộp để thay đổi kích thước, kéo giữa để di chuyển. Nhấn Enter để xác nhận, Esc để hủy."
+            } else {
+                "Drag borders to resize, center to move. Press Enter to confirm, Esc to cancel."
+            }
+        }
     };
 
     let font = CreateFontW(
@@ -1088,6 +1435,7 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
             NativeCaptureMode::ProtractorCalibration { ui_language } => ui_language == crate::model::UiLanguage::Vietnamese,
             NativeCaptureMode::RegionSelect { vietnamese, .. } => vietnamese,
             NativeCaptureMode::PointClick { vietnamese, .. } => vietnamese,
+            NativeCaptureMode::RegionAdjust { vietnamese, .. } => vietnamese,
         };
 
         // Create Hex Code Font (18px bold)
