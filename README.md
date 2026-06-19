@@ -18,7 +18,7 @@ The modules below are built to work with the macro system, so you can combine th
 | :--- | :--- | :--- |
 | Macro Engine | Run key presses, mouse actions, loops, waits, and conditions | Build the main flow of your automation |
 | Computer Vision | Find images on screen, watch colors, and count matching pixels | Trigger actions when something appears on screen |
-| OCR | Read text and numbers from the screen with Windows OCR | Run a macro when text matches |
+| OCR | Read text and numbers from the screen with fast local PaddleOCR | Run a macro when text matches |
 | Window Control | Move, resize, pin, and zoom windows | Control your workspace during a macro |
 | Audio Sense | Watch system audio or microphone levels and pitch | Trigger actions from sound |
 | Sound Effects | Play sound alerts and use custom clips | Confirm status, warnings, or macro events |

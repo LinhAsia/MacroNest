@@ -1341,18 +1341,49 @@ impl CrosshairApp {
                 ui.label(
                     RichText::new(Self::tr_lang(
                         language,
-                        "MacroNest OCR is now limited to English only to keep it stable and predictable.",
-                        "MacroNest OCR is now limited to English only to keep it stable and predictable.",
+                        "MacroNest now uses fast local PaddleOCR. Pick the language pack that matches the text you scan.",
+                        "MacroNest now uses fast local PaddleOCR. Pick the language pack that matches the text you scan.",
                     ))
                     .small(),
                 );
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(Self::tr_lang(
+                        language,
+                        "Active OCR language",
+                        "Active OCR language",
+                    ));
+                    let selected_label =
+                        crate::ocr::label_for_language_code(&self.state.ocr_language);
+                    egui::ComboBox::from_id_salt("settings-ocr-language")
+                        .selected_text(selected_label)
+                        .width(210.0)
+                        .show_ui(ui, |ui| {
+                            for pack in crate::ocr::ocr_language_packs() {
+                                if ui
+                                    .selectable_value(
+                                        &mut self.state.ocr_language,
+                                        pack.code.to_owned(),
+                                        pack.label,
+                                    )
+                                    .changed()
+                                {
+                                    self.state.ocr_language =
+                                        crate::ocr::normalize_language_code(
+                                            &self.state.ocr_language,
+                                        );
+                                    crate::ocr::set_active_language_code(
+                                        &self.state.ocr_language,
+                                    );
+                                }
+                            }
+                        });
+                });
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new(format!(
-                        "{}: {}",
-                        Self::tr_lang(language, "Active OCR language", "Active OCR language"),
-                        crate::ocr::OCR_ENGLISH_LABEL
-                    ))
+                    RichText::new(
+                        "For the best speed in macros, keep the OCR pack close to the script you expect to read.",
+                    )
                     .small()
                     .weak(),
                 );

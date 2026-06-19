@@ -17982,7 +17982,7 @@ mod windows_overlay {
                         &frame.rgba,
                         frame.width as u32,
                         frame.height as u32,
-                        crate::ocr::OCR_ENGLISH_CODE,
+                        crate::ocr::OCR_ACTIVE_CODE,
                     ) {
                         let target_text = ocr_target_text.trim();
                         if target_text.is_empty() {
@@ -18488,7 +18488,7 @@ mod windows_overlay {
                 &frame.rgba,
                 frame.width as u32,
                 frame.height as u32,
-                crate::ocr::OCR_ENGLISH_CODE,
+                crate::ocr::OCR_ACTIVE_CODE,
             ) {
                 let full_text = res.text.clone();
                 // 0. Store full raw text regardless of target_text
