@@ -121,6 +121,7 @@ enum TitlebarQuickActionKind {
 pub(crate) enum VisionCaptureMode {
     Template,
     SearchRegion,
+    RegionAdjust,
     ColorSample,
     ColorPriorityAnchor,
     SinglePixel,
@@ -11496,6 +11497,27 @@ impl eframe::App for CrosshairApp {
                                 } => {
                                     self.finish_ocr_step_region_capture_command(
                                         ctx, group_id, preset_id, step_index, x, y, width, height,
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+                        crate::overlay::NativeCaptureResult::AdjustedRegion {
+                            x,
+                            y,
+                            width,
+                            height,
+                        } => {
+                            match target {
+                                VisionCaptureTarget::Preset(preset_id) => {
+                                    self.finish_image_search_region_capture_command(
+                                        ctx,
+                                        preset_id,
+                                        false,
+                                        x,
+                                        y,
+                                        width,
+                                        height,
                                     );
                                 }
                                 _ => {}

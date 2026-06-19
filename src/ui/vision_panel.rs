@@ -148,6 +148,7 @@ impl CrosshairApp {
                 let mut cancel_active_capture_local = false;
                 let mut start_image_search_capture = None;
                 let mut start_search_region_capture = None;
+                let mut start_adjust_region_capture = None;
                 let mut start_color_pick_capture = None;
                 let mut start_color_priority_anchor_capture = None;
                 let mut start_single_pixel_capture = None;
@@ -375,6 +376,22 @@ impl CrosshairApp {
                                         .clicked()
                                     {
                                         start_search_region_capture = Some(preset.id);
+                                    }
+                                    // Show Adjust button when there is an existing region
+                                    let has_region = preset.search_region_screen_x.is_some()
+                                        && preset.search_region_width.is_some();
+                                    if has_region {
+                                        if ui
+                                            .button(Self::tr_lang(language, "Adjust", "Adjust"))
+                                            .on_hover_text(Self::tr_lang(
+                                                language,
+                                                "Move/resize the region directly on screen",
+                                                "Move/resize the region directly on screen",
+                                            ))
+                                            .clicked()
+                                        {
+                                            start_adjust_region_capture = Some(preset.id);
+                                        }
                                     }
                                 }
 
@@ -790,6 +807,13 @@ impl CrosshairApp {
                         ctx,
                         VisionCaptureTarget::Preset(preset_id),
                         VisionCaptureMode::SearchRegion,
+                    );
+                }
+                if let Some(preset_id) = start_adjust_region_capture {
+                    self.begin_image_search_capture(
+                        ctx,
+                        VisionCaptureTarget::Preset(preset_id),
+                        VisionCaptureMode::RegionAdjust,
                     );
                 }
                 if let Some(preset_id) = start_color_pick_capture {
@@ -1294,6 +1318,7 @@ impl CrosshairApp {
                 | VisionCaptureMode::ColorPriorityAnchor
                 | VisionCaptureMode::SinglePixel
         );
+        let is_region_adjust = matches!(mode, VisionCaptureMode::RegionAdjust);
         let use_natural_point_click_preview = matches!(
             target,
             VisionCaptureTarget::QuickActionsCoordinates
@@ -1302,6 +1327,24 @@ impl CrosshairApp {
                 | VisionCaptureTarget::PinPresetColor(_)
         );
         let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+
+        // For RegionAdjust, capture existing region coords
+        let existing_region = if is_region_adjust {
+            if let VisionCaptureTarget::Preset(preset_id) = target {
+                self.state.vision_presets.iter().find(|p| p.id == preset_id).and_then(|p| {
+                    Some((
+                        p.search_region_screen_x?,
+                        p.search_region_screen_y?,
+                        p.search_region_width?,
+                        p.search_region_height?,
+                    ))
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         std::thread::spawn(move || {
             // Sleep to let OS process window hide
@@ -1312,7 +1355,19 @@ impl CrosshairApp {
             let (result, capture_frame) = if let Some(capture) =
                 crate::window_list::capture_virtual_screen_region(left, top, width, height)
             {
-                let native_mode = if is_point_click {
+                let native_mode = if is_region_adjust {
+                    let (ix, iy, iw, ih) = existing_region.unwrap_or_else(|| {
+                        // Default to center 1/4 of screen
+                        (left + width / 4, top + height / 4, width / 2, height / 2)
+                    });
+                    crate::overlay::native_capture::NativeCaptureMode::RegionAdjust {
+                        initial_x: ix,
+                        initial_y: iy,
+                        initial_w: iw,
+                        initial_h: ih,
+                        vietnamese,
+                    }
+                } else if is_point_click {
                     crate::overlay::native_capture::NativeCaptureMode::PointClick {
                         vietnamese,
                         dim_background: !use_natural_point_click_preview,
@@ -1365,6 +1420,7 @@ impl CrosshairApp {
         });
     }
 
+
     pub(crate) fn handle_image_search_capture_mouse_down(
         &mut self,
         ctx: &egui::Context,
@@ -1380,7 +1436,8 @@ impl CrosshairApp {
         {
             VisionCaptureMode::ColorSample
             | VisionCaptureMode::ColorPriorityAnchor
-            | VisionCaptureMode::SinglePixel => {
+            | VisionCaptureMode::SinglePixel
+            | VisionCaptureMode::RegionAdjust => {
                 // Do nothing on mouse down, wait for mouse up to capture!
             }
             VisionCaptureMode::Template | VisionCaptureMode::SearchRegion => {
@@ -1434,7 +1491,8 @@ impl CrosshairApp {
             }
             VisionCaptureMode::ColorSample
             | VisionCaptureMode::ColorPriorityAnchor
-            | VisionCaptureMode::SinglePixel => {}
+            | VisionCaptureMode::SinglePixel
+            | VisionCaptureMode::RegionAdjust => {}
         }
     }
 
@@ -1622,6 +1680,7 @@ impl CrosshairApp {
                     }
                 }
             }
+            VisionCaptureMode::RegionAdjust => {}
         }
     }
 
@@ -1791,6 +1850,7 @@ impl CrosshairApp {
         self.status = match mode {
             VisionCaptureMode::Template => "Image template capture cancelled.".to_owned(),
             VisionCaptureMode::SearchRegion => "Image search area capture cancelled.".to_owned(),
+            VisionCaptureMode::RegionAdjust => "Image search region adjust cancelled.".to_owned(),
             VisionCaptureMode::ColorSample => "Image color pick cancelled.".to_owned(),
             VisionCaptureMode::ColorPriorityAnchor => {
                 "Image priority point capture cancelled.".to_owned()
@@ -2056,6 +2116,7 @@ impl CrosshairApp {
                     );
                 }
             }
+            VisionCaptureMode::RegionAdjust => {}
         }
     }
 
