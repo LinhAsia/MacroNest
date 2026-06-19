@@ -3048,7 +3048,7 @@ impl Default for AppState {
             quick_screen_draw_smoothing: false,
             quick_screen_draw_smoothing_amount: default_screen_draw_smoothing_amount(),
             quick_key_sound_enabled: false,
-            quick_key_sound_style: 0,
+            quick_key_sound_style: 2,
         }
     }
 }
