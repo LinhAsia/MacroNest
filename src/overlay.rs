@@ -15496,7 +15496,7 @@ mod windows_overlay {
             let mut press_locked_keys: Vec<String> = Vec::new();
             let mut press_locked_mouse_masks: Vec<MouseMoveLockMask> = Vec::new();
             let step_indices: Vec<usize> = (0..preset.steps.len()).collect();
-            let _ = execute_macro_sequence(
+            let flow = execute_macro_sequence(
                 preset.id,
                 &preset.steps,
                 &step_indices,
@@ -15508,6 +15508,9 @@ mod windows_overlay {
                 match_duplicate_window_titles,
                 false,
             );
+            if matches!(flow, MacroRunFlow::StopExecution) && preset.press_stop_step_enabled {
+                execute_hold_abort_step(preset.id, &preset.press_stop_step);
+            }
             for step in cleanup_steps {
                 let _ = send_key_event(&step);
             }
@@ -25446,7 +25449,7 @@ mod windows_overlay {
                 let mut press_locked_keys: Vec<String> = Vec::new();
                 let mut press_locked_mouse_masks: Vec<MouseMoveLockMask> = Vec::new();
                 let step_indices: Vec<usize> = (0..preset.steps.len()).collect();
-                let _ = execute_macro_sequence(
+                let flow = execute_macro_sequence(
                     preset.id,
                     &preset.steps,
                     &step_indices,
@@ -25458,6 +25461,9 @@ mod windows_overlay {
                     false,
                     bypass_enabled,
                 );
+                if matches!(flow, MacroRunFlow::StopExecution) && preset.press_stop_step_enabled {
+                    execute_hold_abort_step(preset.id, &preset.press_stop_step);
+                }
                 for step in cleanup_steps {
                     let _ = send_key_event(&step);
                 }

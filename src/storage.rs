@@ -347,6 +347,8 @@ impl AppPaths {
                         event_match_duplicate_window_titles: true,
                         hold_stop_step_enabled: false,
                         hold_stop_step: crate::model::MacroStep::default(),
+                        press_stop_step_enabled: false,
+                        press_stop_step: crate::model::MacroStep::default(),
                         steps: legacy.steps,
                         record_hotkey: None,
                         acknowledged_infinite_loop: false,
@@ -516,6 +518,16 @@ impl AppPaths {
                         cond.operator = "==".to_string();
                     }
                 }
+                if preset.press_stop_step.if_operator.is_empty()
+                    || preset.press_stop_step.if_operator == "="
+                {
+                    preset.press_stop_step.if_operator = "==".to_string();
+                }
+                for cond in &mut preset.press_stop_step.extra_conditions {
+                    if cond.operator.is_empty() || cond.operator == "=" {
+                        cond.operator = "==".to_string();
+                    }
+                }
                 for step in &mut preset.steps {
                     if step.if_operator.is_empty() || step.if_operator == "=" {
                         step.if_operator = "==".to_string();
@@ -535,6 +547,12 @@ impl AppPaths {
                 preset.hold_stop_step.if_condition_type == crate::model::IfConditionType::Unknown
                     || preset
                         .hold_stop_step
+                        .extra_conditions
+                        .iter()
+                        .any(|c| c.condition_type == crate::model::IfConditionType::Unknown)
+                    || preset.press_stop_step.if_condition_type == crate::model::IfConditionType::Unknown
+                    || preset
+                        .press_stop_step
                         .extra_conditions
                         .iter()
                         .any(|c| c.condition_type == crate::model::IfConditionType::Unknown)

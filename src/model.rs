@@ -444,7 +444,7 @@ pub struct WindowPreset {
     pub hotkey: Option<HotkeyBinding>,
     #[serde(default)]
     pub trigger_keys: String,
-    #[serde(default = "default_true", alias = "stretch_enabled")]
+    #[serde(default, alias = "stretch_enabled")]
     pub remove_title_bar: bool,
     pub animate_enabled: bool,
     pub animate_duration_ms: u64,
@@ -473,7 +473,7 @@ impl WindowPreset {
             y: 0,
             hotkey: None,
             trigger_keys: String::new(),
-            remove_title_bar: true,
+            remove_title_bar: false,
             animate_enabled: false,
             animate_duration_ms: 260,
             animate_hotkey: None,
@@ -613,7 +613,7 @@ impl WindowLayout {
             hotkey: None,
             trigger_keys: String::new(),
             block_taskbar: false,
-            remove_title_bar: true,
+            remove_title_bar: false,
         }
     }
 }
@@ -1567,6 +1567,7 @@ pub enum CaptureRequest {
     MacroPresetRecordHotkey(u32, u32),
     MacroPresetReleaseWaitKey(u32, u32),
     MacroPresetHoldStopInput(u32, u32),
+    MacroPresetPressStopInput(u32, u32),
     CommandPresetHotkey(u32),
     QuickScreenDrawHotkey,
     MacroStepInput {
@@ -2240,6 +2241,8 @@ pub struct MacroPreset {
     pub event_match_duplicate_window_titles: bool,
     pub hold_stop_step_enabled: bool,
     pub hold_stop_step: MacroStep,
+    pub press_stop_step_enabled: bool,
+    pub press_stop_step: MacroStep,
     pub steps: Vec<MacroStep>,
     pub record_hotkey: Option<HotkeyBinding>,
     #[serde(skip)]
@@ -2265,6 +2268,8 @@ impl MacroPreset {
             event_match_duplicate_window_titles: true,
             hold_stop_step_enabled: false,
             hold_stop_step: MacroStep::default(),
+            press_stop_step_enabled: false,
+            press_stop_step: MacroStep::default(),
             steps: vec![MacroStep::default()],
             record_hotkey: None,
             acknowledged_infinite_loop: false,
