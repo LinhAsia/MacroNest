@@ -1178,6 +1178,18 @@ mod windows_overlay {
         hold_mix: f32,
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct MascotVisualState {
+        mouse_offset: (f32, f32),
+        has_held_keys: bool,
+        has_held_mouse_buttons: bool,
+        is_mouse_moving: bool,
+        recent_pulse_active: bool,
+        mascot_style: crate::model::MascotStyle,
+        font_size: f32,
+        window_rect: (i32, i32, i32, i32),
+    }
+
     struct Runtime {
         rx: Receiver<OverlayCommand>,
         ui_tx: Sender<UiCommand>,
@@ -1216,6 +1228,7 @@ mod windows_overlay {
         quick_key_display_mouse_offset: (f32, f32),
         quick_key_display_mouse_velocity: (f32, f32),
         quick_key_display_last_cursor_pos: Option<POINT>,
+        quick_key_display_last_mascot_state: Option<MascotVisualState>,
         tray_menu: HMENU,
         keyboard_hook: HHOOK,
         mouse_hook: HHOOK,
@@ -1975,6 +1988,7 @@ mod windows_overlay {
                 quick_key_display_mouse_offset: (0.0, 0.0),
                 quick_key_display_mouse_velocity: (0.0, 0.0),
                 quick_key_display_last_cursor_pos: None,
+                quick_key_display_last_mascot_state: None,
                 tray_menu,
                 keyboard_hook: HHOOK::default(),
                 mouse_hook: HHOOK::default(),
@@ -5890,6 +5904,15 @@ mod windows_overlay {
         offset_x = (offset_x + velocity_x).clamp(-18.0, 18.0);
         offset_y = (offset_y + velocity_y).clamp(-14.0, 14.0);
 
+        if offset_x.abs() < 0.01 && velocity_x.abs() < 0.01 {
+            offset_x = 0.0;
+            velocity_x = 0.0;
+        }
+        if offset_y.abs() < 0.01 && velocity_y.abs() < 0.01 {
+            offset_y = 0.0;
+            velocity_y = 0.0;
+        }
+
         runtime.quick_key_display_mouse_offset = (offset_x, offset_y);
         runtime.quick_key_display_mouse_velocity = (velocity_x, velocity_y);
         runtime.quick_key_display_last_cursor_pos = Some(cursor);
@@ -6971,6 +6994,7 @@ mod windows_overlay {
             runtime.quick_key_display_entries.clear();
             runtime.quick_key_display_slot_memory.clear();
             runtime.quick_key_display_slot_labels.clear();
+            runtime.quick_key_display_last_mascot_state = None;
             let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
             return Ok(());
         }
@@ -6983,6 +7007,7 @@ mod windows_overlay {
         {
             runtime.quick_key_display_slot_memory.clear();
             runtime.quick_key_display_slot_labels.clear();
+            runtime.quick_key_display_last_mascot_state = None;
             let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
             return Ok(());
         }
@@ -7002,6 +7027,47 @@ mod windows_overlay {
         };
         let x = runtime.quick_key_display_center_x - (width / 2);
         let y = runtime.quick_key_display_center_y - (height / 2);
+
+        if runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot {
+            // Re-query visual state dependencies to check if we can skip repainting
+            let (held_keys, held_mouse_buttons) = {
+                let hook_state = HOOK_STATE.lock();
+                (
+                    hook_state.held_inputs.clone(),
+                    hook_state.held_mouse_buttons.clone(),
+                )
+            };
+            let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
+            let current_ms = unsafe { GetTickCount() };
+            let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 80;
+
+            let now = Instant::now();
+            let recent_pulse = entries.iter().fold(0.0f32, |acc, entry| {
+                let age = now
+                    .saturating_duration_since(entry.shown_at)
+                    .as_secs_f32()
+                    .min(1.0);
+                acc.max((1.0 - age / 0.05).clamp(0.0, 1.0))
+            });
+
+            let current_state = MascotVisualState {
+                mouse_offset: runtime.quick_key_display_mouse_offset,
+                has_held_keys: !held_keys.is_empty(),
+                has_held_mouse_buttons: !held_mouse_buttons.is_empty(),
+                is_mouse_moving,
+                recent_pulse_active: recent_pulse > 0.0,
+                mascot_style: runtime.quick_key_display_mascot_style,
+                font_size,
+                window_rect: (x, y, width, height),
+            };
+
+            if Some(current_state) == runtime.quick_key_display_last_mascot_state && recent_pulse == 0.0 {
+                // No change in visual state, bypass repaint to save CPU
+                return Ok(());
+            }
+            runtime.quick_key_display_last_mascot_state = Some(current_state);
+        }
+
         unsafe {
             match runtime.quick_key_display_mode {
                 QuickKeyDisplayMode::Normal => paint_quick_key_display(
