@@ -295,12 +295,19 @@ impl CrosshairApp {
                             .clicked()
                             {
                                 preset.collapsed = !preset.collapsed;
+                                if preset.collapsed {
+                                    preset.show_search_region_overlay = false;
+                                }
                                 live_sync = true;
                             }
                         });
                     });
 
                     if preset.collapsed {
+                        if preset.show_search_region_overlay {
+                            preset.show_search_region_overlay = false;
+                            live_sync = true;
+                        }
                         return;
                     }
 
@@ -312,7 +319,7 @@ impl CrosshairApp {
 
                             if !preset.use_color_matching && !self.opencv_installed {
                                 ui.label("");
-                                ui.label(egui::RichText::new(Self::tr_lang(language, "⚠ OpenCV library not installed! Check Settings.", "⚠ OpenCV library not installed! Check Settings.")).color(egui::Color32::from_rgb(255, 110, 110)));
+                                ui.label(egui::RichText::new(Self::tr_lang(language, "[!] OpenCV library not installed! Check Settings.", "[!] OpenCV library not installed! Check Settings.")).color(egui::Color32::from_rgb(255, 110, 110)));
                                 ui.end_row();
                             }
 
@@ -407,12 +414,23 @@ impl CrosshairApp {
                                 }
 
                                 if !preset.search_region_is_single_pixel {
-                                     live_sync |= ui
-                                         .checkbox(
-                                             &mut preset.show_search_region_overlay,
-                                             Self::tr_lang(language, "Overlay", "Overlay"),
-                                         )
-                                         .changed();
+                                    let preview_active = preset.show_search_region_overlay;
+                                    let preview_btn = Button::new(Self::material_icon_text(
+                                        if preview_active { 0xe8f5 } else { 0xe8f4 },
+                                        16.0,
+                                    ));
+                                    let preview_response = ui.add_sized([24.0, 21.0], preview_btn);
+                                    if preview_response
+                                        .on_hover_text(if preview_active {
+                                            Self::tr_lang(language, "Stop preview", "Stop preview")
+                                        } else {
+                                            Self::tr_lang(language, "Preview", "Preview")
+                                        })
+                                        .clicked()
+                                    {
+                                        preset.show_search_region_overlay = !preset.show_search_region_overlay;
+                                        live_sync = true;
+                                    }
                                 }
                             });
                             ui.end_row();
@@ -580,7 +598,9 @@ impl CrosshairApp {
                                     });
                                 });
                                 ui.end_row();
-                            } else {
+                            }
+
+                            if !preset.use_color_matching {
                                 ui.label(Self::tr_lang(language, "Accuracy", "Accuracy"));
                                 ui.horizontal_wrapped(|ui| {
                                     live_sync |= ui
@@ -601,19 +621,19 @@ impl CrosshairApp {
                                         ui,
                                         96.0,
                                         Self::tr_lang(
-                                        language,
-                                        if preset.image_search_move_advanced_open {
-                                            "Hide"
+                                            language,
+                                            if preset.image_search_move_advanced_open {
+                                                "Hide"
                                             } else {
                                                 "Show"
-                                        },
-                                        if preset.image_search_move_advanced_open {
-                                            "Hide"
-                                        } else {
-                                            "Show"
-                                        },
-                                    ),
-                                )
+                                            },
+                                            if preset.image_search_move_advanced_open {
+                                                "Hide"
+                                            } else {
+                                                "Show"
+                                            },
+                                        ),
+                                    )
                                     .clicked()
                                     {
                                         preset.image_search_move_advanced_open =
@@ -624,7 +644,7 @@ impl CrosshairApp {
                                 ui.end_row();
                             }
 
-                            if !preset.is_pixel_counter && preset.image_search_move_advanced_open {
+                            if !preset.is_pixel_counter && !preset.search_region_is_single_pixel && preset.image_search_move_advanced_open {
                                 ui.horizontal(|ui| {
                                     ui.label(Self::tr_lang(language, "Offset", "Offset"));
                                     let help_btn = ui.small_button("❓");
@@ -669,96 +689,98 @@ impl CrosshairApp {
                                         .changed();
                                 });
                                 ui.end_row();
+                            }
 
-                                if preset.use_color_matching && !preset.search_region_is_single_pixel {
-                                    ui.label(Self::tr_lang(language, "Color scan", "Color scan"));
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label(Self::tr_lang(language, "Tolerance", "Tolerance"));
-                                        live_sync |= ui
-                                            .add(
-                                                DragValue::new(&mut preset.color_tolerance)
-                                                    .range(0..=96),
-                                            )
-                                            .changed();
-                                        ui.label(Self::tr_lang(language, "Rate", "Rate"));
-                                        live_sync |= ui
-                                            .add(
-                                                DragValue::new(&mut preset.color_scan_rate_hz)
-                                                    .range(1..=2000)
-                                                    .suffix(" Hz"),
-                                            )
-                                            .changed();
-                                    });
-                                    ui.end_row();
+                            if preset.use_color_matching && !preset.is_pixel_counter && !preset.search_region_is_single_pixel {
+                                ui.label(Self::tr_lang(language, "Color scan", "Color scan"));
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(Self::tr_lang(language, "Tolerance", "Tolerance"));
+                                    live_sync |= ui
+                                        .add(
+                                            DragValue::new(&mut preset.color_tolerance)
+                                                .range(0..=96),
+                                        )
+                                        .changed();
+                                    ui.label(Self::tr_lang(language, "Rate", "Rate"));
+                                    live_sync |= ui
+                                        .add(
+                                            DragValue::new(&mut preset.color_scan_rate_hz)
+                                                .range(1..=2000)
+                                                .suffix(" Hz"),
+                                        )
+                                        .changed();
+                                });
+                                ui.end_row();
 
-                                    ui.label(Self::tr_lang(language, "Color grouping", "Color grouping"));
-                                    ui.horizontal_wrapped(|ui| {
-                                        live_sync |= ui
-                                            .checkbox(
-                                                &mut preset.require_connected_target_colors,
-                                                Self::tr_lang(language, "Connected colors", "Connected colors"),
-                                            )
-                                            .changed();
-                                        if preset.target_colors.len() < 2 {
-                                            ui.weak(Self::tr_lang(language, "Needs 2+ colors", "Needs 2+ colors"));
-                                        }
-                                    });
-                                    ui.end_row();
+                                ui.label(Self::tr_lang(language, "Color grouping", "Color grouping"));
+                                ui.horizontal_wrapped(|ui| {
+                                    live_sync |= ui
+                                        .checkbox(
+                                            &mut preset.require_connected_target_colors,
+                                            Self::tr_lang(language, "Connected colors", "Connected colors"),
+                                        )
+                                        .changed();
+                                    if preset.target_colors.len() < 2 {
+                                        ui.weak(Self::tr_lang(language, "Needs 2+ colors", "Needs 2+ colors"));
+                                    }
+                                });
+                                ui.end_row();
 
-                                    ui.label(Self::tr_lang(language, "Color priority", "Color priority"));
-                                    ui.horizontal_wrapped(|ui| {
-                                        live_sync |= ui
-                                            .checkbox(
-                                                &mut preset.dual_color_scan_midpoint,
-                                                Self::tr_lang(language, "Midpoint", "Midpoint"),
-                                            )
-                                            .changed();
-                                        live_sync |= ui
-                                            .checkbox(
-                                                &mut preset.color_priority_from_anchor,
-                                                Self::tr_lang(language, "From point", "From point"),
-                                            )
-                                            .changed();
-                                        let anchor = preset
-                                            .color_priority_anchor_screen_x
-                                            .zip(preset.color_priority_anchor_screen_y);
-                                        if let Some((x, y)) = anchor {
-                                            ui.monospace(format!("{x}, {y}"));
-                                            if ui
-                                                .small_button(Self::tr_lang(language, "x", "x"))
-                                                .on_hover_text(Self::tr_lang(language, "Clear priority point", "Clear priority point"))
-                                                .clicked()
-                                            {
-                                                preset.color_priority_anchor_screen_x = None;
-                                                preset.color_priority_anchor_screen_y = None;
-                                                live_sync = true;
-                                            }
-                                        }
-                                        if preset.color_priority_from_anchor
-                                            && ui
-                                                .button(Self::tr_lang(language, "Pick point", "Pick point"))
-                                                .clicked()
+                                ui.label(Self::tr_lang(language, "Color priority", "Color priority"));
+                                ui.horizontal_wrapped(|ui| {
+                                    live_sync |= ui
+                                        .checkbox(
+                                            &mut preset.dual_color_scan_midpoint,
+                                            Self::tr_lang(language, "Midpoint", "Midpoint"),
+                                        )
+                                        .changed();
+                                    live_sync |= ui
+                                        .checkbox(
+                                            &mut preset.color_priority_from_anchor,
+                                            Self::tr_lang(language, "From point", "From point"),
+                                        )
+                                        .changed();
+                                    let anchor = preset
+                                        .color_priority_anchor_screen_x
+                                        .zip(preset.color_priority_anchor_screen_y);
+                                    if let Some((x, y)) = anchor {
+                                        ui.monospace(format!("{x}, {y}"));
+                                        if ui
+                                            .small_button(Self::tr_lang(language, "x", "x"))
+                                            .on_hover_text(Self::tr_lang(language, "Clear priority point", "Clear priority point"))
+                                            .clicked()
                                         {
-                                            start_color_priority_anchor_capture = Some(preset.id);
+                                            preset.color_priority_anchor_screen_x = None;
+                                            preset.color_priority_anchor_screen_y = None;
+                                            live_sync = true;
                                         }
-                                    });
-                                    ui.end_row();
-                                }
+                                    }
+                                    if preset.color_priority_from_anchor
+                                        && ui
+                                            .button(Self::tr_lang(language, "Pick point", "Pick point"))
+                                            .clicked()
+                                    {
+                                        start_color_priority_anchor_capture = Some(preset.id);
+                                    }
+                                });
+                                ui.end_row();
                             }
 
                             if preset.is_pixel_counter {
-                                    ui.label(Self::tr_lang(language, "Color scan", "Color scan"));
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label(Self::tr_lang(language, "Tolerance", "Tolerance"));
-                                        live_sync |= ui
-                                            .add(
-                                                DragValue::new(&mut preset.color_tolerance)
-                                                    .range(0..=96),
-                                            )
-                                            .changed();
-                                    });
-                                    ui.end_row();
+                                ui.label(Self::tr_lang(language, "Color scan", "Color scan"));
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(Self::tr_lang(language, "Tolerance", "Tolerance"));
+                                    live_sync |= ui
+                                        .add(
+                                            DragValue::new(&mut preset.color_tolerance)
+                                                .range(0..=96),
+                                        )
+                                        .changed();
+                                });
+                                ui.end_row();
+                            }
 
+                            if preset.is_pixel_counter || (preset.use_color_matching && preset.search_region_is_single_pixel) {
                                 ui.label(Self::tr_lang(language, "Variable", "Variable"));
                                 ui.horizontal_wrapped(|ui| {
                                     let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
@@ -767,7 +789,11 @@ impl CrosshairApp {
                                     } else {
                                         Color32::from_rgba_unmultiplied(100, 100, 100, 150)
                                     };
-                                    let hint_text = format!("count_var (e.g. pixel_count_{})", preset.id);
+                                    let hint_text = if preset.is_pixel_counter {
+                                        format!("count_var (e.g. pixel_count_{})", preset.id)
+                                    } else {
+                                        format!("color_var (e.g. color_code_{})", preset.id)
+                                    };
                                     let text_edit = egui::TextEdit::singleline(&mut preset.pixel_counter_variable_name)
                                         .desired_width(120.0)
                                         .hint_text(RichText::new(hint_text).color(hint_color).weak());
