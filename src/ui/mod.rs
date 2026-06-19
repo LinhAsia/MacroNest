@@ -114,6 +114,7 @@ enum TitlebarQuickActionKind {
     GetColor,
     KeyDisplay,
     ScreenDraw,
+    KeySound,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1150,6 +1151,7 @@ impl CrosshairApp {
         self.sync_protractor_state();
         self.sync_quick_key_display_config();
         self.sync_quick_screen_draw_config();
+        self.sync_quick_key_sound_config();
         self.sync_vietnamese_input_enabled();
         self.sync_macro_master_hotkey();
         self.startup_overlay_sync_pending = false;
@@ -1287,6 +1289,15 @@ impl CrosshairApp {
                 brush_size: self.state.quick_screen_draw_brush_size,
                 smoothing: self.state.quick_screen_draw_smoothing,
                 smoothing_amount: self.state.quick_screen_draw_smoothing_amount,
+            });
+    }
+
+    fn sync_quick_key_sound_config(&self) {
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateKeySoundConfig {
+                enabled: self.state.quick_key_sound_enabled,
+                style: self.state.quick_key_sound_style,
             });
     }
 
@@ -3974,6 +3985,49 @@ impl CrosshairApp {
                     icon_color,
                 );
             }
+            TitlebarQuickActionKind::KeySound => {
+                let center = rect.center();
+                let body_rect = egui::Rect::from_center_size(center + vec2(-4.0, 0.0), vec2(6.0, 8.0));
+                painter.rect_filled(body_rect, 1.0, icon_color);
+                
+                let p1 = pos2(center.x - 2.0, center.y - 4.0);
+                let p2 = pos2(center.x + 3.0, center.y - 10.0);
+                let p3 = pos2(center.x + 3.0, center.y + 10.0);
+                let p4 = pos2(center.x - 2.0, center.y + 4.0);
+                painter.add(egui::Shape::convex_polygon(vec![p1, p2, p3, p4], icon_color, egui::Stroke::NONE));
+                
+                let r1 = 7.0;
+                painter.line_segment(
+                    [
+                        pos2(center.x + 6.0, center.y - r1 * 0.7),
+                        pos2(center.x + 8.0, center.y),
+                    ],
+                    egui::Stroke::new(1.8, icon_color),
+                );
+                painter.line_segment(
+                    [
+                        pos2(center.x + 8.0, center.y),
+                        pos2(center.x + 6.0, center.y + r1 * 0.7),
+                    ],
+                    egui::Stroke::new(1.8, icon_color),
+                );
+                
+                let r2 = 12.0;
+                painter.line_segment(
+                    [
+                        pos2(center.x + 10.0, center.y - r2 * 0.7),
+                        pos2(center.x + 13.0, center.y),
+                    ],
+                    egui::Stroke::new(1.8, icon_color),
+                );
+                painter.line_segment(
+                    [
+                        pos2(center.x + 13.0, center.y),
+                        pos2(center.x + 10.0, center.y + r2 * 0.7),
+                    ],
+                    egui::Stroke::new(1.8, icon_color),
+                );
+            }
         }
     }
 
@@ -5253,6 +5307,105 @@ impl CrosshairApp {
                         if keep_open {
                             keep_menu_open = true;
                         }
+                    },
+                );
+
+                // KeySound Action
+                ui.allocate_ui_with_layout(
+                    vec2(action_width, action_height),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::KeySound,
+                            self.state.quick_key_sound_enabled,
+                        );
+                        if button_response.clicked() {
+                            self.state.quick_key_sound_enabled =
+                                !self.state.quick_key_sound_enabled;
+                            self.sync_quick_key_sound_config();
+                            self.persist();
+                            self.status = if self.state.quick_key_sound_enabled {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Key sound enabled.",
+                                    "Bật âm thanh nhấn phím.",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Key sound disabled.",
+                                    "Tắt âm thanh nhấn phím.",
+                                )
+                            }
+                            .to_owned();
+                        }
+
+                        ui.add_space(6.0);
+                        let sound_label = Self::tr_lang(
+                            self.state.ui_language,
+                            "Key Sound",
+                            "Tiếng phím cơ",
+                        );
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(sound_label).size(11.0).color(
+                                        if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        },
+                                    ),
+                                ));
+                            },
+                        );
+
+                        // Popup settings
+                        render_popup(ui, &button_response, TitlebarQuickActionKind::KeySound, &mut |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Sound Style",
+                                        "Kiểu âm thanh",
+                                    ))
+                                    .size(10.0),
+                                );
+                                let style_before = self.state.quick_key_sound_style;
+                                egui::ComboBox::from_id_salt("quick-key-sound-style")
+                                    .width(164.0)
+                                    .selected_text(match self.state.quick_key_sound_style {
+                                        0 => "Blue Switch",
+                                        1 => "Brown Switch",
+                                        _ => "Red Switch (Thock)",
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(
+                                            &mut self.state.quick_key_sound_style,
+                                            0,
+                                            "Blue Switch",
+                                        );
+                                        ui.selectable_value(
+                                            &mut self.state.quick_key_sound_style,
+                                            1,
+                                            "Brown Switch",
+                                        );
+                                        ui.selectable_value(
+                                            &mut self.state.quick_key_sound_style,
+                                            2,
+                                            "Red Switch (Thock)",
+                                        );
+                                    });
+                                if self.state.quick_key_sound_style != style_before {
+                                    self.sync_quick_key_sound_config();
+                                    self.persist();
+                                }
+                                false
+                            }).inner
+                        });
                     },
                 );
             });

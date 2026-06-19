@@ -709,3 +709,132 @@ fn decode_media_audio(path: &str) -> Result<CachedAudio> {
         samples: Arc::from(samples.into_boxed_slice()),
     })
 }
+
+fn generate_switch_sound(style: u32) -> Vec<f32> {
+    let sample_rate = 44100;
+    let mut samples = Vec::new();
+    
+    match style {
+        // Blue Switch (Clicky)
+        0 => {
+            let duration = 0.080;
+            let num_samples = (sample_rate as f32 * duration) as usize;
+            for i in 0..num_samples {
+                let t = i as f32 / sample_rate as f32;
+                
+                let noise = if t < 0.010 {
+                    let rand_val = ((t * 12345.67).sin() * 43758.545).fract() * 2.0 - 1.0;
+                    rand_val * (1.0 - t / 0.010) * 0.4
+                } else {
+                    0.0
+                };
+                
+                let tone = (t * 1800.0 * 2.0 * std::f32::consts::PI).sin() * (-45.0 * t).exp() * 0.4;
+                let housing = (t * 400.0 * 2.0 * std::f32::consts::PI).sin() * (-25.0 * t).exp() * 0.2;
+                
+                samples.push(noise + tone + housing);
+            }
+        }
+        // Brown Switch (Tactile)
+        1 => {
+            let duration = 0.100;
+            let num_samples = (sample_rate as f32 * duration) as usize;
+            for i in 0..num_samples {
+                let t = i as f32 / sample_rate as f32;
+                
+                let noise = if t < 0.015 {
+                    let rand_val = ((t * 12345.67).sin() * 43758.545).fract() * 2.0 - 1.0;
+                    rand_val * (1.0 - t / 0.015) * 0.15
+                } else {
+                    0.0
+                };
+                
+                let tone = (t * 800.0 * 2.0 * std::f32::consts::PI).sin() * (-35.0 * t).exp() * 0.35;
+                let housing = (t * 300.0 * 2.0 * std::f32::consts::PI).sin() * (-20.0 * t).exp() * 0.25;
+                
+                samples.push(noise + tone + housing);
+            }
+        }
+        // Red Switch (Linear / Thocky)
+        _ => {
+            let duration = 0.120;
+            let num_samples = (sample_rate as f32 * duration) as usize;
+            for i in 0..num_samples {
+                let t = i as f32 / sample_rate as f32;
+                
+                let tone = (t * 320.0 * 2.0 * std::f32::consts::PI).sin() * (-22.0 * t).exp() * 0.5;
+                let housing = (t * 160.0 * 2.0 * std::f32::consts::PI).sin() * (-15.0 * t).exp() * 0.3;
+                
+                samples.push(tone + housing);
+            }
+        }
+    }
+    
+    let mut max_val = 0.0f32;
+    for &s in &samples {
+        if s.abs() > max_val {
+            max_val = s.abs();
+        }
+    }
+    if max_val > 0.0 {
+        for s in &mut samples {
+            *s = (*s / max_val) * 0.8;
+        }
+    }
+    
+    samples
+}
+
+struct KeySoundPlayer {
+    _stream: rodio::OutputStream,
+    sink: rodio::Sink,
+    blue_samples: Vec<f32>,
+    brown_samples: Vec<f32>,
+    red_samples: Vec<f32>,
+}
+
+impl KeySoundPlayer {
+    fn new() -> Option<Self> {
+        if let Ok(stream) = rodio::OutputStreamBuilder::open_default_stream() {
+            let sink = Sink::connect_new(stream.mixer());
+            sink.play();
+            
+            let blue_samples = generate_switch_sound(0);
+            let brown_samples = generate_switch_sound(1);
+            let red_samples = generate_switch_sound(2);
+            
+            Some(Self {
+                _stream: stream,
+                sink,
+                blue_samples,
+                brown_samples,
+                red_samples,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn play_style(&self, style: u32) {
+        let samples = match style {
+            0 => &self.blue_samples,
+            1 => &self.brown_samples,
+            _ => &self.red_samples,
+        };
+        let buffer = SamplesBuffer::new(1, 44100, samples.clone());
+        self.sink.append(buffer);
+    }
+}
+
+static KEY_SOUND_PLAYER: Lazy<Mutex<Option<KeySoundPlayer>>> = Lazy::new(|| Mutex::new(None));
+
+pub fn play_key_sound(style: u32) {
+    let mut guard = KEY_SOUND_PLAYER.lock();
+    if guard.is_none() {
+        *guard = KeySoundPlayer::new();
+    }
+    if let Some(player) = guard.as_ref() {
+        player.play_style(style);
+    }
+}
+
