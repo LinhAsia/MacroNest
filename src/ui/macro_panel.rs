@@ -5610,7 +5610,11 @@ impl CrosshairApp {
                                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                             .width(168.0)
                                             .height(420.0)
-                                            .selected_text(Self::macro_action_selected_widget_text(step.action, language))
+                                            .selected_text(Self::macro_action_selected_widget_text(
+                                                step.action,
+                                                language,
+                                                self.state.ui_theme,
+                                            ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(520.0);
                                                 live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
@@ -7639,14 +7643,14 @@ impl CrosshairApp {
                                                     if hold_stop_capture_active { 92.0 } else { 28.0 };
                                                 let hold_stop_capture_button = if hold_stop_capture_active {
                                                     Button::new(Self::capture_button_text(language, true))
-                                                        .min_size(vec2(hold_stop_capture_width, 18.0))
+                                                        .min_size(vec2(hold_stop_capture_width, 20.0))
                                                         .fill(Color32::from_rgb(88, 84, 44))
                                                 } else {
                                                     Button::new(Self::material_icon_text(0xe312, 18.0))
-                                                        .min_size(vec2(hold_stop_capture_width, 18.0))
+                                                        .min_size(vec2(hold_stop_capture_width, 20.0))
                                                 };
                                                 if ui
-                                                    .add_sized([hold_stop_capture_width, 18.0], hold_stop_capture_button)
+                                                    .add_sized([hold_stop_capture_width, 20.0], hold_stop_capture_button)
                                                     .on_hover_text(Self::tr_lang(
                                                         language,
                                                         "Capture hold stop key",
@@ -7661,8 +7665,11 @@ impl CrosshairApp {
                                                     }
                                                 }
                                                 // Dropdown right here for hold stop
-                                                let hs_menu_response = ui.menu_button(Self::material_icon_text(0xe5d2, 14.0), |ui| {
-                                                    ui.set_max_width(200.0);
+                                                let hs_menu_response = ui.scope(|ui| {
+                                                    ui.spacing_mut().button_padding = vec2(2.0, 0.0);
+                                                    ui.spacing_mut().interact_size = vec2(20.0, 20.0);
+                                                    ui.menu_button(Self::material_icon_text(0xe5d2, 14.0), |ui| {
+                                                        ui.set_max_width(200.0);
                                                      ui.menu_button(Self::tr_lang(language, "Letters (A-Z)", "Letters (A-Z)"), |ui| {
                                                          ui.set_max_width(120.0);
                                                          egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
@@ -7739,8 +7746,9 @@ impl CrosshairApp {
                                                              }
                                                          }
                                                      });
-                                                 });
-                                                 hs_menu_response.response.on_hover_text(Self::tr_lang(language, "Manually select key", "Manually select key"));
+                                                 })
+                                                }).inner;
+                                                hs_menu_response.response.on_hover_text(Self::tr_lang(language, "Manually select key", "Manually select key"));
                                             } else {
                                                 ui.add_sized([28.0, 20.0], egui::Label::new(""));
                                             }
@@ -7776,7 +7784,11 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                             .width(168.0)
                                             .height(420.0)
-                                            .selected_text(Self::macro_action_selected_widget_text(step.action, language))
+                                            .selected_text(Self::macro_action_selected_widget_text(
+                                                step.action,
+                                                language,
+                                                self.state.ui_theme,
+                                            ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(520.0);
                                                 live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
@@ -9805,14 +9817,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     if hold_stop_capture_active { 92.0 } else { 28.0 };
                                                 let hold_stop_capture_button = if hold_stop_capture_active {
                                                     Button::new(Self::capture_button_text(language, true))
-                                                        .min_size(vec2(hold_stop_capture_width, 18.0))
+                                                        .min_size(vec2(hold_stop_capture_width, 20.0))
                                                         .fill(Color32::from_rgb(88, 84, 44))
                                                 } else {
                                                     Button::new(Self::material_icon_text(0xe312, 18.0))
-                                                        .min_size(vec2(hold_stop_capture_width, 18.0))
+                                                        .min_size(vec2(hold_stop_capture_width, 20.0))
                                                 };
                                                 if ui
-                                                    .add_sized([hold_stop_capture_width, 18.0], hold_stop_capture_button)
+                                                    .add_sized([hold_stop_capture_width, 20.0], hold_stop_capture_button)
                                                     .on_hover_text(Self::tr_lang(
                                                         language,
                                                         "Capture hold stop key",
@@ -9827,7 +9839,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     }
                                                 }
                                                 // Dropdown right here for hold stop
-                                                let hs_menu_response = ui.menu_button(Self::material_icon_text(0xe5d2, 14.0), |ui| {
+                                                let hs_menu_response = ui.scope(|ui| {
+                                                    ui.spacing_mut().button_padding = vec2(2.0, 0.0);
+                                                    ui.spacing_mut().interact_size = vec2(20.0, 20.0);
+                                                    ui.menu_button(Self::material_icon_text(0xe5d2, 14.0), |ui| {
                                                     ui.set_max_width(200.0);
                                                      ui.menu_button(Self::tr_lang(language, "Letters (A-Z)", "Letters (A-Z)"), |ui| {
                                                          ui.set_max_width(120.0);
@@ -9905,8 +9920,9 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                              }
                                                          }
                                                      });
-                                                 });
-                                                 hs_menu_response.response.on_hover_text(Self::tr_lang(language, "Manually select key", "Manually select key"));
+                                                 })
+                                                }).inner;
+                                                hs_menu_response.response.on_hover_text(Self::tr_lang(language, "Manually select key", "Manually select key"));
                                             } else {
                                                 ui.add_sized([28.0, 20.0], egui::Label::new(""));
                                             }
@@ -10344,7 +10360,11 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                     ui.visuals().faint_bg_color
                                 };
                                 if !step.enabled && !is_selected {
-                                    row_fill = Color32::from_rgba_unmultiplied(62, 62, 62, 220);
+                                    row_fill = if self.state.ui_theme == UiThemeMode::Dark {
+                                        Color32::from_rgba_unmultiplied(62, 62, 62, 220)
+                                    } else {
+                                        Color32::from_rgb(224, 231, 238)
+                                    };
                                 }
                                 let has_infinite_loop_warning = self.state.macro_infinite_loop_warning_enabled
                                     && preset.enabled
@@ -10743,7 +10763,11 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                                 .width(146.0)
                                                 .height(420.0)
-                                                .selected_text(Self::macro_action_selected_widget_text(step.action, language))
+                                                .selected_text(Self::macro_action_selected_widget_text(
+                                                    step.action,
+                                                    language,
+                                                    self.state.ui_theme,
+                                                ))
                                                 .show_ui(ui, |ui| {
                                                     ui.set_min_width(520.0);
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
@@ -13369,7 +13393,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     Button::new(Self::material_icon_text(0xe312, 12.0))
                                                 };
                                                 if ui
-                                                    .add_sized([step_capture_width, 18.0], step_capture_button)
+                                                    .add_sized([step_capture_width, 20.0], step_capture_button)
                                                     .on_hover_text(Self::tr_lang(
                                                         language,
                                                         "Capture input",
@@ -13384,7 +13408,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     }
                                                 }
                                                 // Dropdown right here (equal size: 22.0 wide, 18.0 high)
-                                                let menu_response = ui.menu_button(Self::material_icon_text(0xe5d2, 12.0), |ui| {
+                                                let menu_response = ui.scope(|ui| {
+                                                    ui.spacing_mut().button_padding = vec2(2.0, 0.0);
+                                                    ui.spacing_mut().interact_size = vec2(20.0, 20.0);
+                                                    ui.menu_button(Self::material_icon_text(0xe5d2, 12.0), |ui| {
                                                     ui.set_max_width(200.0);
                                                     ui.menu_button(Self::tr_lang(language, "Letters (A-Z)", "Letters (A-Z)"), |ui| {
                                                         ui.set_max_width(120.0);
@@ -13462,7 +13489,8 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             }
                                                         }
                                                     });
-                                                });
+                                                })
+                                                }).inner;
                                                 menu_response.response.on_hover_text(Self::tr_lang(language, "Manually select key", "Manually select key"));
                                                 // Trailing spacers placed after buttons to align columns with other rows having X/Y coords
                                                 ui.add_sized([48.0, 20.0], egui::Label::new(""));

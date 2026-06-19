@@ -414,6 +414,24 @@ fn visuals_for_theme(theme: UiThemeMode) -> egui::Visuals {
             visuals.widgets.hovered.fg_stroke.color = Color32::from_rgb(18, 26, 40);
             visuals.widgets.active.fg_stroke.color = Color32::from_rgb(16, 24, 38);
             visuals.widgets.open.fg_stroke.color = Color32::from_rgb(18, 26, 40);
+            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(238, 243, 248);
+            visuals.widgets.inactive.bg_fill = Color32::from_rgb(248, 251, 254);
+            visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(238, 244, 250);
+            visuals.widgets.hovered.bg_fill = Color32::from_rgb(232, 241, 248);
+            visuals.widgets.active.bg_fill = Color32::from_rgb(222, 235, 245);
+            visuals.widgets.open.bg_fill = Color32::from_rgb(248, 251, 254);
+            let control_stroke = egui::Stroke::new(1.0, Color32::from_rgb(178, 191, 207));
+            visuals.widgets.noninteractive.bg_stroke = control_stroke;
+            visuals.widgets.inactive.bg_stroke = control_stroke;
+            visuals.widgets.hovered.bg_stroke =
+                egui::Stroke::new(1.0, Color32::from_rgb(132, 153, 176));
+            visuals.widgets.active.bg_stroke =
+                egui::Stroke::new(1.0, Color32::from_rgb(96, 128, 160));
+            visuals.widgets.open.bg_stroke =
+                egui::Stroke::new(1.0, Color32::from_rgb(132, 153, 176));
+            visuals.extreme_bg_color = Color32::WHITE;
+            visuals.faint_bg_color = Color32::from_rgb(229, 246, 236);
+            visuals.weak_text_color = Some(Color32::from_rgb(90, 101, 116));
             visuals.hyperlink_color = Color32::from_rgb(26, 92, 164);
             visuals.panel_fill = Color32::from_rgb(248, 248, 248);
             visuals.window_fill = Color32::from_rgb(248, 248, 248);
@@ -6585,9 +6603,14 @@ impl CrosshairApp {
     fn macro_action_selected_widget_text(
         action: MacroAction,
         language: UiLanguage,
+        theme: UiThemeMode,
     ) -> egui::WidgetText {
         let mut job = egui::text::LayoutJob::default();
-        let weak_color = Color32::from_gray(224);
+        let weak_color = if theme == UiThemeMode::Dark {
+            Color32::from_gray(224)
+        } else {
+            Color32::from_rgb(28, 36, 48)
+        };
         let icon_format = egui::TextFormat {
             font_id: egui::FontId::new(13.0, FontFamily::Name(MATERIAL_ICONS_FONT.into())),
             color: weak_color,
@@ -12444,7 +12467,11 @@ impl eframe::App for CrosshairApp {
                                                 RichText::new(self.app_brand_title())
                                                     .strong()
                                                     .size(17.0)
-                                                    .color(Color32::WHITE),
+                                                    .color(if self.state.ui_theme == UiThemeMode::Dark {
+                                                        Color32::WHITE
+                                                    } else {
+                                                        Color32::from_rgb(28, 36, 48)
+                                                    }),
                                             );
                                             ui.add_space(4.0);
                                             ui.label(
