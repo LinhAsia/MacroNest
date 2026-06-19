@@ -6,9 +6,9 @@
   <a href="https://github.com/NBaoLinh/MacroNest/releases/latest"><img src="assets/download-button-v2.svg" alt="Download MacroNest" height="38" /></a>
 </p>
 
-MacroNest is a Windows desktop tool for macro automation.
-
-It helps you automate keyboard, mouse, OCR, image search, overlays, window control, and more in one app.
+> **MacroNest is a Windows desktop macro tool.**
+>
+> Automate keyboard, mouse, OCR, image search, color detect, geometry drawing, pin part of a window, crosshair overlays, commands, sound playback, HUD labels, window control, and more in one app.
 
 ## Key Features
 
@@ -35,12 +35,12 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 - Toggle taskbar visibility
 - Lock or unlock the Windows key
 - Pin a window on top
-- Highlight the active window
+- Highlight the active window border
 - Use the protractor overlay
 - Get screen coordinates
 - Pick colors from the screen
 - Show key display overlay
-- Open the screen draw tool
+- Draw on the screen and capture from it
 - Enable key sound effects
 
 ## Getting Started
