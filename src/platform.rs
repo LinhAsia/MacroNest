@@ -37,7 +37,7 @@ mod windows_platform {
         core::{PCWSTR, w},
     };
 
-    const MUTEX_NAME: &str = "Global\\CrosshairOverlaySingleInstance";
+    const MUTEX_NAME: &str = "Global\\CrosshairOverlaySingleInstance_v2";
     fn spawn_popup_arg(arg: &str) {
         if let Ok(exe) = env::current_exe() {
             let exe_wide = widestring(exe.as_os_str().to_string_lossy().as_ref());
@@ -69,9 +69,14 @@ mod windows_platform {
 
     pub fn acquire_single_instance() -> Result<Option<SingleInstanceGuard>> {
         let name = widestring(MUTEX_NAME);
+        let err_before = unsafe { GetLastError().0 };
+        unsafe { windows::Win32::Foundation::SetLastError(windows::Win32::Foundation::WIN32_ERROR(0)); }
         let handle = unsafe { CreateMutexW(None, false, PCWSTR(name.as_ptr()))? };
-        let already_exists =
-            unsafe { GetLastError().0 } == windows::Win32::Foundation::ERROR_ALREADY_EXISTS.0;
+        let err_after = unsafe { GetLastError().0 };
+
+
+
+        let already_exists = err_after == windows::Win32::Foundation::ERROR_ALREADY_EXISTS.0;
         if already_exists {
             spawn_popup_arg("--already-running-popup");
             unsafe {
