@@ -32,7 +32,7 @@
 | :--- | :--- |
 | **OS** | Windows 10 / 11 (64-bit) |
 | **Runtime** | No installation required (portable `.exe`) |
-| **Privileges** | Standard user. Admin elevation is requested automatically when needed (e.g. Interception driver). |
+| **Privileges** | Administrator. Run as Administrator is required to capture/inject inputs and manage windows globally. |
 
 ### Quick Install
 
