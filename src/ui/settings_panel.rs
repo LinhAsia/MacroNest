@@ -697,36 +697,98 @@ impl CrosshairApp {
         label: impl Into<WidgetText>,
         active: bool,
     ) -> egui::Response {
-        let visuals = ui.visuals();
-        let fill = if active {
-            visuals.widgets.active.bg_fill
+        let is_dark = ui.visuals().dark_mode;
+        
+        let (fill, stroke_color) = if is_dark {
+            if active {
+                (Color32::from_rgb(57, 72, 96), Color32::from_rgb(117, 219, 166))
+            } else {
+                (Color32::from_rgb(42, 52, 68), Color32::from_rgb(72, 88, 116))
+            }
         } else {
-            visuals.widgets.inactive.bg_fill
+            if active {
+                (Color32::from_rgb(181, 192, 206), Color32::from_rgb(72, 168, 118))
+            } else {
+                (Color32::from_rgb(214, 223, 235), Color32::from_rgb(164, 178, 198))
+            }
         };
-        let stroke_color = if active {
-            visuals.widgets.active.bg_stroke.color
+
+        let button_size = vec2(ui.available_width(), 32.0);
+        let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
+        
+        let hovered = response.hovered();
+        let pressed = response.is_pointer_button_down_on();
+        
+        let final_fill = if pressed {
+            fill.linear_multiply(0.8)
+        } else if hovered {
+            fill.linear_multiply(1.1)
         } else {
-            visuals.widgets.inactive.bg_stroke.color
+            fill
         };
-        let response = ui.add_sized(
-            [ui.available_width(), 30.0],
-            Button::new(label)
-                .fill(fill)
-                .stroke(Stroke::new(1.0, stroke_color))
-                .min_size(vec2(0.0, 30.0)),
+
+        ui.painter().rect(
+            rect,
+            8.0,
+            final_fill,
+            Stroke::new(1.0, stroke_color),
+            egui::StrokeKind::Inside,
         );
+
+        let galley = label.into().into_galley(ui, None, rect.width() - 16.0, egui::TextStyle::Button);
+        let text_pos = rect.center() - galley.size() / 2.0;
+        let text_color = if is_dark { Color32::WHITE } else { Color32::BLACK };
+        ui.painter().galley(text_pos, galley, text_color);
+
         Self::paint_show_hover_outline(ui, &response);
         response
     }
 
     fn settings_action_button(ui: &mut egui::Ui, label: impl Into<WidgetText>) -> egui::Response {
-        let visuals = ui.visuals();
-        let response = ui.add(
-            Button::new(label)
-                .fill(visuals.widgets.inactive.bg_fill)
-                .stroke(Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color))
-                .min_size(vec2(104.0, 28.0)),
+        let is_dark = ui.visuals().dark_mode;
+        
+        let (fill, stroke_color) = if is_dark {
+            (Color32::from_rgb(48, 58, 76), Color32::from_rgb(84, 100, 124))
+        } else {
+            (Color32::from_rgb(220, 228, 238), Color32::from_rgb(170, 182, 198))
+        };
+
+        let label_text = label.into();
+        let text_style = egui::TextStyle::Button;
+        
+        let wrap_width = ui.available_width();
+        let galley = label_text.into_galley(ui, None, wrap_width, text_style);
+        
+        let button_size = vec2(
+            (galley.size().x + 20.0).max(104.0),
+            (galley.size().y + 10.0).max(28.0)
         );
+        
+        let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
+        
+        let hovered = response.hovered();
+        let pressed = response.is_pointer_button_down_on();
+        
+        let final_fill = if pressed {
+            fill.linear_multiply(0.8)
+        } else if hovered {
+            fill.linear_multiply(1.1)
+        } else {
+            fill
+        };
+
+        ui.painter().rect(
+            rect,
+            6.0,
+            final_fill,
+            Stroke::new(1.0, stroke_color),
+            egui::StrokeKind::Inside,
+        );
+
+        let text_pos = rect.center() - galley.size() / 2.0;
+        let text_color = if is_dark { Color32::WHITE } else { Color32::BLACK };
+        ui.painter().galley(text_pos, galley, text_color);
+
         Self::paint_show_hover_outline(ui, &response);
         response
     }

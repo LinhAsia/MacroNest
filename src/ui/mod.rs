@@ -10563,12 +10563,21 @@ impl CrosshairApp {
     }
 
     fn settings_card_frame(ui: &egui::Ui) -> egui::Frame {
+        let is_dark = ui.visuals().dark_mode;
+        let (fill, stroke) = if is_dark {
+            (
+                Color32::from_rgba_premultiplied(54, 67, 88, 50),
+                Color32::from_rgba_premultiplied(96, 118, 148, 120),
+            )
+        } else {
+            (
+                Color32::from_rgba_premultiplied(214, 223, 235, 80),
+                Color32::from_rgba_premultiplied(170, 182, 198, 120),
+            )
+        };
         egui::Frame::group(ui.style())
-            .fill(Color32::from_rgba_premultiplied(32, 36, 42, 160))
-            .stroke(egui::Stroke::new(
-                1.0,
-                Color32::from_rgba_premultiplied(90, 100, 115, 80),
-            ))
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, stroke))
             .corner_radius(14.0)
             .inner_margin(egui::Margin::same(16))
     }
