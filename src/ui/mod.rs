@@ -31,7 +31,7 @@ use crate::{
         MasterMacroGroupState, MasterMacroPresetState, MasterPreset, MasterWindowFocusPresetState,
         MasterWindowPresetState, MasterZoomPresetState, MousePathEvent, MousePathEventKind,
         ProfileRecord, QuickKeyDisplayMode, RgbaColor, SoundLibraryItem, TimerPreset,
-        UiLanguage, UiThemeMode, VideoClipSettings, VietnameseInputMode, WindowAnchor,
+        UiLanguage, UiThemeMode, VietnameseInputMode, WindowAnchor,
         WindowExpandDirection, WindowPreset,
     },
     overlay::{OverlayCommand, UiCommand},
@@ -259,21 +259,7 @@ pub(crate) struct VisionPreviewCache {
     view: VisionPreviewView,
 }
 
-#[derive(Clone)]
-pub(crate) struct VideoPreviewView {
-    texture: TextureHandle,
-    width: usize,
-    height: usize,
-}
 
-pub(crate) struct VideoPreviewCache {
-    updated_at: Instant,
-    source_path: String,
-    start_ms: u64,
-    max_width: i32,
-    max_height: i32,
-    view: VideoPreviewView,
-}
 
 pub(crate) const MATERIAL_ICONS_FONT: &str = "material_icons";
 const UI_SANS_FONT: &str = "ui_sans";
@@ -670,8 +656,6 @@ pub struct CrosshairApp {
     show_exit_audio_editor: bool,
     audio_waveforms: HashMap<String, Vec<f32>>,
     sound_preset_clip_duration_ms: HashMap<u32, Option<u64>>,
-    video_preset_clip_duration_ms: HashMap<u32, Option<u64>>,
-    video_preview_cursor_ms: HashMap<u32, u64>,
     show_sound_preset_audio_editor: HashSet<u32>,
     library_clip_duration_ms: HashMap<u32, Option<u64>>,
     show_library_audio_editor: HashSet<u32>,
@@ -748,15 +732,7 @@ pub struct CrosshairApp {
     downloaded_tools_open: bool,
     zoom_preview_cache: HashMap<u32, ZoomPreviewCache>,
     vision_preview_cache: HashMap<u32, VisionPreviewCache>,
-    video_preview_cache: HashMap<u32, VideoPreviewCache>,
-    video_frame_tx: Option<crossbeam_channel::Sender<crate::media::VideoFrameRequest>>,
-    video_preview_requested: HashMap<u32, (String, u64)>,
     window_preview_requested: HashMap<u32, Instant>,
-    video_chroma_pick_preset_id: Option<u32>,
-    active_video_preview_preset_id: Option<u32>,
-    active_video_preview_started_at: Option<Instant>,
-    active_video_preview_start_ms: u64,
-    active_video_overlay_preset_id: Option<u32>,
     vision_color_pick_texture: Option<TextureHandle>,
     vision_color_pick_preview_color: Option<RgbaColor>,
     vietnamese_input_enabled_texture: Option<TextureHandle>,
@@ -894,8 +870,6 @@ impl CrosshairApp {
             show_exit_audio_editor: false,
             audio_waveforms: HashMap::new(),
             sound_preset_clip_duration_ms: HashMap::new(),
-            video_preset_clip_duration_ms: HashMap::new(),
-            video_preview_cursor_ms: HashMap::new(),
             show_sound_preset_audio_editor: HashSet::new(),
             library_clip_duration_ms: HashMap::new(),
             show_library_audio_editor: HashSet::new(),
@@ -982,15 +956,7 @@ impl CrosshairApp {
             downloaded_tools_open: false,
             zoom_preview_cache: HashMap::new(),
             vision_preview_cache: HashMap::new(),
-            video_preview_cache: HashMap::new(),
-            video_frame_tx: None,
-            video_preview_requested: HashMap::new(),
             window_preview_requested: HashMap::new(),
-            video_chroma_pick_preset_id: None,
-            active_video_preview_preset_id: None,
-            active_video_preview_started_at: None,
-            active_video_preview_start_ms: 0,
-            active_video_overlay_preset_id: None,
             vision_color_pick_texture: None,
             vision_color_pick_preview_color: None,
             vietnamese_input_enabled_texture: None,
@@ -1100,10 +1066,6 @@ impl CrosshairApp {
             pending_startup_persist = true;
         }
         app.startup_state_persist_pending = pending_startup_persist;
-        for preset in &app.state.audio_settings.video_presets {
-            app.video_preview_cursor_ms
-                .insert(preset.id, preset.clip.start_ms);
-        }
         {
             let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
             for (name, val) in &app.state.global_constants {
@@ -1358,11 +1320,6 @@ impl CrosshairApp {
         self.panel_warmup_target = Some(self.state.active_panel);
         self.panel_warmup_frames_remaining = 1;
         self.warmed_panels.clear();
-        self.video_preview_cursor_ms.clear();
-        for preset in &self.state.audio_settings.video_presets {
-            self.video_preview_cursor_ms
-                .insert(preset.id, preset.clip.start_ms);
-        }
         {
             let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
             vars.clear();
@@ -1523,6 +1480,21 @@ impl CrosshairApp {
         if let Err(error) = self.paths.save_state(&self.state) {
             self.status = format!("Failed to save app state: {error}");
         }
+    }
+
+    pub(crate) fn persist_deferred(&mut self, ctx: &egui::Context) {
+        let id = egui::Id::new("app_needs_persist");
+        if ctx.input(|i| i.pointer.any_down()) {
+            ctx.data_mut(|d| d.insert_temp(id, true));
+        } else {
+            self.persist();
+            ctx.data_mut(|d| d.insert_temp(id, false));
+        }
+    }
+
+    fn persist_timer_presets_deferred(&mut self, ctx: &egui::Context) {
+        self.sync_timer_presets();
+        self.persist_deferred(ctx);
     }
 
     fn invalidate_macro_variable_cache(&mut self) {
@@ -2345,39 +2317,7 @@ impl CrosshairApp {
         }
     }
 
-    fn choose_video_file_for_preset(&mut self, preset_id: u32) {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("Video", &["webm", "mp4", "mov", "mkv", "avi"])
-            .pick_file()
-        else {
-            return;
-        };
-        let path_str = path.to_string_lossy().to_string();
-        let duration = crate::media::load_video_metadata(&path_str)
-            .ok()
-            .map(|meta| meta.duration_ms);
-        self.stop_active_video_preview();
-        self.stop_active_video_overlay_preview();
-        self.clear_video_preview_for_preset(preset_id);
-        if let Some(preset) = self
-            .state
-            .audio_settings
-            .video_presets
-            .iter_mut()
-            .find(|preset| preset.id == preset_id)
-        {
-            preset.clip.file_path = path_str.clone();
-            preset.clip.start_ms = 0;
-            preset.clip.end_ms = duration.unwrap_or(0);
-            preset.clip.enabled = true;
-            self.video_preset_clip_duration_ms
-                .insert(preset_id, duration);
-            self.video_preview_cursor_ms.insert(preset_id, 0);
-            self.refresh_audio_waveform_for_path(&path_str);
-            self.sync_audio_settings();
-            self.persist();
-        }
-    }
+
 
     fn save_clip_to_library(&mut self, name_prefix: &str, clip: &AudioClipSettings) {
         if clip.file_path.trim().is_empty() {
@@ -2439,125 +2379,7 @@ impl CrosshairApp {
         });
     }
 
-    fn ensure_video_preview_worker_ready(
-        &mut self,
-    ) -> crossbeam_channel::Sender<crate::media::VideoFrameRequest> {
-        if let Some(tx) = &self.video_frame_tx {
-            return tx.clone();
-        }
-        let tx = crate::media::start_video_preview_worker(self.ui_tx.clone());
-        self.video_frame_tx = Some(tx.clone());
-        tx
-    }
 
-    fn ensure_video_preview_frame(
-        &mut self,
-        ctx: &egui::Context,
-        preset_id: u32,
-        path: &str,
-        start_ms: u64,
-        max_width: i32,
-        max_height: i32,
-    ) -> Option<VideoPreviewView> {
-        let trimmed = path.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        let rounded_start_ms = (start_ms / 15) * 15;
-        if let Some(cache) = self.video_preview_cache.get(&preset_id)
-            && cache.source_path == trimmed
-            && cache.start_ms == rounded_start_ms
-            && cache.max_width == max_width
-            && cache.max_height == max_height
-        {
-            return Some(cache.view.clone());
-        }
-
-        let already_requested = self
-            .video_preview_requested
-            .get(&preset_id)
-            .map(|(p, ms)| p == trimmed && *ms == rounded_start_ms)
-            .unwrap_or(false);
-
-        if !already_requested {
-            self.video_preview_requested
-                .insert(preset_id, (trimmed.to_owned(), rounded_start_ms));
-            let is_playing = self.active_video_preview_preset_id == Some(preset_id);
-            let video_frame_tx = self.ensure_video_preview_worker_ready();
-            let _ = video_frame_tx.send(crate::media::VideoFrameRequest {
-                preset_id,
-                path: trimmed.to_owned(),
-                start_ms: rounded_start_ms,
-                max_width,
-                max_height,
-                is_playing,
-            });
-        }
-
-        self.video_preview_cache
-            .get(&preset_id)
-            .map(|cache| cache.view.clone())
-    }
-
-    fn start_active_video_overlay_preview(&mut self, preset_id: u32, start_ms: u64) {
-        let _ = self.overlay_tx.send(OverlayCommand::StopVideoPlayback);
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::PlayVideoPresetFrom(preset_id, start_ms));
-        self.active_video_overlay_preset_id = Some(preset_id);
-    }
-
-    fn stop_active_video_overlay_preview(&mut self) {
-        let _ = self.overlay_tx.send(OverlayCommand::StopVideoPlayback);
-        self.active_video_overlay_preset_id = None;
-    }
-
-    fn start_video_preview(
-        &mut self,
-        preset_id: u32,
-        clip: &VideoClipSettings,
-        start_ms: u64,
-    ) -> anyhow::Result<()> {
-        let trimmed = clip.file_path.trim();
-        if trimmed.is_empty() {
-            anyhow::bail!("Choose a video file first");
-        }
-
-        let clip_end_ms = if clip.end_ms > clip.start_ms {
-            clip.end_ms
-        } else {
-            crate::media::load_video_metadata(trimmed)
-                .ok()
-                .map(|meta| meta.duration_ms)
-                .filter(|duration_ms| *duration_ms > start_ms)
-                .unwrap_or(start_ms.saturating_add(1))
-        };
-        let next_start_ms = start_ms.min(clip_end_ms.saturating_sub(1));
-
-        crate::audio::play_video_audio_preview(trimmed, next_start_ms, clip_end_ms)?;
-        self.active_video_preview_preset_id = Some(preset_id);
-        self.active_video_preview_started_at = Some(Instant::now());
-        self.active_video_preview_start_ms = next_start_ms;
-        self.video_preview_cursor_ms
-            .insert(preset_id, next_start_ms);
-        Ok(())
-    }
-
-    fn stop_active_video_preview(&mut self) {
-        crate::audio::stop_video_audio_preview();
-        self.active_video_preview_preset_id = None;
-        self.active_video_preview_started_at = None;
-        self.active_video_preview_start_ms = 0;
-    }
-
-    fn clear_video_preview_for_preset(&mut self, preset_id: u32) {
-        self.video_preview_cache.remove(&preset_id);
-    }
-
-    fn clear_video_preview_cache(&mut self) {
-        self.video_preview_cache.clear();
-        self.video_chroma_pick_preset_id = None;
-    }
 
     fn preview_cursor_ms_for(
         preview_cursor: &Option<(AudioEditorTarget, u64)>,
@@ -6156,7 +5978,6 @@ impl CrosshairApp {
             MacroAction::EnableZoomPreset => "EnableZoom",
             MacroAction::DisableZoom => "DisableZoom",
             MacroAction::PlaySoundPreset => "PlaySound",
-            MacroAction::PlayVideoPreset => "PlayVideo",
             MacroAction::StartVisionSearch => "StartImageSearch",
             MacroAction::ScanVisionOnce => "ScanImageOnce",
             MacroAction::StartAudioSensePreset => "StartAudio",
@@ -6294,10 +6115,6 @@ impl CrosshairApp {
             MacroAction::PlaySoundPreset => (
                 "macro_action_tooltip.play_sound_preset",
                 "Play one sound preset from the Media tab.",
-            ),
-            MacroAction::PlayVideoPreset => (
-                "macro_action_tooltip.play_video_preset",
-                "Play one fullscreen video preset from the Media tab.",
             ),
             MacroAction::StartVisionSearch => (
                 "macro_action_tooltip.start_vision_search",
@@ -6535,7 +6352,6 @@ impl CrosshairApp {
             MacroAction::EnableZoomPreset => 0xe8ff,
             MacroAction::DisableZoom => 0xe8f4,
             MacroAction::PlaySoundPreset => 0xe050,
-            MacroAction::PlayVideoPreset => 0xe04b,
             MacroAction::StartVisionSearch => 0xe8b6,
             MacroAction::ScanVisionOnce => 0xe8b6,
             MacroAction::StartAudioSensePreset => 0xe050,
@@ -6644,7 +6460,6 @@ impl CrosshairApp {
             }
             MacroAction::DisableZoom => ("macro_action_short_label.disable_zoom", "NoZoom"),
             MacroAction::PlaySoundPreset => ("macro_action_short_label.play_sound_preset", "Sound"),
-            MacroAction::PlayVideoPreset => ("macro_action_short_label.play_video_preset", "Video"),
             MacroAction::StartVisionSearch => {
                 ("macro_action_short_label.start_vision_search", "Start")
             }
@@ -6868,7 +6683,6 @@ impl CrosshairApp {
                 | MacroAction::ApplyMouseSensitivityPreset
                 | MacroAction::EnableZoomPreset
                 | MacroAction::PlaySoundPreset
-                | MacroAction::PlayVideoPreset
                 | MacroAction::EnableMacroPreset
                 | MacroAction::DisableMacroPreset
                 | MacroAction::StartTimerPreset
@@ -11862,51 +11676,6 @@ impl eframe::App for CrosshairApp {
                     }
                     ctx.request_repaint();
                 }
-                UiCommand::VideoFrameLoaded {
-                    preset_id,
-                    path,
-                    start_ms,
-                    max_width,
-                    max_height,
-                    width,
-                    height,
-                    rgba,
-                } => {
-                    let image = ColorImage::from_rgba_unmultiplied([width, height], &rgba);
-                    if let Some(cache) = self.video_preview_cache.get_mut(&preset_id) {
-                        cache.view.texture.set(image, TextureOptions::LINEAR);
-                        cache.updated_at = Instant::now();
-                        cache.source_path = path;
-                        cache.start_ms = start_ms;
-                        cache.max_width = max_width;
-                        cache.max_height = max_height;
-                        cache.view.width = width;
-                        cache.view.height = height;
-                    } else {
-                        let texture = ctx.load_texture(
-                            format!("video_preview_{preset_id}"),
-                            image,
-                            TextureOptions::LINEAR,
-                        );
-                        let view = VideoPreviewView {
-                            texture,
-                            width,
-                            height,
-                        };
-                        self.video_preview_cache.insert(
-                            preset_id,
-                            VideoPreviewCache {
-                                updated_at: Instant::now(),
-                                source_path: path,
-                                start_ms,
-                                max_width,
-                                max_height,
-                                view,
-                            },
-                        );
-                    }
-                    ctx.request_repaint();
-                }
                 UiCommand::AudioWaveformLoaded {
                     path,
                     waveform,
@@ -11922,19 +11691,6 @@ impl eframe::App for CrosshairApp {
                     for item in &mut self.state.audio_settings.library {
                         if item.clip.file_path.trim() == path {
                             self.library_clip_duration_ms.insert(item.id, duration_ms);
-                        }
-                    }
-                    for preset in &mut self.state.audio_settings.video_presets {
-                        if preset.clip.file_path.trim() == path
-                            && self
-                                .video_preset_clip_duration_ms
-                                .get(&preset.id)
-                                .copied()
-                                .flatten()
-                                .is_none()
-                        {
-                            self.video_preset_clip_duration_ms
-                                .insert(preset.id, duration_ms);
                         }
                     }
                     if self.state.audio_settings.startup.file_path.trim() == path {
@@ -11963,12 +11719,7 @@ impl eframe::App for CrosshairApp {
                     self.last_audio_sense_devices_refresh_at = Instant::now();
                     ctx.request_repaint();
                 }
-                UiCommand::VideoPlaybackFinished(preset_id) => {
-                    if self.active_video_overlay_preset_id == Some(preset_id) {
-                        self.active_video_overlay_preset_id = None;
-                    }
-                    ctx.request_repaint();
-                }
+
                 UiCommand::SetProtractorEnabled(enabled) => {
                     self.state.protractor_enabled = enabled;
                     if enabled {
@@ -12124,11 +11875,7 @@ impl eframe::App for CrosshairApp {
             {
                 self.macro_panel_render_limit = 8;
             }
-            if matches!(self.last_active_panel, AppPanel::Sound | AppPanel::Media)
-                && !matches!(self.state.active_panel, AppPanel::Sound | AppPanel::Media)
-            {
-                self.clear_video_preview_cache();
-            }
+
             self.last_active_panel = self.state.active_panel;
         }
 
@@ -12979,6 +12726,13 @@ impl eframe::App for CrosshairApp {
             ctx.request_repaint();
         }
 
+        let needs_persist_id = egui::Id::new("app_needs_persist");
+        let needs_persist = ctx.data_mut(|d| d.get_temp::<bool>(needs_persist_id).unwrap_or(false));
+        if needs_persist && !ctx.input(|i| i.pointer.any_down()) {
+            self.persist();
+            ctx.data_mut(|d| d.insert_temp(needs_persist_id, false));
+        }
+
         self.poll_capture_input(ctx);
     }
 
@@ -13006,12 +12760,3 @@ pub(crate) fn audio_duration(clip: &AudioClipSettings) -> Option<u64> {
     }
 }
 
-pub(crate) fn video_duration(clip: &VideoClipSettings) -> Option<u64> {
-    if clip.file_path.trim().is_empty() {
-        None
-    } else {
-        crate::media::load_video_metadata(&clip.file_path)
-            .ok()
-            .map(|meta| meta.duration_ms)
-    }
-}

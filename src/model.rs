@@ -662,7 +662,6 @@ pub enum MacroAction {
     EnableZoomPreset,
     DisableZoom,
     PlaySoundPreset,
-    PlayVideoPreset,
     #[serde(alias = "StartImageSearch")]
     StartVisionSearch,
     #[serde(alias = "ScanImageOnce", alias = "ScanVisionOnce")]
@@ -2585,44 +2584,6 @@ impl Default for AudioClipSettings {
     }
 }
 
-fn default_video_resolution() -> String {
-    "Auto".to_owned()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct VideoClipSettings {
-    pub enabled: bool,
-    pub file_path: String,
-    pub start_ms: u64,
-    pub end_ms: u64,
-    pub chroma_key_enabled: bool,
-    pub chroma_key_color: RgbaColor,
-    pub chroma_key_tolerance: u8,
-    #[serde(default = "default_video_resolution")]
-    pub resolution: String,
-}
-
-impl Default for VideoClipSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            file_path: String::new(),
-            start_ms: 0,
-            end_ms: 0,
-            chroma_key_enabled: true,
-            chroma_key_color: RgbaColor {
-                r: 0,
-                g: 255,
-                b: 0,
-                a: 255,
-            },
-            chroma_key_tolerance: 36,
-            resolution: "Auto".to_owned(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct AudioSettings {
@@ -2632,8 +2593,6 @@ pub struct AudioSettings {
     pub next_library_item_id: u32,
     pub presets: Vec<SoundPreset>,
     pub next_preset_id: u32,
-    pub video_presets: Vec<VideoPreset>,
-    pub next_video_preset_id: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -2693,34 +2652,7 @@ impl Default for SoundPreset {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct VideoPreset {
-    pub id: u32,
-    pub name: String,
-    pub collapsed: bool,
-    pub clip: VideoClipSettings,
-}
 
-impl VideoPreset {
-    pub fn new(id: u32) -> Self {
-        Self {
-            id,
-            name: format!("Video {id}"),
-            collapsed: true,
-            clip: VideoClipSettings {
-                enabled: true,
-                ..VideoClipSettings::default()
-            },
-        }
-    }
-}
-
-impl Default for VideoPreset {
-    fn default() -> Self {
-        Self::new(1)
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -2777,8 +2709,6 @@ impl Default for AudioSettings {
             next_library_item_id: 1,
             presets: Vec::new(),
             next_preset_id: 1,
-            video_presets: Vec::new(),
-            next_video_preset_id: 1,
         }
     }
 }
