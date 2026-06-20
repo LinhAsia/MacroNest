@@ -137,13 +137,15 @@ impl CrosshairApp {
             *pending_ocr_step_capture = Some((group_id, preset_id, step_index));
         }
 
-        let selected_label = if step.ocr_language == crate::ocr::OCR_ACTIVE_CODE {
-            "Active OCR"
-        } else {
-            crate::ocr::label_for_language_code(&step.ocr_language)
-        };
         egui::ComboBox::from_id_salt((group_id, preset_id, step_index, "ocr-language-step"))
-            .selected_text(selected_label)
+            .selected_text(if step.ocr_language == crate::ocr::OCR_ACTIVE_CODE {
+                format!(
+                    "Active OCR ({})",
+                    crate::ocr::display_label_for_language_code(&crate::ocr::active_language_code())
+                )
+            } else {
+                crate::ocr::display_label_for_language_code(&step.ocr_language)
+            })
             .width(96.0)
             .show_ui(ui, |ui| {
                 if ui
@@ -158,7 +160,11 @@ impl CrosshairApp {
                 }
                 for pack in crate::ocr::ocr_language_packs() {
                     if ui
-                        .selectable_value(&mut step.ocr_language, pack.code.to_owned(), pack.label)
+                        .selectable_value(
+                            &mut step.ocr_language,
+                            pack.code.to_owned(),
+                            crate::ocr::display_label_for_language_code(pack.code),
+                        )
                         .changed()
                     {
                         step.ocr_language =

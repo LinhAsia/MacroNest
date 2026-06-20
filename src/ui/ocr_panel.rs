@@ -131,7 +131,9 @@ impl CrosshairApp {
                     .show(ui, |ui| {
                         // Language
                         ui.label(Self::tr_lang(language, "Language", "Language"));
-                        ui.label(crate::ocr::label_for_language_code(&self.state.ocr_language));
+                        ui.label(crate::ocr::display_label_for_language_code(
+                            &self.state.ocr_language,
+                        ));
                         ui.end_row();
 
                         // Scan Region (X, Y, W, H)
