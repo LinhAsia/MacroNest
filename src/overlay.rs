@@ -13046,25 +13046,11 @@ mod windows_overlay {
         fill_skia_circle(pixmap, body_cx, body_cy + 4.0 * scale, body_radius, [0, 0, 0, 22]);
         
         // Body color
-        let body_color = match mascot_style {
-            crate::model::MascotStyle::ChiikawaCoffee => [255, 253, 245, 255], // Creamy white
-            _ => [255, 255, 255, 255], // Pure white
-        };
+        let body_color = [255, 255, 255, 255]; // Pure white
         
         // Body fill + outline
         fill_skia_circle(pixmap, body_cx, body_cy, body_radius, body_color);
         stroke_skia_circle(pixmap, body_cx, body_cy, body_radius, 2.2 * scale, [45, 40, 42, 255]);
-
-        // Pajama details
-        if mascot_style == crate::model::MascotStyle::ChiikawaPajama {
-            // Draw pink pajama on the body
-            let pajama_color = [255, 192, 203, 255];
-            fill_skia_circle(pixmap, body_cx, body_cy + 6.0 * scale, body_radius * 0.8, pajama_color);
-            stroke_skia_circle(pixmap, body_cx, body_cy + 6.0 * scale, body_radius * 0.8, 1.8 * scale, [45, 40, 42, 255]);
-            // Pajama buttons
-            fill_skia_circle(pixmap, body_cx, body_cy + 2.0 * scale, 2.0 * scale, [255, 105, 180, 255]);
-            fill_skia_circle(pixmap, body_cx, body_cy + 10.0 * scale, 2.0 * scale, [255, 105, 180, 255]);
-        }
 
         // Ear animation offsets
         let ear_wiggle = recent_pulse * 3.0 * scale;
@@ -13185,17 +13171,11 @@ mod windows_overlay {
         mascot_style: crate::model::MascotStyle,
     ) {
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
-        let is_sleepy = mascot_style == crate::model::MascotStyle::ChiikawaSleepy;
-        let is_star = mascot_style == crate::model::MascotStyle::ChiikawaHappyStar;
-        let is_coffee = mascot_style == crate::model::MascotStyle::ChiikawaCoffee;
 
         // Head shadow + fill
         fill_skia_circle(pixmap, head_cx, head_cy + 4.5 * scale, head_radius, [0, 0, 0, 28]);
         
-        let body_color = match mascot_style {
-            crate::model::MascotStyle::ChiikawaCoffee => [255, 253, 245, 255],
-            _ => [255, 255, 255, 255],
-        };
+        let body_color = [255, 255, 255, 255];
         fill_skia_circle(pixmap, head_cx, head_cy, head_radius, body_color);
 
         let hx = look_x * 0.15;
@@ -13218,47 +13198,6 @@ mod windows_overlay {
             }
         }
 
-        // Draw Sleepy Sleeping Hat
-        if is_sleepy {
-            let mut hat = tiny_skia::PathBuilder::new();
-            let base_l = head_cx - 25.0 * scale + hx;
-            let base_r = head_cx + 25.0 * scale + hx;
-            let base_y = head_cy - 44.0 * scale + hy;
-            let tip_x = head_cx + 30.0 * scale + hx;
-            let tip_y = head_cy - 72.0 * scale + hy;
-
-            hat.move_to(base_l, base_y);
-            hat.quad_to(head_cx + hx, base_y - 12.0 * scale, base_r, base_y);
-            hat.quad_to(head_cx + 22.0 * scale + hx, base_y - 25.0 * scale, tip_x, tip_y);
-            hat.quad_to(head_cx + 10.0 * scale + hx, base_y - 45.0 * scale, base_l, base_y);
-            hat.close();
-            if let Some(path) = hat.finish() {
-                fill_skia_path(pixmap, &path, [160, 210, 255, 255]);
-                stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 2.0 * scale);
-            }
-            // Pom pom at the tip
-            fill_skia_circle(pixmap, tip_x, tip_y, 6.0 * scale, [255, 255, 255, 255]);
-            stroke_skia_circle(pixmap, tip_x, tip_y, 6.0 * scale, 1.8 * scale, [45, 40, 42, 255]);
-        }
-
-        // Draw Star Crown
-        if is_star {
-            let mut crown = tiny_skia::PathBuilder::new();
-            let cy_y = head_cy - 46.0 * scale + hy;
-            crown.move_to(head_cx - 15.0 * scale + hx, cy_y);
-            crown.line_to(head_cx - 18.0 * scale + hx, cy_y - 14.0 * scale);
-            crown.line_to(head_cx - 6.0 * scale + hx, cy_y - 6.0 * scale);
-            crown.line_to(head_cx + hx, cy_y - 22.0 * scale);
-            crown.line_to(head_cx + 6.0 * scale + hx, cy_y - 6.0 * scale);
-            crown.line_to(head_cx + 18.0 * scale + hx, cy_y - 14.0 * scale);
-            crown.line_to(head_cx + 15.0 * scale + hx, cy_y);
-            crown.close();
-            if let Some(path) = crown.finish() {
-                fill_skia_path(pixmap, &path, [255, 225, 60, 255]);
-                stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 2.0 * scale);
-            }
-        }
-
         // Head outline
         stroke_skia_circle(pixmap, head_cx, head_cy, head_radius, 2.2 * scale, [45, 40, 42, 255]);
 
@@ -13267,66 +13206,24 @@ mod windows_overlay {
         let eye_h = 10.5 * scale;
         let eye_y_offset = if is_hachiware { 4.0 * scale } else { 2.5 * scale };
 
-        if is_sleepy {
-            // Sleeping eyes: (^^)
-            for &ex in &[head_cx - 18.0 * scale + look_x, head_cx + 18.0 * scale + look_x] {
-                let mut eye = tiny_skia::PathBuilder::new();
-                let ey = head_cy + eye_y_offset + look_y;
-                eye.move_to(ex - 6.0 * scale, ey + 2.0 * scale);
-                eye.quad_to(ex, ey - 4.0 * scale, ex + 6.0 * scale, ey + 2.0 * scale);
-                if let Some(path) = eye.finish() {
-                    stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 2.4 * scale);
-                }
-            }
-        } else if is_star {
-            // Starry/squint eyes (><)
-            for &(ex, _sign) in &[(head_cx - 18.0 * scale + look_x, -1.0f32), (head_cx + 18.0 * scale + look_x, 1.0f32)] {
-                let ey = head_cy + eye_y_offset + look_y;
-                let mut star_eye = tiny_skia::PathBuilder::new();
-                star_eye.move_to(ex - 5.0 * scale, ey - 3.0 * scale);
-                star_eye.line_to(ex + 5.0 * scale, ey + 3.0 * scale);
-                star_eye.move_to(ex - 5.0 * scale, ey + 3.0 * scale);
-                star_eye.line_to(ex + 5.0 * scale, ey - 3.0 * scale);
-                if let Some(path) = star_eye.finish() {
-                    stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 2.5 * scale);
-                }
-            }
-        } else {
-            // Normal shiny eyes
-            for &ex in &[head_cx - 18.0 * scale + look_x, head_cx + 18.0 * scale + look_x] {
-                let ey = head_cy + eye_y_offset + look_y;
-                fill_skia_rounded_rect(pixmap, ex - eye_w * 0.5, ey - eye_h * 0.5, eye_w, eye_h, 4.2 * scale, [45, 40, 42, 255]);
-                // Highlights
-                fill_skia_circle(pixmap, ex - 1.5 * scale, ey - 2.2 * scale, 3.2 * scale, [255, 255, 255, 255]);
-                fill_skia_circle(pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.6 * scale, [255, 255, 255, 255]);
-            }
-        }
-
-        // Draw Glasses for Coffee Style
-        if is_coffee {
-            let g_r = 13.0 * scale;
-            let g_y = head_cy + eye_y_offset + look_y;
-            stroke_skia_circle(pixmap, head_cx - 18.0 * scale + look_x, g_y, g_r, 2.0 * scale, [75, 55, 45, 255]);
-            stroke_skia_circle(pixmap, head_cx + 18.0 * scale + look_x, g_y, g_r, 2.0 * scale, [75, 55, 45, 255]);
-            let mut bridge = tiny_skia::PathBuilder::new();
-            bridge.move_to(head_cx - 5.0 * scale + look_x, g_y);
-            bridge.line_to(head_cx + 5.0 * scale + look_x, g_y);
-            if let Some(path) = bridge.finish() {
-                stroke_skia_path(pixmap, &path, [75, 55, 45, 255], 2.0 * scale);
-            }
+        // Normal shiny eyes
+        for &ex in &[head_cx - 18.0 * scale + look_x, head_cx + 18.0 * scale + look_x] {
+            let ey = head_cy + eye_y_offset + look_y;
+            fill_skia_rounded_rect(pixmap, ex - eye_w * 0.5, ey - eye_h * 0.5, eye_w, eye_h, 4.2 * scale, [45, 40, 42, 255]);
+            // Highlights
+            fill_skia_circle(pixmap, ex - 1.5 * scale, ey - 2.2 * scale, 3.2 * scale, [255, 255, 255, 255]);
+            fill_skia_circle(pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.6 * scale, [255, 255, 255, 255]);
         }
 
         // Eyebrows
-        if !is_sleepy && !is_star {
-            for &(ex, sign) in &[(head_cx - 18.0 * scale + look_x, -1.0f32), (head_cx + 18.0 * scale + look_x, 1.0f32)] {
-                let mut eyebrow = tiny_skia::PathBuilder::new();
-                let ebx = ex;
-                let eby = head_cy - 7.5 * scale + look_y;
-                eyebrow.move_to(ebx - 4.0 * scale, eby + 1.5 * scale);
-                eyebrow.quad_to(ebx, eby - 1.5 * scale, ebx + 4.0 * scale, eby + 0.5 * scale * sign);
-                if let Some(path) = eyebrow.finish() {
-                    stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
-                }
+        for &(ex, sign) in &[(head_cx - 18.0 * scale + look_x, -1.0f32), (head_cx + 18.0 * scale + look_x, 1.0f32)] {
+            let mut eyebrow = tiny_skia::PathBuilder::new();
+            let ebx = ex;
+            let eby = head_cy - 7.5 * scale + look_y;
+            eyebrow.move_to(ebx - 4.0 * scale, eby + 1.5 * scale);
+            eyebrow.quad_to(ebx, eby - 1.5 * scale, ebx + 4.0 * scale, eby + 0.5 * scale * sign);
+            if let Some(path) = eyebrow.finish() {
+                stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
             }
         }
 
@@ -13349,28 +13246,11 @@ mod windows_overlay {
         // Mouth depending on style
         let mut mouth = tiny_skia::PathBuilder::new();
         let mouth_y = head_cy + 13.5 * scale + look_y;
-        if is_sleepy {
-            fill_skia_circle(pixmap, head_cx + look_x, mouth_y + 1.5 * scale, 3.5 * scale, [255, 120, 130, 255]);
-            stroke_skia_circle(pixmap, head_cx + look_x, mouth_y + 1.5 * scale, 3.5 * scale, 1.8 * scale, [45, 40, 42, 255]);
-        } else if is_star {
-            let mut open_m = tiny_skia::PathBuilder::new();
-            let mx = head_cx + look_x;
-            let my = mouth_y;
-            open_m.move_to(mx - 4.5 * scale, my);
-            open_m.line_to(mx + 4.5 * scale, my);
-            open_m.quad_to(mx, my + 7.5 * scale, mx - 4.5 * scale, my);
-            open_m.close();
-            if let Some(path) = open_m.finish() {
-                fill_skia_path(pixmap, &path, [255, 100, 110, 255]);
-                stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
-            }
-        } else {
-            // Chiikawa cute small mouth (w)
-            mouth.move_to(head_cx - 4.0 * scale + look_x, mouth_y);
-            mouth.quad_to(head_cx - 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + look_x, mouth_y + 0.5 * scale);
-            mouth.quad_to(head_cx + 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + 4.0 * scale + look_x, mouth_y);
-            if let Some(p) = mouth.finish() { stroke_skia_path(pixmap, &p, [45, 40, 42, 255], 2.0 * scale); }
-        }
+        // Chiikawa cute small mouth (w)
+        mouth.move_to(head_cx - 4.0 * scale + look_x, mouth_y);
+        mouth.quad_to(head_cx - 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + look_x, mouth_y + 0.5 * scale);
+        mouth.quad_to(head_cx + 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + 4.0 * scale + look_x, mouth_y);
+        if let Some(p) = mouth.finish() { stroke_skia_path(pixmap, &p, [45, 40, 42, 255], 2.0 * scale); }
     }
 
     /// Draws the character's arms + shoulder joints into `pixmap`.
@@ -13406,13 +13286,8 @@ mod windows_overlay {
         let right_shoulder_top    = (right_shoulder_cx - px_r * 12.5 * scale, right_shoulder_cy - py_r * 12.5 * scale);
         let right_shoulder_bottom = (right_shoulder_cx + px_r * 12.5 * scale, right_shoulder_cy + py_r * 12.5 * scale);
 
-        // Arm fill color: Chiikawa has white arms. Hachiware has white arms too.
-        // If Pajama style, arms are pink!
-        let arm_fill = match mascot_style {
-            crate::model::MascotStyle::ChiikawaPajama => [255, 192, 203, 255],
-            crate::model::MascotStyle::ChiikawaCoffee => [255, 253, 245, 255],
-            _ => [255, 255, 255, 255],
-        };
+        // Arm fill color: Chiikawa and Hachiware have white arms.
+        let arm_fill = [255, 255, 255, 255];
 
         // Shoulder cap circles drawn first so arm paths render on top
         let cap_r = 13.0 * scale;
@@ -13655,83 +13530,6 @@ mod windows_overlay {
                 [255, 225, 225, 255],
                 [255, 245, 245, 255],
             ),
-            crate::model::MascotStyle::ChiikawaCoffee => (
-                [230, 232, 235, 255], // Marble top
-                [180, 185, 190, 255],
-                false, // No wood grain
-                [0, 0, 0, 0],
-                [135, 110, 95, 255], // Latte frame
-                [90, 75, 65, 255],
-                [255, 248, 235, 245], // Latte cream key
-                [90, 70, 60, 235],    // Dark espresso modifier
-                [245, 230, 210, 255], // Cozy canvas pad
-                0,
-                [150, 125, 110, 255], // Mocha body
-                [115, 95, 85, 255],
-            ),
-            crate::model::MascotStyle::ChiikawaSleepy => (
-                [210, 235, 255, 255], // Soft blue cushion
-                [175, 210, 240, 255],
-                false,
-                [0, 0, 0, 0],
-                [200, 245, 225, 255], // Mint green frame
-                [160, 215, 195, 255],
-                [255, 255, 255, 245],
-                [255, 245, 190, 235], // Lemon yellow modifier
-                [255, 255, 255, 255], // White cloud pad
-                1, // Cloud mouse pad shape
-                [255, 245, 190, 255], // Pastel yellow mouse
-                [220, 210, 150, 255],
-            ),
-            crate::model::MascotStyle::ChiikawaHappyStar => (
-                [28, 30, 38, 255], // Galaxy dark glass
-                [15, 16, 22, 255],
-                false,
-                [0, 0, 0, 0],
-                [220, 200, 245, 255], // Lavender purple frame
-                [180, 160, 210, 255],
-                [245, 235, 255, 245],
-                [150, 110, 220, 235], // Deep violet modifier
-                [255, 235, 150, 255], // Yellow moon pad
-                3, // Moon mouse pad shape
-                [170, 240, 235, 255], // Aqua blue mouse
-                [120, 200, 195, 255],
-            ),
-            crate::model::MascotStyle::ChiikawaPajama => (
-                [255, 210, 190, 255], // Peach wool mat
-                [230, 175, 150, 255],
-                false,
-                [0, 0, 0, 0],
-                [255, 240, 180, 255], // Butter yellow frame
-                [220, 200, 140, 255],
-                [255, 253, 240, 245],
-                [220, 205, 245, 235], // Lilac modifier
-                [255, 180, 190, 255], // Strawberry shape pad
-                2, // Strawberry mouse pad shape
-                [220, 205, 245, 255], // Purple mouse body
-                [180, 165, 215, 255],
-            ),
-        };
-
-        // Helper helper function to draw shiny stars
-        let star_draw = |pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, size: f32| {
-            let mut path = tiny_skia::PathBuilder::new();
-            let p1 = project_point(x, y - size);
-            let p2 = project_point(x + size * 0.3, y - size * 0.3);
-            let p3 = project_point(x + size, y);
-            let p4 = project_point(x + size * 0.3, y + size * 0.3);
-            let p5 = project_point(x, y + size);
-            let p6 = project_point(x - size * 0.3, y + size * 0.3);
-            let p7 = project_point(x - size, y);
-            let p8 = project_point(x - size * 0.3, y - size * 0.3);
-            path.move_to(p1.0, p1.1);
-            path.line_to(p2.0, p2.1); path.line_to(p3.0, p3.1); path.line_to(p4.0, p4.1);
-            path.line_to(p5.0, p5.1); path.line_to(p6.0, p6.1); path.line_to(p7.0, p7.1);
-            path.line_to(p8.0, p8.1);
-            path.close();
-            if let Some(p) = path.finish() {
-                fill_skia_path(pixmap, &p, [255, 245, 160, 210]);
-            }
         };
 
         // 1. Draw mascot body+ears then head+face (sitting BEHIND the desk)
@@ -13893,199 +13691,6 @@ mod windows_overlay {
                     fill_skia_path(&mut pixmap, &path, [255, 180, 195, 255]);
                 }
             },
-            crate::model::MascotStyle::ChiikawaCoffee => {
-                // Heart Latte art coffee cup
-                let c_x = desk_left + 24.0;
-                let c_y = desk_top + 20.0;
-                // Saucer
-                fill_projected_rounded_quad(&mut pixmap, c_x - 10.0, c_y - 2.0, 20.0, 4.0, 2.0, [110, 85, 75, 255]);
-                stroke_projected_rounded_quad(&mut pixmap, c_x - 10.0, c_y - 2.0, 20.0, 4.0, 2.0, [45, 40, 42, 255], 1.5 * scale);
-                // Cup
-                fill_projected_rounded_quad(&mut pixmap, c_x - 7.0, c_y - 9.0, 14.0, 10.0, 2.0, [250, 250, 252, 255]);
-                stroke_projected_rounded_quad(&mut pixmap, c_x - 7.0, c_y - 9.0, 14.0, 10.0, 2.0, [45, 40, 42, 255], 1.5 * scale);
-                // Coffee filling
-                fill_projected_rounded_quad(&mut pixmap, c_x - 6.0, c_y - 8.0, 12.0, 3.0, 1.0, [170, 130, 105, 255]);
-                // Latte art heart
-                let mut heart = tiny_skia::PathBuilder::new();
-                let hp1 = project_point(c_x, c_y - 7.5);
-                let hp2 = project_point(c_x - 1.5, c_y - 8.5);
-                let hp3 = project_point(c_x, c_y - 6.0);
-                let hp4 = project_point(c_x + 1.5, c_y - 8.5);
-                heart.move_to(hp1.0, hp1.1);
-                heart.line_to(hp2.0, hp2.1);
-                heart.line_to(hp3.0, hp3.1);
-                heart.line_to(hp4.0, hp4.1);
-                heart.close();
-                if let Some(path) = heart.finish() {
-                    fill_skia_path(&mut pixmap, &path, [255, 255, 255, 220]);
-                }
-
-                // Opened leather book
-                let s_x = desk_left + desk_width - 26.0;
-                let s_y = desk_top + 28.0;
-                // Shadow / cover thickness
-                fill_projected_rounded_quad(&mut pixmap, s_x - 9.0, s_y - 5.0, 18.0, 10.0, 2.0, [130, 45, 45, 255]);
-                stroke_projected_rounded_quad(&mut pixmap, s_x - 9.0, s_y - 5.0, 18.0, 10.0, 2.0, [45, 40, 42, 255], 1.5 * scale);
-                // Left page
-                fill_projected_rounded_quad(&mut pixmap, s_x - 8.0, s_y - 6.0, 8.0, 9.0, 1.0, [255, 252, 245, 255]);
-                // Right page
-                fill_projected_rounded_quad(&mut pixmap, s_x, s_y - 6.0, 8.0, 9.0, 1.0, [255, 252, 245, 255]);
-                // Lines
-                for i in 0..3 {
-                    let off = (i as f32) * 2.2 * scale;
-                    let mut line1 = tiny_skia::PathBuilder::new();
-                    let lp1 = project_point(s_x - 6.5, s_y - 4.0 + off);
-                    let lp2 = project_point(s_x - 1.5, s_y - 4.0 + off);
-                    line1.move_to(lp1.0, lp1.1);
-                    line1.line_to(lp2.0, lp2.1);
-                    if let Some(path) = line1.finish() {
-                        stroke_skia_path(&mut pixmap, &path, [90, 95, 100, 180], 0.8 * scale);
-                    }
-                    
-                    let mut line2 = tiny_skia::PathBuilder::new();
-                    let lp3 = project_point(s_x + 1.5, s_y - 4.0 + off);
-                    let lp4 = project_point(s_x + 6.5, s_y - 4.0 + off);
-                    line2.move_to(lp3.0, lp3.1);
-                    line2.line_to(lp4.0, lp4.1);
-                    if let Some(path) = line2.finish() {
-                        stroke_skia_path(&mut pixmap, &path, [90, 95, 100, 180], 0.8 * scale);
-                    }
-                }
-            },
-            crate::model::MascotStyle::ChiikawaSleepy => {
-                // Sleeping Teddy Bear
-                let g_x = desk_left + 24.0;
-                let g_y = desk_top + 22.0;
-                // Body
-                fill_projected_rounded_quad(&mut pixmap, g_x - 5.5, g_y - 5.0, 11.0, 11.0, 4.0, [245, 220, 160, 255]);
-                stroke_projected_rounded_quad(&mut pixmap, g_x - 5.5, g_y - 5.0, 11.0, 11.0, 4.0, [45, 40, 42, 255], 1.5 * scale);
-                // Head
-                fill_projected_rounded_quad(&mut pixmap, g_x - 4.5, g_y - 12.0, 9.0, 9.0, 3.5, [245, 220, 160, 255]);
-                stroke_projected_rounded_quad(&mut pixmap, g_x - 4.5, g_y - 12.0, 9.0, 9.0, 3.5, [45, 40, 42, 255], 1.5 * scale);
-                // Ears
-                fill_projected_rounded_quad(&mut pixmap, g_x - 6.0, g_y - 14.5, 3.0, 3.0, 1.2, [245, 220, 160, 255]);
-                stroke_projected_rounded_quad(&mut pixmap, g_x - 6.0, g_y - 14.5, 3.0, 3.0, 1.2, [45, 40, 42, 255], 1.2 * scale);
-                fill_projected_rounded_quad(&mut pixmap, g_x + 3.0, g_y - 14.5, 3.0, 3.0, 1.2, [245, 220, 160, 255]);
-                stroke_projected_rounded_quad(&mut pixmap, g_x + 3.0, g_y - 14.5, 3.0, 3.0, 1.2, [45, 40, 42, 255], 1.2 * scale);
-                // Sleeping eyes
-                let mut eyes = tiny_skia::PathBuilder::new();
-                let ep1 = project_point(g_x - 2.5, g_y - 8.0);
-                let ep2 = project_point(g_x - 0.8, g_y - 8.0);
-                let ep3 = project_point(g_x + 0.8, g_y - 8.0);
-                let ep4 = project_point(g_x + 2.5, g_y - 8.0);
-                eyes.move_to(ep1.0, ep1.1); eyes.line_to(ep2.0, ep2.1);
-                eyes.move_to(ep3.0, ep3.1); eyes.line_to(ep4.0, ep4.1);
-                if let Some(path) = eyes.finish() {
-                    stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.2 * scale);
-                }
-
-                // Small starry glimmers on the pillow desk
-                star_draw(&mut pixmap, desk_left + desk_width - 24.0, desk_top + 28.0, 4.5);
-                star_draw(&mut pixmap, desk_left + desk_width - 38.0, desk_top + 18.0, 3.0);
-            },
-            crate::model::MascotStyle::ChiikawaHappyStar => {
-                // Star wand
-                let w_x = desk_left + desk_width - 24.0;
-                let w_y = desk_top + 34.0;
-                let mut shaft = tiny_skia::PathBuilder::new();
-                let sp1 = project_point(w_x - 3.0, w_y - 20.0);
-                let sp2 = project_point(w_x - 12.0, w_y + 12.0);
-                shaft.move_to(sp1.0, sp1.1);
-                shaft.line_to(sp2.0, sp2.1);
-                if let Some(path) = shaft.finish() {
-                    stroke_skia_path(&mut pixmap, &path, [215, 175, 75, 255], 1.8 * scale);
-                }
-                // Star shape
-                let s_x = w_x - 3.0;
-                let s_y = w_y - 20.0;
-                let mut star = tiny_skia::PathBuilder::new();
-                let s_pt = project_point(s_x + 5.5, s_y);
-                star.move_to(s_pt.0, s_pt.1);
-                for i in 1..10 {
-                    let angle = (i as f32) * std::f32::consts::PI / 5.0;
-                    let r = if i % 2 == 0 { 5.5 } else { 2.4 };
-                    let pt = project_point(s_x + r * angle.cos(), s_y + r * angle.sin());
-                    star.line_to(pt.0, pt.1);
-                }
-                star.close();
-                if let Some(path) = star.finish() {
-                    fill_skia_path(&mut pixmap, &path, [255, 235, 80, 255]);
-                    stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.5 * scale);
-                }
-
-                // Glimmer stars
-                star_draw(&mut pixmap, desk_left + 24.0, desk_top + 20.0, 4.0);
-                star_draw(&mut pixmap, desk_left + 35.0, desk_top + 14.0, 2.5);
-            },
-            crate::model::MascotStyle::ChiikawaPajama => {
-                // Strawberry frosting Donut on plate
-                let d_x = desk_left + 24.0;
-                let d_y = desk_top + 22.0;
-                // Plate
-                fill_projected_rounded_quad(&mut pixmap, d_x - 10.0, d_y - 3.0, 20.0, 6.0, 3.0, [250, 250, 252, 255]);
-                stroke_projected_rounded_quad(&mut pixmap, d_x - 10.0, d_y - 3.0, 20.0, 6.0, 3.0, [45, 40, 42, 255], 1.5 * scale);
-                // Donut Dough
-                let mut donut = tiny_skia::PathBuilder::new();
-                let r_outer = 6.2;
-                let d_start = project_point(d_x + r_outer, d_y - 1.0);
-                donut.move_to(d_start.0, d_start.1);
-                for i in 1..=32 {
-                    let angle = (i as f32) * 2.0 * std::f32::consts::PI / 32.0;
-                    let pt = project_point(d_x + r_outer * angle.cos(), d_y - 1.0 + r_outer * angle.sin());
-                    donut.line_to(pt.0, pt.1);
-                }
-                donut.close();
-                if let Some(path) = donut.finish() {
-                    fill_skia_path(&mut pixmap, &path, [220, 160, 100, 255]);
-                    stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.5 * scale);
-                }
-                // Pink frosting
-                let mut icing = tiny_skia::PathBuilder::new();
-                let i_start = project_point(d_x + r_outer * 0.8, d_y - 1.0);
-                icing.move_to(i_start.0, i_start.1);
-                for i in 1..=32 {
-                    let angle = (i as f32) * 2.0 * std::f32::consts::PI / 32.0;
-                    let pt = project_point(d_x + r_outer * 0.8 * angle.cos(), d_y - 1.0 + r_outer * 0.8 * angle.sin());
-                    icing.line_to(pt.0, pt.1);
-                }
-                icing.close();
-                if let Some(path) = icing.finish() {
-                    fill_skia_path(&mut pixmap, &path, [255, 140, 170, 255]);
-                }
-                // Inner hole
-                fill_skia_circle(&mut pixmap, d_x, d_y - 1.0, 2.0 * scale, [250, 250, 252, 255]);
-                stroke_skia_circle(&mut pixmap, d_x, d_y - 1.0, 2.0 * scale, 1.2 * scale, [45, 40, 42, 255]);
-
-                // Cloud-shaped Pillow cushion
-                let g_x = desk_left + desk_width - 24.0;
-                let g_y = desk_top + 28.0;
-                let pts = [
-                    (g_x - 10.0, g_y),
-                    (g_x - 6.0, g_y - 7.0),
-                    (g_x, g_y - 9.0),
-                    (g_x + 6.0, g_y - 7.0),
-                    (g_x + 10.0, g_y),
-                    (g_x + 7.0, g_y + 6.0),
-                    (g_x, g_y + 8.0),
-                    (g_x - 7.0, g_y + 6.0),
-                ];
-                let mut pillow = tiny_skia::PathBuilder::new();
-                let p_start = project_point(pts[0].0, pts[0].1);
-                pillow.move_to(p_start.0, p_start.1);
-                for i in 0..pts.len() {
-                    let next_idx = (i + 1) % pts.len();
-                    let ctrl_x = (pts[i].0 + pts[next_idx].0) * 0.5;
-                    let ctrl_y = (pts[i].1 + pts[next_idx].1) * 0.5 - 2.5 * scale.clamp(1.0, 3.0);
-                    let mid = project_point(ctrl_x, ctrl_y);
-                    let target = project_point(pts[next_idx].0, pts[next_idx].1);
-                    pillow.quad_to(mid.0, mid.1, target.0, target.1);
-                }
-                pillow.close();
-                if let Some(path) = pillow.finish() {
-                    fill_skia_path(&mut pixmap, &path, [190, 230, 255, 255]);
-                    stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.5 * scale);
-                }
-            }
         }
 
         // 3. Draw 3D Keyboard Frame & Mouse Pad
@@ -14167,82 +13772,17 @@ mod windows_overlay {
         let pad_cy = keyboard_top + 23.0;
         let pad_r = 19.0;
         
-        match mouse_pad_style {
-            1 => {
-                // Cloud pad
-                let pts = [
-                    (pad_cx - 17.0, pad_cy),
-                    (pad_cx - 12.0, pad_cy - 12.0),
-                    (pad_cx, pad_cy - 15.0),
-                    (pad_cx + 12.0, pad_cy - 12.0),
-                    (pad_cx + 17.0, pad_cy),
-                    (pad_cx + 13.0, pad_cy + 11.0),
-                    (pad_cx, pad_cy + 14.0),
-                    (pad_cx - 13.0, pad_cy + 11.0),
-                ];
-                let start = project_point(pts[0].0, pts[0].1);
-                pad_pb.move_to(start.0, start.1);
-                for i in 0..pts.len() {
-                    let next_idx = (i + 1) % pts.len();
-                    let ctrl_x = (pts[i].0 + pts[next_idx].0) * 0.5;
-                    let ctrl_y = (pts[i].1 + pts[next_idx].1) * 0.5 - 4.5 * scale.clamp(1.0, 3.0);
-                    let mid = project_point(ctrl_x, ctrl_y);
-                    let target = project_point(pts[next_idx].0, pts[next_idx].1);
-                    pad_pb.quad_to(mid.0, mid.1, target.0, target.1);
-                }
-                pad_pb.close();
-            },
-            2 => {
-                // Strawberry shape pad
-                let pts = [
-                    (pad_cx, pad_cy - 14.0),
-                    (pad_cx + 12.0, pad_cy - 12.0),
-                    (pad_cx + 16.0, pad_cy),
-                    (pad_cx + 8.0, pad_cy + 13.0),
-                    (pad_cx, pad_cy + 17.0),
-                    (pad_cx - 8.0, pad_cy + 13.0),
-                    (pad_cx - 16.0, pad_cy),
-                    (pad_cx - 12.0, pad_cy - 12.0),
-                ];
-                let start = project_point(pts[0].0, pts[0].1);
-                pad_pb.move_to(start.0, start.1);
-                for i in 0..pts.len() {
-                    let next_idx = (i + 1) % pts.len();
-                    let target = project_point(pts[next_idx].0, pts[next_idx].1);
-                    pad_pb.line_to(target.0, target.1);
-                }
-                pad_pb.close();
-            },
-            3 => {
-                // Moon shape pad
-                let start = project_point(pad_cx, pad_cy - pad_r);
-                pad_pb.move_to(start.0, start.1);
-                for i in 1..=16 {
-                    let angle = -std::f32::consts::PI * 0.5 + (i as f32) * std::f32::consts::PI / 16.0;
-                    let pt = project_point(pad_cx + pad_r * angle.cos(), pad_cy + pad_r * angle.sin());
-                    pad_pb.line_to(pt.0, pt.1);
-                }
-                for i in 1..=16 {
-                    let angle = std::f32::consts::PI * 0.5 - (i as f32) * std::f32::consts::PI / 16.0;
-                    let pt = project_point(pad_cx - 6.0 + (pad_r - 2.5) * angle.cos(), pad_cy + (pad_r - 2.5) * angle.sin());
-                    pad_pb.line_to(pt.0, pt.1);
-                }
-                pad_pb.close();
-            },
-            _ => {
-                // Default Oval pad
-                let start_pt = project_point(pad_cx + pad_r, pad_cy);
-                pad_pb.move_to(start_pt.0, start_pt.1);
-                for i in 1..=32 {
-                    let angle = (i as f32) * 2.0 * std::f32::consts::PI / 32.0;
-                    let px = pad_cx + pad_r * angle.cos();
-                    let py = pad_cy + pad_r * angle.sin();
-                    let pt = project_point(px, py);
-                    pad_pb.line_to(pt.0, pt.1);
-                }
-                pad_pb.close();
-            }
+        // Default Oval pad
+        let start_pt = project_point(pad_cx + pad_r, pad_cy);
+        pad_pb.move_to(start_pt.0, start_pt.1);
+        for i in 1..=32 {
+            let angle = (i as f32) * 2.0 * std::f32::consts::PI / 32.0;
+            let px = pad_cx + pad_r * angle.cos();
+            let py = pad_cy + pad_r * angle.sin();
+            let pt = project_point(px, py);
+            pad_pb.line_to(pt.0, pt.1);
         }
+        pad_pb.close();
 
         if let Some(path) = pad_pb.finish() {
             // Shadow
@@ -14263,26 +13803,6 @@ mod windows_overlay {
             
             fill_skia_path(&mut pixmap, &path, mouse_pad_color);
             stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
-
-            // Add seeds/decoration if strawberry pad
-            if mouse_pad_style == 2 {
-                // Green leaf at top
-                let mut leaf = tiny_skia::PathBuilder::new();
-                let lp1 = project_point(pad_cx - 4.0, pad_cy - 14.0);
-                let lp2 = project_point(pad_cx, pad_cy - 18.0);
-                let lp3 = project_point(pad_cx + 4.0, pad_cy - 14.0);
-                leaf.move_to(lp1.0, lp1.1);
-                leaf.quad_to(lp2.0, lp2.1, lp3.0, lp3.1);
-                leaf.close();
-                if let Some(path) = leaf.finish() {
-                    fill_skia_path(&mut pixmap, &path, [100, 180, 80, 255]);
-                    stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.0 * scale);
-                }
-                // Small yellow seeds
-                fill_skia_circle(&mut pixmap, project_point(pad_cx - 5.0, pad_cy - 3.0).0, project_point(pad_cx - 5.0, pad_cy - 3.0).1, 1.0 * scale, [255, 235, 100, 255]);
-                fill_skia_circle(&mut pixmap, project_point(pad_cx + 5.0, pad_cy - 3.0).0, project_point(pad_cx + 5.0, pad_cy - 3.0).1, 1.0 * scale, [255, 235, 100, 255]);
-                fill_skia_circle(&mut pixmap, project_point(pad_cx, pad_cy + 4.0).0, project_point(pad_cx, pad_cy + 4.0).1, 1.0 * scale, [255, 235, 100, 255]);
-            }
         }
 
         // 4. Mouse and Keyboard keys logic
