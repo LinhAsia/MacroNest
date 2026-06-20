@@ -507,6 +507,7 @@ mod windows_overlay {
             size: f32,
             mode: QuickKeyDisplayMode,
             mascot_style: crate::model::MascotStyle,
+            preview: bool,
         },
         ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
@@ -1202,6 +1203,7 @@ mod windows_overlay {
         last_pin_update: Instant,
         hud_display: Option<HudDisplayState>,
         quick_key_display_enabled: bool,
+        quick_key_display_preview_until: Option<Instant>,
         quick_key_display_center_x: i32,
         quick_key_display_center_y: i32,
         quick_key_display_size: f32,
@@ -1962,6 +1964,7 @@ mod windows_overlay {
                 last_pin_update: Instant::now() - Duration::from_secs(1),
                 hud_display: None,
                 quick_key_display_enabled: false,
+                quick_key_display_preview_until: None,
                 quick_key_display_center_x: GetSystemMetrics(SM_CXSCREEN).max(1) / 2,
                 quick_key_display_center_y: GetSystemMetrics(SM_CYSCREEN).max(1) / 2,
                 quick_key_display_size: 36.0,
@@ -2518,7 +2521,9 @@ mod windows_overlay {
                         let _ = refresh_mouse_record_trail(runtime);
                     }
 
-                    if !is_ui_in_foreground() {
+                    let is_preview = runtime.quick_key_display_preview_until.map_or(false, |until| Instant::now() < until);
+                    let has_preview_tracker = runtime.quick_key_display_preview_until.is_some();
+                    if !is_ui_in_foreground() || is_preview || has_preview_tracker {
                         apply_keyboard_arrow_mouse_movement();
                         let pin_active = runtime.active_pin_thumbnail.is_some()
                             || HOOK_STATE.lock().active_pin_preset_id.is_some();
@@ -2535,6 +2540,8 @@ mod windows_overlay {
 
                         if runtime.quick_key_display_enabled
                             || !runtime.quick_key_display_entries.is_empty()
+                            || is_preview
+                            || has_preview_tracker
                         {
                             let _ = refresh_quick_key_display(runtime);
                         }
@@ -5789,7 +5796,7 @@ mod windows_overlay {
             add_key("PgUp", &["PageUp", "Prior"], 15.0, 1.0, 2.0);
 
             // Row 4
-            add_key("Shift", &["Shift"], 0.0, 2.25, 3.0);
+            add_key("Shift", &["LShift"], 0.0, 2.25, 3.0);
             add_key("Z", &["Z"], 2.25, 1.0, 3.0);
             add_key("X", &["X"], 3.25, 1.0, 3.0);
             add_key("C", &["C"], 4.25, 1.0, 3.0);
@@ -5800,7 +5807,7 @@ mod windows_overlay {
             add_key(",", &[","], 9.25, 1.0, 3.0);
             add_key(".", &["."], 10.25, 1.0, 3.0);
             add_key("/", &["/"], 11.25, 1.0, 3.0);
-            add_key("Shift", &["Shift"], 12.25, 1.75, 3.0);
+            add_key("Shift", &["RShift"], 12.25, 1.75, 3.0);
             add_key("Up", &["Up", "ArrowUp"], 14.0, 1.0, 3.0);
             add_key("PgDn", &["PageDown", "Next"], 15.0, 1.0, 3.0);
 
@@ -5859,21 +5866,40 @@ mod windows_overlay {
             .iter()
             .any(|key_name| quick_key_display_alias_match(key_name, aliases));
         
-        // Dynamically query real-time physical key states for Left/Right Ctrl and Alt
-        if aliases.contains(&"LCtrl") {
+        let is_lshift = aliases.contains(&"LShift");
+        let is_rshift = aliases.contains(&"RShift");
+        let is_lctrl = aliases.contains(&"LCtrl");
+        let is_rctrl = aliases.contains(&"RCtrl");
+        let is_lalt = aliases.contains(&"LAlt");
+        let is_ralt = aliases.contains(&"RAlt");
+
+        if is_lctrl {
             held = unsafe { GetAsyncKeyState(0xA2) } as u16 & 0x8000 != 0;
-        } else if aliases.contains(&"RCtrl") {
+        } else if is_rctrl {
             held = unsafe { GetAsyncKeyState(0xA3) } as u16 & 0x8000 != 0;
-        } else if aliases.contains(&"LAlt") {
+        } else if is_lalt {
             held = unsafe { GetAsyncKeyState(0xA4) } as u16 & 0x8000 != 0;
-        } else if aliases.contains(&"RAlt") {
+        } else if is_ralt {
             held = unsafe { GetAsyncKeyState(0xA5) } as u16 & 0x8000 != 0;
+        } else if is_lshift {
+            held = unsafe { GetAsyncKeyState(0xA0) } as u16 & 0x8000 != 0;
+        } else if is_rshift {
+            held = unsafe { GetAsyncKeyState(0xA1) } as u16 & 0x8000 != 0;
         }
 
         if held {
             return 1.0;
         }
-        quick_key_display_recent_entry_strength(aliases, entries, now)
+
+        let mut strength = quick_key_display_recent_entry_strength(aliases, entries, now);
+        if is_lshift || is_rshift {
+            strength = strength.max(quick_key_display_recent_entry_strength(&["Shift"], entries, now));
+        } else if is_lctrl || is_rctrl {
+            strength = strength.max(quick_key_display_recent_entry_strength(&["Ctrl"], entries, now));
+        } else if is_lalt || is_ralt {
+            strength = strength.max(quick_key_display_recent_entry_strength(&["Alt"], entries, now));
+        }
+        strength
     }
 
     fn update_quick_key_display_mascot_mouse(runtime: &mut Runtime) {
@@ -6547,6 +6573,7 @@ mod windows_overlay {
                     size,
                     mode,
                     mascot_style,
+                    preview,
                 } => {
                     runtime.quick_key_display_enabled = enabled;
                     runtime.quick_key_display_center_x = center_x;
@@ -6554,6 +6581,9 @@ mod windows_overlay {
                     runtime.quick_key_display_size = size.clamp(18.0, 96.0);
                     runtime.quick_key_display_mode = mode;
                     runtime.quick_key_display_mascot_style = mascot_style;
+                    if preview {
+                        runtime.quick_key_display_preview_until = Some(Instant::now() + Duration::from_secs(3));
+                    }
                     if !enabled {
                         runtime.quick_key_display_entries.clear();
                         runtime.quick_key_display_slot_memory.clear();
@@ -6579,6 +6609,7 @@ mod windows_overlay {
                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
                     );
                     let _ = refresh_quick_key_display(runtime);
+                    unsafe { refresh_overlay_timer(runtime.overlay_hwnd, runtime); }
                 }
 
                 OverlayCommand::ShowQuickKeyDisplay(update) => {
@@ -6978,7 +7009,18 @@ mod windows_overlay {
     }
 
     fn refresh_quick_key_display(runtime: &mut Runtime) -> Result<()> {
-        if is_ui_in_foreground() || !runtime.quick_key_display_enabled {
+        let is_preview = if let Some(until) = runtime.quick_key_display_preview_until {
+            if Instant::now() >= until {
+                runtime.quick_key_display_preview_until = None;
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        };
+
+        if !runtime.quick_key_display_enabled || (is_ui_in_foreground() && !is_preview) {
             runtime.quick_key_display_entries.clear();
             runtime.quick_key_display_slot_memory.clear();
             runtime.quick_key_display_slot_labels.clear();
@@ -6989,6 +7031,24 @@ mod windows_overlay {
 
         quick_key_display_reconcile_held_entries(runtime);
         quick_key_display_release_expired_entries(runtime, Instant::now());
+
+        let now = Instant::now();
+        if is_preview
+            && runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal
+            && runtime.quick_key_display_entries.is_empty()
+        {
+            runtime.quick_key_display_entries.push(QuickKeyDisplayEntry {
+                text: "A".to_string(),
+                identity: "preview_dummy".to_string(),
+                combo_keys: vec![],
+                lane: QuickKeyDisplayLane::Keyboard,
+                slot: 0,
+                held: false,
+                shown_at: now,
+                released_at: Some(now),
+                hide_at: now + Duration::from_secs(3),
+            });
+        }
 
         if runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal
             && runtime.quick_key_display_entries.is_empty()
@@ -9106,9 +9166,11 @@ mod windows_overlay {
             return 16;
         }
 
+        let is_preview = runtime.quick_key_display_preview_until.is_some();
         if runtime.quick_key_display_enabled
             && (runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
-                || !runtime.quick_key_display_entries.is_empty())
+                || !runtime.quick_key_display_entries.is_empty()
+                || is_preview)
         {
             return 16;
         }
@@ -24004,6 +24066,7 @@ mod fallback {
             center_y: i32,
             size: f32,
             mode: QuickKeyDisplayMode,
+            preview: bool,
         },
         ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
