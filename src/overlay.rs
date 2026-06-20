@@ -131,7 +131,7 @@ mod windows_overlay {
                     EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor,
                     GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
                     GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
-                    GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTCAPTION, HTTRANSPARENT, HWND_TOPMOST,
+                    GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTCLIENT, HTTRANSPARENT, HWND_TOPMOST,
                     IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE,
                     LoadCursorW, LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG,
                     MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN,
@@ -393,6 +393,14 @@ mod windows_overlay {
     static PROTRACTOR_DRAG_START_ANGLE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(0.0));
     static PROTRACTOR_DRAG_START_SCALE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(1.0));
     static PROTRACTOR_DRAG_START_DISTANCE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(1.0));
+    #[derive(Debug, Clone, Copy)]
+    struct QuickKeyDisplayDragState {
+        start_mouse: POINT,
+        start_center_x: i32,
+        start_center_y: i32,
+    }
+    static QUICK_KEY_DISPLAY_DRAG_STATE: Lazy<Mutex<Option<QuickKeyDisplayDragState>>> =
+        Lazy::new(|| Mutex::new(None));
     static CACHED_APP_UI_HWND: AtomicIsize = AtomicIsize::new(0);
     pub static UI_WINDOW_RECT_LEFT: std::sync::atomic::AtomicI32 =
         std::sync::atomic::AtomicI32::new(0);
@@ -2892,10 +2900,66 @@ mod windows_overlay {
                     if hwnd == runtime.key_display_hwnd
                         && quick_key_display_mascot_is_draggable(runtime)
                     {
-                        return LRESULT(HTCAPTION as isize);
+                        return LRESULT(HTCLIENT as isize);
                     }
                 }
                 LRESULT(HTTRANSPARENT as isize)
+            }
+
+            WM_LBUTTONDOWN => {
+                if let Some(runtime) = runtime_mut(hwnd) {
+                    if hwnd == runtime.key_display_hwnd
+                        && quick_key_display_mascot_is_draggable(runtime)
+                    {
+                        let mut mouse = POINT::default();
+                        let _ = GetCursorPos(&mut mouse);
+                        *QUICK_KEY_DISPLAY_DRAG_STATE.lock() = Some(QuickKeyDisplayDragState {
+                            start_mouse: mouse,
+                            start_center_x: runtime.quick_key_display_center_x,
+                            start_center_y: runtime.quick_key_display_center_y,
+                        });
+                        windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd);
+                        return LRESULT(0);
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+
+            WM_MOUSEMOVE => {
+                if let Some(runtime) = runtime_mut(hwnd) {
+                    if hwnd == runtime.key_display_hwnd {
+                        let drag_state = *QUICK_KEY_DISPLAY_DRAG_STATE.lock();
+                        if let Some(drag_state) = drag_state {
+                            let mut mouse = POINT::default();
+                            let _ = GetCursorPos(&mut mouse);
+                            runtime.quick_key_display_center_x =
+                                drag_state.start_center_x + (mouse.x - drag_state.start_mouse.x);
+                            runtime.quick_key_display_center_y =
+                                drag_state.start_center_y + (mouse.y - drag_state.start_mouse.y);
+                            runtime.quick_key_display_last_mascot_state = None;
+                            let _ = refresh_quick_key_display(runtime);
+                            return LRESULT(0);
+                        }
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+
+            WM_LBUTTONUP => {
+                if let Some(runtime) = runtime_mut(hwnd) {
+                    if hwnd == runtime.key_display_hwnd {
+                        let drag_state = QUICK_KEY_DISPLAY_DRAG_STATE.lock().take();
+                        if drag_state.is_some() {
+                            let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+                            let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
+                                x: runtime.quick_key_display_center_x,
+                                y: runtime.quick_key_display_center_y,
+                            });
+                            return LRESULT(0);
+                        }
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
             }
 
             WM_MOVE => {
