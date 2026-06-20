@@ -336,19 +336,12 @@ impl CrosshairApp {
                         self.opencv_installed,
                         opencv_progress,
                         60 * 1024 * 1024,
-                        Self::tr_lang(language, "Image search and color tools.", ""),
                         Self::tr_lang(language, "OpenCV DLL deleted.", ""),
                         Self::start_opencv_download,
                         Self::delete_opencv_tool,
                     );
                     ui.add_space(10.0);
-                    let ocr_header = Self::settings_action_button(
-                        ui,
-                        RichText::new("OCR").strong().size(13.0),
-                    );
-                    if ocr_header.clicked() {
-                        self.ocr_tools_open = !self.ocr_tools_open;
-                    }
+                    self.render_ocr_tool_header(ui, language);
                     if self.ocr_tools_open {
                         ui.add_space(6.0);
                         self.render_ocr_tool_entry(ui, language);
@@ -364,7 +357,6 @@ impl CrosshairApp {
                         self.arduino_tools_downloaded,
                         arduino_progress,
                         1_000_000,
-                        Self::tr_lang(language, "Arduino flashing files.", ""),
                         Self::tr_lang(language, "Arduino tools deleted.", ""),
                         Self::start_arduino_tools_download,
                         Self::delete_arduino_tools,
@@ -385,23 +377,31 @@ impl CrosshairApp {
         let restart_required = self.interception_driver_needs_restart;
 
         ui.vertical(|ui| {
-            ui.label(RichText::new("Interception Driver").strong().size(13.0));
-            ui.add_space(2.0);
+            let action_width = 148.0;
 
             if downloading_progress.is_some() {
-                ui.label(
-                    RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119))
-                        .small()
-                        .weak(),
-                );
-                ui.add_space(4.0);
-                if let Some(progress) = downloading_progress {
-                    ui.add(
-                        egui::ProgressBar::new(progress)
-                            .desired_width(148.0)
-                            .show_percentage(),
-                    );
-                }
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("Interception Driver").strong().size(13.0));
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119))
+                                .small()
+                                .weak(),
+                        );
+                    });
+                    let spacer = (ui.available_width() - action_width).max(0.0);
+                    if spacer > 0.0 {
+                        ui.add_space(spacer);
+                    }
+                    if let Some(progress) = downloading_progress {
+                        ui.add(
+                            egui::ProgressBar::new(progress)
+                                .desired_width(action_width)
+                                .show_percentage(),
+                        );
+                    }
+                });
                 ui.ctx().request_repaint();
                 return;
             }
@@ -427,19 +427,15 @@ impl CrosshairApp {
             if !package_ready {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(
-                            RichText::new(
-                                Self::tr_lang(language, "Package for driver setup.", ""),
-                            )
-                            .weak(),
-                        );
+                        ui.label(RichText::new("Interception Driver").strong().size(13.0));
+                        ui.add_space(2.0);
                         ui.label(
                             RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119))
                                 .small()
                                 .weak(),
                         );
                     });
-                    let spacer = (ui.available_width() - 148.0).max(0.0);
+                    let spacer = (ui.available_width() - action_width).max(0.0);
                     if spacer > 0.0 {
                         ui.add_space(spacer);
                     }
@@ -452,71 +448,34 @@ impl CrosshairApp {
                 return;
             }
 
-            ui.label(RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119)).small().weak());
-
-            ui.add_space(4.0);
-
-            if driver_installed {
-                ui.label(
-                    RichText::new(Self::tr_lang(
-                        language,
-                        "Installed. Restart your PC to take effect.",
-                        "",
-                    ))
-                    .color(Color32::from_rgb(126, 224, 182)),
-                );
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    if Self::settings_action_button(
-                        ui,
-                        Self::tr_lang(language, "Delete", ""),
-                    )
-                    .clicked()
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Interception Driver").strong().size(13.0));
+                    ui.add_space(2.0);
+                    ui.label(
+                        RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119))
+                            .small()
+                            .weak(),
+                    );
+                });
+                let spacer = (ui.available_width() - action_width).max(0.0);
+                if spacer > 0.0 {
+                    ui.add_space(spacer);
+                }
+                if driver_installed {
+                    if Self::settings_action_button(ui, Self::tr_lang(language, "Delete", ""))
+                        .clicked()
                     {
                         self.start_interception_driver_uninstall();
                     }
-                    if Self::settings_action_button(ui, Self::tr_lang(language, "Restart PC", ""))
-                        .clicked()
-                    {
-                        match crate::platform::restart_windows() {
-                            Ok(()) => {
-                                self.status =
-                                    Self::tr_lang(language, "Restarting Windows...", "").to_owned();
-                            }
-                            Err(error) => {
-                                self.status = format!("Failed to restart Windows: {error}");
-                            }
-                        }
-                    }
-                });
-                return;
-            }
-
-            if restart_required {
-                ui.label(
-                    RichText::new(Self::tr_lang(
-                        language,
-                        "Installed. Restart your PC to finish setup.",
-                        "",
-                    ))
-                    .color(Color32::from_rgb(248, 214, 102)),
-                );
-            } else {
-                ui.label(RichText::new(Self::tr_lang(language, "Ready to install.", "")).weak());
-            }
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if Self::settings_action_button(ui, Self::tr_lang(language, "Install", ""))
+                } else if Self::settings_action_button(ui, Self::tr_lang(language, "Install", ""))
                     .clicked()
                 {
                     self.start_interception_driver_install();
                 }
-                if Self::settings_action_button(ui, Self::tr_lang(language, "Delete", "")).clicked()
-                {
-                    self.delete_interception_package();
-                }
             });
 
+            ui.add_space(4.0);
             if restart_required {
                 ui.label(
                     RichText::new(Self::tr_lang(
@@ -527,6 +486,57 @@ impl CrosshairApp {
                     .small()
                     .color(Color32::from_rgb(248, 214, 102)),
                 );
+            } else if driver_installed {
+                ui.label(
+                    RichText::new(Self::tr_lang(
+                        language,
+                        "Installed. Restart your PC to take effect.",
+                        "",
+                    ))
+                    .color(Color32::from_rgb(126, 224, 182)),
+                );
+            }
+        });
+    }
+
+    fn render_ocr_tool_header(&mut self, ui: &mut egui::Ui, language: UiLanguage) {
+        let installed_count = crate::ocr::ocr_language_packs()
+            .iter()
+            .filter(|pack| crate::ocr::is_language_pack_installed(pack.code))
+            .count();
+        let total_size: u64 = crate::ocr::ocr_language_packs()
+            .iter()
+            .map(|pack| crate::ocr::installed_language_pack_size(pack.code))
+            .sum();
+
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(RichText::new("OCR").strong().size(13.0));
+                ui.add_space(2.0);
+                let detail = if installed_count > 0 {
+                    format!(
+                        "{} packs ({})",
+                        installed_count,
+                        Self::format_byte_size(total_size)
+                    )
+                } else {
+                    Self::tr_lang(language, "No packs installed", "").to_owned()
+                };
+                ui.label(RichText::new(detail).small().weak());
+            });
+
+            let action_width = 148.0;
+            let spacer = (ui.available_width() - action_width).max(0.0);
+            if spacer > 0.0 {
+                ui.add_space(spacer);
+            }
+            let button_label = if self.ocr_tools_open {
+                Self::tr_lang(language, "Close", "")
+            } else {
+                Self::tr_lang(language, "Open", "")
+            };
+            if Self::settings_action_button(ui, button_label).clicked() {
+                self.ocr_tools_open = !self.ocr_tools_open;
             }
         });
     }
@@ -614,7 +624,6 @@ impl CrosshairApp {
         installed: bool,
         downloading_progress: Option<f32>,
         expected_size_bytes: u64,
-        description_text: &str,
         delete_status_text: &str,
         download_action: fn(&mut Self),
         delete_action: fn(&mut Self),
@@ -624,7 +633,6 @@ impl CrosshairApp {
                 ui.vertical(|ui| {
                     ui.label(RichText::new(title).strong().size(13.0));
                     ui.add_space(2.0);
-                    ui.label(RichText::new(description_text).weak());
                     ui.label(
                         RichText::new(Self::tool_size_label(path, expected_size_bytes))
                             .small()
