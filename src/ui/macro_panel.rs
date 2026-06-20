@@ -5363,16 +5363,32 @@ impl CrosshairApp {
                                             let is_preset_active = is_preset_enabled && group.enabled && folder_enabled;
                                             let enabled_icon = if is_preset_enabled { 0xe5ca } else { 0xe835 };
                                             let enabled_fill = if is_preset_active {
-                                                Color32::from_rgba_premultiplied(72, 156, 116, 120)
+                                                if self.state.ui_theme == UiThemeMode::Dark {
+                                                    Color32::from_rgba_premultiplied(72, 156, 116, 120)
+                                                } else {
+                                                    Color32::from_rgb(196, 236, 212)
+                                                }
                                             } else if is_preset_enabled {
-                                                Color32::from_rgba_premultiplied(72, 156, 116, 50)
+                                                if self.state.ui_theme == UiThemeMode::Dark {
+                                                    Color32::from_rgba_premultiplied(72, 156, 116, 50)
+                                                } else {
+                                                    Color32::from_rgb(226, 238, 231)
+                                                }
                                             } else {
                                                 ui.visuals().faint_bg_color
                                             };
                                             let enabled_stroke = if is_preset_active {
-                                                Color32::from_rgb(126, 224, 182)
+                                                if self.state.ui_theme == UiThemeMode::Dark {
+                                                    Color32::from_rgb(126, 224, 182)
+                                                } else {
+                                                    Color32::from_rgb(52, 138, 96)
+                                                }
                                             } else if is_preset_enabled {
-                                                Color32::from_rgb(110, 180, 142)
+                                                if self.state.ui_theme == UiThemeMode::Dark {
+                                                    Color32::from_rgb(110, 180, 142)
+                                                } else {
+                                                    Color32::from_rgb(118, 152, 132)
+                                                }
                                             } else {
                                                 ui.visuals().widgets.noninteractive.bg_stroke.color
                                             };
@@ -10363,7 +10379,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                     row_fill = if self.state.ui_theme == UiThemeMode::Dark {
                                         Color32::from_rgba_unmultiplied(62, 62, 62, 220)
                                     } else {
-                                        Color32::from_rgb(224, 231, 238)
+                                        Color32::from_rgb(214, 220, 228)
                                     };
                                 }
                                 let has_infinite_loop_warning = self.state.macro_infinite_loop_warning_enabled
@@ -10508,14 +10524,30 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 let (toggle_changed, new_enabled) = ui.scope(|ui| {
                                                     let icon = if step.enabled { 0xe5ca } else { 0xe835 };
                                                     let fill = if step.enabled {
-                                                        Color32::from_rgba_premultiplied(72, 156, 116, 120)
+                                                        if is_dark_theme {
+                                                            Color32::from_rgba_premultiplied(72, 156, 116, 120)
+                                                        } else {
+                                                            Color32::from_rgb(194, 235, 210)
+                                                        }
                                                     } else {
-                                                        ui.visuals().faint_bg_color
+                                                        if is_dark_theme {
+                                                            ui.visuals().faint_bg_color
+                                                        } else {
+                                                            Color32::from_rgb(229, 234, 241)
+                                                        }
                                                     };
                                                     let stroke = if step.enabled {
-                                                        Color32::from_rgb(126, 224, 182)
+                                                        if is_dark_theme {
+                                                            Color32::from_rgb(126, 224, 182)
+                                                        } else {
+                                                            Color32::from_rgb(50, 136, 94)
+                                                        }
                                                     } else {
-                                                        ui.visuals().widgets.noninteractive.bg_stroke.color
+                                                        if is_dark_theme {
+                                                            ui.visuals().widgets.noninteractive.bg_stroke.color
+                                                        } else {
+                                                            Color32::from_rgb(152, 164, 180)
+                                                        }
                                                     };
                                                     let resp = ui.add_sized(
                                                         STEP_TOOLBAR_BUTTON,

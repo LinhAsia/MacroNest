@@ -2480,13 +2480,22 @@ impl CrosshairApp {
     }
 
     fn preset_frame(ui: &egui::Ui, enabled: bool) -> egui::Frame {
+        let dark_mode = ui.visuals().dark_mode;
         let fill = if enabled {
-            Color32::from_rgba_premultiplied(32, 92, 52, 120)
+            if dark_mode {
+                Color32::from_rgba_premultiplied(32, 92, 52, 120)
+            } else {
+                Color32::from_rgb(212, 244, 224)
+            }
         } else {
             ui.visuals().faint_bg_color
         };
         let stroke_color = if enabled {
-            Color32::from_rgb(108, 224, 148)
+            if dark_mode {
+                Color32::from_rgb(108, 224, 148)
+            } else {
+                Color32::from_rgb(58, 146, 102)
+            }
         } else {
             ui.visuals().widgets.noninteractive.bg_stroke.color
         };
@@ -2581,19 +2590,31 @@ impl CrosshairApp {
         let (fill, stroke_color) = if group_enabled {
             if preset_enabled {
                 if window_focus_trigger {
-                    (
-                        Color32::from_rgba_premultiplied(32, 76, 106, 132),
-                        Color32::from_rgb(116, 204, 255),
-                    )
+                    if dark_mode {
+                        (
+                            Color32::from_rgba_premultiplied(32, 76, 106, 132),
+                            Color32::from_rgb(116, 204, 255),
+                        )
+                    } else {
+                        (
+                            Color32::from_rgb(218, 236, 248),
+                            Color32::from_rgb(76, 146, 204),
+                        )
+                    }
                 } else {
-                    // Combination 1: Group Active + Preset Active (Bright glowing green)
-                    (
-                        Color32::from_rgba_premultiplied(32, 92, 52, 120),
-                        Color32::from_rgb(108, 224, 148),
-                    )
+                    if dark_mode {
+                        (
+                            Color32::from_rgba_premultiplied(32, 92, 52, 120),
+                            Color32::from_rgb(108, 224, 148),
+                        )
+                    } else {
+                        (
+                            Color32::from_rgb(212, 244, 224),
+                            Color32::from_rgb(58, 146, 102),
+                        )
+                    }
                 }
             } else {
-                // Combination 2: Group Active + Preset Inactive (Restore user's desired old behavior!)
                 (
                     ui.visuals().faint_bg_color,
                     ui.visuals().widgets.noninteractive.bg_stroke.color,
@@ -2602,19 +2623,31 @@ impl CrosshairApp {
         } else {
             if preset_enabled {
                 if window_focus_trigger {
-                    (
-                        Color32::from_rgba_premultiplied(22, 54, 78, 72),
-                        Color32::from_rgb(78, 132, 176),
-                    )
+                    if dark_mode {
+                        (
+                            Color32::from_rgba_premultiplied(22, 54, 78, 72),
+                            Color32::from_rgb(78, 132, 176),
+                        )
+                    } else {
+                        (
+                            Color32::from_rgb(232, 240, 247),
+                            Color32::from_rgb(118, 152, 184),
+                        )
+                    }
                 } else {
-                    // Combination 3: Group Inactive + Preset Active (Armed but dormant - show sleep green tint!)
-                    (
-                        Color32::from_rgba_premultiplied(25, 65, 40, 60),
-                        Color32::from_rgb(60, 120, 85),
-                    )
+                    if dark_mode {
+                        (
+                            Color32::from_rgba_premultiplied(25, 65, 40, 60),
+                            Color32::from_rgb(60, 120, 85),
+                        )
+                    } else {
+                        (
+                            Color32::from_rgb(232, 240, 236),
+                            Color32::from_rgb(112, 144, 124),
+                        )
+                    }
                 }
             } else {
-                // Combination 4: Group Inactive + Preset Inactive (Fully dark/dormant)
                 (
                     ui.visuals().faint_bg_color,
                     ui.visuals().widgets.noninteractive.bg_stroke.color,
