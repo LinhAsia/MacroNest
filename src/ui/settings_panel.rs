@@ -36,103 +36,120 @@ impl CrosshairApp {
                             }
                             if self.state.groq_settings.details_open {
                                 ui.add_space(8.0);
-                                ui.horizontal(|ui| {
-                                    ui.label("API Key");
-                                    let key_editor =
-                                        TextEdit::singleline(&mut self.state.groq_settings.api_key)
-                                            .hint_text("gsk_...");
-                                    let response = ui.add_sized(
-                                        [280.0, 24.0],
-                                        if self.state.groq_settings.show_api_key {
-                                            key_editor
-                                        } else {
-                                            key_editor.password(true)
-                                        },
-                                    );
-                                    if self.focus_groq_api_key_pending {
-                                        response.request_focus();
-                                        self.focus_groq_api_key_pending = false;
-                                    }
-                                    Self::apply_vietnamese_input_if_changed(
-                                        &response,
-                                        self.state.vietnamese_input_enabled,
-                                        self.state.vietnamese_input_mode,
-                                        &mut self.state.groq_settings.api_key,
-                                    );
-                                    groq_changed |= response.changed();
-                                    if ui
-                                        .button(if self.state.groq_settings.show_api_key {
-                                            Self::tr_lang(language, "Hide", "")
-                                        } else {
-                                            Self::tr_lang(language, "Show", "")
-                                        })
-                                        .clicked()
-                                    {
-                                        self.state.groq_settings.show_api_key =
-                                            !self.state.groq_settings.show_api_key;
-                                        groq_changed = true;
-                                    }
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Model");
-                                    let selected_text = {
-                                        let model = self.state.groq_settings.model.trim();
-                                        Self::groq_model_catalog()
-                                            .iter()
-                                            .find(|(_, model_id)| {
-                                                model_id.eq_ignore_ascii_case(model)
-                                            })
-                                            .map(|(label, model_id)| {
-                                                format!("{label} ({model_id})")
-                                            })
-                                            .unwrap_or_else(|| model.to_owned())
-                                    };
-                                    egui::ComboBox::from_id_salt("groq-model-picker")
-                                        .selected_text(selected_text)
-                                        .width(280.0)
-                                        .show_ui(ui, |ui| {
-                                            for (label, model_id) in Self::groq_model_catalog() {
-                                                let selected = self
-                                                    .state
-                                                    .groq_settings
-                                                    .model
-                                                    .trim()
-                                                    .eq(*model_id);
-                                                if ui
-                                                    .selectable_label(
-                                                        selected,
-                                                        format!("{label} ({model_id})"),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    self.state.groq_settings.model =
-                                                        (*model_id).to_owned();
-                                                    groq_changed = true;
-                                                    ui.close();
-                                                }
-                                            }
-                                        });
-                                });
-                                ui.add_space(4.0);
-                                ui.horizontal(|ui| {
-                                    let response = ui.add_sized(
-                                        [280.0, 24.0],
-                                        TextEdit::singleline(&mut self.state.groq_settings.model)
-                                            .hint_text("openai/gpt-oss-120b"),
-                                    );
-                                    Self::apply_vietnamese_input_if_changed(
-                                        &response,
-                                        self.state.vietnamese_input_enabled,
-                                        self.state.vietnamese_input_mode,
-                                        &mut self.state.groq_settings.model,
-                                    );
-                                    groq_changed |= response.changed();
-                                    if Self::settings_action_button(ui, "Get API key").clicked() {
-                                        let _ = crate::platform::open_url_in_browser(
-                                            "https://console.groq.com/keys",
+                                let action_width = 104.0;
+                                egui::Grid::new("api-settings-grid")
+                                    .num_columns(3)
+                                    .min_col_width(0.0)
+                                    .spacing([12.0, 8.0])
+                                    .show(ui, |ui| {
+                                        ui.label("API Key");
+                                        let key_editor = TextEdit::singleline(
+                                            &mut self.state.groq_settings.api_key,
+                                        )
+                                        .hint_text("gsk_...");
+                                        let response = ui.add_sized(
+                                            [280.0, 24.0],
+                                            if self.state.groq_settings.show_api_key {
+                                                key_editor
+                                            } else {
+                                                key_editor.password(true)
+                                            },
                                         );
-                                    }
-                                });
+                                        if self.focus_groq_api_key_pending {
+                                            response.request_focus();
+                                            self.focus_groq_api_key_pending = false;
+                                        }
+                                        Self::apply_vietnamese_input_if_changed(
+                                            &response,
+                                            self.state.vietnamese_input_enabled,
+                                            self.state.vietnamese_input_mode,
+                                            &mut self.state.groq_settings.api_key,
+                                        );
+                                        groq_changed |= response.changed();
+                                        if Self::settings_action_button_fixed(
+                                            ui,
+                                            if self.state.groq_settings.show_api_key {
+                                                Self::tr_lang(language, "Hide", "")
+                                            } else {
+                                                Self::tr_lang(language, "Show", "")
+                                            },
+                                            action_width,
+                                        )
+                                        .clicked()
+                                        {
+                                            self.state.groq_settings.show_api_key =
+                                                !self.state.groq_settings.show_api_key;
+                                            groq_changed = true;
+                                        }
+                                        ui.end_row();
+
+                                        ui.label("Model");
+                                        let selected_text = {
+                                            let model = self.state.groq_settings.model.trim();
+                                            Self::groq_model_catalog()
+                                                .iter()
+                                                .find(|(_, model_id)| {
+                                                    model_id.eq_ignore_ascii_case(model)
+                                                })
+                                                .map(|(label, model_id)| {
+                                                    format!("{label} ({model_id})")
+                                                })
+                                                .unwrap_or_else(|| model.to_owned())
+                                        };
+                                        egui::ComboBox::from_id_salt("groq-model-picker")
+                                            .selected_text(selected_text)
+                                            .width(280.0)
+                                            .show_ui(ui, |ui| {
+                                                for (label, model_id) in Self::groq_model_catalog() {
+                                                    let selected = self
+                                                        .state
+                                                        .groq_settings
+                                                        .model
+                                                        .trim()
+                                                        .eq(*model_id);
+                                                    if ui
+                                                        .selectable_label(
+                                                            selected,
+                                                            format!("{label} ({model_id})"),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        self.state.groq_settings.model =
+                                                            (*model_id).to_owned();
+                                                        groq_changed = true;
+                                                        ui.close();
+                                                    }
+                                                }
+                                            });
+                                        ui.add_space(action_width);
+                                        ui.end_row();
+
+                                        ui.label("");
+                                        let response = ui.add_sized(
+                                            [280.0, 24.0],
+                                            TextEdit::singleline(&mut self.state.groq_settings.model)
+                                                .hint_text("openai/gpt-oss-120b"),
+                                        );
+                                        Self::apply_vietnamese_input_if_changed(
+                                            &response,
+                                            self.state.vietnamese_input_enabled,
+                                            self.state.vietnamese_input_mode,
+                                            &mut self.state.groq_settings.model,
+                                        );
+                                        groq_changed |= response.changed();
+                                        if Self::settings_action_button_fixed(
+                                            ui,
+                                            "Get API key",
+                                            action_width,
+                                        )
+                                        .clicked()
+                                        {
+                                            let _ = crate::platform::open_url_in_browser(
+                                                "https://console.groq.com/keys",
+                                            );
+                                        }
+                                        ui.end_row();
+                                    });
                             }
                         });
                     });
