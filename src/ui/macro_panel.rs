@@ -5366,31 +5366,39 @@ impl CrosshairApp {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
                                                     Color32::from_rgba_premultiplied(72, 156, 116, 120)
                                                 } else {
-                                                    Color32::from_rgb(120, 196, 148)
+                                                    Color32::from_rgb(72, 168, 112)
                                                 }
                                             } else if is_preset_enabled {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
                                                     Color32::from_rgba_premultiplied(72, 156, 116, 50)
                                                 } else {
-                                                    Color32::from_rgb(208, 228, 216)
+                                                    Color32::from_rgb(232, 237, 241)
                                                 }
                                             } else {
-                                                ui.visuals().faint_bg_color
+                                                if self.state.ui_theme == UiThemeMode::Dark {
+                                                    ui.visuals().faint_bg_color
+                                                } else {
+                                                    Color32::from_rgb(246, 248, 251)
+                                                }
                                             };
                                             let enabled_stroke = if is_preset_active {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
                                                     Color32::from_rgb(126, 224, 182)
                                                 } else {
-                                                    Color32::from_rgb(32, 120, 76)
+                                                    Color32::from_rgb(24, 108, 66)
                                                 }
                                             } else if is_preset_enabled {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
                                                     Color32::from_rgb(110, 180, 142)
                                                 } else {
-                                                    Color32::from_rgb(108, 150, 124)
+                                                    Color32::from_rgb(180, 192, 202)
                                                 }
                                             } else {
-                                                ui.visuals().widgets.noninteractive.bg_stroke.color
+                                                if self.state.ui_theme == UiThemeMode::Dark {
+                                                    ui.visuals().widgets.noninteractive.bg_stroke.color
+                                                } else {
+                                                    Color32::from_rgb(188, 198, 210)
+                                                }
                                             };
                                             if ui
                                                 .add_sized(
@@ -10379,7 +10387,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                     row_fill = if self.state.ui_theme == UiThemeMode::Dark {
                                         Color32::from_rgba_unmultiplied(62, 62, 62, 220)
                                     } else {
-                                        Color32::from_rgb(214, 220, 228)
+                                        Color32::from_rgb(226, 232, 239)
                                     };
                                 }
                                 let has_infinite_loop_warning = self.state.macro_infinite_loop_warning_enabled
@@ -10527,26 +10535,26 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         if is_dark_theme {
                                                             Color32::from_rgba_premultiplied(72, 156, 116, 120)
                                                         } else {
-                                                            Color32::from_rgb(118, 194, 146)
+                                                            Color32::from_rgb(64, 162, 106)
                                                         }
                                                     } else {
                                                         if is_dark_theme {
                                                             ui.visuals().faint_bg_color
                                                         } else {
-                                                            Color32::from_rgb(229, 234, 241)
+                                                            Color32::from_rgb(246, 248, 251)
                                                         }
                                                     };
                                                     let stroke = if step.enabled {
                                                         if is_dark_theme {
                                                             Color32::from_rgb(126, 224, 182)
                                                         } else {
-                                                            Color32::from_rgb(30, 118, 74)
+                                                            Color32::from_rgb(20, 102, 60)
                                                         }
                                                     } else {
                                                         if is_dark_theme {
                                                             ui.visuals().widgets.noninteractive.bg_stroke.color
                                                         } else {
-                                                            Color32::from_rgb(152, 164, 180)
+                                                            Color32::from_rgb(188, 198, 210)
                                                         }
                                                     };
                                                     let resp = ui.add_sized(
