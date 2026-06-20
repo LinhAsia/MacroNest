@@ -1690,7 +1690,7 @@ impl CrosshairApp {
                         self.clear_image_search_capture_state();
                         self.state.quick_key_display_x = screen_x;
                         self.state.quick_key_display_y = screen_y;
-                        self.sync_quick_key_display_config_with_preview(true);
+                        self.sync_quick_key_display_config();
                         self.persist();
                         self.status = match self.state.ui_language {
                             crate::model::UiLanguage::Vietnamese => {
