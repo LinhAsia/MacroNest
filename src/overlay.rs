@@ -2993,7 +2993,7 @@ mod windows_overlay {
                 }
                 if let Some(key_name) = key_name.clone() {
                     if screen_draw_capture_should_swallow_key_name(&key_name) {
-                        update_held_key(&key_name, is_key_down, is_key_up);
+                        update_held_key(info.vkCode, is_key_down, is_key_up);
                         if is_key_up {
                             mark_screen_draw_capture_trigger_released();
                         }
@@ -3006,12 +3006,12 @@ mod windows_overlay {
                     let binding = binding_from_trigger_event(&key_name);
                     if is_key_down {
                         if process_screen_draw_hotkey(&binding, is_repeat_key(&key_name)) {
-                            update_held_key(&key_name, is_key_down, is_key_up);
+                            update_held_key(info.vkCode, is_key_down, is_key_up);
                             update_modifier_state(info.vkCode, is_key_down);
                             return LRESULT(1);
                         }
                     } else if is_key_up && process_screen_draw_hotkey_release(&binding) {
-                        update_held_key(&key_name, is_key_down, is_key_up);
+                        update_held_key(info.vkCode, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
                         return LRESULT(1);
                     }
@@ -3021,9 +3021,7 @@ mod windows_overlay {
                     hook_state.windows_key_locked
                 };
                 if windows_key_locked && matches!(info.vkCode, 0x5B | 0x5C) {
-                    if let Some(key_name) = key_name.as_ref() {
-                        update_held_key(key_name, is_key_down, is_key_up);
-                    }
+                    update_held_key(info.vkCode, is_key_down, is_key_up);
                     update_modifier_state(info.vkCode, is_key_down);
                     return LRESULT(1);
                 }
@@ -3084,8 +3082,8 @@ mod windows_overlay {
                 // Skip normal hotkeys if UI is focused
 
                 if is_ui_in_foreground() {
-                    if let Some(key_name) = key_name.clone() {
-                        update_held_key(&key_name, is_key_down, is_key_up);
+                    if key_name.is_some() {
+                        update_held_key(info.vkCode, is_key_down, is_key_up);
                         if is_key_up {
                             screen_draw_release_trigger_latch_if_ready();
                         }
@@ -3098,7 +3096,7 @@ mod windows_overlay {
                 if let Some(key_name) = key_name.clone() {
                     let binding = binding_from_trigger_event(&key_name);
                     if key_name.eq_ignore_ascii_case("Tab") && binding.alt {
-                        update_held_key(&key_name, is_key_down, is_key_up);
+                        update_held_key(info.vkCode, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
                         return CallNextHookEx(None, code, wparam, lparam);
                     }
@@ -3111,7 +3109,7 @@ mod windows_overlay {
                         }
                     }
 
-                    update_held_key(&key_name, is_key_down, is_key_up);
+                    update_held_key(info.vkCode, is_key_down, is_key_up);
                     if is_key_up {
                         screen_draw_release_trigger_latch_if_ready();
                     }
@@ -4937,31 +4935,26 @@ mod windows_overlay {
         }
     }
 
-    fn update_held_key(key_name: &str, is_key_down: bool, is_key_up: bool) {
+    fn update_held_key(vk_code: u32, is_key_down: bool, is_key_up: bool) {
+        let key_name = match hotkey::vk_to_key_name(vk_code) {
+            Some(name) => name,
+            None => return,
+        };
         let mut hook_state = HOOK_STATE.lock();
         if is_key_down {
             hook_state.held_inputs.insert(key_name.to_owned());
-            if key_name.eq_ignore_ascii_case("Shift") {
-                if unsafe { GetAsyncKeyState(0xA0) } as u16 & 0x8000 != 0 {
-                    hook_state.held_inputs.insert("LShift".to_owned());
-                }
-                if unsafe { GetAsyncKeyState(0xA1) } as u16 & 0x8000 != 0 {
-                    hook_state.held_inputs.insert("RShift".to_owned());
-                }
-            } else if key_name.eq_ignore_ascii_case("Ctrl") {
-                if unsafe { GetAsyncKeyState(0xA2) } as u16 & 0x8000 != 0 {
-                    hook_state.held_inputs.insert("LCtrl".to_owned());
-                }
-                if unsafe { GetAsyncKeyState(0xA3) } as u16 & 0x8000 != 0 {
-                    hook_state.held_inputs.insert("RCtrl".to_owned());
-                }
-            } else if key_name.eq_ignore_ascii_case("Alt") {
-                if unsafe { GetAsyncKeyState(0xA4) } as u16 & 0x8000 != 0 {
-                    hook_state.held_inputs.insert("LAlt".to_owned());
-                }
-                if unsafe { GetAsyncKeyState(0xA5) } as u16 & 0x8000 != 0 {
-                    hook_state.held_inputs.insert("RAlt".to_owned());
-                }
+            if vk_code == 0xA0 {
+                hook_state.held_inputs.insert("LShift".to_owned());
+            } else if vk_code == 0xA1 {
+                hook_state.held_inputs.insert("RShift".to_owned());
+            } else if vk_code == 0xA2 {
+                hook_state.held_inputs.insert("LCtrl".to_owned());
+            } else if vk_code == 0xA3 {
+                hook_state.held_inputs.insert("RCtrl".to_owned());
+            } else if vk_code == 0xA4 {
+                hook_state.held_inputs.insert("LAlt".to_owned());
+            } else if vk_code == 0xA5 {
+                hook_state.held_inputs.insert("RAlt".to_owned());
             }
             let ignored_for_stop = hook_state
                 .stop_ignore_keys
@@ -4971,16 +4964,41 @@ mod windows_overlay {
                 hook_state.pressed_inputs.insert(key_name.to_owned());
             }
         } else if is_key_up {
-            hook_state.held_inputs.remove(key_name);
-            if key_name.eq_ignore_ascii_case("Shift") {
+            if vk_code == 0xA0 {
                 hook_state.held_inputs.remove("LShift");
+            } else if vk_code == 0xA1 {
                 hook_state.held_inputs.remove("RShift");
-            } else if key_name.eq_ignore_ascii_case("Ctrl") {
+            } else if vk_code == 0xA2 {
                 hook_state.held_inputs.remove("LCtrl");
+            } else if vk_code == 0xA3 {
                 hook_state.held_inputs.remove("RCtrl");
-            } else if key_name.eq_ignore_ascii_case("Alt") {
+            } else if vk_code == 0xA4 {
                 hook_state.held_inputs.remove("LAlt");
+            } else if vk_code == 0xA5 {
                 hook_state.held_inputs.remove("RAlt");
+            }
+
+            let has_lshift = hook_state.held_inputs.contains("LShift");
+            let has_rshift = hook_state.held_inputs.contains("RShift");
+            let has_lctrl = hook_state.held_inputs.contains("LCtrl");
+            let has_rctrl = hook_state.held_inputs.contains("RCtrl");
+            let has_lalt = hook_state.held_inputs.contains("LAlt");
+            let has_ralt = hook_state.held_inputs.contains("RAlt");
+
+            if key_name.eq_ignore_ascii_case("Shift") {
+                if !has_lshift && !has_rshift {
+                    hook_state.held_inputs.remove("Shift");
+                }
+            } else if key_name.eq_ignore_ascii_case("Ctrl") {
+                if !has_lctrl && !has_rctrl {
+                    hook_state.held_inputs.remove("Ctrl");
+                }
+            } else if key_name.eq_ignore_ascii_case("Alt") {
+                if !has_lalt && !has_ralt {
+                    hook_state.held_inputs.remove("Alt");
+                }
+            } else {
+                hook_state.held_inputs.remove(key_name);
             }
             hook_state
                 .stop_ignore_keys
