@@ -527,6 +527,7 @@ mod windows_overlay {
         UpdateKeySoundConfig {
             enabled: bool,
             style: u32,
+            volume: f32,
         },
     }
 
@@ -1011,6 +1012,7 @@ mod windows_overlay {
         last_scroll_down_at: Option<std::time::Instant>,
         pub(crate) quick_key_sound_enabled: bool,
         pub(crate) quick_key_sound_style: u32,
+        pub(crate) quick_key_sound_volume: f32,
         pub(crate) quick_key_mascot_active: bool,
     }
 
@@ -1112,6 +1114,7 @@ mod windows_overlay {
                 last_scroll_down_at: None,
                 quick_key_sound_enabled: false,
                 quick_key_sound_style: 2,
+                quick_key_sound_volume: 1.0,
                 quick_key_mascot_active: false,
             }
         }
@@ -2944,12 +2947,12 @@ mod windows_overlay {
                 let is_key_up = matches!(msg, WM_KEYUP | WM_SYSKEYUP);
 
                 if is_key_down {
-                    let (sound_enabled, sound_style) = {
+                    let (sound_enabled, sound_style, sound_volume) = {
                         let state = HOOK_STATE.lock();
-                        (state.quick_key_sound_enabled, state.quick_key_sound_style)
+                        (state.quick_key_sound_enabled, state.quick_key_sound_style, state.quick_key_sound_volume)
                     };
                     if sound_enabled {
-                        crate::audio::play_key_sound_vk(sound_style, info.vkCode);
+                        crate::audio::play_key_sound_vk(sound_style, info.vkCode, sound_volume);
                     }
                 }
                 if is_key_down && info.vkCode == 0x1B && is_mouse_path_draw_capture_active() {
@@ -6814,10 +6817,11 @@ mod windows_overlay {
                     let _ = refresh_quick_key_display(runtime);
                 }
 
-                OverlayCommand::UpdateKeySoundConfig { enabled, style } => {
+                OverlayCommand::UpdateKeySoundConfig { enabled, style, volume } => {
                     let mut hook_state = HOOK_STATE.lock();
                     hook_state.quick_key_sound_enabled = enabled;
                     hook_state.quick_key_sound_style = style;
+                    hook_state.quick_key_sound_volume = volume;
                 }
 
                 OverlayCommand::UpdateScreenDrawConfig {

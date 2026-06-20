@@ -1127,7 +1127,7 @@ impl CrosshairApp {
             }
         }
         app.preload_primary_sound_preset_audio();
-        crate::audio::play_key_sound_vk(0, 0);
+        crate::audio::play_key_sound_vk(0, 0, 1.0);
         app
     }
 
@@ -1316,6 +1316,7 @@ impl CrosshairApp {
             .send(OverlayCommand::UpdateKeySoundConfig {
                 enabled: self.state.quick_key_sound_enabled,
                 style: self.state.quick_key_sound_style,
+                volume: self.state.quick_key_sound_volume,
             });
     }
 
@@ -5375,6 +5376,37 @@ impl CrosshairApp {
                                     self.sync_quick_key_sound_config();
                                     self.persist();
                                 }
+
+                                ui.add_space(6.0);
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Volume",
+                                        "Am luong",
+                                    ))
+                                    .size(10.0),
+                                );
+                                let vol_before = self.state.quick_key_sound_volume;
+                                let vol_pct = (vol_before * 100.0).round() as i32;
+                                ui.horizontal(|ui| {
+                                    let slider_resp = ui.add_sized(
+                                        [120.0, 20.0],
+                                        egui::Slider::new(
+                                            &mut self.state.quick_key_sound_volume,
+                                            0.0..=2.0,
+                                        )
+                                        .show_value(false),
+                                    );
+                                    ui.label(
+                                        RichText::new(format!("{}%", vol_pct)).size(10.0),
+                                    );
+                                    let _ = slider_resp;
+                                });
+                                if (self.state.quick_key_sound_volume - vol_before).abs() > 1e-4 {
+                                    self.sync_quick_key_sound_config();
+                                    self.persist();
+                                }
+
                                 false
                             }).inner
                         });
