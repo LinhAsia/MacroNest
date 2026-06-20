@@ -4978,12 +4978,42 @@ impl CrosshairApp {
                                         .width(164.0)
                                         .selected_text(match self.state.quick_key_display_mascot_style {
                                             crate::model::MascotStyle::Hachiware => "Hachiware",
+                                            crate::model::MascotStyle::ChiikawaClassic => "Chiikawa Classic",
+                                            crate::model::MascotStyle::ChiikawaCoffee => "Chiikawa Coffee",
+                                            crate::model::MascotStyle::ChiikawaSleepy => "Chiikawa Sleepy",
+                                            crate::model::MascotStyle::ChiikawaHappyStar => "Chiikawa Star",
+                                            crate::model::MascotStyle::ChiikawaPajama => "Chiikawa Pajama",
                                         })
                                         .show_ui(ui, |ui| {
                                             ui.selectable_value(
                                                 &mut self.state.quick_key_display_mascot_style,
                                                 crate::model::MascotStyle::Hachiware,
                                                 "Hachiware",
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.state.quick_key_display_mascot_style,
+                                                crate::model::MascotStyle::ChiikawaClassic,
+                                                "Chiikawa Classic",
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.state.quick_key_display_mascot_style,
+                                                crate::model::MascotStyle::ChiikawaCoffee,
+                                                "Chiikawa Coffee",
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.state.quick_key_display_mascot_style,
+                                                crate::model::MascotStyle::ChiikawaSleepy,
+                                                "Chiikawa Sleepy",
+                                             );
+                                            ui.selectable_value(
+                                                &mut self.state.quick_key_display_mascot_style,
+                                                crate::model::MascotStyle::ChiikawaHappyStar,
+                                                "Chiikawa Star",
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.state.quick_key_display_mascot_style,
+                                                crate::model::MascotStyle::ChiikawaPajama,
+                                                "Chiikawa Pajama",
                                             );
                                         });
                                     if self.state.quick_key_display_mascot_style != style_before {
