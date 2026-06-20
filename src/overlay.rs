@@ -3007,7 +3007,7 @@ mod windows_overlay {
                 if !is_ui_in_foreground()
                     && let Some(key_name) = key_name.as_ref()
                 {
-                    update_quick_key_display_key(key_name, is_key_down, is_key_up);
+                    update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
                 }
                 if let Some(key_name) = key_name.clone() {
                     if screen_draw_capture_should_swallow_key_name(&key_name) {
@@ -3235,7 +3235,7 @@ mod windows_overlay {
                                 | WM_XBUTTONUP
                         );
                         let is_key_up = !is_key_down && message != WM_MOUSEWHEEL;
-                        update_quick_key_display_key(key_name, is_key_down, is_key_up);
+                        update_quick_key_display_key(key_name, 0, is_key_down, is_key_up);
                     }
                 }
                 if process_screen_draw_mouse_event(message, info.pt) {
@@ -3504,7 +3504,7 @@ mod windows_overlay {
                             | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
                             | WM_XBUTTONUP
                     );
-                    update_quick_key_display_key(key_name, is_down, is_key_up);
+                    update_quick_key_display_key(key_name, 0, is_down, is_key_up);
                 }
                 if let Some(key_name) = event_key_name
                     && consume_suppressed_mouse_trigger(key_name)
@@ -6050,26 +6050,62 @@ mod windows_overlay {
         }
     }
 
-    fn update_quick_key_display_key(key_name: &str, is_key_down: bool, is_key_up: bool) {
+    fn update_quick_key_display_key(key_name: &str, vk_code: u32, is_key_down: bool, is_key_up: bool) {
+        let mascot_active = {
+            HOOK_STATE.lock().quick_key_mascot_active
+        };
+
+        // Determine the exact left/right modifier name if mascot mode is active
+        let exact_modifier = if mascot_active {
+            match vk_code {
+                0xA0 => Some("LShift"),
+                0xA1 => Some("RShift"),
+                0xA2 => Some("LCtrl"),
+                0xA3 => Some("RCtrl"),
+                0xA4 => Some("LAlt"),
+                0xA5 => Some("RAlt"),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        let effective_key_name = exact_modifier.unwrap_or(key_name);
+
         if is_key_down {
-            if let (Some((text, combo_keys)), Some(identity)) = (
-                quick_key_display_combo_snapshot_for_key_name(key_name),
-                quick_key_display_identity_for_key_name(key_name),
-            ) {
+            let combo_info = if mascot_active && exact_modifier.is_some() {
+                Some((effective_key_name.to_owned(), vec![effective_key_name.to_owned()]))
+            } else {
+                quick_key_display_combo_snapshot_for_key_name(effective_key_name)
+            };
+
+            let identity_info = if mascot_active && exact_modifier.is_some() {
+                Some(effective_key_name.to_owned())
+            } else {
+                quick_key_display_identity_for_key_name(effective_key_name)
+            };
+
+            if let (Some((text, combo_keys)), Some(identity)) = (combo_info, identity_info) {
                 send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(
                     QuickKeyDisplayUpdate::Press {
                         text,
                         identity,
                         combo_keys,
-                        lane: quick_key_display_lane_for_key_name(key_name),
-                        held: !quick_key_display_is_wheel_key_name(key_name),
+                        lane: quick_key_display_lane_for_key_name(effective_key_name),
+                        held: !quick_key_display_is_wheel_key_name(effective_key_name),
                     },
                 ));
             }
             return;
         }
 
-        if is_key_up && let Some(identity) = quick_key_display_identity_for_key_name(key_name) {
+        let identity_info = if mascot_active && exact_modifier.is_some() {
+            Some(effective_key_name.to_owned())
+        } else {
+            quick_key_display_identity_for_key_name(effective_key_name)
+        };
+
+        if is_key_up && let Some(identity) = identity_info {
             send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(
                 QuickKeyDisplayUpdate::Release { identity },
             ));
