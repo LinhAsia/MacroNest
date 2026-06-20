@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub const OCR_ACTIVE_CODE: &str = "active";
 pub const OCR_DEFAULT_CODE: &str = "multilingual";
 
 const OCR_MODELS_BASE_URL: &str =
@@ -118,17 +117,14 @@ struct OcrEngineBundle {
 static OCR_ENGINE_CACHE: Lazy<Mutex<HashMap<String, OcrEngineBundle>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-static ACTIVE_LANGUAGE_CODE: Lazy<Mutex<String>> =
-    Lazy::new(|| Mutex::new(OCR_DEFAULT_CODE.to_owned()));
-
 pub fn ocr_language_packs() -> &'static [OcrLanguagePack] {
     OCR_LANGUAGE_PACKS
 }
 
 pub fn normalize_language_code(value: &str) -> String {
     let normalized = value.trim().to_ascii_lowercase();
-    if normalized == OCR_ACTIVE_CODE {
-        return active_language_code();
+    if normalized == "active" {
+        return OCR_DEFAULT_CODE.to_owned();
     }
     if OCR_LANGUAGE_PACKS.iter().any(|pack| pack.code == normalized) {
         normalized
@@ -183,28 +179,10 @@ pub fn language_pack_for_code_public(value: &str) -> OcrLanguagePack {
     }
 }
 
-pub fn active_language_code() -> String {
-    ACTIVE_LANGUAGE_CODE
-        .lock()
-        .map(|value| value.clone())
-        .unwrap_or_else(|_| OCR_DEFAULT_CODE.to_owned())
-}
-
-pub fn active_language_label() -> &'static str {
-    label_for_language_code(&active_language_code())
-}
-
-pub fn set_active_language_code(value: &str) {
-    let normalized = normalize_language_code(value);
-    if let Ok(mut active) = ACTIVE_LANGUAGE_CODE.lock() {
-        *active = normalized;
-    }
-}
-
 #[cfg(windows)]
 fn resolve_requested_language(value: &str) -> String {
-    if value.trim().is_empty() || value == OCR_ACTIVE_CODE {
-        active_language_code()
+    if value.trim().is_empty() {
+        OCR_DEFAULT_CODE.to_owned()
     } else {
         normalize_language_code(value)
     }
