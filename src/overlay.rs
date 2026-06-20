@@ -131,7 +131,7 @@ mod windows_overlay {
                     EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor,
                     GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
                     GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
-                    GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTCAPTION, HTTRANSPARENT, HWND_TOPMOST,
+                    GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTTRANSPARENT, HWND_TOPMOST,
                     IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE,
                     LoadCursorW, LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG,
                     MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN,
@@ -142,7 +142,7 @@ mod windows_overlay {
                     TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
                     UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
                     WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
-                    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
+                    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
                     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
                     WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE, WM_NCHITTEST,
                     WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER,
@@ -3198,6 +3198,9 @@ mod windows_overlay {
             }
 
             if handle_mascot_global_drag(message, info.pt) {
+                if message == WM_MOUSEMOVE {
+                    return CallNextHookEx(None, code, wparam, lparam);
+                }
                 return LRESULT(1);
             }
 
