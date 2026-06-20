@@ -5864,6 +5864,16 @@ mod windows_overlay {
             add_key("Down", &["Down", "ArrowDown"], 14.0, 1.0, 4.0);
             add_key("Right", &["Right", "ArrowRight"], 15.0, 1.0, 4.0);
 
+            // Rotate keys 180 degrees around layout center (center_x = 205.85, center_y = 191.85)
+            let center_x = 205.85;
+            let center_y = 191.85;
+            for key in &mut keys {
+                let old_x = key.x;
+                let old_y = key.y;
+                key.x = 2.0 * center_x - old_x - key.w;
+                key.y = 2.0 * center_y - old_y - key.h;
+            }
+
             keys
         });
         &KEYS
@@ -13138,6 +13148,7 @@ mod windows_overlay {
         look_x: f32, look_y: f32,
         recent_pulse: f32,
         mascot_style: crate::model::MascotStyle,
+        is_interacting: bool,
     ) {
         // Body shadow
         fill_skia_circle(pixmap, body_cx, body_cy + 4.0 * scale, body_radius, [0, 0, 0, 22]);
@@ -13163,8 +13174,10 @@ mod windows_overlay {
         // Ear outer color
         let ear_outer_color = if is_hachiware {
             [100, 160, 230, 255] // Blue ears for Hachiware
+        } else if is_interacting {
+            [240, 80, 50, 255] // Red ears for excited Usagi
         } else {
-            body_color // White ears for Chiikawa
+            body_color // Yellow ears for Usagi
         };
 
         // Left Ear
@@ -13180,15 +13193,16 @@ mod windows_overlay {
                 head_cx - 18.0 * scale + ear_shift_x, head_cy - 38.0 * scale + ear_shift_y,
             );
         } else {
-            // Usagi long bunny ears left
-            left_ear.move_to(head_cx - 28.0 * scale + ear_shift_x, head_cy - 38.0 * scale + ear_shift_y);
+            // Usagi long bunny ears left (upright, parallel, cute capsule)
+            let base_y_ear = head_cy - 52.0 * scale + ear_shift_y;
+            left_ear.move_to(head_cx - 9.0 * scale + ear_shift_x, base_y_ear + 3.0 * scale);
             left_ear.quad_to(
-                head_cx - 55.0 * scale - ear_wiggle + ear_shift_x, head_cy - 70.0 * scale - ear_wiggle + ear_shift_y,
-                head_cx - 45.0 * scale - ear_wiggle + ear_shift_x, head_cy - 85.0 * scale - ear_wiggle + ear_shift_y,
+                head_cx - 11.0 * scale - ear_wiggle + ear_shift_x, head_cy - 98.0 * scale - ear_wiggle + ear_shift_y,
+                head_cx - 5.0 * scale - ear_wiggle + ear_shift_x, head_cy - 98.0 * scale - ear_wiggle + ear_shift_y,
             );
             left_ear.quad_to(
-                head_cx - 35.0 * scale - ear_wiggle + ear_shift_x, head_cy - 90.0 * scale - ear_wiggle + ear_shift_y,
-                head_cx - 14.0 * scale + ear_shift_x, head_cy - 44.0 * scale + ear_shift_y,
+                head_cx - 1.0 * scale + ear_shift_x, head_cy - 98.0 * scale + ear_shift_y,
+                head_cx - 1.0 * scale + ear_shift_x, base_y_ear + 3.0 * scale,
             );
         }
         left_ear.close();
@@ -13205,14 +13219,15 @@ mod windows_overlay {
             left_inner.line_to(head_cx - 23.0 * scale + ear_shift_x, head_cy - 34.0 * scale + ear_shift_y);
         } else {
             // Usagi left inner ear
-            left_inner.move_to(head_cx - 25.0 * scale + ear_shift_x, head_cy - 40.0 * scale + ear_shift_y);
+            let base_y_ear = head_cy - 52.0 * scale + ear_shift_y;
+            left_inner.move_to(head_cx - 7.0 * scale + ear_shift_x, base_y_ear + 1.0 * scale);
             left_inner.quad_to(
-                head_cx - 48.0 * scale - ear_wiggle + ear_shift_x, head_cy - 68.0 * scale - ear_wiggle + ear_shift_y,
-                head_cx - 42.0 * scale - ear_wiggle + ear_shift_x, head_cy - 78.0 * scale - ear_wiggle + ear_shift_y,
+                head_cx - 8.5 * scale - ear_wiggle + ear_shift_x, head_cy - 92.0 * scale - ear_wiggle + ear_shift_y,
+                head_cx - 5.0 * scale - ear_wiggle + ear_shift_x, head_cy - 92.0 * scale - ear_wiggle + ear_shift_y,
             );
             left_inner.quad_to(
-                head_cx - 36.0 * scale - ear_wiggle + ear_shift_x, head_cy - 82.0 * scale - ear_wiggle + ear_shift_y,
-                head_cx - 16.0 * scale + ear_shift_x, head_cy - 44.0 * scale + ear_shift_y,
+                head_cx - 3.0 * scale + ear_shift_x, head_cy - 92.0 * scale + ear_shift_y,
+                head_cx - 3.0 * scale + ear_shift_x, base_y_ear + 1.0 * scale,
             );
         }
         left_inner.close();
@@ -13231,15 +13246,16 @@ mod windows_overlay {
                 head_cx + 42.0 * scale + ear_shift_x, head_cy - 22.0 * scale + ear_shift_y,
             );
         } else {
-            // Usagi long bunny ears right
-            right_ear.move_to(head_cx - 12.0 * scale + ear_shift_x, head_cy - 44.0 * scale + ear_shift_y);
+            // Usagi long bunny ears right (upright, parallel, cute capsule)
+            let base_y_ear = head_cy - 52.0 * scale + ear_shift_y;
+            right_ear.move_to(head_cx + 1.0 * scale + ear_shift_x, base_y_ear + 3.0 * scale);
             right_ear.quad_to(
-                head_cx - 35.0 * scale + ear_wiggle + ear_shift_x, head_cy - 85.0 * scale + ear_wiggle + ear_shift_y,
-                head_cx - 24.0 * scale + ear_wiggle + ear_shift_x, head_cy - 98.0 * scale + ear_wiggle + ear_shift_y,
+                head_cx + 1.0 * scale + ear_shift_x, head_cy - 98.0 * scale + ear_shift_y,
+                head_cx + 5.0 * scale + ear_wiggle + ear_shift_x, head_cy - 98.0 * scale + ear_wiggle + ear_shift_y,
             );
             right_ear.quad_to(
-                head_cx - 12.0 * scale + ear_wiggle + ear_shift_x, head_cy - 100.0 * scale + ear_wiggle + ear_shift_y,
-                head_cx + 2.0 * scale + ear_shift_x, head_cy - 43.0 * scale + ear_shift_y,
+                head_cx + 11.0 * scale + ear_wiggle + ear_shift_x, head_cy - 98.0 * scale + ear_wiggle + ear_shift_y,
+                head_cx + 9.0 * scale + ear_shift_x, base_y_ear + 3.0 * scale,
             );
         }
         right_ear.close();
@@ -13256,14 +13272,15 @@ mod windows_overlay {
             right_inner.line_to(head_cx + 37.0 * scale + ear_shift_x, head_cy - 24.0 * scale + ear_shift_y);
         } else {
             // Usagi right inner ear
-            right_inner.move_to(head_cx - 9.0 * scale + ear_shift_x, head_cy - 44.0 * scale + ear_shift_y);
+            let base_y_ear = head_cy - 52.0 * scale + ear_shift_y;
+            right_inner.move_to(head_cx + 3.0 * scale + ear_shift_x, base_y_ear + 1.0 * scale);
             right_inner.quad_to(
-                head_cx - 29.0 * scale + ear_wiggle + ear_shift_x, head_cy - 80.0 * scale + ear_wiggle + ear_shift_y,
-                head_cx - 21.0 * scale + ear_wiggle + ear_shift_x, head_cy - 92.0 * scale + ear_wiggle + ear_shift_y,
+                head_cx + 3.0 * scale + ear_shift_x, head_cy - 92.0 * scale + ear_shift_y,
+                head_cx + 5.0 * scale + ear_wiggle + ear_shift_x, head_cy - 92.0 * scale + ear_wiggle + ear_shift_y,
             );
             right_inner.quad_to(
-                head_cx - 13.0 * scale + ear_wiggle + ear_shift_x, head_cy - 94.0 * scale + ear_wiggle + ear_shift_y,
-                head_cx - 1.0 * scale + ear_shift_x, head_cy - 43.0 * scale + ear_shift_y,
+                head_cx + 8.5 * scale + ear_wiggle + ear_shift_x, head_cy - 92.0 * scale + ear_wiggle + ear_shift_y,
+                head_cx + 7.0 * scale + ear_shift_x, base_y_ear + 1.0 * scale,
             );
         }
         right_inner.close();
@@ -13278,6 +13295,7 @@ mod windows_overlay {
         head_cx: f32, head_cy: f32, head_radius: f32,
         look_x: f32, look_y: f32,
         mascot_style: crate::model::MascotStyle,
+        is_interacting: bool,
     ) {
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
 
@@ -13286,6 +13304,8 @@ mod windows_overlay {
         
         let body_color = if mascot_style == crate::model::MascotStyle::Hachiware {
             [255, 255, 255, 255]
+        } else if is_interacting {
+            [240, 80, 50, 255] // Red head for excited Usagi
         } else {
             [254, 240, 187, 255] // Usagi yellow/cream
         };
@@ -13332,10 +13352,16 @@ mod windows_overlay {
             let eye_y_offset = 3.5 * scale;
             for &ex in &[head_cx - 23.0 * scale + look_x, head_cx + 23.0 * scale + look_x] {
                 let ey = head_cy + eye_y_offset + look_y;
-                fill_skia_circle(pixmap, ex, ey, eye_size * 0.5, [45, 40, 42, 255]);
-                // Highlights
-                fill_skia_circle(pixmap, ex - 1.8 * scale, ey - 1.8 * scale, 2.2 * scale, [255, 255, 255, 255]);
-                fill_skia_circle(pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.1 * scale, [255, 255, 255, 255]);
+                if is_interacting {
+                    // Blank white eyes with black outline when pressing keys
+                    fill_skia_circle(pixmap, ex, ey, eye_size * 0.5, [255, 255, 255, 255]);
+                    stroke_skia_circle(pixmap, ex, ey, eye_size * 0.5, 2.0 * scale, [45, 40, 42, 255]);
+                } else {
+                    // Normal shiny eyes
+                    fill_skia_circle(pixmap, ex, ey, eye_size * 0.5, [45, 40, 42, 255]);
+                    fill_skia_circle(pixmap, ex - 1.8 * scale, ey - 1.8 * scale, 2.2 * scale, [255, 255, 255, 255]);
+                    fill_skia_circle(pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.1 * scale, [255, 255, 255, 255]);
+                }
             }
         }
 
@@ -13360,8 +13386,8 @@ mod windows_overlay {
                 eyebrow.quad_to(ebx, eby - 1.5 * scale, ebx + 4.0 * scale, eby + 0.5 * scale * sign);
             } else {
                 // Usagi cute curved eyebrows
-                eyebrow.move_to(ebx - 4.5 * scale, eby + 1.0 * scale);
-                eyebrow.quad_to(ebx, eby - 2.5 * scale, ebx + 4.5 * scale, eby + 0.8 * scale * sign);
+                eyebrow.move_to(ebx - 4.5 * scale, eby + 1.5 * scale);
+                eyebrow.quad_to(ebx, eby - 2.5 * scale, ebx + 4.5 * scale, eby + 1.2 * scale * sign);
             }
             if let Some(path) = eyebrow.finish() {
                 stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
@@ -13426,13 +13452,13 @@ mod windows_overlay {
             let mx = head_cx + look_x;
             let my = mouth_y;
             // Left curve
-            mouth.move_to(mx - 5.0 * scale, my + 0.5 * scale);
-            mouth.quad_to(mx - 2.5 * scale, my + 3.5 * scale, mx, my + 1.0 * scale);
+            mouth.move_to(mx - 4.0 * scale, my + 0.5 * scale);
+            mouth.quad_to(mx - 2.0 * scale, my + 2.8 * scale, mx, my + 0.8 * scale);
             // Center hook / curl
-            mouth.quad_to(mx - 1.0 * scale, my + 3.5 * scale, mx - 1.5 * scale, my + 2.0 * scale);
+            mouth.quad_to(mx - 0.8 * scale, my + 2.6 * scale, mx - 1.5 * scale, my + 1.8 * scale);
             // Right curve
-            mouth.move_to(mx, my + 1.0 * scale);
-            mouth.quad_to(mx + 2.5 * scale, my + 3.5 * scale, mx + 5.0 * scale, my + 0.5 * scale);
+            mouth.move_to(mx, my + 0.8 * scale);
+            mouth.quad_to(mx + 2.0 * scale, my + 2.8 * scale, mx + 4.0 * scale, my + 0.5 * scale);
         }
         if let Some(p) = mouth.finish() { stroke_skia_path(pixmap, &p, [45, 40, 42, 255], 2.0 * scale); }
     }
@@ -13725,8 +13751,8 @@ mod windows_overlay {
         };
 
         // 1. Draw mascot body+ears then head+face (sitting BEHIND the desk)
-        mascot_draw_body_and_ears(&mut pixmap, scale, body_cx, body_cy, body_radius, head_cx, head_cy, look_x, look_y, recent_pulse, mascot_style);
-        mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y, mascot_style);
+        mascot_draw_body_and_ears(&mut pixmap, scale, body_cx, body_cy, body_radius, head_cx, head_cy, look_x, look_y, recent_pulse, mascot_style, is_interacting);
+        mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y, mascot_style, is_interacting);
 
         // 2. Draw 3D Desk Shadow & Desk
         // Desk Shadow
@@ -14414,7 +14440,7 @@ mod windows_overlay {
 
         // Redraw head+face on top of arms (head must always be in front of arms)
         pixmap.data_mut().fill(0);
-        mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y, mascot_style);
+        mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y, mascot_style, is_interacting);
         let head_data = pixmap.data();
         for (src, dest) in head_data.chunks_exact(4).zip(pixels.chunks_exact_mut(4)) {
             let src_a = src[3];
