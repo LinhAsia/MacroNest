@@ -1006,6 +1006,7 @@ mod windows_overlay {
         last_scroll_down_at: Option<std::time::Instant>,
         pub(crate) quick_key_sound_enabled: bool,
         pub(crate) quick_key_sound_style: u32,
+        pub(crate) quick_key_mascot_active: bool,
     }
 
     impl Default for HookState {
@@ -1106,6 +1107,7 @@ mod windows_overlay {
                 last_scroll_down_at: None,
                 quick_key_sound_enabled: false,
                 quick_key_sound_style: 2,
+                quick_key_mascot_active: false,
             }
         }
     }
@@ -2601,6 +2603,21 @@ mod windows_overlay {
             WMAPP_PROCESS_QUEUE => {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     process_pending_commands(hwnd, runtime);
+
+                    let ui_foreground = is_ui_in_foreground();
+                    let is_preview = runtime.quick_key_display_preview_until.map_or(false, |until| Instant::now() < until);
+                    let has_preview_tracker = runtime.quick_key_display_preview_until.is_some();
+                    
+                    if !ui_foreground || is_preview || has_preview_tracker {
+                        if runtime.quick_key_display_enabled
+                            || !runtime.quick_key_display_entries.is_empty()
+                            || is_preview
+                            || has_preview_tracker
+                        {
+                            let _ = refresh_quick_key_display(runtime);
+                        }
+                    }
+
                     let _ = refresh_search_area_overlay(runtime);
                     let _ = refresh_timer_overlays(runtime);
                     refresh_overlay_timer(hwnd, runtime);
@@ -2967,6 +2984,7 @@ mod windows_overlay {
             let is_key_event = matches!(msg, WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP);
             let injected = info.flags.0 & 0x10 != 0;
             if is_key_event && !injected {
+                wake_command_queue();
                 let is_key_down = matches!(msg, WM_KEYDOWN | WM_SYSKEYDOWN);
                 let is_key_up = matches!(msg, WM_KEYUP | WM_SYSKEYUP);
 
@@ -3231,6 +3249,14 @@ mod windows_overlay {
                 if handle_locked_mouse_move(info.pt) {
                     return LRESULT(1);
                 }
+
+                let mascot_active = {
+                    HOOK_STATE.lock().quick_key_mascot_active
+                };
+                if mascot_active {
+                    wake_command_queue();
+                }
+
                 return CallNextHookEx(None, code, wparam, lparam);
             }
 
@@ -6617,6 +6643,10 @@ mod windows_overlay {
                     runtime.quick_key_display_size = size.clamp(18.0, 96.0);
                     runtime.quick_key_display_mode = mode;
                     runtime.quick_key_display_mascot_style = mascot_style;
+                    {
+                        let mut hook_state = HOOK_STATE.lock();
+                        hook_state.quick_key_mascot_active = enabled && mode == QuickKeyDisplayMode::Mascot;
+                    }
                     if preview {
                         runtime.quick_key_display_preview_until = Some(Instant::now() + Duration::from_secs(3));
                     }
