@@ -1213,6 +1213,7 @@ mod windows_overlay {
         quick_key_display_slot_memory: HashMap<String, usize>,
         quick_key_display_slot_labels: HashMap<(QuickKeyDisplayLane, usize), String>,
         quick_key_display_mouse_offset: (f32, f32),
+        quick_key_display_mouse_velocity: (f32, f32),
         quick_key_display_last_cursor_pos: Option<POINT>,
         quick_key_display_last_mascot_state: Option<MascotVisualState>,
         tray_menu: HMENU,
@@ -1972,6 +1973,7 @@ mod windows_overlay {
                 quick_key_display_slot_memory: HashMap::new(),
                 quick_key_display_slot_labels: HashMap::new(),
                 quick_key_display_mouse_offset: (0.0, 0.0),
+                quick_key_display_mouse_velocity: (0.0, 0.0),
                 quick_key_display_last_cursor_pos: None,
                 quick_key_display_last_mascot_state: None,
                 tray_menu,
@@ -5935,28 +5937,32 @@ mod windows_overlay {
         }
 
         let (mut offset_x, mut offset_y) = runtime.quick_key_display_mouse_offset;
-        let (target_x, target_y) = if let Some(last) = runtime.quick_key_display_last_cursor_pos {
+        let (mut velocity_x, mut velocity_y) = runtime.quick_key_display_mouse_velocity;
+        if let Some(last) = runtime.quick_key_display_last_cursor_pos {
             let delta_x = (cursor.x - last.x) as f32;
             let delta_y = (cursor.y - last.y) as f32;
-            (
-                (delta_x * 0.34).clamp(-16.0, 16.0),
-                (delta_y * 0.30).clamp(-12.0, 12.0),
-            )
-        } else {
-            (0.0, 0.0)
-        };
-
-        offset_x = (offset_x + (target_x - offset_x) * 0.24).clamp(-16.0, 16.0);
-        offset_y = (offset_y + (target_y - offset_y) * 0.24).clamp(-12.0, 12.0);
-
-        if offset_x.abs() < 0.01 && target_x.abs() < 0.01 {
-            offset_x = 0.0;
+            velocity_x += delta_x.clamp(-30.0, 30.0) * 0.08;
+            velocity_y += delta_y.clamp(-30.0, 30.0) * 0.08;
         }
-        if offset_y.abs() < 0.01 && target_y.abs() < 0.01 {
+
+        velocity_x += -offset_x * 0.08;
+        velocity_y += -offset_y * 0.08;
+        velocity_x *= 0.78;
+        velocity_y *= 0.78;
+        offset_x = (offset_x + velocity_x).clamp(-18.0, 18.0);
+        offset_y = (offset_y + velocity_y).clamp(-14.0, 14.0);
+
+        if offset_x.abs() < 0.01 && velocity_x.abs() < 0.01 {
+            offset_x = 0.0;
+            velocity_x = 0.0;
+        }
+        if offset_y.abs() < 0.01 && velocity_y.abs() < 0.01 {
             offset_y = 0.0;
+            velocity_y = 0.0;
         }
 
         runtime.quick_key_display_mouse_offset = (offset_x, offset_y);
+        runtime.quick_key_display_mouse_velocity = (velocity_x, velocity_y);
         runtime.quick_key_display_last_cursor_pos = Some(cursor);
     }
 
@@ -6646,6 +6652,7 @@ mod windows_overlay {
                         runtime.quick_key_display_slot_memory.clear();
                         runtime.quick_key_display_slot_labels.clear();
                         runtime.quick_key_display_mouse_offset = (0.0, 0.0);
+                        runtime.quick_key_display_mouse_velocity = (0.0, 0.0);
                         runtime.quick_key_display_last_cursor_pos = None;
                     }
                     let mut ex_style = GetWindowLongW(runtime.key_display_hwnd, GWL_EXSTYLE) as u32;
