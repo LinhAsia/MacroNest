@@ -2617,8 +2617,8 @@ impl CrosshairApp {
                         )
                     } else {
                         (
-                            Color32::from_rgb(232, 246, 237),
-                            Color32::from_rgb(136, 174, 150),
+                            Color32::from_rgb(198, 236, 210),
+                            Color32::from_rgb(84, 154, 112),
                         )
                     }
                 }
@@ -2658,8 +2658,8 @@ impl CrosshairApp {
                         )
                     } else {
                         (
-                            Color32::from_rgb(246, 248, 247),
-                            Color32::from_rgb(198, 206, 202),
+                            Color32::from_rgb(238, 243, 240),
+                            Color32::from_rgb(188, 198, 192),
                         )
                     }
                 }
