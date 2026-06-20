@@ -2582,6 +2582,13 @@ mod windows_overlay {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     process_pending_commands(hwnd, runtime);
 
+                    if !is_ui_in_foreground()
+                        && (runtime.quick_key_display_enabled
+                            || !runtime.quick_key_display_entries.is_empty())
+                    {
+                        let _ = refresh_quick_key_display(runtime);
+                    }
+
                     let _ = refresh_search_area_overlay(runtime);
                     let _ = refresh_timer_overlays(runtime);
                     refresh_overlay_timer(hwnd, runtime);
