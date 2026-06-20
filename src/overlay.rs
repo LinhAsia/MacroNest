@@ -142,7 +142,7 @@ mod windows_overlay {
                     TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
                     UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
                     WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
-                    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
+                    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_EXITSIZEMOVE, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
                     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
                     WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE, WM_NCHITTEST,
                     WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER,
@@ -1211,7 +1211,6 @@ mod windows_overlay {
         quick_key_display_size: f32,
         quick_key_display_mode: QuickKeyDisplayMode,
         quick_key_display_mascot_style: crate::model::MascotStyle,
-        quick_key_display_in_move_loop: bool,
         quick_key_display_entries: Vec<QuickKeyDisplayEntry>,
         quick_key_display_slot_memory: HashMap<String, usize>,
         quick_key_display_slot_labels: HashMap<(QuickKeyDisplayLane, usize), String>,
@@ -1973,7 +1972,6 @@ mod windows_overlay {
                 quick_key_display_size: 36.0,
                 quick_key_display_mode: QuickKeyDisplayMode::Normal,
                 quick_key_display_mascot_style: crate::model::MascotStyle::Hachiware,
-                quick_key_display_in_move_loop: false,
                 quick_key_display_entries: Vec::new(),
                 quick_key_display_slot_memory: HashMap::new(),
                 quick_key_display_slot_labels: HashMap::new(),
@@ -2542,11 +2540,10 @@ mod windows_overlay {
                             let _ = refresh_hud(runtime);
                         }
 
-                        if quick_key_display_drag_refresh_allowed(runtime)
-                            && (runtime.quick_key_display_enabled
+                        if runtime.quick_key_display_enabled
                             || !runtime.quick_key_display_entries.is_empty()
                             || is_preview
-                            || has_preview_tracker)
+                            || has_preview_tracker
                         {
                             let _ = refresh_quick_key_display(runtime);
                         }
@@ -2612,11 +2609,10 @@ mod windows_overlay {
                     let has_preview_tracker = runtime.quick_key_display_preview_until.is_some();
                     
                     if !ui_foreground || is_preview || has_preview_tracker {
-                        if quick_key_display_drag_refresh_allowed(runtime)
-                            && (runtime.quick_key_display_enabled
+                        if runtime.quick_key_display_enabled
                             || !runtime.quick_key_display_entries.is_empty()
                             || is_preview
-                            || has_preview_tracker)
+                            || has_preview_tracker
                         {
                             let _ = refresh_quick_key_display(runtime);
                         }
@@ -2870,25 +2866,6 @@ mod windows_overlay {
         }
     }
 
-    fn quick_key_display_window_move_enabled(runtime: &Runtime) -> bool {
-        if runtime.quick_key_display_mode != QuickKeyDisplayMode::Mascot {
-            return false;
-        }
-
-        if runtime.quick_key_display_enabled {
-            return true;
-        }
-
-        runtime
-            .quick_key_display_preview_until
-            .is_some_and(|until| Instant::now() < until)
-    }
-
-    fn quick_key_display_drag_refresh_allowed(runtime: &Runtime) -> bool {
-        !(runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
-            && runtime.quick_key_display_in_move_loop)
-    }
-
     unsafe extern "system" fn hud_wnd_proc(
         hwnd: HWND,
         msg: u32,
@@ -2899,7 +2876,8 @@ mod windows_overlay {
             WM_NCHITTEST => {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     if hwnd == runtime.key_display_hwnd
-                        && quick_key_display_window_move_enabled(runtime)
+                        && runtime.quick_key_display_enabled
+                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
                     {
                         return LRESULT(HTCAPTION as isize);
                     }
@@ -2910,7 +2888,8 @@ mod windows_overlay {
             WM_MOVE => {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     if hwnd == runtime.key_display_hwnd
-                        && quick_key_display_window_move_enabled(runtime)
+                        && runtime.quick_key_display_enabled
+                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
                     {
                         let x = (lparam.0 & 0xffff) as i16 as i32;
                         let y = ((lparam.0 >> 16) & 0xffff) as i16 as i32;
@@ -2923,30 +2902,17 @@ mod windows_overlay {
                 LRESULT(0)
             }
 
-            WM_ENTERSIZEMOVE => {
-                if let Some(runtime) = runtime_mut(hwnd) {
-                    if hwnd == runtime.key_display_hwnd
-                        && quick_key_display_window_move_enabled(runtime)
-                    {
-                        runtime.quick_key_display_in_move_loop = true;
-                    }
-                }
-                LRESULT(0)
-            }
-
             WM_EXITSIZEMOVE => {
                 if let Some(runtime) = runtime_mut(hwnd) {
-                    if hwnd == runtime.key_display_hwnd {
-                        let should_persist_drag =
-                            quick_key_display_window_move_enabled(runtime);
-                        runtime.quick_key_display_in_move_loop = false;
-                        if should_persist_drag {
+                    if hwnd == runtime.key_display_hwnd
+                        && runtime.quick_key_display_enabled
+                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
+                    {
                         let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
                             x: runtime.quick_key_display_center_x,
                             y: runtime.quick_key_display_center_y,
                         });
                         let _ = refresh_quick_key_display(runtime);
-                        }
                     }
                 }
                 LRESULT(0)
@@ -6714,15 +6680,14 @@ mod windows_overlay {
                     runtime.quick_key_display_size = size.clamp(18.0, 96.0);
                     runtime.quick_key_display_mode = mode;
                     runtime.quick_key_display_mascot_style = mascot_style;
-                    if !enabled || mode != QuickKeyDisplayMode::Mascot {
-                        runtime.quick_key_display_in_move_loop = false;
-                    }
                     {
                         let mut hook_state = HOOK_STATE.lock();
                         hook_state.quick_key_mascot_active = enabled && mode == QuickKeyDisplayMode::Mascot;
                     }
-                    if preview {
+                    if preview && mode == QuickKeyDisplayMode::Normal {
                         runtime.quick_key_display_preview_until = Some(Instant::now() + Duration::from_secs(3));
+                    } else {
+                        runtime.quick_key_display_preview_until = None;
                     }
                     if !enabled {
                         runtime.quick_key_display_entries.clear();
@@ -6733,7 +6698,7 @@ mod windows_overlay {
                         runtime.quick_key_display_last_cursor_pos = None;
                     }
                     let mut ex_style = GetWindowLongW(runtime.key_display_hwnd, GWL_EXSTYLE) as u32;
-                    if (enabled && mode == QuickKeyDisplayMode::Mascot) || preview {
+                    if enabled && mode == QuickKeyDisplayMode::Mascot {
                         ex_style &= !WS_EX_TRANSPARENT.0;
                     } else {
                         ex_style |= WS_EX_TRANSPARENT.0;
@@ -7149,12 +7114,6 @@ mod windows_overlay {
     }
 
     fn refresh_quick_key_display(runtime: &mut Runtime) -> Result<()> {
-        if runtime.quick_key_display_in_move_loop
-            && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
-        {
-            return Ok(());
-        }
-
         let is_preview = if let Some(until) = runtime.quick_key_display_preview_until {
             if Instant::now() >= until {
                 runtime.quick_key_display_preview_until = None;
