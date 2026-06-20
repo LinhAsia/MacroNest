@@ -345,7 +345,17 @@ impl CrosshairApp {
                         Self::delete_opencv_tool,
                     );
                     ui.add_space(10.0);
-                    self.render_ocr_tool_entry(ui, language);
+                    let ocr_header = Self::settings_action_button(
+                        ui,
+                        RichText::new("OCR").strong().size(13.0),
+                    );
+                    if ocr_header.clicked() {
+                        self.ocr_tools_open = !self.ocr_tools_open;
+                    }
+                    if self.ocr_tools_open {
+                        ui.add_space(6.0);
+                        self.render_ocr_tool_entry(ui, language);
+                    }
                     ui.add_space(10.0);
                     self.render_interception_driver_entry(ui, language, interception_progress);
                     ui.add_space(10.0);
@@ -539,67 +549,77 @@ impl CrosshairApp {
         let active_code = crate::ocr::normalize_language_code(&self.state.ocr_language);
 
         ui.vertical(|ui| {
-            ui.label(RichText::new("OCR").strong().size(13.0));
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new(
-                    "Install only the language packs you need for OCR. Smaller packs are usually faster in macros.",
-                )
-                .small()
-                .weak(),
-            );
-            ui.add_space(8.0);
+            egui::Grid::new("ocr-pack-grid")
+                .num_columns(2)
+                .min_col_width(0.0)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    for pack in crate::ocr::ocr_language_packs() {
+                        let installed = crate::ocr::is_language_pack_installed(pack.code);
+                        let installed_size = crate::ocr::installed_language_pack_size(pack.code);
+                        let is_active = active_code == pack.code;
+                        let is_downloading =
+                            self.ocr_download_language_code.as_deref() == Some(pack.code)
+                                && self.ocr_download_job.is_some();
+                        let download_progress = if is_downloading {
+                            Some(self.ocr_download_progress.load(Ordering::SeqCst) as f32 / 1000.0)
+                        } else {
+                            None
+                        };
 
-            for pack in crate::ocr::ocr_language_packs() {
-                let installed = crate::ocr::is_language_pack_installed(pack.code);
-                let installed_size = crate::ocr::installed_language_pack_size(pack.code);
-                let is_active = active_code == pack.code;
-                let is_downloading = self.ocr_download_language_code.as_deref() == Some(pack.code)
-                    && self.ocr_download_job.is_some();
-                let download_progress = if is_downloading {
-                    Some(self.ocr_download_progress.load(Ordering::SeqCst) as f32 / 1000.0)
-                } else {
-                    None
-                };
+                        ui.horizontal_wrapped(|ui| {
+                            let mut title = pack.label.to_owned();
+                            if is_active {
+                                title.push_str(" [active]");
+                            }
+                            ui.label(RichText::new(title));
+                            if installed_size > 0 {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "({})",
+                                        Self::format_byte_size(installed_size)
+                                    ))
+                                    .small()
+                                    .weak(),
+                                );
+                            }
+                        });
 
-                ui.horizontal(|ui| {
-                    let mut title = pack.label.to_owned();
-                    if is_active {
-                        title.push_str(" [active]");
-                    }
-                    ui.label(RichText::new(title));
-                    if installed_size > 0 {
-                        ui.label(
-                            RichText::new(format!("({})", Self::format_byte_size(installed_size)))
-                                .small()
-                                .weak(),
+                        ui.allocate_ui_with_layout(
+                            vec2(148.0, 28.0),
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                if let Some(progress) = download_progress {
+                                    ui.add(
+                                        egui::ProgressBar::new(progress)
+                                            .desired_width(148.0)
+                                            .show_percentage(),
+                                    );
+                                    ui.ctx().request_repaint();
+                                } else if installed {
+                                    if Self::settings_action_button(
+                                        ui,
+                                        Self::tr_lang(language, "Delete", ""),
+                                    )
+                                    .clicked()
+                                    {
+                                        self.delete_ocr_language_pack(pack.code);
+                                        self.status = format!("OCR pack deleted: {}", pack.label);
+                                    }
+                                } else if Self::settings_action_button(
+                                    ui,
+                                    RichText::new(Self::tr_lang(language, "Download", "")).strong(),
+                                )
+                                .clicked()
+                                {
+                                    self.start_ocr_download_for(pack.code);
+                                }
+                            },
                         );
-                    }
-                    ui.add_space(8.0);
 
-                    if let Some(progress) = download_progress {
-                        ui.label(Self::tr_lang(language, "Downloading...", ""));
-                        ui.add(egui::ProgressBar::new(progress).desired_width(120.0).show_percentage());
-                        ui.ctx().request_repaint();
-                    } else if installed {
-                        ui.label(RichText::new(Self::tr_lang(language, "Installed", "")).small().weak());
-                        if Self::settings_action_button(ui, Self::tr_lang(language, "Delete", ""))
-                            .clicked()
-                        {
-                            self.delete_ocr_language_pack(pack.code);
-                            self.status = format!("OCR pack deleted: {}", pack.label);
-                        }
-                    } else if Self::settings_action_button(
-                        ui,
-                        RichText::new(Self::tr_lang(language, "Download", "")).strong(),
-                    )
-                    .clicked()
-                    {
-                        self.start_ocr_download_for(pack.code);
+                        ui.end_row();
                     }
                 });
-                ui.add_space(4.0);
-            }
         });
     }
 
@@ -1452,15 +1472,6 @@ impl CrosshairApp {
                         .size(14.0),
                 );
                 ui.add_space(8.0);
-                ui.label(
-                    RichText::new(Self::tr_lang(
-                        language,
-                        "MacroNest now uses fast local PaddleOCR. Pick the language pack that matches the text you scan.",
-                        "MacroNest now uses fast local PaddleOCR. Pick the language pack that matches the text you scan.",
-                    ))
-                    .small(),
-                );
-                ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     ui.label(Self::tr_lang(
                         language,
@@ -1493,14 +1504,6 @@ impl CrosshairApp {
                             }
                         });
                 });
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(
-                        "For the best speed in macros, keep the OCR pack close to the script you expect to read.",
-                    )
-                    .small()
-                    .weak(),
-                );
                 if !crate::ocr::is_language_pack_installed(&self.state.ocr_language) {
                     ui.add_space(4.0);
                     ui.label(
