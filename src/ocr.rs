@@ -146,6 +146,15 @@ pub fn label_for_language_code(value: &str) -> &'static str {
         .unwrap_or(OCR_LANGUAGE_PACKS[0].label)
 }
 
+pub fn display_label_for_language_code(value: &str) -> String {
+    let label = label_for_language_code(value);
+    if is_language_pack_installed(value) {
+        label.to_owned()
+    } else {
+        format!("{label} [not installed]")
+    }
+}
+
 pub fn language_pack_for_code_public(value: &str) -> OcrLanguagePack {
     #[cfg(windows)]
     {

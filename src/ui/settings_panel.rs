@@ -1477,7 +1477,7 @@ impl CrosshairApp {
                         "Active OCR language",
                     ));
                     let selected_label =
-                        crate::ocr::label_for_language_code(&self.state.ocr_language);
+                        crate::ocr::display_label_for_language_code(&self.state.ocr_language);
                     egui::ComboBox::from_id_salt("settings-ocr-language")
                         .selected_text(selected_label)
                         .width(210.0)
@@ -1487,7 +1487,7 @@ impl CrosshairApp {
                                     .selectable_value(
                                         &mut self.state.ocr_language,
                                         pack.code.to_owned(),
-                                        pack.label,
+                                        crate::ocr::display_label_for_language_code(pack.code),
                                     )
                                     .changed()
                                 {
