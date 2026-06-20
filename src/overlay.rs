@@ -2484,26 +2484,7 @@ mod windows_overlay {
 
                     process_pending_commands(hwnd, runtime);
                     let ui_foreground = is_ui_in_foreground();
-                    if ui_foreground != runtime.ui_foreground {
-                        runtime.ui_foreground = ui_foreground;
-                        let _ = set_input_hooks_enabled(runtime, desired_hooks_enabled(runtime));
-                        let _ = refresh_overlay(runtime);
-                        if ui_foreground {
-                            reset_all_input_and_locks();
-                            let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
-                            let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
-                            runtime.quick_key_display_entries.clear();
-                            runtime.quick_key_display_slot_memory.clear();
-                            runtime.quick_key_display_slot_labels.clear();
-                            let _ = ShowWindow(runtime.key_display_hwnd, SW_HIDE);
-                        } else {
-                            clear_transient_input_state();
-                            let _ = refresh_pin_overlay(runtime);
-                            let _ = refresh_hud(runtime);
-                            let _ = refresh_quick_key_display(runtime);
-                            let _ = refresh_mouse_record_trail(runtime);
-                        }
-                    }
+                    apply_ui_foreground_state(runtime, ui_foreground);
 
                     if ui_foreground {
                         poll_macro_keyboard_recording();
@@ -2567,6 +2548,10 @@ mod windows_overlay {
                 let foreground = GetForegroundWindow();
                 if let Some(runtime) = runtime_mut(hwnd) {
                     update_native_focus_highlight(runtime, foreground);
+                    let ui_foreground = is_app_ui_currently_foreground();
+                    UI_WINDOW_FOREGROUND.store(ui_foreground, Ordering::Relaxed);
+                    apply_ui_foreground_state(runtime, ui_foreground);
+                    refresh_overlay_timer(hwnd, runtime);
                 }
                 handle_window_focus_event(hwnd, foreground);
                 LRESULT(0)
@@ -6864,16 +6849,32 @@ mod windows_overlay {
                     runtime.ui_visible = visible;
                     if visible {
                         cancel_pending_tray_toggle();
+                        UI_WINDOW_VISIBLE.store(true, Ordering::Relaxed);
+                        let ui_foreground = is_app_ui_currently_foreground();
+                        UI_WINDOW_FOREGROUND.store(ui_foreground, Ordering::Relaxed);
                         let _ = set_input_hooks_enabled(runtime, desired_hooks_enabled(runtime));
                         let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
+                        let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
+                        runtime.quick_key_display_entries.clear();
+                        runtime.quick_key_display_slot_memory.clear();
+                        runtime.quick_key_display_slot_labels.clear();
+                        let _ = ShowWindow(runtime.key_display_hwnd, SW_HIDE);
                         let _ = ShowWindow(runtime.mouse_trail_hwnd, SW_HIDE);
+                        apply_ui_foreground_state(runtime, ui_foreground);
                     } else {
                         *HUD_PREVIEW_DISPLAY.lock() = None;
+                        UI_WINDOW_VISIBLE.store(false, Ordering::Relaxed);
+                        UI_WINDOW_FOREGROUND.store(false, Ordering::Relaxed);
+                        runtime.ui_foreground = false;
+                        clear_transient_input_state();
                         let _ = set_input_hooks_enabled(runtime, desired_hooks_enabled(runtime));
                         let _ = refresh_overlay(runtime);
                         let _ = refresh_pin_overlay(runtime);
                         let _ = refresh_hud(runtime);
+                        let _ = refresh_quick_key_display(runtime);
+                        let _ = refresh_mouse_record_trail(runtime);
                     }
+                    refresh_overlay_timer(runtime.overlay_hwnd, runtime);
                 }
 
                 OverlayCommand::ToggleMacroRecording(group_id, preset_id, preset_name) => {
@@ -6905,6 +6906,32 @@ mod windows_overlay {
             let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
             let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
             let _ = ShowWindow(runtime.mouse_trail_hwnd, SW_HIDE);
+        }
+    }
+
+    unsafe fn apply_ui_foreground_state(runtime: &mut Runtime, ui_foreground: bool) {
+        if ui_foreground == runtime.ui_foreground {
+            return;
+        }
+
+        runtime.ui_foreground = ui_foreground;
+        let _ = set_input_hooks_enabled(runtime, desired_hooks_enabled(runtime));
+        let _ = refresh_overlay(runtime);
+        if ui_foreground {
+            reset_all_input_and_locks();
+            let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
+            let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
+            runtime.quick_key_display_entries.clear();
+            runtime.quick_key_display_slot_memory.clear();
+            runtime.quick_key_display_slot_labels.clear();
+            let _ = ShowWindow(runtime.key_display_hwnd, SW_HIDE);
+            let _ = ShowWindow(runtime.mouse_trail_hwnd, SW_HIDE);
+        } else {
+            clear_transient_input_state();
+            let _ = refresh_pin_overlay(runtime);
+            let _ = refresh_hud(runtime);
+            let _ = refresh_quick_key_display(runtime);
+            let _ = refresh_mouse_record_trail(runtime);
         }
     }
 
