@@ -5366,7 +5366,7 @@ impl CrosshairApp {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
                                                     Color32::from_rgba_premultiplied(72, 156, 116, 120)
                                                 } else {
-                                                    Color32::from_rgb(72, 168, 112)
+                                                    Color32::from_rgb(46, 126, 76)
                                                 }
                                             } else if is_preset_enabled {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
@@ -5385,7 +5385,7 @@ impl CrosshairApp {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
                                                     Color32::from_rgb(126, 224, 182)
                                                 } else {
-                                                    Color32::from_rgb(24, 108, 66)
+                                                    Color32::from_rgb(112, 204, 142)
                                                 }
                                             } else if is_preset_enabled {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
@@ -10535,7 +10535,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         if is_dark_theme {
                                                             Color32::from_rgba_premultiplied(72, 156, 116, 120)
                                                         } else {
-                                                            Color32::from_rgb(64, 162, 106)
+                                                            Color32::from_rgb(46, 126, 76)
                                                         }
                                                     } else {
                                                         if is_dark_theme {
@@ -10548,7 +10548,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         if is_dark_theme {
                                                             Color32::from_rgb(126, 224, 182)
                                                         } else {
-                                                            Color32::from_rgb(20, 102, 60)
+                                                            Color32::from_rgb(112, 204, 142)
                                                         }
                                                     } else {
                                                         if is_dark_theme {
