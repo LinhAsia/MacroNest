@@ -20927,8 +20927,22 @@ mod windows_overlay {
         }
     }
 
+    fn is_app_ui_currently_foreground() -> bool {
+        unsafe {
+            let Some(ui_hwnd) = find_app_ui_window() else {
+                return false;
+            };
+            let foreground = GetForegroundWindow();
+            if foreground.0.is_null() {
+                return false;
+            }
+            let root = GetAncestor(foreground, GA_ROOT);
+            !root.0.is_null() && root == ui_hwnd
+        }
+    }
+
     fn is_ui_in_foreground() -> bool {
-        UI_WINDOW_FOREGROUND.load(Ordering::Relaxed)
+        is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed)
     }
 
     pub fn find_app_ui_window_for_ui_thread() -> Option<windows::Win32::Foundation::HWND> {
