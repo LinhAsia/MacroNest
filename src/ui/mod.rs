@@ -2485,19 +2485,27 @@ impl CrosshairApp {
             if dark_mode {
                 Color32::from_rgba_premultiplied(32, 92, 52, 120)
             } else {
-                Color32::from_rgb(238, 247, 241)
+                Color32::from_rgb(244, 249, 246)
             }
         } else {
-            ui.visuals().faint_bg_color
+            if dark_mode {
+                ui.visuals().faint_bg_color
+            } else {
+                Color32::from_rgb(250, 251, 252)
+            }
         };
         let stroke_color = if enabled {
             if dark_mode {
                 Color32::from_rgb(108, 224, 148)
             } else {
-                Color32::from_rgb(170, 194, 178)
+                Color32::from_rgb(182, 198, 188)
             }
         } else {
-            ui.visuals().widgets.noninteractive.bg_stroke.color
+            if dark_mode {
+                ui.visuals().widgets.noninteractive.bg_stroke.color
+            } else {
+                Color32::from_rgb(214, 222, 230)
+            }
         };
         egui::Frame::group(ui.style())
             .fill(fill)
@@ -2609,15 +2617,23 @@ impl CrosshairApp {
                         )
                     } else {
                         (
-                            Color32::from_rgb(198, 238, 214),
-                            Color32::from_rgb(42, 136, 90),
+                            Color32::from_rgb(232, 246, 237),
+                            Color32::from_rgb(136, 174, 150),
                         )
                     }
                 }
             } else {
                 (
-                    ui.visuals().faint_bg_color,
-                    ui.visuals().widgets.noninteractive.bg_stroke.color,
+                    if dark_mode {
+                        ui.visuals().faint_bg_color
+                    } else {
+                        Color32::from_rgb(250, 251, 252)
+                    },
+                    if dark_mode {
+                        ui.visuals().widgets.noninteractive.bg_stroke.color
+                    } else {
+                        Color32::from_rgb(214, 222, 230)
+                    },
                 )
             }
         } else {
@@ -2642,15 +2658,23 @@ impl CrosshairApp {
                         )
                     } else {
                         (
-                            Color32::from_rgb(236, 242, 238),
-                            Color32::from_rgb(146, 166, 152),
+                            Color32::from_rgb(246, 248, 247),
+                            Color32::from_rgb(198, 206, 202),
                         )
                     }
                 }
             } else {
                 (
-                    ui.visuals().faint_bg_color,
-                    ui.visuals().widgets.noninteractive.bg_stroke.color,
+                    if dark_mode {
+                        ui.visuals().faint_bg_color
+                    } else {
+                        Color32::from_rgb(250, 251, 252)
+                    },
+                    if dark_mode {
+                        ui.visuals().widgets.noninteractive.bg_stroke.color
+                    } else {
+                        Color32::from_rgb(214, 222, 230)
+                    },
                 )
             }
         };
