@@ -4119,12 +4119,11 @@ impl CrosshairApp {
 
             // Keep open if user is actively dragging or has a combobox/sub-popup open (current or previous frame)
             let is_dragging = ui.ctx().dragged_id().is_some();
-            let is_any_popup_open = egui::Popup::is_any_open(ui.ctx()) || ui.ctx().memory(|mem| {
-                mem.is_popup_open(ui.make_persistent_id("quick-key-display-mode"))
-                    || mem.is_popup_open(ui.make_persistent_id("quick-key-display-mascot-preset"))
-                    || mem.is_popup_open(ui.make_persistent_id("focus-highlight-decoration"))
-                    || mem.is_popup_open(ui.make_persistent_id("quick-key-sound-style"))
-            });
+            let is_any_popup_open = egui::Popup::is_any_open(ui.ctx())
+                || egui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id("quick-key-display-mode"))
+                || egui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id("quick-key-display-mascot-preset"))
+                || egui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id("focus-highlight-decoration"))
+                || egui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id("quick-key-sound-style"));
             // One-frame buffer: if popup was open last frame, treat this frame as interacting too
             let is_interacting = is_active && (is_dragging || is_any_popup_open || popup_was_open_prev);
 
