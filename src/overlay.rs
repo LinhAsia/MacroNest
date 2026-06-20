@@ -395,9 +395,8 @@ mod windows_overlay {
     static PROTRACTOR_DRAG_START_DISTANCE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(1.0));
     #[derive(Debug, Clone, Copy)]
     struct QuickKeyDisplayDragState {
-        start_mouse: POINT,
-        start_center_x: i32,
-        start_center_y: i32,
+        drag_offset_x: i32,
+        drag_offset_y: i32,
     }
     static QUICK_KEY_DISPLAY_DRAG_STATE: Lazy<Mutex<Option<QuickKeyDisplayDragState>>> =
         Lazy::new(|| Mutex::new(None));
@@ -2913,11 +2912,15 @@ mod windows_overlay {
                     {
                         let mut mouse = POINT::default();
                         let _ = GetCursorPos(&mut mouse);
-                        *QUICK_KEY_DISPLAY_DRAG_STATE.lock() = Some(QuickKeyDisplayDragState {
-                            start_mouse: mouse,
-                            start_center_x: runtime.quick_key_display_center_x,
-                            start_center_y: runtime.quick_key_display_center_y,
-                        });
+                        let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+                        let (width, height) = quick_key_display_mascot_layout_size(font_size);
+                        let left = runtime.quick_key_display_center_x - (width / 2);
+                        let top = runtime.quick_key_display_center_y - (height / 2);
+                        *QUICK_KEY_DISPLAY_DRAG_STATE.lock() =
+                            Some(QuickKeyDisplayDragState {
+                                drag_offset_x: mouse.x - left,
+                                drag_offset_y: mouse.y - top,
+                            });
                         windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd);
                         return LRESULT(0);
                     }
@@ -2932,12 +2935,17 @@ mod windows_overlay {
                         if let Some(drag_state) = drag_state {
                             let mut mouse = POINT::default();
                             let _ = GetCursorPos(&mut mouse);
-                            runtime.quick_key_display_center_x =
-                                drag_state.start_center_x + (mouse.x - drag_state.start_mouse.x);
-                            runtime.quick_key_display_center_y =
-                                drag_state.start_center_y + (mouse.y - drag_state.start_mouse.y);
-                            runtime.quick_key_display_last_mascot_state = None;
-                            let _ = refresh_quick_key_display(runtime);
+                            let new_left = mouse.x - drag_state.drag_offset_x;
+                            let new_top = mouse.y - drag_state.drag_offset_y;
+                            let _ = SetWindowPos(
+                                runtime.key_display_hwnd,
+                                None,
+                                new_left,
+                                new_top,
+                                0,
+                                0,
+                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                            );
                             return LRESULT(0);
                         }
                     }
