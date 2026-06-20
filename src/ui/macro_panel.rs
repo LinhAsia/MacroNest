@@ -5366,13 +5366,13 @@ impl CrosshairApp {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
                                                     Color32::from_rgba_premultiplied(72, 156, 116, 120)
                                                 } else {
-                                                    Color32::from_rgb(196, 236, 212)
+                                                    Color32::from_rgb(120, 196, 148)
                                                 }
                                             } else if is_preset_enabled {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
                                                     Color32::from_rgba_premultiplied(72, 156, 116, 50)
                                                 } else {
-                                                    Color32::from_rgb(226, 238, 231)
+                                                    Color32::from_rgb(208, 228, 216)
                                                 }
                                             } else {
                                                 ui.visuals().faint_bg_color
@@ -5381,13 +5381,13 @@ impl CrosshairApp {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
                                                     Color32::from_rgb(126, 224, 182)
                                                 } else {
-                                                    Color32::from_rgb(52, 138, 96)
+                                                    Color32::from_rgb(32, 120, 76)
                                                 }
                                             } else if is_preset_enabled {
                                                 if self.state.ui_theme == UiThemeMode::Dark {
                                                     Color32::from_rgb(110, 180, 142)
                                                 } else {
-                                                    Color32::from_rgb(118, 152, 132)
+                                                    Color32::from_rgb(108, 150, 124)
                                                 }
                                             } else {
                                                 ui.visuals().widgets.noninteractive.bg_stroke.color
@@ -10527,7 +10527,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         if is_dark_theme {
                                                             Color32::from_rgba_premultiplied(72, 156, 116, 120)
                                                         } else {
-                                                            Color32::from_rgb(194, 235, 210)
+                                                            Color32::from_rgb(118, 194, 146)
                                                         }
                                                     } else {
                                                         if is_dark_theme {
@@ -10540,7 +10540,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         if is_dark_theme {
                                                             Color32::from_rgb(126, 224, 182)
                                                         } else {
-                                                            Color32::from_rgb(50, 136, 94)
+                                                            Color32::from_rgb(30, 118, 74)
                                                         }
                                                     } else {
                                                         if is_dark_theme {
