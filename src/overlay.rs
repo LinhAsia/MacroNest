@@ -2936,15 +2936,17 @@ mod windows_overlay {
 
             WM_EXITSIZEMOVE => {
                 if let Some(runtime) = runtime_mut(hwnd) {
-                    if hwnd == runtime.key_display_hwnd
-                        && quick_key_display_window_move_enabled(runtime)
-                    {
+                    if hwnd == runtime.key_display_hwnd {
+                        let should_persist_drag =
+                            quick_key_display_window_move_enabled(runtime);
                         runtime.quick_key_display_in_move_loop = false;
+                        if should_persist_drag {
                         let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
                             x: runtime.quick_key_display_center_x,
                             y: runtime.quick_key_display_center_y,
                         });
                         let _ = refresh_quick_key_display(runtime);
+                        }
                     }
                 }
                 LRESULT(0)
@@ -6712,6 +6714,9 @@ mod windows_overlay {
                     runtime.quick_key_display_size = size.clamp(18.0, 96.0);
                     runtime.quick_key_display_mode = mode;
                     runtime.quick_key_display_mascot_style = mascot_style;
+                    if !enabled || mode != QuickKeyDisplayMode::Mascot {
+                        runtime.quick_key_display_in_move_loop = false;
+                    }
                     {
                         let mut hook_state = HOOK_STATE.lock();
                         hook_state.quick_key_mascot_active = enabled && mode == QuickKeyDisplayMode::Mascot;
