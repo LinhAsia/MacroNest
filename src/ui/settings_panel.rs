@@ -305,10 +305,6 @@ impl CrosshairApp {
             .opencv_download_job
             .as_ref()
             .map(|_| self.opencv_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
-        let ocr_progress = self
-            .ocr_download_job
-            .as_ref()
-            .map(|_| self.ocr_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
         let interception_progress = self
             .interception_download_job
             .as_ref()
@@ -349,7 +345,7 @@ impl CrosshairApp {
                         Self::delete_opencv_tool,
                     );
                     ui.add_space(10.0);
-                    self.render_ocr_tool_entry(ui, language, ocr_progress);
+                    self.render_ocr_tool_entry(ui, language);
                     ui.add_space(10.0);
                     self.render_interception_driver_entry(ui, language, interception_progress);
                     ui.add_space(10.0);
@@ -539,76 +535,70 @@ impl CrosshairApp {
         });
     }
 
-    fn render_ocr_tool_entry(
-        &mut self,
-        ui: &mut egui::Ui,
-        language: UiLanguage,
-        downloading_progress: Option<f32>,
-    ) {
-        let pack = crate::ocr::language_pack_for_code_public(&self.state.ocr_language);
-        let installed = crate::ocr::is_language_pack_installed(pack.code);
-        let installed_size = crate::ocr::installed_language_pack_size(pack.code);
+    fn render_ocr_tool_entry(&mut self, ui: &mut egui::Ui, language: UiLanguage) {
+        let active_code = crate::ocr::normalize_language_code(&self.state.ocr_language);
 
         ui.vertical(|ui| {
-            ui.label(RichText::new("OCR Pack").strong().size(13.0));
+            ui.label(RichText::new("OCR").strong().size(13.0));
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label(Self::tr_lang(language, "Selected pack:", ""));
-                ui.label(RichText::new(pack.label).weak());
-                if installed_size > 0 {
-                    ui.label(
-                        RichText::new(format!("({})", Self::format_byte_size(installed_size)))
-                            .small()
-                            .weak(),
-                    );
-                }
-            });
+            ui.label(
+                RichText::new(
+                    "Install only the language packs you need for OCR. Smaller packs are usually faster in macros.",
+                )
+                .small()
+                .weak(),
+            );
+            ui.add_space(8.0);
 
-            if installed {
+            for pack in crate::ocr::ocr_language_packs() {
+                let installed = crate::ocr::is_language_pack_installed(pack.code);
+                let installed_size = crate::ocr::installed_language_pack_size(pack.code);
+                let is_active = active_code == pack.code;
+                let is_downloading = self.ocr_download_language_code.as_deref() == Some(pack.code)
+                    && self.ocr_download_job.is_some();
+                let download_progress = if is_downloading {
+                    Some(self.ocr_download_progress.load(Ordering::SeqCst) as f32 / 1000.0)
+                } else {
+                    None
+                };
+
                 ui.horizontal(|ui| {
-                    ui.label(Self::tr_lang(language, "Status: Installed", ""));
-                    if Self::settings_action_button(ui, Self::tr_lang(language, "Delete", ""))
-                        .clicked()
-                    {
-                        self.delete_ocr_language_pack();
-                        self.status = Self::tr_lang(
-                            language,
-                            "OCR assets deleted.",
-                            "OCR assets deleted.",
-                        )
-                        .to_owned();
+                    let mut title = pack.label.to_owned();
+                    if is_active {
+                        title.push_str(" [active]");
                     }
-                });
-                ui.label(
-                    RichText::new(
-                        "Use a smaller language pack for faster OCR in macros. Switch the OCR language above, then install that pack.",
-                    )
-                    .small()
-                    .weak(),
-                );
-            } else if let Some(progress) = downloading_progress {
-                ui.horizontal(|ui| {
-                    ui.label(Self::tr_lang(language, "Downloading...", ""));
-                    ui.add(egui::ProgressBar::new(progress).show_percentage());
-                });
-                ui.ctx().request_repaint();
-            } else {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(
-                            "Download only the OCR pack you need for the selected language.",
-                        )
-                        .weak(),
-                    );
-                    if Self::settings_action_button(
+                    ui.label(RichText::new(title));
+                    if installed_size > 0 {
+                        ui.label(
+                            RichText::new(format!("({})", Self::format_byte_size(installed_size)))
+                                .small()
+                                .weak(),
+                        );
+                    }
+                    ui.add_space(8.0);
+
+                    if let Some(progress) = download_progress {
+                        ui.label(Self::tr_lang(language, "Downloading...", ""));
+                        ui.add(egui::ProgressBar::new(progress).desired_width(120.0).show_percentage());
+                        ui.ctx().request_repaint();
+                    } else if installed {
+                        ui.label(RichText::new(Self::tr_lang(language, "Installed", "")).small().weak());
+                        if Self::settings_action_button(ui, Self::tr_lang(language, "Delete", ""))
+                            .clicked()
+                        {
+                            self.delete_ocr_language_pack(pack.code);
+                            self.status = format!("OCR pack deleted: {}", pack.label);
+                        }
+                    } else if Self::settings_action_button(
                         ui,
-                        RichText::new(Self::tr_lang(language, "Install OCR Pack", "")).strong(),
+                        RichText::new(Self::tr_lang(language, "Download", "")).strong(),
                     )
                     .clicked()
                     {
-                        self.start_ocr_download();
+                        self.start_ocr_download_for(pack.code);
                     }
                 });
+                ui.add_space(4.0);
             }
         });
     }
@@ -1127,14 +1117,15 @@ impl CrosshairApp {
         self.opencv_download_job = Some(job);
     }
 
-    pub(crate) fn start_ocr_download(&mut self) {
+    pub(crate) fn start_ocr_download_for(&mut self, language_code: &str) {
         if self.ocr_download_job.is_some() {
             return;
         }
 
-        let language_code = self.state.ocr_language.clone();
+        let language_code = crate::ocr::normalize_language_code(language_code);
         let progress = self.ocr_download_progress.clone();
         progress.store(0, Ordering::SeqCst);
+        self.ocr_download_language_code = Some(language_code.clone());
 
         let job = std::thread::spawn(move || -> Result<()> {
             crate::ocr::install_language_pack(&language_code, |downloaded, total| {
@@ -1219,8 +1210,8 @@ impl CrosshairApp {
         self.opencv_installed = false;
     }
 
-    fn delete_ocr_language_pack(&mut self) {
-        let _ = crate::ocr::delete_language_pack(&self.state.ocr_language);
+    fn delete_ocr_language_pack(&mut self, language_code: &str) {
+        let _ = crate::ocr::delete_language_pack(language_code);
     }
 
     fn delete_interception_package(&mut self) {

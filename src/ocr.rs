@@ -155,6 +155,23 @@ pub fn display_label_for_language_code(value: &str) -> String {
     }
 }
 
+pub fn compact_label_for_language_code(value: &str) -> &'static str {
+    match normalize_language_code(value).as_str() {
+        "multilingual" => "CJK",
+        "latin" => "Latin",
+        "korean" => "Korean",
+        "th" => "Thai",
+        "cyrillic" => "Cyrillic",
+        "arabic" => "Arabic",
+        "devanagari" => "Hindi",
+        "el" => "Greek",
+        "ta" => "Tamil",
+        "te" => "Telugu",
+        "en" => "English",
+        _ => "OCR",
+    }
+}
+
 pub fn language_pack_for_code_public(value: &str) -> OcrLanguagePack {
     #[cfg(windows)]
     {

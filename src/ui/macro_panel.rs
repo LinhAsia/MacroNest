@@ -11709,26 +11709,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             &mut live_sync,
                                                             &mut pending_ocr_step_capture,
                                                         );
-                                                    } else {
-                                                        let target_id = ui.id().with((step_index, "ocr-target-text"));
-                                                        let target_resp = Self::render_variable_text_edit(
-                                                            ui,
-                                                            &mut step.ocr_target_text,
-                                                            target_id,
-                                                            120.0,
-                                                            240.0,
-                                                            18.0,
-                                                            18.0,
-                                                            &Self::tr_lang(language, "Target Text", "Target Text"),
-                                                            false,
-                                                         );
-                                                         Self::apply_vietnamese_input_if_changed(
-                                                            &target_resp,
-                                                            self.state.vietnamese_input_enabled,
-                                                            self.state.vietnamese_input_mode,
-                                                            &mut step.ocr_target_text,
-                                                         );
-                                                         live_sync |= target_resp.changed();
                                                     }
                                                                                                 } else if step.action == MacroAction::PlaySoundPreset {
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
