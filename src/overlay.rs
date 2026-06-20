@@ -13269,7 +13269,7 @@ mod windows_overlay {
         head_cx: f32, head_cy: f32, head_radius: f32,
         look_x: f32, look_y: f32,
         mascot_style: crate::model::MascotStyle,
-        is_interacting: bool,
+        _is_interacting: bool,
         red_factor: f32,
         recent_pulse: f32,
     ) {
@@ -13314,77 +13314,142 @@ mod windows_overlay {
                 fill_skia_circle(pixmap, ex - 1.5 * scale, ey - 2.2 * scale, 3.2 * scale, [255, 255, 255, 255]);
                 fill_skia_circle(pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.6 * scale, [255, 255, 255, 255]);
             }
+
+            // Eyebrows
+            let eye_centers = vec![(head_cx - 18.0 * scale + look_x, -1.0f32), (head_cx + 18.0 * scale + look_x, 1.0f32)];
+            for (ex, sign) in eye_centers {
+                let mut eyebrow = tiny_skia::PathBuilder::new();
+                let ebx = ex;
+                let eby = head_cy - 7.5 * scale + look_y;
+                eyebrow.move_to(ebx - 4.0 * scale, eby + 1.5 * scale);
+                eyebrow.quad_to(ebx, eby - 1.5 * scale, ebx + 4.0 * scale, eby + 0.5 * scale * sign);
+                if let Some(path) = eyebrow.finish() {
+                    stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
+                }
+            }
+
+            // Cheek blush
+            let blush_color = [255, 120, 140, 200];
+            let blush_y = head_cy + 13.0 * scale + look_y;
+            let blush_ex_offsets = vec![head_cx - 32.0 * scale + look_x, head_cx + 32.0 * scale + look_x];
+            for ex in blush_ex_offsets {
+                fill_skia_ellipse(pixmap, ex, blush_y, 7.0 * scale, 4.5 * scale, blush_color);
+                for i in 0..3 {
+                    let off = (i as f32 - 1.0) * 2.2 * scale;
+                    let mut line = tiny_skia::PathBuilder::new();
+                    line.move_to(ex + off - 1.2 * scale, blush_y + 2.5 * scale);
+                    line.line_to(ex + off + 1.2 * scale, blush_y - 2.5 * scale);
+                    if let Some(p) = line.finish() {
+                        stroke_skia_path(pixmap, &p, [255, 60, 90, 255], 1.2 * scale);
+                    }
+                }
+            }
+
+            // Mouth
+            let mut mouth = tiny_skia::PathBuilder::new();
+            let mouth_y = head_cy + 13.5 * scale + look_y;
+            mouth.move_to(head_cx - 4.0 * scale + look_x, mouth_y);
+            mouth.quad_to(head_cx - 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + look_x, mouth_y + 0.5 * scale);
+            mouth.quad_to(head_cx + 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + 4.0 * scale + look_x, mouth_y);
+            if let Some(p) = mouth.finish() {
+                stroke_skia_path(pixmap, &p, [45, 40, 42, 255], 2.0 * scale);
+            }
         } else {
-            // Usagi flat ellipse head + ears unified shape
-            let rx = 58.0 * scale;
-            let ry = 44.0 * scale;
-            let get_ellipse_y = |dx: f32| -> f32 {
-                let ratio = (dx / rx).clamp(-1.0, 1.0);
-                head_cy - ry * (1.0 - ratio * ratio).sqrt()
-            };
+            // Usagi asymmetrical tilted face & long parallel bunny ears pointing top-left
+            let rx = 66.0 * scale;
+            let ry = 50.0 * scale;
 
-            // Unified silhouette path
-            let mut head_ears_path = tiny_skia::PathBuilder::new();
-            
-            let x_left_outer = head_cx - 12.0 * scale;
-            let y_left_outer = get_ellipse_y(-12.0 * scale);
-            head_ears_path.move_to(x_left_outer, y_left_outer);
-
-            // Left ear animation/wiggle offsets
+            // Ear wiggle animation
             let ear_wiggle = recent_pulse * 3.0 * scale;
             let ear_shift_x = -look_x * 0.4;
             let ear_shift_y = -look_y * 0.4;
 
-            let y_tip_left = head_cy - 92.0 * scale - ear_wiggle + ear_shift_y;
-            head_ears_path.line_to(x_left_outer + ear_shift_x, y_tip_left);
-            head_ears_path.quad_to(
-                head_cx - 7.0 * scale - ear_wiggle + ear_shift_x,
-                y_tip_left - 6.0 * scale,
-                head_cx - 2.0 * scale + ear_shift_x,
-                y_tip_left,
-            );
-            let x_left_inner = head_cx - 2.0 * scale;
-            let y_left_inner = get_ellipse_y(-2.0 * scale);
-            head_ears_path.line_to(x_left_inner + ear_shift_x, y_left_inner + ear_shift_y);
+            // Define ears geometry (center lines point to the top-left, angle = -40 degrees)
+            let ear_angle = -40.0f32 * std::f32::consts::PI / 180.0;
+            let dx = ear_angle.sin();
+            let dy = -ear_angle.cos();
+            let nx = ear_angle.cos();
+            let ny = ear_angle.sin();
 
-            // Valley
-            let x_right_inner = head_cx + 2.0 * scale;
-            let y_right_inner = get_ellipse_y(2.0 * scale);
-            head_ears_path.quad_to(
-                head_cx,
-                head_cy - ry,
-                x_right_inner + ear_shift_x,
-                y_right_inner + ear_shift_y,
-            );
+            let l = 56.0 * scale;
+            let r = 9.5 * scale;
 
-            // Right ear
-            let y_tip_right = head_cy - 92.0 * scale + ear_wiggle + ear_shift_y;
-            head_ears_path.line_to(x_right_inner + ear_shift_x, y_tip_right);
-            head_ears_path.quad_to(
-                head_cx + 7.0 * scale + ear_wiggle + ear_shift_x,
-                y_tip_right - 6.0 * scale,
-                head_cx + 12.0 * scale + ear_shift_x,
-                y_tip_right,
-            );
-            let x_right_outer = head_cx + 12.0 * scale;
-            let y_right_outer = get_ellipse_y(12.0 * scale);
-            head_ears_path.line_to(x_right_outer + ear_shift_x, y_right_outer + ear_shift_y);
+            // Left ear base on ellipse (top-left)
+            let base_angle1 = -130.0f32 * std::f32::consts::PI / 180.0;
+            let bx1 = head_cx + rx * base_angle1.cos();
+            let by1 = head_cy + ry * base_angle1.sin();
 
-            // Bottom ellipse arc of the head
-            let alpha = (12.0 * scale / rx).acos();
-            let theta_start = -alpha;
-            let theta_end = std::f32::consts::PI + alpha;
+            // Right ear base on ellipse (next to it)
+            let base_angle2 = -85.0f32 * std::f32::consts::PI / 180.0;
+            let bx2 = head_cx + rx * base_angle2.cos();
+            let by2 = head_cy + ry * base_angle2.sin();
+
+            // Calculate control coordinates for unified head-ears path
+            let x1_left = bx1 - r * nx + ear_shift_x;
+            let y1_left = by1 - r * ny + ear_shift_y;
+            let x1_right = bx1 + r * nx + ear_shift_x;
+            let y1_right = by1 + r * ny + ear_shift_y;
+            let x1_tip_left = x1_left + l * dx;
+            let y1_tip_left = y1_left + l * dy;
+            let x1_tip_right = x1_right + l * dx;
+            let y1_tip_right = y1_right + l * dy;
+
+            let x2_left = bx2 - r * nx + ear_shift_x;
+            let y2_left = by2 - r * ny + ear_shift_y;
+            let x2_right = bx2 + r * nx + ear_shift_x;
+            let y2_right = by2 + r * ny + ear_shift_y;
+            let x2_tip_left = x2_left + l * dx;
+            let y2_tip_left = y2_left + l * dy;
+            let x2_tip_right = x2_right + l * dx;
+            let y2_tip_right = y2_right + l * dy;
+
+            let mut head_ears_path = tiny_skia::PathBuilder::new();
+            head_ears_path.move_to(x1_left, y1_left);
+            head_ears_path.line_to(x1_tip_left, y1_tip_left);
+            head_ears_path.cubic_to(
+                x1_tip_left + r * 0.55 * dx, y1_tip_left + r * 0.55 * dy,
+                x1_tip_right + r * 0.55 * dx, y1_tip_right + r * 0.55 * dy,
+                x1_tip_right, y1_tip_right,
+            );
+            head_ears_path.line_to(x1_right, y1_right);
+            head_ears_path.quad_to(
+                (x1_right + x2_left) * 0.5,
+                (y1_right + y2_left) * 0.5,
+                x2_left,
+                y2_left,
+            );
+            head_ears_path.line_to(x2_tip_left, y2_tip_left);
+            head_ears_path.cubic_to(
+                x2_tip_left + r * 0.55 * dx, y2_tip_left + r * 0.55 * dy,
+                x2_tip_right + r * 0.55 * dx, y2_tip_right + r * 0.55 * dy,
+                x2_tip_right, y2_tip_right,
+            );
+            head_ears_path.line_to(x2_right, y2_right);
+
+            // Sweep head ellipse from right base of right ear to left base of left ear
+            let sweep_start_x = bx2 + r * nx;
+            let sweep_start_y = by2 + r * ny;
+            let sweep_end_x = bx1 - r * nx;
+            let sweep_end_y = by1 - r * ny;
+
+            let theta_start = ((sweep_start_y - head_cy) / ry).atan2((sweep_start_x - head_cx) / rx);
+            let theta_end = ((sweep_end_y - head_cy) / ry).atan2((sweep_end_x - head_cx) / rx);
+            let mut target_end = theta_end;
+            if target_end < theta_start {
+                target_end += 2.0 * std::f32::consts::PI;
+            }
+
             let steps = 40;
             for i in 1..=steps {
                 let t = i as f32 / steps as f32;
-                let theta = theta_start + (theta_end - theta_start) * t;
+                let theta = theta_start + (target_end - theta_start) * t;
                 let px = head_cx + rx * theta.cos();
                 let py = head_cy + ry * theta.sin();
                 head_ears_path.line_to(px, py);
             }
             head_ears_path.close();
 
-            // Vertical Linear Gradient Shader
+            // Linear Gradient Shader for Heat Feedback
             let top_r = (254.0 + (240.0 - 254.0) * red_factor).round() as u8;
             let top_g = (240.0 + (80.0 - 240.0) * red_factor).round() as u8;
             let top_b = (187.0 + (50.0 - 187.0) * red_factor).round() as u8;
@@ -13410,7 +13475,7 @@ mod windows_overlay {
                 paint.set_color(tiny_skia::Color::from_rgba8(top_color[0], top_color[1], top_color[2], top_color[3]));
             }
 
-            // Draw head shadow first
+            // Draw head shadow
             fill_skia_circle(pixmap, head_cx, head_cy + 4.5 * scale, ry, [0, 0, 0, 28]);
 
             // Draw unified path fill & stroke outline
@@ -13419,162 +13484,162 @@ mod windows_overlay {
                 stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
             }
 
-            // Draw pink inner ears
-            let base_y_inner = head_cy - 50.0 * scale + ear_shift_y;
-            let tip_y_inner = head_cy - 88.0 * scale - ear_wiggle + ear_shift_y;
-            
-            // Left inner ear
-            let mut left_inner = tiny_skia::PathBuilder::new();
-            left_inner.move_to(head_cx - 10.0 * scale + ear_shift_x, base_y_inner);
-            left_inner.line_to(head_cx - 10.0 * scale + ear_shift_x, tip_y_inner + 4.0 * scale);
-            left_inner.quad_to(
-                head_cx - 7.0 * scale - ear_wiggle + ear_shift_x,
-                tip_y_inner,
-                head_cx - 4.0 * scale + ear_shift_x,
-                tip_y_inner + 4.0 * scale,
-            );
-            left_inner.line_to(head_cx - 4.0 * scale + ear_shift_x, base_y_inner);
-            left_inner.close();
-            if let Some(path) = left_inner.finish() {
-                fill_skia_path(pixmap, &path, [255, 200, 210, 255]);
+            // Draw pink inner ears inside the tilted ears
+            let r_inner = r - 3.5 * scale;
+            let l_inner = l - 8.0 * scale;
+
+            for &bx in &[bx1, bx2] {
+                let is_left = bx == bx1;
+                let wiggle = if is_left { -ear_wiggle } else { ear_wiggle };
+                let mut inner_path = tiny_skia::PathBuilder::new();
+                
+                let cur_bx = bx + 4.0 * scale * dx + ear_shift_x;
+                let cur_by = if is_left { by1 + 4.0 * scale * dy + ear_shift_y } else { by2 + 4.0 * scale * dy + ear_shift_y };
+
+                let ix_left = cur_bx - r_inner * nx;
+                let iy_left = cur_by - r_inner * ny;
+                let ix_right = cur_bx + r_inner * nx;
+                let iy_right = cur_by + r_inner * ny;
+                
+                let ix_tip_left = ix_left + l_inner * dx;
+                let iy_tip_left = iy_left + l_inner * dy;
+                let ix_tip_right = ix_right + l_inner * dx;
+                let iy_tip_right = iy_right + l_inner * dy;
+
+                inner_path.move_to(ix_left, iy_left);
+                inner_path.line_to(ix_tip_left, iy_tip_left);
+                inner_path.cubic_to(
+                    ix_tip_left + r_inner * 0.55 * dx, iy_tip_left + r_inner * 0.55 * dy,
+                    ix_tip_right + r_inner * 0.55 * dx, iy_tip_right + r_inner * 0.55 * dy,
+                    ix_tip_right, iy_tip_right,
+                );
+                inner_path.line_to(ix_right, iy_right);
+                inner_path.close();
+
+                if let Some(path) = inner_path.finish() {
+                    fill_skia_path(pixmap, &path, [255, 200, 210, 255]);
+                }
             }
 
-            // Right inner ear
-            let mut right_inner = tiny_skia::PathBuilder::new();
-            right_inner.move_to(head_cx + 4.0 * scale + ear_shift_x, base_y_inner);
-            right_inner.line_to(head_cx + 4.0 * scale + ear_shift_x, tip_y_inner + 4.0 * scale);
-            right_inner.quad_to(
-                head_cx + 7.0 * scale + ear_wiggle + ear_shift_x,
-                tip_y_inner,
-                head_cx + 10.0 * scale + ear_shift_x,
-                tip_y_inner + 4.0 * scale,
-            );
-            right_inner.line_to(head_cx + 10.0 * scale + ear_shift_x, base_y_inner);
-            right_inner.close();
-            if let Some(path) = right_inner.finish() {
-                fill_skia_path(pixmap, &path, [255, 200, 210, 255]);
-            }
+            // Tilted and shifted 3D Face coordinates helper
+            let fcx = head_cx + 5.0 * scale + look_x;
+            let fcy = head_cy + 3.5 * scale + look_y;
+            let face_tilt = -15.0f32 * std::f32::consts::PI / 180.0;
+            let cos_a = face_tilt.cos();
+            let sin_a = face_tilt.sin();
 
-            // Draw Eyes (blank white or normal shiny)
+            let project_face = |lx: f32, ly: f32| -> (f32, f32) {
+                let rx = lx * cos_a - ly * sin_a;
+                let ry = lx * sin_a + ly * cos_a;
+                (fcx + rx, fcy + ry)
+            };
+
+            // Draw Eyes (blank white when heat is very high, otherwise normal shiny eyes)
             let eye_size = 11.5 * scale;
             let eye_y_offset = 3.5 * scale;
-            for &ex in &[head_cx - 23.0 * scale + look_x, head_cx + 23.0 * scale + look_x] {
-                let ey = head_cy + eye_y_offset + look_y;
-                if red_factor > 0.5 {
-                    // Blank white eyes with black outline when pressing keys
+
+            for &local_x in &[-22.0 * scale, 22.0 * scale] {
+                let (ex, ey) = project_face(local_x, eye_y_offset);
+                if red_factor > 0.85 {
+                    // Blank white eyes with black outline when pressing keys intensely
                     fill_skia_circle(pixmap, ex, ey, eye_size * 0.5, [255, 255, 255, 255]);
                     stroke_skia_circle(pixmap, ex, ey, eye_size * 0.5, 2.0 * scale, [45, 40, 42, 255]);
                 } else {
                     // Normal shiny eyes
                     fill_skia_circle(pixmap, ex, ey, eye_size * 0.5, [45, 40, 42, 255]);
-                    fill_skia_circle(pixmap, ex - 1.8 * scale, ey - 1.8 * scale, 2.2 * scale, [255, 255, 255, 255]);
-                    fill_skia_circle(pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.1 * scale, [255, 255, 255, 255]);
+                    
+                    // Rotated highlights
+                    let hl1_x = ex + (-1.8 * scale) * cos_a - (-1.8 * scale) * sin_a;
+                    let hl1_y = ey + (-1.8 * scale) * sin_a + (-1.8 * scale) * cos_a;
+                    fill_skia_circle(pixmap, hl1_x, hl1_y, 2.2 * scale, [255, 255, 255, 255]);
+                    
+                    let hl2_x = ex + (1.6 * scale) * cos_a - (1.6 * scale) * sin_a;
+                    let hl2_y = ey + (1.6 * scale) * sin_a + (1.6 * scale) * cos_a;
+                    fill_skia_circle(pixmap, hl2_x, hl2_y, 1.1 * scale, [255, 255, 255, 255]);
                 }
             }
-        }
 
-        // Eyebrows
-        let eye_centers = if is_hachiware {
-            vec![(head_cx - 18.0 * scale + look_x, -1.0f32), (head_cx + 18.0 * scale + look_x, 1.0f32)]
-        } else {
-            vec![(head_cx - 23.0 * scale + look_x, -1.0f32), (head_cx + 23.0 * scale + look_x, 1.0f32)]
-        };
-
-        for (ex, sign) in eye_centers {
-            let mut eyebrow = tiny_skia::PathBuilder::new();
-            let ebx = ex;
-            let eby = if is_hachiware {
-                head_cy - 7.5 * scale + look_y
-            } else {
-                head_cy - 9.0 * scale + look_y
-            };
+            // Eyebrows
+            let local_brow_y = -10.0 * scale;
+            let brow_w = 4.5 * scale;
             
-            if is_hachiware {
-                eyebrow.move_to(ebx - 4.0 * scale, eby + 1.5 * scale);
-                eyebrow.quad_to(ebx, eby - 1.5 * scale, ebx + 4.0 * scale, eby + 0.5 * scale * sign);
-            } else {
-                // Usagi cute curved eyebrows
-                eyebrow.move_to(ebx - 4.5 * scale, eby + 1.5 * scale);
-                eyebrow.quad_to(ebx, eby - 2.5 * scale, ebx + 4.5 * scale, eby + 1.2 * scale * sign);
-            }
-            if let Some(path) = eyebrow.finish() {
+            // Left eyebrow
+            let mut left_brow = tiny_skia::PathBuilder::new();
+            let bl_start = project_face(-22.0 * scale - brow_w, local_brow_y + 1.0 * scale);
+            let bl_ctrl = project_face(-22.0 * scale, local_brow_y - 2.5 * scale);
+            let bl_end = project_face(-22.0 * scale + brow_w, local_brow_y + 1.0 * scale);
+            left_brow.move_to(bl_start.0, bl_start.1);
+            left_brow.quad_to(bl_ctrl.0, bl_ctrl.1, bl_end.0, bl_end.1);
+            if let Some(path) = left_brow.finish() {
                 stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
             }
-        }
+            
+            // Right eyebrow
+            let mut right_brow = tiny_skia::PathBuilder::new();
+            let br_start = project_face(22.0 * scale - brow_w, local_brow_y + 1.0 * scale);
+            let br_ctrl = project_face(22.0 * scale, local_brow_y - 2.5 * scale);
+            let br_end = project_face(22.0 * scale + brow_w, local_brow_y + 1.0 * scale);
+            right_brow.move_to(br_start.0, br_start.1);
+            right_brow.quad_to(br_ctrl.0, br_ctrl.1, br_end.0, br_end.1);
+            if let Some(path) = right_brow.finish() {
+                stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
+            }
 
-        // Cheek blush (sweet oval pink fills)
-        let blush_color = [255, 120, 140, 200];
-        let blush_y = if is_hachiware {
-            head_cy + 13.0 * scale + look_y
-        } else {
-            head_cy + 15.0 * scale + look_y
-        };
-        let blush_ex_offsets = if is_hachiware {
-            vec![head_cx - 32.0 * scale + look_x, head_cx + 32.0 * scale + look_x]
-        } else {
-            vec![head_cx - 37.0 * scale + look_x, head_cx + 37.0 * scale + look_x]
-        };
-
-        for ex in blush_ex_offsets {
-            if is_hachiware {
-                fill_skia_ellipse(pixmap, ex, blush_y, 7.0 * scale, 4.5 * scale, blush_color);
-                for i in 0..3 {
-                    let off = (i as f32 - 1.0) * 2.2 * scale;
-                    let mut line = tiny_skia::PathBuilder::new();
-                    line.move_to(ex + off - 1.2 * scale, blush_y + 2.5 * scale);
-                    line.line_to(ex + off + 1.2 * scale, blush_y - 2.5 * scale);
-                    if let Some(p) = line.finish() {
-                        stroke_skia_path(pixmap, &p, [255, 60, 90, 255], 1.2 * scale);
-                    }
-                }
-            } else {
-                // Usagi blush (slightly larger, 4 stripes)
-                fill_skia_ellipse(pixmap, ex, blush_y, 8.5 * scale, 5.0 * scale, blush_color);
+            // Cheek blush (4 slanted stripes)
+            let blush_color = [255, 120, 140, 200];
+            let local_blush_y = 12.0 * scale;
+            
+            for &side_sign in &[-1.0f32, 1.0f32] {
+                let (bx, by) = project_face(side_sign * 35.0 * scale, local_blush_y);
+                fill_skia_ellipse(pixmap, bx, by, 8.5 * scale, 5.0 * scale, blush_color);
+                
                 for i in 0..4 {
-                    let off = (i as f32 - 1.5) * 2.0 * scale;
+                    let offset = (i as f32 - 1.5) * 2.8 * scale;
+                    let local_bx = side_sign * 35.0 * scale + offset;
+                    let p1 = project_face(local_bx - 1.2 * scale, local_blush_y + 3.0 * scale);
+                    let p2 = project_face(local_bx + 1.2 * scale, local_blush_y - 3.0 * scale);
                     let mut line = tiny_skia::PathBuilder::new();
-                    line.move_to(ex + off - 1.2 * scale, blush_y + 2.8 * scale);
-                    line.line_to(ex + off + 1.2 * scale, blush_y - 2.8 * scale);
-                    if let Some(p) = line.finish() {
-                        stroke_skia_path(pixmap, &p, [255, 60, 90, 255], 1.2 * scale);
+                    line.move_to(p1.0, p1.1);
+                    line.line_to(p2.0, p2.1);
+                    if let Some(path) = line.finish() {
+                        stroke_skia_path(pixmap, &path, [255, 60, 90, 255], 1.2 * scale);
                     }
                 }
             }
-        }
 
-        // Mouth depending on style
-        let mut mouth = tiny_skia::PathBuilder::new();
-        let mouth_y = if is_hachiware {
-            head_cy + 13.5 * scale + look_y
-        } else {
-            head_cy + 15.0 * scale + look_y
-        };
-        
-        if is_hachiware {
-            // Chiikawa cute small mouth (w)
-            mouth.move_to(head_cx - 4.0 * scale + look_x, mouth_y);
-            mouth.quad_to(head_cx - 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + look_x, mouth_y + 0.5 * scale);
-            mouth.quad_to(head_cx + 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + 4.0 * scale + look_x, mouth_y);
-        } else {
-            // Usagi cute wavy mouth and nose matching the reference
-            let mx = head_cx + look_x;
-            let my = mouth_y;
-            // Nose (tiny horizontal bar or dot)
-            mouth.move_to(mx - 1.2 * scale, my - 2.5 * scale);
-            mouth.quad_to(mx, my - 3.2 * scale, mx + 1.2 * scale, my - 2.5 * scale);
+            // Mouth and Nose
+            let local_my = 13.5 * scale;
+            let mut mouth = tiny_skia::PathBuilder::new();
+
+            // Nose
+            let n1 = project_face(-1.2 * scale, local_my - 2.5 * scale);
+            let n2 = project_face(0.0, local_my - 3.2 * scale);
+            let n3 = project_face(1.2 * scale, local_my - 2.5 * scale);
+            mouth.move_to(n1.0, n1.1);
+            mouth.quad_to(n2.0, n2.1, n3.0, n3.1);
             
             // Center connecting line
-            mouth.move_to(mx, my - 2.8 * scale);
-            mouth.line_to(mx, my);
+            let c1 = project_face(0.0, local_my - 2.8 * scale);
+            let c2 = project_face(0.0, local_my);
+            mouth.move_to(c1.0, c1.1);
+            mouth.line_to(c2.0, c2.1);
             
             // Left curve
-            mouth.quad_to(mx - 2.2 * scale, my + 2.5 * scale, mx - 4.5 * scale, my + 0.5 * scale);
+            let l_ctrl = project_face(-2.2 * scale, local_my + 2.5 * scale);
+            let l_end = project_face(-4.5 * scale, local_my + 0.5 * scale);
+            mouth.quad_to(l_ctrl.0, l_ctrl.1, l_end.0, l_end.1);
             
             // Right curve
-            mouth.move_to(mx, my);
-            mouth.quad_to(mx + 2.2 * scale, my + 2.5 * scale, mx + 4.5 * scale, my + 0.5 * scale);
+            let r_start = project_face(0.0, local_my);
+            let r_ctrl = project_face(2.2 * scale, local_my + 2.5 * scale);
+            let r_end = project_face(4.5 * scale, local_my + 0.5 * scale);
+            mouth.move_to(r_start.0, r_start.1);
+            mouth.quad_to(r_ctrl.0, r_ctrl.1, r_end.0, r_end.1);
+
+            if let Some(p) = mouth.finish() {
+                stroke_skia_path(pixmap, &p, [45, 40, 42, 255], 2.0 * scale);
+            }
         }
-        if let Some(p) = mouth.finish() { stroke_skia_path(pixmap, &p, [45, 40, 42, 255], 2.0 * scale); }
     }
 
     /// Draws the character's arms + shoulder joints into `pixmap`.
