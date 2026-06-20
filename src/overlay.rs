@@ -135,7 +135,8 @@ mod windows_overlay {
                     IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE,
                     LoadCursorW, LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG,
                     MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN,
-                    SM_CYSCREEN, SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE,
+                    SM_CXVIRTUALSCREEN, SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+                    SM_YVIRTUALSCREEN, SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE,
                     SW_SHOWNA, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
                     SWP_SHOWWINDOW, SetCursorPos, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
                     SetWindowLongW, SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
@@ -244,6 +245,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static MASCOT_DRAG_START_CENTER: Lazy<Mutex<Option<(i32, i32)>>> =
         Lazy::new(|| Mutex::new(None));
+    static MASCOT_DRAG_EDGE_OFFSET: Lazy<Mutex<(i32, i32)>> =
+        Lazy::new(|| Mutex::new((0, 0)));
     static HOOKS_THREAD: Lazy<Mutex<Option<(u32, thread::JoinHandle<()>)>>> =
         Lazy::new(|| Mutex::new(None));
 
@@ -5962,6 +5965,48 @@ mod windows_overlay {
         runtime.quick_key_display_last_cursor_pos = Some(cursor);
     }
 
+    fn move_quick_key_display_window(runtime: &Runtime) {
+        let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+        let (width, height) = quick_key_display_mascot_layout_size(font_size);
+        let x = runtime.quick_key_display_center_x - (width / 2);
+        let y = runtime.quick_key_display_center_y - (height / 2);
+        let _ = unsafe {
+            SetWindowPos(
+                runtime.key_display_hwnd,
+                None,
+                x,
+                y,
+                width,
+                height,
+                SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE,
+            )
+        };
+    }
+
+    fn update_mascot_drag_edge_offset(cursor: POINT) -> (i32, i32) {
+        let virtual_left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+        let virtual_top = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+        let virtual_right =
+            virtual_left + unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) }.max(1);
+        let virtual_bottom =
+            virtual_top + unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) }.max(1);
+        let mut edge_offset = MASCOT_DRAG_EDGE_OFFSET.lock();
+
+        if cursor.x <= virtual_left {
+            edge_offset.0 -= 18;
+        } else if cursor.x >= virtual_right - 1 {
+            edge_offset.0 += 18;
+        }
+
+        if cursor.y <= virtual_top {
+            edge_offset.1 -= 18;
+        } else if cursor.y >= virtual_bottom - 1 {
+            edge_offset.1 += 18;
+        }
+
+        *edge_offset
+    }
+
     fn handle_mascot_global_drag(message: u32, cursor: POINT) -> bool {
         let controller_hwnd = HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void);
         if controller_hwnd.0.is_null() {
@@ -5978,6 +6023,7 @@ mod windows_overlay {
             if matches!(message, WM_LBUTTONUP) && MASCOT_DRAG_START_MOUSE.lock().is_some() {
                 *MASCOT_DRAG_START_MOUSE.lock() = None;
                 *MASCOT_DRAG_START_CENTER.lock() = None;
+                *MASCOT_DRAG_EDGE_OFFSET.lock() = (0, 0);
                 MASCOT_WINDOW_MOVING.store(false, Ordering::Relaxed);
             }
             return false;
@@ -6001,6 +6047,7 @@ mod windows_overlay {
                     runtime.quick_key_display_center_x,
                     runtime.quick_key_display_center_y,
                 ));
+                *MASCOT_DRAG_EDGE_OFFSET.lock() = (0, 0);
                 MASCOT_WINDOW_MOVING.store(true, Ordering::Relaxed);
                 true
             }
@@ -6010,9 +6057,12 @@ mod windows_overlay {
                 else {
                     return false;
                 };
-                runtime.quick_key_display_center_x = start_center_x + (cursor.x - start_mouse_x);
-                runtime.quick_key_display_center_y = start_center_y + (cursor.y - start_mouse_y);
-                let _ = unsafe { refresh_quick_key_display(runtime) };
+                let (edge_x, edge_y) = update_mascot_drag_edge_offset(cursor);
+                runtime.quick_key_display_center_x =
+                    start_center_x + (cursor.x - start_mouse_x) + edge_x;
+                runtime.quick_key_display_center_y =
+                    start_center_y + (cursor.y - start_mouse_y) + edge_y;
+                move_quick_key_display_window(runtime);
                 true
             }
             WM_LBUTTONUP => {
@@ -6021,6 +6071,7 @@ mod windows_overlay {
                 }
                 *MASCOT_DRAG_START_MOUSE.lock() = None;
                 *MASCOT_DRAG_START_CENTER.lock() = None;
+                *MASCOT_DRAG_EDGE_OFFSET.lock() = (0, 0);
                 MASCOT_WINDOW_MOVING.store(false, Ordering::Relaxed);
                 let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
                     x: runtime.quick_key_display_center_x,
