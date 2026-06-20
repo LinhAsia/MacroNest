@@ -23,12 +23,41 @@ impl CrosshairApp {
             .width(110.0)
             .selected_text(outputs_label)
             .show_ui(ui, |ui| {
-                ui.set_min_width(200.0);
+                ui.set_min_width(260.0);
+                let has_target_text = !step.ocr_target_text.trim().is_empty();
 
                 egui::Grid::new("ocr_outputs_grid")
                     .num_columns(2)
                     .spacing([8.0, 6.0])
                     .show(ui, |ui| {
+                        let target_label =
+                            ui.label(Self::tr_lang(language, "Target Text:", "Target Text:"));
+                        target_label.on_hover_text(Self::tr_lang(
+                            language,
+                            "Only mark success when OCR finds this text",
+                            "Only mark success when OCR finds this text",
+                        ));
+                        let target_id = ui.id().with((group_id, preset_id, step_index, "ocr-target-text"));
+                        let target_resp = Self::render_variable_text_edit(
+                            ui,
+                            &mut step.ocr_target_text,
+                            target_id,
+                            120.0,
+                            240.0,
+                            18.0,
+                            18.0,
+                            &Self::tr_lang(language, "Target Text", "Target Text"),
+                            false,
+                        );
+                        Self::apply_vietnamese_input_if_changed(
+                            &target_resp,
+                            vietnamese_input_enabled,
+                            vietnamese_input_mode,
+                            &mut step.ocr_target_text,
+                        );
+                        *live_sync |= target_resp.changed();
+                        ui.end_row();
+
                         let found_label =
                             ui.label(Self::tr_lang(language, "Found Var:", "Found Var:"));
                         found_label.on_hover_text(Self::tr_lang(
@@ -36,10 +65,12 @@ impl CrosshairApp {
                             "Assigns 1 if the target text was found (or if OCR succeeded when no target is set), 0 otherwise",
                             "Assigns 1 if the target text was found (or if OCR succeeded when no target is set), 0 otherwise",
                         ));
-                        let found_resp = ui.add(
-                            egui::TextEdit::singleline(&mut step.ocr_success_var)
-                                .hint_text("found_var"),
-                        );
+                        let found_resp = ui
+                            .add_enabled(
+                                has_target_text,
+                                egui::TextEdit::singleline(&mut step.ocr_success_var)
+                                    .hint_text("found_var"),
+                            );
                         Self::apply_vietnamese_input_if_changed(
                             &found_resp,
                             vietnamese_input_enabled,
@@ -55,10 +86,12 @@ impl CrosshairApp {
                             "Assigns the absolute X coordinate of the center of found text",
                             "Assigns the absolute X coordinate of the center of found text",
                         ));
-                        let pos_x_resp = ui.add(
-                            egui::TextEdit::singleline(&mut step.ocr_pos_var_x)
-                                .hint_text("result_x_var"),
-                        );
+                        let pos_x_resp = ui
+                            .add_enabled(
+                                has_target_text,
+                                egui::TextEdit::singleline(&mut step.ocr_pos_var_x)
+                                    .hint_text("result_x_var"),
+                            );
                         Self::apply_vietnamese_input_if_changed(
                             &pos_x_resp,
                             vietnamese_input_enabled,
@@ -74,10 +107,12 @@ impl CrosshairApp {
                             "Assigns the absolute Y coordinate of the center of found text",
                             "Assigns the absolute Y coordinate of the center of found text",
                         ));
-                        let pos_y_resp = ui.add(
-                            egui::TextEdit::singleline(&mut step.ocr_pos_var_y)
-                                .hint_text("result_y_var"),
-                        );
+                        let pos_y_resp = ui
+                            .add_enabled(
+                                has_target_text,
+                                egui::TextEdit::singleline(&mut step.ocr_pos_var_y)
+                                    .hint_text("result_y_var"),
+                            );
                         Self::apply_vietnamese_input_if_changed(
                             &pos_y_resp,
                             vietnamese_input_enabled,
@@ -139,14 +174,11 @@ impl CrosshairApp {
 
         egui::ComboBox::from_id_salt((group_id, preset_id, step_index, "ocr-language-step"))
             .selected_text(if step.ocr_language == crate::ocr::OCR_ACTIVE_CODE {
-                format!(
-                    "Active OCR ({})",
-                    crate::ocr::display_label_for_language_code(&crate::ocr::active_language_code())
-                )
+                format!("Active ({})", crate::ocr::compact_label_for_language_code(&crate::ocr::active_language_code()))
             } else {
-                crate::ocr::display_label_for_language_code(&step.ocr_language)
+                crate::ocr::compact_label_for_language_code(&step.ocr_language).to_owned()
             })
-            .width(96.0)
+            .width(92.0)
             .show_ui(ui, |ui| {
                 if ui
                     .selectable_value(
@@ -173,26 +205,5 @@ impl CrosshairApp {
                     }
                 }
             });
-
-        let target_id = ui.id().with((step_index, "ocr-target-text"));
-        let target_resp = Self::render_variable_text_edit(
-            ui,
-            &mut step.ocr_target_text,
-            target_id,
-            120.0,
-            240.0,
-            18.0,
-            18.0,
-            &Self::tr_lang(language, "Target Text", "Target Text"),
-            false,
-        );
-
-        Self::apply_vietnamese_input_if_changed(
-            &target_resp,
-            vietnamese_input_enabled,
-            vietnamese_input_mode,
-            &mut step.ocr_target_text,
-        );
-        *live_sync |= target_resp.changed();
     }
 }
