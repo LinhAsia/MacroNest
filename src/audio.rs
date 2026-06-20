@@ -777,6 +777,7 @@ enum KeySoundMessage {
         samples: Vec<f32>,
         sample_rate: u32,
         channels: u16,
+        volume: f32,
     },
 }
 
@@ -811,10 +812,11 @@ pub fn init_key_sound_player() {
                 let mixer = stream.mixer().clone();
                 while let Ok(msg) = rx.recv() {
                     match msg {
-                        KeySoundMessage::Play { samples, sample_rate, channels } => {
+                        KeySoundMessage::Play { samples, sample_rate, channels, volume } => {
                             let mixer_clone = mixer.clone();
                             thread::spawn(move || {
                                 let sink = rodio::Sink::connect_new(&mixer_clone);
+                                sink.set_volume(volume);
                                 sink.append(SamplesBuffer::new(channels, sample_rate, samples));
                                 sink.play();
                                 sink.sleep_until_end();
@@ -829,10 +831,10 @@ pub fn init_key_sound_player() {
 }
 
 pub fn play_key_sound(style: u32) {
-    play_key_sound_vk(style, 0);
+    play_key_sound_vk(style, 0, 1.0);
 }
 
-pub fn play_key_sound_vk(style: u32, vk: u32) {
+pub fn play_key_sound_vk(style: u32, vk: u32, volume: f32) {
     let initialized = KEY_SOUND_CHANNEL.lock().is_some();
     if !initialized {
         init_key_sound_player();
@@ -850,6 +852,7 @@ pub fn play_key_sound_vk(style: u32, vk: u32) {
             samples: samples.clone(),
             sample_rate: *sample_rate,
             channels: *channels,
+            volume: volume.clamp(0.0, 2.0),
         });
     }
 }

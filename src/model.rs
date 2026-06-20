@@ -283,6 +283,10 @@ fn default_screen_draw_smoothing_amount() -> f32 {
     0.45
 }
 
+fn default_key_sound_volume() -> f32 {
+    1.0
+}
+
 fn default_image_search_move_passes() -> u8 {
     3
 }
@@ -2886,6 +2890,8 @@ pub struct AppState {
     pub quick_key_sound_enabled: bool,
     #[serde(default)]
     pub quick_key_sound_style: u32,
+    #[serde(default = "default_key_sound_volume")]
+    pub quick_key_sound_volume: f32,
 }
 
 impl Default for AppState {
@@ -2993,6 +2999,7 @@ impl Default for AppState {
             quick_screen_draw_smoothing_amount: default_screen_draw_smoothing_amount(),
             quick_key_sound_enabled: false,
             quick_key_sound_style: 2,
+            quick_key_sound_volume: default_key_sound_volume(),
         }
     }
 }
