@@ -142,7 +142,7 @@ mod windows_overlay {
                     TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
                     UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
                     WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
-                    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_EXITSIZEMOVE, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
+                    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
                     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
                     WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE, WM_NCHITTEST,
                     WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER,
@@ -239,6 +239,7 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(ScreenDrawState::default()));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
     static LAST_MOUSE_MOVE_TIME_MS: AtomicU64 = AtomicU64::new(0);
+    static MASCOT_WINDOW_MOVING: AtomicBool = AtomicBool::new(false);
     static HOOKS_THREAD: Lazy<Mutex<Option<(u32, thread::JoinHandle<()>)>>> =
         Lazy::new(|| Mutex::new(None));
 
@@ -2582,7 +2583,8 @@ mod windows_overlay {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     process_pending_commands(hwnd, runtime);
 
-                    if !is_ui_in_foreground()
+                    if !MASCOT_WINDOW_MOVING.load(Ordering::Relaxed)
+                        && !is_ui_in_foreground()
                         && (runtime.quick_key_display_enabled
                             || !runtime.quick_key_display_entries.is_empty())
                     {
@@ -2873,12 +2875,25 @@ mod windows_overlay {
                 LRESULT(0)
             }
 
+            WM_ENTERSIZEMOVE => {
+                if let Some(runtime) = runtime_mut(hwnd) {
+                    if hwnd == runtime.key_display_hwnd
+                        && runtime.quick_key_display_enabled
+                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
+                    {
+                        MASCOT_WINDOW_MOVING.store(true, Ordering::Relaxed);
+                    }
+                }
+                LRESULT(0)
+            }
+
             WM_EXITSIZEMOVE => {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     if hwnd == runtime.key_display_hwnd
                         && runtime.quick_key_display_enabled
                         && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
                     {
+                        MASCOT_WINDOW_MOVING.store(false, Ordering::Relaxed);
                         let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
                             x: runtime.quick_key_display_center_x,
                             y: runtime.quick_key_display_center_y,
