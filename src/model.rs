@@ -263,6 +263,11 @@ pub enum QuickKeyDisplayMode {
 pub enum MascotStyle {
     #[default]
     Hachiware,
+    ChiikawaClassic,
+    ChiikawaCoffee,
+    ChiikawaSleepy,
+    ChiikawaHappyStar,
+    ChiikawaPajama,
 }
 
 fn default_screen_draw_color() -> RgbaColor {
