@@ -331,13 +331,12 @@ impl CrosshairApp {
                     self.render_downloaded_tool_entry(
                         ui,
                         language,
-                        "Vision Support (OpenCV)",
+                        "OpenCV",
                         &opencv_path,
                         self.opencv_installed,
                         opencv_progress,
                         60 * 1024 * 1024,
-                        Self::tr_lang(language, "Download OpenCV", ""),
-                        Self::tr_lang(language, "Vision features require OpenCV.", ""),
+                        Self::tr_lang(language, "Image search and color tools.", ""),
                         Self::tr_lang(language, "OpenCV DLL deleted.", ""),
                         Self::start_opencv_download,
                         Self::delete_opencv_tool,
@@ -365,8 +364,7 @@ impl CrosshairApp {
                         self.arduino_tools_downloaded,
                         arduino_progress,
                         1_000_000,
-                        Self::tr_lang(language, "Download Arduino Tools", ""),
-                        Self::tr_lang(language, "Arduino flashing tools and firmware files.", ""),
+                        Self::tr_lang(language, "Arduino flashing files.", ""),
                         Self::tr_lang(language, "Arduino tools deleted.", ""),
                         Self::start_arduino_tools_download,
                         Self::delete_arduino_tools,
@@ -388,20 +386,22 @@ impl CrosshairApp {
 
         ui.vertical(|ui| {
             ui.label(RichText::new("Interception Driver").strong().size(13.0));
-            ui.add_space(6.0);
+            ui.add_space(2.0);
 
             if downloading_progress.is_some() {
-                if let Some(progress) = downloading_progress {
-                    ui.horizontal(|ui| {
-                        ui.label(Self::tr_lang(language, "Downloading package...", ""));
-                        ui.add(egui::ProgressBar::new(progress).show_percentage());
-                    });
-                }
                 ui.label(
                     RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119))
                         .small()
                         .weak(),
                 );
+                ui.add_space(4.0);
+                if let Some(progress) = downloading_progress {
+                    ui.add(
+                        egui::ProgressBar::new(progress)
+                            .desired_width(148.0)
+                            .show_percentage(),
+                    );
+                }
                 ui.ctx().request_repaint();
                 return;
             }
@@ -426,20 +426,23 @@ impl CrosshairApp {
 
             if !package_ready {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(Self::tr_lang(
-                            language,
-                            "Download the Interception package to enable driver setup.",
-                            "",
-                        ))
-                        .weak(),
-                    );
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119))
-                            .small()
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new(
+                                Self::tr_lang(language, "Package for driver setup.", ""),
+                            )
                             .weak(),
-                    );
+                        );
+                        ui.label(
+                            RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119))
+                                .small()
+                                .weak(),
+                        );
+                    });
+                    let spacer = (ui.available_width() - 148.0).max(0.0);
+                    if spacer > 0.0 {
+                        ui.add_space(spacer);
+                    }
                     if Self::settings_action_button(ui, Self::tr_lang(language, "Download", ""))
                         .clicked()
                     {
@@ -449,34 +452,24 @@ impl CrosshairApp {
                 return;
             }
 
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(Self::tr_lang(language, "Package downloaded.", "")).weak());
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119))
-                        .small()
-                        .weak(),
-                );
-            });
+            ui.label(RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119)).small().weak());
 
             ui.add_space(4.0);
 
             if driver_installed {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(Self::tr_lang(
-                            language,
-                            "Driver installed. Restart your PC to take effect.",
-                            "",
-                        ))
-                        .color(Color32::from_rgb(126, 224, 182)),
-                    );
-                });
+                ui.label(
+                    RichText::new(Self::tr_lang(
+                        language,
+                        "Installed. Restart your PC to take effect.",
+                        "",
+                    ))
+                    .color(Color32::from_rgb(126, 224, 182)),
+                );
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if Self::settings_action_button(
                         ui,
-                        Self::tr_lang(language, "Delete Driver", ""),
+                        Self::tr_lang(language, "Delete", ""),
                     )
                     .clicked()
                     {
@@ -499,26 +492,21 @@ impl CrosshairApp {
                 return;
             }
 
-            ui.horizontal(|ui| {
-                if restart_required {
-                    ui.label(
-                        RichText::new(Self::tr_lang(
-                            language,
-                            "Driver installed. Restart your PC to finish setup.",
-                            "",
-                        ))
-                        .color(Color32::from_rgb(248, 214, 102)),
-                    );
-                } else {
-                    ui.label(
-                        RichText::new(Self::tr_lang(language, "Ready to install the driver.", ""))
-                            .weak(),
-                    );
-                }
-            });
+            if restart_required {
+                ui.label(
+                    RichText::new(Self::tr_lang(
+                        language,
+                        "Installed. Restart your PC to finish setup.",
+                        "",
+                    ))
+                    .color(Color32::from_rgb(248, 214, 102)),
+                );
+            } else {
+                ui.label(RichText::new(Self::tr_lang(language, "Ready to install.", "")).weak());
+            }
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                if Self::settings_action_button(ui, Self::tr_lang(language, "Install Driver", ""))
+                if Self::settings_action_button(ui, Self::tr_lang(language, "Install", ""))
                     .clicked()
                 {
                     self.start_interception_driver_install();
@@ -626,61 +614,62 @@ impl CrosshairApp {
         installed: bool,
         downloading_progress: Option<f32>,
         expected_size_bytes: u64,
-        download_button_text: &str,
         description_text: &str,
         delete_status_text: &str,
         download_action: fn(&mut Self),
         delete_action: fn(&mut Self),
     ) {
         ui.vertical(|ui| {
-            ui.label(RichText::new(title).strong().size(13.0));
-            ui.add_space(6.0);
-
-            if installed {
-                ui.horizontal(|ui| {
-                    ui.label(Self::tr_lang(language, "Status: Installed", ""));
-                    ui.label(
-                        RichText::new(Self::tool_size_label(path, expected_size_bytes))
-                            .small()
-                            .weak(),
-                    );
-                    if Self::settings_action_button(ui, Self::tr_lang(language, "Delete", ""))
-                        .clicked()
-                    {
-                        delete_action(self);
-                        self.status = delete_status_text.to_owned();
-                    }
-                });
-            } else if let Some(progress) = downloading_progress {
-                ui.horizontal(|ui| {
-                    ui.label(Self::tr_lang(language, "Downloading...", ""));
-                    ui.add(egui::ProgressBar::new(progress).show_percentage());
-                });
-                ui.label(
-                    RichText::new(Self::tool_size_label(path, expected_size_bytes))
-                        .small()
-                        .weak(),
-                );
-                ui.ctx().request_repaint();
-            } else {
-                ui.horizontal(|ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(title).strong().size(13.0));
+                    ui.add_space(2.0);
                     ui.label(RichText::new(description_text).weak());
-                    ui.add_space(8.0);
                     ui.label(
                         RichText::new(Self::tool_size_label(path, expected_size_bytes))
                             .small()
                             .weak(),
                     );
-                    if Self::settings_action_button(
-                        ui,
-                        RichText::new(download_button_text).strong(),
-                    )
-                    .clicked()
-                    {
-                        download_action(self);
-                    }
                 });
-            }
+
+                let action_width = 148.0;
+                let spacer = (ui.available_width() - action_width).max(0.0);
+                if spacer > 0.0 {
+                    ui.add_space(spacer);
+                }
+
+                ui.allocate_ui_with_layout(
+                    vec2(action_width, 52.0),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        if installed {
+                            if Self::settings_action_button(
+                                ui,
+                                Self::tr_lang(language, "Delete", ""),
+                            )
+                            .clicked()
+                            {
+                                delete_action(self);
+                                self.status = delete_status_text.to_owned();
+                            }
+                        } else if let Some(progress) = downloading_progress {
+                            ui.add(
+                                egui::ProgressBar::new(progress)
+                                    .desired_width(action_width)
+                                    .show_percentage(),
+                            );
+                            ui.ctx().request_repaint();
+                        } else if Self::settings_action_button(
+                            ui,
+                            RichText::new(Self::tr_lang(language, "Download", "")).strong(),
+                        )
+                        .clicked()
+                        {
+                            download_action(self);
+                        }
+                    },
+                );
+            });
         });
     }
 
