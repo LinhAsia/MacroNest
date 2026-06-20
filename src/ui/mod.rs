@@ -4119,7 +4119,12 @@ impl CrosshairApp {
 
             // Keep open if user is actively dragging or has a combobox/sub-popup open (current or previous frame)
             let is_dragging = ui.ctx().dragged_id().is_some();
-            let is_any_popup_open = egui::Popup::is_any_open(ui.ctx());
+            let is_any_popup_open = egui::Popup::is_any_open(ui.ctx()) || ui.ctx().memory(|mem| {
+                mem.is_popup_open(ui.make_persistent_id("quick-key-display-mode"))
+                    || mem.is_popup_open(ui.make_persistent_id("quick-key-display-mascot-preset"))
+                    || mem.is_popup_open(ui.make_persistent_id("focus-highlight-decoration"))
+                    || mem.is_popup_open(ui.make_persistent_id("quick-key-sound-style"))
+            });
             // One-frame buffer: if popup was open last frame, treat this frame as interacting too
             let is_interacting = is_active && (is_dragging || is_any_popup_open || popup_was_open_prev);
 
@@ -4938,38 +4943,7 @@ impl CrosshairApp {
                                 }
                                 
                                 if self.state.quick_key_display_mode == QuickKeyDisplayMode::Mascot {
-                                    ui.add_space(2.0);
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Preset",
-                                            "Preset",
-                                        ))
-                                        .size(10.0),
-                                    );
-                                    let preset_before = self.state.quick_key_display_mascot_style;
-                                    egui::ComboBox::from_id_salt("quick-key-display-mascot-preset")
-                                        .width(164.0)
-                                        .selected_text(match self.state.quick_key_display_mascot_style {
-                                            crate::model::MascotStyle::Hachiware => "Hachiware",
-                                            crate::model::MascotStyle::MechanicRobot => "Mechanic & Robot",
-                                        })
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(
-                                                &mut self.state.quick_key_display_mascot_style,
-                                                crate::model::MascotStyle::Hachiware,
-                                                "Hachiware",
-                                            );
-                                            ui.selectable_value(
-                                                &mut self.state.quick_key_display_mascot_style,
-                                                crate::model::MascotStyle::MechanicRobot,
-                                                "Mechanic & Robot",
-                                            );
-                                        });
-                                    if self.state.quick_key_display_mascot_style != preset_before {
-                                        self.sync_quick_key_display_config();
-                                        self.persist();
-                                    }
+                                    self.state.quick_key_display_mascot_style = crate::model::MascotStyle::Hachiware;
                                 }
                                 
                                 if self.state.quick_key_display_mode == QuickKeyDisplayMode::Normal {

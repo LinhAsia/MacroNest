@@ -263,7 +263,6 @@ pub enum QuickKeyDisplayMode {
 pub enum MascotStyle {
     #[default]
     Hachiware,
-    MechanicRobot,
 }
 
 fn default_screen_draw_color() -> RgbaColor {
