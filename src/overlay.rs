@@ -13143,7 +13143,11 @@ mod windows_overlay {
         fill_skia_circle(pixmap, body_cx, body_cy + 4.0 * scale, body_radius, [0, 0, 0, 22]);
         
         // Body color
-        let body_color = [255, 255, 255, 255]; // Pure white
+        let body_color = if mascot_style == crate::model::MascotStyle::Hachiware {
+            [255, 255, 255, 255]
+        } else {
+            [254, 240, 187, 255] // Usagi yellow/cream
+        };
         
         // Body fill + outline
         fill_skia_circle(pixmap, body_cx, body_cy, body_radius, body_color);
@@ -13176,15 +13180,15 @@ mod windows_overlay {
                 head_cx - 18.0 * scale + ear_shift_x, head_cy - 38.0 * scale + ear_shift_y,
             );
         } else {
-            // Chiikawa bear ears left
-            left_ear.move_to(head_cx - 38.0 * scale + ear_shift_x, head_cy - 24.0 * scale + ear_shift_y);
+            // Usagi long bunny ears left
+            left_ear.move_to(head_cx - 28.0 * scale + ear_shift_x, head_cy - 38.0 * scale + ear_shift_y);
             left_ear.quad_to(
-                head_cx - 48.0 * scale - ear_wiggle + ear_shift_x, head_cy - 45.0 * scale - ear_wiggle + ear_shift_y,
-                head_cx - 30.0 * scale - ear_wiggle + ear_shift_x, head_cy - 50.0 * scale - ear_wiggle + ear_shift_y,
+                head_cx - 55.0 * scale - ear_wiggle + ear_shift_x, head_cy - 70.0 * scale - ear_wiggle + ear_shift_y,
+                head_cx - 45.0 * scale - ear_wiggle + ear_shift_x, head_cy - 85.0 * scale - ear_wiggle + ear_shift_y,
             );
             left_ear.quad_to(
-                head_cx - 20.0 * scale + ear_shift_x, head_cy - 40.0 * scale + ear_shift_y,
-                head_cx - 16.0 * scale + ear_shift_x, head_cy - 36.0 * scale + ear_shift_y,
+                head_cx - 35.0 * scale - ear_wiggle + ear_shift_x, head_cy - 90.0 * scale - ear_wiggle + ear_shift_y,
+                head_cx - 14.0 * scale + ear_shift_x, head_cy - 44.0 * scale + ear_shift_y,
             );
         }
         left_ear.close();
@@ -13200,12 +13204,16 @@ mod windows_overlay {
             left_inner.line_to(head_cx - 34.0 * scale - ear_wiggle + ear_shift_x, head_cy - 45.0 * scale - ear_wiggle + ear_shift_y);
             left_inner.line_to(head_cx - 23.0 * scale + ear_shift_x, head_cy - 34.0 * scale + ear_shift_y);
         } else {
-            left_inner.move_to(head_cx - 34.0 * scale + ear_shift_x, head_cy - 26.0 * scale + ear_shift_y);
+            // Usagi left inner ear
+            left_inner.move_to(head_cx - 25.0 * scale + ear_shift_x, head_cy - 40.0 * scale + ear_shift_y);
             left_inner.quad_to(
-                head_cx - 41.0 * scale - ear_wiggle + ear_shift_x, head_cy - 40.0 * scale - ear_wiggle + ear_shift_y,
-                head_cx - 28.0 * scale - ear_wiggle + ear_shift_x, head_cy - 42.0 * scale - ear_wiggle + ear_shift_y,
+                head_cx - 48.0 * scale - ear_wiggle + ear_shift_x, head_cy - 68.0 * scale - ear_wiggle + ear_shift_y,
+                head_cx - 42.0 * scale - ear_wiggle + ear_shift_x, head_cy - 78.0 * scale - ear_wiggle + ear_shift_y,
             );
-            left_inner.line_to(head_cx - 22.0 * scale + ear_shift_x, head_cy - 35.0 * scale + ear_shift_y);
+            left_inner.quad_to(
+                head_cx - 36.0 * scale - ear_wiggle + ear_shift_x, head_cy - 82.0 * scale - ear_wiggle + ear_shift_y,
+                head_cx - 16.0 * scale + ear_shift_x, head_cy - 44.0 * scale + ear_shift_y,
+            );
         }
         left_inner.close();
         if let Some(path) = left_inner.finish() { fill_skia_path(pixmap, &path, [255, 200, 210, 255]); }
@@ -13223,15 +13231,15 @@ mod windows_overlay {
                 head_cx + 42.0 * scale + ear_shift_x, head_cy - 22.0 * scale + ear_shift_y,
             );
         } else {
-            // Chiikawa bear ears right
-            right_ear.move_to(head_cx + 16.0 * scale + ear_shift_x, head_cy - 36.0 * scale + ear_shift_y);
+            // Usagi long bunny ears right
+            right_ear.move_to(head_cx - 12.0 * scale + ear_shift_x, head_cy - 44.0 * scale + ear_shift_y);
             right_ear.quad_to(
-                head_cx + 20.0 * scale + ear_shift_x, head_cy - 40.0 * scale + ear_shift_y,
-                head_cx + 30.0 * scale + ear_wiggle + ear_shift_x, head_cy - 50.0 * scale + ear_wiggle + ear_shift_y,
+                head_cx - 35.0 * scale + ear_wiggle + ear_shift_x, head_cy - 85.0 * scale + ear_wiggle + ear_shift_y,
+                head_cx - 24.0 * scale + ear_wiggle + ear_shift_x, head_cy - 98.0 * scale + ear_wiggle + ear_shift_y,
             );
             right_ear.quad_to(
-                head_cx + 48.0 * scale + ear_wiggle + ear_shift_x, head_cy - 45.0 * scale + ear_wiggle + ear_shift_y,
-                head_cx + 38.0 * scale + ear_shift_x, head_cy - 24.0 * scale + ear_shift_y,
+                head_cx - 12.0 * scale + ear_wiggle + ear_shift_x, head_cy - 100.0 * scale + ear_wiggle + ear_shift_y,
+                head_cx + 2.0 * scale + ear_shift_x, head_cy - 43.0 * scale + ear_shift_y,
             );
         }
         right_ear.close();
@@ -13247,12 +13255,16 @@ mod windows_overlay {
             right_inner.line_to(head_cx + 34.0 * scale + ear_wiggle + ear_shift_x, head_cy - 45.0 * scale + ear_wiggle + ear_shift_y);
             right_inner.line_to(head_cx + 37.0 * scale + ear_shift_x, head_cy - 24.0 * scale + ear_shift_y);
         } else {
-            right_inner.move_to(head_cx + 22.0 * scale + ear_shift_x, head_cy - 35.0 * scale + ear_shift_y);
+            // Usagi right inner ear
+            right_inner.move_to(head_cx - 9.0 * scale + ear_shift_x, head_cy - 44.0 * scale + ear_shift_y);
             right_inner.quad_to(
-                head_cx + 28.0 * scale + ear_wiggle + ear_shift_x, head_cy - 42.0 * scale + ear_wiggle + ear_shift_y,
-                head_cx + 41.0 * scale + ear_wiggle + ear_shift_x, head_cy - 40.0 * scale + ear_wiggle + ear_shift_y,
+                head_cx - 29.0 * scale + ear_wiggle + ear_shift_x, head_cy - 80.0 * scale + ear_wiggle + ear_shift_y,
+                head_cx - 21.0 * scale + ear_wiggle + ear_shift_x, head_cy - 92.0 * scale + ear_wiggle + ear_shift_y,
             );
-            right_inner.line_to(head_cx + 34.0 * scale + ear_shift_x, head_cy - 26.0 * scale + ear_shift_y);
+            right_inner.quad_to(
+                head_cx - 13.0 * scale + ear_wiggle + ear_shift_x, head_cy - 94.0 * scale + ear_wiggle + ear_shift_y,
+                head_cx - 1.0 * scale + ear_shift_x, head_cy - 43.0 * scale + ear_shift_y,
+            );
         }
         right_inner.close();
         if let Some(path) = right_inner.finish() { fill_skia_path(pixmap, &path, [255, 200, 210, 255]); }
@@ -13272,7 +13284,11 @@ mod windows_overlay {
         // Head shadow + fill
         fill_skia_circle(pixmap, head_cx, head_cy + 4.5 * scale, head_radius, [0, 0, 0, 28]);
         
-        let body_color = [255, 255, 255, 255];
+        let body_color = if mascot_style == crate::model::MascotStyle::Hachiware {
+            [255, 255, 255, 255]
+        } else {
+            [254, 240, 187, 255] // Usagi yellow/cream
+        };
         fill_skia_circle(pixmap, head_cx, head_cy, head_radius, body_color);
 
         let hx = look_x * 0.15;
@@ -13299,26 +13315,54 @@ mod windows_overlay {
         stroke_skia_circle(pixmap, head_cx, head_cy, head_radius, 2.2 * scale, [45, 40, 42, 255]);
 
         // Draw Eyes depending on style
-        let eye_w = 8.5 * scale;
-        let eye_h = 10.5 * scale;
-        let eye_y_offset = if is_hachiware { 4.0 * scale } else { 2.5 * scale };
-
-        // Normal shiny eyes
-        for &ex in &[head_cx - 18.0 * scale + look_x, head_cx + 18.0 * scale + look_x] {
-            let ey = head_cy + eye_y_offset + look_y;
-            fill_skia_rounded_rect(pixmap, ex - eye_w * 0.5, ey - eye_h * 0.5, eye_w, eye_h, 4.2 * scale, [45, 40, 42, 255]);
-            // Highlights
-            fill_skia_circle(pixmap, ex - 1.5 * scale, ey - 2.2 * scale, 3.2 * scale, [255, 255, 255, 255]);
-            fill_skia_circle(pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.6 * scale, [255, 255, 255, 255]);
+        if is_hachiware {
+            let eye_w = 8.5 * scale;
+            let eye_h = 10.5 * scale;
+            let eye_y_offset = 4.0 * scale;
+            for &ex in &[head_cx - 18.0 * scale + look_x, head_cx + 18.0 * scale + look_x] {
+                let ey = head_cy + eye_y_offset + look_y;
+                fill_skia_rounded_rect(pixmap, ex - eye_w * 0.5, ey - eye_h * 0.5, eye_w, eye_h, 4.2 * scale, [45, 40, 42, 255]);
+                // Highlights
+                fill_skia_circle(pixmap, ex - 1.5 * scale, ey - 2.2 * scale, 3.2 * scale, [255, 255, 255, 255]);
+                fill_skia_circle(pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.6 * scale, [255, 255, 255, 255]);
+            }
+        } else {
+            // Usagi round large eyes
+            let eye_size = 11.5 * scale;
+            let eye_y_offset = 3.5 * scale;
+            for &ex in &[head_cx - 23.0 * scale + look_x, head_cx + 23.0 * scale + look_x] {
+                let ey = head_cy + eye_y_offset + look_y;
+                fill_skia_circle(pixmap, ex, ey, eye_size * 0.5, [45, 40, 42, 255]);
+                // Highlights
+                fill_skia_circle(pixmap, ex - 1.8 * scale, ey - 1.8 * scale, 2.2 * scale, [255, 255, 255, 255]);
+                fill_skia_circle(pixmap, ex + 2.0 * scale, ey + 2.0 * scale, 1.1 * scale, [255, 255, 255, 255]);
+            }
         }
 
         // Eyebrows
-        for &(ex, sign) in &[(head_cx - 18.0 * scale + look_x, -1.0f32), (head_cx + 18.0 * scale + look_x, 1.0f32)] {
+        let eye_centers = if is_hachiware {
+            vec![(head_cx - 18.0 * scale + look_x, -1.0f32), (head_cx + 18.0 * scale + look_x, 1.0f32)]
+        } else {
+            vec![(head_cx - 23.0 * scale + look_x, -1.0f32), (head_cx + 23.0 * scale + look_x, 1.0f32)]
+        };
+
+        for (ex, sign) in eye_centers {
             let mut eyebrow = tiny_skia::PathBuilder::new();
             let ebx = ex;
-            let eby = head_cy - 7.5 * scale + look_y;
-            eyebrow.move_to(ebx - 4.0 * scale, eby + 1.5 * scale);
-            eyebrow.quad_to(ebx, eby - 1.5 * scale, ebx + 4.0 * scale, eby + 0.5 * scale * sign);
+            let eby = if is_hachiware {
+                head_cy - 7.5 * scale + look_y
+            } else {
+                head_cy - 9.0 * scale + look_y
+            };
+            
+            if is_hachiware {
+                eyebrow.move_to(ebx - 4.0 * scale, eby + 1.5 * scale);
+                eyebrow.quad_to(ebx, eby - 1.5 * scale, ebx + 4.0 * scale, eby + 0.5 * scale * sign);
+            } else {
+                // Usagi cute curved eyebrows
+                eyebrow.move_to(ebx - 4.5 * scale, eby + 1.0 * scale);
+                eyebrow.quad_to(ebx, eby - 2.5 * scale, ebx + 4.5 * scale, eby + 0.8 * scale * sign);
+            }
             if let Some(path) = eyebrow.finish() {
                 stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
             }
@@ -13326,27 +13370,70 @@ mod windows_overlay {
 
         // Cheek blush (sweet oval pink fills)
         let blush_color = [255, 120, 140, 200];
-        let blush_y = head_cy + 13.0 * scale + look_y;
-        for &ex in &[head_cx - 32.0 * scale + look_x, head_cx + 32.0 * scale + look_x] {
-            fill_skia_ellipse(pixmap, ex, blush_y, 7.0 * scale, 4.5 * scale, blush_color);
-            for i in 0..3 {
-                let off = (i as f32 - 1.0) * 2.2 * scale;
-                let mut line = tiny_skia::PathBuilder::new();
-                line.move_to(ex + off - 1.2 * scale, blush_y + 2.5 * scale);
-                line.line_to(ex + off + 1.2 * scale, blush_y - 2.5 * scale);
-                if let Some(p) = line.finish() {
-                    stroke_skia_path(pixmap, &p, [255, 60, 90, 255], 1.2 * scale);
+        let blush_y = if is_hachiware {
+            head_cy + 13.0 * scale + look_y
+        } else {
+            head_cy + 15.0 * scale + look_y
+        };
+        let blush_ex_offsets = if is_hachiware {
+            vec![head_cx - 32.0 * scale + look_x, head_cx + 32.0 * scale + look_x]
+        } else {
+            vec![head_cx - 37.0 * scale + look_x, head_cx + 37.0 * scale + look_x]
+        };
+
+        for ex in blush_ex_offsets {
+            if is_hachiware {
+                fill_skia_ellipse(pixmap, ex, blush_y, 7.0 * scale, 4.5 * scale, blush_color);
+                for i in 0..3 {
+                    let off = (i as f32 - 1.0) * 2.2 * scale;
+                    let mut line = tiny_skia::PathBuilder::new();
+                    line.move_to(ex + off - 1.2 * scale, blush_y + 2.5 * scale);
+                    line.line_to(ex + off + 1.2 * scale, blush_y - 2.5 * scale);
+                    if let Some(p) = line.finish() {
+                        stroke_skia_path(pixmap, &p, [255, 60, 90, 255], 1.2 * scale);
+                    }
+                }
+            } else {
+                // Usagi blush (slightly larger, 4 stripes)
+                fill_skia_ellipse(pixmap, ex, blush_y, 8.5 * scale, 5.0 * scale, blush_color);
+                for i in 0..4 {
+                    let off = (i as f32 - 1.5) * 2.0 * scale;
+                    let mut line = tiny_skia::PathBuilder::new();
+                    line.move_to(ex + off - 1.2 * scale, blush_y + 2.8 * scale);
+                    line.line_to(ex + off + 1.2 * scale, blush_y - 2.8 * scale);
+                    if let Some(p) = line.finish() {
+                        stroke_skia_path(pixmap, &p, [255, 60, 90, 255], 1.2 * scale);
+                    }
                 }
             }
         }
 
         // Mouth depending on style
         let mut mouth = tiny_skia::PathBuilder::new();
-        let mouth_y = head_cy + 13.5 * scale + look_y;
-        // Chiikawa cute small mouth (w)
-        mouth.move_to(head_cx - 4.0 * scale + look_x, mouth_y);
-        mouth.quad_to(head_cx - 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + look_x, mouth_y + 0.5 * scale);
-        mouth.quad_to(head_cx + 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + 4.0 * scale + look_x, mouth_y);
+        let mouth_y = if is_hachiware {
+            head_cy + 13.5 * scale + look_y
+        } else {
+            head_cy + 15.0 * scale + look_y
+        };
+        
+        if is_hachiware {
+            // Chiikawa cute small mouth (w)
+            mouth.move_to(head_cx - 4.0 * scale + look_x, mouth_y);
+            mouth.quad_to(head_cx - 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + look_x, mouth_y + 0.5 * scale);
+            mouth.quad_to(head_cx + 2.0 * scale + look_x, mouth_y + 2.5 * scale, head_cx + 4.0 * scale + look_x, mouth_y);
+        } else {
+            // Usagi cute wavy mouth (sideways 3 / cat wave with center hook)
+            let mx = head_cx + look_x;
+            let my = mouth_y;
+            // Left curve
+            mouth.move_to(mx - 5.0 * scale, my + 0.5 * scale);
+            mouth.quad_to(mx - 2.5 * scale, my + 3.5 * scale, mx, my + 1.0 * scale);
+            // Center hook / curl
+            mouth.quad_to(mx - 1.0 * scale, my + 3.5 * scale, mx - 1.5 * scale, my + 2.0 * scale);
+            // Right curve
+            mouth.move_to(mx, my + 1.0 * scale);
+            mouth.quad_to(mx + 2.5 * scale, my + 3.5 * scale, mx + 5.0 * scale, my + 0.5 * scale);
+        }
         if let Some(p) = mouth.finish() { stroke_skia_path(pixmap, &p, [45, 40, 42, 255], 2.0 * scale); }
     }
 
@@ -13384,7 +13471,11 @@ mod windows_overlay {
         let right_shoulder_bottom = (right_shoulder_cx + px_r * 12.5 * scale, right_shoulder_cy + py_r * 12.5 * scale);
 
         // Arm fill color: Chiikawa and Hachiware have white arms.
-        let arm_fill = [255, 255, 255, 255];
+        let arm_fill = if mascot_style == crate::model::MascotStyle::Hachiware {
+            [255, 255, 255, 255]
+        } else {
+            [254, 240, 187, 255] // Usagi yellow/cream
+        };
 
         // Shoulder cap circles drawn first so arm paths render on top
         let cap_r = 13.0 * scale;
@@ -13568,7 +13659,11 @@ mod windows_overlay {
         
         let head_cx = 168.0 * scale;
         let head_cy = 92.0 * scale;
-        let head_radius = 47.0 * scale;
+        let head_radius = if mascot_style == crate::model::MascotStyle::Hachiware {
+            47.0 * scale
+        } else {
+            54.0 * scale
+        };
 
         let paw_press = if held_keys.is_empty() && held_mouse_buttons.is_empty() {
             recent_pulse * 2.4 * scale
