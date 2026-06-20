@@ -557,6 +557,8 @@ impl CrosshairApp {
                         if let Some(step) = preset.steps.get_mut(step_index) {
                             step.x = screen_x;
                             step.y = screen_y;
+                            step.x_expr = screen_x.to_string();
+                            step.y_expr = screen_y.to_string();
                             step.ocr_width = width;
                             step.ocr_height = height;
                         }
@@ -565,6 +567,7 @@ impl CrosshairApp {
                 }
             }
         }
+        self.sync_macro_presets();
         self.persist();
         self.status = format!(
             "Saved custom OCR region {}x{} at {}, {} for step.",
