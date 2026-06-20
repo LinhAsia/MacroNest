@@ -135,7 +135,8 @@ mod windows_overlay {
                     IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE,
                     LoadCursorW, LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG,
                     MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN,
-                    SM_CYSCREEN, SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE,
+                    SM_CXVIRTUALSCREEN, SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+                    SM_YVIRTUALSCREEN, SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE,
                     SW_SHOWNA, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
                     SWP_SHOWWINDOW, SetCursorPos, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
                     SetWindowLongW, SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
@@ -5980,6 +5981,43 @@ mod windows_overlay {
         };
     }
 
+    fn maybe_wrap_mascot_drag_cursor(cursor: POINT) {
+        let virtual_left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+        let virtual_top = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+        let virtual_right =
+            virtual_left + unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) }.max(1);
+        let virtual_bottom =
+            virtual_top + unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) }.max(1);
+        let edge_margin = 4;
+        let warp_margin = 28;
+
+        let mut warp_x = cursor.x;
+        let mut warp_y = cursor.y;
+
+        if cursor.x <= virtual_left + edge_margin {
+            warp_x = virtual_left + warp_margin;
+        } else if cursor.x >= virtual_right - 1 - edge_margin {
+            warp_x = virtual_right - 1 - warp_margin;
+        }
+
+        if cursor.y <= virtual_top + edge_margin {
+            warp_y = virtual_top + warp_margin;
+        } else if cursor.y >= virtual_bottom - 1 - edge_margin {
+            warp_y = virtual_bottom - 1 - warp_margin;
+        }
+
+        if warp_x == cursor.x && warp_y == cursor.y {
+            return;
+        }
+
+        let delta_x = warp_x - cursor.x;
+        let delta_y = warp_y - cursor.y;
+        if let Some((start_x, start_y)) = *MASCOT_DRAG_START_MOUSE.lock() {
+            *MASCOT_DRAG_START_MOUSE.lock() = Some((start_x + delta_x, start_y + delta_y));
+        }
+        let _ = unsafe { SetCursorPos(warp_x, warp_y) };
+    }
+
     fn handle_mascot_global_drag(message: u32, cursor: POINT) -> bool {
         let controller_hwnd = HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void);
         if controller_hwnd.0.is_null() {
@@ -6031,6 +6069,7 @@ mod windows_overlay {
                 runtime.quick_key_display_center_x = start_center_x + (cursor.x - start_mouse_x);
                 runtime.quick_key_display_center_y = start_center_y + (cursor.y - start_mouse_y);
                 move_quick_key_display_window(runtime);
+                maybe_wrap_mascot_drag_cursor(cursor);
                 true
             }
             WM_LBUTTONUP => {
