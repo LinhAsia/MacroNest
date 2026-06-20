@@ -264,27 +264,107 @@ impl CrosshairApp {
                     ui.add_space(8.0);
 
                     let mut delay_changed = false;
-                    ui.horizontal(|ui| {
-                        ui.label(Self::tr_lang(language, "Mouse Click Delay:", ""));
-                        let slider = egui::Slider::new(&mut self.state.macro_mouse_click_delay_ms, 0..=500)
-                            .suffix(" ms");
-                        let res = ui.add(slider);
-                        if res.changed() {
-                            delay_changed = true;
-                        }
-                    });
+                    let slider_track_fill = if ui.visuals().dark_mode {
+                        Color32::from_rgb(64, 78, 98)
+                    } else {
+                        Color32::from_rgb(204, 214, 226)
+                    };
+                    let slider_track_stroke = if ui.visuals().dark_mode {
+                        Color32::from_rgb(102, 122, 152)
+                    } else {
+                        Color32::from_rgb(148, 163, 184)
+                    };
+                    let slider_handle_fill = if ui.visuals().dark_mode {
+                        Color32::from_rgb(117, 219, 166)
+                    } else {
+                        Color32::from_rgb(72, 168, 118)
+                    };
 
-                    ui.add_space(6.0);
+                    egui::Grid::new("advanced-delay-grid")
+                        .num_columns(3)
+                        .min_col_width(0.0)
+                        .spacing([12.0, 8.0])
+                        .show(ui, |ui| {
+                            ui.label(Self::tr_lang(language, "Mouse Click Delay:", ""));
+                            ui.scope(|ui| {
+                                let visuals = ui.visuals_mut();
+                                visuals.widgets.inactive.bg_fill = slider_track_fill;
+                                visuals.widgets.inactive.bg_stroke =
+                                    Stroke::new(1.0, slider_track_stroke);
+                                visuals.widgets.hovered.bg_fill = slider_track_fill;
+                                visuals.widgets.hovered.bg_stroke =
+                                    Stroke::new(1.0, slider_track_stroke);
+                                visuals.widgets.active.bg_fill = slider_track_fill;
+                                visuals.widgets.active.bg_stroke =
+                                    Stroke::new(1.0, slider_track_stroke);
+                                visuals.selection.bg_fill = slider_handle_fill;
+                                let res = ui.add_sized(
+                                    [220.0, 22.0],
+                                    egui::Slider::new(
+                                        &mut self.state.macro_mouse_click_delay_ms,
+                                        0..=500,
+                                    )
+                                    .show_value(false),
+                                );
+                                if res.changed() {
+                                    delay_changed = true;
+                                }
+                            });
+                            if ui
+                                .add_sized(
+                                    [58.0, 24.0],
+                                    egui::DragValue::new(
+                                        &mut self.state.macro_mouse_click_delay_ms,
+                                    )
+                                    .range(0..=500)
+                                    .suffix(" ms"),
+                                )
+                                .changed()
+                            {
+                                delay_changed = true;
+                            }
+                            ui.end_row();
 
-                    ui.horizontal(|ui| {
-                        ui.label(Self::tr_lang(language, "Keyboard Press Delay:", ""));
-                        let slider = egui::Slider::new(&mut self.state.macro_keyboard_key_press_delay_ms, 0..=500)
-                            .suffix(" ms");
-                        let res = ui.add(slider);
-                        if res.changed() {
-                            delay_changed = true;
-                        }
-                    });
+                            ui.label(Self::tr_lang(language, "Keyboard Press Delay:", ""));
+                            ui.scope(|ui| {
+                                let visuals = ui.visuals_mut();
+                                visuals.widgets.inactive.bg_fill = slider_track_fill;
+                                visuals.widgets.inactive.bg_stroke =
+                                    Stroke::new(1.0, slider_track_stroke);
+                                visuals.widgets.hovered.bg_fill = slider_track_fill;
+                                visuals.widgets.hovered.bg_stroke =
+                                    Stroke::new(1.0, slider_track_stroke);
+                                visuals.widgets.active.bg_fill = slider_track_fill;
+                                visuals.widgets.active.bg_stroke =
+                                    Stroke::new(1.0, slider_track_stroke);
+                                visuals.selection.bg_fill = slider_handle_fill;
+                                let res = ui.add_sized(
+                                    [220.0, 22.0],
+                                    egui::Slider::new(
+                                        &mut self.state.macro_keyboard_key_press_delay_ms,
+                                        0..=500,
+                                    )
+                                    .show_value(false),
+                                );
+                                if res.changed() {
+                                    delay_changed = true;
+                                }
+                            });
+                            if ui
+                                .add_sized(
+                                    [58.0, 24.0],
+                                    egui::DragValue::new(
+                                        &mut self.state.macro_keyboard_key_press_delay_ms,
+                                    )
+                                    .range(0..=500)
+                                    .suffix(" ms"),
+                                )
+                                .changed()
+                            {
+                                delay_changed = true;
+                            }
+                            ui.end_row();
+                        });
 
                     if delay_changed {
                         self.sync_macro_delay_settings();
