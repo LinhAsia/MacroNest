@@ -519,7 +519,11 @@ impl CrosshairApp {
                     if spacer > 0.0 {
                         ui.add_space(spacer);
                     }
-                    if Self::settings_action_button(ui, Self::tr_lang(language, "Download", ""))
+                    if Self::settings_action_button_fixed(
+                        ui,
+                        Self::tr_lang(language, "Download", ""),
+                        action_width,
+                    )
                         .clicked()
                     {
                         self.start_interception_download();
@@ -543,12 +547,20 @@ impl CrosshairApp {
                     ui.add_space(spacer);
                 }
                 if driver_installed {
-                    if Self::settings_action_button(ui, Self::tr_lang(language, "Delete", ""))
+                    if Self::settings_action_button_fixed(
+                        ui,
+                        Self::tr_lang(language, "Delete", ""),
+                        action_width,
+                    )
                         .clicked()
                     {
                         self.start_interception_driver_uninstall();
                     }
-                } else if Self::settings_action_button(ui, Self::tr_lang(language, "Install", ""))
+                } else if Self::settings_action_button_fixed(
+                    ui,
+                    Self::tr_lang(language, "Install", ""),
+                    action_width,
+                )
                     .clicked()
                 {
                     self.start_interception_driver_install();
@@ -615,7 +627,7 @@ impl CrosshairApp {
             } else {
                 Self::tr_lang(language, "Open", "")
             };
-            if Self::settings_action_button(ui, button_label).clicked() {
+            if Self::settings_action_button_fixed(ui, button_label, action_width).clicked() {
                 self.ocr_tools_open = !self.ocr_tools_open;
             }
         });
@@ -670,18 +682,20 @@ impl CrosshairApp {
                                 );
                                 ui.ctx().request_repaint();
                             } else if installed {
-                                if Self::settings_action_button(
+                                if Self::settings_action_button_fixed(
                                     ui,
                                     Self::tr_lang(language, "Delete", ""),
+                                    148.0,
                                 )
                                 .clicked()
                                 {
                                     self.delete_ocr_language_pack(pack.code);
                                     self.status = format!("OCR pack deleted: {}", pack.label);
                                 }
-                            } else if Self::settings_action_button(
+                            } else if Self::settings_action_button_fixed(
                                 ui,
                                 RichText::new(Self::tr_lang(language, "Download", "")).strong(),
+                                148.0,
                             )
                             .clicked()
                             {
@@ -731,9 +745,10 @@ impl CrosshairApp {
                     egui::Layout::right_to_left(egui::Align::Center),
                     |ui| {
                         if installed {
-                            if Self::settings_action_button(
+                            if Self::settings_action_button_fixed(
                                 ui,
                                 Self::tr_lang(language, "Delete", ""),
+                                action_width,
                             )
                             .clicked()
                             {
@@ -747,9 +762,10 @@ impl CrosshairApp {
                                     .show_percentage(),
                             );
                             ui.ctx().request_repaint();
-                        } else if Self::settings_action_button(
+                        } else if Self::settings_action_button_fixed(
                             ui,
                             RichText::new(Self::tr_lang(language, "Download", "")).strong(),
+                            action_width,
                         )
                         .clicked()
                         {
@@ -906,6 +922,14 @@ impl CrosshairApp {
     }
 
     fn settings_action_button(ui: &mut egui::Ui, label: impl Into<WidgetText>) -> egui::Response {
+        Self::settings_action_button_fixed(ui, label, 0.0)
+    }
+
+    fn settings_action_button_fixed(
+        ui: &mut egui::Ui,
+        label: impl Into<WidgetText>,
+        fixed_width: f32,
+    ) -> egui::Response {
         let is_dark = ui.visuals().dark_mode;
         
         let (fill, stroke_color) = if is_dark {
@@ -920,10 +944,12 @@ impl CrosshairApp {
         let wrap_width = ui.available_width();
         let galley = label_text.into_galley(ui, None, wrap_width, text_style);
         
-        let button_size = vec2(
-            (galley.size().x + 20.0).max(104.0),
-            (galley.size().y + 10.0).max(28.0)
-        );
+        let button_width = if fixed_width > 0.0 {
+            fixed_width
+        } else {
+            (galley.size().x + 20.0).max(104.0)
+        };
+        let button_size = vec2(button_width, (galley.size().y + 10.0).max(28.0));
         
         let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
         
