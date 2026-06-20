@@ -2866,6 +2866,20 @@ mod windows_overlay {
         }
     }
 
+    fn quick_key_display_window_move_enabled(runtime: &Runtime) -> bool {
+        if runtime.quick_key_display_mode != QuickKeyDisplayMode::Mascot {
+            return false;
+        }
+
+        if runtime.quick_key_display_enabled {
+            return true;
+        }
+
+        runtime
+            .quick_key_display_preview_until
+            .is_some_and(|until| Instant::now() < until)
+    }
+
     unsafe extern "system" fn hud_wnd_proc(
         hwnd: HWND,
         msg: u32,
@@ -2876,8 +2890,7 @@ mod windows_overlay {
             WM_NCHITTEST => {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     if hwnd == runtime.key_display_hwnd
-                        && runtime.quick_key_display_enabled
-                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
+                        && quick_key_display_window_move_enabled(runtime)
                     {
                         return LRESULT(HTCAPTION as isize);
                     }
@@ -2888,8 +2901,7 @@ mod windows_overlay {
             WM_MOVE => {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     if hwnd == runtime.key_display_hwnd
-                        && runtime.quick_key_display_enabled
-                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
+                        && quick_key_display_window_move_enabled(runtime)
                     {
                         let x = (lparam.0 & 0xffff) as i16 as i32;
                         let y = ((lparam.0 >> 16) & 0xffff) as i16 as i32;
@@ -2905,8 +2917,7 @@ mod windows_overlay {
             WM_EXITSIZEMOVE => {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     if hwnd == runtime.key_display_hwnd
-                        && runtime.quick_key_display_enabled
-                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
+                        && quick_key_display_window_move_enabled(runtime)
                     {
                         let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
                             x: runtime.quick_key_display_center_x,
