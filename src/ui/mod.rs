@@ -2485,7 +2485,7 @@ impl CrosshairApp {
             if dark_mode {
                 Color32::from_rgba_premultiplied(32, 92, 52, 120)
             } else {
-                Color32::from_rgb(220, 244, 228)
+                Color32::from_rgb(198, 232, 210)
             }
         } else {
             if dark_mode {
@@ -2498,7 +2498,7 @@ impl CrosshairApp {
             if dark_mode {
                 Color32::from_rgb(108, 224, 148)
             } else {
-                Color32::from_rgb(76, 156, 108)
+                Color32::from_rgb(112, 204, 142)
             }
         } else {
             if dark_mode {
@@ -2617,8 +2617,8 @@ impl CrosshairApp {
                         )
                     } else {
                         (
-                            Color32::from_rgb(200, 238, 212),
-                            Color32::from_rgb(64, 146, 98),
+                            Color32::from_rgb(198, 232, 210),
+                            Color32::from_rgb(112, 204, 142),
                         )
                     }
                 }
@@ -2658,8 +2658,8 @@ impl CrosshairApp {
                         )
                     } else {
                         (
-                            Color32::from_rgb(228, 236, 232),
-                            Color32::from_rgb(156, 176, 164),
+                            Color32::from_rgb(236, 242, 238),
+                            Color32::from_rgb(180, 198, 188),
                         )
                     }
                 }
