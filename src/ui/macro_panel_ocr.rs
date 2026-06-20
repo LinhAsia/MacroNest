@@ -173,23 +173,9 @@ impl CrosshairApp {
         }
 
         egui::ComboBox::from_id_salt((group_id, preset_id, step_index, "ocr-language-step"))
-            .selected_text(if step.ocr_language == crate::ocr::OCR_ACTIVE_CODE {
-                format!("Active ({})", crate::ocr::compact_label_for_language_code(&crate::ocr::active_language_code()))
-            } else {
-                crate::ocr::compact_label_for_language_code(&step.ocr_language).to_owned()
-            })
+            .selected_text(crate::ocr::compact_label_for_language_code(&step.ocr_language).to_owned())
             .width(92.0)
             .show_ui(ui, |ui| {
-                if ui
-                    .selectable_value(
-                        &mut step.ocr_language,
-                        crate::ocr::OCR_ACTIVE_CODE.to_owned(),
-                        "Active OCR",
-                    )
-                    .changed()
-                {
-                    *live_sync = true;
-                }
                 for pack in crate::ocr::ocr_language_packs() {
                     if ui
                         .selectable_value(

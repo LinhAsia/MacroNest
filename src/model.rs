@@ -366,7 +366,7 @@ fn default_ocr_language_code() -> String {
 }
 
 fn default_macro_step_ocr_language() -> String {
-    crate::ocr::OCR_ACTIVE_CODE.to_owned()
+    crate::ocr::OCR_DEFAULT_CODE.to_owned()
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
