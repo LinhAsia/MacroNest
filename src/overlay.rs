@@ -507,7 +507,6 @@ mod windows_overlay {
             size: f32,
             mode: QuickKeyDisplayMode,
             mascot_style: crate::model::MascotStyle,
-            preview: bool,
         },
         ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
@@ -1205,7 +1204,6 @@ mod windows_overlay {
         last_pin_update: Instant,
         hud_display: Option<HudDisplayState>,
         quick_key_display_enabled: bool,
-        quick_key_display_preview_until: Option<Instant>,
         quick_key_display_center_x: i32,
         quick_key_display_center_y: i32,
         quick_key_display_size: f32,
@@ -1966,7 +1964,6 @@ mod windows_overlay {
                 last_pin_update: Instant::now() - Duration::from_secs(1),
                 hud_display: None,
                 quick_key_display_enabled: false,
-                quick_key_display_preview_until: None,
                 quick_key_display_center_x: GetSystemMetrics(SM_CXSCREEN).max(1) / 2,
                 quick_key_display_center_y: GetSystemMetrics(SM_CYSCREEN).max(1) / 2,
                 quick_key_display_size: 36.0,
@@ -2523,9 +2520,7 @@ mod windows_overlay {
                         let _ = refresh_mouse_record_trail(runtime);
                     }
 
-                    let is_preview = runtime.quick_key_display_preview_until.map_or(false, |until| Instant::now() < until);
-                    let has_preview_tracker = runtime.quick_key_display_preview_until.is_some();
-                    if !is_ui_in_foreground() || is_preview || has_preview_tracker {
+                    if !is_ui_in_foreground() {
                         apply_keyboard_arrow_mouse_movement();
                         let pin_active = runtime.active_pin_thumbnail.is_some()
                             || HOOK_STATE.lock().active_pin_preset_id.is_some();
@@ -2542,8 +2537,6 @@ mod windows_overlay {
 
                         if runtime.quick_key_display_enabled
                             || !runtime.quick_key_display_entries.is_empty()
-                            || is_preview
-                            || has_preview_tracker
                         {
                             let _ = refresh_quick_key_display(runtime);
                         }
@@ -2603,20 +2596,6 @@ mod windows_overlay {
             WMAPP_PROCESS_QUEUE => {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     process_pending_commands(hwnd, runtime);
-
-                    let ui_foreground = is_ui_in_foreground();
-                    let is_preview = runtime.quick_key_display_preview_until.map_or(false, |until| Instant::now() < until);
-                    let has_preview_tracker = runtime.quick_key_display_preview_until.is_some();
-                    
-                    if !ui_foreground || is_preview || has_preview_tracker {
-                        if runtime.quick_key_display_enabled
-                            || !runtime.quick_key_display_entries.is_empty()
-                            || is_preview
-                            || has_preview_tracker
-                        {
-                            let _ = refresh_quick_key_display(runtime);
-                        }
-                    }
 
                     let _ = refresh_search_area_overlay(runtime);
                     let _ = refresh_timer_overlays(runtime);
@@ -6672,7 +6651,6 @@ mod windows_overlay {
                     size,
                     mode,
                     mascot_style,
-                    preview,
                 } => {
                     runtime.quick_key_display_enabled = enabled;
                     runtime.quick_key_display_center_x = center_x;
@@ -6683,11 +6661,6 @@ mod windows_overlay {
                     {
                         let mut hook_state = HOOK_STATE.lock();
                         hook_state.quick_key_mascot_active = enabled && mode == QuickKeyDisplayMode::Mascot;
-                    }
-                    if preview && mode == QuickKeyDisplayMode::Normal {
-                        runtime.quick_key_display_preview_until = Some(Instant::now() + Duration::from_secs(3));
-                    } else {
-                        runtime.quick_key_display_preview_until = None;
                     }
                     if !enabled {
                         runtime.quick_key_display_entries.clear();
@@ -7114,18 +7087,7 @@ mod windows_overlay {
     }
 
     fn refresh_quick_key_display(runtime: &mut Runtime) -> Result<()> {
-        let is_preview = if let Some(until) = runtime.quick_key_display_preview_until {
-            if Instant::now() >= until {
-                runtime.quick_key_display_preview_until = None;
-                false
-            } else {
-                true
-            }
-        } else {
-            false
-        };
-
-        if !runtime.quick_key_display_enabled || (is_ui_in_foreground() && !is_preview) {
+        if is_ui_in_foreground() || !runtime.quick_key_display_enabled {
             runtime.quick_key_display_entries.clear();
             runtime.quick_key_display_slot_memory.clear();
             runtime.quick_key_display_slot_labels.clear();
@@ -7136,24 +7098,6 @@ mod windows_overlay {
 
         quick_key_display_reconcile_held_entries(runtime);
         quick_key_display_release_expired_entries(runtime, Instant::now());
-
-        let now = Instant::now();
-        if is_preview
-            && runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal
-            && runtime.quick_key_display_entries.is_empty()
-        {
-            runtime.quick_key_display_entries.push(QuickKeyDisplayEntry {
-                text: "A".to_string(),
-                identity: "preview_dummy".to_string(),
-                combo_keys: vec![],
-                lane: QuickKeyDisplayLane::Keyboard,
-                slot: 0,
-                held: false,
-                shown_at: now,
-                released_at: Some(now),
-                hide_at: now + Duration::from_secs(3),
-            });
-        }
 
         if runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal
             && runtime.quick_key_display_entries.is_empty()
@@ -9271,11 +9215,9 @@ mod windows_overlay {
             return 16;
         }
 
-        let is_preview = runtime.quick_key_display_preview_until.is_some();
         if runtime.quick_key_display_enabled
             && (runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
-                || !runtime.quick_key_display_entries.is_empty()
-                || is_preview)
+                || !runtime.quick_key_display_entries.is_empty())
         {
             return 16;
         }
@@ -24348,9 +24290,9 @@ pub use windows_overlay::*;
 mod fallback {
     use crate::{
         model::{
-            AudioSettings, CrosshairStyle, HotkeyBinding, MacroGroup, ProfileRecord, RgbaColor,
-            QuickKeyDisplayMode, VisionPreset, WindowExpandControls, WindowFocusPreset,
-            WindowLayout, WindowPreset,
+            AudioSettings, CrosshairStyle, HotkeyBinding, MacroGroup, MascotStyle,
+            ProfileRecord, QuickKeyDisplayMode, RgbaColor, VisionPreset,
+            WindowExpandControls, WindowFocusPreset, WindowLayout, WindowPreset,
         },
         storage::AppPaths,
     };
@@ -24409,7 +24351,7 @@ mod fallback {
             center_y: i32,
             size: f32,
             mode: QuickKeyDisplayMode,
-            preview: bool,
+            mascot_style: MascotStyle,
         },
         ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {

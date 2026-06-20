@@ -1284,10 +1284,6 @@ impl CrosshairApp {
     }
 
     fn sync_quick_key_display_config(&self) {
-        self.sync_quick_key_display_config_with_preview(false);
-    }
-
-    fn sync_quick_key_display_config_with_preview(&self, preview: bool) {
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateQuickKeyDisplayConfig {
@@ -1297,7 +1293,6 @@ impl CrosshairApp {
                 size: self.state.quick_key_display_size,
                 mode: self.state.quick_key_display_mode,
                 mascot_style: self.state.quick_key_display_mascot_style,
-                preview,
             });
     }
 
@@ -4955,7 +4950,7 @@ impl CrosshairApp {
                                         );
                                     });
                                 if self.state.quick_key_display_mode != mode_before {
-                                    self.sync_quick_key_display_config_with_preview(true);
+                                    self.sync_quick_key_display_config();
                                     self.persist();
                                 }
                                 
@@ -4993,7 +4988,7 @@ impl CrosshairApp {
                                             );
                                         });
                                     if self.state.quick_key_display_mascot_style != style_before {
-                                        self.sync_quick_key_display_config_with_preview(true);
+                                        self.sync_quick_key_display_config();
                                         self.persist();
                                     }
                                 }
@@ -5021,7 +5016,7 @@ impl CrosshairApp {
                                             .changed();
                                         ui.end_row();
                                         if x_changed || y_changed {
-                                            self.sync_quick_key_display_config_with_preview(true);
+                                            self.sync_quick_key_display_config();
                                             self.persist();
                                         }
                                     });
@@ -5046,10 +5041,10 @@ impl CrosshairApp {
                                             .speed(1.0),
                                         )
                                         .changed();
-                                    if size_changed {
-                                        self.sync_quick_key_display_config_with_preview(true);
-                                        self.persist();
-                                    }
+                                        if size_changed {
+                                            self.sync_quick_key_display_config();
+                                            self.persist();
+                                        }
                                 });
                                 
                                 ui.add_space(4.0);
