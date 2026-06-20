@@ -131,7 +131,7 @@ mod windows_overlay {
                     EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor,
                     GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
                     GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
-                    GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTCLIENT, HTTRANSPARENT, HWND_TOPMOST,
+                    GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTCAPTION, HTTRANSPARENT, HWND_TOPMOST,
                     IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE,
                     LoadCursorW, LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG,
                     MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN,
@@ -393,11 +393,6 @@ mod windows_overlay {
     static PROTRACTOR_DRAG_START_ANGLE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(0.0));
     static PROTRACTOR_DRAG_START_SCALE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(1.0));
     static PROTRACTOR_DRAG_START_DISTANCE: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(1.0));
-    static QUICK_KEY_DISPLAY_DRAG_ACTIVE: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
-    static QUICK_KEY_DISPLAY_DRAG_START_MOUSE: Lazy<Mutex<POINT>> =
-        Lazy::new(|| Mutex::new(POINT::default()));
-    static QUICK_KEY_DISPLAY_DRAG_START_CENTER: Lazy<Mutex<(i32, i32)>> =
-        Lazy::new(|| Mutex::new((0, 0)));
     static CACHED_APP_UI_HWND: AtomicIsize = AtomicIsize::new(0);
     pub static UI_WINDOW_RECT_LEFT: std::sync::atomic::AtomicI32 =
         std::sync::atomic::AtomicI32::new(0);
@@ -2871,20 +2866,6 @@ mod windows_overlay {
         }
     }
 
-    fn quick_key_display_mascot_is_draggable(runtime: &Runtime) -> bool {
-        if runtime.quick_key_display_mode != QuickKeyDisplayMode::Mascot {
-            return false;
-        }
-
-        if runtime.quick_key_display_enabled {
-            return true;
-        }
-
-        runtime
-            .quick_key_display_preview_until
-            .is_some_and(|until| Instant::now() < until)
-    }
-
     unsafe extern "system" fn hud_wnd_proc(
         hwnd: HWND,
         msg: u32,
@@ -2895,78 +2876,20 @@ mod windows_overlay {
             WM_NCHITTEST => {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     if hwnd == runtime.key_display_hwnd
-                        && quick_key_display_mascot_is_draggable(runtime)
+                        && runtime.quick_key_display_enabled
+                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
                     {
-                        return LRESULT(HTCLIENT as isize);
+                        return LRESULT(HTCAPTION as isize);
                     }
                 }
                 LRESULT(HTTRANSPARENT as isize)
             }
 
-            WM_LBUTTONDOWN => {
-                if let Some(runtime) = runtime_mut(hwnd) {
-                    if hwnd == runtime.key_display_hwnd
-                        && quick_key_display_mascot_is_draggable(runtime)
-                    {
-                        let mut mouse_screen = POINT::default();
-                        let _ = GetCursorPos(&mut mouse_screen);
-                        *QUICK_KEY_DISPLAY_DRAG_ACTIVE.lock() = true;
-                        *QUICK_KEY_DISPLAY_DRAG_START_MOUSE.lock() = mouse_screen;
-                        *QUICK_KEY_DISPLAY_DRAG_START_CENTER.lock() = (
-                            runtime.quick_key_display_center_x,
-                            runtime.quick_key_display_center_y,
-                        );
-                        windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd);
-                    }
-                }
-                LRESULT(0)
-            }
-
-            WM_MOUSEMOVE => {
-                let dragging = *QUICK_KEY_DISPLAY_DRAG_ACTIVE.lock();
-                if dragging {
-                    if let Some(runtime) = runtime_mut(hwnd) {
-                        if hwnd == runtime.key_display_hwnd
-                            && quick_key_display_mascot_is_draggable(runtime)
-                        {
-                            let mut mouse_screen = POINT::default();
-                            let _ = GetCursorPos(&mut mouse_screen);
-                            let start_mouse = *QUICK_KEY_DISPLAY_DRAG_START_MOUSE.lock();
-                            let start_center = *QUICK_KEY_DISPLAY_DRAG_START_CENTER.lock();
-                            let dx = mouse_screen.x - start_mouse.x;
-                            let dy = mouse_screen.y - start_mouse.y;
-                            runtime.quick_key_display_center_x = start_center.0 + dx;
-                            runtime.quick_key_display_center_y = start_center.1 + dy;
-                            let _ = refresh_quick_key_display(runtime);
-                        }
-                    }
-                    return LRESULT(0);
-                }
-                DefWindowProcW(hwnd, msg, wparam, lparam)
-            }
-
-            WM_LBUTTONUP => {
-                let was_dragging = *QUICK_KEY_DISPLAY_DRAG_ACTIVE.lock();
-                if was_dragging {
-                    let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
-                    *QUICK_KEY_DISPLAY_DRAG_ACTIVE.lock() = false;
-                    if let Some(runtime) = runtime_mut(hwnd) {
-                        if hwnd == runtime.key_display_hwnd {
-                            let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
-                                x: runtime.quick_key_display_center_x,
-                                y: runtime.quick_key_display_center_y,
-                            });
-                        }
-                    }
-                    return LRESULT(0);
-                }
-                DefWindowProcW(hwnd, msg, wparam, lparam)
-            }
-
             WM_MOVE => {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     if hwnd == runtime.key_display_hwnd
-                        && quick_key_display_mascot_is_draggable(runtime)
+                        && runtime.quick_key_display_enabled
+                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
                     {
                         let x = (lparam.0 & 0xffff) as i16 as i32;
                         let y = ((lparam.0 >> 16) & 0xffff) as i16 as i32;
@@ -2982,7 +2905,8 @@ mod windows_overlay {
             WM_EXITSIZEMOVE => {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     if hwnd == runtime.key_display_hwnd
-                        && quick_key_display_mascot_is_draggable(runtime)
+                        && runtime.quick_key_display_enabled
+                        && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
                     {
                         let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
                             x: runtime.quick_key_display_center_x,
