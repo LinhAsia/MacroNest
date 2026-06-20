@@ -1164,11 +1164,11 @@ mod windows_overlay {
         hold_mix: f32,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq)]
+    #[derive(Debug, Clone, PartialEq)]
     struct MascotVisualState {
         mouse_offset: (f32, f32),
-        has_held_keys: bool,
-        has_held_mouse_buttons: bool,
+        held_keys: HashSet<String>,
+        held_mouse_buttons: HashSet<String>,
         is_mouse_moving: bool,
         recent_pulse_active: bool,
         mascot_style: crate::model::MascotStyle,
@@ -4941,6 +4941,28 @@ mod windows_overlay {
         let mut hook_state = HOOK_STATE.lock();
         if is_key_down {
             hook_state.held_inputs.insert(key_name.to_owned());
+            if key_name.eq_ignore_ascii_case("Shift") {
+                if unsafe { GetAsyncKeyState(0xA0) } as u16 & 0x8000 != 0 {
+                    hook_state.held_inputs.insert("LShift".to_owned());
+                }
+                if unsafe { GetAsyncKeyState(0xA1) } as u16 & 0x8000 != 0 {
+                    hook_state.held_inputs.insert("RShift".to_owned());
+                }
+            } else if key_name.eq_ignore_ascii_case("Ctrl") {
+                if unsafe { GetAsyncKeyState(0xA2) } as u16 & 0x8000 != 0 {
+                    hook_state.held_inputs.insert("LCtrl".to_owned());
+                }
+                if unsafe { GetAsyncKeyState(0xA3) } as u16 & 0x8000 != 0 {
+                    hook_state.held_inputs.insert("RCtrl".to_owned());
+                }
+            } else if key_name.eq_ignore_ascii_case("Alt") {
+                if unsafe { GetAsyncKeyState(0xA4) } as u16 & 0x8000 != 0 {
+                    hook_state.held_inputs.insert("LAlt".to_owned());
+                }
+                if unsafe { GetAsyncKeyState(0xA5) } as u16 & 0x8000 != 0 {
+                    hook_state.held_inputs.insert("RAlt".to_owned());
+                }
+            }
             let ignored_for_stop = hook_state
                 .stop_ignore_keys
                 .values()
@@ -4950,6 +4972,16 @@ mod windows_overlay {
             }
         } else if is_key_up {
             hook_state.held_inputs.remove(key_name);
+            if key_name.eq_ignore_ascii_case("Shift") {
+                hook_state.held_inputs.remove("LShift");
+                hook_state.held_inputs.remove("RShift");
+            } else if key_name.eq_ignore_ascii_case("Ctrl") {
+                hook_state.held_inputs.remove("LCtrl");
+                hook_state.held_inputs.remove("RCtrl");
+            } else if key_name.eq_ignore_ascii_case("Alt") {
+                hook_state.held_inputs.remove("LAlt");
+                hook_state.held_inputs.remove("RAlt");
+            }
             hook_state
                 .stop_ignore_keys
                 .retain(|_, ignored| !ignored.eq_ignore_ascii_case(key_name));
@@ -5862,34 +5894,20 @@ mod windows_overlay {
         entries: &[QuickKeyDisplayEntry],
         now: Instant,
     ) -> f32 {
-        let mut held = held_keys
+        let held = held_keys
             .iter()
             .any(|key_name| quick_key_display_alias_match(key_name, aliases));
         
+        if held {
+            return 1.0;
+        }
+
         let is_lshift = aliases.contains(&"LShift");
         let is_rshift = aliases.contains(&"RShift");
         let is_lctrl = aliases.contains(&"LCtrl");
         let is_rctrl = aliases.contains(&"RCtrl");
         let is_lalt = aliases.contains(&"LAlt");
         let is_ralt = aliases.contains(&"RAlt");
-
-        if is_lctrl {
-            held = unsafe { GetAsyncKeyState(0xA2) } as u16 & 0x8000 != 0;
-        } else if is_rctrl {
-            held = unsafe { GetAsyncKeyState(0xA3) } as u16 & 0x8000 != 0;
-        } else if is_lalt {
-            held = unsafe { GetAsyncKeyState(0xA4) } as u16 & 0x8000 != 0;
-        } else if is_ralt {
-            held = unsafe { GetAsyncKeyState(0xA5) } as u16 & 0x8000 != 0;
-        } else if is_lshift {
-            held = unsafe { GetAsyncKeyState(0xA0) } as u16 & 0x8000 != 0;
-        } else if is_rshift {
-            held = unsafe { GetAsyncKeyState(0xA1) } as u16 & 0x8000 != 0;
-        }
-
-        if held {
-            return 1.0;
-        }
 
         let mut strength = quick_key_display_recent_entry_strength(aliases, entries, now);
         if is_lshift || is_rshift {
@@ -7101,8 +7119,8 @@ mod windows_overlay {
 
             let current_state = MascotVisualState {
                 mouse_offset: runtime.quick_key_display_mouse_offset,
-                has_held_keys: !held_keys.is_empty(),
-                has_held_mouse_buttons: !held_mouse_buttons.is_empty(),
+                held_keys,
+                held_mouse_buttons,
                 is_mouse_moving,
                 recent_pulse_active: recent_pulse > 0.0,
                 mascot_style: runtime.quick_key_display_mascot_style,
@@ -7110,7 +7128,7 @@ mod windows_overlay {
                 window_rect: (x, y, width, height),
             };
 
-            if Some(current_state) == runtime.quick_key_display_last_mascot_state && recent_pulse == 0.0 {
+            if runtime.quick_key_display_last_mascot_state.as_ref() == Some(&current_state) && recent_pulse == 0.0 {
                 // No change in visual state, bypass repaint to save CPU
                 return Ok(());
             }
