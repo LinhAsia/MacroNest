@@ -18472,6 +18472,10 @@ mod windows_overlay {
 
     fn execute_ocr_action_step(step: &crate::model::MacroStep) {
         let preset_id = step.key.trim().parse::<u32>().ok().unwrap_or(0);
+        let text_var = step.ocr_text_var.trim();
+        if !text_var.is_empty() {
+            set_text_variable_value(text_var, "");
+        }
         let (x, y, w, h, preset_target_text) = {
             let hook_state = HOOK_STATE.lock();
             if let Some(preset) = hook_state.ocr_presets.iter().find(|p| p.id == preset_id) {
@@ -18493,7 +18497,6 @@ mod windows_overlay {
                 let full_text = res.text.clone();
                 // 0. Store full raw text regardless of target_text
 
-                let text_var = step.ocr_text_var.trim();
                 if !text_var.is_empty() {
                     set_text_variable_value(text_var, &full_text);
                 }
