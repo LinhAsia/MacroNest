@@ -13361,8 +13361,8 @@ mod windows_overlay {
             }
         } else {
             // Usagi symmetric large face & parallel bunny ears pointing slightly outwards
-            let rx = 74.0 * scale;
-            let ry = 56.0 * scale;
+            let rx = 82.0 * scale;
+            let ry = 68.0 * scale;
 
             // Ear wiggle animation
             let ear_wiggle = recent_pulse * 3.0 * scale;
@@ -13547,39 +13547,39 @@ mod windows_overlay {
             };
 
             // Draw Eyes (blank white when heat is very high, otherwise normal shiny eyes)
-            let eye_size = 11.5 * scale;
-            let eye_y_offset = 3.5 * scale;
+            let eye_size = 14.5 * scale;
+            let eye_y_offset = 8.0 * scale;
 
-            for &local_x in &[-24.0 * scale, 24.0 * scale] {
+            for &local_x in &[-26.0 * scale, 26.0 * scale] {
                 let (ex, ey) = project_face(local_x, eye_y_offset);
                 if red_factor > 0.85 {
                     // Blank white eyes with black outline when pressing keys intensely
                     fill_skia_circle(pixmap, ex, ey, eye_size * 0.5, [255, 255, 255, 255]);
                     stroke_skia_circle(pixmap, ex, ey, eye_size * 0.5, 2.0 * scale, [45, 40, 42, 255]);
                 } else {
-                    // Normal shiny eyes (symmetric highlights)
+                    // Normal shiny eyes (symmetric highlights, looking straight)
                     fill_skia_circle(pixmap, ex, ey, eye_size * 0.5, [45, 40, 42, 255]);
                     
                     // Highlights
-                    let hl1_x = ex - 1.8 * scale;
-                    let hl1_y = ey - 1.8 * scale;
-                    fill_skia_circle(pixmap, hl1_x, hl1_y, 2.2 * scale, [255, 255, 255, 255]);
+                    let hl1_x = ex - 2.2 * scale;
+                    let hl1_y = ey - 2.2 * scale;
+                    fill_skia_circle(pixmap, hl1_x, hl1_y, 2.8 * scale, [255, 255, 255, 255]);
                     
-                    let hl2_x = ex + 1.6 * scale;
-                    let hl2_y = ey + 1.6 * scale;
-                    fill_skia_circle(pixmap, hl2_x, hl2_y, 1.1 * scale, [255, 255, 255, 255]);
+                    let hl2_x = ex + 2.0 * scale;
+                    let hl2_y = ey + 2.0 * scale;
+                    fill_skia_circle(pixmap, hl2_x, hl2_y, 1.4 * scale, [255, 255, 255, 255]);
                 }
             }
 
             // Eyebrows
-            let local_brow_y = -10.0 * scale;
+            let local_brow_y = -6.0 * scale;
             let brow_w = 4.5 * scale;
             
             // Left eyebrow
             let mut left_brow = tiny_skia::PathBuilder::new();
-            let bl_start = project_face(-24.0 * scale - brow_w, local_brow_y + 1.0 * scale);
-            let bl_ctrl = project_face(-24.0 * scale, local_brow_y - 2.5 * scale);
-            let bl_end = project_face(-24.0 * scale + brow_w, local_brow_y + 1.0 * scale);
+            let bl_start = project_face(-26.0 * scale - brow_w, local_brow_y + 1.0 * scale);
+            let bl_ctrl = project_face(-26.0 * scale, local_brow_y - 2.5 * scale);
+            let bl_end = project_face(-26.0 * scale + brow_w, local_brow_y + 1.0 * scale);
             left_brow.move_to(bl_start.0, bl_start.1);
             left_brow.quad_to(bl_ctrl.0, bl_ctrl.1, bl_end.0, bl_end.1);
             if let Some(path) = left_brow.finish() {
@@ -13588,9 +13588,9 @@ mod windows_overlay {
             
             // Right eyebrow
             let mut right_brow = tiny_skia::PathBuilder::new();
-            let br_start = project_face(24.0 * scale - brow_w, local_brow_y + 1.0 * scale);
-            let br_ctrl = project_face(24.0 * scale, local_brow_y - 2.5 * scale);
-            let br_end = project_face(24.0 * scale + brow_w, local_brow_y + 1.0 * scale);
+            let br_start = project_face(26.0 * scale - brow_w, local_brow_y + 1.0 * scale);
+            let br_ctrl = project_face(26.0 * scale, local_brow_y - 2.5 * scale);
+            let br_end = project_face(26.0 * scale + brow_w, local_brow_y + 1.0 * scale);
             right_brow.move_to(br_start.0, br_start.1);
             right_brow.quad_to(br_ctrl.0, br_ctrl.1, br_end.0, br_end.1);
             if let Some(path) = right_brow.finish() {
@@ -13599,15 +13599,15 @@ mod windows_overlay {
 
             // Cheek blush (4 slanted stripes)
             let blush_color = [255, 120, 140, 200];
-            let local_blush_y = 12.0 * scale;
+            let local_blush_y = 16.0 * scale;
             
             for &side_sign in &[-1.0f32, 1.0f32] {
-                let (bx, by) = project_face(side_sign * 38.0 * scale, local_blush_y);
+                let (bx, by) = project_face(side_sign * 42.0 * scale, local_blush_y);
                 fill_skia_ellipse(pixmap, bx, by, 8.5 * scale, 5.0 * scale, blush_color);
                 
                 for i in 0..4 {
                     let offset = (i as f32 - 1.5) * 2.8 * scale;
-                    let local_bx = side_sign * 38.0 * scale + offset;
+                    let local_bx = side_sign * 42.0 * scale + offset;
                     let p1 = project_face(local_bx - 1.2 * scale, local_blush_y + 3.0 * scale);
                     let p2 = project_face(local_bx + 1.2 * scale, local_blush_y - 3.0 * scale);
                     let mut line = tiny_skia::PathBuilder::new();
@@ -13620,7 +13620,7 @@ mod windows_overlay {
             }
 
             // Mouth and Nose
-            let local_my = 13.5 * scale;
+            let local_my = 18.0 * scale;
             let mut mouth = tiny_skia::PathBuilder::new();
 
             // Nose
@@ -13667,7 +13667,7 @@ mod windows_overlay {
         mascot_style: crate::model::MascotStyle,
     ) {
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
-        let shoulder_offset = if is_hachiware { 20.0 * scale } else { 29.0 * scale };
+        let shoulder_offset = if is_hachiware { 20.0 * scale } else { 33.0 * scale };
         let left_shoulder_cx = body_cx - shoulder_offset;
         let left_shoulder_cy = body_cy - 4.0 * scale;
         let right_shoulder_cx = body_cx + shoulder_offset;
@@ -13791,12 +13791,13 @@ mod windows_overlay {
             )
         };
 
+        let y_shift = 30.0;
         // 3D Perspective mapping helper (takes FLAT coordinates, returns SCALED & PROJECTED coordinates)
         let project_point = |x: f32, y: f32| -> (f32, f32) {
             let scaled_x = x * scale;
-            let scaled_y = y * scale;
-            let vanish_y = 50.0 * scale;
-            let reference_y = 246.0 * scale;
+            let scaled_y = (y + y_shift) * scale;
+            let vanish_y = (50.0 + y_shift) * scale;
+            let reference_y = (246.0 + y_shift) * scale;
             let p_scale = 0.52 + 0.48 * ((scaled_y - vanish_y) / (reference_y - vanish_y)).clamp(0.0, 1.0);
             let center_x = 168.0 * scale; // Center of the layout
             let px = center_x + (scaled_x - center_x) * p_scale;
@@ -13874,11 +13875,11 @@ mod windows_overlay {
 
         // Animate Mascot closer to the desk
         let body_cx = 167.0 * scale;
-        let body_cy = 138.0 * scale;
+        let body_cy = (138.0 + y_shift) * scale;
         let body_radius = 36.0 * scale;
         
         let head_cx = 168.0 * scale;
-        let head_cy = 92.0 * scale;
+        let head_cy = (92.0 + y_shift) * scale;
         let head_radius = if mascot_style == crate::model::MascotStyle::Hachiware {
             47.0 * scale
         } else {
@@ -14232,8 +14233,8 @@ mod windows_overlay {
         let mouse_projected = project_point(mouse_flat_x, mouse_flat_y);
 
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
-        let default_l_x = if is_hachiware { 130.0 } else { 98.0 };
-        let default_r_x = if is_hachiware { 214.0 } else { 240.0 };
+        let default_l_x = if is_hachiware { 130.0 } else { 85.0 };
+        let default_r_x = if is_hachiware { 214.0 } else { 253.0 };
 
         let l_target = if mouse_active { mouse_projected } else { project_point(default_l_x, 164.0) };
         let mut left_paw_target = l_target;
