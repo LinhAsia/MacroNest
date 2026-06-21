@@ -13993,6 +13993,61 @@ mod windows_overlay {
                 [255, 255, 255, 72],
             );
 
+            // Draw front ear caps after the head fill so the ears stay visible without a seam at the base.
+            let front_ear_color = [100, 160, 230, 255];
+            let front_ear_stroke = [45, 40, 42, 255];
+            let front_ear_wiggle = recent_pulse * 2.3 * scale;
+            let draw_front_ear = |pixmap: &mut tiny_skia::Pixmap, side: f32| {
+                let tip_bias = turn_x * side;
+                let base_x = head_center_x + side * (29.0 * scale + tip_bias * 3.5 * scale);
+                let base_y = head_center_y - 33.0 * scale + turn_y * -1.0 * scale;
+                let tip_x = head_center_x + side * (34.0 * scale + tip_bias * 6.0 * scale);
+                let tip_y = head_center_y - (50.0 + front_ear_wiggle / scale) * scale
+                    + turn_y * -1.5 * scale;
+                let outer_x = head_center_x + side * (22.0 * scale + tip_bias * 2.0 * scale);
+                let outer_y = head_center_y - 42.0 * scale + turn_y * -0.5 * scale;
+
+                let mut ear = tiny_skia::PathBuilder::new();
+                ear.move_to(base_x - side * 8.5 * scale, base_y + 0.8 * scale);
+                ear.quad_to(
+                    outer_x - side * 2.5 * scale,
+                    outer_y,
+                    tip_x,
+                    tip_y,
+                );
+                ear.quad_to(
+                    outer_x + side * 2.0 * scale,
+                    outer_y - 1.5 * scale,
+                    base_x + side * 8.5 * scale,
+                    base_y + 1.2 * scale,
+                );
+                ear.close();
+                if let Some(path) = ear.finish() {
+                    fill_skia_path(pixmap, &path, front_ear_color);
+                }
+
+                // Only stroke the exposed outer silhouette; do not stroke the base so the ear stays fused to the head.
+                let mut silhouette = tiny_skia::PathBuilder::new();
+                silhouette.move_to(base_x - side * 7.0 * scale, base_y + 0.4 * scale);
+                silhouette.quad_to(
+                    outer_x - side * 2.2 * scale,
+                    outer_y - 0.6 * scale,
+                    tip_x,
+                    tip_y,
+                );
+                silhouette.quad_to(
+                    outer_x + side * 1.8 * scale,
+                    outer_y - 1.8 * scale,
+                    base_x + side * 6.5 * scale,
+                    base_y + 0.5 * scale,
+                );
+                if let Some(path) = silhouette.finish() {
+                    stroke_skia_path(pixmap, &path, front_ear_stroke, 1.6 * scale);
+                }
+            };
+            draw_front_ear(pixmap, -1.0);
+            draw_front_ear(pixmap, 1.0);
+
             // Paint the blue forehead patch directly inside the head ellipse so it can never detach.
             let patch_curve = |nx: f32| -> f32 {
                 let center_dip = 0.19 * (1.0 - nx.abs().powf(0.72));
