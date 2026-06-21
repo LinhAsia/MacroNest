@@ -13926,89 +13926,17 @@ mod windows_overlay {
                 )
             };
 
-            let mut head_path = tiny_skia::PathBuilder::new();
-            head_path.move_to(left_base_outer.0, left_base_outer.1);
-            head_path.quad_to(
-                head_center_x - 33.0 * scale + turn_x * -5.0 * scale,
-                head_center_y - 36.0 * scale - ear_lift * 0.35,
-                left_tip.0,
-                left_tip.1,
-            );
-            head_path.quad_to(
-                head_center_x - 18.0 * scale + turn_x * -4.5 * scale,
-                head_center_y - 33.0 * scale - ear_lift * 0.15,
-                left_base_inner.0,
-                left_base_inner.1,
-            );
-            head_path.quad_to(
-                head_center_x + turn_x * -1.2 * scale,
-                head_center_y - 37.0 * scale + turn_y * 0.3 * scale,
-                right_base_inner.0,
-                right_base_inner.1,
-            );
-            head_path.quad_to(
-                head_center_x + 18.0 * scale + turn_x * -4.5 * scale,
-                head_center_y - 33.0 * scale - ear_lift * 0.15,
-                right_tip.0,
-                right_tip.1,
-            );
-            head_path.quad_to(
-                head_center_x + 33.0 * scale + turn_x * -5.0 * scale,
-                head_center_y - 36.0 * scale - ear_lift * 0.35,
-                right_base_outer.0,
-                right_base_outer.1,
-            );
-            let right_cheek = (
-                head_center_x + head_rx * 0.97,
-                head_center_y + head_ry * 0.40,
-            );
-            let chin_bottom = (
-                head_center_x + turn_x * 1.4 * scale,
-                head_center_y + head_ry * 0.82,
-            );
-            let left_cheek = (
-                head_center_x - head_rx * 0.97,
-                head_center_y + head_ry * 0.40,
-            );
-            head_path.cubic_to(
-                head_center_x + head_rx * 1.02,
-                head_center_y - head_ry * 0.02,
-                head_center_x + head_rx * 1.03,
-                head_center_y + head_ry * 0.58,
-                right_cheek.0,
-                right_cheek.1,
-            );
-            head_path.cubic_to(
-                head_center_x + head_rx * 0.82,
-                head_center_y + head_ry * 0.70,
-                head_center_x + head_rx * 0.36,
-                head_center_y + head_ry * 0.84,
-                chin_bottom.0,
-                chin_bottom.1,
-            );
-            head_path.cubic_to(
-                head_center_x - head_rx * 0.36,
-                head_center_y + head_ry * 0.84,
-                head_center_x - head_rx * 0.82,
-                head_center_y + head_ry * 0.70,
-                left_cheek.0,
-                left_cheek.1,
-            );
-            head_path.cubic_to(
-                head_center_x - head_rx * 1.03,
-                head_center_y + head_ry * 0.58,
-                head_center_x - head_rx * 1.02,
-                head_center_y - head_ry * 0.02,
-                left_base_outer.0,
-                left_base_outer.1,
-            );
-            head_path.close();
-
             fill_skia_ellipse(pixmap, head_center_x, head_center_y + 5.0 * scale, head_rx, head_ry, [0, 0, 0, 28]);
-            if let Some(path) = head_path.finish() {
-                fill_skia_path(pixmap, &path, body_color);
-                stroke_skia_path(pixmap, &path, outline_color, 2.2 * scale);
-            }
+            fill_skia_ellipse(pixmap, head_center_x, head_center_y, head_rx, head_ry, body_color);
+            stroke_skia_ellipse(
+                pixmap,
+                head_center_x,
+                head_center_y,
+                head_rx,
+                head_ry,
+                2.2 * scale,
+                outline_color,
+            );
             fill_skia_ellipse(
                 pixmap,
                 far_shadow_x,
