@@ -14298,64 +14298,71 @@ mod windows_overlay {
                                      paw_x: f32,
                                      paw_y: f32,
                                      side: f32| {
-                let elbow_x = root_x + (paw_x - root_x) * 0.5 + side * 10.0 * scale;
-                let elbow_y = root_y + (paw_y - root_y) * 0.48 - 7.0 * scale;
-                let wrist_x = paw_x - side * 4.0 * scale;
-                let wrist_y = paw_y - 5.0 * scale;
+                let dx = paw_x - root_x;
+                let dy = paw_y - root_y;
+                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                let ux = dx / len;
+                let uy = dy / len;
+                let px = -uy;
+                let py = ux;
 
-                let (ux_root, uy_root) = {
-                    let d = ((elbow_x - root_x).powi(2) + (elbow_y - root_y).powi(2)).sqrt().max(1.0);
-                    ((elbow_x - root_x) / d, (elbow_y - root_y) / d)
-                };
-                let (ux_fore, uy_fore) = {
-                    let d = ((wrist_x - elbow_x).powi(2) + (wrist_y - elbow_y).powi(2)).sqrt().max(1.0);
-                    ((wrist_x - elbow_x) / d, (wrist_y - elbow_y) / d)
-                };
-                let (px_root, py_root) = (-uy_root, ux_root);
-                let (px_fore, py_fore) = (-uy_fore, ux_fore);
-                let avg_px = px_root + px_fore;
-                let avg_py = py_root + py_fore;
-                let avg_len = (avg_px * avg_px + avg_py * avg_py).sqrt().max(1.0);
-                let (px_mid, py_mid) = (avg_px / avg_len, avg_py / avg_len);
+                let top_center_x = root_x + side * 1.5 * scale;
+                let top_center_y = root_y;
+                let mid_center_x = root_x + dx * 0.5 + side * 4.0 * scale;
+                let mid_center_y = root_y + dy * 0.52 - 3.0 * scale;
+                let bottom_center_x = paw_x - side * 1.5 * scale;
+                let bottom_center_y = paw_y + 2.5 * scale;
 
-                let root_w = 8.5 * scale;
-                let elbow_w = 6.2 * scale;
-                let wrist_w = 9.4 * scale;
-                let paw_r = 11.4 * scale;
+                let top_w = 5.3 * scale;
+                let mid_w = 8.0 * scale;
+                let bottom_w = 13.6 * scale;
+                let bottom_h = 11.5 * scale;
 
-                let root_top = (root_x + px_root * root_w, root_y + py_root * root_w);
-                let root_bottom = (root_x - px_root * root_w, root_y - py_root * root_w);
-                let elbow_top = (elbow_x + px_mid * elbow_w, elbow_y + py_mid * elbow_w);
-                let elbow_bottom = (elbow_x - px_mid * elbow_w, elbow_y - py_mid * elbow_w);
-                let wrist_top = (wrist_x + px_fore * wrist_w, wrist_y + py_fore * wrist_w);
-                let wrist_bottom = (wrist_x - px_fore * wrist_w, wrist_y - py_fore * wrist_w);
+                let top_outer = (top_center_x + px * top_w, top_center_y + py * top_w);
+                let top_inner = (top_center_x - px * top_w, top_center_y - py * top_w);
+                let mid_outer = (mid_center_x + px * mid_w, mid_center_y + py * mid_w);
+                let mid_inner = (mid_center_x - px * mid_w, mid_center_y - py * mid_w);
+                let bottom_outer = (bottom_center_x + px * bottom_w, bottom_center_y + py * bottom_w);
+                let bottom_inner = (bottom_center_x - px * bottom_w, bottom_center_y - py * bottom_w);
+                let bottom_tip = (bottom_center_x, bottom_center_y + bottom_h);
 
                 let mut arm = tiny_skia::PathBuilder::new();
-                arm.move_to(root_top.0, root_top.1);
+                arm.move_to(top_outer.0, top_outer.1);
                 arm.quad_to(
-                    root_x + (elbow_x - root_x) * 0.45 + px_root * 2.0 * scale,
-                    root_y + (elbow_y - root_y) * 0.45 + py_root * 2.0 * scale,
-                    elbow_top.0,
-                    elbow_top.1,
+                    root_x + dx * 0.18 + px * 4.5 * scale,
+                    root_y + dy * 0.16 + py * 3.5 * scale,
+                    mid_outer.0,
+                    mid_outer.1,
                 );
                 arm.quad_to(
-                    elbow_x + (wrist_x - elbow_x) * 0.55 + px_fore * 1.5 * scale,
-                    elbow_y + (wrist_y - elbow_y) * 0.55 + py_fore * 1.5 * scale,
-                    wrist_top.0,
-                    wrist_top.1,
-                );
-                arm.line_to(wrist_bottom.0, wrist_bottom.1);
-                arm.quad_to(
-                    elbow_x + (wrist_x - elbow_x) * 0.45 - px_fore * 1.0 * scale,
-                    elbow_y + (wrist_y - elbow_y) * 0.45 - py_fore * 1.0 * scale,
-                    elbow_bottom.0,
-                    elbow_bottom.1,
+                    root_x + dx * 0.8 + px * 9.5 * scale,
+                    root_y + dy * 0.86 + py * 2.8 * scale,
+                    bottom_outer.0,
+                    bottom_outer.1,
                 );
                 arm.quad_to(
-                    root_x + (elbow_x - root_x) * 0.4 - px_root * 1.5 * scale,
-                    root_y + (elbow_y - root_y) * 0.4 - py_root * 1.5 * scale,
-                    root_bottom.0,
-                    root_bottom.1,
+                    bottom_center_x + px * 8.0 * scale,
+                    bottom_center_y + bottom_h * 0.92,
+                    bottom_tip.0,
+                    bottom_tip.1,
+                );
+                arm.quad_to(
+                    bottom_center_x - px * 8.0 * scale,
+                    bottom_center_y + bottom_h * 0.92,
+                    bottom_inner.0,
+                    bottom_inner.1,
+                );
+                arm.quad_to(
+                    root_x + dx * 0.72 - px * 7.0 * scale,
+                    root_y + dy * 0.82 - py * 1.8 * scale,
+                    mid_inner.0,
+                    mid_inner.1,
+                );
+                arm.quad_to(
+                    root_x + dx * 0.1 - px * 1.4 * scale,
+                    root_y + dy * 0.18 - py * 1.0 * scale,
+                    top_inner.0,
+                    top_inner.1,
                 );
                 arm.close();
 
@@ -14363,22 +14370,6 @@ mod windows_overlay {
                     fill_skia_path(pixmap, &p, arm_fill);
                     stroke_skia_path(pixmap, &p, stroke_color, stroke_w);
                 }
-
-                fill_skia_circle(
-                    pixmap,
-                    paw_x,
-                    paw_y + 1.2 * scale,
-                    paw_r,
-                    arm_fill,
-                );
-                stroke_skia_circle(
-                    pixmap,
-                    paw_x,
-                    paw_y + 1.2 * scale,
-                    paw_r,
-                    stroke_w,
-                    stroke_color,
-                );
             };
 
             draw_detached_arm(
