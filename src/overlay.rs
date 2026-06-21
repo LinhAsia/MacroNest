@@ -13995,34 +13995,51 @@ mod windows_overlay {
                 [255, 255, 255, 72],
             );
 
-            // Draw Hachiware Forehead Hair Patch
-            let mut hair = tiny_skia::PathBuilder::new();
-            let p = map_hachi_point(head_cx - 49.0 * scale, head_cy - 2.0 * scale, 0.20);
-            hair.move_to(p.0, p.1);
-            let c1 = map_hachi_point(head_cx - 42.0 * scale, head_cy - 48.0 * scale, 0.10);
-            let t = map_hachi_point(head_cx, head_cy - 49.0 * scale, 0.04);
-            hair.quad_to(c1.0, c1.1, t.0, t.1);
-            let c1 = map_hachi_point(head_cx + 42.0 * scale, head_cy - 48.0 * scale, 0.10);
-            let t = map_hachi_point(head_cx + 49.0 * scale, head_cy - 2.0 * scale, 0.20);
-            hair.quad_to(c1.0, c1.1, t.0, t.1);
+            // Paint the blue forehead patch directly inside the head ellipse so it can never detach.
+            let patch_curve = |nx: f32| -> f32 {
+                let center_dip = 0.19 * (1.0 - nx.abs().powf(0.72));
+                let side_height = -0.035 + turn_x * nx * 0.025 - turn_y * 0.03;
+                (side_height + center_dip).clamp(-0.16, 0.21)
+            };
+            let head_left = (head_center_x - head_rx).floor().max(0.0) as u32;
+            let head_top = (head_center_y - head_ry).floor().max(0.0) as u32;
+            let head_right = (head_center_x + head_rx).ceil().min(pixmap.width() as f32) as u32;
+            let head_bottom = (head_center_y + head_ry).ceil().min(pixmap.height() as f32) as u32;
+            let pixmap_width = pixmap.width() as usize;
+            let data = pixmap.data_mut();
+            for y in head_top..head_bottom {
+                let ny = ((y as f32 + 0.5) - head_center_y) / head_ry.max(1.0);
+                for x in head_left..head_right {
+                    let nx = ((x as f32 + 0.5) - head_center_x) / head_rx.max(1.0);
+                    if nx * nx + ny * ny > 1.0 {
+                        continue;
+                    }
+                    if ny <= patch_curve(nx) {
+                        let idx = ((y as usize) * pixmap_width + (x as usize)) * 4;
+                        data[idx] = 100;
+                        data[idx + 1] = 160;
+                        data[idx + 2] = 230;
+                        data[idx + 3] = 255;
+                    }
+                }
+            }
 
-            let c1 = map_hachi_point(head_cx + 35.0 * scale, head_cy + 1.5 * scale, 0.24);
-            let c2 = map_hachi_point(head_cx + 23.0 * scale, head_cy + 6.0 * scale, 0.32);
-            let t = map_hachi_point(head_cx + 12.0 * scale, head_cy + 8.0 * scale, 0.40);
-            hair.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-
-            let c1 = map_hachi_point(head_cx + 5.5 * scale, head_cy + 0.5 * scale, 0.46);
-            let c2 = map_hachi_point(head_cx - 5.5 * scale, head_cy + 0.5 * scale, 0.46);
-            let t = map_hachi_point(head_cx - 12.0 * scale, head_cy + 8.0 * scale, 0.40);
-            hair.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-
-            let c1 = map_hachi_point(head_cx - 23.0 * scale, head_cy + 6.0 * scale, 0.32);
-            let c2 = map_hachi_point(head_cx - 35.0 * scale, head_cy + 1.5 * scale, 0.24);
-            let t = map_hachi_point(head_cx - 49.0 * scale, head_cy - 2.0 * scale, 0.20);
-            hair.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            hair.close();
-            if let Some(path) = hair.finish() {
-                fill_skia_path(pixmap, &path, [100, 160, 230, 255]);
+            let mut hairline = tiny_skia::PathBuilder::new();
+            let hairline_steps = 40;
+            for i in 0..=hairline_steps {
+                let t = i as f32 / hairline_steps as f32;
+                let nx = -0.98 + t * 1.96;
+                let ny = patch_curve(nx);
+                let px = head_center_x + nx * head_rx;
+                let py = head_center_y + ny * head_ry;
+                if i == 0 {
+                    hairline.move_to(px, py);
+                } else {
+                    hairline.line_to(px, py);
+                }
+            }
+            if let Some(path) = hairline.finish() {
+                stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
             }
 
             // Head outline
