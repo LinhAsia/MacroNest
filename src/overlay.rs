@@ -13792,7 +13792,7 @@ mod windows_overlay {
 
                     // Apply ear wiggle only for head outline, hair, ears (0, 1, 2, 3) and only in the upper region
                     if (i == 0 || i == 1 || i == 2 || i == 3) && yc < 130.0 {
-                        let side = if xc < CX { -1.0_f32 } else { 1.0_f32 };
+                        let side = ((xc - CX) / 60.0).clamp(-1.0, 1.0);
                         let ear_off = quick_key_display_chiikawa_ear_offset(yc, scale, time_s, look_x, look_y, recent_pulse, side);
                         px += ear_off.0;
                         py += ear_off.1;
