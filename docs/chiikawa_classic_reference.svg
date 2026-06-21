@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <rect width="100%" height="100%" fill="#eee"/>
+  <g stroke="#3b2926" stroke-width="3.71" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Left Ear -->
+    <path d="M 165,123 C 154,95 151,42 169,23 C 181,11 193,21 196,45 C 199,70 196,101 190,124 Z" fill="#fff1bd"/>
+    <!-- Left Inner Ear -->
+    <path d="M 173,111 C 166,85 165,43 176,30 C 185,38 187,83 182,112 Z" fill="#ffb7bd" stroke="none"/>
+    
+    <!-- Right Ear -->
+    <path d="M 211,123 C 209,94 210,39 226,23 C 239,11 253,22 256,47 C 260,75 253,106 244,127 Z" fill="#fff1bd"/>
+    <!-- Right Inner Ear -->
+    <path d="M 224,112 C 222,83 224,39 234,30 C 246,43 245,83 238,113 Z" fill="#ffb7bd" stroke="none"/>
+    
+    <!-- Head & Body Contour -->
+    <path d="M 151,121 C 102,126 66,164 65,216 C 64,254 82,280 107,292 C 104,312 106,330 116,337 C 125,343 132,337 132,324 L 132,310 C 146,319 169,324 200,324 C 230,324 254,320 268,311 L 268,327 C 268,340 277,345 285,337 C 292,330 294,312 292,293 C 318,282 335,254 334,216 C 333,165 297,128 249,121 C 238,118 224,117 207,118 L 194,118 C 178,117 163,118 151,121 Z" fill="#fff1bd"/>
+    
+    <!-- Left eyebrow -->
+    <path d="M 124,163 C 132,147 144,138 158,134" stroke-width="2.65"/>
+    <!-- Right eyebrow -->
+    <path d="M 242,134 C 257,139 268,149 275,165" stroke-width="2.65"/>
+    
+    <!-- Left eye -->
+    <circle cx="159" cy="184" r="8" fill="#4a2d2a"/>
+    <circle cx="154" cy="177" r="2.65" fill="#fff" stroke="none"/>
+    <circle cx="164" cy="190" r="2.12" fill="#fff" stroke="none"/>
+    
+    <!-- Right eye -->
+    <circle cx="241" cy="184" r="8" fill="#4a2d2a"/>
+    <circle cx="236" cy="177" r="2.65" fill="#fff" stroke="none"/>
+    <circle cx="246" cy="190" r="2.12" fill="#fff" stroke="none"/>
+    
+    <!-- Left cheek blush -->
+    <ellipse cx="126" cy="215" rx="12.7" ry="9" fill="#ffc4ca" fill-opacity="0.44" stroke="none"/>
+    <path d="M 112,207 L 106,222 M 123,205 L 117,222 M 134,207 L 128,222" stroke-width="2.65"/>
+    
+    <!-- Right cheek blush -->
+    <ellipse cx="274" cy="215" rx="12.7" ry="9" fill="#ffc4ca" fill-opacity="0.44" stroke="none"/>
+    <path d="M 262,207 L 256,222 M 273,205 L 267,222 M 284,207 L 278,222" stroke-width="2.65"/>
+    
+    <!-- Nose -->
+    <path d="M 194,210 C 198,206 202,206 206,210 C 203,214 197,214 194,210 Z" fill="#3b2926"/>
+    
+    <!-- Mouth -->
+    <path d="M 200,214 C 200,224 190,227 184,220" stroke-width="2.65"/>
+    <path d="M 200,214 C 200,224 210,227 216,220" stroke-width="2.65"/>
+    <path d="M 189,231 C 196,238 207,238 214,231" stroke-width="2.65"/>
+  </g>
+</svg>
