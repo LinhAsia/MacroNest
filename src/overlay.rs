@@ -13959,45 +13959,45 @@ mod windows_overlay {
                 right_base_outer.1,
             );
             let right_cheek = (
-                head_center_x + head_rx * 0.92,
-                head_center_y + head_ry * 0.32,
+                head_center_x + head_rx * 0.97,
+                head_center_y + head_ry * 0.40,
             );
             let chin_bottom = (
-                head_center_x + turn_x * 2.0 * scale,
-                head_center_y + head_ry * 0.90,
+                head_center_x + turn_x * 1.4 * scale,
+                head_center_y + head_ry * 0.82,
             );
             let left_cheek = (
-                head_center_x - head_rx * 0.92,
-                head_center_y + head_ry * 0.32,
+                head_center_x - head_rx * 0.97,
+                head_center_y + head_ry * 0.40,
             );
             head_path.cubic_to(
-                head_center_x + head_rx * 1.04,
+                head_center_x + head_rx * 1.02,
                 head_center_y - head_ry * 0.02,
-                head_center_x + head_rx * 1.00,
-                head_center_y + head_ry * 0.72,
+                head_center_x + head_rx * 1.03,
+                head_center_y + head_ry * 0.58,
                 right_cheek.0,
                 right_cheek.1,
             );
             head_path.cubic_to(
-                head_center_x + head_rx * 0.72,
-                head_center_y + head_ry * 0.88,
-                head_center_x + head_rx * 0.26,
-                head_center_y + head_ry * 0.96,
+                head_center_x + head_rx * 0.82,
+                head_center_y + head_ry * 0.70,
+                head_center_x + head_rx * 0.36,
+                head_center_y + head_ry * 0.84,
                 chin_bottom.0,
                 chin_bottom.1,
             );
             head_path.cubic_to(
-                head_center_x - head_rx * 0.26,
-                head_center_y + head_ry * 0.96,
-                head_center_x - head_rx * 0.72,
-                head_center_y + head_ry * 0.88,
+                head_center_x - head_rx * 0.36,
+                head_center_y + head_ry * 0.84,
+                head_center_x - head_rx * 0.82,
+                head_center_y + head_ry * 0.70,
                 left_cheek.0,
                 left_cheek.1,
             );
             head_path.cubic_to(
-                head_center_x - head_rx * 1.00,
-                head_center_y + head_ry * 0.72,
-                head_center_x - head_rx * 1.04,
+                head_center_x - head_rx * 1.03,
+                head_center_y + head_ry * 0.58,
+                head_center_x - head_rx * 1.02,
                 head_center_y - head_ry * 0.02,
                 left_base_outer.0,
                 left_base_outer.1,
