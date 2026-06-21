@@ -14313,8 +14313,8 @@ mod windows_overlay {
                 let straight_sign = -side;
 
                 let top_w = 4.8 * scale;
-                let bottom_w = 12.6 * scale;
-                let bottom_h = 8.6 * scale;
+                let bottom_w = 13.4 * scale;
+                let bottom_h = 10.8 * scale;
 
                 let top_straight = (
                     top_center_x + px * top_w * straight_sign,
@@ -14337,12 +14337,12 @@ mod windows_overlay {
                     bottom_center_y + bottom_h,
                 );
                 let bottom_arc_mid_outer = (
-                    bottom_center_x + px * 3.4 * scale * straight_sign,
-                    bottom_center_y + bottom_h * 1.02,
+                    bottom_center_x + px * 4.8 * scale * straight_sign,
+                    bottom_center_y + bottom_h * 0.98,
                 );
                 let bottom_arc_mid_inner = (
-                    bottom_center_x - px * 3.4 * scale * straight_sign,
-                    bottom_center_y + bottom_h * 1.02,
+                    bottom_center_x - px * 4.8 * scale * straight_sign,
+                    bottom_center_y + bottom_h * 0.98,
                 );
                 let curve_ctrl = (
                     root_x + dx * 0.32 - px * 6.8 * scale * straight_sign,
@@ -14353,20 +14353,20 @@ mod windows_overlay {
                 arm.move_to(top_straight.0, top_straight.1);
                 arm.line_to(bottom_straight.0, bottom_straight.1);
                 arm.quad_to(
-                    bottom_center_x + px * 8.1 * scale * straight_sign,
-                    bottom_center_y + bottom_h * 0.48,
+                    bottom_center_x + px * 10.6 * scale * straight_sign,
+                    bottom_center_y + bottom_h * 0.42,
                     bottom_arc_mid_outer.0,
                     bottom_arc_mid_outer.1,
                 );
                 arm.quad_to(
                     bottom_center_x,
-                    bottom_center_y + bottom_h * 1.14,
+                    bottom_center_y + bottom_h * 1.22,
                     bottom_arc_mid_inner.0,
                     bottom_arc_mid_inner.1,
                 );
                 arm.quad_to(
-                    bottom_center_x - px * 8.1 * scale * straight_sign,
-                    bottom_center_y + bottom_h * 0.48,
+                    bottom_center_x - px * 10.6 * scale * straight_sign,
+                    bottom_center_y + bottom_h * 0.42,
                     bottom_curve.0,
                     bottom_curve.1,
                 );
