@@ -13808,15 +13808,53 @@ mod windows_overlay {
 
                 if let Some(path) = parse_svg_path_warped(d, &map_svg_pt) {
                     if i == 0 {
-                        // Silhouette: use EvenOdd fill so self-intersections from perspective warp
-                        // do not cancel out the face region (Winding rule can cause the face to be
-                        // treated as "outside" when the warped outline self-intersects).
-                        let mut paint = tiny_skia::Paint::default();
-                        paint.set_color_rgba8(255, 255, 255, 255);
-                        paint.anti_alias = true;
-                        tmp_pixmap.fill_path(&path, &paint, tiny_skia::FillRule::EvenOdd,
-                            identity.pre_translate(0.0, dest_y as f32), None);
-
+                        // Path 0 is the full body silhouette (head + arms + legs + feet).
+                        // When warped by perspective, the body sections below the desk create
+                        // winding loops that cancel out the face fill (winding=0 or even inside face).
+                        // Draw an explicit white-filled oval at the face center instead.
+                        let face_svg_y = SVG_TOP + SVG_H * 0.55;
+                        let (oval_cx, oval_cy_raw) = map_svg_pt(SVG_CX, face_svg_y);
+                        let oval_cy = oval_cy_raw + dest_y as f32;
+                        // rx covers full head width, ry covers head height
+                        let oval_rx = 150.0_f32 * scale;
+                        let oval_ry = 87.0_f32 * scale;
+                        const K: f32 = 0.5523_f32;
+                        let mut oval_pb = tiny_skia::PathBuilder::new();
+                        oval_pb.move_to(oval_cx + oval_rx, oval_cy);
+                        oval_pb.cubic_to(
+                            oval_cx + oval_rx, oval_cy - K * oval_ry,
+                            oval_cx + K * oval_rx, oval_cy - oval_ry,
+                            oval_cx, oval_cy - oval_ry,
+                        );
+                        oval_pb.cubic_to(
+                            oval_cx - K * oval_rx, oval_cy - oval_ry,
+                            oval_cx - oval_rx, oval_cy - K * oval_ry,
+                            oval_cx - oval_rx, oval_cy,
+                        );
+                        oval_pb.cubic_to(
+                            oval_cx - oval_rx, oval_cy + K * oval_ry,
+                            oval_cx - K * oval_rx, oval_cy + oval_ry,
+                            oval_cx, oval_cy + oval_ry,
+                        );
+                        oval_pb.cubic_to(
+                            oval_cx + K * oval_rx, oval_cy + oval_ry,
+                            oval_cx + oval_rx, oval_cy + K * oval_ry,
+                            oval_cx + oval_rx, oval_cy,
+                        );
+                        oval_pb.close();
+                        if let Some(oval_path) = oval_pb.finish() {
+                            let mut white_paint = tiny_skia::Paint::default();
+                            white_paint.set_color_rgba8(255, 255, 255, 255);
+                            white_paint.anti_alias = true;
+                            tmp_pixmap.fill_path(
+                                &oval_path,
+                                &white_paint,
+                                tiny_skia::FillRule::Winding,
+                                identity,
+                                None,
+                            );
+                        }
+                        // Draw dark outline of the warped body path on top of the oval
                         let stroke = tiny_skia::Stroke {
                             width: 7.0 * 0.53 * scale,
                             line_cap: tiny_skia::LineCap::Round,
@@ -13826,8 +13864,13 @@ mod windows_overlay {
                         let mut stroke_paint = tiny_skia::Paint::default();
                         stroke_paint.set_color_rgba8(55, 27, 17, 255);
                         stroke_paint.anti_alias = true;
-                        tmp_pixmap.stroke_path(&path, &stroke_paint, &stroke,
-                            identity.pre_translate(0.0, dest_y as f32), None);
+                        tmp_pixmap.stroke_path(
+                            &path,
+                            &stroke_paint,
+                            &stroke,
+                            identity.pre_translate(0.0, dest_y as f32),
+                            None,
+                        );
                     } else {
                         let mut paint = tiny_skia::Paint::default();
                         let draw_color = if i == 2 {
