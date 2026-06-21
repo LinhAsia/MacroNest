@@ -13985,11 +13985,8 @@ mod windows_overlay {
             let left_tip = map(114.0 - ear_sway, 52.0 - ear_lift);
             let right_tip = map(286.0 + ear_sway, 52.0 - ear_lift);
 
-            let start_left_cheek = map(151.0, 121.0);
-            let end_right_cheek = map(249.0, 121.0);
-            
             let mut head_contour = tiny_skia::PathBuilder::new();
-            head_contour.move_to(start_left_cheek.0, start_left_cheek.1);
+            head_contour.move_to(left_base_outer.0, left_base_outer.1);
             
             // Cheeks and chin
             let c1 = map(102.0, 126.0); let c2 = map(66.0, 164.0); let t = map(65.0, 216.0);
@@ -14014,27 +14011,22 @@ mod windows_overlay {
             head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
             let c1 = map(318.0, 282.0); let c2 = map(335.0, 254.0); let t = map(334.0, 216.0);
             head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let c1 = map(333.0, 165.0); let c2 = map(297.0, 128.0); let t = map(249.0, 121.0);
+            let c1 = map(333.0, 165.0); let c2 = map(297.0, 128.0); let t = right_base_outer;
             head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
             
-            // Connect to right ear base
-            head_contour.line_to(right_base_outer.0, right_base_outer.1);
-            // Right ear tip & inner base
+            // Connect to right ear
             head_contour.line_to(right_tip.0, right_tip.1);
             head_contour.line_to(right_base_inner.0, right_base_inner.1);
             
-            // Connect right ear base to left ear base (top skull curve)
+            // Top skull curve
             head_contour.quad_to(
                 map(200.0, 110.0).0, map(200.0, 110.0).1,
                 left_base_inner.0, left_base_inner.1,
             );
             
-            // Left ear tip & outer base
+            // Left ear
             head_contour.line_to(left_tip.0, left_tip.1);
             head_contour.line_to(left_base_outer.0, left_base_outer.1);
-            
-            // Close back to start of cheeks
-            head_contour.line_to(start_left_cheek.0, start_left_cheek.1);
             head_contour.close();
 
             let head_contour_path = head_contour.finish();
@@ -14111,13 +14103,23 @@ mod windows_overlay {
                 [255, 90, 105, 255],
             );
 
-            // Left eyebrow (small cute dot)
-            let (bx1, by1) = map_face_brow(164.0, 164.0);
-            fill_skia_ellipse(&mut tmp_pixmap, bx1, by1, 5.0 * 0.53 * scale, 3.5 * 0.53 * scale, stroke_color);
+            // Left eyebrow
+            let mut left_brow = tiny_skia::PathBuilder::new();
+            let start = map_face_brow(124.0, 163.0); left_brow.move_to(start.0, start.1);
+            let c1 = map_face_brow(132.0, 147.0); let c2 = map_face_brow(144.0, 138.0); let t = map_face_brow(158.0, 134.0);
+            left_brow.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            if let Some(p) = left_brow.finish() {
+                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * 0.53 * scale);
+            }
 
-            // Right eyebrow (small cute dot)
-            let (bx2, by2) = map_face_brow(236.0, 164.0);
-            fill_skia_ellipse(&mut tmp_pixmap, bx2, by2, 5.0 * 0.53 * scale, 3.5 * 0.53 * scale, stroke_color);
+            // Right eyebrow
+            let mut right_brow = tiny_skia::PathBuilder::new();
+            let start = map_face_brow(242.0, 134.0); right_brow.move_to(start.0, start.1);
+            let c1 = map_face_brow(257.0, 139.0); let c2 = map_face_brow(268.0, 149.0); let t = map_face_brow(275.0, 165.0);
+            right_brow.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            if let Some(p) = right_brow.finish() {
+                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * 0.53 * scale);
+            }
 
             // Left eye
             let (ex1, ey1) = map_face_eye(159.0, 184.0);
