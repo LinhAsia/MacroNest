@@ -13976,8 +13976,8 @@ mod windows_overlay {
             let ear_sway = recent_pulse * 10.6; // SVG scale sway
             let ear_lift = 4.0 - look_y * 1.5;
             
-            let patch_left = map(132.0, 142.0);
-            let patch_right = map(268.0, 142.0);
+            let patch_left = map(151.0, 121.0);
+            let patch_right = map(249.0, 121.0);
             let left_base_outer = patch_left;
             let right_base_outer = patch_right;
             let left_base_inner = map(182.0, 118.0);
@@ -14037,8 +14037,8 @@ mod windows_overlay {
             // Draw blue hair patch (including ears)
             let patch_color = [116, 172, 203, 255]; // steel-blue hair/ears
             let hairline_mid = map(200.0, 138.0); // parting peak
-            let ctrl_left = map(166.0, 168.0);
-            let ctrl_right = map(234.0, 168.0);
+            let ctrl_left = map(175.0, 150.0);
+            let ctrl_right = map(225.0, 150.0);
 
             let mut patch = tiny_skia::PathBuilder::new();
             patch.move_to(patch_left.0, patch_left.1);
