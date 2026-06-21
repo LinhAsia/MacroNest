@@ -13808,11 +13808,13 @@ mod windows_overlay {
 
                 if let Some(path) = parse_svg_path_warped(d, &map_svg_pt) {
                     if i == 0 {
-                        // Silhouette: white fill + dark stroke
+                        // Silhouette: use EvenOdd fill so self-intersections from perspective warp
+                        // do not cancel out the face region (Winding rule can cause the face to be
+                        // treated as "outside" when the warped outline self-intersects).
                         let mut paint = tiny_skia::Paint::default();
                         paint.set_color_rgba8(255, 255, 255, 255);
                         paint.anti_alias = true;
-                        tmp_pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding,
+                        tmp_pixmap.fill_path(&path, &paint, tiny_skia::FillRule::EvenOdd,
                             identity.pre_translate(0.0, dest_y as f32), None);
 
                         let stroke = tiny_skia::Stroke {
@@ -13829,9 +13831,9 @@ mod windows_overlay {
                     } else {
                         let mut paint = tiny_skia::Paint::default();
                         let draw_color = if i == 2 {
-                            // Path index 2 is the partition fill that covers the face. The paywalled source
-                            // colored it brown [55, 27, 17, 255] to obscure it. We override it to white [255, 255, 255, 255]
-                            [255, 255, 255, 255]
+                            // Path index 2 covers the face area but was colored brown by the source.
+                            // Override to white so the face background is correct.
+                            [255u8, 255, 255, 255]
                         } else {
                             [color[0], color[1], color[2], color[3]]
                         };
