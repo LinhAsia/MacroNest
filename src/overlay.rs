@@ -12844,6 +12844,33 @@ mod windows_overlay {
         }
     }
 
+    fn stroke_skia_ellipse(
+        pixmap: &mut tiny_skia::Pixmap,
+        cx: f32,
+        cy: f32,
+        rx: f32,
+        ry: f32,
+        stroke_width: f32,
+        color: [u8; 4],
+    ) {
+        let steps = 48;
+        let mut pb = tiny_skia::PathBuilder::new();
+        for i in 0..=steps {
+            let angle = (i as f32 / steps as f32) * 2.0 * std::f32::consts::PI;
+            let px = cx + rx * angle.cos();
+            let py = cy + ry * angle.sin();
+            if i == 0 {
+                pb.move_to(px, py);
+            } else {
+                pb.line_to(px, py);
+            }
+        }
+        pb.close();
+        if let Some(path) = pb.finish() {
+            stroke_skia_path(pixmap, &path, color, stroke_width);
+        }
+    }
+
     fn stroke_skia_circle(
         pixmap: &mut tiny_skia::Pixmap,
         center_x: f32,
@@ -13997,18 +14024,15 @@ mod windows_overlay {
             }
 
             // Head outline
-            if let Some(path) = tiny_skia::PathBuilder::from_circle(0.0, 0.0, 1.0) {
-                let mut paint = tiny_skia::Paint::default();
-                paint.set_color(tiny_skia::Color::from_rgba8(45, 40, 42, 255));
-                paint.anti_alias = true;
-                let stroke = tiny_skia::Stroke {
-                    width: 2.2 * scale,
-                    ..Default::default()
-                };
-                let transform = tiny_skia::Transform::from_scale(head_rx, head_ry)
-                    .post_translate(head_center_x, head_center_y);
-                pixmap.stroke_path(&path, &paint, &stroke, transform, None);
-            }
+            stroke_skia_ellipse(
+                pixmap,
+                head_center_x,
+                head_center_y,
+                head_rx,
+                head_ry,
+                2.2 * scale,
+                [45, 40, 42, 255],
+            );
 
             // Draw Eyes
             let left_eye = map_hachi_point(head_cx - 18.0 * scale, head_cy + 4.0 * scale, 0.62);
