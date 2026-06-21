@@ -13683,8 +13683,8 @@ mod windows_overlay {
                 }
             }
 
-            // Cut off the head below the desk top (desk top surface starts at 146.0 * scale)
-            let threshold_y = 146.0 * scale;
+            // Cut off the head below the desk top (desk top surface starts at 146.0 * scale, projected with y_shift 30.0 to 176.0 * scale)
+            let threshold_y = (146.0 + 30.0) * scale;
             let w = pixmap.width();
             let h = pixmap.height();
             let dest_data = pixmap.data_mut();
@@ -13698,31 +13698,6 @@ mod windows_overlay {
                         dest_data[row_start..row_end].copy_from_slice(&src_data[row_start..row_end]);
                     }
                 }
-            }
-
-            // Draw paws from the SVG on top of the desk
-            let mut left_hand = tiny_skia::PathBuilder::new();
-            let start = map(103.0, 282.0); left_hand.move_to(start.0, start.1);
-            let c1 = map(94.0, 285.0); let c2 = map(96.0, 307.0); let t = map(105.0, 310.0);
-            left_hand.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let c1 = map(112.0, 312.0); let c2 = map(115.0, 302.0); let t = map(114.0, 288.0);
-            left_hand.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            left_hand.close();
-            if let Some(path) = left_hand.finish() {
-                fill_skia_path(pixmap, &path, fill_color);
-                stroke_skia_path(pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
-            }
-
-            let mut right_hand = tiny_skia::PathBuilder::new();
-            let start = map(296.0, 282.0); right_hand.move_to(start.0, start.1);
-            let c1 = map(305.0, 285.0); let c2 = map(303.0, 307.0); let t = map(294.0, 310.0);
-            right_hand.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let c1 = map(287.0, 312.0); let c2 = map(284.0, 302.0); let t = map(285.0, 288.0);
-            right_hand.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            right_hand.close();
-            if let Some(path) = right_hand.finish() {
-                fill_skia_path(pixmap, &path, fill_color);
-                stroke_skia_path(pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
             }
 
             return;
@@ -14114,9 +14089,6 @@ mod windows_overlay {
         _paw_glow: [u8; 4],
         mascot_style: crate::model::MascotStyle,
     ) {
-        if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            return;
-        }
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
         let shoulder_offset = if is_hachiware { 20.0 * scale } else { 45.0 * scale };
         let left_shoulder_cx = body_cx - shoulder_offset;
@@ -14706,12 +14678,13 @@ mod windows_overlay {
         let mouse_projected = project_point(mouse_flat_x, mouse_flat_y);
 
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
-        let default_l_x = if is_hachiware { 130.0 } else { 85.0 };
-        let default_r_x = if is_hachiware { 214.0 } else { 253.0 };
+        let default_l_x = if is_hachiware { 130.0 } else { 100.0 };
+        let default_r_x = if is_hachiware { 214.0 } else { 235.0 };
+        let default_y = if is_hachiware { 164.0 } else { 146.0 };
 
-        let l_target = if mouse_active { mouse_projected } else { project_point(default_l_x, 164.0) };
+        let l_target = if mouse_active { mouse_projected } else { project_point(default_l_x, default_y) };
         let mut left_paw_target = l_target;
-        let mut right_paw_target = project_point(default_r_x, 164.0);
+        let mut right_paw_target = project_point(default_r_x, default_y);
 
         let mut left_paw_strength = 0.0f32;
         let mut right_paw_strength = 0.0f32;
