@@ -264,6 +264,7 @@ pub enum MascotStyle {
     #[default]
     Hachiware,
     ChiikawaClassic,
+    Custom,
 }
 
 fn default_screen_draw_color() -> RgbaColor {
