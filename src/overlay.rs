@@ -5565,6 +5565,28 @@ mod windows_overlay {
         }
     }
 
+    fn quick_key_display_chiikawa_ear_offset(
+        svg_y: f32,
+        scale: f32,
+        time_s: f32,
+        look_x: f32,
+        look_y: f32,
+        recent_pulse: f32,
+        side: f32,
+    ) -> (f32, f32) {
+        let root_y = 123.0;
+        let tip_y = 23.0;
+        let t = ((root_y - svg_y) / (root_y - tip_y)).clamp(0.0, 1.0);
+        let bend = t * t;
+        let bend_tip = bend * t;
+        let wind = (time_s * 1.45 + side * 0.55).sin() * 2.0 * scale;
+        let overshoot = (time_s * 2.15 + side * 1.2).sin() * 0.9 * scale;
+        let pulse = recent_pulse * 1.4 * scale;
+        let bend_x = wind + overshoot + look_x * -0.15 + side * pulse * 0.2;
+        let bend_y = look_y * -0.05 * bend + (-bend_x.abs() * 0.18 + overshoot * 0.12) * bend_tip;
+        (bend_x * bend_tip, bend_y)
+    }
+
     fn quick_key_display_allocate_slot(
         runtime: &Runtime,
         lane: QuickKeyDisplayLane,
@@ -13251,17 +13273,7 @@ mod windows_overlay {
                 (px * scale, py * scale)
             };
 
-            // Ear wiggle animation with a small delayed follow-through so the head
-            // can feel less like a rigid sprite.
             let time_s = unsafe { GetTickCount() } as f32 * 0.001;
-            let ear_lag_x = (time_s * 1.1 - 0.7).sin() * 1.4 * scale + look_x * -0.12;
-            let ear_lag_y = (time_s * 0.9 + 0.3).sin() * 0.8 * scale + look_y * -0.08;
-            let ear_wiggle = recent_pulse * 3.0 * scale;
-            let ear_shift_x = -look_x * 0.34 + ear_lag_x;
-            let ear_shift_y = -look_y * 0.28 + ear_lag_y;
-
-            let ear_wiggle_x = -ear_wiggle * 0.8;
-            let ear_wiggle_y = -ear_wiggle * 0.8;
 
             let fill_color = [255, 241, 189, 255]; // #fff1bd
             let stroke_color = [59, 41, 38, 255]; // #3b2926
@@ -13269,19 +13281,22 @@ mod windows_overlay {
 
             // 1. Left Ear
             let mut left_ear = tiny_skia::PathBuilder::new();
-            let start = map_point(165.0, 123.0); left_ear.move_to(start.0 + ear_shift_x, start.1 + ear_shift_y);
+            let start = map_point(165.0, 123.0); let off = quick_key_display_chiikawa_ear_offset(123.0, scale, time_s, look_x, look_y, recent_pulse, -1.0); left_ear.move_to(start.0 + off.0, start.1 + off.1);
             let c1 = map_point(154.0, 95.0); let c2 = map_point(151.0, 42.0); let t = map_point(169.0, 23.0);
-            left_ear.cubic_to(c1.0 + ear_shift_x + ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                             c2.0 + ear_shift_x + ear_wiggle_x, c2.1 + ear_shift_y + ear_wiggle_y,
-                             t.0 + ear_shift_x + ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+            let c1_off = quick_key_display_chiikawa_ear_offset(95.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            let c2_off = quick_key_display_chiikawa_ear_offset(42.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            let t_off = quick_key_display_chiikawa_ear_offset(23.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            left_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
             let c1 = map_point(181.0, 11.0); let c2 = map_point(193.0, 21.0); let t = map_point(196.0, 45.0);
-            left_ear.cubic_to(c1.0 + ear_shift_x + ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                             c2.0 + ear_shift_x + ear_wiggle_x, c2.1 + ear_shift_y + ear_wiggle_y,
-                             t.0 + ear_shift_x + ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+            let c1_off = quick_key_display_chiikawa_ear_offset(11.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            let c2_off = quick_key_display_chiikawa_ear_offset(21.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            let t_off = quick_key_display_chiikawa_ear_offset(45.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            left_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
             let c1 = map_point(199.0, 70.0); let c2 = map_point(196.0, 101.0); let t = map_point(190.0, 124.0);
-            left_ear.cubic_to(c1.0 + ear_shift_x, c1.1 + ear_shift_y,
-                             c2.0 + ear_shift_x, c2.1 + ear_shift_y,
-                             t.0 + ear_shift_x, t.1 + ear_shift_y);
+            let c1_off = quick_key_display_chiikawa_ear_offset(70.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            let c2_off = quick_key_display_chiikawa_ear_offset(101.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            let t_off = quick_key_display_chiikawa_ear_offset(124.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            left_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
             left_ear.close();
             if let Some(path) = left_ear.finish() {
                 fill_skia_path(pixmap, &path, fill_color);
@@ -13290,15 +13305,17 @@ mod windows_overlay {
 
             // 2. Left Inner Ear
             let mut left_inner = tiny_skia::PathBuilder::new();
-            let start = map_point(173.0, 111.0); left_inner.move_to(start.0 + ear_shift_x, start.1 + ear_shift_y);
+            let start = map_point(173.0, 111.0); let off = quick_key_display_chiikawa_ear_offset(111.0, scale, time_s, look_x, look_y, recent_pulse, -1.0); left_inner.move_to(start.0 + off.0, start.1 + off.1);
             let c1 = map_point(166.0, 85.0); let c2 = map_point(165.0, 43.0); let t = map_point(176.0, 30.0);
-            left_inner.cubic_to(c1.0 + ear_shift_x, c1.1 + ear_shift_y,
-                               c2.0 + ear_shift_x + ear_wiggle_x, c2.1 + ear_shift_y + ear_wiggle_y,
-                               t.0 + ear_shift_x + ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+            let c1_off = quick_key_display_chiikawa_ear_offset(85.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            let c2_off = quick_key_display_chiikawa_ear_offset(43.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            let t_off = quick_key_display_chiikawa_ear_offset(30.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            left_inner.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
             let c1 = map_point(185.0, 38.0); let c2 = map_point(187.0, 83.0); let t = map_point(182.0, 112.0);
-            left_inner.cubic_to(c1.0 + ear_shift_x + ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                               c2.0 + ear_shift_x, c2.1 + ear_shift_y,
-                               t.0 + ear_shift_x, t.1 + ear_shift_y);
+            let c1_off = quick_key_display_chiikawa_ear_offset(38.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            let c2_off = quick_key_display_chiikawa_ear_offset(83.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            let t_off = quick_key_display_chiikawa_ear_offset(112.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+            left_inner.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
             left_inner.close();
             if let Some(path) = left_inner.finish() {
                 fill_skia_path(pixmap, &path, inner_color);
@@ -13306,19 +13323,22 @@ mod windows_overlay {
 
             // 3. Right Ear
             let mut right_ear = tiny_skia::PathBuilder::new();
-            let start = map_point(211.0, 123.0); right_ear.move_to(start.0 + ear_shift_x, start.1 + ear_shift_y);
+            let start = map_point(211.0, 123.0); let off = quick_key_display_chiikawa_ear_offset(123.0, scale, time_s, look_x, look_y, recent_pulse, 1.0); right_ear.move_to(start.0 + off.0, start.1 + off.1);
             let c1 = map_point(209.0, 94.0); let c2 = map_point(210.0, 39.0); let t = map_point(226.0, 23.0);
-            right_ear.cubic_to(c1.0 + ear_shift_x, c1.1 + ear_shift_y,
-                              c2.0 + ear_shift_x, c2.1 + ear_shift_y,
-                              t.0 + ear_shift_x - ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+            let c1_off = quick_key_display_chiikawa_ear_offset(94.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            let c2_off = quick_key_display_chiikawa_ear_offset(39.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            let t_off = quick_key_display_chiikawa_ear_offset(23.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            right_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
             let c1 = map_point(239.0, 11.0); let c2 = map_point(253.0, 22.0); let t = map_point(256.0, 47.0);
-            right_ear.cubic_to(c1.0 + ear_shift_x - ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                              c2.0 + ear_shift_x - ear_wiggle_x, c2.1 + ear_shift_y + ear_wiggle_y,
-                              t.0 + ear_shift_x - ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+            let c1_off = quick_key_display_chiikawa_ear_offset(11.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            let c2_off = quick_key_display_chiikawa_ear_offset(22.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            let t_off = quick_key_display_chiikawa_ear_offset(47.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            right_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
             let c1 = map_point(260.0, 75.0); let c2 = map_point(253.0, 106.0); let t = map_point(244.0, 127.0);
-            right_ear.cubic_to(c1.0 + ear_shift_x - ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                              c2.0 + ear_shift_x, c2.1 + ear_shift_y,
-                              t.0 + ear_shift_x, t.1 + ear_shift_y);
+            let c1_off = quick_key_display_chiikawa_ear_offset(75.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            let c2_off = quick_key_display_chiikawa_ear_offset(106.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            let t_off = quick_key_display_chiikawa_ear_offset(127.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            right_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
             right_ear.close();
             if let Some(path) = right_ear.finish() {
                 fill_skia_path(pixmap, &path, fill_color);
@@ -13327,15 +13347,17 @@ mod windows_overlay {
 
             // 4. Right Inner Ear
             let mut right_inner = tiny_skia::PathBuilder::new();
-            let start = map_point(224.0, 112.0); right_inner.move_to(start.0 + ear_shift_x, start.1 + ear_shift_y);
+            let start = map_point(224.0, 112.0); let off = quick_key_display_chiikawa_ear_offset(112.0, scale, time_s, look_x, look_y, recent_pulse, 1.0); right_inner.move_to(start.0 + off.0, start.1 + off.1);
             let c1 = map_point(222.0, 83.0); let c2 = map_point(224.0, 39.0); let t = map_point(234.0, 30.0);
-            right_inner.cubic_to(c1.0 + ear_shift_x, c1.1 + ear_shift_y,
-                                c2.0 + ear_shift_x - ear_wiggle_x, c2.1 + ear_shift_y + ear_wiggle_y,
-                                t.0 + ear_shift_x - ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+            let c1_off = quick_key_display_chiikawa_ear_offset(83.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            let c2_off = quick_key_display_chiikawa_ear_offset(39.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            let t_off = quick_key_display_chiikawa_ear_offset(30.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            right_inner.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
             let c1 = map_point(246.0, 43.0); let c2 = map_point(245.0, 83.0); let t = map_point(238.0, 113.0);
-            right_inner.cubic_to(c1.0 + ear_shift_x - ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                                c2.0 + ear_shift_x, c2.1 + ear_shift_y,
-                                t.0 + ear_shift_x, t.1 + ear_shift_y);
+            let c1_off = quick_key_display_chiikawa_ear_offset(43.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            let c2_off = quick_key_display_chiikawa_ear_offset(83.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            let t_off = quick_key_display_chiikawa_ear_offset(113.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+            right_inner.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
             right_inner.close();
             if let Some(path) = right_inner.finish() {
                 fill_skia_path(pixmap, &path, inner_color);
@@ -13506,30 +13528,25 @@ mod windows_overlay {
                 }
 
                 let time_s = unsafe { GetTickCount() } as f32 * 0.001;
-                let ear_lag_x = (time_s * 1.1 - 0.7).sin() * 1.4 * scale + look_x * -0.12;
-                let ear_lag_y = (time_s * 0.9 + 0.3).sin() * 0.8 * scale + look_y * -0.08;
-                let ear_wiggle = recent_pulse * 3.0 * scale;
-                let ear_shift_x = -look_x * 0.34 + ear_lag_x;
-                let ear_shift_y = -look_y * 0.28 + ear_lag_y;
-
-                let ear_wiggle_x = -ear_wiggle * 0.8;
-                let ear_wiggle_y = -ear_wiggle * 0.8;
 
                 // 1. Left Ear
                 let mut left_ear = tiny_skia::PathBuilder::new();
-                let start = map_point(165.0, 123.0); left_ear.move_to(start.0 + ear_shift_x, start.1 + ear_shift_y);
+                let start = map_point(165.0, 123.0); let off = quick_key_display_chiikawa_ear_offset(123.0, scale, time_s, look_x, look_y, recent_pulse, -1.0); left_ear.move_to(start.0 + off.0, start.1 + off.1);
                 let c1 = map_point(154.0, 95.0); let c2 = map_point(151.0, 42.0); let t = map_point(169.0, 23.0);
-                left_ear.cubic_to(c1.0 + ear_shift_x + ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                                 c2.0 + ear_shift_x + ear_wiggle_x, c2.1 + ear_shift_y + ear_wiggle_y,
-                                 t.0 + ear_shift_x + ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+                let c1_off = quick_key_display_chiikawa_ear_offset(95.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                let c2_off = quick_key_display_chiikawa_ear_offset(42.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                let t_off = quick_key_display_chiikawa_ear_offset(23.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                left_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
                 let c1 = map_point(181.0, 11.0); let c2 = map_point(193.0, 21.0); let t = map_point(196.0, 45.0);
-                left_ear.cubic_to(c1.0 + ear_shift_x + ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                                 c2.0 + ear_shift_x + ear_wiggle_x, c2.1 + ear_shift_y + ear_wiggle_y,
-                                 t.0 + ear_shift_x + ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+                let c1_off = quick_key_display_chiikawa_ear_offset(11.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                let c2_off = quick_key_display_chiikawa_ear_offset(21.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                let t_off = quick_key_display_chiikawa_ear_offset(45.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                left_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
                 let c1 = map_point(199.0, 70.0); let c2 = map_point(196.0, 101.0); let t = map_point(190.0, 124.0);
-                left_ear.cubic_to(c1.0 + ear_shift_x, c1.1 + ear_shift_y,
-                                 c2.0 + ear_shift_x, c2.1 + ear_shift_y,
-                                 t.0 + ear_shift_x, t.1 + ear_shift_y);
+                let c1_off = quick_key_display_chiikawa_ear_offset(70.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                let c2_off = quick_key_display_chiikawa_ear_offset(101.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                let t_off = quick_key_display_chiikawa_ear_offset(124.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                left_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
                 left_ear.close();
                 if let Some(path) = left_ear.finish() {
                     fill_skia_path(&mut tmp_pixmap, &path, fill_color);
@@ -13538,15 +13555,17 @@ mod windows_overlay {
 
                 // 2. Left Inner Ear
                 let mut left_inner = tiny_skia::PathBuilder::new();
-                let start = map_point(173.0, 111.0); left_inner.move_to(start.0 + ear_shift_x, start.1 + ear_shift_y);
+                let start = map_point(173.0, 111.0); let off = quick_key_display_chiikawa_ear_offset(111.0, scale, time_s, look_x, look_y, recent_pulse, -1.0); left_inner.move_to(start.0 + off.0, start.1 + off.1);
                 let c1 = map_point(166.0, 85.0); let c2 = map_point(165.0, 43.0); let t = map_point(176.0, 30.0);
-                left_inner.cubic_to(c1.0 + ear_shift_x, c1.1 + ear_shift_y,
-                                   c2.0 + ear_shift_x + ear_wiggle_x, c2.1 + ear_shift_y + ear_wiggle_y,
-                                   t.0 + ear_shift_x + ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+                let c1_off = quick_key_display_chiikawa_ear_offset(85.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                let c2_off = quick_key_display_chiikawa_ear_offset(43.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                let t_off = quick_key_display_chiikawa_ear_offset(30.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                left_inner.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
                 let c1 = map_point(185.0, 38.0); let c2 = map_point(187.0, 83.0); let t = map_point(182.0, 112.0);
-                left_inner.cubic_to(c1.0 + ear_shift_x + ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                                   c2.0 + ear_shift_x, c2.1 + ear_shift_y,
-                                   t.0 + ear_shift_x, t.1 + ear_shift_y);
+                let c1_off = quick_key_display_chiikawa_ear_offset(38.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                let c2_off = quick_key_display_chiikawa_ear_offset(83.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                let t_off = quick_key_display_chiikawa_ear_offset(112.0, scale, time_s, look_x, look_y, recent_pulse, -1.0);
+                left_inner.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
                 left_inner.close();
                 if let Some(path) = left_inner.finish() {
                     fill_skia_path(&mut tmp_pixmap, &path, [255, 183, 189, 255]);
@@ -13554,19 +13573,22 @@ mod windows_overlay {
 
                 // 3. Right Ear
                 let mut right_ear = tiny_skia::PathBuilder::new();
-                let start = map_point(211.0, 123.0); right_ear.move_to(start.0 + ear_shift_x, start.1 + ear_shift_y);
+                let start = map_point(211.0, 123.0); let off = quick_key_display_chiikawa_ear_offset(123.0, scale, time_s, look_x, look_y, recent_pulse, 1.0); right_ear.move_to(start.0 + off.0, start.1 + off.1);
                 let c1 = map_point(209.0, 94.0); let c2 = map_point(210.0, 39.0); let t = map_point(226.0, 23.0);
-                right_ear.cubic_to(c1.0 + ear_shift_x, c1.1 + ear_shift_y,
-                                  c2.0 + ear_shift_x, c2.1 + ear_shift_y,
-                                  t.0 + ear_shift_x - ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+                let c1_off = quick_key_display_chiikawa_ear_offset(94.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                let c2_off = quick_key_display_chiikawa_ear_offset(39.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                let t_off = quick_key_display_chiikawa_ear_offset(23.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                right_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
                 let c1 = map_point(239.0, 11.0); let c2 = map_point(253.0, 22.0); let t = map_point(256.0, 47.0);
-                right_ear.cubic_to(c1.0 + ear_shift_x - ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                                  c2.0 + ear_shift_x - ear_wiggle_x, c2.1 + ear_shift_y + ear_wiggle_y,
-                                  t.0 + ear_shift_x - ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+                let c1_off = quick_key_display_chiikawa_ear_offset(11.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                let c2_off = quick_key_display_chiikawa_ear_offset(22.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                let t_off = quick_key_display_chiikawa_ear_offset(47.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                right_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
                 let c1 = map_point(260.0, 75.0); let c2 = map_point(253.0, 106.0); let t = map_point(244.0, 127.0);
-                right_ear.cubic_to(c1.0 + ear_shift_x - ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                                  c2.0 + ear_shift_x, c2.1 + ear_shift_y,
-                                  t.0 + ear_shift_x, t.1 + ear_shift_y);
+                let c1_off = quick_key_display_chiikawa_ear_offset(75.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                let c2_off = quick_key_display_chiikawa_ear_offset(106.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                let t_off = quick_key_display_chiikawa_ear_offset(127.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                right_ear.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
                 right_ear.close();
                 if let Some(path) = right_ear.finish() {
                     fill_skia_path(&mut tmp_pixmap, &path, fill_color);
@@ -13575,15 +13597,17 @@ mod windows_overlay {
 
                 // 4. Right Inner Ear
                 let mut right_inner = tiny_skia::PathBuilder::new();
-                let start = map_point(224.0, 112.0); right_inner.move_to(start.0 + ear_shift_x, start.1 + ear_shift_y);
+                let start = map_point(224.0, 112.0); let off = quick_key_display_chiikawa_ear_offset(112.0, scale, time_s, look_x, look_y, recent_pulse, 1.0); right_inner.move_to(start.0 + off.0, start.1 + off.1);
                 let c1 = map_point(222.0, 83.0); let c2 = map_point(224.0, 39.0); let t = map_point(234.0, 30.0);
-                right_inner.cubic_to(c1.0 + ear_shift_x, c1.1 + ear_shift_y,
-                                    c2.0 + ear_shift_x - ear_wiggle_x, c2.1 + ear_shift_y + ear_wiggle_y,
-                                    t.0 + ear_shift_x - ear_wiggle_x, t.1 + ear_shift_y + ear_wiggle_y);
+                let c1_off = quick_key_display_chiikawa_ear_offset(83.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                let c2_off = quick_key_display_chiikawa_ear_offset(39.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                let t_off = quick_key_display_chiikawa_ear_offset(30.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                right_inner.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
                 let c1 = map_point(246.0, 43.0); let c2 = map_point(245.0, 83.0); let t = map_point(238.0, 113.0);
-                right_inner.cubic_to(c1.0 + ear_shift_x - ear_wiggle_x, c1.1 + ear_shift_y + ear_wiggle_y,
-                                    c2.0 + ear_shift_x, c2.1 + ear_shift_y,
-                                    t.0 + ear_shift_x, t.1 + ear_shift_y);
+                let c1_off = quick_key_display_chiikawa_ear_offset(43.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                let c2_off = quick_key_display_chiikawa_ear_offset(83.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                let t_off = quick_key_display_chiikawa_ear_offset(113.0, scale, time_s, look_x, look_y, recent_pulse, 1.0);
+                right_inner.cubic_to(c1.0 + c1_off.0, c1.1 + c1_off.1, c2.0 + c2_off.0, c2.1 + c2_off.1, t.0 + t_off.0, t.1 + t_off.1);
                 right_inner.close();
                 if let Some(path) = right_inner.finish() {
                     fill_skia_path(&mut tmp_pixmap, &path, [255, 183, 189, 255]);
@@ -14200,59 +14224,52 @@ mod windows_overlay {
             if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
             if let Some(p) = right_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
         } else {
-            // ChiikawaClassic works better with intentionally detached hanging
-            // arms than with oversized shoulder blobs fighting the torso shape.
-            let shoulder_offset = 52.0 * scale;
+            let shoulder_offset = 48.0 * scale;
             let left_shoulder_cx = body_cx - shoulder_offset;
-            let left_shoulder_cy = body_cy + 20.0 * scale;
+            let left_shoulder_cy = body_cy + 17.0 * scale;
             let right_shoulder_cx = body_cx + shoulder_offset;
-            let right_shoulder_cy = body_cy + 20.0 * scale;
+            let right_shoulder_cy = body_cy + 17.0 * scale;
 
             let left_paw_x = left_paw_target.0;
             let left_paw_y = left_paw_target.1 + paw_press;
             let right_paw_x = right_paw_target.0;
             let right_paw_y = right_paw_target.1 + paw_press;
 
-            let (ux_l, uy_l) = { let d = ((left_paw_x - left_shoulder_cx).powi(2) + (left_paw_y - left_shoulder_cy).powi(2)).sqrt().max(1.0); ((left_paw_x - left_shoulder_cx) / d, (left_paw_y - left_shoulder_cy) / d) };
-            let (px_l, py_l) = (-uy_l, ux_l);
-            let shoulder_width = 6.4 * scale;
-            let left_shoulder_top    = (left_shoulder_cx + px_l * shoulder_width, left_shoulder_cy + py_l * shoulder_width);
-            let left_shoulder_bottom = (left_shoulder_cx - px_l * shoulder_width, left_shoulder_cy - py_l * shoulder_width);
-
-            let (ux_r, uy_r) = { let d = ((right_paw_x - right_shoulder_cx).powi(2) + (right_paw_y - right_shoulder_cy).powi(2)).sqrt().max(1.0); ((right_paw_x - right_shoulder_cx) / d, (right_paw_y - right_shoulder_cy) / d) };
-            let (px_r, py_r) = (-uy_r, ux_r);
-            let right_shoulder_top    = (right_shoulder_cx - px_r * shoulder_width, right_shoulder_cy - py_r * shoulder_width);
-            let right_shoulder_bottom = (right_shoulder_cx + px_r * shoulder_width, right_shoulder_cy + py_r * shoulder_width);
-
             let arm_fill = [255, 247, 242, 255];
             let stroke_color = [96, 78, 74, 255];
-            let stroke_w = 2.2 * scale;
+            let stroke_w = 1.7 * scale;
 
-            let cap_r = 6.0 * scale;
-            fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, arm_fill);
-            stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, stroke_w, stroke_color);
-            fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, arm_fill);
-            stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, stroke_w, stroke_color);
+            let draw_bead_arm = |pixmap: &mut tiny_skia::Pixmap,
+                                 shoulder: (f32, f32),
+                                 paw: (f32, f32),
+                                 ctrl: (f32, f32)| {
+                let steps = 12;
+                for i in 0..=steps {
+                    let t = i as f32 / steps as f32;
+                    let inv = 1.0 - t;
+                    let x = inv * inv * shoulder.0 + 2.0 * inv * t * ctrl.0 + t * t * paw.0;
+                    let y = inv * inv * shoulder.1 + 2.0 * inv * t * ctrl.1 + t * t * paw.1;
+                    let radius = (7.4 - t * 1.9) * scale;
+                    fill_skia_circle(pixmap, x, y, radius, arm_fill);
+                    stroke_skia_circle(pixmap, x, y, radius, stroke_w, stroke_color);
+                }
+                fill_skia_ellipse(pixmap, paw.0, paw.1 + 1.2 * scale, 8.4 * scale, 6.6 * scale, arm_fill);
+                stroke_skia_circle(pixmap, paw.0 - 3.8 * scale, paw.1 + 1.2 * scale, 4.5 * scale, stroke_w, stroke_color);
+                stroke_skia_circle(pixmap, paw.0 + 3.8 * scale, paw.1 + 1.2 * scale, 4.5 * scale, stroke_w, stroke_color);
+            };
 
-            let mut left_arm = tiny_skia::PathBuilder::new();
-            left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
-            left_arm.quad_to(left_shoulder_cx - 8.0 * scale, left_shoulder_cy + 14.0 * scale, left_paw_x - 7.5 * scale, left_paw_y + 2.5 * scale);
-            left_arm.quad_to(left_paw_x, left_paw_y + 10.5 * scale, left_paw_x + 7.0 * scale, left_paw_y + 1.0 * scale);
-            left_arm.quad_to(left_shoulder_cx + 8.0 * scale, left_shoulder_cy + 14.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
-            let left_arm_stroke = left_arm.clone();
-            left_arm.close();
-            if let Some(p) = left_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
-            if let Some(p) = left_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
-
-            let mut right_arm = tiny_skia::PathBuilder::new();
-            right_arm.move_to(right_shoulder_top.0, right_shoulder_top.1);
-            right_arm.quad_to(right_shoulder_cx + 8.0 * scale, right_shoulder_cy + 14.0 * scale, right_paw_x + 7.5 * scale, right_paw_y + 2.5 * scale);
-            right_arm.quad_to(right_paw_x, right_paw_y + 10.5 * scale, right_paw_x - 7.0 * scale, right_paw_y + 1.0 * scale);
-            right_arm.quad_to(right_shoulder_cx - 8.0 * scale, right_shoulder_cy + 14.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
-            let right_arm_stroke = right_arm.clone();
-            right_arm.close();
-            if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
-            if let Some(p) = right_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
+            draw_bead_arm(
+                pixmap,
+                (left_shoulder_cx, left_shoulder_cy),
+                (left_paw_x, left_paw_y),
+                (left_shoulder_cx - 10.0 * scale, left_shoulder_cy + 11.0 * scale),
+            );
+            draw_bead_arm(
+                pixmap,
+                (right_shoulder_cx, right_shoulder_cy),
+                (right_paw_x, right_paw_y),
+                (right_shoulder_cx + 10.0 * scale, right_shoulder_cy + 11.0 * scale),
+            );
         }
     }
     unsafe fn paint_mascot_quick_key_display(
