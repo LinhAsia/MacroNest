@@ -14179,7 +14179,7 @@ mod windows_overlay {
 
             let (ux_l, uy_l) = { let d = ((left_paw_x - left_shoulder_cx).powi(2) + (left_paw_y - left_shoulder_cy).powi(2)).sqrt().max(1.0); ((left_paw_x - left_shoulder_cx) / d, (left_paw_y - left_shoulder_cy) / d) };
             let (px_l, py_l) = (-uy_l, ux_l);
-            let shoulder_width = 5.8 * scale; // Thinner shoulder attachment to match the small hands
+            let shoulder_width = 12.5 * scale; // Thick shoulder attachment matching Hachiware
             let left_shoulder_top    = (left_shoulder_cx + px_l * shoulder_width, left_shoulder_cy + py_l * shoulder_width);
             let left_shoulder_bottom = (left_shoulder_cx - px_l * shoulder_width, left_shoulder_cy - py_l * shoulder_width);
 
@@ -14189,33 +14189,33 @@ mod windows_overlay {
             let right_shoulder_bottom = (right_shoulder_cx + px_r * shoulder_width, right_shoulder_cy + py_r * shoulder_width);
 
             let arm_fill = [255, 241, 189, 255]; // Usagi yellow/cream #fff1bd
-            let stroke_color = [59, 41, 38, 255]; // Usagi outline #3b2926
-            let stroke_w = 7.0 * 0.53 * scale;
+            let stroke_color = [45, 40, 42, 255]; // Consistent dark grey outline
+            let stroke_w = 2.2 * scale;
 
-            // Smaller shoulder cap
-            let cap_r = 6.0 * scale;
+            // Larger shoulder cap matching Hachiware
+            let cap_r = 13.0 * scale;
             fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, arm_fill);
             stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, stroke_w, stroke_color);
             fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, arm_fill);
             stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, stroke_w, stroke_color);
 
-            // Thin, cute left arm path
+            // Thick left arm path matching Hachiware
             let mut left_arm = tiny_skia::PathBuilder::new();
             left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
-            left_arm.quad_to(left_paw_x - 8.0 * scale, left_paw_y - 6.0 * scale, left_paw_x - 5.0 * scale, left_paw_y + 2.0 * scale);
-            left_arm.quad_to(left_paw_x, left_paw_y + 7.0 * scale, left_paw_x + 5.0 * scale, left_paw_y + 1.0 * scale);
-            left_arm.quad_to(left_paw_x + 3.0 * scale, left_paw_y - 6.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
+            left_arm.quad_to(left_paw_x - 16.0 * scale, left_paw_y - 12.0 * scale, left_paw_x - 10.0 * scale, left_paw_y + 4.0 * scale);
+            left_arm.quad_to(left_paw_x, left_paw_y + 14.0 * scale, left_paw_x + 10.0 * scale, left_paw_y + 2.0 * scale);
+            left_arm.quad_to(left_paw_x + 6.0 * scale, left_paw_y - 12.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
             let left_arm_stroke = left_arm.clone();
             left_arm.close();
             if let Some(p) = left_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
             if let Some(p) = left_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
 
-            // Thin, cute right arm path
+            // Thick right arm path matching Hachiware
             let mut right_arm = tiny_skia::PathBuilder::new();
             right_arm.move_to(right_shoulder_top.0, right_shoulder_top.1);
-            right_arm.quad_to(right_paw_x + 8.0 * scale, right_paw_y - 6.0 * scale, right_paw_x + 5.0 * scale, right_paw_y + 2.0 * scale);
-            right_arm.quad_to(right_paw_x, right_paw_y + 7.0 * scale, right_paw_x - 5.0 * scale, right_paw_y + 1.0 * scale);
-            right_arm.quad_to(right_paw_x - 3.0 * scale, right_paw_y - 6.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
+            right_arm.quad_to(right_paw_x + 16.0 * scale, right_paw_y - 12.0 * scale, right_paw_x + 10.0 * scale, right_paw_y + 4.0 * scale);
+            right_arm.quad_to(right_paw_x, right_paw_y + 14.0 * scale, right_paw_x - 10.0 * scale, right_paw_y + 2.0 * scale);
+            right_arm.quad_to(right_paw_x - 6.0 * scale, right_paw_y - 12.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
             let right_arm_stroke = right_arm.clone();
             right_arm.close();
             if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
