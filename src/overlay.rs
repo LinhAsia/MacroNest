@@ -6065,6 +6065,10 @@ mod windows_overlay {
             return;
         }
 
+        let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
+        let current_ms = unsafe { GetTickCount() };
+        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 380;
+
         let (mut offset_x, mut offset_y) = runtime.quick_key_display_mouse_offset;
         let (mut velocity_x, mut velocity_y) = runtime.quick_key_display_mouse_velocity;
         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
@@ -6077,18 +6081,26 @@ mod windows_overlay {
         } else {
             height as f32 * 0.18
         };
-        let target_x = (local_x / (width as f32 * 0.43)).clamp(-1.0, 1.0)
-            * if runtime.quick_key_display_mascot_style == crate::model::MascotStyle::Hachiware {
-                15.5
-            } else {
-                18.0
-            };
-        let target_y = ((local_y - horizon_y) / (height as f32 * 0.36)).clamp(-1.0, 1.0)
-            * if runtime.quick_key_display_mascot_style == crate::model::MascotStyle::Hachiware {
-                11.5
-            } else {
-                14.0
-            };
+        let target_x = if is_mouse_moving {
+            (local_x / (width as f32 * 0.43)).clamp(-1.0, 1.0)
+                * if runtime.quick_key_display_mascot_style == crate::model::MascotStyle::Hachiware {
+                    15.5
+                } else {
+                    18.0
+                }
+        } else {
+            0.0
+        };
+        let target_y = if is_mouse_moving {
+            ((local_y - horizon_y) / (height as f32 * 0.36)).clamp(-1.0, 1.0)
+                * if runtime.quick_key_display_mascot_style == crate::model::MascotStyle::Hachiware {
+                    11.5
+                } else {
+                    14.0
+                }
+        } else {
+            0.0
+        };
         if let Some(last) = runtime.quick_key_display_last_cursor_pos {
             let delta_x = (cursor.x - last.x) as f32;
             let delta_y = (cursor.y - last.y) as f32;
@@ -6182,6 +6194,7 @@ mod windows_overlay {
 
         if !runtime.quick_key_display_enabled
             || runtime.quick_key_display_mode != QuickKeyDisplayMode::Mascot
+            || unsafe { !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(runtime.key_display_hwnd).as_bool() }
         {
             if matches!(message, WM_LBUTTONUP) && MASCOT_DRAG_START_MOUSE.lock().is_some() {
                 *MASCOT_DRAG_START_MOUSE.lock() = None;
@@ -6202,6 +6215,25 @@ mod windows_overlay {
                     || cursor.y < rect.top
                     || cursor.y >= rect.bottom
                 {
+                    return false;
+                }
+                let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+                let mascot_style = runtime.quick_key_display_mascot_style;
+                let scale = quick_key_display_mascot_scale(font_size, mascot_style);
+                let y_shift = 30.0;
+                let head_cx = 168.0 * scale;
+                let head_cy = (77.0 + y_shift) * scale;
+                let head_radius = if mascot_style == crate::model::MascotStyle::Hachiware {
+                    56.0 * scale
+                } else {
+                    54.0 * scale
+                };
+                let local_x = (cursor.x - rect.left) as f32;
+                let local_y = (cursor.y - rect.top) as f32;
+                let dx = local_x - head_cx;
+                let dy = local_y - head_cy;
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq > head_radius * head_radius {
                     return false;
                 }
                 *MASCOT_DRAG_START_MOUSE.lock() = Some((cursor.x, cursor.y));
