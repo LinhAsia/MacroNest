@@ -14228,80 +14228,56 @@ mod windows_overlay {
             if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
             if let Some(p) = right_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
         } else {
-            let shoulder_offset = 48.0 * scale;
+            let shoulder_offset = 20.0 * scale;
             let left_shoulder_cx = body_cx - shoulder_offset;
-            let left_shoulder_cy = body_cy + 17.0 * scale;
+            let left_shoulder_cy = body_cy - 2.0 * scale;
             let right_shoulder_cx = body_cx + shoulder_offset;
-            let right_shoulder_cy = body_cy + 17.0 * scale;
+            let right_shoulder_cy = body_cy - 2.0 * scale;
 
             let left_paw_x = left_paw_target.0;
             let left_paw_y = left_paw_target.1 + paw_press;
             let right_paw_x = right_paw_target.0;
             let right_paw_y = right_paw_target.1 + paw_press;
 
-            let arm_fill = [255, 247, 242, 255];
-            let stroke_color = [96, 78, 74, 255];
-            let stroke_w = 1.9 * scale;
+            let (ux_l, uy_l) = { let d = ((left_paw_x - left_shoulder_cx).powi(2) + (left_paw_y - left_shoulder_cy).powi(2)).sqrt().max(1.0); ((left_paw_x - left_shoulder_cx) / d, (left_paw_y - left_shoulder_cy) / d) };
+            let (px_l, py_l) = (-uy_l, ux_l);
+            let left_shoulder_top    = (left_shoulder_cx + px_l * 12.5 * scale, left_shoulder_cy + py_l * 12.5 * scale);
+            let left_shoulder_bottom = (left_shoulder_cx - px_l * 12.5 * scale, left_shoulder_cy - py_l * 12.5 * scale);
 
-            let draw_soft_arm = |pixmap: &mut tiny_skia::Pixmap,
-                                 shoulder: (f32, f32),
-                                 paw: (f32, f32),
-                                 side: f32| {
-                let ctrl_top = (shoulder.0 + side * 3.0 * scale, shoulder.1 + 14.0 * scale);
-                let ctrl_bottom = (paw.0 - side * 6.5 * scale, paw.1 - 9.5 * scale);
+            let (ux_r, uy_r) = { let d = ((right_paw_x - right_shoulder_cx).powi(2) + (right_paw_y - right_shoulder_cy).powi(2)).sqrt().max(1.0); ((right_paw_x - right_shoulder_cx) / d, (right_paw_y - right_shoulder_cy) / d) };
+            let (px_r, py_r) = (-uy_r, ux_r);
+            let right_shoulder_top    = (right_shoulder_cx - px_r * 12.5 * scale, right_shoulder_cy - py_r * 12.5 * scale);
+            let right_shoulder_bottom = (right_shoulder_cx + px_r * 12.5 * scale, right_shoulder_cy + py_r * 12.5 * scale);
 
-                let mut arm = tiny_skia::PathBuilder::new();
-                arm.move_to(shoulder.0 - 7.8 * scale, shoulder.1 - 4.0 * scale);
-                arm.cubic_to(
-                    ctrl_top.0 - 5.5 * scale,
-                    ctrl_top.1 - 2.0 * scale,
-                    ctrl_bottom.0 - 6.5 * scale,
-                    ctrl_bottom.1 + 2.0 * scale,
-                    paw.0 - 8.5 * scale,
-                    paw.1 + 0.8 * scale,
-                );
-                arm.quad_to(
-                    paw.0,
-                    paw.1 + 8.8 * scale,
-                    paw.0 + 8.4 * scale,
-                    paw.1 + 0.8 * scale,
-                );
-                arm.cubic_to(
-                    ctrl_bottom.0 + 6.5 * scale,
-                    ctrl_bottom.1 + 2.0 * scale,
-                    ctrl_top.0 + 5.2 * scale,
-                    ctrl_top.1 - 1.2 * scale,
-                    shoulder.0 + 7.4 * scale,
-                    shoulder.1 - 4.4 * scale,
-                );
-                arm.quad_to(
-                    shoulder.0,
-                    shoulder.1 - 9.0 * scale,
-                    shoulder.0 - 7.8 * scale,
-                    shoulder.1 - 4.0 * scale,
-                );
-                arm.close();
-                let arm_stroke = arm.clone();
-                if let Some(path) = arm.finish() {
-                    fill_skia_path(pixmap, &path, arm_fill);
-                }
-                if let Some(path) = arm_stroke.finish() {
-                    stroke_skia_path(pixmap, &path, stroke_color, stroke_w);
-                }
-            };
+            let arm_fill = [255, 241, 189, 255];
+            let stroke_color = [59, 41, 38, 255];
+            let stroke_w = 2.2 * scale;
 
-            draw_soft_arm(
-                pixmap,
-                (left_shoulder_cx, left_shoulder_cy),
-                (left_paw_x, left_paw_y),
-                -1.0,
-            );
-            draw_soft_arm(
-                pixmap,
-                (right_shoulder_cx, right_shoulder_cy),
-                (right_paw_x, right_paw_y),
-                1.0,
-            );
+            let cap_r = 13.0 * scale;
+            fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, arm_fill);
+            stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, stroke_w, stroke_color);
+            fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, arm_fill);
+            stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, stroke_w, stroke_color);
+
+            let mut left_arm = tiny_skia::PathBuilder::new();
+            left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
+            left_arm.quad_to(left_paw_x - 16.0 * scale, left_paw_y - 12.0 * scale, left_paw_x - 10.0 * scale, left_paw_y + 4.0 * scale);
+            left_arm.quad_to(left_paw_x, left_paw_y + 14.0 * scale, left_paw_x + 10.0 * scale, left_paw_y + 2.0 * scale);
+            left_arm.quad_to(left_paw_x + 6.0 * scale, left_paw_y - 12.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
+            let left_arm_stroke = left_arm.clone();
+            left_arm.close();
+            if let Some(p) = left_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
+            if let Some(p) = left_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
+
+            let mut right_arm = tiny_skia::PathBuilder::new();
+            right_arm.move_to(right_shoulder_top.0, right_shoulder_top.1);
+            right_arm.quad_to(right_paw_x + 16.0 * scale, right_paw_y - 12.0 * scale, right_paw_x + 10.0 * scale, right_paw_y + 4.0 * scale);
+            right_arm.quad_to(right_paw_x, right_paw_y + 14.0 * scale, right_paw_x - 10.0 * scale, right_paw_y + 2.0 * scale);
+            right_arm.quad_to(right_paw_x - 6.0 * scale, right_paw_y - 12.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
+            let right_arm_stroke = right_arm.clone();
+            right_arm.close();
+            if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
+            if let Some(p) = right_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
         }
     }
     unsafe fn paint_mascot_quick_key_display(
@@ -14842,9 +14818,9 @@ mod windows_overlay {
         let mouse_projected = project_point(mouse_flat_x, mouse_flat_y);
 
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
-        let default_l_x = if is_hachiware { 130.0 } else { 100.0 };
-        let default_r_x = if is_hachiware { 214.0 } else { 235.0 };
-        let default_y = if is_hachiware { 164.0 } else { 146.0 };
+        let default_l_x = if is_hachiware { 130.0 } else { 146.0 };
+        let default_r_x = if is_hachiware { 214.0 } else { 190.0 };
+        let default_y = if is_hachiware { 164.0 } else { 170.0 };
 
         let l_target = if mouse_active { mouse_projected } else { project_point(default_l_x, default_y) };
         let mut left_paw_target = l_target;
