@@ -5579,12 +5579,16 @@ mod windows_overlay {
         let t = ((root_y - svg_y) / (root_y - tip_y)).clamp(0.0, 1.0);
         let bend = t * t;
         let bend_tip = bend * t;
-        let wind = (time_s * 1.45 + side * 0.55).sin() * 2.0 * scale;
-        let overshoot = (time_s * 2.15 + side * 1.2).sin() * 0.9 * scale;
-        let pulse = recent_pulse * 1.4 * scale;
-        let bend_x = wind + overshoot + look_x * -0.15 + side * pulse * 0.2;
-        let bend_y = look_y * -0.05 * bend + (-bend_x.abs() * 0.18 + overshoot * 0.12) * bend_tip;
-        (bend_x * bend_tip, bend_y)
+        let sway = (time_s * 0.95 + side * 0.35).sin();
+        let overshoot = (time_s * 1.85 + side * 0.9).sin();
+        let gust = (time_s * 0.52 + 1.1).sin();
+        let wind_dir_x = look_x * -0.18 + sway * 1.2 * scale + overshoot * 0.95 * scale + gust * 0.65 * scale;
+        let wind_dir_y = look_y * -0.03 + sway.abs() * -0.25 * scale + overshoot * 0.08 * scale;
+        let pulse = recent_pulse * 1.25 * scale;
+        let curl = (0.35 + 0.65 * t) * bend_tip;
+        let x = (wind_dir_x + side * pulse * 0.18) * curl;
+        let y = wind_dir_y * curl + (-x.abs() * 0.22 + overshoot * 0.06 * scale) * bend_tip;
+        (x, y)
     }
 
     fn quick_key_display_allocate_slot(
@@ -14237,38 +14241,70 @@ mod windows_overlay {
 
             let arm_fill = [255, 247, 242, 255];
             let stroke_color = [96, 78, 74, 255];
-            let stroke_w = 1.7 * scale;
+            let stroke_w = 1.9 * scale;
 
-            let draw_bead_arm = |pixmap: &mut tiny_skia::Pixmap,
+            let draw_soft_arm = |pixmap: &mut tiny_skia::Pixmap,
                                  shoulder: (f32, f32),
                                  paw: (f32, f32),
-                                 ctrl: (f32, f32)| {
-                let steps = 12;
-                for i in 0..=steps {
-                    let t = i as f32 / steps as f32;
-                    let inv = 1.0 - t;
-                    let x = inv * inv * shoulder.0 + 2.0 * inv * t * ctrl.0 + t * t * paw.0;
-                    let y = inv * inv * shoulder.1 + 2.0 * inv * t * ctrl.1 + t * t * paw.1;
-                    let radius = (7.4 - t * 1.9) * scale;
-                    fill_skia_circle(pixmap, x, y, radius, arm_fill);
-                    stroke_skia_circle(pixmap, x, y, radius, stroke_w, stroke_color);
+                                 side: f32| {
+                let ctrl_top = (shoulder.0 + side * 3.0 * scale, shoulder.1 + 14.0 * scale);
+                let ctrl_bottom = (paw.0 - side * 5.5 * scale, paw.1 - 10.0 * scale);
+
+                let mut arm = tiny_skia::PathBuilder::new();
+                arm.move_to(shoulder.0 - 7.8 * scale, shoulder.1 - 4.0 * scale);
+                arm.cubic_to(
+                    ctrl_top.0 - 5.5 * scale,
+                    ctrl_top.1 - 2.0 * scale,
+                    ctrl_bottom.0 - 6.0 * scale,
+                    ctrl_bottom.1 + 2.5 * scale,
+                    paw.0 - 7.5 * scale,
+                    paw.1 + 1.2 * scale,
+                );
+                arm.quad_to(
+                    paw.0,
+                    paw.1 + 10.0 * scale,
+                    paw.0 + 7.8 * scale,
+                    paw.1 + 1.4 * scale,
+                );
+                arm.cubic_to(
+                    ctrl_bottom.0 + 6.0 * scale,
+                    ctrl_bottom.1 + 1.5 * scale,
+                    ctrl_top.0 + 5.2 * scale,
+                    ctrl_top.1 - 1.2 * scale,
+                    shoulder.0 + 7.4 * scale,
+                    shoulder.1 - 4.4 * scale,
+                );
+                arm.quad_to(
+                    shoulder.0,
+                    shoulder.1 - 9.0 * scale,
+                    shoulder.0 - 7.8 * scale,
+                    shoulder.1 - 4.0 * scale,
+                );
+                arm.close();
+                let arm_stroke = arm.clone();
+                if let Some(path) = arm.finish() {
+                    fill_skia_path(pixmap, &path, arm_fill);
                 }
-                fill_skia_ellipse(pixmap, paw.0, paw.1 + 1.2 * scale, 8.4 * scale, 6.6 * scale, arm_fill);
-                stroke_skia_circle(pixmap, paw.0 - 3.8 * scale, paw.1 + 1.2 * scale, 4.5 * scale, stroke_w, stroke_color);
-                stroke_skia_circle(pixmap, paw.0 + 3.8 * scale, paw.1 + 1.2 * scale, 4.5 * scale, stroke_w, stroke_color);
+                if let Some(path) = arm_stroke.finish() {
+                    stroke_skia_path(pixmap, &path, stroke_color, stroke_w);
+                }
+
+                fill_skia_ellipse(pixmap, paw.0, paw.1 + 1.4 * scale, 7.8 * scale, 6.2 * scale, arm_fill);
+                stroke_skia_circle(pixmap, paw.0 - 3.3 * scale, paw.1 + 1.4 * scale, 4.1 * scale, stroke_w, stroke_color);
+                stroke_skia_circle(pixmap, paw.0 + 3.3 * scale, paw.1 + 1.4 * scale, 4.1 * scale, stroke_w, stroke_color);
             };
 
-            draw_bead_arm(
+            draw_soft_arm(
                 pixmap,
                 (left_shoulder_cx, left_shoulder_cy),
                 (left_paw_x, left_paw_y),
-                (left_shoulder_cx - 10.0 * scale, left_shoulder_cy + 11.0 * scale),
+                -1.0,
             );
-            draw_bead_arm(
+            draw_soft_arm(
                 pixmap,
                 (right_shoulder_cx, right_shoulder_cy),
                 (right_paw_x, right_paw_y),
-                (right_shoulder_cx + 10.0 * scale, right_shoulder_cy + 11.0 * scale),
+                1.0,
             );
         }
     }
