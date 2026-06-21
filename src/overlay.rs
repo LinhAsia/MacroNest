@@ -5578,16 +5578,24 @@ mod windows_overlay {
         let tip_y = 23.0;
         let t = ((root_y - svg_y) / (root_y - tip_y)).clamp(0.0, 1.0);
         let bend = t * t;
-        let bend_tip = bend * t;
-        let sway = (time_s * 0.95 + side * 0.35).sin();
-        let overshoot = (time_s * 1.85 + side * 0.9).sin();
-        let gust = (time_s * 0.52 + 1.1).sin();
-        let wind_dir_x = look_x * -0.18 + sway * 1.2 * scale + overshoot * 0.95 * scale + gust * 0.65 * scale;
-        let wind_dir_y = look_y * -0.03 + sway.abs() * -0.25 * scale + overshoot * 0.08 * scale;
-        let pulse = recent_pulse * 1.25 * scale;
-        let curl = (0.35 + 0.65 * t) * bend_tip;
-        let x = (wind_dir_x + side * pulse * 0.18) * curl;
-        let y = wind_dir_y * curl + (-x.abs() * 0.22 + overshoot * 0.06 * scale) * bend_tip;
+        let bend_mid = bend * (0.45 + 0.55 * t);
+        let bend_tip = bend_mid * (0.4 + 0.6 * t);
+        let sway = (time_s * 0.82 + side * 0.25).sin();
+        let sway_fast = (time_s * 1.67 + side * 0.7).sin();
+        let recoil = (time_s * 2.45 + side * 1.05).sin();
+        let gust = (time_s * 0.41 + 0.8).sin();
+        let wind_dir_x = look_x * -0.28
+            + sway * 1.8 * scale
+            + sway_fast * 1.05 * scale
+            + recoil * 0.65 * scale
+            + gust * 0.9 * scale;
+        let wind_dir_y = look_y * -0.05
+            + sway.abs() * -0.34 * scale
+            + sway_fast * 0.12 * scale
+            + recoil * 0.08 * scale;
+        let pulse = recent_pulse * 1.45 * scale;
+        let x = (wind_dir_x + side * pulse * 0.22) * bend_tip;
+        let y = wind_dir_y * bend_mid + (-x.abs() * 0.3 + recoil * 0.1 * scale) * bend_tip;
         (x, y)
     }
 
@@ -14252,6 +14260,12 @@ mod windows_overlay {
             let arm_fill = [255, 241, 189, 255];
             let stroke_color = [59, 41, 38, 255];
             let stroke_w = 2.2 * scale;
+            let cap_r = 10.5 * scale;
+
+            fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, arm_fill);
+            stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, stroke_w, stroke_color);
+            fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, arm_fill);
+            stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, stroke_w, stroke_color);
 
             let mut left_arm = tiny_skia::PathBuilder::new();
             left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
