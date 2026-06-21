@@ -14306,68 +14306,61 @@ mod windows_overlay {
                 let px = -uy;
                 let py = ux;
 
-                let top_center_x = root_x + side * 0.8 * scale;
+                let top_center_x = root_x + side * 0.5 * scale;
                 let top_center_y = root_y;
-                let bottom_center_x = paw_x - side * 0.6 * scale;
-                let bottom_center_y = paw_y + 2.2 * scale;
-                let shaft_outer_x = root_x + dx * 0.86 + px * 1.6 * scale;
-                let shaft_outer_y = root_y + dy * 0.84 + py * 0.6 * scale;
-                let shaft_inner_x = root_x + dx * 0.84 - px * 1.4 * scale;
-                let shaft_inner_y = root_y + dy * 0.82 - py * 0.5 * scale;
+                let bottom_center_x = paw_x - side * 0.2 * scale;
+                let bottom_center_y = paw_y + 2.0 * scale;
+                let straight_sign = -side;
 
-                let top_w = 5.3 * scale;
-                let bottom_w = 12.8 * scale;
-                let bottom_h = 8.2 * scale;
+                let top_w = 4.8 * scale;
+                let bottom_w = 12.6 * scale;
+                let bottom_h = 8.6 * scale;
 
-                let top_outer = (top_center_x + px * top_w, top_center_y + py * top_w);
-                let top_inner = (top_center_x - px * top_w, top_center_y - py * top_w);
-                let bottom_outer = (bottom_center_x + px * bottom_w, bottom_center_y + py * bottom_w);
-                let bottom_inner = (bottom_center_x - px * bottom_w, bottom_center_y - py * bottom_w);
-                let bottom_arc_outer = (
-                    bottom_center_x + px * 5.4 * scale,
+                let top_straight = (
+                    top_center_x + px * top_w * straight_sign,
+                    top_center_y + py * top_w * straight_sign,
+                );
+                let top_curve = (
+                    top_center_x - px * top_w * straight_sign,
+                    top_center_y - py * top_w * straight_sign,
+                );
+                let bottom_straight = (
+                    bottom_center_x + px * bottom_w * straight_sign,
+                    bottom_center_y + py * bottom_w * straight_sign,
+                );
+                let bottom_curve = (
+                    bottom_center_x - px * bottom_w * straight_sign,
+                    bottom_center_y - py * bottom_w * straight_sign,
+                );
+                let bottom_arc_mid = (
+                    bottom_center_x,
                     bottom_center_y + bottom_h,
                 );
-                let bottom_arc_inner = (
-                    bottom_center_x - px * 5.4 * scale,
-                    bottom_center_y + bottom_h,
+                let curve_ctrl = (
+                    root_x + dx * 0.32 - px * 6.8 * scale * straight_sign,
+                    root_y + dy * 0.56 - py * 2.4 * scale * straight_sign,
                 );
 
                 let mut arm = tiny_skia::PathBuilder::new();
-                arm.move_to(top_outer.0, top_outer.1);
+                arm.move_to(top_straight.0, top_straight.1);
+                arm.line_to(bottom_straight.0, bottom_straight.1);
                 arm.quad_to(
-                    root_x + dx * 0.42 + px * 1.6 * scale,
-                    root_y + dy * 0.42 + py * 0.8 * scale,
-                    shaft_outer_x,
-                    shaft_outer_y,
-                );
-                arm.line_to(
-                    bottom_outer.0,
-                    bottom_outer.1,
+                    bottom_center_x + px * 7.4 * scale * straight_sign,
+                    bottom_center_y + bottom_h * 0.72,
+                    bottom_arc_mid.0,
+                    bottom_arc_mid.1,
                 );
                 arm.quad_to(
-                    bottom_center_x + px * 9.0 * scale,
-                    bottom_center_y + bottom_h * 0.52,
-                    bottom_arc_outer.0,
-                    bottom_arc_outer.1,
+                    bottom_center_x - px * 7.4 * scale * straight_sign,
+                    bottom_center_y + bottom_h * 0.72,
+                    bottom_curve.0,
+                    bottom_curve.1,
                 );
                 arm.quad_to(
-                    bottom_center_x,
-                    bottom_center_y + bottom_h * 1.18,
-                    bottom_arc_inner.0,
-                    bottom_arc_inner.1,
-                );
-                arm.quad_to(
-                    bottom_center_x - px * 9.0 * scale,
-                    bottom_center_y + bottom_h * 0.52,
-                    bottom_inner.0,
-                    bottom_inner.1,
-                );
-                arm.line_to(shaft_inner_x, shaft_inner_y);
-                arm.quad_to(
-                    root_x + dx * 0.38 - px * 1.3 * scale,
-                    root_y + dy * 0.38 - py * 0.7 * scale,
-                    top_inner.0,
-                    top_inner.1,
+                    curve_ctrl.0,
+                    curve_ctrl.1,
+                    top_curve.0,
+                    top_curve.1,
                 );
                 arm.close();
 
