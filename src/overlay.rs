@@ -13888,11 +13888,9 @@ mod windows_overlay {
             let head_rx = rx * (1.0 + turn_x.abs() * 0.06);
             let head_ry = ry * (1.0 - turn_x.abs() * 0.03 + turn_y.abs() * 0.02);
             
-            let far_shadow_x = head_center_x - turn_x * 12.0 * scale;
-            let far_shadow_y = head_center_y + 4.0 * scale;
             let body_color = [255, 255, 255, 255];
-            let outline_color = [45, 40, 42, 255];
-            let patch_color = [100, 160, 230, 255];
+            let outline_color = [59, 41, 38, 255];
+            let patch_color = [116, 172, 203, 255];
             let ear_sway = recent_pulse * 5.6 * scale;
             let ear_lift = 2.0 * scale + turn_y * -2.0 * scale;
 
@@ -13922,11 +13920,11 @@ mod windows_overlay {
             );
             let patch_left = (
                 head_center_x - 57.0 * scale,
-                head_center_y - 8.0 * scale + turn_y * -0.4 * scale,
+                head_center_y - 12.0 * scale + turn_y * -0.4 * scale,
             );
             let patch_right = (
                 head_center_x + 57.0 * scale,
-                head_center_y - 8.0 * scale + turn_y * -0.4 * scale,
+                head_center_y - 12.0 * scale + turn_y * -0.4 * scale,
             );
             let patch_top_mid = (
                 head_center_x + turn_x * 2.0 * scale,
@@ -13934,7 +13932,7 @@ mod windows_overlay {
             );
             let hairline_mid = (
                 head_center_x + turn_x * 2.0 * scale,
-                head_center_y - 14.0 * scale + turn_y * 1.2 * scale,
+                head_center_y - 24.0 * scale + turn_y * 1.2 * scale,
             );
 
             let map_hachi_point = |px: f32, py: f32, depth: f32| -> (f32, f32) {
@@ -14015,15 +14013,25 @@ mod windows_overlay {
                 patch_right.0,
                 patch_right.1,
             );
+
+            let ctrl_right = (
+                head_center_x + 28.0 * scale,
+                head_center_y - 4.0 * scale + turn_y * 1.0 * scale,
+            );
+            let ctrl_left = (
+                head_center_x - 28.0 * scale,
+                head_center_y - 4.0 * scale + turn_y * 1.0 * scale,
+            );
+
             patch.quad_to(
-                head_center_x + 24.0 * scale,
-                head_center_y - 1.0 * scale + turn_y * 1.0 * scale,
+                ctrl_right.0,
+                ctrl_right.1,
                 hairline_mid.0,
                 hairline_mid.1,
             );
             patch.quad_to(
-                head_center_x - 24.0 * scale,
-                head_center_y - 1.0 * scale + turn_y * 1.0 * scale,
+                ctrl_left.0,
+                ctrl_left.1,
                 patch_left.0,
                 patch_left.1,
             );
@@ -14035,19 +14043,19 @@ mod windows_overlay {
             let mut hairline = tiny_skia::PathBuilder::new();
             hairline.move_to(patch_left.0, patch_left.1);
             hairline.quad_to(
-                head_center_x - 24.0 * scale,
-                head_center_y - 1.0 * scale + turn_y * 1.0 * scale,
+                ctrl_left.0,
+                ctrl_left.1,
                 hairline_mid.0,
                 hairline_mid.1,
             );
             hairline.quad_to(
-                head_center_x + 24.0 * scale,
-                head_center_y - 1.0 * scale + turn_y * 1.0 * scale,
+                ctrl_right.0,
+                ctrl_right.1,
                 patch_right.0,
                 patch_right.1,
             );
             if let Some(path) = hairline.finish() {
-                stroke_skia_path(&mut tmp_pixmap, &path, outline_color, 1.8 * scale);
+                stroke_skia_path(&mut tmp_pixmap, &path, outline_color, 2.2 * scale);
             }
 
             for &is_left in &[true, false] {
@@ -14066,62 +14074,6 @@ mod windows_overlay {
                 }
             }
 
-            let l_base_mid_x = (left_base_outer.0 + left_base_inner.0) * 0.5;
-            let l_base_mid_y = (left_base_outer.1 + left_base_inner.1) * 0.5;
-            let l_inner_tip_x = l_base_mid_x + (left_tip.0 - l_base_mid_x) * 0.72;
-            let l_inner_tip_y = l_base_mid_y + (left_tip.1 - l_base_mid_y) * 0.72;
-            let l_inner_outer_x = l_base_mid_x + (left_base_outer.0 - l_base_mid_x) * 0.65;
-            let l_inner_outer_y = l_base_mid_y + (left_base_outer.1 - l_base_mid_y) * 0.65;
-            let l_inner_inner_x = l_base_mid_x + (left_base_inner.0 - l_base_mid_x) * 0.65;
-            let l_inner_inner_y = l_base_mid_y + (left_base_inner.1 - l_base_mid_y) * 0.65;
-
-            let mut left_inner = tiny_skia::PathBuilder::new();
-            left_inner.move_to(l_inner_outer_x, l_inner_outer_y);
-            left_inner.quad_to(
-                l_base_mid_x + (left_tip.0 - l_base_mid_x) * 0.36,
-                l_base_mid_y + (left_tip.1 - l_base_mid_y) * 0.36,
-                l_inner_tip_x,
-                l_inner_tip_y,
-            );
-            left_inner.quad_to(
-                l_base_mid_x + (left_tip.0 - l_base_mid_x) * 0.36,
-                l_base_mid_y + (left_tip.1 - l_base_mid_y) * 0.36,
-                l_inner_inner_x,
-                l_inner_inner_y,
-            );
-            left_inner.close();
-            if let Some(path) = left_inner.finish() {
-                fill_skia_path(&mut tmp_pixmap, &path, [255, 183, 189, 255]);
-            }
-
-            let r_base_mid_x = (right_base_outer.0 + right_base_inner.0) * 0.5;
-            let r_base_mid_y = (right_base_outer.1 + right_base_inner.1) * 0.5;
-            let r_inner_tip_x = r_base_mid_x + (right_tip.0 - r_base_mid_x) * 0.72;
-            let r_inner_tip_y = r_base_mid_y + (right_tip.1 - r_base_mid_y) * 0.72;
-            let r_inner_outer_x = r_base_mid_x + (right_base_outer.0 - r_base_mid_x) * 0.65;
-            let r_inner_outer_y = r_base_mid_y + (right_base_outer.1 - r_base_mid_y) * 0.65;
-            let r_inner_inner_x = r_base_mid_x + (right_base_inner.0 - r_base_mid_x) * 0.65;
-            let r_inner_inner_y = r_base_mid_y + (right_base_inner.1 - r_base_mid_y) * 0.65;
-
-            let mut right_inner = tiny_skia::PathBuilder::new();
-            right_inner.move_to(r_inner_outer_x, r_inner_outer_y);
-            right_inner.quad_to(
-                r_base_mid_x + (right_tip.0 - r_base_mid_x) * 0.36,
-                r_base_mid_y + (right_tip.1 - r_base_mid_y) * 0.36,
-                r_inner_tip_x,
-                r_inner_tip_y,
-            );
-            right_inner.quad_to(
-                r_base_mid_x + (right_tip.0 - r_base_mid_x) * 0.36,
-                r_base_mid_y + (right_tip.1 - r_base_mid_y) * 0.36,
-                r_inner_inner_x,
-                r_inner_inner_y,
-            );
-            right_inner.close();
-            if let Some(path) = right_inner.finish() {
-                fill_skia_path(&mut tmp_pixmap, &path, [255, 183, 189, 255]);
-            }
-
             quick_key_display_apply_heat_tint_ellipse(
                 &mut tmp_pixmap,
                 head_center_x + look_x * 0.2,
@@ -14137,7 +14089,7 @@ mod windows_overlay {
             let right_eye = map_hachi_point(head_cx + 26.0 * scale, head_cy + 8.0 * scale, 0.62);
 
             for (ex, ey, sign) in [(left_eye.0, left_eye.1, -1.0f32), (right_eye.0, right_eye.1, 1.0f32)] {
-                fill_skia_circle(&mut tmp_pixmap, ex, ey, eye_size * 0.5, [45, 40, 42, 255]);
+                fill_skia_circle(&mut tmp_pixmap, ex, ey, eye_size * 0.5, [59, 41, 38, 255]);
                 let hl1_x = ex - 2.2 * scale;
                 let hl1_y = ey - 2.2 * scale;
                 fill_skia_circle(&mut tmp_pixmap, hl1_x, hl1_y, 2.8 * scale, [255, 255, 255, 255]);
@@ -14147,20 +14099,15 @@ mod windows_overlay {
                 fill_skia_circle(&mut tmp_pixmap, hl2_x, hl2_y, 1.4 * scale, [255, 255, 255, 255]);
             }
 
-            for (ex, sign) in [(left_eye, -1.0f32), (right_eye, 1.0f32)] {
+            for &is_left in &[true, false] {
+                let sign = if is_left { -1.0f32 } else { 1.0f32 };
+                let p1 = map_hachi_point(head_cx + sign * 22.0 * scale, head_cy - 2.0 * scale, 0.62);
+                let p2 = map_hachi_point(head_cx + sign * 18.0 * scale, head_cy - 2.0 * scale, 0.62);
                 let mut eyebrow = tiny_skia::PathBuilder::new();
-                let ebx = ex.0;
-                let eby = ex.1 - 13.5 * scale + sign * turn_x * -0.6 * scale;
-                let brow_w = 4.5 * scale;
-                eyebrow.move_to(ebx - brow_w, eby + 1.0 * scale);
-                eyebrow.quad_to(
-                    ebx,
-                    eby - 2.5 * scale + turn_y * -0.4 * scale,
-                    ebx + brow_w,
-                    eby + 1.0 * scale,
-                );
+                eyebrow.move_to(p1.0, p1.1);
+                eyebrow.line_to(p2.0, p2.1);
                 if let Some(path) = eyebrow.finish() {
-                    stroke_skia_path(&mut tmp_pixmap, &path, [45, 40, 42, 255], 1.8 * scale);
+                    stroke_skia_path(&mut tmp_pixmap, &path, outline_color, 2.2 * scale);
                 }
             }
 
@@ -14184,32 +14131,33 @@ mod windows_overlay {
                 }
             }
 
-            let local_my = 18.0 * scale;
-            let mut mouth = tiny_skia::PathBuilder::new();
+            let nose_pos = map_hachi_point(head_cx, head_cy + 14.5 * scale, 0.62);
+            fill_skia_ellipse(&mut tmp_pixmap, nose_pos.0, nose_pos.1, 3.0 * 0.5 * scale, 2.0 * 0.5 * scale, outline_color);
 
-            let n1 = map_hachi_point(head_cx - 1.2 * scale, head_cy + local_my - 2.5 * scale, 0.62);
-            let n2 = map_hachi_point(head_cx, head_cy + local_my - 3.2 * scale, 0.62);
-            let n3 = map_hachi_point(head_cx + 1.2 * scale, head_cy + local_my - 2.5 * scale, 0.62);
-            mouth.move_to(n1.0, n1.1);
-            mouth.quad_to(n2.0, n2.1, n3.0, n3.1);
+            let local_my = 17.5 * scale;
+            let mut mouth = tiny_skia::PathBuilder::new();
             
-            let c1 = map_hachi_point(head_cx, head_cy + local_my - 2.8 * scale, 0.62);
-            let c2 = map_hachi_point(head_cx, head_cy + local_my, 0.62);
-            mouth.move_to(c1.0, c1.1);
-            mouth.line_to(c2.0, c2.1);
-            
-            let l_ctrl = map_hachi_point(head_cx - 2.2 * scale, head_cy + local_my + 2.5 * scale, 0.62);
-            let l_end = map_hachi_point(head_cx - 4.5 * scale, head_cy + local_my + 0.5 * scale, 0.62);
-            mouth.quad_to(l_ctrl.0, l_ctrl.1, l_end.0, l_end.1);
-            
-            let r_start = map_hachi_point(head_cx, head_cy + local_my, 0.62);
-            let r_ctrl = map_hachi_point(head_cx + 2.2 * scale, head_cy + local_my + 2.5 * scale, 0.62);
-            let r_end = map_hachi_point(head_cx + 4.5 * scale, head_cy + local_my + 0.5 * scale, 0.62);
-            mouth.move_to(r_start.0, r_start.1);
-            mouth.quad_to(r_ctrl.0, r_ctrl.1, r_end.0, r_end.1);
+            let start_left = map_hachi_point(head_cx - 4.5 * scale, head_cy + local_my - 1.0 * scale, 0.62);
+            let ctrl_left = map_hachi_point(head_cx - 2.25 * scale, head_cy + local_my + 2.0 * scale, 0.62);
+            let mid = map_hachi_point(head_cx, head_cy + local_my, 0.62);
+            let ctrl_right = map_hachi_point(head_cx + 2.25 * scale, head_cy + local_my + 2.0 * scale, 0.62);
+            let end_right = map_hachi_point(head_cx + 4.5 * scale, head_cy + local_my - 1.0 * scale, 0.62);
+
+            mouth.move_to(start_left.0, start_left.1);
+            mouth.quad_to(ctrl_left.0, ctrl_left.1, mid.0, mid.1);
+            mouth.quad_to(ctrl_right.0, ctrl_right.1, end_right.0, end_right.1);
 
             if let Some(p) = mouth.finish() {
-                stroke_skia_path(&mut tmp_pixmap, &p, [45, 40, 42, 255], 2.0 * scale);
+                stroke_skia_path(&mut tmp_pixmap, &p, outline_color, 2.0 * scale);
+            }
+
+            let chin_start = map_hachi_point(head_cx - 1.5 * scale, head_cy + 22.0 * scale, 0.62);
+            let chin_end = map_hachi_point(head_cx + 1.5 * scale, head_cy + 22.0 * scale, 0.62);
+            let mut chin = tiny_skia::PathBuilder::new();
+            chin.move_to(chin_start.0, chin_start.1);
+            chin.line_to(chin_end.0, chin_end.1);
+            if let Some(p) = chin.finish() {
+                stroke_skia_path(&mut tmp_pixmap, &p, outline_color, 1.5 * scale);
             }
 
             let threshold_y = (146.0 + 30.0) * scale;
