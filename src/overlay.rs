@@ -7365,6 +7365,17 @@ mod windows_overlay {
             runtime.quick_key_display_spam_heat = 0.0;
         }
 
+        let screen_draw_active = {
+            let state = SCREEN_DRAW_STATE.lock();
+            state.active
+        };
+
+        if screen_draw_active {
+            runtime.quick_key_display_last_mascot_state = None;
+            let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
+            return Ok(());
+        }
+
         if is_ui_in_foreground() || !runtime.quick_key_display_enabled {
             runtime.quick_key_display_entries.clear();
             runtime.quick_key_display_slot_memory.clear();
