@@ -5512,6 +5512,59 @@ mod windows_overlay {
         ]
     }
 
+    fn quick_key_display_apply_heat_tint_ellipse(
+        pixmap: &mut tiny_skia::Pixmap,
+        center_x: f32,
+        center_y: f32,
+        radius_x: f32,
+        radius_y: f32,
+        red_factor: f32,
+        tint: [u8; 4],
+    ) {
+        if red_factor <= 0.0 {
+            return;
+        }
+
+        let left = (center_x - radius_x).floor().max(0.0) as u32;
+        let top = (center_y - radius_y).floor().max(0.0) as u32;
+        let right = (center_x + radius_x).ceil().min(pixmap.width() as f32) as u32;
+        let bottom = (center_y + radius_y).ceil().min(pixmap.height() as f32) as u32;
+        let width = pixmap.width() as usize;
+        let data = pixmap.data_mut();
+
+        for y in top..bottom {
+            let local_y = (y as f32 - center_y) / radius_y.max(1.0);
+            let y_mask = (1.0 - (local_y + 1.0) * 0.5).clamp(0.0, 1.0).powf(1.35);
+            if y_mask <= 0.0 {
+                continue;
+            }
+
+            for x in left..right {
+                let local_x = (x as f32 - center_x) / radius_x.max(1.0);
+                let dist_sq = local_x * local_x + local_y * local_y;
+                if dist_sq > 1.0 {
+                    continue;
+                }
+
+                let radial = (1.0 - dist_sq).clamp(0.0, 1.0).powf(0.6);
+                let mix = (red_factor * y_mask * radial).clamp(0.0, 1.0);
+                if mix <= 0.0 {
+                    continue;
+                }
+
+                let idx = ((y as usize) * width + (x as usize)) * 4;
+                let a = data[idx + 3] as f32 / 255.0;
+                if a <= 0.0 {
+                    continue;
+                }
+
+                data[idx] = (((data[idx] as f32) * (1.0 - mix)) + (tint[0] as f32) * mix).round() as u8;
+                data[idx + 1] = (((data[idx + 1] as f32) * (1.0 - mix)) + (tint[1] as f32) * mix).round() as u8;
+                data[idx + 2] = (((data[idx + 2] as f32) * (1.0 - mix)) + (tint[2] as f32) * mix).round() as u8;
+            }
+        }
+    }
+
     fn quick_key_display_allocate_slot(
         runtime: &Runtime,
         lane: QuickKeyDisplayLane,
@@ -5568,7 +5621,7 @@ mod windows_overlay {
         runtime
             .quick_key_display_slot_labels
             .insert((lane, slot), text.clone());
-        runtime.quick_key_display_spam_heat = (runtime.quick_key_display_spam_heat + 0.12).min(1.0);
+        runtime.quick_key_display_spam_heat = (runtime.quick_key_display_spam_heat + 0.045).min(1.0);
         runtime
             .quick_key_display_entries
             .push(QuickKeyDisplayEntry {
@@ -7254,8 +7307,8 @@ mod windows_overlay {
         let dt = now.saturating_duration_since(runtime.quick_key_display_last_update).as_secs_f32().min(0.1);
         runtime.quick_key_display_last_update = now;
 
-        // Decay spam heat towards 0 with a half-life of 0.8 seconds
-        let decay = (-0.866 * dt).exp();
+        // Decay spam heat towards 0 with a half-life of 1.2 seconds.
+        let decay = (-0.57762265 * dt).exp();
         runtime.quick_key_display_spam_heat *= decay;
         if runtime.quick_key_display_spam_heat < 0.001 {
             runtime.quick_key_display_spam_heat = 0.0;
@@ -13198,10 +13251,14 @@ mod windows_overlay {
                 (px * scale, py * scale)
             };
 
-            // Ear wiggle animation
+            // Ear wiggle animation with a small delayed follow-through so the head
+            // can feel less like a rigid sprite.
+            let time_s = unsafe { GetTickCount() } as f32 * 0.001;
+            let ear_lag_x = (time_s * 1.1 - 0.7).sin() * 1.4 * scale + look_x * -0.12;
+            let ear_lag_y = (time_s * 0.9 + 0.3).sin() * 0.8 * scale + look_y * -0.08;
             let ear_wiggle = recent_pulse * 3.0 * scale;
-            let ear_shift_x = -look_x * 0.4;
-            let ear_shift_y = -look_y * 0.4;
+            let ear_shift_x = -look_x * 0.34 + ear_lag_x;
+            let ear_shift_y = -look_y * 0.28 + ear_lag_y;
 
             let ear_wiggle_x = -ear_wiggle * 0.8;
             let ear_wiggle_y = -ear_wiggle * 0.8;
@@ -13314,26 +13371,6 @@ mod windows_overlay {
                 stroke_skia_path(pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
             }
 
-            if red_factor > 0.0 {
-                let tint_alpha = (180.0 * red_factor) as u32;
-                let data = pixmap.data_mut();
-                for pixel in data.chunks_exact_mut(4) {
-                    let a = pixel[3] as u32;
-                    if a > 0 {
-                        let r = pixel[0] as u32;
-                        let g = pixel[1] as u32;
-                        let b = pixel[2] as u32;
-                        
-                        let new_r = (r * (255 - tint_alpha) + a * tint_alpha) / 255;
-                        let new_g = (g * (255 - tint_alpha) + ((60 * a) * tint_alpha) / 255) / 255;
-                        let new_b = (b * (255 - tint_alpha) + ((60 * a) * tint_alpha) / 255) / 255;
-                        
-                        pixel[0] = new_r.min(a) as u8;
-                        pixel[1] = new_g.min(a) as u8;
-                        pixel[2] = new_b.min(a) as u8;
-                    }
-                }
-            }
             return;
         }
 
@@ -13468,9 +13505,12 @@ mod windows_overlay {
                     stroke_skia_path(&mut tmp_pixmap, &path, stroke_color_body, stroke_w_body);
                 }
 
+                let time_s = unsafe { GetTickCount() } as f32 * 0.001;
+                let ear_lag_x = (time_s * 1.1 - 0.7).sin() * 1.4 * scale + look_x * -0.12;
+                let ear_lag_y = (time_s * 0.9 + 0.3).sin() * 0.8 * scale + look_y * -0.08;
                 let ear_wiggle = recent_pulse * 3.0 * scale;
-                let ear_shift_x = -look_x * 0.4;
-                let ear_shift_y = -look_y * 0.4;
+                let ear_shift_x = -look_x * 0.34 + ear_lag_x;
+                let ear_shift_y = -look_y * 0.28 + ear_lag_y;
 
                 let ear_wiggle_x = -ear_wiggle * 0.8;
                 let ear_wiggle_y = -ear_wiggle * 0.8;
@@ -13579,6 +13619,16 @@ mod windows_overlay {
                 fill_skia_path(&mut tmp_pixmap, &path, fill_color);
                 stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
             }
+
+            quick_key_display_apply_heat_tint_ellipse(
+                &mut tmp_pixmap,
+                head_cx + look_x * 0.2,
+                head_cy + 10.0 * scale + look_y * 0.35,
+                38.0 * scale,
+                34.0 * scale,
+                red_factor,
+                [255, 118, 128, 255],
+            );
 
             // 6. Left eyebrow
             let mut left_brow = tiny_skia::PathBuilder::new();
@@ -13690,27 +13740,6 @@ mod windows_overlay {
             mouth3.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
             if let Some(p) = mouth3.finish() {
                 stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * scale);
-            }
-
-            if red_factor > 0.0 {
-                let tint_alpha = (180.0 * red_factor) as u32;
-                let data = tmp_pixmap.data_mut();
-                for pixel in data.chunks_exact_mut(4) {
-                    let a = pixel[3] as u32;
-                    if a > 0 {
-                        let r = pixel[0] as u32;
-                        let g = pixel[1] as u32;
-                        let b = pixel[2] as u32;
-                        
-                        let new_r = (r * (255 - tint_alpha) + a * tint_alpha) / 255;
-                        let new_g = (g * (255 - tint_alpha) + ((60 * a) * tint_alpha) / 255) / 255;
-                        let new_b = (b * (255 - tint_alpha) + ((60 * a) * tint_alpha) / 255) / 255;
-                        
-                        pixel[0] = new_r.min(a) as u8;
-                        pixel[1] = new_g.min(a) as u8;
-                        pixel[2] = new_b.min(a) as u8;
-                    }
-                }
             }
 
             // Cut off the head below the desk top (desk top surface starts at 146.0 * scale, projected with y_shift 30.0 to 176.0 * scale)
@@ -14171,12 +14200,13 @@ mod windows_overlay {
             if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
             if let Some(p) = right_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
         } else {
-            // Usagi (ChiikawaClassic) - cute thin yellow arms and paws
-            let shoulder_offset = 33.0 * scale;
+            // ChiikawaClassic works better with intentionally detached hanging
+            // arms than with oversized shoulder blobs fighting the torso shape.
+            let shoulder_offset = 52.0 * scale;
             let left_shoulder_cx = body_cx - shoulder_offset;
-            let left_shoulder_cy = body_cy - 1.5 * scale;
+            let left_shoulder_cy = body_cy + 20.0 * scale;
             let right_shoulder_cx = body_cx + shoulder_offset;
-            let right_shoulder_cy = body_cy - 1.5 * scale;
+            let right_shoulder_cy = body_cy + 20.0 * scale;
 
             let left_paw_x = left_paw_target.0;
             let left_paw_y = left_paw_target.1 + paw_press;
@@ -14185,7 +14215,7 @@ mod windows_overlay {
 
             let (ux_l, uy_l) = { let d = ((left_paw_x - left_shoulder_cx).powi(2) + (left_paw_y - left_shoulder_cy).powi(2)).sqrt().max(1.0); ((left_paw_x - left_shoulder_cx) / d, (left_paw_y - left_shoulder_cy) / d) };
             let (px_l, py_l) = (-uy_l, ux_l);
-            let shoulder_width = 9.5 * scale;
+            let shoulder_width = 6.4 * scale;
             let left_shoulder_top    = (left_shoulder_cx + px_l * shoulder_width, left_shoulder_cy + py_l * shoulder_width);
             let left_shoulder_bottom = (left_shoulder_cx - px_l * shoulder_width, left_shoulder_cy - py_l * shoulder_width);
 
@@ -14194,11 +14224,11 @@ mod windows_overlay {
             let right_shoulder_top    = (right_shoulder_cx - px_r * shoulder_width, right_shoulder_cy - py_r * shoulder_width);
             let right_shoulder_bottom = (right_shoulder_cx + px_r * shoulder_width, right_shoulder_cy + py_r * shoulder_width);
 
-            let arm_fill = [255, 241, 189, 255]; // Usagi yellow/cream #fff1bd
-            let stroke_color = [45, 40, 42, 255]; // Consistent dark grey outline
+            let arm_fill = [255, 247, 242, 255];
+            let stroke_color = [96, 78, 74, 255];
             let stroke_w = 2.2 * scale;
 
-            let cap_r = 8.5 * scale;
+            let cap_r = 6.0 * scale;
             fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, arm_fill);
             stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, stroke_w, stroke_color);
             fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, arm_fill);
@@ -14206,9 +14236,9 @@ mod windows_overlay {
 
             let mut left_arm = tiny_skia::PathBuilder::new();
             left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
-            left_arm.quad_to(left_paw_x - 14.0 * scale, left_paw_y - 10.0 * scale, left_paw_x - 9.0 * scale, left_paw_y + 3.0 * scale);
-            left_arm.quad_to(left_paw_x, left_paw_y + 12.0 * scale, left_paw_x + 9.0 * scale, left_paw_y + 1.0 * scale);
-            left_arm.quad_to(left_paw_x + 5.0 * scale, left_paw_y - 10.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
+            left_arm.quad_to(left_shoulder_cx - 8.0 * scale, left_shoulder_cy + 14.0 * scale, left_paw_x - 7.5 * scale, left_paw_y + 2.5 * scale);
+            left_arm.quad_to(left_paw_x, left_paw_y + 10.5 * scale, left_paw_x + 7.0 * scale, left_paw_y + 1.0 * scale);
+            left_arm.quad_to(left_shoulder_cx + 8.0 * scale, left_shoulder_cy + 14.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
             let left_arm_stroke = left_arm.clone();
             left_arm.close();
             if let Some(p) = left_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
@@ -14216,9 +14246,9 @@ mod windows_overlay {
 
             let mut right_arm = tiny_skia::PathBuilder::new();
             right_arm.move_to(right_shoulder_top.0, right_shoulder_top.1);
-            right_arm.quad_to(right_paw_x + 14.0 * scale, right_paw_y - 10.0 * scale, right_paw_x + 9.0 * scale, right_paw_y + 3.0 * scale);
-            right_arm.quad_to(right_paw_x, right_paw_y + 12.0 * scale, right_paw_x - 9.0 * scale, right_paw_y + 1.0 * scale);
-            right_arm.quad_to(right_paw_x - 5.0 * scale, right_paw_y - 10.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
+            right_arm.quad_to(right_shoulder_cx + 8.0 * scale, right_shoulder_cy + 14.0 * scale, right_paw_x + 7.5 * scale, right_paw_y + 2.5 * scale);
+            right_arm.quad_to(right_paw_x, right_paw_y + 10.5 * scale, right_paw_x - 7.0 * scale, right_paw_y + 1.0 * scale);
+            right_arm.quad_to(right_shoulder_cx - 8.0 * scale, right_shoulder_cy + 14.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
             let right_arm_stroke = right_arm.clone();
             right_arm.close();
             if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
@@ -14373,13 +14403,27 @@ mod windows_overlay {
         let keyboard_width = 232.0;
         let keyboard_height = 71.0;
 
+        let current_ms = unsafe { GetTickCount() };
+        let time_s = current_ms as f32 * 0.001;
+        let chiikawa_idle_turn_x = (time_s * 0.82).sin() * 4.8 * scale;
+        let chiikawa_idle_turn_y = (time_s * 0.47 + 0.9).sin() * 1.6 * scale;
+        let chiikawa_idle_body_bob = (time_s * 0.63 + 0.4).sin() * 1.5 * scale;
+        let chiikawa_idle_head_drift_x = (time_s * 0.37 + 0.2).sin() * 1.4 * scale;
+
         // Animate Mascot closer to the desk
         let body_cx = 167.0 * scale;
-        let body_cy = (138.0 + y_shift) * scale;
+        let mut body_cy = (138.0 + y_shift) * scale;
+        if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            body_cy += chiikawa_idle_body_bob;
+        }
         let body_radius = 36.0 * scale;
         
-        let head_cx = 168.0 * scale;
-        let head_cy = (92.0 + y_shift) * scale;
+        let mut head_cx = 168.0 * scale;
+        let mut head_cy = (92.0 + y_shift) * scale;
+        if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            head_cx += chiikawa_idle_head_drift_x;
+            head_cy += chiikawa_idle_body_bob * 0.7;
+        }
         let head_radius = if mascot_style == crate::model::MascotStyle::Hachiware {
             47.0 * scale
         } else {
@@ -14396,11 +14440,11 @@ mod windows_overlay {
         let is_interacting = !held_keys.is_empty() || !held_mouse_buttons.is_empty() || paw_press > 0.05 * scale;
         let (look_x, look_y) = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             if is_interacting || mouse_offset.0.abs() > 0.1 || mouse_offset.1.abs() > 0.1 {
-                let lx = mouse_offset.0 * 0.45 * scale;
-                let ly = (mouse_offset.1 * 0.35 + 3.0) * scale;
+                let lx = mouse_offset.0 * 0.45 * scale + chiikawa_idle_turn_x * 0.35;
+                let ly = (mouse_offset.1 * 0.35 + 3.0) * scale + chiikawa_idle_turn_y * 0.45;
                 (lx, ly)
             } else {
-                (0.0, 0.0)
+                (chiikawa_idle_turn_x, chiikawa_idle_turn_y)
             }
         } else {
             if is_interacting {
@@ -14408,6 +14452,12 @@ mod windows_overlay {
             } else {
                 (0.0, 0.0) // look straight ahead normally
             }
+        };
+
+        let visual_red_factor = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            ((red_factor - 0.34) / 0.66).clamp(0.0, 1.0).powf(1.35)
+        } else {
+            red_factor
         };
 
         // Define dynamic styles depending on preset
@@ -14456,8 +14506,8 @@ mod windows_overlay {
         };
 
         // 1. Draw mascot body+ears then head+face (sitting BEHIND the desk)
-        mascot_draw_body_and_ears(&mut pixmap, scale, body_cx, body_cy, body_radius, head_cx, head_cy, look_x, look_y, recent_pulse, mascot_style, is_interacting, red_factor);
-        mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y, mascot_style, is_interacting, red_factor, recent_pulse, false);
+        mascot_draw_body_and_ears(&mut pixmap, scale, body_cx, body_cy, body_radius, head_cx, head_cy, look_x, look_y, recent_pulse, mascot_style, is_interacting, visual_red_factor);
+        mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y, mascot_style, is_interacting, visual_red_factor, recent_pulse, false);
 
         // 2. Draw 3D Desk Shadow & Desk
         // Desk Shadow
@@ -15150,7 +15200,7 @@ mod windows_overlay {
 
         // Redraw head+face on top of arms (head must always be in front of arms)
         pixmap.data_mut().fill(0);
-        mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y, mascot_style, is_interacting, red_factor, recent_pulse, true);
+        mascot_draw_head_and_face(&mut pixmap, scale, head_cx, head_cy, head_radius, look_x, look_y, mascot_style, is_interacting, visual_red_factor, recent_pulse, true);
         let head_data = pixmap.data();
         for (src, dest) in head_data.chunks_exact(4).zip(pixels.chunks_exact_mut(4)) {
             let src_a = src[3];
