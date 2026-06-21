@@ -14315,8 +14315,8 @@ mod windows_overlay {
 
                 let top_w = 5.3 * scale;
                 let mid_w = 8.0 * scale;
-                let bottom_w = 13.6 * scale;
-                let bottom_h = 11.5 * scale;
+                let bottom_w = 12.2 * scale;
+                let bottom_h = 8.8 * scale;
 
                 let top_outer = (top_center_x + px * top_w, top_center_y + py * top_w);
                 let top_inner = (top_center_x - px * top_w, top_center_y - py * top_w);
@@ -14324,7 +14324,14 @@ mod windows_overlay {
                 let mid_inner = (mid_center_x - px * mid_w, mid_center_y - py * mid_w);
                 let bottom_outer = (bottom_center_x + px * bottom_w, bottom_center_y + py * bottom_w);
                 let bottom_inner = (bottom_center_x - px * bottom_w, bottom_center_y - py * bottom_w);
-                let bottom_tip = (bottom_center_x, bottom_center_y + bottom_h);
+                let bottom_arc_outer = (
+                    bottom_center_x + px * 5.4 * scale,
+                    bottom_center_y + bottom_h,
+                );
+                let bottom_arc_inner = (
+                    bottom_center_x - px * 5.4 * scale,
+                    bottom_center_y + bottom_h,
+                );
 
                 let mut arm = tiny_skia::PathBuilder::new();
                 arm.move_to(top_outer.0, top_outer.1);
@@ -14335,26 +14342,32 @@ mod windows_overlay {
                     mid_outer.1,
                 );
                 arm.quad_to(
-                    root_x + dx * 0.8 + px * 9.5 * scale,
-                    root_y + dy * 0.86 + py * 2.8 * scale,
+                    root_x + dx * 0.8 + px * 8.0 * scale,
+                    root_y + dy * 0.86 + py * 2.6 * scale,
                     bottom_outer.0,
                     bottom_outer.1,
                 );
                 arm.quad_to(
-                    bottom_center_x + px * 8.0 * scale,
-                    bottom_center_y + bottom_h * 0.92,
-                    bottom_tip.0,
-                    bottom_tip.1,
+                    bottom_center_x + px * 10.2 * scale,
+                    bottom_center_y + bottom_h * 0.55,
+                    bottom_arc_outer.0,
+                    bottom_arc_outer.1,
                 );
                 arm.quad_to(
-                    bottom_center_x - px * 8.0 * scale,
-                    bottom_center_y + bottom_h * 0.92,
+                    bottom_center_x,
+                    bottom_center_y + bottom_h * 1.18,
+                    bottom_arc_inner.0,
+                    bottom_arc_inner.1,
+                );
+                arm.quad_to(
+                    bottom_center_x - px * 10.2 * scale,
+                    bottom_center_y + bottom_h * 0.55,
                     bottom_inner.0,
                     bottom_inner.1,
                 );
                 arm.quad_to(
-                    root_x + dx * 0.72 - px * 7.0 * scale,
-                    root_y + dy * 0.82 - py * 1.8 * scale,
+                    root_x + dx * 0.72 - px * 6.1 * scale,
+                    root_y + dy * 0.82 - py * 1.6 * scale,
                     mid_inner.0,
                     mid_inner.1,
                 );
