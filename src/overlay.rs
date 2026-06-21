@@ -6034,13 +6034,13 @@ mod windows_overlay {
         match mascot_style {
             crate::model::MascotStyle::ChiikawaClassic => base * 1.25,
             crate::model::MascotStyle::Hachiware => base * 1.25,
-            crate::model::MascotStyle::Custom => base * 1.25,
+            crate::model::MascotStyle::Custom => base * 0.90,
         }
     }
 
     fn quick_key_display_mascot_layout_size(font_size: f32, mascot_style: crate::model::MascotStyle) -> (i32, i32) {
         let scale = quick_key_display_mascot_scale(font_size, mascot_style);
-        let (base_w, base_h) = if mascot_style == crate::model::MascotStyle::Hachiware {
+        let (base_w, base_h) = if mascot_style == crate::model::MascotStyle::Hachiware || mascot_style == crate::model::MascotStyle::Custom {
             (448.0, 310.0)
         } else {
             (430.0, 290.0)
@@ -13764,8 +13764,8 @@ mod windows_overlay {
             let mut tmp_pixmap = tiny_skia::Pixmap::new(pixmap.width(), pixmap.height()).unwrap();
 
             // Translate the mascot down a bit so the tall ears don't get clipped by the top of the window.
-            // We'll translate it down by 32.0 * scale units.
-            let vertical_offset = 32.0 * scale;
+            // We'll translate it down by 10.0 * scale units.
+            let vertical_offset = 10.0 * scale;
 
             let identity = tiny_skia::Transform::identity();
             for (i, &(d, color)) in CUSTOM_MASCOT_PATHS.iter().enumerate() {
@@ -13828,7 +13828,14 @@ mod windows_overlay {
                             identity.pre_translate(0.0, dest_y as f32), None);
                     } else {
                         let mut paint = tiny_skia::Paint::default();
-                        paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
+                        let draw_color = if i == 2 {
+                            // Path index 2 is the partition fill that covers the face. The paywalled source
+                            // colored it brown [55, 27, 17, 255] to obscure it. We override it to white [255, 255, 255, 255]
+                            [255, 255, 255, 255]
+                        } else {
+                            [color[0], color[1], color[2], color[3]]
+                        };
+                        paint.set_color_rgba8(draw_color[0], draw_color[1], draw_color[2], draw_color[3]);
                         paint.anti_alias = true;
                         tmp_pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding,
                             identity.pre_translate(0.0, dest_y as f32), None);
