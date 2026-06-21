@@ -14336,6 +14336,14 @@ mod windows_overlay {
                     bottom_center_x,
                     bottom_center_y + bottom_h,
                 );
+                let bottom_arc_mid_outer = (
+                    bottom_center_x + px * 3.4 * scale * straight_sign,
+                    bottom_center_y + bottom_h * 1.02,
+                );
+                let bottom_arc_mid_inner = (
+                    bottom_center_x - px * 3.4 * scale * straight_sign,
+                    bottom_center_y + bottom_h * 1.02,
+                );
                 let curve_ctrl = (
                     root_x + dx * 0.32 - px * 6.8 * scale * straight_sign,
                     root_y + dy * 0.56 - py * 2.4 * scale * straight_sign,
@@ -14345,14 +14353,20 @@ mod windows_overlay {
                 arm.move_to(top_straight.0, top_straight.1);
                 arm.line_to(bottom_straight.0, bottom_straight.1);
                 arm.quad_to(
-                    bottom_center_x + px * 7.4 * scale * straight_sign,
-                    bottom_center_y + bottom_h * 0.72,
-                    bottom_arc_mid.0,
-                    bottom_arc_mid.1,
+                    bottom_center_x + px * 8.1 * scale * straight_sign,
+                    bottom_center_y + bottom_h * 0.48,
+                    bottom_arc_mid_outer.0,
+                    bottom_arc_mid_outer.1,
                 );
                 arm.quad_to(
-                    bottom_center_x - px * 7.4 * scale * straight_sign,
-                    bottom_center_y + bottom_h * 0.72,
+                    bottom_center_x,
+                    bottom_center_y + bottom_h * 1.14,
+                    bottom_arc_mid_inner.0,
+                    bottom_arc_mid_inner.1,
+                );
+                arm.quad_to(
+                    bottom_center_x - px * 8.1 * scale * straight_sign,
+                    bottom_center_y + bottom_h * 0.48,
                     bottom_curve.0,
                     bottom_curve.1,
                 );
