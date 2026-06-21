@@ -13997,26 +13997,29 @@ mod windows_overlay {
 
             // Draw Hachiware Forehead Hair Patch
             let mut hair = tiny_skia::PathBuilder::new();
-            let p = map_hachi_point(head_cx - 46.2 * scale, head_cy - 8.0 * scale, 0.16);
+            let p = map_hachi_point(head_cx - 49.0 * scale, head_cy - 2.0 * scale, 0.20);
             hair.move_to(p.0, p.1);
-            let c1 = map_hachi_point(head_cx - 40.0 * scale, head_cy - 46.0 * scale, 0.12);
-            let t = map_hachi_point(head_cx, head_cy - 47.0 * scale, 0.06);
+            let c1 = map_hachi_point(head_cx - 42.0 * scale, head_cy - 48.0 * scale, 0.10);
+            let t = map_hachi_point(head_cx, head_cy - 49.0 * scale, 0.04);
             hair.quad_to(c1.0, c1.1, t.0, t.1);
-            let c1 = map_hachi_point(head_cx + 40.0 * scale, head_cy - 46.0 * scale, 0.12);
-            let t = map_hachi_point(head_cx + 46.2 * scale, head_cy - 8.0 * scale, 0.16);
+            let c1 = map_hachi_point(head_cx + 42.0 * scale, head_cy - 48.0 * scale, 0.10);
+            let t = map_hachi_point(head_cx + 49.0 * scale, head_cy - 2.0 * scale, 0.20);
             hair.quad_to(c1.0, c1.1, t.0, t.1);
-            let c1 = map_hachi_point(head_cx + 25.0 * scale, head_cy - 4.0 * scale, 0.26);
-            let t = map_hachi_point(head_cx + 14.0 * scale, head_cy + 8.0 * scale, 0.34);
-            hair.quad_to(c1.0, c1.1, t.0, t.1);
-            let c1 = map_hachi_point(head_cx + 6.0 * scale, head_cy - 8.0 * scale, 0.38);
-            let t = map_hachi_point(head_cx, head_cy - 12.0 * scale, 0.46);
-            hair.quad_to(c1.0, c1.1, t.0, t.1);
-            let c1 = map_hachi_point(head_cx - 6.0 * scale, head_cy - 8.0 * scale, 0.38);
-            let t = map_hachi_point(head_cx - 14.0 * scale, head_cy + 8.0 * scale, 0.34);
-            hair.quad_to(c1.0, c1.1, t.0, t.1);
-            let c1 = map_hachi_point(head_cx - 25.0 * scale, head_cy - 4.0 * scale, 0.26);
-            let t = map_hachi_point(head_cx - 46.2 * scale, head_cy - 8.0 * scale, 0.16);
-            hair.quad_to(c1.0, c1.1, t.0, t.1);
+
+            let c1 = map_hachi_point(head_cx + 35.0 * scale, head_cy + 1.5 * scale, 0.24);
+            let c2 = map_hachi_point(head_cx + 23.0 * scale, head_cy + 6.0 * scale, 0.32);
+            let t = map_hachi_point(head_cx + 12.0 * scale, head_cy + 8.0 * scale, 0.40);
+            hair.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+
+            let c1 = map_hachi_point(head_cx + 5.5 * scale, head_cy + 0.5 * scale, 0.46);
+            let c2 = map_hachi_point(head_cx - 5.5 * scale, head_cy + 0.5 * scale, 0.46);
+            let t = map_hachi_point(head_cx - 12.0 * scale, head_cy + 8.0 * scale, 0.40);
+            hair.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+
+            let c1 = map_hachi_point(head_cx - 23.0 * scale, head_cy + 6.0 * scale, 0.32);
+            let c2 = map_hachi_point(head_cx - 35.0 * scale, head_cy + 1.5 * scale, 0.24);
+            let t = map_hachi_point(head_cx - 49.0 * scale, head_cy - 2.0 * scale, 0.20);
+            hair.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
             hair.close();
             if let Some(path) = hair.finish() {
                 fill_skia_path(pixmap, &path, [100, 160, 230, 255]);
