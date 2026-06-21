@@ -14043,31 +14043,31 @@ mod windows_overlay {
             let mut patch = tiny_skia::PathBuilder::new();
             patch.move_to(patch_left.0, patch_left.1);
             
-            // Up left ear
-            patch.line_to(left_base_outer.0, left_base_outer.1);
-            patch.line_to(left_tip.0, left_tip.1);
-            patch.line_to(left_base_inner.0, left_base_inner.1);
-            
-            // Top skull curve
+            // Hairline parting curve (left to right)
             patch.quad_to(
-                map(200.0, 110.0).0, map(200.0, 110.0).1,
-                right_base_inner.0, right_base_inner.1,
-            );
-            
-            // Right ear
-            patch.line_to(right_tip.0, right_tip.1);
-            patch.line_to(right_base_outer.0, right_base_outer.1);
-            patch.line_to(patch_right.0, patch_right.1);
-            
-            // Hairline parting curve (right to left)
-            patch.quad_to(
-                ctrl_right.0, ctrl_right.1,
+                ctrl_left.0, ctrl_left.1,
                 hairline_mid.0, hairline_mid.1,
             );
             patch.quad_to(
-                ctrl_left.0, ctrl_left.1,
-                patch_left.0, patch_left.1,
+                ctrl_right.0, ctrl_right.1,
+                patch_right.0, patch_right.1,
             );
+            
+            // Up right ear
+            patch.line_to(right_tip.0, right_tip.1);
+            // Down right ear
+            patch.line_to(right_base_inner.0, right_base_inner.1);
+            
+            // Top skull curve (right to left)
+            patch.quad_to(
+                map(200.0, 110.0).0, map(200.0, 110.0).1,
+                left_base_inner.0, left_base_inner.1,
+            );
+            
+            // Up left ear
+            patch.line_to(left_tip.0, left_tip.1);
+            // Down left ear back to start
+            patch.line_to(left_base_outer.0, left_base_outer.1);
             patch.close();
 
             if let Some(path) = patch.finish() {
