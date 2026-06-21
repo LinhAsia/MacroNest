@@ -13525,11 +13525,11 @@ mod windows_overlay {
             // Ear animation offsets
             let turn_x = (look_x / (16.0 * scale)).clamp(-1.0, 1.0);
             let turn_y = (look_y / (14.0 * scale)).clamp(-1.0, 1.0);
-            let ear_wiggle = recent_pulse * 3.8 * scale;
-            let ear_shift_x = -look_x * 0.52;
-            let ear_shift_y = -look_y * 0.34;
-            let left_ear_scale = 1.0 - turn_x * 0.14;
-            let right_ear_scale = 1.0 + turn_x * 0.14;
+            let ear_wiggle = recent_pulse * 3.4 * scale;
+            let ear_shift_x = -look_x * 0.36;
+            let ear_shift_y = -look_y * 0.18;
+            let left_ear_scale = (1.0 - turn_x * 0.10).clamp(0.9, 1.12);
+            let right_ear_scale = (1.0 + turn_x * 0.10).clamp(0.9, 1.12);
 
             // Ear outer color
             let ear_outer_color = [100, 160, 230, 255]; // Blue ears for Hachiware
@@ -13537,40 +13537,39 @@ mod windows_overlay {
             // Left Ear
             let mut left_ear = tiny_skia::PathBuilder::new();
             left_ear.move_to(
-                head_cx - 43.0 * scale + ear_shift_x + turn_x * -4.5 * scale,
-                head_cy - 21.0 * scale + ear_shift_y + turn_y * -1.5 * scale,
+                head_cx - 36.0 * scale + ear_shift_x + turn_x * -2.8 * scale,
+                head_cy - 28.0 * scale + ear_shift_y + turn_y * -1.2 * scale,
             );
             left_ear.quad_to(
-                head_cx - 44.0 * scale - ear_wiggle * left_ear_scale + ear_shift_x + turn_x * -5.0 * scale,
-                head_cy - 49.0 * scale - ear_wiggle + ear_shift_y + turn_y * -3.0 * scale,
-                head_cx - 37.0 * scale - ear_wiggle * left_ear_scale + ear_shift_x + turn_x * -3.0 * scale,
-                head_cy - 55.0 * scale - ear_wiggle + ear_shift_y + turn_y * -3.5 * scale,
+                head_cx - 40.0 * scale - ear_wiggle * left_ear_scale + ear_shift_x + turn_x * -3.0 * scale,
+                head_cy - 53.0 * scale - ear_wiggle + ear_shift_y + turn_y * -2.0 * scale,
+                head_cx - 31.0 * scale - ear_wiggle * left_ear_scale + ear_shift_x + turn_x * -1.5 * scale,
+                head_cy - 61.0 * scale - ear_wiggle + ear_shift_y + turn_y * -2.5 * scale,
             );
             left_ear.quad_to(
-                head_cx - 24.0 * scale + ear_shift_x + turn_x * -2.0 * scale,
-                head_cy - 42.0 * scale + ear_shift_y + turn_y * -1.5 * scale,
-                head_cx - 17.0 * scale + ear_shift_x + turn_x * 0.5 * scale,
-                head_cy - 36.0 * scale + ear_shift_y + turn_y * -1.0 * scale,
+                head_cx - 20.0 * scale + ear_shift_x + turn_x * -0.8 * scale,
+                head_cy - 45.0 * scale + ear_shift_y + turn_y * -0.8 * scale,
+                head_cx - 12.0 * scale + ear_shift_x + turn_x * 0.8 * scale,
+                head_cy - 31.0 * scale + ear_shift_y + turn_y * -0.4 * scale,
             );
             left_ear.close();
             if let Some(path) = left_ear.finish() {
                 fill_skia_path(pixmap, &path, ear_outer_color);
-                stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
             }
             
             // Left Inner Ear (pink)
             let mut left_inner = tiny_skia::PathBuilder::new();
             left_inner.move_to(
-                head_cx - 38.0 * scale + ear_shift_x + turn_x * -3.0 * scale,
-                head_cy - 24.0 * scale + ear_shift_y,
+                head_cx - 33.0 * scale + ear_shift_x + turn_x * -2.0 * scale,
+                head_cy - 31.0 * scale + ear_shift_y,
             );
             left_inner.line_to(
-                head_cx - 35.0 * scale - ear_wiggle * left_ear_scale + ear_shift_x + turn_x * -3.5 * scale,
-                head_cy - 46.0 * scale - ear_wiggle + ear_shift_y + turn_y * -2.0 * scale,
+                head_cx - 31.0 * scale - ear_wiggle * left_ear_scale + ear_shift_x + turn_x * -1.8 * scale,
+                head_cy - 51.0 * scale - ear_wiggle + ear_shift_y + turn_y * -1.4 * scale,
             );
             left_inner.line_to(
-                head_cx - 24.0 * scale + ear_shift_x + turn_x * -1.0 * scale,
-                head_cy - 34.0 * scale + ear_shift_y + turn_y * -0.5 * scale,
+                head_cx - 20.0 * scale + ear_shift_x + turn_x * -0.2 * scale,
+                head_cy - 38.0 * scale + ear_shift_y + turn_y * -0.2 * scale,
             );
             left_inner.close();
             if let Some(path) = left_inner.finish() { fill_skia_path(pixmap, &path, [255, 200, 210, 255]); }
@@ -13578,40 +13577,39 @@ mod windows_overlay {
             // Right Ear
             let mut right_ear = tiny_skia::PathBuilder::new();
             right_ear.move_to(
-                head_cx + 17.0 * scale + ear_shift_x + turn_x * -0.5 * scale,
-                head_cy - 36.0 * scale + ear_shift_y + turn_y * -1.0 * scale,
+                head_cx + 12.0 * scale + ear_shift_x + turn_x * -0.8 * scale,
+                head_cy - 31.0 * scale + ear_shift_y + turn_y * -0.4 * scale,
             );
             right_ear.quad_to(
-                head_cx + 25.0 * scale + ear_shift_x + turn_x * 2.0 * scale,
-                head_cy - 42.0 * scale + ear_shift_y + turn_y * -1.5 * scale,
-                head_cx + 37.0 * scale + ear_wiggle * right_ear_scale + ear_shift_x + turn_x * 3.5 * scale,
-                head_cy - 55.0 * scale + ear_wiggle + ear_shift_y + turn_y * -3.5 * scale,
+                head_cx + 20.0 * scale + ear_shift_x + turn_x * 0.8 * scale,
+                head_cy - 45.0 * scale + ear_shift_y + turn_y * -0.8 * scale,
+                head_cx + 31.0 * scale + ear_wiggle * right_ear_scale + ear_shift_x + turn_x * 1.5 * scale,
+                head_cy - 61.0 * scale + ear_wiggle + ear_shift_y + turn_y * -2.5 * scale,
             );
             right_ear.quad_to(
-                head_cx + 45.0 * scale + ear_wiggle * right_ear_scale + ear_shift_x + turn_x * 5.0 * scale,
-                head_cy - 49.0 * scale + ear_wiggle + ear_shift_y + turn_y * -3.0 * scale,
-                head_cx + 43.0 * scale + ear_shift_x + turn_x * 4.5 * scale,
-                head_cy - 21.0 * scale + ear_shift_y + turn_y * -1.5 * scale,
+                head_cx + 40.0 * scale + ear_wiggle * right_ear_scale + ear_shift_x + turn_x * 3.0 * scale,
+                head_cy - 53.0 * scale + ear_wiggle + ear_shift_y + turn_y * -2.0 * scale,
+                head_cx + 36.0 * scale + ear_shift_x + turn_x * 2.8 * scale,
+                head_cy - 28.0 * scale + ear_shift_y + turn_y * -1.2 * scale,
             );
             right_ear.close();
             if let Some(path) = right_ear.finish() {
                 fill_skia_path(pixmap, &path, ear_outer_color);
-                stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
             }
 
             // Right Inner Ear (pink)
             let mut right_inner = tiny_skia::PathBuilder::new();
             right_inner.move_to(
-                head_cx + 24.0 * scale + ear_shift_x + turn_x * 1.0 * scale,
-                head_cy - 34.0 * scale + ear_shift_y + turn_y * -0.5 * scale,
+                head_cx + 20.0 * scale + ear_shift_x + turn_x * 0.2 * scale,
+                head_cy - 38.0 * scale + ear_shift_y + turn_y * -0.2 * scale,
             );
             right_inner.line_to(
-                head_cx + 35.0 * scale + ear_wiggle * right_ear_scale + ear_shift_x + turn_x * 3.5 * scale,
-                head_cy - 46.0 * scale + ear_wiggle + ear_shift_y + turn_y * -2.0 * scale,
+                head_cx + 31.0 * scale + ear_wiggle * right_ear_scale + ear_shift_x + turn_x * 1.8 * scale,
+                head_cy - 51.0 * scale + ear_wiggle + ear_shift_y + turn_y * -1.4 * scale,
             );
             right_inner.line_to(
-                head_cx + 38.0 * scale + ear_shift_x + turn_x * 3.0 * scale,
-                head_cy - 24.0 * scale + ear_shift_y,
+                head_cx + 33.0 * scale + ear_shift_x + turn_x * 2.0 * scale,
+                head_cy - 31.0 * scale + ear_shift_y,
             );
             right_inner.close();
             if let Some(path) = right_inner.finish() { fill_skia_path(pixmap, &path, [255, 200, 210, 255]); }
