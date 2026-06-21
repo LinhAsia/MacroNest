@@ -13972,72 +13972,132 @@ mod windows_overlay {
                 let (px, py) = map_point(x, y);
                 (px + bx, py + by)
             };
-            let mut pb = tiny_skia::PathBuilder::new();
-            let p = map(151.0, 121.0); pb.move_to(p.0, p.1);
-            let c1 = map(102.0, 126.0); let c2 = map(66.0, 164.0); let t = map(65.0, 216.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let c1 = map(64.0, 254.0); let c2 = map(82.0, 280.0); let t = map(107.0, 292.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let c1 = map(104.0, 312.0); let c2 = map(106.0, 330.0); let t = map(116.0, 337.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let c1 = map(125.0, 343.0); let c2 = map(132.0, 337.0); let t = map(132.0, 324.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let t = map(132.0, 310.0); pb.line_to(t.0, t.1);
-            let c1 = map(146.0, 319.0); let c2 = map(169.0, 324.0); let t = map(200.0, 324.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let c1 = map(230.0, 324.0); let c2 = map(254.0, 320.0); let t = map(268.0, 311.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let t = map(268.0, 327.0); pb.line_to(t.0, t.1);
-            let c1 = map(268.0, 340.0); let c2 = map(277.0, 345.0); let t = map(285.0, 337.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let c1 = map(292.0, 330.0); let c2 = map(294.0, 312.0); let t = map(292.0, 293.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let c1 = map(318.0, 282.0); let c2 = map(335.0, 254.0); let t = map(334.0, 216.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let c1 = map(333.0, 165.0); let c2 = map(297.0, 128.0); let t = map(249.0, 121.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let c1 = map(238.0, 118.0); let c2 = map(224.0, 117.0); let t = map(207.0, 118.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            let t = map(194.0, 118.0); pb.line_to(t.0, t.1);
-            let c1 = map(178.0, 117.0); let c2 = map(163.0, 118.0); let t = map(151.0, 121.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            pb.close();
-            if let Some(path) = pb.finish() {
-                fill_skia_path(&mut tmp_pixmap, &path, fill_color);
-                stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
-            }
 
-            // Draw White cat ears on top of head outline
             let ear_sway = recent_pulse * 10.6; // SVG scale sway
             let ear_lift = 4.0 - look_y * 1.5;
             
-            let left_base_outer = map(152.0, 121.0);
-            let left_tip = map(138.0 - ear_sway, 68.0 - ear_lift);
-            let left_base_inner = map(186.0, 119.0);
+            let patch_left = map(132.0, 142.0);
+            let patch_right = map(268.0, 142.0);
+            let left_base_outer = patch_left;
+            let right_base_outer = patch_right;
+            let left_base_inner = map(182.0, 118.0);
+            let right_base_inner = map(218.0, 118.0);
+            let left_tip = map(114.0 - ear_sway, 52.0 - ear_lift);
+            let right_tip = map(286.0 + ear_sway, 52.0 - ear_lift);
+
+            let start_left_cheek = map(151.0, 121.0);
+            let end_right_cheek = map(249.0, 121.0);
             
-            let right_base_inner = map(214.0, 119.0);
-            let right_tip = map(262.0 + ear_sway, 68.0 - ear_lift);
-            let right_base_outer = map(248.0, 121.0);
+            let mut head_contour = tiny_skia::PathBuilder::new();
+            head_contour.move_to(start_left_cheek.0, start_left_cheek.1);
+            
+            // Cheeks and chin
+            let c1 = map(102.0, 126.0); let c2 = map(66.0, 164.0); let t = map(65.0, 216.0);
+            head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(64.0, 254.0); let c2 = map(82.0, 280.0); let t = map(107.0, 292.0);
+            head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(104.0, 312.0); let c2 = map(106.0, 330.0); let t = map(116.0, 337.0);
+            head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(125.0, 343.0); let c2 = map(132.0, 337.0); let t = map(132.0, 324.0);
+            head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let t = map(132.0, 310.0);
+            head_contour.line_to(t.0, t.1);
+            let c1 = map(146.0, 319.0); let c2 = map(169.0, 324.0); let t = map(200.0, 324.0);
+            head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(230.0, 324.0); let c2 = map(254.0, 320.0); let t = map(268.0, 311.0);
+            head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let t = map(268.0, 327.0);
+            head_contour.line_to(t.0, t.1);
+            let c1 = map(268.0, 340.0); let c2 = map(277.0, 345.0); let t = map(285.0, 337.0);
+            head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(292.0, 330.0); let c2 = map(294.0, 312.0); let t = map(292.0, 293.0);
+            head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(318.0, 282.0); let c2 = map(335.0, 254.0); let t = map(334.0, 216.0);
+            head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(333.0, 165.0); let c2 = map(297.0, 128.0); let t = map(249.0, 121.0);
+            head_contour.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            
+            // Connect to right ear base
+            head_contour.line_to(right_base_outer.0, right_base_outer.1);
+            // Right ear tip & inner base
+            head_contour.line_to(right_tip.0, right_tip.1);
+            head_contour.line_to(right_base_inner.0, right_base_inner.1);
+            
+            // Connect right ear base to left ear base (top skull curve)
+            head_contour.quad_to(
+                map(200.0, 110.0).0, map(200.0, 110.0).1,
+                left_base_inner.0, left_base_inner.1,
+            );
+            
+            // Left ear tip & outer base
+            head_contour.line_to(left_tip.0, left_tip.1);
+            head_contour.line_to(left_base_outer.0, left_base_outer.1);
+            
+            // Close back to start of cheeks
+            head_contour.line_to(start_left_cheek.0, start_left_cheek.1);
+            head_contour.close();
 
-            // Left ear fill & outline
-            let mut left_ear = tiny_skia::PathBuilder::new();
-            left_ear.move_to(left_base_outer.0, left_base_outer.1);
-            left_ear.line_to(left_tip.0, left_tip.1);
-            left_ear.line_to(left_base_inner.0, left_base_inner.1);
-            left_ear.close();
-            if let Some(path) = left_ear.finish() {
-                fill_skia_path(&mut tmp_pixmap, &path, fill_color);
-            }
-            let mut left_ear_outline = tiny_skia::PathBuilder::new();
-            left_ear_outline.move_to(left_base_outer.0, left_base_outer.1);
-            left_ear_outline.line_to(left_tip.0, left_tip.1);
-            left_ear_outline.line_to(left_base_inner.0, left_base_inner.1);
-            if let Some(path) = left_ear_outline.finish() {
-                stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
+            let head_contour_path = head_contour.finish();
+            if let Some(ref path) = head_contour_path {
+                fill_skia_path(&mut tmp_pixmap, path, fill_color);
             }
 
-            // Right ear fill & outline
-            let mut right_ear = tiny_skia::PathBuilder::new();
-            right_ear.move_to(right_base_outer.0, right_base_outer.1);
-            right_ear.line_to(right_tip.0, right_tip.1);
-            right_ear.line_to(right_base_inner.0, right_base_inner.1);
-            right_ear.close();
-            if let Some(path) = right_ear.finish() {
-                fill_skia_path(&mut tmp_pixmap, &path, fill_color);
+            // Draw blue hair patch (including ears)
+            let patch_color = [116, 172, 203, 255]; // steel-blue hair/ears
+            let hairline_mid = map(200.0, 138.0); // parting peak
+            let ctrl_left = map(166.0, 168.0);
+            let ctrl_right = map(234.0, 168.0);
+
+            let mut patch = tiny_skia::PathBuilder::new();
+            patch.move_to(patch_left.0, patch_left.1);
+            
+            // Up left ear
+            patch.line_to(left_base_outer.0, left_base_outer.1);
+            patch.line_to(left_tip.0, left_tip.1);
+            patch.line_to(left_base_inner.0, left_base_inner.1);
+            
+            // Top skull curve
+            patch.quad_to(
+                map(200.0, 110.0).0, map(200.0, 110.0).1,
+                right_base_inner.0, right_base_inner.1,
+            );
+            
+            // Right ear
+            patch.line_to(right_tip.0, right_tip.1);
+            patch.line_to(right_base_outer.0, right_base_outer.1);
+            patch.line_to(patch_right.0, patch_right.1);
+            
+            // Hairline parting curve (right to left)
+            patch.quad_to(
+                ctrl_right.0, ctrl_right.1,
+                hairline_mid.0, hairline_mid.1,
+            );
+            patch.quad_to(
+                ctrl_left.0, ctrl_left.1,
+                patch_left.0, patch_left.1,
+            );
+            patch.close();
+
+            if let Some(path) = patch.finish() {
+                fill_skia_path(&mut tmp_pixmap, &path, patch_color);
             }
-            let mut right_ear_outline = tiny_skia::PathBuilder::new();
-            right_ear_outline.move_to(right_base_outer.0, right_base_outer.1);
-            right_ear_outline.line_to(right_tip.0, right_tip.1);
-            right_ear_outline.line_to(right_base_inner.0, right_base_inner.1);
-            if let Some(path) = right_ear_outline.finish() {
+
+            // Now stroke the head contour and the hairline partition
+            if let Some(ref path) = head_contour_path {
+                stroke_skia_path(&mut tmp_pixmap, path, stroke_color, 7.0 * 0.53 * scale);
+            }
+
+            let mut hairline = tiny_skia::PathBuilder::new();
+            hairline.move_to(patch_left.0, patch_left.1);
+            hairline.quad_to(
+                ctrl_left.0, ctrl_left.1,
+                hairline_mid.0, hairline_mid.1,
+            );
+            hairline.quad_to(
+                ctrl_right.0, ctrl_right.1,
+                patch_right.0, patch_right.1,
+            );
+            if let Some(path) = hairline.finish() {
                 stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
             }
 
