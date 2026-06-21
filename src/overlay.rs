@@ -13442,6 +13442,25 @@ mod windows_overlay {
 
             let mut tmp_pixmap = tiny_skia::Pixmap::new(pixmap.width(), pixmap.height()).unwrap();
 
+            // Draw body shape for Usagi (ChiikawaClassic) so shoulders and neck connect properly
+            let body_cx = head_cx - 1.0 * scale;
+            let body_cy = head_cy + 46.0 * scale;
+            let body_radius = 45.0 * scale;
+            let body_color = [255, 241, 189, 255];
+            let stroke_color_body = [59, 41, 38, 255];
+            let stroke_w_body = 7.0 * 0.53 * scale;
+
+            let mut body_pb = tiny_skia::PathBuilder::new();
+            body_pb.move_to(body_cx - body_radius, body_cy);
+            body_pb.quad_to(body_cx - body_radius, body_cy - 16.0 * scale, body_cx - body_radius * 0.4, body_cy - 20.0 * scale);
+            body_pb.line_to(body_cx + body_radius * 0.4, body_cy - 20.0 * scale);
+            body_pb.quad_to(body_cx + body_radius, body_cy - 16.0 * scale, body_cx + body_radius, body_cy);
+            body_pb.close();
+            if let Some(path) = body_pb.finish() {
+                fill_skia_path(&mut tmp_pixmap, &path, body_color);
+                stroke_skia_path(&mut tmp_pixmap, &path, stroke_color_body, stroke_w_body);
+            }
+
             let ear_wiggle = recent_pulse * 3.0 * scale;
             let ear_shift_x = -look_x * 0.4;
             let ear_shift_y = -look_y * 0.4;
@@ -14089,76 +14108,114 @@ mod windows_overlay {
         _paw_glow: [u8; 4],
         mascot_style: crate::model::MascotStyle,
     ) {
-        let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
-        let shoulder_offset = if is_hachiware { 20.0 * scale } else { 45.0 * scale };
-        let left_shoulder_cx = body_cx - shoulder_offset;
-        let left_shoulder_cy = body_cy + if is_hachiware { -4.0 * scale } else { 8.5 * scale };
-        let right_shoulder_cx = body_cx + shoulder_offset;
-        let right_shoulder_cy = body_cy + if is_hachiware { -4.0 * scale } else { 8.5 * scale };
+        if mascot_style == crate::model::MascotStyle::Hachiware {
+            let shoulder_offset = 20.0 * scale;
+            let left_shoulder_cx = body_cx - shoulder_offset;
+            let left_shoulder_cy = body_cy - 4.0 * scale;
+            let right_shoulder_cx = body_cx + shoulder_offset;
+            let right_shoulder_cy = body_cy - 4.0 * scale;
 
-        let left_paw_x = left_paw_target.0;
-        let left_paw_y = left_paw_target.1 + paw_press;
-        let right_paw_x = right_paw_target.0;
-        let right_paw_y = right_paw_target.1 + paw_press;
+            let left_paw_x = left_paw_target.0;
+            let left_paw_y = left_paw_target.1 + paw_press;
+            let right_paw_x = right_paw_target.0;
+            let right_paw_y = right_paw_target.1 + paw_press;
 
-        // Compute arm direction normals for shoulder width
-        let (ux_l, uy_l) = { let d = ((left_paw_x - left_shoulder_cx).powi(2) + (left_paw_y - left_shoulder_cy).powi(2)).sqrt().max(1.0); ((left_paw_x - left_shoulder_cx) / d, (left_paw_y - left_shoulder_cy) / d) };
-        let (px_l, py_l) = (-uy_l, ux_l);
-        let left_shoulder_top    = (left_shoulder_cx + px_l * 12.5 * scale, left_shoulder_cy + py_l * 12.5 * scale);
-        let left_shoulder_bottom = (left_shoulder_cx - px_l * 12.5 * scale, left_shoulder_cy - py_l * 12.5 * scale);
+            let (ux_l, uy_l) = { let d = ((left_paw_x - left_shoulder_cx).powi(2) + (left_paw_y - left_shoulder_cy).powi(2)).sqrt().max(1.0); ((left_paw_x - left_shoulder_cx) / d, (left_paw_y - left_shoulder_cy) / d) };
+            let (px_l, py_l) = (-uy_l, ux_l);
+            let left_shoulder_top    = (left_shoulder_cx + px_l * 12.5 * scale, left_shoulder_cy + py_l * 12.5 * scale);
+            let left_shoulder_bottom = (left_shoulder_cx - px_l * 12.5 * scale, left_shoulder_cy - py_l * 12.5 * scale);
 
-        let (ux_r, uy_r) = { let d = ((right_paw_x - right_shoulder_cx).powi(2) + (right_paw_y - right_shoulder_cy).powi(2)).sqrt().max(1.0); ((right_paw_x - right_shoulder_cx) / d, (right_paw_y - right_shoulder_cy) / d) };
-        let (px_r, py_r) = (-uy_r, ux_r);
-        let right_shoulder_top    = (right_shoulder_cx - px_r * 12.5 * scale, right_shoulder_cy - py_r * 12.5 * scale);
-        let right_shoulder_bottom = (right_shoulder_cx + px_r * 12.5 * scale, right_shoulder_cy + py_r * 12.5 * scale);
+            let (ux_r, uy_r) = { let d = ((right_paw_x - right_shoulder_cx).powi(2) + (right_paw_y - right_shoulder_cy).powi(2)).sqrt().max(1.0); ((right_paw_x - right_shoulder_cx) / d, (right_paw_y - right_shoulder_cy) / d) };
+            let (px_r, py_r) = (-uy_r, ux_r);
+            let right_shoulder_top    = (right_shoulder_cx - px_r * 12.5 * scale, right_shoulder_cy - py_r * 12.5 * scale);
+            let right_shoulder_bottom = (right_shoulder_cx + px_r * 12.5 * scale, right_shoulder_cy + py_r * 12.5 * scale);
 
-        // Arm fill color: Chiikawa and Hachiware have white arms.
-        let arm_fill = if mascot_style == crate::model::MascotStyle::Hachiware {
-            [255, 255, 255, 255]
+            let arm_fill = [255, 255, 255, 255];
+            let stroke_color = [45, 40, 42, 255];
+            let stroke_w = 2.2 * scale;
+
+            let cap_r = 13.0 * scale;
+            fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, arm_fill);
+            stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, stroke_w, stroke_color);
+            fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, arm_fill);
+            stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, stroke_w, stroke_color);
+
+            let mut left_arm = tiny_skia::PathBuilder::new();
+            left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
+            left_arm.quad_to(left_paw_x - 16.0 * scale, left_paw_y - 12.0 * scale, left_paw_x - 10.0 * scale, left_paw_y + 4.0 * scale);
+            left_arm.quad_to(left_paw_x, left_paw_y + 14.0 * scale, left_paw_x + 10.0 * scale, left_paw_y + 2.0 * scale);
+            left_arm.quad_to(left_paw_x + 6.0 * scale, left_paw_y - 12.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
+            let left_arm_stroke = left_arm.clone();
+            left_arm.close();
+            if let Some(p) = left_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
+            if let Some(p) = left_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
+
+            let mut right_arm = tiny_skia::PathBuilder::new();
+            right_arm.move_to(right_shoulder_top.0, right_shoulder_top.1);
+            right_arm.quad_to(right_paw_x + 16.0 * scale, right_paw_y - 12.0 * scale, right_paw_x + 10.0 * scale, right_paw_y + 4.0 * scale);
+            right_arm.quad_to(right_paw_x, right_paw_y + 14.0 * scale, right_paw_x - 10.0 * scale, right_paw_y + 2.0 * scale);
+            right_arm.quad_to(right_paw_x - 6.0 * scale, right_paw_y - 12.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
+            let right_arm_stroke = right_arm.clone();
+            right_arm.close();
+            if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
+            if let Some(p) = right_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
         } else {
-            [255, 241, 189, 255] // Usagi yellow/cream #fff1bd
-        };
+            // Usagi (ChiikawaClassic) - cute thin yellow arms and paws
+            let shoulder_offset = 45.0 * scale;
+            let left_shoulder_cx = body_cx - shoulder_offset;
+            let left_shoulder_cy = body_cy + 8.5 * scale;
+            let right_shoulder_cx = body_cx + shoulder_offset;
+            let right_shoulder_cy = body_cy + 8.5 * scale;
 
-        let stroke_color = if mascot_style == crate::model::MascotStyle::Hachiware {
-            [45, 40, 42, 255]
-        } else {
-            [59, 41, 38, 255] // Usagi outline #3b2926
-        };
+            let left_paw_x = left_paw_target.0;
+            let left_paw_y = left_paw_target.1 + paw_press;
+            let right_paw_x = right_paw_target.0;
+            let right_paw_y = right_paw_target.1 + paw_press;
 
-        let stroke_w = if mascot_style == crate::model::MascotStyle::Hachiware {
-            2.2 * scale
-        } else {
-            7.0 * 0.53 * scale // Match SVG outline width
-        };
+            let (ux_l, uy_l) = { let d = ((left_paw_x - left_shoulder_cx).powi(2) + (left_paw_y - left_shoulder_cy).powi(2)).sqrt().max(1.0); ((left_paw_x - left_shoulder_cx) / d, (left_paw_y - left_shoulder_cy) / d) };
+            let (px_l, py_l) = (-uy_l, ux_l);
+            let shoulder_width = 5.8 * scale; // Thinner shoulder attachment to match the small hands
+            let left_shoulder_top    = (left_shoulder_cx + px_l * shoulder_width, left_shoulder_cy + py_l * shoulder_width);
+            let left_shoulder_bottom = (left_shoulder_cx - px_l * shoulder_width, left_shoulder_cy - py_l * shoulder_width);
 
-        // Shoulder cap circles drawn first so arm paths render on top
-        let cap_r = 13.0 * scale;
-        fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, arm_fill);
-        stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, stroke_w, stroke_color);
-        fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, arm_fill);
-        stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, stroke_w, stroke_color);
+            let (ux_r, uy_r) = { let d = ((right_paw_x - right_shoulder_cx).powi(2) + (right_paw_y - right_shoulder_cy).powi(2)).sqrt().max(1.0); ((right_paw_x - right_shoulder_cx) / d, (right_paw_y - right_shoulder_cy) / d) };
+            let (px_r, py_r) = (-uy_r, ux_r);
+            let right_shoulder_top    = (right_shoulder_cx - px_r * shoulder_width, right_shoulder_cy - py_r * shoulder_width);
+            let right_shoulder_bottom = (right_shoulder_cx + px_r * shoulder_width, right_shoulder_cy + py_r * shoulder_width);
 
-        // Left arm: fill closed, stroke open (shoulder side left open so body covers the gap)
-        let mut left_arm = tiny_skia::PathBuilder::new();
-        left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
-        left_arm.quad_to(left_paw_x - 16.0 * scale, left_paw_y - 12.0 * scale, left_paw_x - 10.0 * scale, left_paw_y + 4.0 * scale);
-        left_arm.quad_to(left_paw_x, left_paw_y + 14.0 * scale, left_paw_x + 10.0 * scale, left_paw_y + 2.0 * scale);
-        left_arm.quad_to(left_paw_x + 6.0 * scale, left_paw_y - 12.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
-        let left_arm_stroke = left_arm.clone();
-        left_arm.close();
-        if let Some(p) = left_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
-        if let Some(p) = left_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
+            let arm_fill = [255, 241, 189, 255]; // Usagi yellow/cream #fff1bd
+            let stroke_color = [59, 41, 38, 255]; // Usagi outline #3b2926
+            let stroke_w = 7.0 * 0.53 * scale;
 
-        // Right arm
-        let mut right_arm = tiny_skia::PathBuilder::new();
-        right_arm.move_to(right_shoulder_top.0, right_shoulder_top.1);
-        right_arm.quad_to(right_paw_x + 16.0 * scale, right_paw_y - 12.0 * scale, right_paw_x + 10.0 * scale, right_paw_y + 4.0 * scale);
-        right_arm.quad_to(right_paw_x, right_paw_y + 14.0 * scale, right_paw_x - 10.0 * scale, right_paw_y + 2.0 * scale);
-        right_arm.quad_to(right_paw_x - 6.0 * scale, right_paw_y - 12.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
-        let right_arm_stroke = right_arm.clone();
-        right_arm.close();
-        if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
-        if let Some(p) = right_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
+            // Smaller shoulder cap
+            let cap_r = 6.0 * scale;
+            fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, arm_fill);
+            stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, stroke_w, stroke_color);
+            fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, arm_fill);
+            stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, stroke_w, stroke_color);
+
+            // Thin, cute left arm path
+            let mut left_arm = tiny_skia::PathBuilder::new();
+            left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
+            left_arm.quad_to(left_paw_x - 8.0 * scale, left_paw_y - 6.0 * scale, left_paw_x - 5.0 * scale, left_paw_y + 2.0 * scale);
+            left_arm.quad_to(left_paw_x, left_paw_y + 7.0 * scale, left_paw_x + 5.0 * scale, left_paw_y + 1.0 * scale);
+            left_arm.quad_to(left_paw_x + 3.0 * scale, left_paw_y - 6.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
+            let left_arm_stroke = left_arm.clone();
+            left_arm.close();
+            if let Some(p) = left_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
+            if let Some(p) = left_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
+
+            // Thin, cute right arm path
+            let mut right_arm = tiny_skia::PathBuilder::new();
+            right_arm.move_to(right_shoulder_top.0, right_shoulder_top.1);
+            right_arm.quad_to(right_paw_x + 8.0 * scale, right_paw_y - 6.0 * scale, right_paw_x + 5.0 * scale, right_paw_y + 2.0 * scale);
+            right_arm.quad_to(right_paw_x, right_paw_y + 7.0 * scale, right_paw_x - 5.0 * scale, right_paw_y + 1.0 * scale);
+            right_arm.quad_to(right_paw_x - 3.0 * scale, right_paw_y - 6.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
+            let right_arm_stroke = right_arm.clone();
+            right_arm.close();
+            if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
+            if let Some(p) = right_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
+        }
     }
     unsafe fn paint_mascot_quick_key_display(
         hwnd: HWND,
