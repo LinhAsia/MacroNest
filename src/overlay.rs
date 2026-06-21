@@ -5585,18 +5585,35 @@ mod windows_overlay {
         let recoil = (time_s * 2.45 + side * 1.05).sin();
         let gust = (time_s * 0.41 + 0.8).sin();
         let wind_dir_x = look_x * -0.28
-            + sway * 1.8 * scale
-            + sway_fast * 1.05 * scale
-            + recoil * 0.65 * scale
-            + gust * 0.9 * scale;
+            + sway * 3.8 * scale
+            + sway_fast * 2.2 * scale
+            + recoil * 1.35 * scale
+            + gust * 1.9 * scale;
         let wind_dir_y = look_y * -0.05
-            + sway.abs() * -0.34 * scale
-            + sway_fast * 0.12 * scale
-            + recoil * 0.08 * scale;
-        let pulse = recent_pulse * 1.45 * scale;
-        let x = (wind_dir_x + side * pulse * 0.22) * bend_tip;
-        let y = wind_dir_y * bend_mid + (-x.abs() * 0.3 + recoil * 0.1 * scale) * bend_tip;
+            + sway.abs() * -0.7 * scale
+            + sway_fast * 0.22 * scale
+            + recoil * 0.16 * scale;
+        let pulse = recent_pulse * 2.4 * scale;
+        let x = (wind_dir_x + side * pulse * 0.36) * bend_tip;
+        let y = wind_dir_y * bend_mid + (-x.abs() * 0.38 + recoil * 0.18 * scale) * bend_tip;
         (x, y)
+    }
+
+    fn quick_key_display_chiikawa_map_point(
+        svg_x: f32,
+        svg_y: f32,
+        scale: f32,
+        perspective: f32,
+    ) -> (f32, f32) {
+        let dx = svg_x - 200.0;
+        let side = (dx / 140.0).clamp(-1.0, 1.0);
+        let perspective_scale = 1.0 + perspective * side * 0.18;
+        let px = 168.0 + dx * 0.53 * perspective_scale + perspective * 4.8 * side;
+        let py = 27.4
+            + svg_y * 0.53
+            + perspective * side.abs() * 1.8
+            + perspective * side * (svg_y - 170.0) * 0.012;
+        (px * scale, py * scale)
     }
 
     fn quick_key_display_allocate_slot(
@@ -13279,13 +13296,11 @@ mod windows_overlay {
     ) {
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
         if !is_hachiware {
-            let map_point = |svg_x: f32, svg_y: f32| -> (f32, f32) {
-                let px = 168.0 + (svg_x - 200.0) * 0.53;
-                let py = 27.4 + svg_y * 0.53;
-                (px * scale, py * scale)
-            };
-
             let time_s = unsafe { GetTickCount() } as f32 * 0.001;
+            let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
+            let map_point = |svg_x: f32, svg_y: f32| -> (f32, f32) {
+                quick_key_display_chiikawa_map_point(svg_x, svg_y, scale, perspective)
+            };
 
             let fill_color = [255, 241, 189, 255]; // #fff1bd
             let stroke_color = [59, 41, 38, 255]; // #3b2926
@@ -13503,15 +13518,13 @@ mod windows_overlay {
     ) {
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
         if !is_hachiware {
-            let map_point = |svg_x: f32, svg_y: f32| -> (f32, f32) {
-                let px = 168.0 + (svg_x - 200.0) * 0.53;
-                let py = 27.4 + svg_y * 0.53;
-                (px * scale, py * scale)
-            };
-
             let time_s = unsafe { GetTickCount() } as f32 * 0.001;
-            let face_wobble_fast_x = (time_s * 1.65).sin() * 0.28 * scale;
-            let face_wobble_fast_y = (time_s * 1.2 + 0.7).sin() * 0.18 * scale;
+            let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
+            let map_point = |svg_x: f32, svg_y: f32| -> (f32, f32) {
+                quick_key_display_chiikawa_map_point(svg_x, svg_y, scale, perspective)
+            };
+            let face_wobble_fast_x = (time_s * 1.65).sin() * 0.16 * scale;
+            let face_wobble_fast_y = (time_s * 1.2 + 0.7).sin() * 0.1 * scale;
             let face_wobble_mid_x = (time_s * 1.05 + 0.9).sin() * 0.42 * scale;
             let face_wobble_mid_y = (time_s * 0.92 + 1.4).sin() * 0.26 * scale;
             let face_wobble_slow_x = (time_s * 0.58 + 1.8).sin() * 0.55 * scale;
@@ -13529,7 +13542,7 @@ mod windows_overlay {
                 )
             };
             let map_face_brow = |svg_x: f32, svg_y: f32| -> (f32, f32) {
-                map_face(svg_x, svg_y, 0.9, 0.82, face_wobble_fast_x, face_wobble_fast_y)
+                map_face(svg_x, svg_y, 0.48, 0.46, face_wobble_fast_x, face_wobble_fast_y)
             };
             let map_face_eye = |svg_x: f32, svg_y: f32| -> (f32, f32) {
                 map_face(svg_x, svg_y, 0.8, 0.78, face_wobble_mid_x, face_wobble_fast_y)
@@ -14288,7 +14301,7 @@ mod windows_overlay {
             let arm_fill = [255, 241, 189, 255];
             let stroke_color = [59, 41, 38, 255];
             let stroke_w = 2.2 * scale;
-            let cap_r = 12.5 * scale;
+            let cap_r = 9.8 * scale;
 
             fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, arm_fill);
             stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, stroke_w, stroke_color);
@@ -14297,9 +14310,9 @@ mod windows_overlay {
 
             let mut left_arm = tiny_skia::PathBuilder::new();
             left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
-            left_arm.quad_to(left_paw_x - 18.0 * scale, left_paw_y - 13.0 * scale, left_paw_x - 12.0 * scale, left_paw_y + 5.0 * scale);
-            left_arm.quad_to(left_paw_x, left_paw_y + 16.0 * scale, left_paw_x + 12.0 * scale, left_paw_y + 3.0 * scale);
-            left_arm.quad_to(left_paw_x + 8.0 * scale, left_paw_y - 13.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
+            left_arm.quad_to(left_paw_x - 10.0 * scale, left_paw_y - 7.0 * scale, left_paw_x - 7.0 * scale, left_paw_y + 3.0 * scale);
+            left_arm.quad_to(left_paw_x, left_paw_y + 10.5 * scale, left_paw_x + 7.0 * scale, left_paw_y + 2.0 * scale);
+            left_arm.quad_to(left_paw_x + 4.0 * scale, left_paw_y - 7.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
             let left_arm_stroke = left_arm.clone();
             left_arm.close();
             if let Some(p) = left_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
@@ -14307,9 +14320,9 @@ mod windows_overlay {
 
             let mut right_arm = tiny_skia::PathBuilder::new();
             right_arm.move_to(right_shoulder_top.0, right_shoulder_top.1);
-            right_arm.quad_to(right_paw_x + 18.0 * scale, right_paw_y - 13.0 * scale, right_paw_x + 12.0 * scale, right_paw_y + 5.0 * scale);
-            right_arm.quad_to(right_paw_x, right_paw_y + 16.0 * scale, right_paw_x - 12.0 * scale, right_paw_y + 3.0 * scale);
-            right_arm.quad_to(right_paw_x - 8.0 * scale, right_paw_y - 13.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
+            right_arm.quad_to(right_paw_x + 10.0 * scale, right_paw_y - 7.0 * scale, right_paw_x + 7.0 * scale, right_paw_y + 3.0 * scale);
+            right_arm.quad_to(right_paw_x, right_paw_y + 10.5 * scale, right_paw_x - 7.0 * scale, right_paw_y + 2.0 * scale);
+            right_arm.quad_to(right_paw_x - 4.0 * scale, right_paw_y - 7.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
             let right_arm_stroke = right_arm.clone();
             right_arm.close();
             if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
@@ -14473,14 +14486,14 @@ mod windows_overlay {
 
         // Animate Mascot closer to the desk
         let body_cx = 167.0 * scale;
-        let mut body_cy = (138.0 + y_shift) * scale;
+        let mut body_cy = (131.0 + y_shift) * scale;
         if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             body_cy += chiikawa_idle_body_bob;
         }
         let body_radius = 36.0 * scale;
         
         let mut head_cx = 168.0 * scale;
-        let mut head_cy = (92.0 + y_shift) * scale;
+        let mut head_cy = (85.0 + y_shift) * scale;
         if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             head_cx += chiikawa_idle_head_drift_x;
             head_cy += chiikawa_idle_body_bob * 0.7;
@@ -14854,9 +14867,9 @@ mod windows_overlay {
         let mouse_projected = project_point(mouse_flat_x, mouse_flat_y);
 
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
-        let default_l_x = if is_hachiware { 130.0 } else { 110.0 };
-        let default_r_x = if is_hachiware { 214.0 } else { 238.0 };
-        let default_y = if is_hachiware { 164.0 } else { 176.0 };
+        let default_l_x = if is_hachiware { 130.0 } else { 112.0 };
+        let default_r_x = if is_hachiware { 214.0 } else { 236.0 };
+        let default_y = if is_hachiware { 164.0 } else { 170.0 };
 
         let l_target = if mouse_active { mouse_projected } else { project_point(default_l_x, default_y) };
         let mut left_paw_target = l_target;
