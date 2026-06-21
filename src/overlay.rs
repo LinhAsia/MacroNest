@@ -13739,10 +13739,10 @@ mod windows_overlay {
                 &mut tmp_pixmap,
                 head_cx + look_x * 0.2,
                 head_cy + 10.0 * scale + look_y * 0.35,
-                38.0 * scale,
-                34.0 * scale,
+                45.0 * scale,
+                40.0 * scale,
                 red_factor,
-                [255, 118, 128, 255],
+                [255, 90, 105, 255],
             );
 
             // 6. Left eyebrow
@@ -13857,6 +13857,48 @@ mod windows_overlay {
                 stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * scale);
             }
 
+            // Sweat drops when typing too much
+            if red_factor > 0.15 {
+                let sweat_size = (red_factor - 0.15) / 0.85; // 0.0 to 1.0
+                let s_scale = (0.5 + 0.5 * sweat_size) * scale;
+                
+                // Left sweat drop
+                let (sx, sy) = map_face_brow(122.0, 158.0);
+                let mut trail1 = tiny_skia::PathBuilder::new();
+                trail1.move_to(sx - 2.0 * s_scale, sy - 14.0 * s_scale);
+                trail1.quad_to(sx - 3.0 * s_scale, sy - 8.0 * s_scale, sx - 2.0 * s_scale, sy - 2.0 * s_scale);
+                if let Some(p) = trail1.finish() {
+                    stroke_skia_path(&mut tmp_pixmap, &p, [59, 41, 38, 100], 1.0 * scale);
+                }
+                let mut drop1 = tiny_skia::PathBuilder::new();
+                drop1.move_to(sx - 2.0 * s_scale, sy - 2.0 * s_scale);
+                drop1.quad_to(sx + 2.0 * s_scale, sy + 3.0 * s_scale, sx - 2.0 * s_scale, sy + 5.0 * s_scale);
+                drop1.quad_to(sx - 6.0 * s_scale, sy + 3.0 * s_scale, sx - 2.0 * s_scale, sy - 2.0 * s_scale);
+                drop1.close();
+                if let Some(p) = drop1.finish() {
+                    fill_skia_path(&mut tmp_pixmap, &p, [180, 230, 255, 230]);
+                    stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 1.2 * scale);
+                }
+
+                // Right sweat drop
+                let (sx2, sy2) = map_face_brow(278.0, 168.0);
+                let mut trail2 = tiny_skia::PathBuilder::new();
+                trail2.move_to(sx2 + 2.0 * s_scale, sy2 - 14.0 * s_scale);
+                trail2.quad_to(sx2 + 3.0 * s_scale, sy2 - 8.0 * s_scale, sx2 + 2.0 * s_scale, sy2 - 2.0 * s_scale);
+                if let Some(p) = trail2.finish() {
+                    stroke_skia_path(&mut tmp_pixmap, &p, [59, 41, 38, 100], 1.0 * scale);
+                }
+                let mut drop2 = tiny_skia::PathBuilder::new();
+                drop2.move_to(sx2 + 2.0 * s_scale, sy2 - 2.0 * s_scale);
+                drop2.quad_to(sx2 + 6.0 * s_scale, sy2 + 3.0 * s_scale, sx2 + 2.0 * s_scale, sy2 + 5.0 * s_scale);
+                drop2.quad_to(sx2 - 2.0 * s_scale, sy2 + 3.0 * s_scale, sx2 + 2.0 * s_scale, sy2 - 2.0 * s_scale);
+                drop2.close();
+                if let Some(p) = drop2.finish() {
+                    fill_skia_path(&mut tmp_pixmap, &p, [180, 230, 255, 230]);
+                    stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 1.2 * scale);
+                }
+            }
+
             // Cut off the head below the desk top (desk top surface starts at 146.0 * scale, projected with y_shift 30.0 to 176.0 * scale)
             let threshold_y = (146.0 + 30.0) * scale;
             let w = pixmap.width();
@@ -13919,7 +13961,6 @@ mod windows_overlay {
 
             let fill_color = [255, 255, 255, 255]; // white body
             let stroke_color = [59, 41, 38, 255]; // outline
-            let patch_color = [116, 172, 203, 255]; // steel-blue hair/ears
 
             let mut tmp_pixmap = tiny_skia::Pixmap::new(pixmap.width(), pixmap.height()).unwrap();
 
@@ -13974,7 +14015,7 @@ mod windows_overlay {
                 stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
             }
 
-            // Blue hair patch & ears drawing in SVG coordinates space
+            // Draw White cat ears on top of head outline
             let ear_sway = recent_pulse * 10.6; // SVG scale sway
             let ear_lift = 4.0 - look_y * 1.5;
             
@@ -13985,91 +14026,38 @@ mod windows_overlay {
             let right_base_inner = map(214.0, 119.0);
             let right_tip = map(262.0 + ear_sway, 68.0 - ear_lift);
             let right_base_outer = map(248.0, 121.0);
-            
-            let patch_left = map(132.0, 150.0);
-            let patch_right = map(268.0, 150.0);
-            
-            let patch_top_mid = map(200.0, 110.0);
-            let hairline_mid = map(200.0, 142.0); // parting peak
 
-            let mut patch = tiny_skia::PathBuilder::new();
-            patch.move_to(patch_left.0, patch_left.1);
-            patch.quad_to(
-                map(138.0, 132.0).0, map(138.0, 132.0).1,
-                left_base_outer.0, left_base_outer.1,
-            );
-            patch.line_to(left_tip.0, left_tip.1);
-            patch.line_to(left_base_inner.0, left_base_inner.1);
-            patch.quad_to(
-                map(193.0, 112.0).0, map(193.0, 112.0).1,
-                patch_top_mid.0, patch_top_mid.1,
-            );
-            patch.quad_to(
-                map(207.0, 112.0).0, map(207.0, 112.0).1,
-                right_base_inner.0, right_base_inner.1,
-            );
-            patch.line_to(right_tip.0, right_tip.1);
-            patch.line_to(right_base_outer.0, right_base_outer.1);
-            patch.quad_to(
-                map(262.0, 132.0).0, map(262.0, 132.0).1,
-                patch_right.0, patch_right.1,
-            );
-            
-            let ctrl_right = map(234.0, 174.0);
-            let ctrl_left = map(166.0, 174.0);
-            
-            patch.quad_to(
-                ctrl_right.0, ctrl_right.1,
-                hairline_mid.0, hairline_mid.1,
-            );
-            patch.quad_to(
-                ctrl_left.0, ctrl_left.1,
-                patch_left.0, patch_left.1,
-            );
-            patch.close();
-            if let Some(path) = patch.finish() {
-                fill_skia_path(&mut tmp_pixmap, &path, patch_color);
+            // Left ear fill & outline
+            let mut left_ear = tiny_skia::PathBuilder::new();
+            left_ear.move_to(left_base_outer.0, left_base_outer.1);
+            left_ear.line_to(left_tip.0, left_tip.1);
+            left_ear.line_to(left_base_inner.0, left_base_inner.1);
+            left_ear.close();
+            if let Some(path) = left_ear.finish() {
+                fill_skia_path(&mut tmp_pixmap, &path, fill_color);
             }
-
-            // Hairline outline
-            let mut hairline = tiny_skia::PathBuilder::new();
-            hairline.move_to(patch_left.0, patch_left.1);
-            hairline.quad_to(
-                ctrl_left.0, ctrl_left.1,
-                hairline_mid.0, hairline_mid.1,
-            );
-            hairline.quad_to(
-                ctrl_right.0, ctrl_right.1,
-                patch_right.0, patch_right.1,
-            );
-            if let Some(path) = hairline.finish() {
+            let mut left_ear_outline = tiny_skia::PathBuilder::new();
+            left_ear_outline.move_to(left_base_outer.0, left_base_outer.1);
+            left_ear_outline.line_to(left_tip.0, left_tip.1);
+            left_ear_outline.line_to(left_base_inner.0, left_base_inner.1);
+            if let Some(path) = left_ear_outline.finish() {
                 stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
             }
 
-            // Head top & ears outline
-            let mut top_outline = tiny_skia::PathBuilder::new();
-            top_outline.move_to(patch_left.0, patch_left.1);
-            top_outline.quad_to(
-                map(138.0, 132.0).0, map(138.0, 132.0).1,
-                left_base_outer.0, left_base_outer.1,
-            );
-            top_outline.line_to(left_tip.0, left_tip.1);
-            top_outline.line_to(left_base_inner.0, left_base_inner.1);
-            top_outline.quad_to(
-                map(193.0, 112.0).0, map(193.0, 112.0).1,
-                patch_top_mid.0, patch_top_mid.1,
-            );
-            top_outline.quad_to(
-                map(207.0, 112.0).0, map(207.0, 112.0).1,
-                right_base_inner.0, right_base_inner.1,
-            );
-            top_outline.line_to(right_tip.0, right_tip.1);
-            top_outline.line_to(right_base_outer.0, right_base_outer.1);
-            top_outline.quad_to(
-                map(262.0, 132.0).0, map(262.0, 132.0).1,
-                patch_right.0, patch_right.1,
-            );
-            if let Some(path) = top_outline.finish() {
+            // Right ear fill & outline
+            let mut right_ear = tiny_skia::PathBuilder::new();
+            right_ear.move_to(right_base_outer.0, right_base_outer.1);
+            right_ear.line_to(right_tip.0, right_tip.1);
+            right_ear.line_to(right_base_inner.0, right_base_inner.1);
+            right_ear.close();
+            if let Some(path) = right_ear.finish() {
+                fill_skia_path(&mut tmp_pixmap, &path, fill_color);
+            }
+            let mut right_ear_outline = tiny_skia::PathBuilder::new();
+            right_ear_outline.move_to(right_base_outer.0, right_base_outer.1);
+            right_ear_outline.line_to(right_tip.0, right_tip.1);
+            right_ear_outline.line_to(right_base_inner.0, right_base_inner.1);
+            if let Some(path) = right_ear_outline.finish() {
                 stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
             }
 
@@ -14077,10 +14065,10 @@ mod windows_overlay {
                 &mut tmp_pixmap,
                 head_cx + look_x * 0.2,
                 head_cy + 10.0 * scale + look_y * 0.35,
-                38.0 * scale,
-                34.0 * scale,
+                45.0 * scale,
+                40.0 * scale,
                 red_factor,
-                [255, 118, 128, 255],
+                [255, 90, 105, 255],
             );
 
             // Left eyebrow
