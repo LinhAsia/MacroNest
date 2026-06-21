@@ -13725,6 +13725,15 @@ mod windows_overlay {
                 return;
             }
 
+            let time_s = unsafe { GetTickCount() } as f32 * 0.001;
+
+            let face_wobble_fast_x = (time_s * 1.65).sin() * 0.16 * scale;
+            let face_wobble_fast_y = (time_s * 1.2 + 0.7).sin() * 0.1 * scale;
+            let face_wobble_mid_x = (time_s * 1.05 + 0.9).sin() * 0.42 * scale;
+            let face_wobble_mid_y = (time_s * 0.92 + 1.4).sin() * 0.26 * scale;
+            let face_wobble_slow_x = (time_s * 0.58 + 1.8).sin() * 0.55 * scale;
+            let face_wobble_slow_y = (time_s * 0.52 + 2.3).sin() * 0.34 * scale;
+
             // SVG viewBox: origin ~(264, 205), head spans roughly x=[526..1733], y=[218..1180]
             // We map this to Chiikawa coordinate space (x=[60..340], y=[0..340]) so we can
             // reuse quick_key_display_chiikawa_map_point for the same 3D perspective warp.
@@ -13751,15 +13760,47 @@ mod windows_overlay {
             let screen_y_at_ch0 = 27.4_f32 * scale; // approximate screen y when chiikawa-y=0
             let dest_y = (178.0 * scale - CH * 0.53 * scale - screen_y_at_ch0).round() as i32;
 
-            let map_svg_pt = |sx: f32, sy: f32| -> (f32, f32) {
-                let xc = CX + (sx - SVG_CX) * (HALF_W_CH / HALF_W_SVG);
-                let yc = (sy - SVG_TOP) * (CH / SVG_H);
-                let (px, py) = quick_key_display_chiikawa_map_point(xc, yc, scale, perspective);
-                (px, py - screen_y_at_ch0)
-            };
-
             let identity = tiny_skia::Transform::identity();
             for (i, &(d, color)) in CUSTOM_MASCOT_PATHS.iter().enumerate() {
+                let map_svg_pt = |sx: f32, sy: f32| -> (f32, f32) {
+                    let xc = CX + (sx - SVG_CX) * (HALF_W_CH / HALF_W_SVG);
+                    let yc = (sy - SVG_TOP) * (CH / SVG_H);
+
+                    let (look_mul_x, look_mul_y, wobble_x, wobble_y) = match i {
+                        // Left cheek/blush and lines
+                        4 | 5 | 6 | 7 | 8 => (0.38, 0.46, face_wobble_slow_x, face_wobble_slow_y),
+                        // Right cheek/blush and lines
+                        9 | 10 | 11 | 12 => (0.38, 0.46, face_wobble_slow_x, face_wobble_slow_y),
+                        // Left eye & highlights
+                        14 | 15 | 16 => (0.8, 0.78, face_wobble_mid_x, face_wobble_fast_y),
+                        // Right eye & highlights
+                        13 | 17 | 18 => (0.8, 0.78, face_wobble_mid_x, face_wobble_fast_y),
+                        // Nose & Mouth
+                        19 | 20 => (0.6, 0.65, face_wobble_mid_x * 0.75, face_wobble_mid_y),
+                        // Left eyebrow
+                        21 => (0.48, 0.46, face_wobble_fast_x, face_wobble_fast_y),
+                        // Right eyebrow
+                        22 => (0.48, 0.46, face_wobble_fast_x, face_wobble_fast_y),
+                        // Head outline, hair, ears (0, 1, 2, 3)
+                        _ => (0.1, 0.1, 0.0, 0.0),
+                    };
+
+                    let (mut px, mut py) = quick_key_display_chiikawa_map_point(xc, yc, scale, perspective);
+
+                    px += look_x * look_mul_x + wobble_x;
+                    py += look_y * look_mul_y + wobble_y;
+
+                    // Apply ear wiggle only for head outline, hair, ears (0, 1, 2, 3) and only in the upper region
+                    if (i == 0 || i == 1 || i == 2 || i == 3) && yc < 130.0 {
+                        let side = if xc < CX { -1.0_f32 } else { 1.0_f32 };
+                        let ear_off = quick_key_display_chiikawa_ear_offset(yc, scale, time_s, look_x, look_y, recent_pulse, side);
+                        px += ear_off.0;
+                        py += ear_off.1;
+                    }
+
+                    (px, py - screen_y_at_ch0)
+                };
+
                 if let Some(path) = parse_svg_path_warped(d, &map_svg_pt) {
                     if i == 0 {
                         // Silhouette: white fill + dark stroke
