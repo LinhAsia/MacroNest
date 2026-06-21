@@ -13601,53 +13601,56 @@ mod windows_overlay {
             // 8. Left eye
             let (ex1, ey1) = map_face(159.0, 184.0);
             let r_eye = 15.0 * 0.53 * scale;
-            if red_factor > 0.85 {
-                fill_skia_circle(&mut tmp_pixmap, ex1, ey1, r_eye, [255, 255, 255, 255]);
-                stroke_skia_circle(&mut tmp_pixmap, ex1, ey1, r_eye, 7.0 * 0.53 * scale, stroke_color);
-            } else {
-                fill_skia_circle(&mut tmp_pixmap, ex1, ey1, r_eye, [74, 45, 42, 255]);
-                stroke_skia_circle(&mut tmp_pixmap, ex1, ey1, r_eye, 7.0 * 0.53 * scale, stroke_color);
+            let eye_heat = ((red_factor - 0.55) / 0.3).clamp(0.0, 1.0);
+            let eye_fill = quick_key_display_mix_rgba([74, 45, 42, 255], [255, 255, 255, 255], eye_heat);
+            let eye_highlight = quick_key_display_mix_rgba([255, 255, 255, 255], [255, 255, 255, 0], eye_heat);
+            fill_skia_circle(&mut tmp_pixmap, ex1, ey1, r_eye, eye_fill);
+            stroke_skia_circle(&mut tmp_pixmap, ex1, ey1, r_eye, 7.0 * 0.53 * scale, stroke_color);
+            if eye_highlight[3] > 0 {
                 let (h1x, h1y) = map_face(154.0, 177.0);
-                fill_skia_circle(&mut tmp_pixmap, h1x, h1y, 5.0 * 0.53 * scale, [255, 255, 255, 255]);
+                fill_skia_circle(&mut tmp_pixmap, h1x, h1y, 5.0 * 0.53 * scale, eye_highlight);
                 let (h2x, h2y) = map_face(164.0, 190.0);
-                fill_skia_circle(&mut tmp_pixmap, h2x, h2y, 4.0 * 0.53 * scale, [255, 255, 255, 255]);
+                fill_skia_circle(&mut tmp_pixmap, h2x, h2y, 4.0 * 0.53 * scale, eye_highlight);
             }
 
             // 9. Right eye
             let (ex2, ey2) = map_face(241.0, 184.0);
-            if red_factor > 0.85 {
-                fill_skia_circle(&mut tmp_pixmap, ex2, ey2, r_eye, [255, 255, 255, 255]);
-                stroke_skia_circle(&mut tmp_pixmap, ex2, ey2, r_eye, 7.0 * 0.53 * scale, stroke_color);
-            } else {
-                fill_skia_circle(&mut tmp_pixmap, ex2, ey2, r_eye, [74, 45, 42, 255]);
-                stroke_skia_circle(&mut tmp_pixmap, ex2, ey2, r_eye, 7.0 * 0.53 * scale, stroke_color);
+            fill_skia_circle(&mut tmp_pixmap, ex2, ey2, r_eye, eye_fill);
+            stroke_skia_circle(&mut tmp_pixmap, ex2, ey2, r_eye, 7.0 * 0.53 * scale, stroke_color);
+            if eye_highlight[3] > 0 {
                 let (h1x, h1y) = map_face(236.0, 177.0);
-                fill_skia_circle(&mut tmp_pixmap, h1x, h1y, 5.0 * 0.53 * scale, [255, 255, 255, 255]);
+                fill_skia_circle(&mut tmp_pixmap, h1x, h1y, 5.0 * 0.53 * scale, eye_highlight);
                 let (h2x, h2y) = map_face(246.0, 190.0);
-                fill_skia_circle(&mut tmp_pixmap, h2x, h2y, 4.0 * 0.53 * scale, [255, 255, 255, 255]);
+                fill_skia_circle(&mut tmp_pixmap, h2x, h2y, 4.0 * 0.53 * scale, eye_highlight);
             }
 
             // 10. Left cheek
+            let cheek_fill = quick_key_display_mix_rgba(
+                [255, 196, 202, 112],
+                [255, 122, 146, 228],
+                red_factor,
+            );
+            let cheek_line = quick_key_display_mix_rgba(stroke_color, [255, 92, 120, 255], red_factor * 0.85);
             let (cx1, cy1) = map_face(126.0, 215.0);
-            fill_skia_ellipse(&mut tmp_pixmap, cx1, cy1, 24.0 * 0.53 * scale, 17.0 * 0.53 * scale, [255, 190, 194, 255]);
+            fill_skia_ellipse(&mut tmp_pixmap, cx1, cy1, 24.0 * 0.53 * scale, 17.0 * 0.53 * scale, cheek_fill);
             for &(x1, y1, x2, y2) in &[(112.0, 207.0, 106.0, 222.0), (123.0, 205.0, 117.0, 222.0), (134.0, 207.0, 128.0, 222.0)] {
                 let mut path = tiny_skia::PathBuilder::new();
                 let start = map_face(x1, y1); path.move_to(start.0, start.1);
                 let end = map_face(x2, y2); path.line_to(end.0, end.1);
                 if let Some(p) = path.finish() {
-                    stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * 0.53 * scale);
+                    stroke_skia_path(&mut tmp_pixmap, &p, cheek_line, 5.0 * 0.53 * scale);
                 }
             }
 
             // 11. Right cheek
             let (cx2, cy2) = map_face(274.0, 215.0);
-            fill_skia_ellipse(&mut tmp_pixmap, cx2, cy2, 24.0 * 0.53 * scale, 17.0 * 0.53 * scale, [255, 190, 194, 255]);
+            fill_skia_ellipse(&mut tmp_pixmap, cx2, cy2, 24.0 * 0.53 * scale, 17.0 * 0.53 * scale, cheek_fill);
             for &(x1, y1, x2, y2) in &[(262.0, 207.0, 256.0, 222.0), (273.0, 205.0, 267.0, 222.0), (284.0, 207.0, 278.0, 222.0)] {
                 let mut path = tiny_skia::PathBuilder::new();
                 let start = map_face(x1, y1); path.move_to(start.0, start.1);
                 let end = map_face(x2, y2); path.line_to(end.0, end.1);
                 if let Some(p) = path.finish() {
-                    stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * 0.53 * scale);
+                    stroke_skia_path(&mut tmp_pixmap, &p, cheek_line, 5.0 * 0.53 * scale);
                 }
             }
 
@@ -14169,11 +14172,11 @@ mod windows_overlay {
             if let Some(p) = right_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
         } else {
             // Usagi (ChiikawaClassic) - cute thin yellow arms and paws
-            let shoulder_offset = 45.0 * scale;
+            let shoulder_offset = 33.0 * scale;
             let left_shoulder_cx = body_cx - shoulder_offset;
-            let left_shoulder_cy = body_cy + 8.5 * scale;
+            let left_shoulder_cy = body_cy - 1.5 * scale;
             let right_shoulder_cx = body_cx + shoulder_offset;
-            let right_shoulder_cy = body_cy + 8.5 * scale;
+            let right_shoulder_cy = body_cy - 1.5 * scale;
 
             let left_paw_x = left_paw_target.0;
             let left_paw_y = left_paw_target.1 + paw_press;
@@ -14182,7 +14185,7 @@ mod windows_overlay {
 
             let (ux_l, uy_l) = { let d = ((left_paw_x - left_shoulder_cx).powi(2) + (left_paw_y - left_shoulder_cy).powi(2)).sqrt().max(1.0); ((left_paw_x - left_shoulder_cx) / d, (left_paw_y - left_shoulder_cy) / d) };
             let (px_l, py_l) = (-uy_l, ux_l);
-            let shoulder_width = 12.5 * scale; // Thick shoulder attachment matching Hachiware
+            let shoulder_width = 9.5 * scale;
             let left_shoulder_top    = (left_shoulder_cx + px_l * shoulder_width, left_shoulder_cy + py_l * shoulder_width);
             let left_shoulder_bottom = (left_shoulder_cx - px_l * shoulder_width, left_shoulder_cy - py_l * shoulder_width);
 
@@ -14195,30 +14198,27 @@ mod windows_overlay {
             let stroke_color = [45, 40, 42, 255]; // Consistent dark grey outline
             let stroke_w = 2.2 * scale;
 
-            // Larger shoulder cap matching Hachiware
-            let cap_r = 13.0 * scale;
+            let cap_r = 8.5 * scale;
             fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, arm_fill);
             stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, stroke_w, stroke_color);
             fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, arm_fill);
             stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, stroke_w, stroke_color);
 
-            // Thick left arm path matching Hachiware
             let mut left_arm = tiny_skia::PathBuilder::new();
             left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
-            left_arm.quad_to(left_paw_x - 16.0 * scale, left_paw_y - 12.0 * scale, left_paw_x - 10.0 * scale, left_paw_y + 4.0 * scale);
-            left_arm.quad_to(left_paw_x, left_paw_y + 14.0 * scale, left_paw_x + 10.0 * scale, left_paw_y + 2.0 * scale);
-            left_arm.quad_to(left_paw_x + 6.0 * scale, left_paw_y - 12.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
+            left_arm.quad_to(left_paw_x - 14.0 * scale, left_paw_y - 10.0 * scale, left_paw_x - 9.0 * scale, left_paw_y + 3.0 * scale);
+            left_arm.quad_to(left_paw_x, left_paw_y + 12.0 * scale, left_paw_x + 9.0 * scale, left_paw_y + 1.0 * scale);
+            left_arm.quad_to(left_paw_x + 5.0 * scale, left_paw_y - 10.0 * scale, left_shoulder_bottom.0, left_shoulder_bottom.1);
             let left_arm_stroke = left_arm.clone();
             left_arm.close();
             if let Some(p) = left_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
             if let Some(p) = left_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
 
-            // Thick right arm path matching Hachiware
             let mut right_arm = tiny_skia::PathBuilder::new();
             right_arm.move_to(right_shoulder_top.0, right_shoulder_top.1);
-            right_arm.quad_to(right_paw_x + 16.0 * scale, right_paw_y - 12.0 * scale, right_paw_x + 10.0 * scale, right_paw_y + 4.0 * scale);
-            right_arm.quad_to(right_paw_x, right_paw_y + 14.0 * scale, right_paw_x - 10.0 * scale, right_paw_y + 2.0 * scale);
-            right_arm.quad_to(right_paw_x - 6.0 * scale, right_paw_y - 12.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
+            right_arm.quad_to(right_paw_x + 14.0 * scale, right_paw_y - 10.0 * scale, right_paw_x + 9.0 * scale, right_paw_y + 3.0 * scale);
+            right_arm.quad_to(right_paw_x, right_paw_y + 12.0 * scale, right_paw_x - 9.0 * scale, right_paw_y + 1.0 * scale);
+            right_arm.quad_to(right_paw_x - 5.0 * scale, right_paw_y - 10.0 * scale, right_shoulder_bottom.0, right_shoulder_bottom.1);
             let right_arm_stroke = right_arm.clone();
             right_arm.close();
             if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
