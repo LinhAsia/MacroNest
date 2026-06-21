@@ -14308,20 +14308,19 @@ mod windows_overlay {
 
                 let top_center_x = root_x + side * 0.8 * scale;
                 let top_center_y = root_y;
-                let mid_center_x = root_x + dx * 0.52 + side * 0.9 * scale;
-                let mid_center_y = root_y + dy * 0.5 - 1.2 * scale;
                 let bottom_center_x = paw_x - side * 0.6 * scale;
                 let bottom_center_y = paw_y + 2.2 * scale;
+                let shaft_outer_x = root_x + dx * 0.86 + px * 1.6 * scale;
+                let shaft_outer_y = root_y + dy * 0.84 + py * 0.6 * scale;
+                let shaft_inner_x = root_x + dx * 0.84 - px * 1.4 * scale;
+                let shaft_inner_y = root_y + dy * 0.82 - py * 0.5 * scale;
 
                 let top_w = 5.3 * scale;
-                let mid_w = 7.3 * scale;
                 let bottom_w = 12.8 * scale;
                 let bottom_h = 8.2 * scale;
 
                 let top_outer = (top_center_x + px * top_w, top_center_y + py * top_w);
                 let top_inner = (top_center_x - px * top_w, top_center_y - py * top_w);
-                let mid_outer = (mid_center_x + px * mid_w, mid_center_y + py * mid_w);
-                let mid_inner = (mid_center_x - px * mid_w, mid_center_y - py * mid_w);
                 let bottom_outer = (bottom_center_x + px * bottom_w, bottom_center_y + py * bottom_w);
                 let bottom_inner = (bottom_center_x - px * bottom_w, bottom_center_y - py * bottom_w);
                 let bottom_arc_outer = (
@@ -14336,14 +14335,12 @@ mod windows_overlay {
                 let mut arm = tiny_skia::PathBuilder::new();
                 arm.move_to(top_outer.0, top_outer.1);
                 arm.quad_to(
-                    root_x + dx * 0.26 + px * 3.0 * scale,
-                    root_y + dy * 0.24 + py * 2.6 * scale,
-                    mid_outer.0,
-                    mid_outer.1,
+                    root_x + dx * 0.42 + px * 1.6 * scale,
+                    root_y + dy * 0.42 + py * 0.8 * scale,
+                    shaft_outer_x,
+                    shaft_outer_y,
                 );
-                arm.quad_to(
-                    root_x + dx * 0.82 + px * 5.6 * scale,
-                    root_y + dy * 0.82 + py * 1.9 * scale,
+                arm.line_to(
                     bottom_outer.0,
                     bottom_outer.1,
                 );
@@ -14365,15 +14362,10 @@ mod windows_overlay {
                     bottom_inner.0,
                     bottom_inner.1,
                 );
+                arm.line_to(shaft_inner_x, shaft_inner_y);
                 arm.quad_to(
-                    root_x + dx * 0.78 - px * 4.9 * scale,
-                    root_y + dy * 0.8 - py * 1.25 * scale,
-                    mid_inner.0,
-                    mid_inner.1,
-                );
-                arm.quad_to(
-                    root_x + dx * 0.18 - px * 0.9 * scale,
-                    root_y + dy * 0.22 - py * 0.7 * scale,
+                    root_x + dx * 0.38 - px * 1.3 * scale,
+                    root_y + dy * 0.38 - py * 0.7 * scale,
                     top_inner.0,
                     top_inner.1,
                 );
