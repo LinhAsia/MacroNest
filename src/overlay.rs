@@ -14111,23 +14111,13 @@ mod windows_overlay {
                 [255, 90, 105, 255],
             );
 
-            // Left eyebrow
-            let mut left_brow = tiny_skia::PathBuilder::new();
-            let start = map_face_brow(124.0, 163.0); left_brow.move_to(start.0, start.1);
-            let c1 = map_face_brow(132.0, 147.0); let c2 = map_face_brow(144.0, 138.0); let t = map_face_brow(158.0, 134.0);
-            left_brow.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            if let Some(p) = left_brow.finish() {
-                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * 0.53 * scale);
-            }
+            // Left eyebrow (small cute dot)
+            let (bx1, by1) = map_face_brow(164.0, 164.0);
+            fill_skia_ellipse(&mut tmp_pixmap, bx1, by1, 5.0 * 0.53 * scale, 3.5 * 0.53 * scale, stroke_color);
 
-            // Right eyebrow
-            let mut right_brow = tiny_skia::PathBuilder::new();
-            let start = map_face_brow(242.0, 134.0); right_brow.move_to(start.0, start.1);
-            let c1 = map_face_brow(257.0, 139.0); let c2 = map_face_brow(268.0, 149.0); let t = map_face_brow(275.0, 165.0);
-            right_brow.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
-            if let Some(p) = right_brow.finish() {
-                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * 0.53 * scale);
-            }
+            // Right eyebrow (small cute dot)
+            let (bx2, by2) = map_face_brow(236.0, 164.0);
+            fill_skia_ellipse(&mut tmp_pixmap, bx2, by2, 5.0 * 0.53 * scale, 3.5 * 0.53 * scale, stroke_color);
 
             // Left eye
             let (ex1, ey1) = map_face_eye(159.0, 184.0);
