@@ -14058,20 +14058,58 @@ mod windows_overlay {
                 stroke_skia_path(&mut tmp_pixmap, &path, outline_color, 2.2 * scale);
             }
 
-            for &is_left in &[true, false] {
-                let mut ear_outline = tiny_skia::PathBuilder::new();
-                if is_left {
-                    ear_outline.move_to(left_base_outer.0, left_base_outer.1);
-                    ear_outline.line_to(left_tip.0, left_tip.1);
-                    ear_outline.line_to(left_base_inner.0, left_base_inner.1);
-                } else {
-                    ear_outline.move_to(right_base_outer.0, right_base_outer.1);
-                    ear_outline.line_to(right_tip.0, right_tip.1);
-                    ear_outline.line_to(right_base_inner.0, right_base_inner.1);
-                }
-                if let Some(path) = ear_outline.finish() {
-                    stroke_skia_path(&mut tmp_pixmap, &path, outline_color, 2.2 * scale);
-                }
+            let mut top_outline = tiny_skia::PathBuilder::new();
+            top_outline.move_to(patch_left.0, patch_left.1);
+            top_outline.quad_to(
+                head_center_x - 57.0 * scale,
+                head_center_y - 25.0 * scale,
+                left_base_outer.0,
+                left_base_outer.1,
+            );
+            top_outline.quad_to(
+                head_center_x - 45.0 * scale + turn_x * -5.4 * scale,
+                head_center_y - 48.0 * scale - ear_lift * 0.35,
+                left_tip.0,
+                left_tip.1,
+            );
+            top_outline.quad_to(
+                head_center_x - 26.0 * scale + turn_x * -4.8 * scale,
+                head_center_y - 44.0 * scale - ear_lift * 0.12,
+                left_base_inner.0,
+                left_base_inner.1,
+            );
+            top_outline.quad_to(
+                head_center_x - 14.0 * scale,
+                head_center_y - 45.0 * scale - ear_lift * 0.08,
+                patch_top_mid.0,
+                patch_top_mid.1,
+            );
+            top_outline.quad_to(
+                head_center_x + 14.0 * scale,
+                head_center_y - 45.0 * scale - ear_lift * 0.08,
+                right_base_inner.0,
+                right_base_inner.1,
+            );
+            top_outline.quad_to(
+                head_center_x + 26.0 * scale + turn_x * -4.8 * scale,
+                head_center_y - 44.0 * scale - ear_lift * 0.12,
+                right_tip.0,
+                right_tip.1,
+            );
+            top_outline.quad_to(
+                head_center_x + 45.0 * scale + turn_x * -5.4 * scale,
+                head_center_y - 48.0 * scale - ear_lift * 0.35,
+                right_base_outer.0,
+                right_base_outer.1,
+            );
+            top_outline.quad_to(
+                head_center_x + 57.0 * scale,
+                head_center_y - 25.0 * scale,
+                patch_right.0,
+                patch_right.1,
+            );
+            if let Some(path) = top_outline.finish() {
+                stroke_skia_path(&mut tmp_pixmap, &path, outline_color, 2.2 * scale);
             }
 
             quick_key_display_apply_heat_tint_ellipse(
