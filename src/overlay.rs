@@ -2872,7 +2872,7 @@ mod windows_overlay {
                         let x = (lparam.0 & 0xffff) as i16 as i32;
                         let y = ((lparam.0 >> 16) & 0xffff) as i16 as i32;
                         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
-                        let (width, height) = quick_key_display_mascot_layout_size(font_size);
+                        let (width, height) = quick_key_display_mascot_layout_size(font_size, runtime.quick_key_display_mascot_style);
                         runtime.quick_key_display_center_x = x + (width / 2);
                         runtime.quick_key_display_center_y = y + (height / 2);
                     }
@@ -5739,12 +5739,17 @@ mod windows_overlay {
     unsafe impl Send for QuickKeyDisplayMascotKey {}
     unsafe impl Sync for QuickKeyDisplayMascotKey {}
 
-    fn quick_key_display_mascot_scale(font_size: f32) -> f32 {
-        (font_size / 36.0).clamp(0.72, 2.4)
+    fn quick_key_display_mascot_scale(font_size: f32, mascot_style: crate::model::MascotStyle) -> f32 {
+        let base = (font_size / 36.0).clamp(0.72, 2.4);
+        if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            base * 1.25
+        } else {
+            base
+        }
     }
 
-    fn quick_key_display_mascot_layout_size(font_size: f32) -> (i32, i32) {
-        let scale = quick_key_display_mascot_scale(font_size);
+    fn quick_key_display_mascot_layout_size(font_size: f32, mascot_style: crate::model::MascotStyle) -> (i32, i32) {
+        let scale = quick_key_display_mascot_scale(font_size, mascot_style);
         (
             (430.0 * scale).round() as i32,
             (290.0 * scale).round() as i32,
@@ -5984,7 +5989,7 @@ mod windows_overlay {
 
     fn move_quick_key_display_window(runtime: &Runtime) {
         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
-        let (width, height) = quick_key_display_mascot_layout_size(font_size);
+        let (width, height) = quick_key_display_mascot_layout_size(font_size, runtime.quick_key_display_mascot_style);
         let x = runtime.quick_key_display_center_x - (width / 2);
         let y = runtime.quick_key_display_center_y - (height / 2);
         let _ = unsafe {
@@ -6069,7 +6074,7 @@ mod windows_overlay {
                     return false;
                 };
                 let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
-                let (width, height) = quick_key_display_mascot_layout_size(font_size);
+                let (width, height) = quick_key_display_mascot_layout_size(font_size, runtime.quick_key_display_mascot_style);
                 let center_x = start_center_x + (cursor.x - start_mouse_x);
                 let center_y = start_center_y + (cursor.y - start_mouse_y);
                 let (center_x, center_y) =
@@ -7289,7 +7294,7 @@ mod windows_overlay {
             QuickKeyDisplayMode::Normal => {
                 quick_key_display_layout_size(&entries, &slot_labels, font_size)
             }
-            QuickKeyDisplayMode::Mascot => quick_key_display_mascot_layout_size(font_size),
+            QuickKeyDisplayMode::Mascot => quick_key_display_mascot_layout_size(font_size, runtime.quick_key_display_mascot_style),
         };
         if runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot {
             let (center_x, center_y) = clamp_mascot_center_to_screen(
@@ -14264,7 +14269,7 @@ mod windows_overlay {
         let mut pixmap = tiny_skia::Pixmap::new(width as u32, height as u32)
             .ok_or_else(|| anyhow::anyhow!("Failed to allocate mascot key display pixmap"))?;
 
-        let scale = quick_key_display_mascot_scale(font_size);
+        let scale = quick_key_display_mascot_scale(font_size, mascot_style);
         let now = Instant::now();
         
         let recent_pulse = entries.iter().fold(0.0f32, |acc, entry| {
