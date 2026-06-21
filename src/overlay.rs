@@ -349,6 +349,163 @@ mod windows_overlay {
     });
     static SEARCH_AREA_OVERLAY_REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
     static UI_CONTEXT: Lazy<Mutex<Option<egui::Context>>> = Lazy::new(|| Mutex::new(None));
+    static USAGI_TREE: Lazy<resvg::usvg::Tree> = Lazy::new(|| {
+        let svg_code = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <defs>
+    <style>
+      .outline {
+        stroke: #3b2926;
+        stroke-width: 7;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .thin {
+        stroke: #3b2926;
+        stroke-width: 5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+      }
+    </style>
+  </defs>
+
+  <!-- tai trái -->
+  <path class="outline"
+        d="M165 123
+           C154 95 151 42 169 23
+           C181 11 193 21 196 45
+           C199 70 196 101 190 124
+           Z"
+        fill="#fff1bd"/>
+
+  <!-- tai phải -->
+  <path class="outline"
+        d="M211 123
+           C209 94 210 39 226 23
+           C239 11 253 22 256 47
+           C260 75 253 106 244 127
+           Z"
+        fill="#fff1bd"/>
+
+  <!-- lòng tai trái -->
+  <path d="M173 111
+           C166 85 165 43 176 30
+           C185 38 187 83 182 112"
+        fill="#ffb7bd"/>
+
+  <!-- lòng tai phải -->
+  <path d="M224 112
+           C222 83 224 39 234 30
+           C246 43 245 83 238 113"
+        fill="#ffb7bd"/>
+
+  <!-- thân + đầu -->
+  <path class="outline"
+        d="M151 121
+           C102 126 66 164 65 216
+           C64 254 82 280 107 292
+
+           C104 312 106 330 116 337
+           C125 343 132 337 132 324
+           L132 310
+
+           C146 319 169 324 200 324
+           C230 324 254 320 268 311
+           L268 327
+           C268 340 277 345 285 337
+           C292 330 294 312 292 293
+
+           C318 282 335 254 334 216
+           C333 165 297 128 249 121
+
+           C238 118 224 117 207 118
+           L194 118
+           C178 117 163 118 151 121
+           Z"
+        fill="#fff1bd"/>
+
+  <!-- tay trái -->
+  <path class="outline"
+        d="M103 282
+           C94 285 96 307 105 310
+           C112 312 115 302 114 288"
+        fill="#fff1bd"/>
+
+  <!-- tay phải -->
+  <path class="outline"
+        d="M296 282
+           C305 285 303 307 294 310
+           C287 312 284 302 285 288"
+        fill="#fff1bd"/>
+
+  <!-- chân trái -->
+  <path class="outline"
+        d="M125 318
+           C120 335 121 357 131 359
+           C140 361 143 339 140 323"
+        fill="#fff1bd"/>
+
+  <!-- chân phải -->
+  <path class="outline"
+        d="M275 318
+           C280 335 279 357 269 359
+           C260 361 257 339 260 323"
+        fill="#fff1bd"/>
+
+  <!-- lông mày trái -->
+  <path class="thin"
+        d="M124 163
+           C132 147 144 138 158 134"/>
+
+  <!-- lông mày phải -->
+  <path class="thin"
+        d="M242 134
+           C257 139 268 149 275 165"/>
+
+  <!-- mắt trái -->
+  <circle class="outline" cx="159" cy="184" r="15" fill="#4a2d2a"/>
+  <circle cx="154" cy="177" r="5" fill="#ffffff"/>
+  <circle cx="164" cy="190" r="4" fill="#ffffff"/>
+
+  <!-- mắt phải -->
+  <circle class="outline" cx="241" cy="184" r="15" fill="#4a2d2a"/>
+  <circle cx="236" cy="177" r="5" fill="#ffffff"/>
+  <circle cx="246" cy="190" r="4" fill="#ffffff"/>
+
+  <!-- má trái -->
+  <ellipse cx="126" cy="215" rx="24" ry="17" fill="#ffbec2"/>
+  <path class="thin" d="M112 207 L106 222"/>
+  <path class="thin" d="M123 205 L117 222"/>
+  <path class="thin" d="M134 207 L128 222"/>
+
+  <!-- má phải -->
+  <ellipse cx="274" cy="215" rx="24" ry="17" fill="#ffbec2"/>
+  <path class="thin" d="M262 207 L256 222"/>
+  <path class="thin" d="M273 205 L267 222"/>
+  <path class="thin" d="M284 207 L278 222"/>
+
+  <!-- mũi -->
+  <path class="outline"
+        d="M194 210
+           C198 206 202 206 206 210
+           C203 214 197 214 194 210Z"
+        fill="#3b2926"/>
+
+  <!-- miệng -->
+  <path class="thin"
+        d="M200 214
+           C200 224 190 227 184 220"/>
+  <path class="thin"
+        d="M200 214
+           C200 224 210 227 216 220"/>
+  <path class="thin"
+        d="M189 231
+           C196 238 207 238 214 231"/>
+</svg>"##;
+        let options = resvg::usvg::Options::default();
+        resvg::usvg::Tree::from_data(svg_code.as_bytes(), &options).unwrap()
+    });
     static CONTROLLER_HWND: AtomicIsize = AtomicIsize::new(0);
     static ACTIVE_HIGHLIGHT_HWND: AtomicIsize = AtomicIsize::new(0);
     static ACTIVE_PIN_SOURCE_HWND: AtomicIsize = AtomicIsize::new(0);
@@ -13186,6 +13343,37 @@ mod windows_overlay {
         red_factor: f32,
     ) {
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
+        if !is_hachiware {
+            let f = 0.53;
+            let tx = 64.4 * scale + look_x;
+            let ty = 27.4 * scale + look_y;
+            let transform = tiny_skia::Transform::from_scale(f * scale, f * scale)
+                .post_translate(tx, ty);
+            resvg::render(&USAGI_TREE, transform, &mut pixmap.as_mut());
+
+            if red_factor > 0.0 {
+                let tint_alpha = (180.0 * red_factor) as u32;
+                let data = pixmap.data_mut();
+                for pixel in data.chunks_exact_mut(4) {
+                    let a = pixel[3] as u32;
+                    if a > 0 {
+                        let r = pixel[0] as u32;
+                        let g = pixel[1] as u32;
+                        let b = pixel[2] as u32;
+                        
+                        let new_r = (r * (255 - tint_alpha) + a * tint_alpha) / 255;
+                        let new_g = (g * (255 - tint_alpha) + ((60 * a) * tint_alpha) / 255) / 255;
+                        let new_b = (b * (255 - tint_alpha) + ((60 * a) * tint_alpha) / 255) / 255;
+                        
+                        pixel[0] = new_r.min(a) as u8;
+                        pixel[1] = new_g.min(a) as u8;
+                        pixel[2] = new_b.min(a) as u8;
+                    }
+                }
+            }
+            return;
+        }
+
         let body_r = if is_hachiware {
             body_radius
         } else {
@@ -13279,6 +13467,54 @@ mod windows_overlay {
         recent_pulse: f32,
     ) {
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
+        if !is_hachiware {
+            let f = 0.53;
+            let tx = 64.4 * scale + look_x;
+            let ty = 27.4 * scale + look_y;
+            let transform = tiny_skia::Transform::from_scale(f * scale, f * scale)
+                .post_translate(tx, ty);
+
+            let mut tmp_pixmap = tiny_skia::Pixmap::new(pixmap.width(), pixmap.height()).unwrap();
+            resvg::render(&USAGI_TREE, transform, &mut tmp_pixmap.as_mut());
+
+            if red_factor > 0.0 {
+                let tint_alpha = (180.0 * red_factor) as u32;
+                let data = tmp_pixmap.data_mut();
+                for pixel in data.chunks_exact_mut(4) {
+                    let a = pixel[3] as u32;
+                    if a > 0 {
+                        let r = pixel[0] as u32;
+                        let g = pixel[1] as u32;
+                        let b = pixel[2] as u32;
+                        
+                        let new_r = (r * (255 - tint_alpha) + a * tint_alpha) / 255;
+                        let new_g = (g * (255 - tint_alpha) + ((60 * a) * tint_alpha) / 255) / 255;
+                        let new_b = (b * (255 - tint_alpha) + ((60 * a) * tint_alpha) / 255) / 255;
+                        
+                        pixel[0] = new_r.min(a) as u8;
+                        pixel[1] = new_g.min(a) as u8;
+                        pixel[2] = new_b.min(a) as u8;
+                    }
+                }
+            }
+
+            let threshold_y = 190.0 * scale;
+            let w = pixmap.width();
+            let h = pixmap.height();
+            let dest_data = pixmap.data_mut();
+            let src_data = tmp_pixmap.data();
+
+            for y in 0..h {
+                if (y as f32) < threshold_y {
+                    let row_start = (y * w * 4) as usize;
+                    let row_end = ((y + 1) * w * 4) as usize;
+                    if row_start < dest_data.len() && row_end <= dest_data.len() && row_end <= src_data.len() {
+                        dest_data[row_start..row_end].copy_from_slice(&src_data[row_start..row_end]);
+                    }
+                }
+            }
+            return;
+        }
 
         if is_hachiware {
             // Head shadow + fill
