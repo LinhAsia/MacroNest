@@ -14023,7 +14023,6 @@ mod windows_overlay {
             hair.close();
             if let Some(path) = hair.finish() {
                 fill_skia_path(pixmap, &path, [100, 160, 230, 255]);
-                stroke_skia_path(pixmap, &path, [45, 40, 42, 255], 2.2 * scale);
             }
 
             // Head outline
