@@ -14248,27 +14248,27 @@ mod windows_overlay {
                                  paw: (f32, f32),
                                  side: f32| {
                 let ctrl_top = (shoulder.0 + side * 3.0 * scale, shoulder.1 + 14.0 * scale);
-                let ctrl_bottom = (paw.0 - side * 5.5 * scale, paw.1 - 10.0 * scale);
+                let ctrl_bottom = (paw.0 - side * 6.5 * scale, paw.1 - 9.5 * scale);
 
                 let mut arm = tiny_skia::PathBuilder::new();
                 arm.move_to(shoulder.0 - 7.8 * scale, shoulder.1 - 4.0 * scale);
                 arm.cubic_to(
                     ctrl_top.0 - 5.5 * scale,
                     ctrl_top.1 - 2.0 * scale,
-                    ctrl_bottom.0 - 6.0 * scale,
-                    ctrl_bottom.1 + 2.5 * scale,
-                    paw.0 - 7.5 * scale,
-                    paw.1 + 1.2 * scale,
+                    ctrl_bottom.0 - 6.5 * scale,
+                    ctrl_bottom.1 + 2.0 * scale,
+                    paw.0 - 8.5 * scale,
+                    paw.1 + 0.8 * scale,
                 );
                 arm.quad_to(
                     paw.0,
-                    paw.1 + 10.0 * scale,
-                    paw.0 + 7.8 * scale,
-                    paw.1 + 1.4 * scale,
+                    paw.1 + 8.8 * scale,
+                    paw.0 + 8.4 * scale,
+                    paw.1 + 0.8 * scale,
                 );
                 arm.cubic_to(
-                    ctrl_bottom.0 + 6.0 * scale,
-                    ctrl_bottom.1 + 1.5 * scale,
+                    ctrl_bottom.0 + 6.5 * scale,
+                    ctrl_bottom.1 + 2.0 * scale,
                     ctrl_top.0 + 5.2 * scale,
                     ctrl_top.1 - 1.2 * scale,
                     shoulder.0 + 7.4 * scale,
@@ -14288,10 +14288,6 @@ mod windows_overlay {
                 if let Some(path) = arm_stroke.finish() {
                     stroke_skia_path(pixmap, &path, stroke_color, stroke_w);
                 }
-
-                fill_skia_ellipse(pixmap, paw.0, paw.1 + 1.4 * scale, 7.8 * scale, 6.2 * scale, arm_fill);
-                stroke_skia_circle(pixmap, paw.0 - 3.3 * scale, paw.1 + 1.4 * scale, 4.1 * scale, stroke_w, stroke_color);
-                stroke_skia_circle(pixmap, paw.0 + 3.3 * scale, paw.1 + 1.4 * scale, 4.1 * scale, stroke_w, stroke_color);
             };
 
             draw_soft_arm(
