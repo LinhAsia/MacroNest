@@ -14228,11 +14228,11 @@ mod windows_overlay {
             if let Some(p) = right_arm.finish() { fill_skia_path(pixmap, &p, arm_fill); }
             if let Some(p) = right_arm_stroke.finish() { stroke_skia_path(pixmap, &p, stroke_color, stroke_w); }
         } else {
-            let shoulder_offset = 20.0 * scale;
+            let shoulder_offset = 34.0 * scale;
             let left_shoulder_cx = body_cx - shoulder_offset;
-            let left_shoulder_cy = body_cy - 2.0 * scale;
+            let left_shoulder_cy = body_cy + 10.0 * scale;
             let right_shoulder_cx = body_cx + shoulder_offset;
-            let right_shoulder_cy = body_cy - 2.0 * scale;
+            let right_shoulder_cy = body_cy + 10.0 * scale;
 
             let left_paw_x = left_paw_target.0;
             let left_paw_y = left_paw_target.1 + paw_press;
@@ -14252,12 +14252,6 @@ mod windows_overlay {
             let arm_fill = [255, 241, 189, 255];
             let stroke_color = [59, 41, 38, 255];
             let stroke_w = 2.2 * scale;
-
-            let cap_r = 13.0 * scale;
-            fill_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, arm_fill);
-            stroke_skia_circle(pixmap, left_shoulder_cx, left_shoulder_cy, cap_r, stroke_w, stroke_color);
-            fill_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, arm_fill);
-            stroke_skia_circle(pixmap, right_shoulder_cx, right_shoulder_cy, cap_r, stroke_w, stroke_color);
 
             let mut left_arm = tiny_skia::PathBuilder::new();
             left_arm.move_to(left_shoulder_top.0, left_shoulder_top.1);
@@ -14818,9 +14812,9 @@ mod windows_overlay {
         let mouse_projected = project_point(mouse_flat_x, mouse_flat_y);
 
         let is_hachiware = mascot_style == crate::model::MascotStyle::Hachiware;
-        let default_l_x = if is_hachiware { 130.0 } else { 146.0 };
-        let default_r_x = if is_hachiware { 214.0 } else { 190.0 };
-        let default_y = if is_hachiware { 164.0 } else { 170.0 };
+        let default_l_x = if is_hachiware { 130.0 } else { 118.0 };
+        let default_r_x = if is_hachiware { 214.0 } else { 230.0 };
+        let default_y = if is_hachiware { 164.0 } else { 174.0 };
 
         let l_target = if mouse_active { mouse_projected } else { project_point(default_l_x, default_y) };
         let mut left_paw_target = l_target;
