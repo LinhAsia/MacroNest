@@ -408,6 +408,58 @@ mod windows_overlay {
         }
         pb.finish()
     }
+
+    fn parse_svg_path_warped<F>(d: &str, map: &F) -> Option<tiny_skia::Path>
+    where
+        F: Fn(f32, f32) -> (f32, f32),
+    {
+        let mut pb = tiny_skia::PathBuilder::new();
+        let clean_d = d.replace(',', " ");
+        let mut tokens = clean_d.split_whitespace().peekable();
+        while let Some(token) = tokens.next() {
+            match token {
+                "M" | "m" => {
+                    let x = tokens.next()?.parse::<f32>().ok()?;
+                    let y = tokens.next()?.parse::<f32>().ok()?;
+                    let (px, py) = map(x, y);
+                    pb.move_to(px, py);
+                }
+                "L" | "l" => {
+                    let x = tokens.next()?.parse::<f32>().ok()?;
+                    let y = tokens.next()?.parse::<f32>().ok()?;
+                    let (px, py) = map(x, y);
+                    pb.line_to(px, py);
+                }
+                "C" | "c" => {
+                    let x1 = tokens.next()?.parse::<f32>().ok()?;
+                    let y1 = tokens.next()?.parse::<f32>().ok()?;
+                    let x2 = tokens.next()?.parse::<f32>().ok()?;
+                    let y2 = tokens.next()?.parse::<f32>().ok()?;
+                    let x3 = tokens.next()?.parse::<f32>().ok()?;
+                    let y3 = tokens.next()?.parse::<f32>().ok()?;
+                    let (p1x, p1y) = map(x1, y1);
+                    let (p2x, p2y) = map(x2, y2);
+                    let (p3x, p3y) = map(x3, y3);
+                    pb.cubic_to(p1x, p1y, p2x, p2y, p3x, p3y);
+                }
+                "Q" | "q" => {
+                    let x1 = tokens.next()?.parse::<f32>().ok()?;
+                    let y1 = tokens.next()?.parse::<f32>().ok()?;
+                    let x2 = tokens.next()?.parse::<f32>().ok()?;
+                    let y2 = tokens.next()?.parse::<f32>().ok()?;
+                    let (p1x, p1y) = map(x1, y1);
+                    let (p2x, p2y) = map(x2, y2);
+                    pb.quad_to(p1x, p1y, p2x, p2y);
+                }
+                "Z" | "z" => {
+                    pb.close();
+                }
+                _ => {}
+            }
+        }
+        pb.finish()
+    }
+
     pub fn add_active_step(preset_id: u32, step_index: usize) {
         let mut active = ACTIVE_MACRO_STEPS.lock();
         active.entry(preset_id).or_default().insert(step_index);
@@ -13672,56 +13724,70 @@ mod windows_overlay {
             if is_redraw {
                 return;
             }
-            let head_h_scaled = (135.0 * scale).round() as u32;
-            let temp_w = pixmap.width();
-            let temp_h = head_h_scaled.max(1);
 
-            if let Some(mut temp_pixmap) = tiny_skia::Pixmap::new(temp_w, temp_h) {
-                let factor = (135.0 / 961.9) * scale;
-                let tx = (168.0 - 1016.25 * (135.0 / 961.9)) * scale;
-                let ty = temp_h as f32 - 1180.0 * factor;
-                let transform = tiny_skia::Transform::from_scale(factor, factor).post_translate(tx, ty);
+            // SVG viewBox: origin ~(264, 205), head spans roughly x=[526..1733], y=[218..1180]
+            // We map this to Chiikawa coordinate space (x=[60..340], y=[0..340]) so we can
+            // reuse quick_key_display_chiikawa_map_point for the same 3D perspective warp.
+            //
+            // Hachiware head center SVG x: ~1016.25, SVG y top of head: ~218.1
+            // Chiikawa head center x: 200, y range: 0..~340 over ~961.9 SVG units of height
+            // x_scale: 280.0 / 1469.0 ~= 140.0 / 716.3 (half-width 140 Chiikawa / 716.3 SVG)
+            // y_scale: 340.0 / 961.9
+            const SVG_CX: f32 = 1016.25;
+            const SVG_TOP: f32 = 218.1;
+            const SVG_H: f32 = 961.9;
+            const CX: f32 = 200.0;
+            const CH: f32 = 340.0;
+            const HALF_W_SVG: f32 = 716.3;
+            const HALF_W_CH: f32 = 140.0;
 
-                for (i, &(d, color)) in CUSTOM_MASCOT_PATHS.iter().enumerate() {
-                    if let Some(path) = parse_svg_path(d) {
-                        if i == 0 {
-                            // First path is the silhouette. Fill with white body color.
-                            let mut paint = tiny_skia::Paint::default();
-                            paint.set_color_rgba8(255, 255, 255, 255);
-                            paint.anti_alias = true;
-                            temp_pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, transform, None);
+            let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
 
-                            // Stroke the silhouette to draw the outer border
-                            let mut stroke = tiny_skia::Stroke {
-                                width: 7.0 * 0.53 * scale,
-                                line_cap: tiny_skia::LineCap::Round,
-                                line_join: tiny_skia::LineJoin::Round,
-                                ..Default::default()
-                            };
-                            let mut stroke_paint = tiny_skia::Paint::default();
-                            stroke_paint.set_color_rgba8(55, 27, 17, 255);
-                            stroke_paint.anti_alias = true;
-                            temp_pixmap.stroke_path(&path, &stroke_paint, &stroke, transform, None);
-                        } else {
-                            // All subsequent paths are drawn exactly as filled paths
-                            let mut paint = tiny_skia::Paint::default();
-                            paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
-                            paint.anti_alias = true;
-                            temp_pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, transform, None);
-                        }
+            // Chiikawa map_point outputs pixel coords relative to (0,0) being
+            // the top-left of the standard mascot region. We need to offset so
+            // the top of the Hachiware head aligns with the top of the pixmap.
+            // At y=0 Chiikawa space, map_point gives py = (27.4 + 0*0.53)*scale.
+            // We want that to land at dest_y + 0 in screen space (top of temp pixmap).
+            let screen_y_at_ch0 = 27.4_f32 * scale; // approximate screen y when chiikawa-y=0
+            let dest_y = (178.0 * scale - CH * 0.53 * scale - screen_y_at_ch0).round() as i32;
+
+            let map_svg_pt = |sx: f32, sy: f32| -> (f32, f32) {
+                let xc = CX + (sx - SVG_CX) * (HALF_W_CH / HALF_W_SVG);
+                let yc = (sy - SVG_TOP) * (CH / SVG_H);
+                let (px, py) = quick_key_display_chiikawa_map_point(xc, yc, scale, perspective);
+                (px, py - screen_y_at_ch0)
+            };
+
+            let identity = tiny_skia::Transform::identity();
+            for (i, &(d, color)) in CUSTOM_MASCOT_PATHS.iter().enumerate() {
+                if let Some(path) = parse_svg_path_warped(d, &map_svg_pt) {
+                    if i == 0 {
+                        // Silhouette: white fill + dark stroke
+                        let mut paint = tiny_skia::Paint::default();
+                        paint.set_color_rgba8(255, 255, 255, 255);
+                        paint.anti_alias = true;
+                        pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding,
+                            identity.pre_translate(0.0, dest_y as f32), None);
+
+                        let stroke = tiny_skia::Stroke {
+                            width: 7.0 * 0.53 * scale,
+                            line_cap: tiny_skia::LineCap::Round,
+                            line_join: tiny_skia::LineJoin::Round,
+                            ..Default::default()
+                        };
+                        let mut stroke_paint = tiny_skia::Paint::default();
+                        stroke_paint.set_color_rgba8(55, 27, 17, 255);
+                        stroke_paint.anti_alias = true;
+                        pixmap.stroke_path(&path, &stroke_paint, &stroke,
+                            identity.pre_translate(0.0, dest_y as f32), None);
+                    } else {
+                        let mut paint = tiny_skia::Paint::default();
+                        paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
+                        paint.anti_alias = true;
+                        pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding,
+                            identity.pre_translate(0.0, dest_y as f32), None);
                     }
                 }
-
-                // Draw the temp_pixmap onto the main pixmap at the correct desk offset
-                let dest_y = (178.0 * scale - temp_h as f32).round() as i32;
-                pixmap.draw_pixmap(
-                    0,
-                    dest_y,
-                    temp_pixmap.as_ref(),
-                    &tiny_skia::PixmapPaint::default(),
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
             }
             return;
         }
