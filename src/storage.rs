@@ -1,5 +1,6 @@
 use std::{
     env, fs,
+    io::Write,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -146,6 +147,84 @@ impl AppPaths {
         self.root.join(format!("state-recovery-{ts}.json"))
     }
 
+    fn read_state_file(path: &Path) -> Result<AppState> {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+        let content = content.strip_prefix('\u{feff}').unwrap_or(&content);
+        if content.trim().is_empty() {
+            anyhow::bail!("{} is empty", path.display());
+        }
+        serde_json::from_str(content)
+            .with_context(|| format!("{} contains invalid JSON", path.display()))
+    }
+
+    fn latest_state_recovery_file(&self) -> Option<PathBuf> {
+        let mut candidates = Vec::new();
+        let entries = fs::read_dir(&self.root).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !file_name.starts_with("state-recovery-") || !file_name.ends_with(".json") {
+                continue;
+            }
+            let modified = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(UNIX_EPOCH);
+            candidates.push((modified, path));
+        }
+        candidates.sort_by(|a, b| b.0.cmp(&a.0));
+        candidates.into_iter().map(|(_, path)| path).next()
+    }
+
+    fn restore_state_from_backup(&self) -> Result<Option<AppState>> {
+        let mut restore_sources = Vec::new();
+        let backup_file = self.state_backup_file();
+        if backup_file.exists() {
+            restore_sources.push(backup_file);
+        }
+        if let Some(recovery_file) = self.latest_state_recovery_file() {
+            if !restore_sources.iter().any(|path| path == &recovery_file) {
+                restore_sources.push(recovery_file);
+            }
+        }
+
+        for source in restore_sources {
+            let Ok(state) = Self::read_state_file(&source) else {
+                continue;
+            };
+            let temp_file = self.state_temp_file();
+            {
+                let mut file = fs::File::create(&temp_file).with_context(|| {
+                    format!("Failed to create temporary state file {}", temp_file.display())
+                })?;
+                let content = serde_json::to_string_pretty(&state)?;
+                file.write_all(content.as_bytes()).with_context(|| {
+                    format!("Failed to write temporary state file {}", temp_file.display())
+                })?;
+                file.sync_all().ok();
+            }
+            if self.state_file.exists() {
+                let _ = fs::remove_file(&self.state_file);
+            }
+            fs::rename(&temp_file, &self.state_file).with_context(|| {
+                format!(
+                    "Failed to restore {} from backup {}",
+                    self.state_file.display(),
+                    source.display()
+                )
+            })?;
+            return Ok(Some(state));
+        }
+
+        Ok(None)
+    }
+
     pub fn load_state(&self) -> Result<(AppState, StateLoadStatus)> {
         // Fallback: Copy interception.dll from local assets folder if not present in bin directory
         if !self.interception_dll.exists() {
@@ -159,19 +238,20 @@ impl AppPaths {
         }
 
         let (mut state, status) = if !self.state_file.exists() {
-            (AppState::default(), StateLoadStatus::Loaded)
+            if let Some(restored) = self.restore_state_from_backup()? {
+                (restored, StateLoadStatus::Loaded)
+            } else {
+                (AppState::default(), StateLoadStatus::Loaded)
+            }
         } else {
-            let content = fs::read_to_string(&self.state_file)?;
-            let content = content.strip_prefix('\u{feff}').unwrap_or(&content);
-            match serde_json::from_str(content) {
+            match Self::read_state_file(&self.state_file) {
                 Ok(state) => (state, StateLoadStatus::Loaded),
-                Err(error) => {
-                    if content.trim().is_empty() {
-                        eprintln!("state.json was empty; recreating defaults.");
-                        (AppState::default(), StateLoadStatus::Loaded)
+                Err(primary_error) => {
+                    if let Some(restored) = self.restore_state_from_backup()? {
+                        (restored, StateLoadStatus::Loaded)
                     } else {
                         anyhow::bail!(
-                            "state.json is invalid: {error}. Please fix the file or restore from a backup to prevent data loss. The application will not start in this state."
+                            "state.json could not be loaded: {primary_error}. No valid backup could be restored."
                         );
                     }
                 }
@@ -591,7 +671,13 @@ impl AppPaths {
         let content = serde_json::to_string_pretty(&state)?;
         let temp_file = self.state_temp_file();
         let backup_file = self.state_backup_file();
-        fs::write(&temp_file, content)?;
+        {
+            let mut file = fs::File::create(&temp_file)
+                .with_context(|| format!("Failed to create {}", temp_file.display()))?;
+            file.write_all(content.as_bytes())
+                .with_context(|| format!("Failed to write {}", temp_file.display()))?;
+            file.sync_all().ok();
+        }
         if self.state_file.exists() {
             if let Ok(entries) = fs::read_dir(&self.root) {
                 for entry in entries.flatten() {
@@ -608,10 +694,30 @@ impl AppPaths {
                 }
             }
             let _ = fs::copy(&self.state_file, self.state_recovery_file());
-            let _ = fs::copy(&self.state_file, &backup_file);
+            if backup_file.exists() {
+                let _ = fs::remove_file(&backup_file);
+            }
+            fs::rename(&self.state_file, &backup_file).with_context(|| {
+                format!(
+                    "Failed to move {} to backup {}",
+                    self.state_file.display(),
+                    backup_file.display()
+                )
+            })?;
         }
-        fs::copy(&temp_file, &self.state_file)?;
-        let _ = fs::remove_file(temp_file);
+        if let Err(error) = fs::rename(&temp_file, &self.state_file) {
+            if !self.state_file.exists() && backup_file.exists() {
+                let _ = fs::copy(&backup_file, &self.state_file);
+            }
+            let _ = fs::remove_file(&temp_file);
+            return Err(error).with_context(|| {
+                format!(
+                    "Failed to promote {} to {}",
+                    temp_file.display(),
+                    self.state_file.display()
+                )
+            });
+        }
         Ok(())
     }
 
