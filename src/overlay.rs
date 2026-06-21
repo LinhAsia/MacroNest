@@ -13906,9 +13906,13 @@ mod windows_overlay {
                 head_center_x + 39.0 * scale,
                 head_center_y - 6.5 * scale + turn_y * -0.4 * scale,
             );
-            let patch_mid = (
+            let patch_top_mid = (
+                head_center_x + turn_x * 1.4 * scale,
+                head_center_y - 30.0 * scale - ear_lift * 0.18,
+            );
+            let hairline_mid = (
                 head_center_x + turn_x * 1.8 * scale,
-                head_center_y - 11.0 * scale + turn_y * 1.4 * scale,
+                head_center_y - 10.0 * scale + turn_y * 1.2 * scale,
             );
 
             let map_hachi_point = |px: f32, py: f32, depth: f32| -> (f32, f32) {
@@ -13954,18 +13958,46 @@ mod windows_overlay {
                 right_base_outer.0,
                 right_base_outer.1,
             );
-            head_path.cubic_to(
-                head_center_x + head_rx * 1.02,
-                head_center_y - head_ry * 0.02,
-                head_center_x + head_rx * 1.06,
-                head_center_y + head_ry * 0.70,
-                head_center_x,
-                head_center_y + head_ry * 1.03,
+            let right_cheek = (
+                head_center_x + head_rx * 0.92,
+                head_center_y + head_ry * 0.32,
+            );
+            let chin_bottom = (
+                head_center_x + turn_x * 2.0 * scale,
+                head_center_y + head_ry * 0.90,
+            );
+            let left_cheek = (
+                head_center_x - head_rx * 0.92,
+                head_center_y + head_ry * 0.32,
             );
             head_path.cubic_to(
-                head_center_x - head_rx * 1.06,
-                head_center_y + head_ry * 0.70,
-                head_center_x - head_rx * 1.02,
+                head_center_x + head_rx * 1.04,
+                head_center_y - head_ry * 0.02,
+                head_center_x + head_rx * 1.00,
+                head_center_y + head_ry * 0.72,
+                right_cheek.0,
+                right_cheek.1,
+            );
+            head_path.cubic_to(
+                head_center_x + head_rx * 0.72,
+                head_center_y + head_ry * 0.88,
+                head_center_x + head_rx * 0.26,
+                head_center_y + head_ry * 0.96,
+                chin_bottom.0,
+                chin_bottom.1,
+            );
+            head_path.cubic_to(
+                head_center_x - head_rx * 0.26,
+                head_center_y + head_ry * 0.96,
+                head_center_x - head_rx * 0.72,
+                head_center_y + head_ry * 0.88,
+                left_cheek.0,
+                left_cheek.1,
+            );
+            head_path.cubic_to(
+                head_center_x - head_rx * 1.00,
+                head_center_y + head_ry * 0.72,
+                head_center_x - head_rx * 1.04,
                 head_center_y - head_ry * 0.02,
                 left_base_outer.0,
                 left_base_outer.1,
@@ -14015,14 +14047,14 @@ mod windows_overlay {
                 left_base_inner.1,
             );
             patch.quad_to(
-                head_center_x - 8.0 * scale,
-                head_center_y - 15.0 * scale,
-                patch_mid.0,
-                patch_mid.1,
+                head_center_x - 9.5 * scale,
+                head_center_y - 32.5 * scale - ear_lift * 0.08,
+                patch_top_mid.0,
+                patch_top_mid.1,
             );
             patch.quad_to(
-                head_center_x + 8.0 * scale,
-                head_center_y - 15.0 * scale,
+                head_center_x + 9.5 * scale,
+                head_center_y - 32.5 * scale - ear_lift * 0.08,
                 right_base_inner.0,
                 right_base_inner.1,
             );
@@ -14047,8 +14079,8 @@ mod windows_overlay {
             patch.quad_to(
                 head_center_x + 18.0 * scale,
                 head_center_y - 0.8 * scale + turn_y * 1.0 * scale,
-                patch_mid.0,
-                patch_mid.1,
+                hairline_mid.0,
+                hairline_mid.1,
             );
             patch.quad_to(
                 head_center_x - 18.0 * scale,
@@ -14066,8 +14098,8 @@ mod windows_overlay {
             hairline.quad_to(
                 head_center_x - 18.0 * scale,
                 head_center_y - 0.8 * scale + turn_y * 1.0 * scale,
-                patch_mid.0,
-                patch_mid.1,
+                hairline_mid.0,
+                hairline_mid.1,
             );
             hairline.quad_to(
                 head_center_x + 18.0 * scale,
