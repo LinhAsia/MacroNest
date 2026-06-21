@@ -13763,7 +13763,7 @@ mod windows_overlay {
             let identity = tiny_skia::Transform::identity();
             for (i, &(d, color)) in CUSTOM_MASCOT_PATHS.iter().enumerate() {
                 let map_svg_pt = |sx: f32, sy: f32| -> (f32, f32) {
-                    let xc = CX + (sx - SVG_CX) * (HALF_W_CH / HALF_W_SVG);
+                    let xc = CX + (sx - SVG_CX) * (CH / SVG_H);
                     let yc = (sy - SVG_TOP) * (CH / SVG_H);
 
                     let (look_mul_x, look_mul_y, wobble_x, wobble_y) = match i {
