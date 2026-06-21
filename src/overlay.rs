@@ -13878,324 +13878,321 @@ mod windows_overlay {
         }
 
         if is_hachiware {
-            let turn_x = (look_x / (16.0 * scale)).clamp(-1.0, 1.0);
-            let turn_y = (look_y / (14.0 * scale)).clamp(-1.0, 1.0);
-            
-            let rx = 82.0 * scale;
-            let ry = 68.0 * scale;
-            let head_center_x = head_cx + look_x * 0.18;
-            let head_center_y = head_cy + look_y * 0.10;
-            let head_rx = rx * (1.0 + turn_x.abs() * 0.06);
-            let head_ry = ry * (1.0 - turn_x.abs() * 0.03 + turn_y.abs() * 0.02);
-            
-            let body_color = [255, 255, 255, 255];
-            let outline_color = [59, 41, 38, 255];
-            let patch_color = [116, 172, 203, 255];
-            let ear_sway = recent_pulse * 5.6 * scale;
-            let ear_lift = 2.0 * scale + turn_y * -2.0 * scale;
-
-            let left_base_outer = (
-                head_center_x - 50.0 * scale + turn_x * -4.0 * scale,
-                head_center_y - 29.0 * scale + turn_y * -0.8 * scale,
-            );
-            let left_tip = (
-                head_center_x - 38.0 * scale + turn_x * -7.5 * scale - ear_sway,
-                head_center_y - 64.0 * scale - ear_lift - ear_sway * 0.36,
-            );
-            let left_base_inner = (
-                head_center_x - 15.0 * scale + turn_x * -1.8 * scale,
-                head_center_y - 31.0 * scale + turn_y * -0.5 * scale,
-            );
-            let right_base_inner = (
-                head_center_x + 15.0 * scale + turn_x * -1.8 * scale,
-                head_center_y - 31.0 * scale + turn_y * -0.5 * scale,
-            );
-            let right_tip = (
-                head_center_x + 38.0 * scale + turn_x * -7.5 * scale + ear_sway,
-                head_center_y - 64.0 * scale - ear_lift + ear_sway * 0.36,
-            );
-            let right_base_outer = (
-                head_center_x + 50.0 * scale + turn_x * -4.0 * scale,
-                head_center_y - 29.0 * scale + turn_y * -0.8 * scale,
-            );
-            let patch_left = (
-                head_center_x - 57.0 * scale,
-                head_center_y - 12.0 * scale + turn_y * -0.4 * scale,
-            );
-            let patch_right = (
-                head_center_x + 57.0 * scale,
-                head_center_y - 12.0 * scale + turn_y * -0.4 * scale,
-            );
-            let patch_top_mid = (
-                head_center_x + turn_x * 2.0 * scale,
-                head_center_y - 40.0 * scale - ear_lift * 0.18,
-            );
-            let hairline_mid = (
-                head_center_x + turn_x * 2.0 * scale,
-                head_center_y - 24.0 * scale + turn_y * 1.2 * scale,
-            );
-
-            let map_hachi_point = |px: f32, py: f32, depth: f32| -> (f32, f32) {
-                let nx = (px - head_cx) / (47.0 * scale);
-                let ny = (py - head_cy) / (47.0 * scale);
-                let side_scale = 1.0 + turn_x * 0.18 * nx;
-                let vertical_scale = 1.0 + turn_y * 0.07 * ny;
+            let time_s = unsafe { GetTickCount() } as f32 * 0.001;
+            let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
+            let map_point = |svg_x: f32, svg_y: f32| -> (f32, f32) {
+                quick_key_display_chiikawa_map_point(svg_x, svg_y, scale, perspective)
+            };
+            let face_wobble_fast_x = (time_s * 1.65).sin() * 0.16 * scale;
+            let face_wobble_fast_y = (time_s * 1.2 + 0.7).sin() * 0.1 * scale;
+            let face_wobble_mid_x = (time_s * 1.05 + 0.9).sin() * 0.42 * scale;
+            let face_wobble_mid_y = (time_s * 0.92 + 1.4).sin() * 0.26 * scale;
+            let face_wobble_slow_x = (time_s * 0.58 + 1.8).sin() * 0.55 * scale;
+            let face_wobble_slow_y = (time_s * 0.52 + 2.3).sin() * 0.34 * scale;
+            let map_face = |svg_x: f32,
+                            svg_y: f32,
+                            look_mul_x: f32,
+                            look_mul_y: f32,
+                            wobble_x: f32,
+                            wobble_y: f32| -> (f32, f32) {
+                let (px, py) = map_point(svg_x, svg_y);
                 (
-                    head_center_x + nx * head_rx * side_scale + look_x * depth * 0.22 - ny * turn_x * 4.0 * scale,
-                    head_center_y + ny * head_ry * vertical_scale + look_y * depth * 0.18,
+                    px + look_x * look_mul_x + wobble_x,
+                    py + look_y * look_mul_y + wobble_y,
                 )
             };
+            let map_face_brow = |svg_x: f32, svg_y: f32| -> (f32, f32) {
+                map_face(svg_x, svg_y, 0.48, 0.46, face_wobble_fast_x, face_wobble_fast_y)
+            };
+            let map_face_eye = |svg_x: f32, svg_y: f32| -> (f32, f32) {
+                map_face(svg_x, svg_y, 0.8, 0.78, face_wobble_mid_x, face_wobble_fast_y)
+            };
+            let map_face_nose = |svg_x: f32, svg_y: f32| -> (f32, f32) {
+                map_face(svg_x, svg_y, 0.64, 0.68, face_wobble_mid_x * 0.75, face_wobble_mid_y)
+            };
+            let map_face_mouth = |svg_x: f32, svg_y: f32| -> (f32, f32) {
+                map_face(svg_x, svg_y, 0.56, 0.62, face_wobble_slow_x * 0.75, face_wobble_mid_y)
+            };
+            let map_face_cheek = |svg_x: f32, svg_y: f32| -> (f32, f32) {
+                map_face(svg_x, svg_y, 0.38, 0.46, face_wobble_slow_x, face_wobble_slow_y)
+            };
+
+            let fill_color = [255, 255, 255, 255]; // white body
+            let stroke_color = [59, 41, 38, 255]; // outline
+            let patch_color = [116, 172, 203, 255]; // steel-blue hair/ears
 
             let mut tmp_pixmap = tiny_skia::Pixmap::new(pixmap.width(), pixmap.height()).unwrap();
 
             if !is_redraw {
-                fill_skia_ellipse(&mut tmp_pixmap, head_center_x, head_center_y + 4.5 * scale, head_rx, head_ry, [0, 0, 0, 28]);
+                // Draw body shape for Hachiware
+                let body_cx = head_cx - 1.0 * scale;
+                let body_cy = head_cy + 46.0 * scale;
+                let body_radius = 45.0 * scale;
+                let body_color = [255, 255, 255, 255];
+                let stroke_color_body = stroke_color;
+                let stroke_w_body = 7.0 * 0.53 * scale;
+
+                let mut body_pb = tiny_skia::PathBuilder::new();
+                body_pb.move_to(body_cx - body_radius, body_cy);
+                body_pb.quad_to(body_cx - body_radius, body_cy - 16.0 * scale, body_cx - body_radius * 0.4, body_cy - 20.0 * scale);
+                body_pb.line_to(body_cx + body_radius * 0.4, body_cy - 20.0 * scale);
+                body_pb.quad_to(body_cx + body_radius, body_cy - 16.0 * scale, body_cx + body_radius, body_cy);
+                body_pb.close();
+                if let Some(path) = body_pb.finish() {
+                    fill_skia_path(&mut tmp_pixmap, &path, body_color);
+                    stroke_skia_path(&mut tmp_pixmap, &path, stroke_color_body, stroke_w_body);
+                }
             }
 
-            fill_skia_ellipse(&mut tmp_pixmap, head_center_x, head_center_y, head_rx, head_ry, body_color);
-            stroke_skia_ellipse(
-                &mut tmp_pixmap,
-                head_center_x,
-                head_center_y,
-                head_rx,
-                head_ry,
-                2.2 * scale,
-                outline_color,
-            );
+            // Head outline coordinates (same as ChiikawaClassic)
+            let bx = look_x * 0.1;
+            let by = look_y * 0.1;
+            let map = |x: f32, y: f32| -> (f32, f32) {
+                let (px, py) = map_point(x, y);
+                (px + bx, py + by)
+            };
+            let mut pb = tiny_skia::PathBuilder::new();
+            let p = map(151.0, 121.0); pb.move_to(p.0, p.1);
+            let c1 = map(102.0, 126.0); let c2 = map(66.0, 164.0); let t = map(65.0, 216.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(64.0, 254.0); let c2 = map(82.0, 280.0); let t = map(107.0, 292.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(104.0, 312.0); let c2 = map(106.0, 330.0); let t = map(116.0, 337.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(125.0, 343.0); let c2 = map(132.0, 337.0); let t = map(132.0, 324.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let t = map(132.0, 310.0); pb.line_to(t.0, t.1);
+            let c1 = map(146.0, 319.0); let c2 = map(169.0, 324.0); let t = map(200.0, 324.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(230.0, 324.0); let c2 = map(254.0, 320.0); let t = map(268.0, 311.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let t = map(268.0, 327.0); pb.line_to(t.0, t.1);
+            let c1 = map(268.0, 340.0); let c2 = map(277.0, 345.0); let t = map(285.0, 337.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(292.0, 330.0); let c2 = map(294.0, 312.0); let t = map(292.0, 293.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(318.0, 282.0); let c2 = map(335.0, 254.0); let t = map(334.0, 216.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(333.0, 165.0); let c2 = map(297.0, 128.0); let t = map(249.0, 121.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map(238.0, 118.0); let c2 = map(224.0, 117.0); let t = map(207.0, 118.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let t = map(194.0, 118.0); pb.line_to(t.0, t.1);
+            let c1 = map(178.0, 117.0); let c2 = map(163.0, 118.0); let t = map(151.0, 121.0); pb.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            pb.close();
+            if let Some(path) = pb.finish() {
+                fill_skia_path(&mut tmp_pixmap, &path, fill_color);
+                stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
+            }
+
+            // Blue hair patch & ears drawing in SVG coordinates space
+            let ear_sway = recent_pulse * 10.6; // SVG scale sway
+            let ear_lift = 4.0 - look_y * 1.5;
+            
+            let left_base_outer = map(152.0, 121.0);
+            let left_tip = map(138.0 - ear_sway, 68.0 - ear_lift);
+            let left_base_inner = map(186.0, 119.0);
+            
+            let right_base_inner = map(214.0, 119.0);
+            let right_tip = map(262.0 + ear_sway, 68.0 - ear_lift);
+            let right_base_outer = map(248.0, 121.0);
+            
+            let patch_left = map(132.0, 150.0);
+            let patch_right = map(268.0, 150.0);
+            
+            let patch_top_mid = map(200.0, 110.0);
+            let hairline_mid = map(200.0, 142.0); // parting peak
 
             let mut patch = tiny_skia::PathBuilder::new();
             patch.move_to(patch_left.0, patch_left.1);
             patch.quad_to(
-                head_center_x - 57.0 * scale,
-                head_center_y - 25.0 * scale,
-                left_base_outer.0,
-                left_base_outer.1,
+                map(138.0, 132.0).0, map(138.0, 132.0).1,
+                left_base_outer.0, left_base_outer.1,
+            );
+            patch.line_to(left_tip.0, left_tip.1);
+            patch.line_to(left_base_inner.0, left_base_inner.1);
+            patch.quad_to(
+                map(193.0, 112.0).0, map(193.0, 112.0).1,
+                patch_top_mid.0, patch_top_mid.1,
             );
             patch.quad_to(
-                head_center_x - 45.0 * scale + turn_x * -5.4 * scale,
-                head_center_y - 48.0 * scale - ear_lift * 0.35,
-                left_tip.0,
-                left_tip.1,
+                map(207.0, 112.0).0, map(207.0, 112.0).1,
+                right_base_inner.0, right_base_inner.1,
+            );
+            patch.line_to(right_tip.0, right_tip.1);
+            patch.line_to(right_base_outer.0, right_base_outer.1);
+            patch.quad_to(
+                map(262.0, 132.0).0, map(262.0, 132.0).1,
+                patch_right.0, patch_right.1,
+            );
+            
+            let ctrl_right = map(234.0, 174.0);
+            let ctrl_left = map(166.0, 174.0);
+            
+            patch.quad_to(
+                ctrl_right.0, ctrl_right.1,
+                hairline_mid.0, hairline_mid.1,
             );
             patch.quad_to(
-                head_center_x - 26.0 * scale + turn_x * -4.8 * scale,
-                head_center_y - 44.0 * scale - ear_lift * 0.12,
-                left_base_inner.0,
-                left_base_inner.1,
-            );
-            patch.quad_to(
-                head_center_x - 14.0 * scale,
-                head_center_y - 45.0 * scale - ear_lift * 0.08,
-                patch_top_mid.0,
-                patch_top_mid.1,
-            );
-            patch.quad_to(
-                head_center_x + 14.0 * scale,
-                head_center_y - 45.0 * scale - ear_lift * 0.08,
-                right_base_inner.0,
-                right_base_inner.1,
-            );
-            patch.quad_to(
-                head_center_x + 26.0 * scale + turn_x * -4.8 * scale,
-                head_center_y - 44.0 * scale - ear_lift * 0.12,
-                right_tip.0,
-                right_tip.1,
-            );
-            patch.quad_to(
-                head_center_x + 45.0 * scale + turn_x * -5.4 * scale,
-                head_center_y - 48.0 * scale - ear_lift * 0.35,
-                right_base_outer.0,
-                right_base_outer.1,
-            );
-            patch.quad_to(
-                head_center_x + 57.0 * scale,
-                head_center_y - 25.0 * scale,
-                patch_right.0,
-                patch_right.1,
-            );
-
-            let ctrl_right = (
-                head_center_x + 28.0 * scale,
-                head_center_y - 4.0 * scale + turn_y * 1.0 * scale,
-            );
-            let ctrl_left = (
-                head_center_x - 28.0 * scale,
-                head_center_y - 4.0 * scale + turn_y * 1.0 * scale,
-            );
-
-            patch.quad_to(
-                ctrl_right.0,
-                ctrl_right.1,
-                hairline_mid.0,
-                hairline_mid.1,
-            );
-            patch.quad_to(
-                ctrl_left.0,
-                ctrl_left.1,
-                patch_left.0,
-                patch_left.1,
+                ctrl_left.0, ctrl_left.1,
+                patch_left.0, patch_left.1,
             );
             patch.close();
             if let Some(path) = patch.finish() {
                 fill_skia_path(&mut tmp_pixmap, &path, patch_color);
             }
 
+            // Hairline outline
             let mut hairline = tiny_skia::PathBuilder::new();
             hairline.move_to(patch_left.0, patch_left.1);
             hairline.quad_to(
-                ctrl_left.0,
-                ctrl_left.1,
-                hairline_mid.0,
-                hairline_mid.1,
+                ctrl_left.0, ctrl_left.1,
+                hairline_mid.0, hairline_mid.1,
             );
             hairline.quad_to(
-                ctrl_right.0,
-                ctrl_right.1,
-                patch_right.0,
-                patch_right.1,
+                ctrl_right.0, ctrl_right.1,
+                patch_right.0, patch_right.1,
             );
             if let Some(path) = hairline.finish() {
-                stroke_skia_path(&mut tmp_pixmap, &path, outline_color, 2.2 * scale);
+                stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
             }
 
+            // Head top & ears outline
             let mut top_outline = tiny_skia::PathBuilder::new();
             top_outline.move_to(patch_left.0, patch_left.1);
             top_outline.quad_to(
-                head_center_x - 57.0 * scale,
-                head_center_y - 25.0 * scale,
-                left_base_outer.0,
-                left_base_outer.1,
+                map(138.0, 132.0).0, map(138.0, 132.0).1,
+                left_base_outer.0, left_base_outer.1,
+            );
+            top_outline.line_to(left_tip.0, left_tip.1);
+            top_outline.line_to(left_base_inner.0, left_base_inner.1);
+            top_outline.quad_to(
+                map(193.0, 112.0).0, map(193.0, 112.0).1,
+                patch_top_mid.0, patch_top_mid.1,
             );
             top_outline.quad_to(
-                head_center_x - 45.0 * scale + turn_x * -5.4 * scale,
-                head_center_y - 48.0 * scale - ear_lift * 0.35,
-                left_tip.0,
-                left_tip.1,
+                map(207.0, 112.0).0, map(207.0, 112.0).1,
+                right_base_inner.0, right_base_inner.1,
             );
+            top_outline.line_to(right_tip.0, right_tip.1);
+            top_outline.line_to(right_base_outer.0, right_base_outer.1);
             top_outline.quad_to(
-                head_center_x - 26.0 * scale + turn_x * -4.8 * scale,
-                head_center_y - 44.0 * scale - ear_lift * 0.12,
-                left_base_inner.0,
-                left_base_inner.1,
-            );
-            top_outline.quad_to(
-                head_center_x - 14.0 * scale,
-                head_center_y - 45.0 * scale - ear_lift * 0.08,
-                patch_top_mid.0,
-                patch_top_mid.1,
-            );
-            top_outline.quad_to(
-                head_center_x + 14.0 * scale,
-                head_center_y - 45.0 * scale - ear_lift * 0.08,
-                right_base_inner.0,
-                right_base_inner.1,
-            );
-            top_outline.quad_to(
-                head_center_x + 26.0 * scale + turn_x * -4.8 * scale,
-                head_center_y - 44.0 * scale - ear_lift * 0.12,
-                right_tip.0,
-                right_tip.1,
-            );
-            top_outline.quad_to(
-                head_center_x + 45.0 * scale + turn_x * -5.4 * scale,
-                head_center_y - 48.0 * scale - ear_lift * 0.35,
-                right_base_outer.0,
-                right_base_outer.1,
-            );
-            top_outline.quad_to(
-                head_center_x + 57.0 * scale,
-                head_center_y - 25.0 * scale,
-                patch_right.0,
-                patch_right.1,
+                map(262.0, 132.0).0, map(262.0, 132.0).1,
+                patch_right.0, patch_right.1,
             );
             if let Some(path) = top_outline.finish() {
-                stroke_skia_path(&mut tmp_pixmap, &path, outline_color, 2.2 * scale);
+                stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
             }
 
             quick_key_display_apply_heat_tint_ellipse(
                 &mut tmp_pixmap,
-                head_center_x + look_x * 0.2,
-                head_center_y + 10.0 * scale + look_y * 0.35,
+                head_cx + look_x * 0.2,
+                head_cy + 10.0 * scale + look_y * 0.35,
                 38.0 * scale,
                 34.0 * scale,
                 red_factor,
                 [255, 118, 128, 255],
             );
 
-            let eye_size = 14.5 * scale;
-            let left_eye = map_hachi_point(head_cx - 26.0 * scale, head_cy + 8.0 * scale, 0.62);
-            let right_eye = map_hachi_point(head_cx + 26.0 * scale, head_cy + 8.0 * scale, 0.62);
-
-            for (ex, ey, sign) in [(left_eye.0, left_eye.1, -1.0f32), (right_eye.0, right_eye.1, 1.0f32)] {
-                fill_skia_circle(&mut tmp_pixmap, ex, ey, eye_size * 0.5, [59, 41, 38, 255]);
-                let hl1_x = ex - 2.2 * scale;
-                let hl1_y = ey - 2.2 * scale;
-                fill_skia_circle(&mut tmp_pixmap, hl1_x, hl1_y, 2.8 * scale, [255, 255, 255, 255]);
-                
-                let hl2_x = ex + 2.0 * scale;
-                let hl2_y = ey + 2.0 * scale;
-                fill_skia_circle(&mut tmp_pixmap, hl2_x, hl2_y, 1.4 * scale, [255, 255, 255, 255]);
+            // Left eyebrow
+            let mut left_brow = tiny_skia::PathBuilder::new();
+            let start = map_face_brow(124.0, 163.0); left_brow.move_to(start.0, start.1);
+            let c1 = map_face_brow(132.0, 147.0); let c2 = map_face_brow(144.0, 138.0); let t = map_face_brow(158.0, 134.0);
+            left_brow.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            if let Some(p) = left_brow.finish() {
+                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * 0.53 * scale);
             }
 
-            for &is_left in &[true, false] {
-                let sign = if is_left { -1.0f32 } else { 1.0f32 };
-                let p1 = map_hachi_point(head_cx + sign * 22.0 * scale, head_cy - 2.0 * scale, 0.62);
-                let p2 = map_hachi_point(head_cx + sign * 18.0 * scale, head_cy - 2.0 * scale, 0.62);
-                let mut eyebrow = tiny_skia::PathBuilder::new();
-                eyebrow.move_to(p1.0, p1.1);
-                eyebrow.line_to(p2.0, p2.1);
-                if let Some(path) = eyebrow.finish() {
-                    stroke_skia_path(&mut tmp_pixmap, &path, outline_color, 2.2 * scale);
+            // Right eyebrow
+            let mut right_brow = tiny_skia::PathBuilder::new();
+            let start = map_face_brow(242.0, 134.0); right_brow.move_to(start.0, start.1);
+            let c1 = map_face_brow(257.0, 139.0); let c2 = map_face_brow(268.0, 149.0); let t = map_face_brow(275.0, 165.0);
+            right_brow.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            if let Some(p) = right_brow.finish() {
+                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * 0.53 * scale);
+            }
+
+            // Left eye
+            let (ex1, ey1) = map_face_eye(159.0, 184.0);
+            let r_eye = 15.0 * 0.53 * scale;
+            let eye_heat = ((red_factor - 0.55) / 0.3).clamp(0.0, 1.0);
+            let eye_fill = quick_key_display_mix_rgba([74, 45, 42, 255], [255, 255, 255, 255], eye_heat);
+            let eye_highlight = quick_key_display_mix_rgba([255, 255, 255, 255], [255, 255, 255, 0], eye_heat);
+            fill_skia_circle(&mut tmp_pixmap, ex1, ey1, r_eye, eye_fill);
+            stroke_skia_circle(&mut tmp_pixmap, ex1, ey1, r_eye, 7.0 * 0.53 * scale, stroke_color);
+            if eye_highlight[3] > 0 {
+                let (h1x, h1y) = map_face_eye(154.0, 177.0);
+                fill_skia_circle(&mut tmp_pixmap, h1x, h1y, 5.0 * 0.53 * scale, eye_highlight);
+                let (h2x, h2y) = map_face_eye(164.0, 190.0);
+                fill_skia_circle(&mut tmp_pixmap, h2x, h2y, 4.0 * 0.53 * scale, eye_highlight);
+            }
+
+            // Right eye
+            let (ex2, ey2) = map_face_eye(241.0, 184.0);
+            fill_skia_circle(&mut tmp_pixmap, ex2, ey2, r_eye, eye_fill);
+            stroke_skia_circle(&mut tmp_pixmap, ex2, ey2, r_eye, 7.0 * 0.53 * scale, stroke_color);
+            if eye_highlight[3] > 0 {
+                let (h1x, h1y) = map_face_eye(236.0, 177.0);
+                fill_skia_circle(&mut tmp_pixmap, h1x, h1y, 5.0 * 0.53 * scale, eye_highlight);
+                let (h2x, h2y) = map_face_eye(246.0, 190.0);
+                fill_skia_circle(&mut tmp_pixmap, h2x, h2y, 4.0 * 0.53 * scale, eye_highlight);
+            }
+
+            // Left cheek
+            let cheek_fill = quick_key_display_mix_rgba(
+                [255, 196, 202, 112],
+                [255, 122, 146, 228],
+                red_factor,
+            );
+            let cheek_line = quick_key_display_mix_rgba(stroke_color, [255, 92, 120, 255], red_factor * 0.85);
+            let (cx1, cy1) = map_face_cheek(126.0, 215.0);
+            fill_skia_ellipse(&mut tmp_pixmap, cx1, cy1, 24.0 * 0.53 * scale, 17.0 * 0.53 * scale, cheek_fill);
+            for &(x1, y1, x2, y2) in &[(112.0, 207.0, 106.0, 222.0), (123.0, 205.0, 117.0, 222.0), (134.0, 207.0, 128.0, 222.0)] {
+                let mut path = tiny_skia::PathBuilder::new();
+                let start = map_face_cheek(x1, y1); path.move_to(start.0, start.1);
+                let end = map_face_cheek(x2, y2); path.line_to(end.0, end.1);
+                if let Some(p) = path.finish() {
+                    stroke_skia_path(&mut tmp_pixmap, &p, cheek_line, 5.0 * 0.53 * scale);
                 }
             }
 
-            let blush_color = [255, 120, 140, 200];
-            for (blush, side_sign) in [
-                (map_hachi_point(head_cx - 42.0 * scale, head_cy + 16.0 * scale, 0.28), -1.0f32),
-                (map_hachi_point(head_cx + 42.0 * scale, head_cy + 16.0 * scale, 0.28), 1.0f32),
-            ] {
-                fill_skia_ellipse(&mut tmp_pixmap, blush.0, blush.1, 8.5 * scale, 5.0 * scale, blush_color);
-                for i in 0..4 {
-                    let offset = (i as f32 - 1.5) * 2.8 * scale;
-                    let local_bx = side_sign * 42.0 * scale + offset;
-                    let p1 = map_hachi_point(local_bx - 1.2 * scale, 16.0 * scale + 3.0 * scale, 0.28);
-                    let p2 = map_hachi_point(local_bx + 1.2 * scale, 16.0 * scale - 3.0 * scale, 0.28);
-                    let mut line = tiny_skia::PathBuilder::new();
-                    line.move_to(p1.0, p1.1);
-                    line.line_to(p2.0, p2.1);
-                    if let Some(path) = line.finish() {
-                        stroke_skia_path(&mut tmp_pixmap, &path, [255, 60, 90, 255], 1.2 * scale);
-                    }
+            // Right cheek
+            let (cx2, cy2) = map_face_cheek(274.0, 215.0);
+            fill_skia_ellipse(&mut tmp_pixmap, cx2, cy2, 24.0 * 0.53 * scale, 17.0 * 0.53 * scale, cheek_fill);
+            for &(x1, y1, x2, y2) in &[(262.0, 207.0, 256.0, 222.0), (273.0, 205.0, 267.0, 222.0), (284.0, 207.0, 278.0, 222.0)] {
+                let mut path = tiny_skia::PathBuilder::new();
+                let start = map_face_cheek(x1, y1); path.move_to(start.0, start.1);
+                let end = map_face_cheek(x2, y2); path.line_to(end.0, end.1);
+                if let Some(p) = path.finish() {
+                    stroke_skia_path(&mut tmp_pixmap, &p, cheek_line, 5.0 * 0.53 * scale);
                 }
             }
 
-            let nose_pos = map_hachi_point(head_cx, head_cy + 14.5 * scale, 0.62);
-            fill_skia_ellipse(&mut tmp_pixmap, nose_pos.0, nose_pos.1, 3.0 * 0.5 * scale, 2.0 * 0.5 * scale, outline_color);
-
-            let local_my = 17.5 * scale;
-            let mut mouth = tiny_skia::PathBuilder::new();
-            
-            let start_left = map_hachi_point(head_cx - 4.5 * scale, head_cy + local_my - 1.0 * scale, 0.62);
-            let ctrl_left = map_hachi_point(head_cx - 2.25 * scale, head_cy + local_my + 2.0 * scale, 0.62);
-            let mid = map_hachi_point(head_cx, head_cy + local_my, 0.62);
-            let ctrl_right = map_hachi_point(head_cx + 2.25 * scale, head_cy + local_my + 2.0 * scale, 0.62);
-            let end_right = map_hachi_point(head_cx + 4.5 * scale, head_cy + local_my - 1.0 * scale, 0.62);
-
-            mouth.move_to(start_left.0, start_left.1);
-            mouth.quad_to(ctrl_left.0, ctrl_left.1, mid.0, mid.1);
-            mouth.quad_to(ctrl_right.0, ctrl_right.1, end_right.0, end_right.1);
-
-            if let Some(p) = mouth.finish() {
-                stroke_skia_path(&mut tmp_pixmap, &p, outline_color, 2.0 * scale);
+            // Nose
+            let mut nose = tiny_skia::PathBuilder::new();
+            let start = map_face_nose(194.0, 210.0); nose.move_to(start.0, start.1);
+            let c1 = map_face_nose(198.0, 206.0); let c2 = map_face_nose(202.0, 206.0); let t = map_face_nose(206.0, 210.0);
+            nose.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            let c1 = map_face_nose(203.0, 214.0); let c2 = map_face_nose(197.0, 214.0); let t = map_face_nose(194.0, 210.0);
+            nose.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            nose.close();
+            if let Some(p) = nose.finish() {
+                fill_skia_path(&mut tmp_pixmap, &p, stroke_color);
+                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 7.0 * 0.53 * scale);
             }
 
-            let chin_start = map_hachi_point(head_cx - 1.5 * scale, head_cy + 22.0 * scale, 0.62);
-            let chin_end = map_hachi_point(head_cx + 1.5 * scale, head_cy + 22.0 * scale, 0.62);
-            let mut chin = tiny_skia::PathBuilder::new();
-            chin.move_to(chin_start.0, chin_start.1);
-            chin.line_to(chin_end.0, chin_end.1);
-            if let Some(p) = chin.finish() {
-                stroke_skia_path(&mut tmp_pixmap, &p, outline_color, 1.5 * scale);
+            // Mouth
+            let mut mouth1 = tiny_skia::PathBuilder::new();
+            let start = map_face_mouth(200.0, 214.0); mouth1.move_to(start.0, start.1);
+            let c1 = map_face_mouth(200.0, 224.0); let c2 = map_face_mouth(190.0, 227.0); let t = map_face_mouth(184.0, 220.0);
+            mouth1.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            if let Some(p) = mouth1.finish() {
+                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * scale);
+            }
+
+            let mut mouth2 = tiny_skia::PathBuilder::new();
+            let start = map_face_mouth(200.0, 214.0); mouth2.move_to(start.0, start.1);
+            let c1 = map_face_mouth(200.0, 224.0); let c2 = map_face_mouth(210.0, 227.0); let t = map_face_mouth(216.0, 220.0);
+            mouth2.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            if let Some(p) = mouth2.finish() {
+                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * scale);
+            }
+
+            let mut mouth3 = tiny_skia::PathBuilder::new();
+            let start = map_face_mouth(189.0, 231.0); mouth3.move_to(start.0, start.1);
+            let c1 = map_face_mouth(196.0, 238.0); let c2 = map_face_mouth(207.0, 238.0); let t = map_face_mouth(214.0, 231.0);
+            mouth3.cubic_to(c1.0, c1.1, c2.0, c2.1, t.0, t.1);
+            if let Some(p) = mouth3.finish() {
+                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * scale);
             }
 
             let threshold_y = (146.0 + 30.0) * scale;
