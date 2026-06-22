@@ -262,6 +262,7 @@ pub enum QuickKeyDisplayMode {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum MascotStyle {
     #[default]
+    #[serde(alias = "Hachiware")]
     Custom,
     ChiikawaClassic,
     Gugugaga,
