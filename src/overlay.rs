@@ -7036,7 +7036,7 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
         let base = (font_size / 36.0).clamp(0.72, 2.4);
         match mascot_style {
             crate::model::MascotStyle::ChiikawaClassic => base * 1.25,
-            crate::model::MascotStyle::Hachiware => base * 1.25,
+            crate::model::MascotStyle::Hachiware => base * 0.90,
             crate::model::MascotStyle::Gugugaga => base * 0.90,
         }
     }
@@ -14788,13 +14788,6 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
                     px += look_x * look_mul_x + wobble_x;
                     py += look_y * look_mul_y + wobble_y + vertical_offset;
 
-                    if (i == 0 || i == 1 || i == 2 || i == 3) && sy < (svg_top + 432.0) {
-                        let side = ((xc - CX) / 60.0).clamp(-1.0, 1.0);
-                        let ear_off = quick_key_display_chiikawa_ear_offset(yc, scale, time_s, look_x, look_y, recent_pulse, side);
-                        px += ear_off.0;
-                        py += ear_off.1;
-                    }
-
                     (px, py - screen_y_at_ch0)
                 };
 
@@ -14806,7 +14799,7 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
                         tmp_pixmap.fill_path(
                             &path,
                             &white_paint,
-                            tiny_skia::FillRule::EvenOdd,
+                            tiny_skia::FillRule::Winding,
                             identity.pre_translate(0.0, dest_y as f32),
                             None,
                         );
