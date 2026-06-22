@@ -711,12 +711,13 @@ impl CrosshairApp {
                                         .changed();
                                 });
                                 ui.end_row();
-                                ui.label(Self::tr_lang(language, "Color grouping", "Color grouping"));
+
+                                ui.label(Self::tr_lang(language, "Scan condition", "Điều kiện quét"));
                                 ui.horizontal_wrapped(|ui| {
                                     if ui
                                         .checkbox(
                                             &mut preset.require_connected_target_colors,
-                                            Self::tr_lang(language, "Connected colors", "Connected colors"),
+                                            Self::tr_lang(language, "Connected colors", "Các màu phải chạm nhau"),
                                         )
                                         .changed()
                                     {
@@ -727,13 +728,17 @@ impl CrosshairApp {
                                         live_sync = true;
                                     }
                                     if preset.target_colors.len() < 2 {
-                                        ui.weak(Self::tr_lang(language, "Needs 2+ colors", "Needs 2+ colors"));
+                                        ui.weak(Self::tr_lang(language, "Needs 2+ colors", "Cần 2 màu trở lên"));
                                     }
+                                });
+                                ui.end_row();
 
+                                ui.label(Self::tr_lang(language, "Target position", "Vị trí di chuột"));
+                                ui.horizontal_wrapped(|ui| {
                                     if ui
                                         .checkbox(
                                             &mut preset.color_scan_average_centroid,
-                                            Self::tr_lang(language, "Average centroid", "Lấy điểm ở giữa"),
+                                            Self::tr_lang(language, "Average centroid", "Lấy điểm ở giữa các pixel"),
                                         )
                                         .changed()
                                     {
@@ -743,15 +748,11 @@ impl CrosshairApp {
                                         }
                                         live_sync = true;
                                     }
-                                });
-                                ui.end_row();
 
-                                ui.label(Self::tr_lang(language, "Color priority", "Color priority"));
-                                ui.horizontal_wrapped(|ui| {
                                     if ui
                                         .checkbox(
                                             &mut preset.dual_color_scan_midpoint,
-                                            Self::tr_lang(language, "Midpoint", "Midpoint"),
+                                            Self::tr_lang(language, "Midpoint between colors", "Trung điểm các màu"),
                                         )
                                         .changed()
                                     {
@@ -761,10 +762,15 @@ impl CrosshairApp {
                                         }
                                         live_sync = true;
                                     }
+                                });
+                                ui.end_row();
+
+                                ui.label(Self::tr_lang(language, "Scan priority", "Ưu tiên quét"));
+                                ui.horizontal_wrapped(|ui| {
                                     live_sync |= ui
                                         .checkbox(
                                             &mut preset.color_priority_from_anchor,
-                                            Self::tr_lang(language, "From point", "From point"),
+                                            Self::tr_lang(language, "Near target point", "Gần điểm chỉ định"),
                                         )
                                         .changed();
                                     let anchor = preset
