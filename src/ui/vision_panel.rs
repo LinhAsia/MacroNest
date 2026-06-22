@@ -711,29 +711,56 @@ impl CrosshairApp {
                                         .changed();
                                 });
                                 ui.end_row();
-
                                 ui.label(Self::tr_lang(language, "Color grouping", "Color grouping"));
                                 ui.horizontal_wrapped(|ui| {
-                                    live_sync |= ui
+                                    if ui
                                         .checkbox(
                                             &mut preset.require_connected_target_colors,
                                             Self::tr_lang(language, "Connected colors", "Connected colors"),
                                         )
-                                        .changed();
+                                        .changed()
+                                    {
+                                        if preset.require_connected_target_colors {
+                                            preset.dual_color_scan_midpoint = false;
+                                            preset.color_scan_average_centroid = false;
+                                        }
+                                        live_sync = true;
+                                    }
                                     if preset.target_colors.len() < 2 {
                                         ui.weak(Self::tr_lang(language, "Needs 2+ colors", "Needs 2+ colors"));
+                                    }
+
+                                    if ui
+                                        .checkbox(
+                                            &mut preset.color_scan_average_centroid,
+                                            Self::tr_lang(language, "Average centroid", "Lấy điểm ở giữa"),
+                                        )
+                                        .changed()
+                                    {
+                                        if preset.color_scan_average_centroid {
+                                            preset.require_connected_target_colors = false;
+                                            preset.dual_color_scan_midpoint = false;
+                                        }
+                                        live_sync = true;
                                     }
                                 });
                                 ui.end_row();
 
                                 ui.label(Self::tr_lang(language, "Color priority", "Color priority"));
                                 ui.horizontal_wrapped(|ui| {
-                                    live_sync |= ui
+                                    if ui
                                         .checkbox(
                                             &mut preset.dual_color_scan_midpoint,
                                             Self::tr_lang(language, "Midpoint", "Midpoint"),
                                         )
-                                        .changed();
+                                        .changed()
+                                    {
+                                        if preset.dual_color_scan_midpoint {
+                                            preset.require_connected_target_colors = false;
+                                            preset.color_scan_average_centroid = false;
+                                        }
+                                        live_sync = true;
+                                    }
                                     live_sync |= ui
                                         .checkbox(
                                             &mut preset.color_priority_from_anchor,

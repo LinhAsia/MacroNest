@@ -2253,7 +2253,7 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
                 interception_runtime_status: InterceptionRuntimeStatus::Unavailable,
                 mouse_sensitivity_restore_on_exit: false,
                 mouse_sensitivity_exit_restore_speed: 6,
-                macro_mouse_click_delay_ms: 16,
+                macro_mouse_click_delay_ms: 0,
                 macro_keyboard_key_press_delay_ms: 0,
                 active_pin_preset_id: None,
                 vision_capture_mouse_blocked: false,
@@ -7811,12 +7811,23 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
 
                 OverlayCommand::UpdateCrosshairProfile { index, profile } => {
                     let mut hook_state = HOOK_STATE.lock();
-                    if let Some(existing) = hook_state.profiles.get_mut(index) {
-                        *existing = profile;
-                    } else {
-                        hook_state.profiles.push(profile);
+                    let mut is_active = false;
+                    if let Some(existing) = hook_state.profiles.get(index) {
+                        if hook_state.active_crosshair_profile_name.as_deref() == Some(&existing.name) {
+                            is_active = true;
+                        }
                     }
-
+                    if let Some(existing) = hook_state.profiles.get_mut(index) {
+                        *existing = profile.clone();
+                    } else {
+                        hook_state.profiles.push(profile.clone());
+                    }
+                    if is_active {
+                        hook_state.active_crosshair_profile_name = Some(profile.name.clone());
+                        let mut style = profile.style.clone();
+                        style.enabled = profile.enabled;
+                        hook_state.current_style = style;
+                    }
                     drop(hook_state);
                     let _ = refresh_overlay(runtime);
                 }

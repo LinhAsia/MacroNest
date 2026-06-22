@@ -352,7 +352,7 @@ fn default_geometry_arrow_head_size() -> f32 {
 }
 
 fn default_macro_mouse_click_delay_ms() -> u32 {
-    16
+    0
 }
 
 fn default_macro_keyboard_key_press_delay_ms() -> u32 {
@@ -2484,6 +2484,8 @@ pub struct VisionPreset {
     #[serde(default)]
     pub require_connected_target_colors: bool,
     #[serde(default)]
+    pub color_scan_average_centroid: bool,
+    #[serde(default)]
     pub is_pixel_counter: bool,
     #[serde(default)]
     pub pixel_counter_variable_name: String,
@@ -2533,6 +2535,7 @@ impl VisionPreset {
             color_scan_rate_hz: default_image_search_color_scan_rate_hz(),
             dual_color_scan_midpoint: false,
             require_connected_target_colors: false,
+            color_scan_average_centroid: false,
             is_pixel_counter: false,
             pixel_counter_variable_name: String::new(),
             search_region_is_single_pixel: false,
@@ -2970,7 +2973,7 @@ impl Default for AppState {
             groq_settings: GroqSettings::default(),
             audio_settings: AudioSettings::default(),
             vision_settings: VisionSettings::default(),
-            macro_mouse_click_delay_ms: 16,
+            macro_mouse_click_delay_ms: 0,
             macro_keyboard_key_press_delay_ms: 0,
             global_constants: Vec::new(),
             ocr_presets: Vec::new(),

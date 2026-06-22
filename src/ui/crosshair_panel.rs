@@ -453,9 +453,9 @@ impl CrosshairApp {
             let mut preset_changed = false;
             let is_selected = self.state.selected_profile.as_deref()
                 == Some(self.state.profiles[index].name.as_str());
+            let preset_snapshot = self.state.profiles[index].clone();
             {
                 let preset = &mut self.state.profiles[index];
-                let preset_snapshot = preset.clone();
                 Self::show_preset_card(ui, preset.enabled, |ui| {
                     ui.horizontal(|ui| {
                         let name_width = Self::preset_header_name_width(ui);
@@ -546,6 +546,15 @@ impl CrosshairApp {
                 break;
             }
             if preset_changed {
+                if is_selected {
+                    let preset = &self.state.profiles[index];
+                    if preset.name != preset_snapshot.name {
+                        self.state.selected_profile = Some(preset.name.clone());
+                        self.save_name = preset.name.clone();
+                    }
+                    self.state.active_style = preset.style.clone();
+                    self.state.active_style.enabled = preset.enabled;
+                }
                 self.mark_crosshair_profile_dirty(index);
             }
         }
@@ -582,7 +591,8 @@ impl CrosshairApp {
         }
 
         if self.crosshair_editor_dirty {
-            self.flush_crosshair_profile_dirty(false);
+            let pointer_down = ui.input(|i| i.pointer.any_down());
+            self.flush_crosshair_profile_dirty(!pointer_down);
             if self.crosshair_editor_dirty {
                 ui.ctx().request_repaint_after(Duration::from_millis(16));
             }
