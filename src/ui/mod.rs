@@ -4973,15 +4973,15 @@ impl CrosshairApp {
                                     egui::ComboBox::from_id_salt("quick-key-display-mascot-style")
                                         .width(164.0)
                                         .selected_text(match self.state.quick_key_display_mascot_style {
-                                            crate::model::MascotStyle::Custom => "Custom Image",
+                                            crate::model::MascotStyle::Hachiware => "Hachiware",
                                             crate::model::MascotStyle::ChiikawaClassic => "Chiikawa Classic",
                                             crate::model::MascotStyle::Gugugaga => "Gugugaga",
                                         })
                                         .show_ui(ui, |ui| {
                                             ui.selectable_value(
                                                 &mut self.state.quick_key_display_mascot_style,
-                                                crate::model::MascotStyle::Custom,
-                                                "Custom Image",
+                                                crate::model::MascotStyle::Hachiware,
+                                                "Hachiware",
                                             );
                                             ui.selectable_value(
                                                 &mut self.state.quick_key_display_mascot_style,
