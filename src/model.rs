@@ -262,9 +262,8 @@ pub enum QuickKeyDisplayMode {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum MascotStyle {
     #[default]
-    Hachiware,
-    ChiikawaClassic,
     Custom,
+    ChiikawaClassic,
     Gugugaga,
 }
 
@@ -2991,7 +2990,7 @@ impl Default for AppState {
             quick_key_display_y: default_quick_key_display_y(),
             quick_key_display_size: default_quick_key_display_size(),
             quick_key_display_mode: QuickKeyDisplayMode::Normal,
-            quick_key_display_mascot_style: MascotStyle::Hachiware,
+            quick_key_display_mascot_style: MascotStyle::Custom,
             quick_screen_draw_enabled: false,
             quick_screen_draw_hotkey: None,
             quick_screen_draw_pass_trigger_through: false,
