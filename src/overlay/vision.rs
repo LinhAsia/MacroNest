@@ -925,6 +925,81 @@ pub(crate) fn find_dual_color_midpoint_match(
     }
 }
 
+pub(crate) fn find_color_average_centroid_match(
+    screen: &window_list::ScreenCaptureFrame,
+    targets: &[RgbaColor],
+    tolerance: u8,
+    region: Option<&VisionRegion>,
+) -> Option<ColorMatchHit> {
+    let width = screen.width as i32;
+    let height = screen.height as i32;
+    if width <= 0 || height <= 0 || targets.is_empty() {
+        return None;
+    }
+
+    let tolerance = tolerance as i16;
+    let mut sum_x = 0i64;
+    let mut sum_y = 0i64;
+    let mut match_count = 0i64;
+    let mut score_sum = 0u64;
+    let mut matched_color = targets[0];
+
+    for y in 0..height {
+        for x in 0..width {
+            if !image_search_region_contains_point(
+                region,
+                screen.screen_x + x,
+                screen.screen_y + y,
+            ) {
+                continue;
+            }
+
+            let index = ((y as usize) * screen.width + (x as usize)) * 4;
+            if index + 3 >= screen.rgba.len() {
+                continue;
+            }
+
+            let r = screen.rgba[index] as i16;
+            let g = screen.rgba[index + 1] as i16;
+            let b = screen.rgba[index + 2] as i16;
+
+            for target in targets {
+                let dr = (r - target.r as i16).abs();
+                let dg = (g - target.g as i16).abs();
+                let db = (b - target.b as i16).abs();
+                if dr <= tolerance && dg <= tolerance && db <= tolerance {
+                    sum_x += x as i64;
+                    sum_y += y as i64;
+                    score_sum += (dr + dg + db) as u64;
+                    if match_count == 0 {
+                        matched_color = *target;
+                    }
+                    match_count += 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    if match_count > 0 {
+        let avg_x = (sum_x / match_count) as i32;
+        let avg_y = (sum_y / match_count) as i32;
+        let avg_score = (score_sum / match_count as u64) as u32;
+        let center_x = width / 2;
+        let center_y = height / 2;
+        let distance_sq = (avg_x - center_x).pow(2) + (avg_y - center_y).pow(2);
+        Some(ColorMatchHit {
+            x: avg_x,
+            y: avg_y,
+            score: avg_score,
+            distance_sq,
+            matched_color,
+        })
+    } else {
+        None
+    }
+}
+
 pub(crate) fn find_color_match_from_anchor(
     screen: &window_list::ScreenCaptureFrame,
     targets: &[RgbaColor],
@@ -1180,6 +1255,13 @@ pub(crate) fn run_vision_once_with_options(
                 relative_anchor_y,
                 configured_region.as_ref(),
             )
+        } else if preset.color_scan_average_centroid {
+            find_color_average_centroid_match(
+                &screen,
+                &target_colors,
+                preset.color_tolerance,
+                configured_region.as_ref(),
+            )
         } else if preset.require_connected_target_colors && target_colors.len() >= 2 {
             find_connected_color_match(
                 &screen,
@@ -1245,6 +1327,11 @@ pub(crate) fn run_vision_once_with_options(
             status: if anchor.is_some() {
                 format!(
                     "Matched colors from priority point at {moved_x}, {moved_y} with tolerance {} and offset {:+}, {:+}.",
+                    preset.color_tolerance, preset.move_offset_x, preset.move_offset_y
+                )
+            } else if preset.color_scan_average_centroid {
+                format!(
+                    "Matched colors centroid at {moved_x}, {moved_y} with tolerance {} and offset {:+}, {:+}.",
                     preset.color_tolerance, preset.move_offset_x, preset.move_offset_y
                 )
             } else if preset.require_connected_target_colors && target_colors.len() >= 2 {
