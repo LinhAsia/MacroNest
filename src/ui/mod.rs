@@ -4976,6 +4976,7 @@ impl CrosshairApp {
                                             crate::model::MascotStyle::Hachiware => "Hachiware",
                                             crate::model::MascotStyle::ChiikawaClassic => "Chiikawa Classic",
                                             crate::model::MascotStyle::Custom => "Custom Image",
+                                            crate::model::MascotStyle::Gugugaga => "Gugugaga",
                                         })
                                         .show_ui(ui, |ui| {
                                             ui.selectable_value(
@@ -4992,6 +4993,11 @@ impl CrosshairApp {
                                                 &mut self.state.quick_key_display_mascot_style,
                                                 crate::model::MascotStyle::Custom,
                                                 "Custom Image",
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.state.quick_key_display_mascot_style,
+                                                crate::model::MascotStyle::Gugugaga,
+                                                "Gugugaga",
                                             );
                                         });
                                     if self.state.quick_key_display_mascot_style != style_before {
