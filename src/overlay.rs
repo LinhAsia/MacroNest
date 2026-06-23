@@ -7049,7 +7049,7 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
         let base = (font_size / 36.0).clamp(0.72, 2.4);
         match mascot_style {
             crate::model::MascotStyle::ChiikawaClassic => base * 1.25,
-            crate::model::MascotStyle::Hachiware => base * 0.90,
+            crate::model::MascotStyle::Hachiware => base * 0.80,
             crate::model::MascotStyle::Gugugaga => base * 0.90,
         }
     }
@@ -14769,7 +14769,7 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
                 (1070.35, 120.08, 961.9, 340.0_f32, 10.0 * scale)
             };
 
-            let cx_val = if mascot_style == crate::model::MascotStyle::Hachiware { 272.0 } else { 200.0 };
+            let cx_val = if mascot_style == crate::model::MascotStyle::Hachiware { 257.0 } else { 200.0 };
 
             let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
 
@@ -15557,7 +15557,7 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
         // Animate Mascot closer to the desk
         let mut body_cx = 167.0 * scale;
         if mascot_style == crate::model::MascotStyle::Hachiware {
-            body_cx = 206.0 * scale;
+            body_cx = 198.0 * scale;
         }
         let mut body_cy = (123.0 + y_shift) * scale;
         if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
@@ -15567,7 +15567,7 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
         
         let mut head_cx = 168.0 * scale;
         if mascot_style == crate::model::MascotStyle::Hachiware {
-            head_cx = 207.0 * scale;
+            head_cx = 199.0 * scale;
         }
         let mut head_cy = (77.0 + y_shift) * scale;
         if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
@@ -15961,8 +15961,8 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
         let default_y = if is_custom_or_gugugaga { 164.0 } else { 172.0 };
 
         if mascot_style == crate::model::MascotStyle::Hachiware {
-            default_l_x = 169.0;
-            default_r_x = 253.0;
+            default_l_x = 161.0;
+            default_r_x = 245.0;
         }
 
         let l_target = if mouse_active { mouse_projected } else { project_point(default_l_x, default_y) };
