@@ -14797,6 +14797,60 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
 
                 if let Some(path) = parse_svg_path_warped(d, &map_svg_pt) {
                     if i == 0 {
+                        if mascot_style == crate::model::MascotStyle::Hachiware {
+                            let look_mul_x = 0.8;
+                            let look_mul_y = 0.78;
+                            let wobble_x = face_wobble_mid_x;
+                            let wobble_y = face_wobble_fast_y;
+
+                            let xc = CX + (1016.25 - svg_cx) * (mapping_ch / svg_h);
+                            let yc = (890.0 - svg_top) * (mapping_ch / svg_h);
+                            let (mut px, mut py) = quick_key_display_chiikawa_map_point(xc, yc, scale, perspective);
+                            px += look_x * look_mul_x + wobble_x;
+                            py += look_y * look_mul_y + wobble_y + vertical_offset;
+                            let oval_cx = px;
+                            let oval_cy = py - screen_y_at_ch0 + dest_y as f32;
+
+                            let oval_rx = 150.0_f32 * scale;
+                            let oval_ry = 87.0_f32 * scale;
+                            const K: f32 = 0.5523_f32;
+                            let mut oval_pb = tiny_skia::PathBuilder::new();
+                            oval_pb.move_to(oval_cx + oval_rx, oval_cy);
+                            oval_pb.cubic_to(
+                                oval_cx + oval_rx, oval_cy - K * oval_ry,
+                                oval_cx + K * oval_rx, oval_cy - oval_ry,
+                                oval_cx, oval_cy - oval_ry,
+                            );
+                            oval_pb.cubic_to(
+                                oval_cx - K * oval_rx, oval_cy - oval_ry,
+                                oval_cx - oval_rx, oval_cy - K * oval_ry,
+                                oval_cx - oval_rx, oval_cy,
+                            );
+                            oval_pb.cubic_to(
+                                oval_cx - oval_rx, oval_cy + K * oval_ry,
+                                oval_cx - K * oval_rx, oval_cy + oval_ry,
+                                oval_cx, oval_cy + oval_ry,
+                            );
+                            oval_pb.cubic_to(
+                                oval_cx + K * oval_rx, oval_cy + oval_ry,
+                                oval_cx + oval_rx, oval_cy + K * oval_ry,
+                                oval_cx + oval_rx, oval_cy,
+                            );
+                            oval_pb.close();
+                            if let Some(oval_path) = oval_pb.finish() {
+                                let mut white_paint = tiny_skia::Paint::default();
+                                white_paint.set_color_rgba8(255, 255, 255, 255);
+                                white_paint.anti_alias = true;
+                                tmp_pixmap.fill_path(
+                                    &oval_path,
+                                    &white_paint,
+                                    tiny_skia::FillRule::Winding,
+                                    identity,
+                                    None,
+                                );
+                            }
+                        }
+
                         let mut white_paint = tiny_skia::Paint::default();
                         white_paint.set_color_rgba8(255, 255, 255, 255);
                         white_paint.anti_alias = true;
