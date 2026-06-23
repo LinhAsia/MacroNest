@@ -14798,11 +14798,11 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
                 if let Some(path) = parse_svg_path_warped(d, &map_svg_pt) {
                     if i == 0 {
                         if mascot_style == crate::model::MascotStyle::Hachiware {
-                            let (oval_cx, oval_cy_raw) = map_svg_pt(1038.0, 800.0);
+                            let (oval_cx, oval_cy_raw) = map_svg_pt(1010.0, 800.0);
                             let oval_cy = oval_cy_raw + dest_y as f32;
 
-                            let oval_rx = 83.0_f32 * scale;
-                            let oval_ry = 56.0_f32 * scale;
+                            let oval_rx = 82.0_f32 * scale;
+                            let oval_ry = 54.0_f32 * scale;
                             const K: f32 = 0.5523_f32;
                             let mut oval_pb = tiny_skia::PathBuilder::new();
                             oval_pb.move_to(oval_cx + oval_rx, oval_cy);
