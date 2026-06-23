@@ -6776,15 +6776,26 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
         let sway_fast = (time_s * 1.67 + side * 0.7).sin();
         let recoil = (time_s * 2.45 + side * 1.05).sin();
         let gust = (time_s * 0.41 + 0.8).sin();
+
+        // Mouse moving wiggle animation
+        let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
+        let current_ms = unsafe { GetTickCount() };
+        let elapsed_ms = current_ms.wrapping_sub(last_move_ms);
+        let mouse_move_strength = (1.0 - (elapsed_ms as f32 / 380.0)).clamp(0.0, 1.0);
+        let mouse_wiggle_x = (time_s * 22.0 + side * 2.5).sin() * 5.8 * scale * mouse_move_strength;
+        let mouse_wiggle_y = (time_s * 22.0 + side * 2.5 + 1.5).sin() * 2.2 * scale * mouse_move_strength;
+
         let wind_dir_x = look_x * -0.28
             + sway * 3.8 * scale
             + sway_fast * 2.2 * scale
             + recoil * 1.35 * scale
-            + gust * 1.9 * scale;
+            + gust * 1.9 * scale
+            + mouse_wiggle_x;
         let wind_dir_y = look_y * -0.05
             + sway.abs() * -0.7 * scale
             + sway_fast * 0.22 * scale
-            + recoil * 0.16 * scale;
+            + recoil * 0.16 * scale
+            + mouse_wiggle_y;
         let pulse = recent_pulse * 2.4 * scale;
         let x = (wind_dir_x + side * pulse * 0.36) * bend_tip;
         let y = wind_dir_y * bend_mid + (-x.abs() * 0.38 + recoil * 0.18 * scale) * bend_tip;
@@ -14758,7 +14769,7 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
                 (1070.35, 120.08, 961.9, 340.0_f32, 10.0 * scale)
             };
 
-            const CX: f32 = 200.0;
+            let cx_val = if mascot_style == crate::model::MascotStyle::Hachiware { 272.0 } else { 200.0 };
 
             let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
 
@@ -14776,7 +14787,7 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
 
             for (i, &(d, color)) in paths_list.iter().enumerate() {
                 let map_svg_pt = |sx: f32, sy: f32| -> (f32, f32) {
-                    let xc = CX + (sx - svg_cx) * (mapping_ch / svg_h);
+                    let xc = cx_val + (sx - svg_cx) * (mapping_ch / svg_h);
                     let yc = (sy - svg_top) * (mapping_ch / svg_h);
 
                     let path_index_for_wobble = if mascot_style == crate::model::MascotStyle::Hachiware {
@@ -14799,6 +14810,13 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
 
                     px += look_x * look_mul_x + wobble_x;
                     py += look_y * look_mul_y + wobble_y + vertical_offset;
+
+                    if mascot_style == crate::model::MascotStyle::Hachiware {
+                        let side = ((xc - cx_val) / 60.0).clamp(-1.0, 1.0);
+                        let ear_off = quick_key_display_chiikawa_ear_offset(yc, scale, time_s, look_x, look_y, recent_pulse, side);
+                        px += ear_off.0;
+                        py += ear_off.1;
+                    }
 
                     (px, py - screen_y_at_ch0)
                 };
@@ -15537,7 +15555,10 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
         let chiikawa_idle_head_drift_x = (time_s * 0.37 + 0.2).sin() * 1.4 * scale;
 
         // Animate Mascot closer to the desk
-        let body_cx = 167.0 * scale;
+        let mut body_cx = 167.0 * scale;
+        if mascot_style == crate::model::MascotStyle::Hachiware {
+            body_cx = 206.0 * scale;
+        }
         let mut body_cy = (123.0 + y_shift) * scale;
         if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             body_cy += chiikawa_idle_body_bob;
@@ -15545,6 +15566,9 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
         let body_radius = 36.0 * scale;
         
         let mut head_cx = 168.0 * scale;
+        if mascot_style == crate::model::MascotStyle::Hachiware {
+            head_cx = 207.0 * scale;
+        }
         let mut head_cy = (77.0 + y_shift) * scale;
         if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             head_cx += chiikawa_idle_head_drift_x;
@@ -15932,9 +15956,14 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
 
         let is_custom_or_gugugaga = mascot_style == crate::model::MascotStyle::Hachiware
             || mascot_style == crate::model::MascotStyle::Gugugaga;
-        let default_l_x = if is_custom_or_gugugaga { 130.0 } else { 112.0 };
-        let default_r_x = if is_custom_or_gugugaga { 214.0 } else { 236.0 };
+        let mut default_l_x = if is_custom_or_gugugaga { 130.0 } else { 112.0 };
+        let mut default_r_x = if is_custom_or_gugugaga { 214.0 } else { 236.0 };
         let default_y = if is_custom_or_gugugaga { 164.0 } else { 172.0 };
+
+        if mascot_style == crate::model::MascotStyle::Hachiware {
+            default_l_x = 169.0;
+            default_r_x = 253.0;
+        }
 
         let l_target = if mouse_active { mouse_projected } else { project_point(default_l_x, default_y) };
         let mut left_paw_target = l_target;
