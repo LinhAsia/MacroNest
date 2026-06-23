@@ -14741,10 +14741,6 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
         if mascot_style == crate::model::MascotStyle::Hachiware
             || mascot_style == crate::model::MascotStyle::Gugugaga
         {
-            if is_redraw {
-                return;
-            }
-
             let time_s = unsafe { GetTickCount() } as f32 * 0.001;
 
             let face_wobble_fast_x = (time_s * 1.65).sin() * 0.16 * scale;
@@ -14754,23 +14750,20 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
             let face_wobble_slow_x = (time_s * 0.58 + 1.8).sin() * 0.55 * scale;
             let face_wobble_slow_y = (time_s * 0.52 + 2.3).sin() * 0.34 * scale;
 
-            let (svg_cx, svg_top, svg_h) = if mascot_style == crate::model::MascotStyle::Hachiware {
-                (1016.25, 218.1, 961.9)
+            let (svg_cx, svg_top, svg_h, mapping_ch, vertical_offset) = if mascot_style == crate::model::MascotStyle::Hachiware {
+                (1016.25, 165.0, 961.9, 290.0_f32, 10.0 * scale)
             } else {
-                (1070.35, 120.08, 961.9)
+                (1070.35, 120.08, 961.9, 340.0_f32, 10.0 * scale)
             };
 
             const CX: f32 = 200.0;
-            const CH: f32 = 340.0;
 
             let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
 
             let screen_y_at_ch0 = 27.4_f32 * scale;
-            let dest_y = (178.0 * scale - CH * 0.53 * scale - screen_y_at_ch0).round() as i32;
+            let dest_y = (178.0 * scale - mapping_ch * 0.53 * scale - screen_y_at_ch0).round() as i32;
 
             let mut tmp_pixmap = tiny_skia::Pixmap::new(pixmap.width(), pixmap.height()).unwrap();
-
-            let vertical_offset = 10.0 * scale;
 
             let identity = tiny_skia::Transform::identity();
             let paths_list = if mascot_style == crate::model::MascotStyle::Hachiware {
@@ -14781,8 +14774,8 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
 
             for (i, &(d, color)) in paths_list.iter().enumerate() {
                 let map_svg_pt = |sx: f32, sy: f32| -> (f32, f32) {
-                    let xc = CX + (sx - svg_cx) * (CH / svg_h);
-                    let yc = (sy - svg_top) * (CH / svg_h);
+                    let xc = CX + (sx - svg_cx) * (mapping_ch / svg_h);
+                    let yc = (sy - svg_top) * (mapping_ch / svg_h);
 
                     let (look_mul_x, look_mul_y, wobble_x, wobble_y) = match i {
                         4 | 10 => (0.38, 0.46, face_wobble_slow_x, face_wobble_slow_y),
@@ -14810,7 +14803,7 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
                         tmp_pixmap.fill_path(
                             &path,
                             &white_paint,
-                            tiny_skia::FillRule::Winding,
+                            tiny_skia::FillRule::EvenOdd,
                             identity.pre_translate(0.0, dest_y as f32),
                             None,
                         );
