@@ -14803,16 +14803,16 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
                             let wobble_x = face_wobble_mid_x;
                             let wobble_y = face_wobble_fast_y;
 
-                            let xc = CX + (1016.25 - svg_cx) * (mapping_ch / svg_h);
-                            let yc = (890.0 - svg_top) * (mapping_ch / svg_h);
+                            let xc = CX + (1022.5 - svg_cx) * (mapping_ch / svg_h);
+                            let yc = (936.5 - svg_top) * (mapping_ch / svg_h);
                             let (mut px, mut py) = quick_key_display_chiikawa_map_point(xc, yc, scale, perspective);
                             px += look_x * look_mul_x + wobble_x;
                             py += look_y * look_mul_y + wobble_y + vertical_offset;
                             let oval_cx = px;
                             let oval_cy = py - screen_y_at_ch0 + dest_y as f32;
 
-                            let oval_rx = 150.0_f32 * scale;
-                            let oval_ry = 87.0_f32 * scale;
+                            let oval_rx = 60.0_f32 * scale;
+                            let oval_ry = 38.0_f32 * scale;
                             const K: f32 = 0.5523_f32;
                             let mut oval_pb = tiny_skia::PathBuilder::new();
                             oval_pb.move_to(oval_cx + oval_rx, oval_cy);
