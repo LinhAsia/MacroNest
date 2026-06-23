@@ -14801,8 +14801,8 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
                             let (oval_cx, oval_cy_raw) = map_svg_pt(1015.0, 800.0);
                             let oval_cy = oval_cy_raw + dest_y as f32;
 
-                            let oval_rx = 114.0_f32 * scale;
-                            let oval_ry = 64.0_f32 * scale;
+                            let oval_rx = 78.0_f32 * scale;
+                            let oval_ry = 52.0_f32 * scale;
                             const K: f32 = 0.5523_f32;
                             let mut oval_pb = tiny_skia::PathBuilder::new();
                             oval_pb.move_to(oval_cx + oval_rx, oval_cy);
