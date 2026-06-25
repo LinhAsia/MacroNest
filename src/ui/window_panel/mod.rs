@@ -2252,7 +2252,9 @@ impl CrosshairApp {
                 // Compute offsets and anchors for the handles
                 drag_offset = match active_handle {
                     SelectionDragHandle::Center => pointer_pos - rect.min,
-                    SelectionDragHandle::Left | SelectionDragHandle::TopLeft | SelectionDragHandle::BottomLeft => {
+                    SelectionDragHandle::Left
+                    | SelectionDragHandle::TopLeft
+                    | SelectionDragHandle::BottomLeft => {
                         let ox = pointer_pos.x - rect.min.x;
                         let oy = if active_handle == SelectionDragHandle::TopLeft {
                             pointer_pos.y - rect.min.y
@@ -2263,7 +2265,9 @@ impl CrosshairApp {
                         };
                         egui::vec2(ox, oy)
                     }
-                    SelectionDragHandle::Right | SelectionDragHandle::TopRight | SelectionDragHandle::BottomRight => {
+                    SelectionDragHandle::Right
+                    | SelectionDragHandle::TopRight
+                    | SelectionDragHandle::BottomRight => {
                         let ox = pointer_pos.x - rect.max.x;
                         let oy = if active_handle == SelectionDragHandle::TopRight {
                             pointer_pos.y - rect.min.y
@@ -2281,12 +2285,12 @@ impl CrosshairApp {
                 ui.data_mut(|d| d.insert_temp(offset_id, drag_offset));
 
                 drag_anchor = match active_handle {
-                    SelectionDragHandle::Left | SelectionDragHandle::TopLeft | SelectionDragHandle::BottomLeft => {
-                        rect.max
-                    }
-                    SelectionDragHandle::Right | SelectionDragHandle::TopRight | SelectionDragHandle::BottomRight => {
-                        rect.min
-                    }
+                    SelectionDragHandle::Left
+                    | SelectionDragHandle::TopLeft
+                    | SelectionDragHandle::BottomLeft => rect.max,
+                    SelectionDragHandle::Right
+                    | SelectionDragHandle::TopRight
+                    | SelectionDragHandle::BottomRight => rect.min,
                     SelectionDragHandle::Top => rect.max,
                     SelectionDragHandle::Bottom => rect.min,
                     _ => egui::Pos2::ZERO,
@@ -2299,7 +2303,10 @@ impl CrosshairApp {
         // the mouse moves outside the canvas bounds (important for small boxes).
         let pointer_primary_down = ui.input(|i| i.pointer.primary_down());
         if pointer_primary_down && active_handle != SelectionDragHandle::None {
-            if let Some(pointer_pos) = ui.input(|i| i.pointer.latest_pos()).or_else(|| ui.input(|i| i.pointer.hover_pos())) {
+            if let Some(pointer_pos) = ui
+                .input(|i| i.pointer.latest_pos())
+                .or_else(|| ui.input(|i| i.pointer.hover_pos()))
+            {
                 let shift_pressed = ui.input(|i| i.modifiers.shift);
                 let ctrl_pressed = ui.input(|i| i.modifiers.ctrl);
                 let aspect = if rect.height() > 0.0 {
@@ -2387,7 +2394,9 @@ impl CrosshairApp {
 
                 if lock_aspect > 0.0 {
                     match active_handle {
-                        SelectionDragHandle::Right | SelectionDragHandle::BottomRight | SelectionDragHandle::TopRight => {
+                        SelectionDragHandle::Right
+                        | SelectionDragHandle::BottomRight
+                        | SelectionDragHandle::TopRight => {
                             let new_h = rect.width() / lock_aspect;
                             if active_handle == SelectionDragHandle::TopRight {
                                 rect.min.y = rect.max.y - new_h;
@@ -2395,7 +2404,9 @@ impl CrosshairApp {
                                 rect.max.y = rect.min.y + new_h;
                             }
                         }
-                        SelectionDragHandle::Left | SelectionDragHandle::TopLeft | SelectionDragHandle::BottomLeft => {
+                        SelectionDragHandle::Left
+                        | SelectionDragHandle::TopLeft
+                        | SelectionDragHandle::BottomLeft => {
                             let new_h = rect.width() / lock_aspect;
                             if active_handle == SelectionDragHandle::TopLeft {
                                 rect.min.y = rect.max.y - new_h;
@@ -2418,16 +2429,22 @@ impl CrosshairApp {
                 // Bound checking for translation (only when moving the whole rect)
                 if active_handle == SelectionDragHandle::Center {
                     if rect.left() < active_bounds_rect.left() {
-                        rect = rect.translate(egui::vec2(active_bounds_rect.left() - rect.left(), 0.0));
+                        rect = rect
+                            .translate(egui::vec2(active_bounds_rect.left() - rect.left(), 0.0));
                     }
                     if rect.top() < active_bounds_rect.top() {
-                        rect = rect.translate(egui::vec2(0.0, active_bounds_rect.top() - rect.top()));
+                        rect =
+                            rect.translate(egui::vec2(0.0, active_bounds_rect.top() - rect.top()));
                     }
                     if rect.right() > active_bounds_rect.right() {
-                        rect = rect.translate(egui::vec2(active_bounds_rect.right() - rect.right(), 0.0));
+                        rect = rect
+                            .translate(egui::vec2(active_bounds_rect.right() - rect.right(), 0.0));
                     }
                     if rect.bottom() > active_bounds_rect.bottom() {
-                        rect = rect.translate(egui::vec2(0.0, active_bounds_rect.bottom() - rect.bottom()));
+                        rect = rect.translate(egui::vec2(
+                            0.0,
+                            active_bounds_rect.bottom() - rect.bottom(),
+                        ));
                     }
                 }
 
