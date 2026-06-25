@@ -58,6 +58,7 @@ impl CrosshairApp {
         let mut run_test_preset_id = None;
         let mut preview_toggled_preset_id = None;
         let mut start_ocr_capture_preset_id = None;
+        let mut start_ocr_download_language_code = None;
         // Render card-based presets list
         for index in 0..self.state.ocr_presets.len() {
             let preset = &mut self.state.ocr_presets[index];
@@ -141,21 +142,32 @@ impl CrosshairApp {
                                     let is_selected = self.state.ocr_language == pack.code;
                                     let installed =
                                         crate::ocr::is_language_pack_installed(pack.code);
+                                    let is_downloading = self
+                                        .ocr_download_language_code
+                                        .as_deref()
+                                        == Some(pack.code)
+                                        && self.ocr_download_job.is_some();
                                     let row = ui
                                         .horizontal(|ui| {
                                             let label_response = ui.add_sized(
-                                                [182.0, 0.0],
+                                                [148.0, 0.0],
                                                 egui::Button::selectable(
                                                     is_selected,
                                                     pack.label,
                                                 ),
                                             );
-                                            if !installed {
+                                            if is_downloading {
+                                                ui.add_sized([82.0, 18.0], egui::Spinner::new());
+                                            } else if !installed {
                                                 ui.with_layout(
                                                     egui::Layout::right_to_left(
                                                         egui::Align::Center,
                                                     ),
                                                     |ui| {
+                                                        if ui.small_button("Download").clicked() {
+                                                            start_ocr_download_language_code =
+                                                                Some(pack.code.to_owned());
+                                                        }
                                                         ui.label(
                                                             RichText::new("[not installed]")
                                                                 .weak(),
@@ -442,6 +454,9 @@ impl CrosshairApp {
                 VisionCaptureTarget::OcrPreset(preset_id),
                 VisionCaptureMode::SearchRegion,
             );
+        }
+        if let Some(language_code) = start_ocr_download_language_code {
+            self.start_ocr_download_for(&language_code);
         }
 
         if live_sync {

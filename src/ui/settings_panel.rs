@@ -711,7 +711,14 @@ impl CrosshairApp {
                                 }
                             } else if Self::settings_action_button_fixed(
                                 ui,
-                                RichText::new(Self::tr_lang(language, "Download", "")).strong(),
+                                RichText::new(
+                                    if crate::ocr::is_ocr_assets_archive_cached() {
+                                        Self::tr_lang(language, "Install", "Install")
+                                    } else {
+                                        Self::tr_lang(language, "Download", "")
+                                    },
+                                )
+                                .strong(),
                                 148.0,
                             )
                             .clicked()

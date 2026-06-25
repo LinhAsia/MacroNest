@@ -4011,6 +4011,7 @@ impl CrosshairApp {
         )> = None;
         let mut pending_open_ai_preset_id: Option<u32> = None;
         let mut pending_ocr_step_capture: Option<(u32, u32, usize)> = None;
+        let mut pending_ocr_language_download: Option<String> = None;
         let command_presets_snapshot = self.state.command_presets.clone();
         let macro_group_virtualization_margin = 480.0;
         let all_presets: Vec<(u32, String)> = self.state.macro_groups.iter().flat_map(|g| &g.presets).map(|p| (p.id, Self::format_macro_trigger_ui(language, p))).collect();
@@ -4351,6 +4352,9 @@ impl CrosshairApp {
                     let mut request_geometry_screen_color_pick = false;
                     let mut pending_geometry_macro_step_color_pick: Option<(u32, u32, usize, bool, bool)> = None;
                     let mut open_groq_api_settings_requested = false;
+                    let current_ocr_download_language_code =
+                        self.ocr_download_language_code.clone();
+                    let is_ocr_download_running = self.ocr_download_job.is_some();
                     let group = &mut self.state.macro_groups[group_index];
                     let folder_enabled = true;
                     let group_scroll_rect_top = ui.cursor().min.y;
@@ -11748,6 +11752,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             step,
                                                             &mut live_sync,
                                                             &mut pending_ocr_step_capture,
+                                                            current_ocr_download_language_code
+                                                                .as_deref(),
+                                                            is_ocr_download_running,
+                                                            &mut pending_ocr_language_download,
                                                         );
                                                     }
                                                                                                 } else if step.action == MacroAction::PlaySoundPreset {
@@ -14082,6 +14090,9 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                             crate::ui::VisionCaptureTarget::OcrStepRegion { group_id: gid, preset_id: pid, step_index: sidx },
                             crate::ui::VisionCaptureMode::SearchRegion,
                         );
+                    }
+                    if let Some(language_code) = pending_ocr_language_download.take() {
+                        self.start_ocr_download_for(&language_code);
                     }
                     if cancel_active_capture {
                         self.cancel_capture();
