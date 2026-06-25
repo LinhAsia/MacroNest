@@ -371,10 +371,7 @@ fn groq_chat_completion_text(
     if settings.api_key.trim().is_empty() {
         bail!("Enter a Groq API key first");
     }
-    let model = settings.model.trim();
-    if model.is_empty() {
-        bail!("The Groq model name is empty");
-    }
+    let model = "openai/gpt-oss-120b";
 
     let url = "https://api.groq.com/openai/v1/chat/completions";
     let mut body = serde_json::json!({

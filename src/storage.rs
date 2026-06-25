@@ -358,11 +358,7 @@ impl AppPaths {
             preset.click_after_move = false;
         }
         state.active_panel = crate::model::AppPanel::Macros;
-        if state.groq_settings.model.trim().is_empty()
-            || state.groq_settings.model.trim() == "llama-3.1-8b-instant"
-        {
-            state.groq_settings.model = "openai/gpt-oss-120b".to_owned();
-        }
+
         let legacy_vision_dir = self.root.join("image-search");
         if legacy_vision_dir.exists() {
             let _ = fs::create_dir_all(&self.vision_dir);
