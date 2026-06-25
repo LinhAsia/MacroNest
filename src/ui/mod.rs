@@ -1396,6 +1396,7 @@ impl CrosshairApp {
         self.startup_cjk_font_check_pending = true;
         self.startup_shell_frames_remaining = self.startup_shell_frames_remaining.max(1);
         configure_theme(ctx, self.state.ui_theme);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.request_repaint();
     }
 
@@ -11472,6 +11473,7 @@ impl eframe::App for CrosshairApp {
                     self.startup_cjk_font_check_pending = true;
                     self.startup_shell_frames_remaining =
                         self.startup_shell_frames_remaining.max(1);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     ctx.request_repaint();
                 }
                 UiCommand::SyncMacroGroups(groups, status) => {
