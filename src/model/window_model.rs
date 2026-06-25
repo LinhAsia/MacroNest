@@ -261,6 +261,106 @@ pub enum CapturedInput {
     Step(MacroStep),
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum MousePathEventKind {
+    #[default]
+    Move,
+    LeftDown,
+    LeftUp,
+    RightDown,
+    RightUp,
+    MiddleDown,
+    MiddleUp,
+    WheelUp,
+    WheelDown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct MousePathEvent {
+    pub kind: MousePathEventKind,
+    pub x: i32,
+    pub y: i32,
+    pub delay_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct MousePathPreset {
+    pub id: u32,
+    pub name: String,
+    pub enabled: bool,
+    pub collapsed: bool,
+    pub record_hotkey: Option<HotkeyBinding>,
+    #[serde(default)]
+    pub replay_relative_motion: bool,
+    pub events: Vec<MousePathEvent>,
+}
+
+impl MousePathPreset {
+    pub fn new(id: u32) -> Self {
+        Self {
+            id,
+            name: format!("Mouse Path {id}"),
+            enabled: true,
+            collapsed: true,
+            record_hotkey: None,
+            replay_relative_motion: false,
+            events: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MouseSensitivityPreset {
+    pub id: u32,
+    pub name: String,
+    pub enabled: bool,
+    pub collapsed: bool,
+    pub target_window_title: Option<String>,
+    pub extra_target_window_titles: Vec<String>,
+    #[serde(default = "default_true")]
+    pub match_duplicate_window_titles: bool,
+    pub speed: u32,
+    #[serde(default)]
+    pub restore_on_exit: bool,
+    #[serde(default = "default_mouse_sensitivity_restore_speed")]
+    pub restore_speed: u32,
+    pub hotkey: Option<HotkeyBinding>,
+    #[serde(default)]
+    pub trigger_keys: String,
+}
+
+fn default_mouse_sensitivity_restore_speed() -> u32 {
+    6
+}
+
+impl MouseSensitivityPreset {
+    pub fn new(id: u32) -> Self {
+        Self {
+            id,
+            name: format!("Mouse Sensitivity {id}"),
+            enabled: true,
+            collapsed: true,
+            target_window_title: None,
+            extra_target_window_titles: Vec::new(),
+            match_duplicate_window_titles: true,
+            speed: 15,
+            restore_on_exit: false,
+            restore_speed: default_mouse_sensitivity_restore_speed(),
+            hotkey: None,
+            trigger_keys: String::new(),
+        }
+    }
+}
+
+impl Default for MouseSensitivityPreset {
+    fn default() -> Self {
+        Self::new(1)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum WindowExpandDirection {
     Up,
@@ -515,5 +615,18 @@ impl PinPreset {
 impl Default for PinPreset {
     fn default() -> Self {
         Self::new(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MouseSensitivityPreset;
+
+    #[test]
+    fn mouse_sensitivity_default_keeps_restore_defaults() {
+        let preset = MouseSensitivityPreset::default();
+        assert_eq!(preset.restore_speed, 6);
+        assert!(preset.match_duplicate_window_titles);
+        assert_eq!(preset.speed, 15);
     }
 }

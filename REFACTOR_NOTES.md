@@ -49,11 +49,20 @@
   - [src/model/geometry_model.rs](D:/app/MacroNest/src/model/geometry_model.rs)
   - [src/model/vision_model.rs](D:/app/MacroNest/src/model/vision_model.rs)
   - [src/model/macro_model.rs](D:/app/MacroNest/src/model/macro_model.rs)
-- `src/model/mod.rs` now mainly keeps shared defaults, remaining mixed presets, and `AppState`.
+- Finished the remaining `model` holdouts:
+  - mouse path and mouse sensitivity presets now live in [src/model/window_model.rs](D:/app/MacroNest/src/model/window_model.rs)
+  - HUD, timer, command, AI settings, and `AppState` now live in [src/model/settings_model.rs](D:/app/MacroNest/src/model/settings_model.rs)
+  - `src/model/mod.rs` now only keeps shared defaults and module wiring/re-exports
+- Started the `ui/mod.rs` reduction with a low-risk extraction:
+  - moved font loading, CJK fallback detection, and theme visual configuration into [src/ui/theme.rs](D:/app/MacroNest/src/ui/theme.rs)
+  - kept the public `crate::ui::configure_fonts` and `crate::ui::configure_theme` entrypoints stable via re-export
+- Added small behavior-locking tests for the refactor slice:
+  - legacy alias deserialization for `AppState`
+  - mouse sensitivity default restore settings
 - Kept behavior-preserving changes first; no serialization rename or user-facing flow change was introduced in this phase.
 
 ## Next Safe Steps
 
-- Finish the remaining `model` holdouts still in `src/model/mod.rs` such as HUD/timer/command/AI/app-state-adjacent types.
-- Extract shared UI shell helpers from `src/ui/mod.rs` into smaller modules without changing layout or styling.
+- Continue extracting shared UI shell helpers from `src/ui/mod.rs` into smaller modules without changing layout or styling.
+- Good next cuts are navigation/titlebar helpers and shared card/button styling, because they are still clustered in `src/ui/mod.rs` and mostly UI-local.
 - Start with pure/testable helpers before touching overlay runtime behavior.
