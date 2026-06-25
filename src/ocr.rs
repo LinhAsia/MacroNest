@@ -14,6 +14,7 @@ pub const OCR_DEFAULT_CODE: &str = "multilingual";
 
 const OCR_ASSETS_ARCHIVE_URL: &str =
     "https://github.com/NBaoLinh/MacroNest/releases/download/tools/ocr-assets.zip";
+const OCR_ASSETS_ARCHIVE_EXPECTED_SIZE_BYTES: u64 = 55_223_788;
 const OCR_DET_MODEL_FILE: &str = "PP-OCRv5_mobile_det.mnn";
 const OCR_MULTILINGUAL_REC_FILE: &str = "PP-OCRv5_mobile_rec.mnn";
 const OCR_MULTILINGUAL_CHARSET_FILE: &str = "ppocr_keys_v5.txt";
@@ -140,7 +141,10 @@ pub fn normalize_language_code(value: &str) -> String {
     if normalized == "active" {
         return OCR_DEFAULT_CODE.to_owned();
     }
-    if OCR_LANGUAGE_PACKS.iter().any(|pack| pack.code == normalized) {
+    if OCR_LANGUAGE_PACKS
+        .iter()
+        .any(|pack| pack.code == normalized)
+    {
         normalized
     } else {
         OCR_DEFAULT_CODE.to_owned()
@@ -230,13 +234,54 @@ fn ocr_assets_archive_path() -> Result<PathBuf> {
 
 #[cfg(windows)]
 pub fn is_ocr_assets_archive_cached() -> bool {
-    ocr_assets_archive_path()
-        .ok()
-        .is_some_and(|path| path.exists() && path.metadata().map(|meta| meta.len() > 0).unwrap_or(false))
+    ocr_assets_archive_path().ok().is_some_and(|path| {
+        path.exists() && path.metadata().map(|meta| meta.len() > 0).unwrap_or(false)
+    })
 }
 
 #[cfg(not(windows))]
 pub fn is_ocr_assets_archive_cached() -> bool {
+    false
+}
+
+pub fn expected_ocr_assets_archive_size() -> u64 {
+    OCR_ASSETS_ARCHIVE_EXPECTED_SIZE_BYTES
+}
+
+#[cfg(windows)]
+pub fn ocr_assets_disk_usage_bytes() -> u64 {
+    ocr_models_dir()
+        .ok()
+        .and_then(|root| fs::read_dir(root).ok())
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok())
+                .filter_map(|entry| entry.metadata().ok())
+                .filter(|metadata| metadata.is_file())
+                .map(|metadata| metadata.len())
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+#[cfg(not(windows))]
+pub fn ocr_assets_disk_usage_bytes() -> u64 {
+    0
+}
+
+pub fn has_any_ocr_assets() -> bool {
+    ocr_assets_disk_usage_bytes() > 0
+}
+
+#[cfg(windows)]
+pub fn are_all_language_packs_installed() -> bool {
+    OCR_LANGUAGE_PACKS
+        .iter()
+        .all(|pack| is_language_pack_installed(pack.code))
+}
+
+#[cfg(not(windows))]
+pub fn are_all_language_packs_installed() -> bool {
     false
 }
 
@@ -265,7 +310,12 @@ where
         .head(OCR_ASSETS_ARCHIVE_URL)
         .send()
         .ok()
-        .and_then(|response| response.headers().get(reqwest::header::CONTENT_LENGTH).cloned())
+        .and_then(|response| {
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_LENGTH)
+                .cloned()
+        })
         .and_then(|value| value.to_str().ok()?.parse::<u64>().ok())
         .unwrap_or(1)
         .max(1);
@@ -273,11 +323,19 @@ where
     let mut response = client
         .get(OCR_ASSETS_ARCHIVE_URL)
         .send()
-        .with_context(|| format!("Failed to download OCR asset archive from {OCR_ASSETS_ARCHIVE_URL}"))?
+        .with_context(|| {
+            format!("Failed to download OCR asset archive from {OCR_ASSETS_ARCHIVE_URL}")
+        })?
         .error_for_status()
-        .with_context(|| format!("OCR asset archive download returned an error for {OCR_ASSETS_ARCHIVE_URL}"))?;
-    let mut archive_file = fs::File::create(&temp_path)
-        .with_context(|| format!("Failed to create temporary OCR archive {}", temp_path.display()))?;
+        .with_context(|| {
+            format!("OCR asset archive download returned an error for {OCR_ASSETS_ARCHIVE_URL}")
+        })?;
+    let mut archive_file = fs::File::create(&temp_path).with_context(|| {
+        format!(
+            "Failed to create temporary OCR archive {}",
+            temp_path.display()
+        )
+    })?;
     let mut downloaded = 0_u64;
     progress(downloaded, total_size);
     let mut buffer = [0u8; 16384];
@@ -292,8 +350,12 @@ where
     }
     archive_file.flush()?;
     drop(archive_file);
-    fs::rename(&temp_path, &archive_path)
-        .with_context(|| format!("Failed to move OCR archive into place {}", archive_path.display()))?;
+    fs::rename(&temp_path, &archive_path).with_context(|| {
+        format!(
+            "Failed to move OCR archive into place {}",
+            archive_path.display()
+        )
+    })?;
     progress(total_size, total_size);
     Ok(archive_path)
 }
@@ -306,8 +368,7 @@ fn copy_file_from_ocr_archive(
 ) -> Result<()> {
     let file = fs::File::open(archive_path)
         .with_context(|| format!("Failed to open OCR archive {}", archive_path.display()))?;
-    let mut archive =
-        ZipArchive::new(file).context("Failed to read OCR archive as a zip file")?;
+    let mut archive = ZipArchive::new(file).context("Failed to read OCR archive as a zip file")?;
     for index in 0..archive.len() {
         let mut entry = archive
             .by_index(index)
@@ -318,14 +379,21 @@ fn copy_file_from_ocr_archive(
                 fs::create_dir_all(parent)?;
             }
             let temp_path = destination.with_extension("tmp");
-            let mut output = fs::File::create(&temp_path)
-                .with_context(|| format!("Failed to create temporary OCR asset {}", temp_path.display()))?;
+            let mut output = fs::File::create(&temp_path).with_context(|| {
+                format!(
+                    "Failed to create temporary OCR asset {}",
+                    temp_path.display()
+                )
+            })?;
             std::io::copy(&mut entry, &mut output)
                 .with_context(|| format!("Failed to extract OCR asset {file_name}"))?;
             output.flush()?;
             drop(output);
             fs::rename(&temp_path, destination).with_context(|| {
-                format!("Failed to move OCR asset into place {}", destination.display())
+                format!(
+                    "Failed to move OCR asset into place {}",
+                    destination.display()
+                )
             })?;
             return Ok(());
         }
@@ -338,9 +406,9 @@ pub fn is_language_pack_installed(value: &str) -> bool {
     let pack = language_pack_for_code(value);
     model_paths_for_pack(pack)
         .map(|(det_path, rec_path, charset_path)| {
-            [det_path, rec_path, charset_path]
-                .iter()
-                .all(|path| path.exists() && path.metadata().map(|meta| meta.len() > 0).unwrap_or(false))
+            [det_path, rec_path, charset_path].iter().all(|path| {
+                path.exists() && path.metadata().map(|meta| meta.len() > 0).unwrap_or(false)
+            })
         })
         .unwrap_or(false)
 }
@@ -373,53 +441,8 @@ pub fn expected_language_pack_size(value: &str) -> u64 {
     pack.expected_size_bytes
 }
 
-pub fn total_expected_language_pack_size() -> u64 {
-    OCR_LANGUAGE_PACKS
-        .iter()
-        .map(|pack| pack.expected_size_bytes)
-        .sum()
-}
-
 #[cfg(windows)]
-pub fn count_installed_language_packs() -> usize {
-    OCR_LANGUAGE_PACKS
-        .iter()
-        .filter(|pack| is_language_pack_installed(pack.code))
-        .count()
-}
-
-#[cfg(not(windows))]
-pub fn count_installed_language_packs() -> usize {
-    0
-}
-
-#[cfg(windows)]
-pub fn total_installed_language_pack_size() -> u64 {
-    OCR_LANGUAGE_PACKS
-        .iter()
-        .map(|pack| installed_language_pack_size(pack.code))
-        .sum()
-}
-
-#[cfg(not(windows))]
-pub fn total_installed_language_pack_size() -> u64 {
-    0
-}
-
-#[cfg(windows)]
-pub fn are_all_language_packs_installed() -> bool {
-    count_installed_language_packs() == OCR_LANGUAGE_PACKS.len()
-}
-
-#[cfg(not(windows))]
-pub fn are_all_language_packs_installed() -> bool {
-    false
-}
-
-#[cfg(windows)]
-fn missing_language_pack_files(
-    pack: &OcrLanguagePack,
-) -> Result<Vec<(PathBuf, &'static str)>> {
+fn missing_language_pack_files(pack: &OcrLanguagePack) -> Result<Vec<(PathBuf, &'static str)>> {
     let (det_path, rec_path, charset_path) = model_paths_for_pack(pack)?;
     Ok([
         (det_path, OCR_DET_MODEL_FILE),
@@ -428,11 +451,7 @@ fn missing_language_pack_files(
     ]
     .into_iter()
     .filter(|(path, _)| {
-        !path.exists()
-            || path
-                .metadata()
-                .map(|meta| meta.len() == 0)
-                .unwrap_or(true)
+        !path.exists() || path.metadata().map(|meta| meta.len() == 0).unwrap_or(true)
     })
     .collect())
 }
@@ -514,18 +533,21 @@ pub fn delete_language_pack(_value: &str) -> Result<()> {
 }
 
 #[cfg(windows)]
-pub fn delete_all_language_packs() -> Result<()> {
+pub fn delete_all_ocr_assets() -> Result<()> {
     OCR_ENGINE_CACHE
         .lock()
         .map_err(|_| anyhow!("OCR engine cache lock was poisoned"))?
         .clear();
-    let models_dir = ocr_models_dir()?;
-    let _ = fs::remove_dir_all(&models_dir);
+    let dir = crate::storage::AppPaths::discover()?.ocr_dir;
+    if dir.exists() {
+        fs::remove_dir_all(&dir)
+            .with_context(|| format!("Failed to remove OCR assets directory {}", dir.display()))?;
+    }
     Ok(())
 }
 
 #[cfg(not(windows))]
-pub fn delete_all_language_packs() -> Result<()> {
+pub fn delete_all_ocr_assets() -> Result<()> {
     Ok(())
 }
 
@@ -563,8 +585,12 @@ fn build_engine(pack: &OcrLanguagePack) -> Result<ocr_rs::OcrEngine> {
         .with_det_options(det_options)
         .with_rec_options(rec_options);
 
-    ocr_rs::OcrEngine::new(det_path, rec_path, charset_path, Some(config))
-        .map_err(|error| anyhow!("Failed to initialize PaddleOCR engine for {}: {error}", pack.label))
+    ocr_rs::OcrEngine::new(det_path, rec_path, charset_path, Some(config)).map_err(|error| {
+        anyhow!(
+            "Failed to initialize PaddleOCR engine for {}: {error}",
+            pack.label
+        )
+    })
 }
 
 #[cfg(windows)]
@@ -585,11 +611,9 @@ fn engine_for_language(value: &str) -> Result<Arc<Mutex<ocr_rs::OcrEngine>>> {
     let mut cache = OCR_ENGINE_CACHE
         .lock()
         .map_err(|_| anyhow!("OCR engine cache lock was poisoned"))?;
-    let entry = cache
-        .entry(requested)
-        .or_insert_with(|| OcrEngineBundle {
-            engine: engine.clone(),
-        });
+    let entry = cache.entry(requested).or_insert_with(|| OcrEngineBundle {
+        engine: engine.clone(),
+    });
     Ok(entry.engine.clone())
 }
 
