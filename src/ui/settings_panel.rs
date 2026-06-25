@@ -439,10 +439,8 @@ impl CrosshairApp {
                     );
                     ui.add_space(10.0);
                     self.render_ocr_tool_header(ui, language);
-                    if self.ocr_tools_open {
-                        ui.add_space(6.0);
-                        self.render_ocr_tool_entry(ui, language);
-                    }
+                    ui.add_space(6.0);
+                    self.render_ocr_tool_entry(ui, language);
                     ui.add_space(10.0);
                     self.render_interception_driver_entry(ui, language, interception_progress);
                     ui.add_space(10.0);
@@ -611,44 +609,20 @@ impl CrosshairApp {
     fn render_ocr_tool_header(&mut self, ui: &mut egui::Ui, language: UiLanguage) {
         let installed_count = crate::ocr::count_installed_language_packs();
         let total_size = crate::ocr::total_installed_language_pack_size();
-        let action_width = 148.0;
 
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label(RichText::new("OCR").strong().size(13.0));
-                ui.add_space(2.0);
-                let detail = if installed_count > 0 {
-                    format!(
-                        "{} packs ({})",
-                        installed_count,
-                        Self::format_byte_size(total_size)
-                    )
-                } else {
-                    Self::tr_lang(language, "No packs installed", "").to_owned()
-                };
-                ui.label(RichText::new(detail).small().weak());
-            });
-
-            let spacer = (ui.available_width() - action_width).max(0.0);
-            if spacer > 0.0 {
-                ui.add_space(spacer);
-            }
-
-            ui.allocate_ui_with_layout(
-                vec2(action_width, 52.0),
-                egui::Layout::right_to_left(egui::Align::Center),
-                |ui| {
-                    let button_label = if self.ocr_tools_open {
-                        Self::tr_lang(language, "Close", "")
-                    } else {
-                        Self::tr_lang(language, "Open", "")
-                    };
-                    if Self::settings_action_button_fixed(ui, button_label, action_width).clicked()
-                    {
-                        self.ocr_tools_open = !self.ocr_tools_open;
-                    }
-                },
-            );
+        ui.vertical(|ui| {
+            ui.label(RichText::new("OCR").strong().size(13.0));
+            ui.add_space(2.0);
+            let detail = if installed_count > 0 {
+                format!(
+                    "{} packs ({})",
+                    installed_count,
+                    Self::format_byte_size(total_size)
+                )
+            } else {
+                Self::tr_lang(language, "No packs installed", "").to_owned()
+            };
+            ui.label(RichText::new(detail).small().weak());
         });
     }
 
@@ -934,13 +908,16 @@ impl CrosshairApp {
         let label = label.into();
         let galley = label.clone().into_galley(ui, None, f32::INFINITY, egui::TextStyle::Button);
         let button_width = (galley.size().x + 28.0).clamp(120.0, 260.0);
-        ui.add_sized(
-            [button_width, 32.0],
-            Button::new(label.color(text_color))
-                .fill(fill)
-                .stroke(Stroke::new(1.0, stroke_color))
-                .corner_radius(8.0),
-        )
+        ui.horizontal_centered(|ui| {
+            ui.add_sized(
+                [button_width, 32.0],
+                Button::new(label.color(text_color))
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0, stroke_color))
+                    .corner_radius(8.0),
+            )
+        })
+        .inner
     }
 
     fn settings_action_button(ui: &mut egui::Ui, label: impl Into<WidgetText>) -> egui::Response {
