@@ -29,6 +29,7 @@ tiny-skia = "0.11"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 vi = "0.8"
 serialport = "4.6"
+zip = { version = "4.3", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 hidapi = "2.6"

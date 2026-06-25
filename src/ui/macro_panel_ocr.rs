@@ -156,6 +156,9 @@ impl CrosshairApp {
         step: &mut MacroStep,
         live_sync: &mut bool,
         pending_ocr_step_capture: &mut Option<(u32, u32, usize)>,
+        current_ocr_download_language_code: Option<&str>,
+        is_ocr_download_running: bool,
+        pending_ocr_language_download: &mut Option<String>,
     ) {
         let ctrl_height = ui.spacing().interact_size.y;
 
@@ -177,14 +180,28 @@ impl CrosshairApp {
             .width(92.0)
             .show_ui(ui, |ui| {
                 for pack in crate::ocr::ocr_language_packs() {
-                    if ui
-                        .selectable_value(
-                            &mut step.ocr_language,
-                            pack.code.to_owned(),
-                            crate::ocr::display_label_for_language_code(pack.code),
-                        )
-                        .changed()
-                    {
+                    let installed = crate::ocr::is_language_pack_installed(pack.code);
+                    let is_downloading = current_ocr_download_language_code == Some(pack.code)
+                        && is_ocr_download_running;
+                    let row = ui
+                        .horizontal(|ui| {
+                            let label_response = ui.add_sized(
+                                [118.0, 0.0],
+                                egui::Button::selectable(
+                                    step.ocr_language == pack.code,
+                                    crate::ocr::display_label_for_language_code(pack.code),
+                                ),
+                            );
+                            if is_downloading {
+                                ui.add_sized([58.0, 18.0], egui::Spinner::new());
+                            } else if !installed && ui.small_button("Dl").clicked() {
+                                *pending_ocr_language_download = Some(pack.code.to_owned());
+                            }
+                            label_response
+                        })
+                        .inner;
+                    if row.clicked() {
+                        step.ocr_language = pack.code.to_owned();
                         step.ocr_language =
                             crate::ocr::normalize_language_code(&step.ocr_language);
                         *live_sync = true;
