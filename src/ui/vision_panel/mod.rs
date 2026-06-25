@@ -75,7 +75,11 @@ impl CrosshairApp {
                 self.persist();
             }
             if ui
-                .button(Self::tr_lang(language, "+ Pixel counter", "+ Pixel counter"))
+                .button(Self::tr_lang(
+                    language,
+                    "+ Pixel counter",
+                    "+ Pixel counter",
+                ))
                 .clicked()
             {
                 let mut id = 1;
@@ -223,7 +227,11 @@ impl CrosshairApp {
                             };
 
                             let hover_text = if capture_active {
-                                Self::tr_lang(language, "Capturing... Press any key.", "Capturing... Press any key.")
+                                Self::tr_lang(
+                                    language,
+                                    "Capturing... Press any key.",
+                                    "Capturing... Press any key.",
+                                )
                                 .to_string()
                             } else if has_keys {
                                 let bindings_labels: Vec<String> = Self::preset_trigger_bindings(
@@ -237,15 +245,27 @@ impl CrosshairApp {
                                     "{} {}\n{}",
                                     Self::tr_lang(language, "Hotkey:", "Hotkey:"),
                                     bindings_labels.join(", "),
-                                    Self::tr_lang(language, "Left click: rebind | Right click: clear", "Left click: rebind | Right click: clear")
+                                    Self::tr_lang(
+                                        language,
+                                        "Left click: rebind | Right click: clear",
+                                        "Left click: rebind | Right click: clear"
+                                    )
                                 )
                             } else {
-                                Self::tr_lang(language, "Left click: bind hotkey", "Left click: bind hotkey")
+                                Self::tr_lang(
+                                    language,
+                                    "Left click: bind hotkey",
+                                    "Left click: bind hotkey",
+                                )
                                 .to_string()
                             };
 
                             let btn_text = if capture_active {
-                                RichText::new(Self::tr_lang(language, "Capturing...", "Capturing..."))
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Capturing...",
+                                    "Capturing...",
+                                ))
                                 .strong()
                                 .color(Color32::from_rgb(255, 232, 96))
                             } else {
@@ -349,7 +369,7 @@ impl CrosshairApp {
                             ui.label(Self::tr_lang(language, "Area", "Area"));
                             ui.horizontal_wrapped(|ui| {
                                 ui.monospace(Self::image_search_search_area_text(preset));
-                                
+
                                 let mut is_single = preset.search_region_is_single_pixel;
                                 if preset.use_color_matching && !preset.is_pixel_counter {
                                     if ui
@@ -1390,14 +1410,18 @@ impl CrosshairApp {
         // For RegionAdjust, capture existing region coords
         let existing_region = if is_region_adjust {
             if let VisionCaptureTarget::Preset(preset_id) = target {
-                self.state.vision_presets.iter().find(|p| p.id == preset_id).and_then(|p| {
-                    Some((
-                        p.search_region_screen_x?,
-                        p.search_region_screen_y?,
-                        p.search_region_width?,
-                        p.search_region_height?,
-                    ))
-                })
+                self.state
+                    .vision_presets
+                    .iter()
+                    .find(|p| p.id == preset_id)
+                    .and_then(|p| {
+                        Some((
+                            p.search_region_screen_x?,
+                            p.search_region_screen_y?,
+                            p.search_region_width?,
+                            p.search_region_height?,
+                        ))
+                    })
             } else {
                 None
             }
@@ -1478,7 +1502,6 @@ impl CrosshairApp {
             egui_ctx.request_repaint();
         });
     }
-
 
     pub(crate) fn handle_image_search_capture_mouse_down(
         &mut self,

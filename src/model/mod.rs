@@ -2671,8 +2671,6 @@ impl Default for SoundPreset {
     }
 }
 
-
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct OcrPreset {
