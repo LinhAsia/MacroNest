@@ -26,7 +26,7 @@ impl CrosshairApp {
                 ui.vertical(|ui| {
                     ui.add_space(4.0);
                     let mut groq_changed = false;
-                    Self::show_settings_card(ui, |ui| {
+                    Self::show_settings_card_at_width(ui, content_width, |ui| {
                         ui.vertical(|ui| {
                             let api_header = Self::settings_section_button(
                                 ui,
@@ -165,7 +165,7 @@ impl CrosshairApp {
                     }
 
                     ui.add_space(12.0);
-                    Self::show_settings_card(ui, |ui| {
+                    Self::show_settings_card_at_width(ui, content_width, |ui| {
                         ui.vertical(|ui| {
                             ui.label(
                                 RichText::new(Self::tr_lang(language, "Vietnamese input", ""))
@@ -197,7 +197,7 @@ impl CrosshairApp {
                         });
                     });
                     ui.add_space(12.0);
-                    Self::show_settings_card(ui, |ui| {
+                    Self::show_settings_card_at_width(ui, content_width, |ui| {
                         ui.vertical(|ui| {
                             ui.label(
                                 RichText::new(Self::tr_lang(language, "App data", ""))
@@ -250,20 +250,20 @@ impl CrosshairApp {
                         });
                     });
                     ui.add_space(12.0);
-                    self.render_advanced_settings(ui);
+                    self.render_advanced_settings(ui, content_width);
                     ui.add_space(12.0);
-                    self.render_downloaded_tools_settings(ui);
+                    self.render_downloaded_tools_settings(ui, content_width);
                     ui.add_space(12.0);
                     let ctx_clone = ui.ctx().clone();
-                    self.render_update_settings(ui, &ctx_clone);
+                    self.render_update_settings(ui, &ctx_clone, content_width);
                     ui.add_space(8.0);
                 });
             });
     }
 
-    pub(crate) fn render_advanced_settings(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn render_advanced_settings(&mut self, ui: &mut egui::Ui, card_width: f32) {
         let language = self.state.ui_language;
-        Self::show_settings_card(ui, |ui| {
+        Self::show_settings_card_at_width(ui, card_width, |ui| {
             ui.vertical(|ui| {
                 let header_text = RichText::new(Self::tr_lang(language, "Advanced", ""))
                     .strong()
@@ -395,7 +395,11 @@ impl CrosshairApp {
         });
     }
 
-    pub(crate) fn render_downloaded_tools_settings(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn render_downloaded_tools_settings(
+        &mut self,
+        ui: &mut egui::Ui,
+        card_width: f32,
+    ) {
         let language = self.state.ui_language;
         let opencv_path = self.paths.opencv_dll.clone();
         let arduino_path = self.paths.avrdude_exe.clone();
@@ -411,7 +415,7 @@ impl CrosshairApp {
             .arduino_download_job
             .as_ref()
             .map(|_| self.arduino_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
-        Self::show_settings_card(ui, |ui| {
+        Self::show_settings_card_at_width(ui, card_width, |ui| {
             ui.vertical(|ui| {
                 if Self::settings_section_button(
                     ui,
@@ -817,9 +821,14 @@ impl CrosshairApp {
         });
     }
 
-    pub(crate) fn render_update_settings(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    pub(crate) fn render_update_settings(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        card_width: f32,
+    ) {
         let language = self.state.ui_language;
-        Self::show_settings_card(ui, |ui| {
+        Self::show_settings_card_at_width(ui, card_width, |ui| {
             ui.vertical(|ui| {
                 ui.label(
                     RichText::new(Self::tr_lang(language, "Update", ""))
@@ -983,8 +992,11 @@ impl CrosshairApp {
         Self::settings_action_button_fixed(ui, label, 0.0)
     }
 
-    fn show_settings_card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
-        let card_width = ui.available_width();
+    fn show_settings_card_at_width(
+        ui: &mut egui::Ui,
+        card_width: f32,
+        add_contents: impl FnOnce(&mut egui::Ui),
+    ) {
         ui.allocate_ui_with_layout(
             vec2(card_width, 0.0),
             egui::Layout::top_down(egui::Align::Min),
