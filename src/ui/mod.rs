@@ -12183,14 +12183,13 @@ impl eframe::App for CrosshairApp {
                 let job = self.interception_uninstall_job.take().unwrap();
                 match job.join() {
                     Ok(Ok(())) => {
+                        self.delete_interception_package();
+                        self.state.vision_settings.use_interception = false;
                         self.interception_driver_installed = false;
                         self.interception_driver_needs_restart = true;
-                        self.status = Self::tr_lang(
-                            self.state.ui_language,
-                            "Interception driver removed. Restart your PC to finish cleanup.",
-                            "Interception driver removed. Restart your PC to finish cleanup.",
-                        )
-                        .to_owned();
+                        self.status =
+                            "Interception driver removed. Package files deleted from app. Restart your PC to finish cleanup."
+                                .to_owned();
                     }
                     Ok(Err(error)) => {
                         self.status = format!("Driver uninstall failed: {error}");
