@@ -3213,10 +3213,10 @@ const GUGUGAGA_MASCOT_PATHS: &[(&str, [u8; 4])] = &[
                 dynamic_geometry_overlay_visible: false,
             });
             let _controller_hwnd = CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
+                WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
                 w!("CrosshairController"),
                 w!("CrosshairController"),
-                WS_OVERLAPPEDWINDOW,
+                WS_POPUP,
                 0,
                 0,
                 0,
