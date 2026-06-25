@@ -1438,14 +1438,7 @@ impl CrosshairApp {
             if exit_code != 0 {
                 bail!("Interception installer exited with code {exit_code}");
             }
-            let deadline = Instant::now() + Duration::from_secs(60);
-            while Instant::now() < deadline {
-                if crate::platform::is_interception_driver_installed() {
-                    return Ok(());
-                }
-                std::thread::sleep(Duration::from_secs(2));
-            }
-            bail!("Timed out waiting for the Interception driver to install");
+            Ok(())
         });
 
         self.interception_install_job = Some(job);
