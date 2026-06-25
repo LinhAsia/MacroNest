@@ -2380,7 +2380,6 @@ pub struct AiSettings {
 pub struct GroqSettings {
     pub api_key: String,
     pub show_api_key: bool,
-    pub model: String,
     pub enabled: bool,
     pub details_open: bool,
 }
@@ -2573,7 +2572,6 @@ impl Default for GroqSettings {
         Self {
             api_key: String::new(),
             show_api_key: false,
-            model: "openai/gpt-oss-120b".to_owned(),
             enabled: false,
             details_open: false,
         }

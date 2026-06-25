@@ -86,63 +86,8 @@ impl CrosshairApp {
                                         }
                                         ui.end_row();
 
-                                        ui.label("Model");
-                                        let selected_text = {
-                                            let model = self.state.groq_settings.model.trim();
-                                            Self::groq_model_catalog()
-                                                .iter()
-                                                .find(|(_, model_id)| {
-                                                    model_id.eq_ignore_ascii_case(model)
-                                                })
-                                                .map(|(label, model_id)| {
-                                                    format!("{label} ({model_id})")
-                                                })
-                                                .unwrap_or_else(|| model.to_owned())
-                                        };
-                                        egui::ComboBox::from_id_salt("groq-model-picker")
-                                            .selected_text(selected_text)
-                                            .width(280.0)
-                                            .show_ui(ui, |ui| {
-                                                for (label, model_id) in Self::groq_model_catalog()
-                                                {
-                                                    let selected = self
-                                                        .state
-                                                        .groq_settings
-                                                        .model
-                                                        .trim()
-                                                        .eq(*model_id);
-                                                    if ui
-                                                        .selectable_label(
-                                                            selected,
-                                                            format!("{label} ({model_id})"),
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        self.state.groq_settings.model =
-                                                            (*model_id).to_owned();
-                                                        groq_changed = true;
-                                                        ui.close();
-                                                    }
-                                                }
-                                            });
-                                        ui.add_space(action_width);
-                                        ui.end_row();
-
                                         ui.label("");
-                                        let response = ui.add_sized(
-                                            [280.0, 24.0],
-                                            TextEdit::singleline(
-                                                &mut self.state.groq_settings.model,
-                                            )
-                                            .hint_text("openai/gpt-oss-120b"),
-                                        );
-                                        Self::apply_vietnamese_input_if_changed(
-                                            &response,
-                                            self.state.vietnamese_input_enabled,
-                                            self.state.vietnamese_input_mode,
-                                            &mut self.state.groq_settings.model,
-                                        );
-                                        groq_changed |= response.changed();
+                                        ui.label("");
                                         if Self::settings_action_button_fixed(
                                             ui,
                                             "Get API key",

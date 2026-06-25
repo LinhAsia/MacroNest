@@ -875,10 +875,6 @@ pub struct CrosshairApp {
 }
 
 impl CrosshairApp {
-    fn groq_model_catalog() -> &'static [(&'static str, &'static str)] {
-        &[("GPT OSS 120B", "openai/gpt-oss-120b")]
-    }
-
     pub fn new(
         paths: AppPaths,
         state: AppState,
