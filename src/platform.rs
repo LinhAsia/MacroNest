@@ -198,17 +198,63 @@ mod windows_platform {
         }
     }
 
+    fn registry_key_exists(key_path: &str) -> bool {
+        let system_root = env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_owned());
+        let reg_exe = Path::new(&system_root)
+            .join("System32")
+            .join("reg.exe");
+        Command::new(reg_exe)
+            .args(["query", key_path])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    fn registry_value_contains_token(key_path: &str, value_name: &str, token: &str) -> bool {
+        let system_root = env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_owned());
+        let reg_exe = Path::new(&system_root)
+            .join("System32")
+            .join("reg.exe");
+        let Ok(output) = Command::new(reg_exe)
+            .args(["query", key_path, "/v", value_name])
+            .output()
+        else {
+            return false;
+        };
+        if !output.status.success() {
+            return false;
+        }
+
+        let token = token.to_ascii_lowercase();
+        String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .any(|part| part.eq_ignore_ascii_case(&token))
+    }
+
     pub fn is_interception_driver_installed() -> bool {
         let system_root = env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_owned());
         let drivers_dir = Path::new(&system_root).join("System32").join("drivers");
 
-        // Interception installs the keyboard/mouse driver pair in System32\drivers.
-        // Some older packaging may expose a different driver name, so accept either shape.
         let legacy_driver = drivers_dir.join("interception.sys");
-        let keyboard_driver = drivers_dir.join("keyboard.sys");
-        let mouse_driver = drivers_dir.join("mouse.sys");
+        if legacy_driver.exists() {
+            return true;
+        }
 
-        legacy_driver.exists() || (keyboard_driver.exists() && mouse_driver.exists())
+        // Interception registers keyboard/mouse upper-filter services and rewrites
+        // the class UpperFilters entries during install. These markers disappear
+        // after uninstall even before a reboot fully unloads the drivers.
+        registry_key_exists("HKLM\\SYSTEM\\CurrentControlSet\\Services\\keyboard")
+            || registry_key_exists("HKLM\\SYSTEM\\CurrentControlSet\\Services\\mouse")
+            || registry_value_contains_token(
+                "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4D36E96B-E325-11CE-BFC1-08002BE10318}",
+                "UpperFilters",
+                "keyboard",
+            )
+            || registry_value_contains_token(
+                "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4D36E96F-E325-11CE-BFC1-08002BE10318}",
+                "UpperFilters",
+                "mouse",
+            )
     }
 
     pub fn restart_windows() -> Result<()> {
