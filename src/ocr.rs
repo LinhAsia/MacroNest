@@ -373,6 +373,49 @@ pub fn expected_language_pack_size(value: &str) -> u64 {
     pack.expected_size_bytes
 }
 
+pub fn total_expected_language_pack_size() -> u64 {
+    OCR_LANGUAGE_PACKS
+        .iter()
+        .map(|pack| pack.expected_size_bytes)
+        .sum()
+}
+
+#[cfg(windows)]
+pub fn count_installed_language_packs() -> usize {
+    OCR_LANGUAGE_PACKS
+        .iter()
+        .filter(|pack| is_language_pack_installed(pack.code))
+        .count()
+}
+
+#[cfg(not(windows))]
+pub fn count_installed_language_packs() -> usize {
+    0
+}
+
+#[cfg(windows)]
+pub fn total_installed_language_pack_size() -> u64 {
+    OCR_LANGUAGE_PACKS
+        .iter()
+        .map(|pack| installed_language_pack_size(pack.code))
+        .sum()
+}
+
+#[cfg(not(windows))]
+pub fn total_installed_language_pack_size() -> u64 {
+    0
+}
+
+#[cfg(windows)]
+pub fn are_all_language_packs_installed() -> bool {
+    count_installed_language_packs() == OCR_LANGUAGE_PACKS.len()
+}
+
+#[cfg(not(windows))]
+pub fn are_all_language_packs_installed() -> bool {
+    false
+}
+
 #[cfg(windows)]
 fn missing_language_pack_files(
     pack: &OcrLanguagePack,
@@ -467,6 +510,22 @@ pub fn delete_language_pack(value: &str) -> Result<()> {
 
 #[cfg(not(windows))]
 pub fn delete_language_pack(_value: &str) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn delete_all_language_packs() -> Result<()> {
+    OCR_ENGINE_CACHE
+        .lock()
+        .map_err(|_| anyhow!("OCR engine cache lock was poisoned"))?
+        .clear();
+    let models_dir = ocr_models_dir()?;
+    let _ = fs::remove_dir_all(&models_dir);
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn delete_all_language_packs() -> Result<()> {
     Ok(())
 }
 
