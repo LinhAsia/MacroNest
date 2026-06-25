@@ -1,7 +1,7 @@
-use anyhow::{Result, bail};
 use crate::model::*;
 use crate::overlay::UiCommand;
 use crate::ui::{CrosshairApp, UpdateStatus};
+use anyhow::{Result, bail};
 use eframe::egui::{
     self, Button, Color32, Frame, Margin, Order, RichText, Shadow, Stroke, TextEdit, WidgetText,
     vec2,
@@ -100,7 +100,8 @@ impl CrosshairApp {
                                             .selected_text(selected_text)
                                             .width(280.0)
                                             .show_ui(ui, |ui| {
-                                                for (label, model_id) in Self::groq_model_catalog() {
+                                                for (label, model_id) in Self::groq_model_catalog()
+                                                {
                                                     let selected = self
                                                         .state
                                                         .groq_settings
@@ -127,8 +128,10 @@ impl CrosshairApp {
                                         ui.label("");
                                         let response = ui.add_sized(
                                             [280.0, 24.0],
-                                            TextEdit::singleline(&mut self.state.groq_settings.model)
-                                                .hint_text("openai/gpt-oss-120b"),
+                                            TextEdit::singleline(
+                                                &mut self.state.groq_settings.model,
+                                            )
+                                            .hint_text("openai/gpt-oss-120b"),
                                         );
                                         Self::apply_vietnamese_input_if_changed(
                                             &response,
@@ -438,8 +441,6 @@ impl CrosshairApp {
                         Self::delete_opencv_tool,
                     );
                     ui.add_space(10.0);
-                    self.render_ocr_tool_header(ui, language);
-                    ui.add_space(6.0);
                     self.render_ocr_tool_entry(ui, language);
                     ui.add_space(10.0);
                     self.render_interception_driver_entry(ui, language, interception_progress);
@@ -480,9 +481,12 @@ impl CrosshairApp {
                         ui.label(RichText::new("Interception Driver").strong().size(13.0));
                         ui.add_space(2.0);
                         ui.label(
-                            RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119))
-                                .small()
-                                .weak(),
+                            RichText::new(Self::tool_size_label(
+                                &self.paths.interception_zip,
+                                389_119,
+                            ))
+                            .small()
+                            .weak(),
                         );
                     });
                     let spacer = (ui.available_width() - action_width).max(0.0);
@@ -525,9 +529,12 @@ impl CrosshairApp {
                         ui.label(RichText::new("Interception Driver").strong().size(13.0));
                         ui.add_space(2.0);
                         ui.label(
-                            RichText::new(Self::tool_size_label(&self.paths.interception_zip, 389_119))
-                                .small()
-                                .weak(),
+                            RichText::new(Self::tool_size_label(
+                                &self.paths.interception_zip,
+                                389_119,
+                            ))
+                            .small()
+                            .weak(),
                         );
                     });
                     let spacer = (ui.available_width() - action_width).max(0.0);
@@ -539,7 +546,7 @@ impl CrosshairApp {
                         Self::tr_lang(language, "Download", ""),
                         action_width,
                     )
-                        .clicked()
+                    .clicked()
                     {
                         self.start_interception_download();
                     }
@@ -567,7 +574,7 @@ impl CrosshairApp {
                         Self::tr_lang(language, "Delete", ""),
                         action_width,
                     )
-                        .clicked()
+                    .clicked()
                     {
                         self.start_interception_driver_uninstall();
                     }
@@ -576,7 +583,7 @@ impl CrosshairApp {
                     Self::tr_lang(language, "Install", ""),
                     action_width,
                 )
-                    .clicked()
+                .clicked()
                 {
                     self.start_interception_driver_install();
                 }
@@ -606,26 +613,6 @@ impl CrosshairApp {
         });
     }
 
-    fn render_ocr_tool_header(&mut self, ui: &mut egui::Ui, language: UiLanguage) {
-        let installed_count = crate::ocr::count_installed_language_packs();
-        let total_size = crate::ocr::total_installed_language_pack_size();
-
-        ui.vertical(|ui| {
-            ui.label(RichText::new("OCR").strong().size(13.0));
-            ui.add_space(2.0);
-            let detail = if installed_count > 0 {
-                format!(
-                    "{} packs ({})",
-                    installed_count,
-                    Self::format_byte_size(total_size)
-                )
-            } else {
-                Self::tr_lang(language, "No packs installed", "").to_owned()
-            };
-            ui.label(RichText::new(detail).small().weak());
-        });
-    }
-
     fn render_ocr_tool_entry(&mut self, ui: &mut egui::Ui, language: UiLanguage) {
         ui.vertical(|ui| {
             let is_downloading = self.ocr_download_job.is_some();
@@ -634,91 +621,77 @@ impl CrosshairApp {
             } else {
                 None
             };
-            let installed_count = crate::ocr::count_installed_language_packs();
-            let installed_size = crate::ocr::total_installed_language_pack_size();
-            let expected_size = crate::ocr::total_expected_language_pack_size();
             let all_installed = crate::ocr::are_all_language_packs_installed();
+            let has_assets = crate::ocr::has_any_ocr_assets();
+            let current_size = crate::ocr::ocr_assets_disk_usage_bytes();
+            let state_label = if all_installed {
+                Self::tr_lang(language, "Installed", "Installed")
+            } else {
+                Self::tr_lang(language, "No packs installed", "")
+            };
+            let size_label = if has_assets {
+                format!("Size: {}", Self::format_file_size(current_size))
+            } else {
+                format!(
+                    "Expected size: ~{}",
+                    Self::format_file_size(crate::ocr::expected_ocr_assets_archive_size())
+                )
+            };
+            let detail = format!("{state_label} • {size_label}");
+            let total_action_width = 304.0;
+            let button_width = 148.0;
 
             ui.horizontal(|ui| {
-                ui.allocate_ui_with_layout(
-                    vec2((ui.available_width() - 160.0).max(180.0), 32.0),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        ui.vertical(|ui| {
-                            ui.label(
-                                RichText::new(Self::tr_lang(
-                                    language,
-                                    "All OCR language packs",
-                                    "All OCR language packs",
-                                ))
-                                .strong(),
-                            );
-                            ui.add_space(2.0);
-                            let detail = if installed_count > 0 {
-                                format!(
-                                    "{} packs installed ({}) / total {}",
-                                    installed_count,
-                                    Self::format_byte_size(installed_size),
-                                    Self::format_byte_size(expected_size)
-                                )
-                            } else {
-                                format!(
-                                    "{}",
-                                    Self::tr_lang(
-                                        language,
-                                        "Not installed",
-                                        "Not installed",
-                                    )
-                                ) + &format!(" ({})", Self::format_byte_size(expected_size))
-                            };
-                            ui.label(RichText::new(detail).small().weak());
-                        });
-                    },
-                );
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("OCR").strong().size(13.0));
+                    ui.add_space(2.0);
+                    ui.label(RichText::new(detail).small().weak());
+                    ui.add_space(2.0);
+                    ui.label(
+                        RichText::new(Self::tr_lang(language, "All OCR language packs", ""))
+                            .small()
+                            .weak(),
+                    );
+                });
 
-                ui.allocate_ui_with_layout(
-                    vec2(148.0, 60.0),
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| {
-                        if let Some(progress) = download_progress {
-                            ui.add(
-                                egui::ProgressBar::new(progress)
-                                    .desired_width(148.0)
-                                    .show_percentage(),
-                            );
-                            ui.ctx().request_repaint();
-                        } else if all_installed {
-                            ui.label(
-                                RichText::new(Self::tr_lang(language, "Installed", "Installed"))
-                                    .weak(),
-                            );
-                        } else if Self::settings_action_button_fixed(
-                            ui,
-                            RichText::new(
-                                if crate::ocr::is_ocr_assets_archive_cached() {
-                                    Self::tr_lang(language, "Install", "Install")
-                                } else {
-                                    Self::tr_lang(language, "Download", "")
-                                },
-                            )
-                            .strong(),
-                            148.0,
-                            )
-                            .clicked()
-                        {
-                            self.start_ocr_download_for(crate::ocr::OCR_DEFAULT_CODE);
-                        } else if Self::settings_action_button_fixed(
-                            ui,
-                            Self::tr_lang(language, "Delete", ""),
-                            148.0,
-                        )
-                        .clicked()
-                        {
-                            self.delete_ocr_assets();
+                let spacer = (ui.available_width() - total_action_width).max(0.0);
+                if spacer > 0.0 {
+                    ui.add_space(spacer);
+                }
+
+                if let Some(progress) = download_progress {
+                    ui.add(
+                        egui::ProgressBar::new(progress)
+                            .desired_width(total_action_width)
+                            .show_percentage(),
+                    );
+                    ui.ctx().request_repaint();
+                } else {
+                    if Self::settings_action_button_fixed(
+                        ui,
+                        RichText::new(Self::tr_lang(language, "Download", "")).strong(),
+                        button_width,
+                    )
+                    .clicked()
+                    {
+                        self.start_ocr_download_for(crate::ocr::OCR_DEFAULT_CODE);
+                    }
+                    ui.add_space(8.0);
+                    if Self::settings_action_button_fixed(
+                        ui,
+                        Self::tr_lang(language, "Delete", ""),
+                        button_width,
+                    )
+                    .clicked()
+                    {
+                        if has_assets {
+                            self.delete_all_ocr_assets();
                             self.status = "OCR assets deleted.".to_owned();
+                        } else {
+                            self.status = "No OCR assets to delete.".to_owned();
                         }
-                    },
-                );
+                    }
+                }
             });
         });
     }
@@ -889,35 +862,69 @@ impl CrosshairApp {
         active: bool,
     ) -> egui::Response {
         let is_dark = ui.visuals().dark_mode;
-        
+
         let (fill, stroke_color) = if is_dark {
             if active {
-                (Color32::from_rgb(57, 72, 96), Color32::from_rgb(117, 219, 166))
+                (
+                    Color32::from_rgb(57, 72, 96),
+                    Color32::from_rgb(117, 219, 166),
+                )
             } else {
-                (Color32::from_rgb(42, 52, 68), Color32::from_rgb(72, 88, 116))
+                (
+                    Color32::from_rgb(42, 52, 68),
+                    Color32::from_rgb(72, 88, 116),
+                )
             }
         } else {
             if active {
-                (Color32::from_rgb(181, 192, 206), Color32::from_rgb(72, 168, 118))
+                (
+                    Color32::from_rgb(181, 192, 206),
+                    Color32::from_rgb(72, 168, 118),
+                )
             } else {
-                (Color32::from_rgb(214, 223, 235), Color32::from_rgb(164, 178, 198))
+                (
+                    Color32::from_rgb(214, 223, 235),
+                    Color32::from_rgb(164, 178, 198),
+                )
             }
         };
 
-        let text_color = if is_dark { Color32::WHITE } else { Color32::BLACK };
-        let label = label.into();
-        let galley = label.clone().into_galley(ui, None, f32::INFINITY, egui::TextStyle::Button);
-        let button_width = (galley.size().x + 28.0).clamp(120.0, 260.0);
-        ui.horizontal_centered(|ui| {
-            ui.add_sized(
-                [button_width, 32.0],
-                Button::new(label.color(text_color))
-                    .fill(fill)
-                    .stroke(Stroke::new(1.0, stroke_color))
-                    .corner_radius(8.0),
-            )
-        })
-        .inner
+        let button_size = vec2(ui.available_width(), 32.0);
+        let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
+
+        let hovered = response.hovered();
+        let pressed = response.is_pointer_button_down_on();
+
+        let final_fill = if pressed {
+            fill.linear_multiply(0.8)
+        } else if hovered {
+            fill.linear_multiply(1.1)
+        } else {
+            fill
+        };
+
+        ui.painter().rect(
+            rect,
+            8.0,
+            final_fill,
+            Stroke::new(1.0, stroke_color),
+            egui::StrokeKind::Inside,
+        );
+
+        let galley =
+            label
+                .into()
+                .into_galley(ui, None, rect.width() - 16.0, egui::TextStyle::Button);
+        let text_pos = rect.center() - galley.size() / 2.0;
+        let text_color = if is_dark {
+            Color32::WHITE
+        } else {
+            Color32::BLACK
+        };
+        ui.painter().galley(text_pos, galley, text_color);
+
+        Self::paint_show_hover_outline(ui, &response);
+        response
     }
 
     fn settings_action_button(ui: &mut egui::Ui, label: impl Into<WidgetText>) -> egui::Response {
@@ -930,31 +937,37 @@ impl CrosshairApp {
         fixed_width: f32,
     ) -> egui::Response {
         let is_dark = ui.visuals().dark_mode;
-        
+
         let (fill, stroke_color) = if is_dark {
-            (Color32::from_rgb(48, 58, 76), Color32::from_rgb(84, 100, 124))
+            (
+                Color32::from_rgb(48, 58, 76),
+                Color32::from_rgb(84, 100, 124),
+            )
         } else {
-            (Color32::from_rgb(220, 228, 238), Color32::from_rgb(170, 182, 198))
+            (
+                Color32::from_rgb(220, 228, 238),
+                Color32::from_rgb(170, 182, 198),
+            )
         };
 
         let label_text = label.into();
         let text_style = egui::TextStyle::Button;
-        
+
         let wrap_width = ui.available_width();
         let galley = label_text.into_galley(ui, None, wrap_width, text_style);
-        
+
         let button_width = if fixed_width > 0.0 {
             fixed_width
         } else {
             (galley.size().x + 20.0).max(104.0)
         };
         let button_size = vec2(button_width, (galley.size().y + 10.0).max(28.0));
-        
+
         let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
-        
+
         let hovered = response.hovered();
         let pressed = response.is_pointer_button_down_on();
-        
+
         let final_fill = if pressed {
             fill.linear_multiply(0.8)
         } else if hovered {
@@ -972,27 +985,15 @@ impl CrosshairApp {
         );
 
         let text_pos = rect.center() - galley.size() / 2.0;
-        let text_color = if is_dark { Color32::WHITE } else { Color32::BLACK };
+        let text_color = if is_dark {
+            Color32::WHITE
+        } else {
+            Color32::BLACK
+        };
         ui.painter().galley(text_pos, galley, text_color);
 
         Self::paint_show_hover_outline(ui, &response);
         response
-    }
-
-    fn format_byte_size(size: u64) -> String {
-        const KB: f64 = 1024.0;
-        const MB: f64 = KB * 1024.0;
-        const GB: f64 = MB * 1024.0;
-        let size_f = size as f64;
-        if size_f >= GB {
-            format!("{:.1} GB", size_f / GB)
-        } else if size_f >= MB {
-            format!("{:.1} MB", size_f / MB)
-        } else if size_f >= KB {
-            format!("{:.1} KB", size_f / KB)
-        } else {
-            format!("{size} B")
-        }
     }
 
     pub(crate) fn cleanup_custom_ai_dialog_state(&mut self) {
@@ -1324,8 +1325,8 @@ impl CrosshairApp {
         self.opencv_installed = false;
     }
 
-    fn delete_ocr_assets(&mut self) {
-        let _ = crate::ocr::delete_all_language_packs();
+    fn delete_all_ocr_assets(&mut self) {
+        let _ = crate::ocr::delete_all_ocr_assets();
     }
 
     fn delete_interception_package(&mut self) {
