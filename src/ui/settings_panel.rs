@@ -1436,7 +1436,7 @@ impl CrosshairApp {
         self.interception_installed = false;
     }
 
-    fn start_interception_driver_install(&mut self) {
+    pub(crate) fn start_interception_driver_install(&mut self) {
         if self.interception_install_job.is_some() || self.interception_uninstall_job.is_some() {
             return;
         }
