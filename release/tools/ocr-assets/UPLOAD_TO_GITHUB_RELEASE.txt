@@ -1,0 +1,32 @@
+Upload every file in this folder as a separate asset to:
+https://github.com/NBaoLinh/MacroNest/releases/tag/tools
+
+Do not rename any file.
+
+Expected release asset names:
+- PP-OCRv5_mobile_det.mnn
+- PP-OCRv5_mobile_rec.mnn
+- ppocr_keys_v5.txt
+- latin_PP-OCRv5_mobile_rec_infer.mnn
+- ppocr_keys_latin.txt
+- korean_PP-OCRv5_mobile_rec_infer.mnn
+- ppocr_keys_korean.txt
+- th_PP-OCRv5_mobile_rec_infer.mnn
+- ppocr_keys_th.txt
+- cyrillic_PP-OCRv5_mobile_rec_infer.mnn
+- ppocr_keys_cyrillic.txt
+- arabic_PP-OCRv5_mobile_rec_infer.mnn
+- ppocr_keys_arabic.txt
+- devanagari_PP-OCRv5_mobile_rec_infer.mnn
+- ppocr_keys_devanagari.txt
+- el_PP-OCRv5_mobile_rec_infer.mnn
+- ppocr_keys_el.txt
+- ta_PP-OCRv5_mobile_rec_infer.mnn
+- ppocr_keys_ta.txt
+- te_PP-OCRv5_mobile_rec_infer.mnn
+- ppocr_keys_te.txt
+- en_PP-OCRv5_mobile_rec_infer.mnn
+- ppocr_keys_en.txt
+
+After upload, the app will download OCR packs from:
+https://github.com/NBaoLinh/MacroNest/releases/download/tools/<file_name>

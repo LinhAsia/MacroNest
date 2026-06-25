@@ -131,9 +131,27 @@ impl CrosshairApp {
                     .show(ui, |ui| {
                         // Language
                         ui.label(Self::tr_lang(language, "Language", "Language"));
-                        ui.label(crate::ocr::display_label_for_language_code(
-                            &self.state.ocr_language,
-                        ));
+                        egui::ComboBox::from_id_salt((preset.id, "ocr-language"))
+                            .selected_text(crate::ocr::display_label_for_language_code(
+                                &self.state.ocr_language,
+                            ))
+                            .width(260.0)
+                            .show_ui(ui, |ui| {
+                                for pack in crate::ocr::ocr_language_packs() {
+                                    let option_label =
+                                        crate::ocr::display_label_for_language_code(pack.code);
+                                    if ui
+                                        .selectable_value(
+                                            &mut self.state.ocr_language,
+                                            pack.code.to_owned(),
+                                            option_label,
+                                        )
+                                        .changed()
+                                    {
+                                        live_sync = true;
+                                    }
+                                }
+                            });
                         ui.end_row();
 
                         // Scan Region (X, Y, W, H)

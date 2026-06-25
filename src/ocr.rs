@@ -11,7 +11,7 @@ use std::time::Duration;
 pub const OCR_DEFAULT_CODE: &str = "multilingual";
 
 const OCR_MODELS_BASE_URL: &str =
-    "https://raw.githubusercontent.com/zibo-chen/rust-paddle-ocr/main/models";
+    "https://github.com/NBaoLinh/MacroNest/releases/download/tools";
 const OCR_DET_MODEL_FILE: &str = "PP-OCRv5_mobile_det.mnn";
 const OCR_MULTILINGUAL_REC_FILE: &str = "PP-OCRv5_mobile_rec.mnn";
 const OCR_MULTILINGUAL_CHARSET_FILE: &str = "ppocr_keys_v5.txt";
