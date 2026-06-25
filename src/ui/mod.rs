@@ -896,6 +896,17 @@ impl CrosshairApp {
         let mut interception_driver_installed = crate::platform::is_interception_driver_installed();
         if interception_driver_installed {
             let _ = std::fs::remove_file(&interception_pending_marker);
+        } else if interception_pending_marker.exists() {
+            if let Ok(metadata) = std::fs::metadata(&interception_pending_marker) {
+                if let Ok(created) = metadata.created().or_else(|_| metadata.modified()) {
+                    if let Ok(elapsed) = created.elapsed() {
+                        let uptime = crate::platform::get_system_uptime();
+                        if elapsed > uptime {
+                            let _ = std::fs::remove_file(&interception_pending_marker);
+                        }
+                    }
+                }
+            }
         }
         let interception_driver_needs_restart =
             !interception_driver_installed && interception_pending_marker.exists();
