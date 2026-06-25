@@ -41,10 +41,19 @@
   - `src/ui/mouse_panel.rs` -> `src/ui/mouse_panel/mod.rs`
   - `src/ui/vision_panel.rs` -> `src/ui/vision_panel/mod.rs`
   - `src/ui/window_panel.rs` -> `src/ui/window_panel/mod.rs`
-- Kept the change intentionally structural so the project remains buildable before deeper refactors.
+- Split `src/model/mod.rs` by domain without changing the `crate::model::*` API:
+  - [src/model/overlay_model.rs](D:/app/MacroNest/src/model/overlay_model.rs)
+  - [src/model/settings_model.rs](D:/app/MacroNest/src/model/settings_model.rs)
+  - [src/model/audio_model.rs](D:/app/MacroNest/src/model/audio_model.rs)
+  - [src/model/window_model.rs](D:/app/MacroNest/src/model/window_model.rs)
+  - [src/model/geometry_model.rs](D:/app/MacroNest/src/model/geometry_model.rs)
+  - [src/model/vision_model.rs](D:/app/MacroNest/src/model/vision_model.rs)
+  - [src/model/macro_model.rs](D:/app/MacroNest/src/model/macro_model.rs)
+- `src/model/mod.rs` now mainly keeps shared defaults, remaining mixed presets, and `AppState`.
+- Kept behavior-preserving changes first; no serialization rename or user-facing flow change was introduced in this phase.
 
 ## Next Safe Steps
 
-- Split `src/model/mod.rs` by domain while preserving re-exports from `crate::model`.
+- Finish the remaining `model` holdouts still in `src/model/mod.rs` such as HUD/timer/command/AI/app-state-adjacent types.
 - Extract shared UI shell helpers from `src/ui/mod.rs` into smaller modules without changing layout or styling.
 - Start with pure/testable helpers before touching overlay runtime behavior.
