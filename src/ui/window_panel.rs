@@ -2415,18 +2415,20 @@ impl CrosshairApp {
                     }
                 }
 
-                // Bound checking
-                if rect.left() < active_bounds_rect.left() {
-                    rect = rect.translate(egui::vec2(active_bounds_rect.left() - rect.left(), 0.0));
-                }
-                if rect.top() < active_bounds_rect.top() {
-                    rect = rect.translate(egui::vec2(0.0, active_bounds_rect.top() - rect.top()));
-                }
-                if rect.right() > active_bounds_rect.right() {
-                    rect = rect.translate(egui::vec2(active_bounds_rect.right() - rect.right(), 0.0));
-                }
-                if rect.bottom() > active_bounds_rect.bottom() {
-                    rect = rect.translate(egui::vec2(0.0, active_bounds_rect.bottom() - rect.bottom()));
+                // Bound checking for translation (only when moving the whole rect)
+                if active_handle == SelectionDragHandle::Center {
+                    if rect.left() < active_bounds_rect.left() {
+                        rect = rect.translate(egui::vec2(active_bounds_rect.left() - rect.left(), 0.0));
+                    }
+                    if rect.top() < active_bounds_rect.top() {
+                        rect = rect.translate(egui::vec2(0.0, active_bounds_rect.top() - rect.top()));
+                    }
+                    if rect.right() > active_bounds_rect.right() {
+                        rect = rect.translate(egui::vec2(active_bounds_rect.right() - rect.right(), 0.0));
+                    }
+                    if rect.bottom() > active_bounds_rect.bottom() {
+                        rect = rect.translate(egui::vec2(0.0, active_bounds_rect.bottom() - rect.bottom()));
+                    }
                 }
 
                 rect.min.x = rect.min.x.clamp(
