@@ -892,6 +892,16 @@ impl CrosshairApp {
         let initial_active_panel = state.active_panel;
 
         let opencv_installed = paths.opencv_dll.exists();
+        let interception_pending_marker = paths.bin_dir.join("interception.install.pending");
+        let mut interception_driver_installed = crate::platform::is_interception_driver_installed();
+        if interception_driver_installed {
+            let _ = std::fs::remove_file(&interception_pending_marker);
+        }
+        let interception_driver_needs_restart =
+            !interception_driver_installed && interception_pending_marker.exists();
+        if interception_driver_needs_restart {
+            interception_driver_installed = true;
+        }
         let mut app = Self {
             paths: paths.clone(),
             state,
@@ -1038,8 +1048,8 @@ impl CrosshairApp {
             interception_package_downloaded: paths.interception_zip.exists()
                 || paths.interception_package_dir.exists()
                 || paths.interception_installer_exe.exists(),
-            interception_driver_installed: crate::platform::is_interception_driver_installed(),
-            interception_driver_needs_restart: false,
+            interception_driver_installed,
+            interception_driver_needs_restart,
             interception_install_job: None,
             interception_uninstall_job: None,
             arduino_download_job: None,
@@ -2284,6 +2294,19 @@ impl CrosshairApp {
         Ok(())
     }
 
+    fn interception_install_pending_marker_path(&self) -> std::path::PathBuf {
+        self.paths.bin_dir.join("interception.install.pending")
+    }
+
+    fn set_interception_install_pending_marker(&self, pending: bool) {
+        let marker = self.interception_install_pending_marker_path();
+        if pending {
+            let _ = std::fs::write(marker, b"pending");
+        } else {
+            let _ = std::fs::remove_file(marker);
+        }
+    }
+
     fn poll_mouse_tool_jobs(&mut self) {
         if let Some(job) = &self.arduino_download_job {
             if job.is_finished() {
@@ -2338,9 +2361,9 @@ impl CrosshairApp {
                 let job = self.interception_install_job.take().unwrap();
                 match job.join() {
                     Ok(Ok(())) => {
-                        self.interception_driver_installed =
-                            crate::platform::is_interception_driver_installed();
-                        self.interception_driver_needs_restart = self.interception_driver_installed;
+                        self.interception_driver_installed = true;
+                        self.interception_driver_needs_restart = true;
+                        self.set_interception_install_pending_marker(true);
                         self.status = Self::tr_lang(
                             self.state.ui_language,
                             "Interception driver installed. Restart your PC for it to take effect.",
@@ -2367,6 +2390,7 @@ impl CrosshairApp {
                         self.state.vision_settings.use_interception = false;
                         self.interception_driver_installed = false;
                         self.interception_driver_needs_restart = true;
+                        self.set_interception_install_pending_marker(false);
                         self.status =
                             "Interception driver removed. Package files deleted from app. Restart your PC to finish cleanup."
                                 .to_owned();
