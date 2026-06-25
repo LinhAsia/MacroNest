@@ -138,16 +138,36 @@ impl CrosshairApp {
                             .width(260.0)
                             .show_ui(ui, |ui| {
                                 for pack in crate::ocr::ocr_language_packs() {
-                                    let option_label =
-                                        crate::ocr::display_label_for_language_code(pack.code);
-                                    if ui
-                                        .selectable_value(
-                                            &mut self.state.ocr_language,
-                                            pack.code.to_owned(),
-                                            option_label,
-                                        )
-                                        .changed()
-                                    {
+                                    let is_selected = self.state.ocr_language == pack.code;
+                                    let installed =
+                                        crate::ocr::is_language_pack_installed(pack.code);
+                                    let row = ui
+                                        .horizontal(|ui| {
+                                            let label_response = ui.add_sized(
+                                                [182.0, 0.0],
+                                                egui::Button::selectable(
+                                                    is_selected,
+                                                    pack.label,
+                                                ),
+                                            );
+                                            if !installed {
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(
+                                                        egui::Align::Center,
+                                                    ),
+                                                    |ui| {
+                                                        ui.label(
+                                                            RichText::new("[not installed]")
+                                                                .weak(),
+                                                        );
+                                                    },
+                                                );
+                                            }
+                                            label_response
+                                        })
+                                        .inner;
+                                    if row.clicked() {
+                                        self.state.ocr_language = pack.code.to_owned();
                                         live_sync = true;
                                     }
                                 }
