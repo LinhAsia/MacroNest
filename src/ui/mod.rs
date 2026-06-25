@@ -13005,6 +13005,8 @@ impl eframe::App for CrosshairApp {
                             .inner_margin(Margin::same(20))
                             .show(ui, |ui| {
                                 ui.set_min_size(panel_size);
+                                ui.set_width(panel_size.x);
+                                ui.set_max_width(panel_size.x);
                                 ui.vertical(|ui| {
                                     ui.horizontal(|ui| {
                                         ui.label(
