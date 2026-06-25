@@ -538,7 +538,19 @@ impl CrosshairApp {
                         });
                     },
                     |ui| {
-                        if Self::settings_action_button_fixed(
+                        if restart_required {
+                            if Self::settings_action_button_fixed(
+                                ui,
+                                Self::tr_lang(language, "Restart", ""),
+                                action_width,
+                            )
+                            .clicked()
+                            {
+                                if let Err(error) = crate::platform::restart_windows() {
+                                    self.status = format!("Restart failed: {error}");
+                                }
+                            }
+                        } else if Self::settings_action_button_fixed(
                             ui,
                             Self::tr_lang(language, "Download", ""),
                             action_width,
@@ -577,7 +589,19 @@ impl CrosshairApp {
                     });
                 },
                 |ui| {
-                    if driver_installed {
+                    if restart_required {
+                        if Self::settings_action_button_fixed(
+                            ui,
+                            Self::tr_lang(language, "Restart", ""),
+                            action_width,
+                        )
+                        .clicked()
+                        {
+                            if let Err(error) = crate::platform::restart_windows() {
+                                self.status = format!("Restart failed: {error}");
+                            }
+                        }
+                    } else if driver_installed {
                         if Self::settings_action_button_fixed(
                             ui,
                             Self::tr_lang(language, "Delete", ""),
