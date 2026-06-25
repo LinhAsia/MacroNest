@@ -59,6 +59,7 @@
 - Continued the `ui/mod.rs` reduction with shared helper extraction:
   - moved shared preset/card/button hover helpers into [src/ui/widgets.rs](D:/app/MacroNest/src/ui/widgets.rs)
   - moved titlebar/tab navigation labels and button styling into [src/ui/navigation.rs](D:/app/MacroNest/src/ui/navigation.rs)
+  - moved startup overlay sync, state-to-overlay sync, and persist helpers into [src/ui/state_sync.rs](D:/app/MacroNest/src/ui/state_sync.rs)
   - kept the existing `CrosshairApp` call sites unchanged by reusing `impl CrosshairApp` methods from the new modules
 - Added small behavior-locking tests for the refactor slice:
   - legacy alias deserialization for `AppState`
@@ -68,5 +69,5 @@
 ## Next Safe Steps
 
 - Continue extracting shared UI shell helpers from `src/ui/mod.rs` into smaller modules without changing layout or styling.
-- Good next cuts are remaining pure helper clusters such as copy/share feedback utilities, window-title formatting, and titlebar quick-action rendering.
+- Good next cuts are remaining pure helper clusters such as copy/share feedback utilities, window-title formatting, capture-info placement, and titlebar quick-action rendering.
 - Keep starting with pure/testable helpers before touching overlay runtime behavior.
