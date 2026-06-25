@@ -226,9 +226,11 @@ mod windows_platform {
         }
 
         let token = token.to_ascii_lowercase();
-        String::from_utf8_lossy(&output.stdout)
+        let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+        let cleaned = stdout.replace("\\0", " ").replace('\0', " ");
+        cleaned
             .split_whitespace()
-            .any(|part| part.eq_ignore_ascii_case(&token))
+            .any(|part| part == token)
     }
 
     pub fn is_interception_driver_installed() -> bool {
@@ -255,6 +257,21 @@ mod windows_platform {
                 "UpperFilters",
                 "mouse",
             )
+    }
+
+    pub fn get_system_uptime() -> std::time::Duration {
+        // Approximate: use wmic to get LastBootUpTime and compare to now.
+        // If we can't determine it, return Duration::ZERO (safe fallback — won't clear the marker).
+        let Ok(output) = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command",
+                "(Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime | Select-Object -ExpandProperty TotalMilliseconds"])
+            .output()
+        else {
+            return std::time::Duration::ZERO;
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let ms: f64 = stdout.trim().parse().unwrap_or(0.0);
+        std::time::Duration::from_millis(ms as u64)
     }
 
     pub fn restart_windows() -> Result<()> {
@@ -614,6 +631,10 @@ mod fallback {
     }
     pub fn is_taskbar_hidden() -> bool {
         false
+    }
+
+    pub fn get_system_uptime() -> std::time::Duration {
+        std::time::Duration::ZERO
     }
 }
 
