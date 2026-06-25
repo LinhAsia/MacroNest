@@ -970,8 +970,10 @@ impl CrosshairApp {
             |ui| {
                 Self::lock_settings_card_width_to(ui, card_width);
                 Self::settings_card_frame(ui).show(ui, |ui| {
+                    let max_right = ui.max_rect().right();
                     Self::lock_settings_card_width(ui);
                     add_contents(ui);
+                    ui.expand_to_include_x(max_right);
                 });
             },
         );
