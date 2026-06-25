@@ -2400,10 +2400,10 @@ impl CrosshairApp {
                         self.delete_interception_package();
                         self.state.vision_settings.use_interception = false;
                         self.interception_driver_installed = false;
-                        self.interception_driver_needs_restart = true;
+                        self.interception_driver_needs_restart = false;
                         self.set_interception_install_pending_marker(false);
                         self.status =
-                            "Interception driver removed. Package files deleted from app. Restart your PC to finish cleanup."
+                            "Interception driver removed. Package files deleted from app."
                                 .to_owned();
                     }
                     Ok(Err(error)) => {
