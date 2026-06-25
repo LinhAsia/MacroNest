@@ -652,17 +652,73 @@ impl CrosshairApp {
 
     fn render_ocr_tool_entry(&mut self, ui: &mut egui::Ui, language: UiLanguage) {
         ui.vertical(|ui| {
+            let is_downloading = self.ocr_download_job.is_some();
+            let download_progress = if is_downloading {
+                Some(self.ocr_download_progress.load(Ordering::SeqCst) as f32 / 1000.0)
+            } else {
+                None
+            };
+            let all_installed = crate::ocr::ocr_language_packs()
+                .iter()
+                .all(|pack| crate::ocr::is_language_pack_installed(pack.code));
+
+            ui.horizontal(|ui| {
+                ui.allocate_ui_with_layout(
+                    vec2((ui.available_width() - 160.0).max(180.0), 32.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "Install all OCR language packs",
+                                "Install all OCR language packs",
+                            ))
+                            .strong(),
+                        );
+                    },
+                );
+
+                ui.allocate_ui_with_layout(
+                    vec2(148.0, 28.0),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        if let Some(progress) = download_progress {
+                            ui.add(
+                                egui::ProgressBar::new(progress)
+                                    .desired_width(148.0)
+                                    .show_percentage(),
+                            );
+                            ui.ctx().request_repaint();
+                        } else if all_installed {
+                            ui.label(
+                                RichText::new(Self::tr_lang(language, "Installed", "Installed"))
+                                    .weak(),
+                            );
+                        } else if Self::settings_action_button_fixed(
+                            ui,
+                            RichText::new(
+                                if crate::ocr::is_ocr_assets_archive_cached() {
+                                    Self::tr_lang(language, "Install", "Install")
+                                } else {
+                                    Self::tr_lang(language, "Download", "")
+                                },
+                            )
+                            .strong(),
+                            148.0,
+                        )
+                        .clicked()
+                        {
+                            self.start_ocr_download_for(crate::ocr::OCR_DEFAULT_CODE);
+                        }
+                    },
+                );
+            });
+            ui.add_space(8.0);
+
             for pack in crate::ocr::ocr_language_packs() {
                 let installed = crate::ocr::is_language_pack_installed(pack.code);
                 let installed_size = crate::ocr::installed_language_pack_size(pack.code);
-                let is_downloading =
-                    self.ocr_download_language_code.as_deref() == Some(pack.code)
-                        && self.ocr_download_job.is_some();
-                let download_progress = if is_downloading {
-                    Some(self.ocr_download_progress.load(Ordering::SeqCst) as f32 / 1000.0)
-                } else {
-                    None
-                };
+                let expected_size = crate::ocr::expected_language_pack_size(pack.code);
 
                 ui.horizontal(|ui| {
                     ui.allocate_ui_with_layout(
@@ -679,7 +735,11 @@ impl CrosshairApp {
                                             Self::format_byte_size(installed_size)
                                         )
                                     } else {
-                                        pack.label.to_owned()
+                                        format!(
+                                            "{} ({})",
+                                            pack.label,
+                                            Self::format_byte_size(expected_size)
+                                        )
                                     }),
                                 )
                                 .wrap(),
@@ -691,14 +751,7 @@ impl CrosshairApp {
                         vec2(148.0, 28.0),
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
-                            if let Some(progress) = download_progress {
-                                ui.add(
-                                    egui::ProgressBar::new(progress)
-                                        .desired_width(148.0)
-                                        .show_percentage(),
-                                );
-                                ui.ctx().request_repaint();
-                            } else if installed {
+                            if installed {
                                 if Self::settings_action_button_fixed(
                                     ui,
                                     Self::tr_lang(language, "Delete", ""),
@@ -709,21 +762,24 @@ impl CrosshairApp {
                                     self.delete_ocr_language_pack(pack.code);
                                     self.status = format!("OCR pack deleted: {}", pack.label);
                                 }
-                            } else if Self::settings_action_button_fixed(
-                                ui,
-                                RichText::new(
-                                    if crate::ocr::is_ocr_assets_archive_cached() {
-                                        Self::tr_lang(language, "Install", "Install")
-                                    } else {
-                                        Self::tr_lang(language, "Download", "")
-                                    },
-                                )
-                                .strong(),
-                                148.0,
-                            )
-                            .clicked()
-                            {
-                                self.start_ocr_download_for(pack.code);
+                            } else if is_downloading {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Installing...",
+                                        "Installing...",
+                                    ))
+                                    .weak(),
+                                );
+                            } else {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Not installed",
+                                        "Not installed",
+                                    ))
+                                    .weak(),
+                                );
                             }
                         },
                     );
@@ -1258,18 +1314,16 @@ impl CrosshairApp {
         self.opencv_download_job = Some(job);
     }
 
-    pub(crate) fn start_ocr_download_for(&mut self, language_code: &str) {
+    pub(crate) fn start_ocr_download_for(&mut self, _language_code: &str) {
         if self.ocr_download_job.is_some() {
             return;
         }
 
-        let language_code = crate::ocr::normalize_language_code(language_code);
         let progress = self.ocr_download_progress.clone();
         progress.store(0, Ordering::SeqCst);
-        self.ocr_download_language_code = Some(language_code.clone());
 
         let job = std::thread::spawn(move || -> Result<()> {
-            crate::ocr::install_language_pack(&language_code, |downloaded, total| {
+            crate::ocr::install_all_language_packs(|downloaded, total| {
                 let ratio = if total == 0 {
                     0.0
                 } else {

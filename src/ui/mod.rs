@@ -817,7 +817,6 @@ pub struct CrosshairApp {
     opencv_installed: bool,
     ocr_download_job: Option<JoinHandle<Result<()>>>,
     ocr_download_progress: Arc<AtomicU32>,
-    ocr_download_language_code: Option<String>,
     interception_download_job: Option<JoinHandle<Result<()>>>,
     interception_download_progress: Arc<AtomicU32>,
     interception_package_downloaded: bool,
@@ -1042,7 +1041,6 @@ impl CrosshairApp {
             opencv_installed,
             ocr_download_job: None,
             ocr_download_progress: Arc::new(AtomicU32::new(0)),
-            ocr_download_language_code: None,
             interception_download_job: None,
             interception_download_progress: Arc::new(AtomicU32::new(0)),
             interception_package_downloaded: paths.interception_zip.exists()
@@ -11962,17 +11960,9 @@ impl eframe::App for CrosshairApp {
         if let Some(job) = &self.ocr_download_job {
             if job.is_finished() {
                 let job = self.ocr_download_job.take().unwrap();
-                let completed_language = self.ocr_download_language_code.take();
                 match job.join() {
                     Ok(Ok(())) => {
-                        self.status = format!(
-                            "OCR pack installed: {}",
-                            crate::ocr::label_for_language_code(
-                                completed_language
-                                    .as_deref()
-                                    .unwrap_or(&self.state.ocr_language),
-                            )
-                        );
+                        self.status = "OCR packs installed.".to_owned();
                     }
                     Ok(Err(error)) => {
                         self.status = format!("OCR install failed: {error}");

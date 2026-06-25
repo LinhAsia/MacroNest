@@ -142,11 +142,8 @@ impl CrosshairApp {
                                     let is_selected = self.state.ocr_language == pack.code;
                                     let installed =
                                         crate::ocr::is_language_pack_installed(pack.code);
-                                    let is_downloading = self
-                                        .ocr_download_language_code
-                                        .as_deref()
-                                        == Some(pack.code)
-                                        && self.ocr_download_job.is_some();
+                                    let is_downloading =
+                                        self.ocr_download_job.is_some() && !installed;
                                     let row = ui
                                         .horizontal(|ui| {
                                             let label_response = ui.add_sized(
@@ -159,21 +156,10 @@ impl CrosshairApp {
                                             if is_downloading {
                                                 ui.add_sized([82.0, 18.0], egui::Spinner::new());
                                             } else if !installed {
-                                                ui.with_layout(
-                                                    egui::Layout::right_to_left(
-                                                        egui::Align::Center,
-                                                    ),
-                                                    |ui| {
-                                                        if ui.small_button("Download").clicked() {
-                                                            start_ocr_download_language_code =
-                                                                Some(pack.code.to_owned());
-                                                        }
-                                                        ui.label(
-                                                            RichText::new("[not installed]")
-                                                                .weak(),
-                                                        );
-                                                    },
-                                                );
+                                                if ui.small_button("Download").clicked() {
+                                                    start_ocr_download_language_code =
+                                                        Some(pack.code.to_owned());
+                                                }
                                             }
                                             label_response
                                         })

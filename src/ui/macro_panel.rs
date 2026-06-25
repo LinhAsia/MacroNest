@@ -4352,8 +4352,6 @@ impl CrosshairApp {
                     let mut request_geometry_screen_color_pick = false;
                     let mut pending_geometry_macro_step_color_pick: Option<(u32, u32, usize, bool, bool)> = None;
                     let mut open_groq_api_settings_requested = false;
-                    let current_ocr_download_language_code =
-                        self.ocr_download_language_code.clone();
                     let is_ocr_download_running = self.ocr_download_job.is_some();
                     let group = &mut self.state.macro_groups[group_index];
                     let folder_enabled = true;
@@ -11752,8 +11750,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             step,
                                                             &mut live_sync,
                                                             &mut pending_ocr_step_capture,
-                                                            current_ocr_download_language_code
-                                                                .as_deref(),
                                                             is_ocr_download_running,
                                                             &mut pending_ocr_language_download,
                                                         );

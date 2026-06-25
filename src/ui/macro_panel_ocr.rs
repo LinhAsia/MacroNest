@@ -156,7 +156,6 @@ impl CrosshairApp {
         step: &mut MacroStep,
         live_sync: &mut bool,
         pending_ocr_step_capture: &mut Option<(u32, u32, usize)>,
-        current_ocr_download_language_code: Option<&str>,
         is_ocr_download_running: bool,
         pending_ocr_language_download: &mut Option<String>,
     ) {
@@ -181,8 +180,7 @@ impl CrosshairApp {
             .show_ui(ui, |ui| {
                 for pack in crate::ocr::ocr_language_packs() {
                     let installed = crate::ocr::is_language_pack_installed(pack.code);
-                    let is_downloading = current_ocr_download_language_code == Some(pack.code)
-                        && is_ocr_download_running;
+                    let is_downloading = is_ocr_download_running && !installed;
                     let row = ui
                         .horizontal(|ui| {
                             let label_response = ui.add_sized(
