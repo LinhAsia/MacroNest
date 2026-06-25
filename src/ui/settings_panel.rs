@@ -611,36 +611,45 @@ impl CrosshairApp {
     fn render_ocr_tool_header(&mut self, ui: &mut egui::Ui, language: UiLanguage) {
         let installed_count = crate::ocr::count_installed_language_packs();
         let total_size = crate::ocr::total_installed_language_pack_size();
+        let action_width = 148.0;
 
         ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label(RichText::new("OCR").strong().size(13.0));
-                ui.add_space(2.0);
-                let detail = if installed_count > 0 {
-                    format!(
-                        "{} packs ({})",
-                        installed_count,
-                        Self::format_byte_size(total_size)
-                    )
-                } else {
-                    Self::tr_lang(language, "No packs installed", "").to_owned()
-                };
-                ui.label(RichText::new(detail).small().weak());
-            });
+            ui.allocate_ui_with_layout(
+                vec2((ui.available_width() - action_width - 12.0).max(180.0), 36.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("OCR").strong().size(13.0));
+                        ui.add_space(2.0);
+                        let detail = if installed_count > 0 {
+                            format!(
+                                "{} packs ({})",
+                                installed_count,
+                                Self::format_byte_size(total_size)
+                            )
+                        } else {
+                            Self::tr_lang(language, "No packs installed", "").to_owned()
+                        };
+                        ui.label(RichText::new(detail).small().weak());
+                    });
+                },
+            );
 
-            let action_width = 148.0;
-            let spacer = (ui.available_width() - action_width).max(0.0);
-            if spacer > 0.0 {
-                ui.add_space(spacer);
-            }
-            let button_label = if self.ocr_tools_open {
-                Self::tr_lang(language, "Close", "")
-            } else {
-                Self::tr_lang(language, "Open", "")
-            };
-            if Self::settings_action_button_fixed(ui, button_label, action_width).clicked() {
-                self.ocr_tools_open = !self.ocr_tools_open;
-            }
+            ui.allocate_ui_with_layout(
+                vec2(action_width, 28.0),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    let button_label = if self.ocr_tools_open {
+                        Self::tr_lang(language, "Close", "")
+                    } else {
+                        Self::tr_lang(language, "Open", "")
+                    };
+                    if Self::settings_action_button_fixed(ui, button_label, action_width).clicked()
+                    {
+                        self.ocr_tools_open = !self.ocr_tools_open;
+                    }
+                },
+            );
         });
     }
 
