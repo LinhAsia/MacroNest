@@ -12979,6 +12979,11 @@ impl eframe::App for CrosshairApp {
                 self.render_modal_backdrop(ctx, true);
                 let (panel_size, panel_pos) =
                     Self::centered_modal_placement(ctx, vec2(600.0, 620.0), vec2(500.0, 500.0));
+                let settings_inner_margin = 20.0;
+                let settings_content_size = vec2(
+                    (panel_size.x - settings_inner_margin * 2.0).max(0.0),
+                    (panel_size.y - settings_inner_margin * 2.0).max(0.0),
+                );
                 let mut close_request = false;
                 egui::Area::new(egui::Id::new("settings_popup_modal"))
                     .order(Order::Foreground)
@@ -13002,11 +13007,11 @@ impl eframe::App for CrosshairApp {
                                 color: Color32::from_rgba_premultiplied(12, 12, 16, 72),
                             })
                             .corner_radius(24.0)
-                            .inner_margin(Margin::same(20))
+                            .inner_margin(Margin::same(settings_inner_margin as i8))
                             .show(ui, |ui| {
-                                ui.set_min_size(panel_size);
-                                ui.set_width(panel_size.x);
-                                ui.set_max_width(panel_size.x);
+                                ui.set_min_size(settings_content_size);
+                                ui.set_width(settings_content_size.x);
+                                ui.set_max_width(settings_content_size.x);
                                 ui.vertical(|ui| {
                                     ui.horizontal(|ui| {
                                         ui.label(
