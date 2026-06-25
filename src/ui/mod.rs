@@ -2354,6 +2354,7 @@ impl CrosshairApp {
                             "Interception package downloaded successfully.",
                         )
                         .to_owned();
+                        self.start_interception_driver_install();
                     }
                     Ok(Err(error)) => {
                         self.status = format!("Download failed: {error}");
