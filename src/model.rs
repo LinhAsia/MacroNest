@@ -2379,6 +2379,7 @@ pub struct AiSettings {
 #[serde(default)]
 pub struct GroqSettings {
     pub api_key: String,
+    #[serde(skip)]
     pub show_api_key: bool,
     pub enabled: bool,
     pub details_open: bool,
