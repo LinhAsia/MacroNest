@@ -614,29 +614,28 @@ impl CrosshairApp {
         let action_width = 148.0;
 
         ui.horizontal(|ui| {
-            ui.allocate_ui_with_layout(
-                vec2((ui.available_width() - action_width - 12.0).max(180.0), 36.0),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new("OCR").strong().size(13.0));
-                        ui.add_space(2.0);
-                        let detail = if installed_count > 0 {
-                            format!(
-                                "{} packs ({})",
-                                installed_count,
-                                Self::format_byte_size(total_size)
-                            )
-                        } else {
-                            Self::tr_lang(language, "No packs installed", "").to_owned()
-                        };
-                        ui.label(RichText::new(detail).small().weak());
-                    });
-                },
-            );
+            ui.vertical(|ui| {
+                ui.label(RichText::new("OCR").strong().size(13.0));
+                ui.add_space(2.0);
+                let detail = if installed_count > 0 {
+                    format!(
+                        "{} packs ({})",
+                        installed_count,
+                        Self::format_byte_size(total_size)
+                    )
+                } else {
+                    Self::tr_lang(language, "No packs installed", "").to_owned()
+                };
+                ui.label(RichText::new(detail).small().weak());
+            });
+
+            let spacer = (ui.available_width() - action_width).max(0.0);
+            if spacer > 0.0 {
+                ui.add_space(spacer);
+            }
 
             ui.allocate_ui_with_layout(
-                vec2(action_width, 28.0),
+                vec2(action_width, 52.0),
                 egui::Layout::right_to_left(egui::Align::Center),
                 |ui| {
                     let button_label = if self.ocr_tools_open {
