@@ -7,11 +7,13 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+#[cfg(windows)]
+use std::process::Command;
 
 pub const OCR_DEFAULT_CODE: &str = "multilingual";
 
-const OCR_MODELS_BASE_URL: &str =
-    "https://github.com/NBaoLinh/MacroNest/releases/download/tools";
+const OCR_ASSETS_ARCHIVE_URL: &str =
+    "https://github.com/NBaoLinh/MacroNest/releases/download/tools/ocr-assets.zip";
 const OCR_DET_MODEL_FILE: &str = "PP-OCRv5_mobile_det.mnn";
 const OCR_MULTILINGUAL_REC_FILE: &str = "PP-OCRv5_mobile_rec.mnn";
 const OCR_MULTILINGUAL_CHARSET_FILE: &str = "ppocr_keys_v5.txt";
@@ -205,6 +207,11 @@ fn ocr_models_dir() -> Result<PathBuf> {
 }
 
 #[cfg(windows)]
+fn powershell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+#[cfg(windows)]
 fn model_paths_for_pack(pack: &OcrLanguagePack) -> Result<(PathBuf, PathBuf, PathBuf)> {
     let root = ocr_models_dir()?;
     Ok((
@@ -212,6 +219,27 @@ fn model_paths_for_pack(pack: &OcrLanguagePack) -> Result<(PathBuf, PathBuf, Pat
         root.join(pack.rec_model_file),
         root.join(pack.charset_file),
     ))
+}
+
+#[cfg(windows)]
+fn extract_ocr_archive(archive_path: &std::path::Path, destination: &std::path::Path) -> Result<()> {
+    if destination.exists() {
+        let _ = fs::remove_dir_all(destination);
+    }
+    fs::create_dir_all(destination)?;
+    let extract_script = format!(
+        "Expand-Archive -LiteralPath {} -DestinationPath {} -Force",
+        powershell_quote(&archive_path.to_string_lossy()),
+        powershell_quote(&destination.to_string_lossy()),
+    );
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &extract_script])
+        .status()
+        .context("Failed to launch PowerShell to extract OCR assets")?;
+    if !status.success() {
+        bail!("Failed to extract OCR assets archive");
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -263,6 +291,15 @@ where
             (charset_path, pack.charset_file),
         ]
     };
+    let missing_files = files
+        .iter()
+        .filter(|(path, _)| !path.exists() || path.metadata().map(|meta| meta.len() == 0).unwrap_or(true))
+        .map(|(path, file_name)| (path.clone(), *file_name))
+        .collect::<Vec<_>>();
+    if missing_files.is_empty() {
+        progress(1, 1);
+        return Ok(());
+    }
 
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(120))
@@ -270,65 +307,71 @@ where
         .build()
         .context("Failed to create OCR download client")?;
 
-    let mut total_size = 0_u64;
-    for (path, file_name) in &files {
-        if path.exists() && path.metadata().map(|meta| meta.len() > 0).unwrap_or(false) {
-            total_size = total_size.saturating_add(path.metadata().map(|meta| meta.len()).unwrap_or(0));
-            continue;
-        }
-        let url = format!("{OCR_MODELS_BASE_URL}/{file_name}");
-        let size = client
-            .head(&url)
-            .send()
-            .ok()
-            .and_then(|response| response.headers().get(reqwest::header::CONTENT_LENGTH).cloned())
-            .and_then(|value| value.to_str().ok()?.parse::<u64>().ok())
-            .unwrap_or(0);
-        total_size = total_size.saturating_add(size.max(1));
-    }
-    total_size = total_size.max(1);
+    let total_size = client
+        .head(OCR_ASSETS_ARCHIVE_URL)
+        .send()
+        .ok()
+        .and_then(|response| response.headers().get(reqwest::header::CONTENT_LENGTH).cloned())
+        .and_then(|value| value.to_str().ok()?.parse::<u64>().ok())
+        .unwrap_or(1)
+        .max(1);
 
     let mut downloaded = 0_u64;
     progress(downloaded, total_size);
 
-    for (path, file_name) in files {
-        if path.exists() && path.metadata().map(|meta| meta.len() > 0).unwrap_or(false) {
-            downloaded = downloaded.saturating_add(path.metadata().map(|meta| meta.len()).unwrap_or(0));
-            progress(downloaded.min(total_size), total_size);
-            continue;
+    let models_dir = ocr_models_dir()?;
+    let archive_temp_path = models_dir.join("ocr-assets.zip.tmp");
+    let extract_dir = models_dir.join("ocr-assets-extract");
+
+    let mut response = client
+        .get(OCR_ASSETS_ARCHIVE_URL)
+        .send()
+        .with_context(|| format!("Failed to download OCR asset archive from {OCR_ASSETS_ARCHIVE_URL}"))?
+        .error_for_status()
+        .with_context(|| format!("OCR asset archive download returned an error for {OCR_ASSETS_ARCHIVE_URL}"))?;
+
+    let mut archive_file = fs::File::create(&archive_temp_path)
+        .with_context(|| format!("Failed to create temporary OCR archive {}", archive_temp_path.display()))?;
+
+    use std::io::Read;
+    let mut buffer = [0u8; 16384];
+    loop {
+        let count = response.read(&mut buffer)?;
+        if count == 0 {
+            break;
         }
+        archive_file.write_all(&buffer[..count])?;
+        downloaded = downloaded.saturating_add(count as u64);
+        progress(downloaded.min(total_size), total_size);
+    }
+    archive_file.flush()?;
+    drop(archive_file);
 
-        let url = format!("{OCR_MODELS_BASE_URL}/{file_name}");
-        let mut response = client
-            .get(&url)
-            .send()
-            .with_context(|| format!("Failed to download OCR asset from {url}"))?
-            .error_for_status()
-            .with_context(|| format!("OCR asset download returned an error for {url}"))?;
+    extract_ocr_archive(&archive_temp_path, &extract_dir)?;
 
+    for (path, file_name) in missing_files {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
+        let direct_source = extract_dir.join(file_name);
+        let nested_source = extract_dir.join("ocr-assets").join(file_name);
+        let source = if direct_source.exists() {
+            direct_source
+        } else if nested_source.exists() {
+            nested_source
+        } else {
+            bail!("OCR archive did not contain required asset {file_name}");
+        };
         let temp_path = path.with_extension("tmp");
-        let mut file = fs::File::create(&temp_path)
-            .with_context(|| format!("Failed to create temporary OCR asset file {}", temp_path.display()))?;
-
-        use std::io::Read;
-        let mut buffer = [0u8; 16384];
-        loop {
-            let count = response.read(&mut buffer)?;
-            if count == 0 {
-                break;
-            }
-            file.write_all(&buffer[..count])?;
-            downloaded = downloaded.saturating_add(count as u64);
-            progress(downloaded.min(total_size), total_size);
-        }
-        file.flush()?;
-        drop(file);
+        fs::copy(&source, &temp_path)
+            .with_context(|| format!("Failed to copy OCR asset {}", source.display()))?;
         fs::rename(&temp_path, &path)
             .with_context(|| format!("Failed to move OCR asset into place {}", path.display()))?;
     }
+
+    let _ = fs::remove_file(&archive_temp_path);
+    let _ = fs::remove_dir_all(&extract_dir);
+    progress(total_size, total_size);
 
     Ok(())
 }
