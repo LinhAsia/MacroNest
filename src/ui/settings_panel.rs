@@ -26,7 +26,7 @@ impl CrosshairApp {
                     ui.add_space(4.0);
                     let mut groq_changed = false;
                     Self::settings_card_frame(ui).show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
+                        Self::lock_settings_card_width(ui);
                         ui.vertical(|ui| {
                             let api_header = Self::settings_section_button(
                                 ui,
@@ -166,7 +166,7 @@ impl CrosshairApp {
 
                     ui.add_space(12.0);
                     Self::settings_card_frame(ui).show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
+                        Self::lock_settings_card_width(ui);
                         ui.vertical(|ui| {
                             ui.label(
                                 RichText::new(Self::tr_lang(language, "Vietnamese input", ""))
@@ -199,7 +199,7 @@ impl CrosshairApp {
                     });
                     ui.add_space(12.0);
                     Self::settings_card_frame(ui).show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
+                        Self::lock_settings_card_width(ui);
                         ui.vertical(|ui| {
                             ui.label(
                                 RichText::new(Self::tr_lang(language, "App data", ""))
@@ -266,7 +266,7 @@ impl CrosshairApp {
     pub(crate) fn render_advanced_settings(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
         Self::settings_card_frame(ui).show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
+            Self::lock_settings_card_width(ui);
             ui.vertical(|ui| {
                 let header_text = RichText::new(Self::tr_lang(language, "Advanced", ""))
                     .strong()
@@ -415,9 +415,7 @@ impl CrosshairApp {
             .as_ref()
             .map(|_| self.arduino_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
         Self::settings_card_frame(ui).show(ui, |ui| {
-            let card_width = ui.available_width();
-            ui.set_width(card_width);
-            ui.set_max_width(card_width);
+            Self::lock_settings_card_width(ui);
             ui.vertical(|ui| {
                 if Self::settings_section_button(
                     ui,
@@ -826,7 +824,7 @@ impl CrosshairApp {
     pub(crate) fn render_update_settings(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let language = self.state.ui_language;
         Self::settings_card_frame(ui).show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
+            Self::lock_settings_card_width(ui);
             ui.vertical(|ui| {
                 ui.label(
                     RichText::new(Self::tr_lang(language, "Update", ""))
@@ -988,6 +986,12 @@ impl CrosshairApp {
 
     fn settings_action_button(ui: &mut egui::Ui, label: impl Into<WidgetText>) -> egui::Response {
         Self::settings_action_button_fixed(ui, label, 0.0)
+    }
+
+    fn lock_settings_card_width(ui: &mut egui::Ui) {
+        let width = ui.available_width();
+        ui.set_width(width);
+        ui.set_max_width(width);
     }
 
     fn settings_action_button_fixed(
