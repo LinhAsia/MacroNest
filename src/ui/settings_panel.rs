@@ -1366,24 +1366,14 @@ impl CrosshairApp {
                 }
                 file.write_all(&buffer[..n])?;
                 downloaded += n as u64;
-                let p = (downloaded as f32 / total_size as f32 * 1000.0) as u32;
+                let p = ((downloaded as f32 / total_size as f32) * 999.0).round() as u32;
                 progress.store(p, Ordering::SeqCst);
             }
 
             drop(file);
 
             let _ = fs::remove_dir_all(&paths.interception_package_dir);
-            let extract_script = format!(
-                "Expand-Archive -LiteralPath {} -DestinationPath {} -Force",
-                Self::powershell_quote(&paths.interception_zip.to_string_lossy()),
-                Self::powershell_quote(&paths.bin_dir.to_string_lossy()),
-            );
-            let extract_status = Command::new("powershell")
-                .args(["-NoProfile", "-NonInteractive", "-Command", &extract_script])
-                .status()?;
-            if !extract_status.success() {
-                bail!("Failed to extract Interception.zip");
-            }
+            Self::extract_zip_archive(&paths.interception_zip, &paths.bin_dir)?;
 
             let extracted_dll = paths
                 .interception_package_dir
@@ -1395,6 +1385,7 @@ impl CrosshairApp {
             }
 
             fs::copy(&extracted_dll, &paths.interception_dll)?;
+            progress.store(1000, Ordering::SeqCst);
 
             Ok(())
         });

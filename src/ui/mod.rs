@@ -2241,8 +2241,47 @@ impl CrosshairApp {
         None
     }
 
-    fn powershell_quote(value: &str) -> String {
-        value.replace('\'', "''")
+    #[cfg(windows)]
+    pub(crate) fn extract_zip_archive(
+        archive_path: &std::path::Path,
+        destination_dir: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        use anyhow::Context;
+        use std::fs;
+        use std::io::{self, Write};
+        use zip::ZipArchive;
+
+        let file = fs::File::open(archive_path)
+            .with_context(|| format!("Failed to open archive {}", archive_path.display()))?;
+        let mut archive = ZipArchive::new(file)
+            .with_context(|| format!("Failed to read zip archive {}", archive_path.display()))?;
+
+        for index in 0..archive.len() {
+            let mut entry = archive
+                .by_index(index)
+                .with_context(|| format!("Failed to read zip entry #{index}"))?;
+            let Some(relative_path) = entry.enclosed_name().map(|path| path.to_path_buf()) else {
+                continue;
+            };
+            let output_path = destination_dir.join(relative_path);
+
+            if entry.is_dir() {
+                fs::create_dir_all(&output_path)?;
+                continue;
+            }
+
+            if let Some(parent) = output_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+
+            let mut output = fs::File::create(&output_path)
+                .with_context(|| format!("Failed to create {}", output_path.display()))?;
+            io::copy(&mut entry, &mut output)
+                .with_context(|| format!("Failed to extract {}", output_path.display()))?;
+            output.flush()?;
+        }
+
+        Ok(())
     }
 
     fn choose_audio_file(&mut self, startup: bool) {

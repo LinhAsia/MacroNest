@@ -183,7 +183,13 @@ mod windows_platform {
         let command = format!(
             "$p = Start-Process -FilePath {exe} -ArgumentList {args} -Verb RunAs -WindowStyle {window_style} -PassThru; if (-not $p) {{ exit 1 }}; if (-not $p.WaitForExit({timeout_ms})) {{ try {{ $p.Kill() }} catch {{}}; exit 124 }}; exit $p.ExitCode"
         );
-        let status = Command::new("powershell")
+        let mut powershell = Command::new("powershell");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            powershell.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        let status = powershell
             .args(["-NoProfile", "-NonInteractive", "-Command", &command])
             .status()?;
         match status.code() {
