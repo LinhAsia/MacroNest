@@ -930,35 +930,14 @@ impl CrosshairApp {
             }
         };
 
-        let button_size = vec2(ui.available_width(), 32.0);
-        let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
-        
-        let hovered = response.hovered();
-        let pressed = response.is_pointer_button_down_on();
-        
-        let final_fill = if pressed {
-            fill.linear_multiply(0.8)
-        } else if hovered {
-            fill.linear_multiply(1.1)
-        } else {
-            fill
-        };
-
-        ui.painter().rect(
-            rect,
-            8.0,
-            final_fill,
-            Stroke::new(1.0, stroke_color),
-            egui::StrokeKind::Inside,
-        );
-
-        let galley = label.into().into_galley(ui, None, rect.width() - 16.0, egui::TextStyle::Button);
-        let text_pos = rect.center() - galley.size() / 2.0;
         let text_color = if is_dark { Color32::WHITE } else { Color32::BLACK };
-        ui.painter().galley(text_pos, galley, text_color);
-
-        Self::paint_show_hover_outline(ui, &response);
-        response
+        ui.add_sized(
+            [ui.available_width(), 32.0],
+            Button::new(label.into().color(text_color))
+                .fill(fill)
+                .stroke(Stroke::new(1.0, stroke_color))
+                .corner_radius(8.0),
+        )
     }
 
     fn settings_action_button(ui: &mut egui::Ui, label: impl Into<WidgetText>) -> egui::Response {
