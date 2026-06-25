@@ -1454,14 +1454,8 @@ impl CrosshairApp {
             .unwrap_or_else(|| self.paths.bin_dir.clone());
         let job = std::thread::spawn(move || -> Result<()> {
             let installer = installer_dir.join("install-interception.exe");
-            let exit_code = crate::platform::run_hidden_process_as_admin_and_wait(
-                &installer,
-                Some("/install"),
-                60_000,
-            )?;
-            if exit_code != 0 {
-                bail!("Interception installer exited with code {exit_code}");
-            }
+            let _ =
+                crate::platform::run_hidden_process_as_admin_and_wait(&installer, Some("/install"), 60_000)?;
             Ok(())
         });
 
