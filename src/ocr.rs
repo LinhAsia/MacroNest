@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use image::{DynamicImage, ImageBuffer, Rgba, imageops::FilterType};
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -22,6 +22,7 @@ const OCR_MULTILINGUAL_CHARSET_FILE: &str = "ppocr_keys_v5.txt";
 pub struct OcrLanguagePack {
     pub code: &'static str,
     pub label: &'static str,
+    pub expected_size_bytes: u64,
     rec_model_file: &'static str,
     charset_file: &'static str,
 }
@@ -30,66 +31,77 @@ const OCR_LANGUAGE_PACKS: &[OcrLanguagePack] = &[
     OcrLanguagePack {
         code: "multilingual",
         label: "Chinese / English / Japanese",
+        expected_size_bytes: 21_365_848,
         rec_model_file: OCR_MULTILINGUAL_REC_FILE,
         charset_file: OCR_MULTILINGUAL_CHARSET_FILE,
     },
     OcrLanguagePack {
         code: "latin",
         label: "Latin / Vietnamese / European",
+        expected_size_bytes: 8_828_300,
         rec_model_file: "latin_PP-OCRv5_mobile_rec_infer.mnn",
         charset_file: "ppocr_keys_latin.txt",
     },
     OcrLanguagePack {
         code: "korean",
         label: "Korean / English",
+        expected_size_bytes: 11_583_731,
         rec_model_file: "korean_PP-OCRv5_mobile_rec_infer.mnn",
         charset_file: "ppocr_keys_korean.txt",
     },
     OcrLanguagePack {
         code: "th",
         label: "Thai / English",
+        expected_size_bytes: 8_751_323,
         rec_model_file: "th_PP-OCRv5_mobile_rec_infer.mnn",
         charset_file: "ppocr_keys_th.txt",
     },
     OcrLanguagePack {
         code: "cyrillic",
         label: "Cyrillic",
+        expected_size_bytes: 8_831_881,
         rec_model_file: "cyrillic_PP-OCRv5_mobile_rec_infer.mnn",
         charset_file: "ppocr_keys_cyrillic.txt",
     },
     OcrLanguagePack {
         code: "arabic",
         label: "Arabic / Persian / Urdu",
+        expected_size_bytes: 8_806_337,
         rec_model_file: "arabic_PP-OCRv5_mobile_rec_infer.mnn",
         charset_file: "ppocr_keys_arabic.txt",
     },
     OcrLanguagePack {
         code: "devanagari",
         label: "Hindi / Devanagari",
+        expected_size_bytes: 8_762_235,
         rec_model_file: "devanagari_PP-OCRv5_mobile_rec_infer.mnn",
         charset_file: "ppocr_keys_devanagari.txt",
     },
     OcrLanguagePack {
         code: "el",
         label: "Greek / English",
+        expected_size_bytes: 8_709_179,
         rec_model_file: "el_PP-OCRv5_mobile_rec_infer.mnn",
         charset_file: "ppocr_keys_el.txt",
     },
     OcrLanguagePack {
         code: "ta",
         label: "Tamil / English",
+        expected_size_bytes: 8_748_595,
         rec_model_file: "ta_PP-OCRv5_mobile_rec_infer.mnn",
         charset_file: "ppocr_keys_ta.txt",
     },
     OcrLanguagePack {
         code: "te",
         label: "Telugu / English",
+        expected_size_bytes: 8_755_291,
         rec_model_file: "te_PP-OCRv5_mobile_rec_infer.mnn",
         charset_file: "ppocr_keys_te.txt",
     },
     OcrLanguagePack {
         code: "en",
         label: "English",
+        expected_size_bytes: 8_729_500,
         rec_model_file: "en_PP-OCRv5_mobile_rec_infer.mnn",
         charset_file: "ppocr_keys_en.txt",
     },
@@ -145,12 +157,7 @@ pub fn label_for_language_code(value: &str) -> &'static str {
 }
 
 pub fn display_label_for_language_code(value: &str) -> String {
-    let label = label_for_language_code(value);
-    if is_language_pack_installed(value) {
-        label.to_owned()
-    } else {
-        format!("{label} [not installed]")
-    }
+    label_for_language_code(value).to_owned()
 }
 
 pub fn compact_label_for_language_code(value: &str) -> &'static str {
@@ -361,25 +368,46 @@ pub fn installed_language_pack_size(_value: &str) -> u64 {
     0
 }
 
+pub fn expected_language_pack_size(value: &str) -> u64 {
+    let pack = language_pack_for_code(value);
+    pack.expected_size_bytes
+}
+
 #[cfg(windows)]
-pub fn install_language_pack<F>(value: &str, mut progress: F) -> Result<()>
+fn missing_language_pack_files(
+    pack: &OcrLanguagePack,
+) -> Result<Vec<(PathBuf, &'static str)>> {
+    let (det_path, rec_path, charset_path) = model_paths_for_pack(pack)?;
+    Ok([
+        (det_path, OCR_DET_MODEL_FILE),
+        (rec_path, pack.rec_model_file),
+        (charset_path, pack.charset_file),
+    ]
+    .into_iter()
+    .filter(|(path, _)| {
+        !path.exists()
+            || path
+                .metadata()
+                .map(|meta| meta.len() == 0)
+                .unwrap_or(true)
+    })
+    .collect())
+}
+
+#[cfg(windows)]
+pub fn install_all_language_packs<F>(mut progress: F) -> Result<()>
 where
     F: FnMut(u64, u64),
 {
-    let pack = language_pack_for_code(value);
-    let files = {
-        let (det_path, rec_path, charset_path) = model_paths_for_pack(pack)?;
-        [
-            (det_path, OCR_DET_MODEL_FILE),
-            (rec_path, pack.rec_model_file),
-            (charset_path, pack.charset_file),
-        ]
-    };
-    let missing_files = files
-        .iter()
-        .filter(|(path, _)| !path.exists() || path.metadata().map(|meta| meta.len() == 0).unwrap_or(true))
-        .map(|(path, file_name)| (path.clone(), *file_name))
-        .collect::<Vec<_>>();
+    let mut seen_destinations = HashSet::new();
+    let mut missing_files = Vec::new();
+    for pack in OCR_LANGUAGE_PACKS.iter() {
+        for (path, file_name) in missing_language_pack_files(pack)? {
+            if seen_destinations.insert(path.clone()) {
+                missing_files.push((path, file_name));
+            }
+        }
+    }
     if missing_files.is_empty() {
         progress(1, 1);
         return Ok(());
@@ -394,11 +422,27 @@ where
 }
 
 #[cfg(not(windows))]
-pub fn install_language_pack<F>(_value: &str, _progress: F) -> Result<()>
+pub fn install_all_language_packs<F>(_progress: F) -> Result<()>
 where
     F: FnMut(u64, u64),
 {
     bail!("OCR is only supported on Windows.");
+}
+
+#[cfg(windows)]
+pub fn install_language_pack<F>(_value: &str, progress: F) -> Result<()>
+where
+    F: FnMut(u64, u64),
+{
+    install_all_language_packs(progress)
+}
+
+#[cfg(not(windows))]
+pub fn install_language_pack<F>(_value: &str, progress: F) -> Result<()>
+where
+    F: FnMut(u64, u64),
+{
+    install_all_language_packs(progress)
 }
 
 #[cfg(windows)]
