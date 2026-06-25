@@ -931,9 +931,12 @@ impl CrosshairApp {
         };
 
         let text_color = if is_dark { Color32::WHITE } else { Color32::BLACK };
+        let label = label.into();
+        let galley = label.clone().into_galley(ui, None, f32::INFINITY, egui::TextStyle::Button);
+        let button_width = (galley.size().x + 28.0).clamp(120.0, 260.0);
         ui.add_sized(
-            [ui.available_width(), 32.0],
-            Button::new(label.into().color(text_color))
+            [button_width, 32.0],
+            Button::new(label.color(text_color))
                 .fill(fill)
                 .stroke(Stroke::new(1.0, stroke_color))
                 .corner_radius(8.0),
