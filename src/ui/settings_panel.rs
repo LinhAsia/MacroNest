@@ -1414,7 +1414,14 @@ impl CrosshairApp {
             .unwrap_or_else(|| self.paths.bin_dir.clone());
         let job = std::thread::spawn(move || -> Result<()> {
             let installer = installer_dir.join("install-interception.exe");
-            crate::platform::launch_hidden_process_as_admin(&installer, Some("/install"))?;
+            let exit_code = crate::platform::run_hidden_process_as_admin_and_wait(
+                &installer,
+                Some("/install"),
+                60_000,
+            )?;
+            if exit_code != 0 {
+                bail!("Interception installer exited with code {exit_code}");
+            }
             let deadline = Instant::now() + Duration::from_secs(60);
             while Instant::now() < deadline {
                 if crate::platform::is_interception_driver_installed() {
@@ -1447,15 +1454,15 @@ impl CrosshairApp {
             .unwrap_or_else(|| self.paths.bin_dir.clone());
         let job = std::thread::spawn(move || -> Result<()> {
             let installer = installer_dir.join("install-interception.exe");
-            crate::platform::launch_hidden_process_as_admin(&installer, Some("/uninstall"))?;
-            let deadline = Instant::now() + Duration::from_secs(60);
-            while Instant::now() < deadline {
-                if !crate::platform::is_interception_driver_installed() {
-                    return Ok(());
-                }
-                std::thread::sleep(Duration::from_secs(2));
+            let exit_code = crate::platform::run_hidden_process_as_admin_and_wait(
+                &installer,
+                Some("/uninstall"),
+                60_000,
+            )?;
+            if exit_code != 0 {
+                bail!("Interception uninstaller exited with code {exit_code}");
             }
-            bail!("Timed out waiting for the Interception driver to uninstall");
+            Ok(())
         });
 
         self.interception_uninstall_job = Some(job);
