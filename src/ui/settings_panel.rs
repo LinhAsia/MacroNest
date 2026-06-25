@@ -396,6 +396,7 @@ impl CrosshairApp {
     }
 
     pub(crate) fn render_downloaded_tools_settings(&mut self, ui: &mut egui::Ui, card_width: f32) {
+        self.poll_mouse_tool_jobs();
         let language = self.state.ui_language;
         let opencv_path = self.paths.opencv_dll.clone();
         let arduino_path = self.paths.avrdude_exe.clone();

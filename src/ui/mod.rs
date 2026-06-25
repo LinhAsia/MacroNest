@@ -2284,6 +2284,104 @@ impl CrosshairApp {
         Ok(())
     }
 
+    fn poll_mouse_tool_jobs(&mut self) {
+        if let Some(job) = &self.arduino_download_job {
+            if job.is_finished() {
+                let job = self.arduino_download_job.take().unwrap();
+                match job.join() {
+                    Ok(Ok(())) => {
+                        self.arduino_tools_downloaded = true;
+                        self.status = Self::tr_lang(
+                            self.state.ui_language,
+                            "Arduino tools downloaded successfully!",
+                            "Arduino tools downloaded successfully!",
+                        )
+                        .to_owned();
+                    }
+                    Ok(Err(error)) => {
+                        self.status = format!("Download failed: {error}");
+                    }
+                    Err(_) => {
+                        self.status = "Download thread panicked".to_owned();
+                    }
+                }
+            }
+        }
+
+        if let Some(job) = &self.interception_download_job {
+            if job.is_finished() {
+                let job = self.interception_download_job.take().unwrap();
+                match job.join() {
+                    Ok(Ok(())) => {
+                        self.interception_package_downloaded = true;
+                        self.status = Self::tr_lang(
+                            self.state.ui_language,
+                            "Interception package downloaded successfully.",
+                            "Interception package downloaded successfully.",
+                        )
+                        .to_owned();
+                    }
+                    Ok(Err(error)) => {
+                        self.status = format!("Download failed: {error}");
+                        let _ = fs::remove_file(&self.paths.interception_zip);
+                        let _ = fs::remove_dir_all(&self.paths.interception_package_dir);
+                    }
+                    Err(_) => {
+                        self.status = "Download thread panicked.".to_owned();
+                    }
+                }
+            }
+        }
+
+        if let Some(job) = &self.interception_install_job {
+            if job.is_finished() {
+                let job = self.interception_install_job.take().unwrap();
+                match job.join() {
+                    Ok(Ok(())) => {
+                        self.interception_driver_installed =
+                            crate::platform::is_interception_driver_installed();
+                        self.interception_driver_needs_restart = self.interception_driver_installed;
+                        self.status = Self::tr_lang(
+                            self.state.ui_language,
+                            "Interception driver installed. Restart your PC for it to take effect.",
+                            "Interception driver installed. Restart your PC for it to take effect.",
+                        )
+                        .to_owned();
+                    }
+                    Ok(Err(error)) => {
+                        self.status = format!("Driver install failed: {error}");
+                    }
+                    Err(_) => {
+                        self.status = "Driver install thread panicked.".to_owned();
+                    }
+                }
+            }
+        }
+
+        if let Some(job) = &self.interception_uninstall_job {
+            if job.is_finished() {
+                let job = self.interception_uninstall_job.take().unwrap();
+                match job.join() {
+                    Ok(Ok(())) => {
+                        self.delete_interception_package();
+                        self.state.vision_settings.use_interception = false;
+                        self.interception_driver_installed = false;
+                        self.interception_driver_needs_restart = true;
+                        self.status =
+                            "Interception driver removed. Package files deleted from app. Restart your PC to finish cleanup."
+                                .to_owned();
+                    }
+                    Ok(Err(error)) => {
+                        self.status = format!("Driver uninstall failed: {error}");
+                    }
+                    Err(_) => {
+                        self.status = "Driver uninstall thread panicked.".to_owned();
+                    }
+                }
+            }
+        }
+    }
+
     fn choose_audio_file(&mut self, startup: bool) {
         let Some(path) = rfd::FileDialog::new()
             .add_filter("Audio", &["mp3", "wav", "flac", "ogg", "m4a"])
@@ -12167,77 +12265,14 @@ impl eframe::App for CrosshairApp {
             }
         }
 
-        if let Some(job) = &self.interception_download_job {
-            if job.is_finished() {
-                let job = self.interception_download_job.take().unwrap();
-                match job.join() {
-                    Ok(Ok(())) => {
-                        self.interception_package_downloaded = true;
-                        self.status = Self::tr_lang(
-                            self.state.ui_language,
-                            "Interception package downloaded successfully.",
-                            "Interception package downloaded successfully.",
-                        )
-                        .to_owned();
-                    }
-                    Ok(Err(error)) => {
-                        self.status = format!("Download failed: {error}");
-                        let _ = fs::remove_file(&self.paths.interception_zip);
-                        let _ = fs::remove_dir_all(&self.paths.interception_package_dir);
-                    }
-                    Err(_) => {
-                        self.status = "Download thread panicked.".to_owned();
-                    }
-                }
-            }
-        }
+        self.poll_mouse_tool_jobs();
 
-        if let Some(job) = &self.interception_install_job {
-            if job.is_finished() {
-                let job = self.interception_install_job.take().unwrap();
-                match job.join() {
-                    Ok(Ok(())) => {
-                        self.interception_driver_installed =
-                            crate::platform::is_interception_driver_installed();
-                        self.interception_driver_needs_restart = self.interception_driver_installed;
-                        self.status = Self::tr_lang(
-                            self.state.ui_language,
-                            "Interception driver installed. Restart your PC for it to take effect.",
-                            "Interception driver installed. Restart your PC for it to take effect.",
-                        )
-                        .to_owned();
-                    }
-                    Ok(Err(error)) => {
-                        self.status = format!("Driver install failed: {error}");
-                    }
-                    Err(_) => {
-                        self.status = "Driver install thread panicked.".to_owned();
-                    }
-                }
-            }
-        }
-
-        if let Some(job) = &self.interception_uninstall_job {
-            if job.is_finished() {
-                let job = self.interception_uninstall_job.take().unwrap();
-                match job.join() {
-                    Ok(Ok(())) => {
-                        self.delete_interception_package();
-                        self.state.vision_settings.use_interception = false;
-                        self.interception_driver_installed = false;
-                        self.interception_driver_needs_restart = true;
-                        self.status =
-                            "Interception driver removed. Package files deleted from app. Restart your PC to finish cleanup."
-                                .to_owned();
-                    }
-                    Ok(Err(error)) => {
-                        self.status = format!("Driver uninstall failed: {error}");
-                    }
-                    Err(_) => {
-                        self.status = "Driver uninstall thread panicked.".to_owned();
-                    }
-                }
-            }
+        if self.arduino_download_job.is_some()
+            || self.interception_download_job.is_some()
+            || self.interception_install_job.is_some()
+            || self.interception_uninstall_job.is_some()
+        {
+            ctx.request_repaint_after(Duration::from_millis(33));
         }
 
         self.poll_custom_ai_generation(ctx);
