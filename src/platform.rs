@@ -1,6 +1,6 @@
 #[cfg(windows)]
 mod windows_platform {
-    use std::{env, path::Path};
+    use std::{env, path::Path, process::Command};
 
     use anyhow::{Result, bail};
     use eframe::Frame;
@@ -9,11 +9,10 @@ mod windows_platform {
         Win32::{
             Foundation::{CloseHandle, GetLastError, HANDLE, HWND},
             Graphics::Dwm::{
-                DWMNCRP_ENABLED, DWMNCRP_USEWINDOWSTYLE, DWMWA_BORDER_COLOR,
-                DWMWA_COLOR_NONE, DWMWA_NCRENDERING_POLICY,
-                DWMWA_TRANSITIONS_FORCEDISABLED,
-                DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
-                DwmSetWindowAttribute, DwmExtendFrameIntoClientArea,
+                DWMNCRP_ENABLED, DWMNCRP_USEWINDOWSTYLE, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
+                DWMWA_NCRENDERING_POLICY, DWMWA_TRANSITIONS_FORCEDISABLED,
+                DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea,
+                DwmSetWindowAttribute,
             },
             System::Threading::{
                 CreateMutexW, GetCurrentProcess, HIGH_PRIORITY_CLASS, SetPriorityClass,
@@ -24,9 +23,7 @@ mod windows_platform {
             },
             UI::{
                 Controls::MARGINS,
-                Shell::{
-                    DROPFILES, IsUserAnAdmin, ShellExecuteW,
-                },
+                Shell::{DROPFILES, IsUserAnAdmin, ShellExecuteW},
                 WindowsAndMessaging::{
                     BringWindowToTop, FindWindowExW, FindWindowW, HWND_NOTOPMOST, HWND_TOPMOST,
                     IsWindowVisible, SW_HIDE, SW_RESTORE, SW_SHOWNA, SW_SHOWNORMAL, SWP_NOMOVE,
@@ -70,11 +67,11 @@ mod windows_platform {
     pub fn acquire_single_instance() -> Result<Option<SingleInstanceGuard>> {
         let name = widestring(MUTEX_NAME);
         let err_before = unsafe { GetLastError().0 };
-        unsafe { windows::Win32::Foundation::SetLastError(windows::Win32::Foundation::WIN32_ERROR(0)); }
+        unsafe {
+            windows::Win32::Foundation::SetLastError(windows::Win32::Foundation::WIN32_ERROR(0));
+        }
         let handle = unsafe { CreateMutexW(None, false, PCWSTR(name.as_ptr()))? };
         let err_after = unsafe { GetLastError().0 };
-
-
 
         let already_exists = err_after == windows::Win32::Foundation::ERROR_ALREADY_EXISTS.0;
         if already_exists {
@@ -130,6 +127,14 @@ mod windows_platform {
         launch_process_as_admin_with_show(executable, arguments, SW_HIDE)
     }
 
+    pub fn run_hidden_process_as_admin_and_wait(
+        executable: &Path,
+        arguments: Option<&str>,
+        timeout_ms: u32,
+    ) -> Result<u32> {
+        run_process_as_admin_and_wait_with_show(executable, arguments, SW_HIDE, timeout_ms)
+    }
+
     fn launch_process_as_admin_with_show(
         executable: &Path,
         arguments: Option<&str>,
@@ -160,6 +165,31 @@ mod windows_platform {
             }
         }
         Ok(())
+    }
+
+    fn run_process_as_admin_and_wait_with_show(
+        executable: &Path,
+        arguments: Option<&str>,
+        show_command: windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD,
+        timeout_ms: u32,
+    ) -> Result<u32> {
+        let exe = powershell_single_quote(executable.as_os_str().to_string_lossy().as_ref());
+        let args = powershell_single_quote(arguments.unwrap_or_default());
+        let window_style = if show_command == SW_HIDE {
+            "Hidden"
+        } else {
+            "Normal"
+        };
+        let command = format!(
+            "$p = Start-Process -FilePath {exe} -ArgumentList {args} -Verb RunAs -WindowStyle {window_style} -PassThru; if (-not $p) {{ exit 1 }}; if (-not $p.WaitForExit({timeout_ms})) {{ try {{ $p.Kill() }} catch {{}}; exit 124 }}; exit $p.ExitCode"
+        );
+        let status = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+            .status()?;
+        match status.code() {
+            Some(code) => Ok(code as u32),
+            None => bail!("Elevated process helper terminated without an exit code"),
+        }
     }
 
     pub fn is_interception_driver_installed() -> bool {
@@ -470,6 +500,10 @@ mod windows_platform {
         wide.push(0);
         wide
     }
+
+    fn powershell_single_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "''"))
+    }
 }
 
 #[cfg(windows)]
@@ -496,6 +530,14 @@ mod fallback {
         true
     }
 
+    pub fn run_hidden_process_as_admin_and_wait(
+        _executable: &std::path::Path,
+        _arguments: Option<&str>,
+        _timeout_ms: u32,
+    ) -> Result<u32> {
+        Ok(0)
+    }
+
     pub fn set_native_window_transitions_disabled(_frame: &Frame, _disabled: bool) -> bool {
         true
     }
@@ -512,9 +554,15 @@ mod fallback {
         Ok(())
     }
 
-    pub fn hide_taskbar() -> bool { false }
-    pub fn show_taskbar() -> bool { false }
-    pub fn is_taskbar_hidden() -> bool { false }
+    pub fn hide_taskbar() -> bool {
+        false
+    }
+    pub fn show_taskbar() -> bool {
+        false
+    }
+    pub fn is_taskbar_hidden() -> bool {
+        false
+    }
 }
 
 #[cfg(not(windows))]

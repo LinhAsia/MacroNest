@@ -12183,8 +12183,7 @@ impl eframe::App for CrosshairApp {
                 let job = self.interception_uninstall_job.take().unwrap();
                 match job.join() {
                     Ok(Ok(())) => {
-                        self.interception_driver_installed =
-                            crate::platform::is_interception_driver_installed();
+                        self.interception_driver_installed = false;
                         self.interception_driver_needs_restart = true;
                         self.status = Self::tr_lang(
                             self.state.ui_language,
