@@ -11,8 +11,8 @@ mod windows_platform {
             Graphics::Dwm::{
                 DWMNCRP_ENABLED, DWMNCRP_USEWINDOWSTYLE, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
                 DWMWA_NCRENDERING_POLICY, DWMWA_TRANSITIONS_FORCEDISABLED,
-                DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea,
-                DwmSetWindowAttribute,
+                DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
+                DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
             },
             System::Threading::{
                 CreateMutexW, GetCurrentProcess, HIGH_PRIORITY_CLASS, SetPriorityClass,
@@ -304,7 +304,11 @@ mod windows_platform {
                 std::mem::size_of_val(&policy) as u32,
             );
 
-            let corner = DWMWCP_ROUND;
+            let corner = if enabled {
+                DWMWCP_ROUND
+            } else {
+                DWMWCP_DONOTROUND
+            };
             let _ = DwmSetWindowAttribute(
                 hwnd,
                 DWMWA_WINDOW_CORNER_PREFERENCE,

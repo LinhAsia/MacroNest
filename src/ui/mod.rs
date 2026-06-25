@@ -1383,9 +1383,8 @@ impl CrosshairApp {
         self.startup_state_persist_pending |= persist_pending;
         self.startup_overlay_sync_pending = true;
         self.startup_cjk_font_check_pending = true;
-        self.startup_shell_frames_remaining = self.startup_shell_frames_remaining.max(1);
+        self.startup_shell_frames_remaining = self.startup_shell_frames_remaining.max(3);
         configure_theme(ctx, self.state.ui_theme);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.request_repaint();
     }
 
@@ -11386,6 +11385,10 @@ impl eframe::App for CrosshairApp {
         [0.0, 0.0, 0.0, 0.0]
     }
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if self.startup_shell_frames_remaining > 0 {
+            self.startup_shell_frames_remaining -= 1;
+            ctx.request_repaint();
+        }
         if matches!(self.state.active_panel, AppPanel::Zoom | AppPanel::Modes) {
             self.state.active_panel = AppPanel::Pin;
         }
@@ -11461,8 +11464,7 @@ impl eframe::App for CrosshairApp {
                     self.startup_overlay_sync_pending = true;
                     self.startup_cjk_font_check_pending = true;
                     self.startup_shell_frames_remaining =
-                        self.startup_shell_frames_remaining.max(1);
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        self.startup_shell_frames_remaining.max(3);
                     ctx.request_repaint();
                 }
                 UiCommand::SyncMacroGroups(groups, status) => {
@@ -13180,7 +13182,7 @@ impl eframe::App for CrosshairApp {
             self.titlebar_guides_open = open;
         }
 
-        if self.startup_show_pending && self.state.show_window {
+        if self.startup_show_pending && self.state.show_window && self.startup_shell_frames_remaining == 0 {
             self.startup_show_pending = false;
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
