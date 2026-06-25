@@ -1,9 +1,10 @@
 use eframe::egui;
 
 use crate::{
-    audio,
+    audio, audiosense,
     model::{AppState, AudioSensePresetKind, ProfileRecord, TimerPreset},
-    overlay::OverlayCommand,
+    overlay::{OverlayCommand, UiCommand},
+    window_list,
 };
 
 use super::{CrosshairApp, build_runtime_macro_groups, configure_theme};
@@ -425,5 +426,74 @@ impl CrosshairApp {
 
     pub(crate) fn invalidate_macro_variable_cache(&mut self) {
         self.macro_referenced_variables_cache = None;
+    }
+
+    pub(crate) fn schedule_open_windows_refresh(&mut self, status: Option<String>) {
+        if self.open_windows_loading {
+            return;
+        }
+        self.open_windows_loading = true;
+        let ui_tx = self.ui_tx.clone();
+        std::thread::spawn(move || {
+            let windows = window_list::list_open_windows()
+                .into_iter()
+                .map(|item| item.selector)
+                .collect();
+            let _ = ui_tx.send(UiCommand::OpenWindowsLoaded { windows, status });
+        });
+    }
+
+    pub(crate) fn ensure_open_windows_ready(&mut self, force: bool) {
+        if self.open_windows_loading {
+            return;
+        }
+        if !force
+            && self.open_windows_loaded_once
+            && self.last_window_refresh_at.elapsed() < super::OPEN_WINDOWS_REFRESH_INTERVAL
+        {
+            return;
+        }
+        self.schedule_open_windows_refresh(None);
+    }
+
+    pub(crate) fn sync_quick_action_window_selection(&mut self) {
+        if self.open_windows.is_empty() {
+            self.quick_action_window_selector.clear();
+            return;
+        }
+        if self.quick_action_window_selector.is_empty()
+            || !self
+                .open_windows
+                .iter()
+                .any(|item| item == &self.quick_action_window_selector)
+        {
+            self.quick_action_window_selector = self.open_windows[0].clone();
+        }
+    }
+
+    pub(crate) fn schedule_audio_sense_devices_refresh(&mut self) {
+        if self.audio_sense_devices_loading {
+            return;
+        }
+        self.audio_sense_devices_loading = true;
+        let ui_tx = self.ui_tx.clone();
+        std::thread::spawn(move || {
+            let devices = audiosense::list_capture_devices().unwrap_or_default();
+            let _ = ui_tx.send(UiCommand::AudioSenseDevicesLoaded { devices });
+        });
+    }
+
+    pub(crate) fn ensure_audio_sense_devices_ready(&mut self, force: bool) {
+        if self.audio_sense_devices_loading {
+            return;
+        }
+        if !force
+            && self.audio_sense_devices_loaded_once
+            && self.last_audio_sense_devices_refresh_at.elapsed()
+                < super::AUDIO_SENSE_DEVICES_REFRESH_INTERVAL
+        {
+            return;
+        }
+        self.schedule_audio_sense_devices_refresh();
     }
 }
