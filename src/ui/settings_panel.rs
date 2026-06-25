@@ -969,12 +969,14 @@ impl CrosshairApp {
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 Self::lock_settings_card_width_to(ui, card_width);
-                Self::settings_card_frame(ui).show(ui, |ui| {
-                    let max_right = ui.max_rect().right();
-                    Self::lock_settings_card_width(ui);
-                    add_contents(ui);
-                    ui.expand_to_include_x(max_right);
-                });
+                let mut prepared = Self::settings_card_frame(ui).begin(ui);
+                let max_rect = prepared.content_ui.max_rect();
+                Self::lock_settings_card_width_to(&mut prepared.content_ui, max_rect.width());
+                add_contents(&mut prepared.content_ui);
+                let mut forced_rect = prepared.content_ui.min_rect();
+                forced_rect.max.x = max_rect.right();
+                prepared.content_ui.expand_to_include_rect(forced_rect);
+                prepared.end(ui);
             },
         );
     }
