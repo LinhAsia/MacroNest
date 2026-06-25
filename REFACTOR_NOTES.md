@@ -57,6 +57,7 @@
   - moved font loading, CJK fallback detection, and theme visual configuration into [src/ui/theme.rs](D:/app/MacroNest/src/ui/theme.rs)
   - kept the public `crate::ui::configure_fonts` and `crate::ui::configure_theme` entrypoints stable via re-export
 - Continued the `ui/mod.rs` reduction with shared helper extraction:
+  - moved loading shell and modal shell helpers into [src/ui/app_shell.rs](D:/app/MacroNest/src/ui/app_shell.rs)
   - moved shared preset/card/button hover helpers into [src/ui/widgets.rs](D:/app/MacroNest/src/ui/widgets.rs)
   - moved titlebar/tab navigation labels and button styling into [src/ui/navigation.rs](D:/app/MacroNest/src/ui/navigation.rs)
   - moved startup overlay sync, state-to-overlay sync, and persist helpers into [src/ui/state_sync.rs](D:/app/MacroNest/src/ui/state_sync.rs)
