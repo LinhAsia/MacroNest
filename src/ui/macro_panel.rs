@@ -3975,19 +3975,7 @@ impl CrosshairApp {
             }
         }
         let total_render_items = render_items.len();
-        let mut lazy_render_limit = self.macro_panel_render_limit.min(total_render_items);
-        if let Some(target_id) = pending_macro_group_scroll_target {
-            if let Some(pos) = render_items.iter().position(|item| match item {
-                RenderItem::MacroGroup(index) => self.state.macro_groups[*index].id == target_id,
-                _ => false,
-            }) {
-                if pos >= lazy_render_limit {
-                    lazy_render_limit = (pos + 1).min(total_render_items);
-                    self.macro_panel_render_limit = lazy_render_limit;
-                }
-            }
-        }
-        let lazy_render_active = lazy_render_limit < total_render_items;
+        let lazy_render_active = false;
         let mut toggle_collapsed_folder_id: Option<u32> = None;
         let mut add_group_to_folder_id: Option<u32> = None;
         let mut renamed_folder: Option<(u32, String)> = None;
@@ -4051,7 +4039,7 @@ impl CrosshairApp {
             .iter()
             .map(|preset| (preset.id, preset.name.clone()))
             .collect();
-        for item in render_items.into_iter().take(lazy_render_limit) {
+        for item in render_items {
             match item {
                 RenderItem::AddFolder => {
                     let create_folder =
@@ -14521,19 +14509,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
             }
             self.persist();
         }
-        if lazy_render_active {
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(
-                    RichText::new(Self::tr_lang(language, "Loading more macro groups...", "Loading more macro groups..."))
-                    .small()
-                    .weak(),
-                );
-            });
-            self.macro_panel_render_limit =
-                (self.macro_panel_render_limit + 24).min(total_render_items);
-        }
+
         ui.add_space((macro_panel_scroll_height - 50.0).max(0.0));
         if let Some(group_scroll_rect) = pending_macro_group_scroll_rect {
             ui.scroll_to_rect(group_scroll_rect, Some(egui::Align::Center));

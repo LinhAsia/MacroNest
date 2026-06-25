@@ -763,7 +763,6 @@ pub struct CrosshairApp {
     last_selected_macro_step: Option<(u32, u32, usize)>,
     active_macro_folder_view: Option<u32>,
     macro_folders_panel_open: bool,
-    macro_panel_render_limit: usize,
     startup_splash: StartupSplashState,
     settings_popup_open: bool,
     focus_groq_api_key_pending: bool,
@@ -999,11 +998,6 @@ impl CrosshairApp {
             last_selected_macro_step: None,
             active_macro_folder_view: None,
             macro_folders_panel_open: false,
-            macro_panel_render_limit: if initial_active_panel == AppPanel::Macros {
-                8
-            } else {
-                usize::MAX
-            },
             startup_splash: StartupSplashState {
                 started_at: None,
                 duration_sec: 0.0,
@@ -1372,11 +1366,6 @@ impl CrosshairApp {
         self.state = state;
         self.save_name = self.state.selected_profile.clone().unwrap_or_default();
         self.last_active_panel = self.state.active_panel;
-        self.macro_panel_render_limit = if self.state.active_panel == AppPanel::Macros {
-            8
-        } else {
-            usize::MAX
-        };
         self.panel_warmup_target = Some(self.state.active_panel);
         self.panel_warmup_frames_remaining = 1;
         self.warmed_panels.clear();
@@ -12321,11 +12310,6 @@ impl eframe::App for CrosshairApp {
             }
             if Self::active_panel_needs_audio_sense_devices(self.state.active_panel) {
                 self.ensure_audio_sense_devices_ready(false);
-            }
-            if self.state.active_panel == AppPanel::Macros
-                && !self.panel_is_warmed(AppPanel::Macros)
-            {
-                self.macro_panel_render_limit = 8;
             }
 
             self.last_active_panel = self.state.active_panel;
