@@ -20,13 +20,13 @@ impl CrosshairApp {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 let content_width = ui.available_width();
+                ui.set_min_width(content_width);
                 ui.set_width(content_width);
                 ui.set_max_width(content_width);
                 ui.vertical(|ui| {
                     ui.add_space(4.0);
                     let mut groq_changed = false;
-                    Self::settings_card_frame(ui).show(ui, |ui| {
-                        Self::lock_settings_card_width(ui);
+                    Self::show_settings_card(ui, |ui| {
                         ui.vertical(|ui| {
                             let api_header = Self::settings_section_button(
                                 ui,
@@ -165,8 +165,7 @@ impl CrosshairApp {
                     }
 
                     ui.add_space(12.0);
-                    Self::settings_card_frame(ui).show(ui, |ui| {
-                        Self::lock_settings_card_width(ui);
+                    Self::show_settings_card(ui, |ui| {
                         ui.vertical(|ui| {
                             ui.label(
                                 RichText::new(Self::tr_lang(language, "Vietnamese input", ""))
@@ -198,8 +197,7 @@ impl CrosshairApp {
                         });
                     });
                     ui.add_space(12.0);
-                    Self::settings_card_frame(ui).show(ui, |ui| {
-                        Self::lock_settings_card_width(ui);
+                    Self::show_settings_card(ui, |ui| {
                         ui.vertical(|ui| {
                             ui.label(
                                 RichText::new(Self::tr_lang(language, "App data", ""))
@@ -265,8 +263,7 @@ impl CrosshairApp {
 
     pub(crate) fn render_advanced_settings(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
-        Self::settings_card_frame(ui).show(ui, |ui| {
-            Self::lock_settings_card_width(ui);
+        Self::show_settings_card(ui, |ui| {
             ui.vertical(|ui| {
                 let header_text = RichText::new(Self::tr_lang(language, "Advanced", ""))
                     .strong()
@@ -414,8 +411,7 @@ impl CrosshairApp {
             .arduino_download_job
             .as_ref()
             .map(|_| self.arduino_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
-        Self::settings_card_frame(ui).show(ui, |ui| {
-            Self::lock_settings_card_width(ui);
+        Self::show_settings_card(ui, |ui| {
             ui.vertical(|ui| {
                 if Self::settings_section_button(
                     ui,
@@ -823,8 +819,7 @@ impl CrosshairApp {
 
     pub(crate) fn render_update_settings(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let language = self.state.ui_language;
-        Self::settings_card_frame(ui).show(ui, |ui| {
-            Self::lock_settings_card_width(ui);
+        Self::show_settings_card(ui, |ui| {
             ui.vertical(|ui| {
                 ui.label(
                     RichText::new(Self::tr_lang(language, "Update", ""))
@@ -988,8 +983,27 @@ impl CrosshairApp {
         Self::settings_action_button_fixed(ui, label, 0.0)
     }
 
+    fn show_settings_card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+        let card_width = ui.available_width();
+        ui.allocate_ui_with_layout(
+            vec2(card_width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                Self::lock_settings_card_width_to(ui, card_width);
+                Self::settings_card_frame(ui).show(ui, |ui| {
+                    Self::lock_settings_card_width(ui);
+                    add_contents(ui);
+                });
+            },
+        );
+    }
+
     fn lock_settings_card_width(ui: &mut egui::Ui) {
-        let width = ui.available_width();
+        Self::lock_settings_card_width_to(ui, ui.available_width());
+    }
+
+    fn lock_settings_card_width_to(ui: &mut egui::Ui, width: f32) {
+        ui.set_min_width(width);
         ui.set_width(width);
         ui.set_max_width(width);
     }
