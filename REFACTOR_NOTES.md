@@ -60,6 +60,7 @@
   - moved shared preset/card/button hover helpers into [src/ui/widgets.rs](D:/app/MacroNest/src/ui/widgets.rs)
   - moved titlebar/tab navigation labels and button styling into [src/ui/navigation.rs](D:/app/MacroNest/src/ui/navigation.rs)
   - moved startup overlay sync, state-to-overlay sync, and persist helpers into [src/ui/state_sync.rs](D:/app/MacroNest/src/ui/state_sync.rs)
+  - moved modal placement, window-title formatting, and capture-info viewport helpers into [src/ui/layout.rs](D:/app/MacroNest/src/ui/layout.rs)
   - kept the existing `CrosshairApp` call sites unchanged by reusing `impl CrosshairApp` methods from the new modules
 - Added small behavior-locking tests for the refactor slice:
   - legacy alias deserialization for `AppState`
