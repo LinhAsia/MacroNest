@@ -1,11 +1,10 @@
 use crate::hotkey;
 use crate::model::*;
 use crate::overlay::OverlayCommand;
-use crate::ui::{CrosshairApp, VisionCaptureTarget, ZoomPreviewCache, ZoomPreviewView};
+use crate::ui::{CrosshairApp, VisionCaptureTarget, ZoomPreviewView};
 use crate::window_list;
 use eframe::egui::{
-    self, Button, Color32, ColorImage, DragValue, Frame, RichText, Sense, TextBuffer, TextEdit,
-    TextureOptions, vec2,
+    self, Button, Color32, DragValue, Frame, RichText, Sense, TextBuffer, TextEdit, vec2,
 };
 use std::time::{Duration, Instant};
 
@@ -583,8 +582,10 @@ impl CrosshairApp {
                     preview.as_ref(),
                     None,
                     None,
+                    None,
                     false,
                     true,
+                    false,
                 );
                 ui.add_space(8.0);
                 live_sync |= Self::render_zoom_rect_editor(
@@ -606,8 +607,10 @@ impl CrosshairApp {
                     Some(
                         (preset.source_width.max(1) as f32) / (preset.source_height.max(1) as f32),
                     ),
+                    None,
                     false,
                     true,
+                    false,
                 );
             });
             if let Some((target, status)) = next_capture_target.take() {
@@ -1216,8 +1219,13 @@ impl CrosshairApp {
                             None
                         },
                         None,
+                        Some(
+                            (preset.source_width.max(1) as f32)
+                                / (preset.source_height.max(1) as f32),
+                        ),
                         false,
                         true,
+                        false,
                     );
                     ui.horizontal_wrapped(|ui| {
                         if ui
@@ -1301,8 +1309,10 @@ impl CrosshairApp {
                         source_preview.as_ref(),
                         None,
                         None,
+                        None,
                         true,
                         preset.preview_enabled,
+                        true,
                     );
                     if crop_changed {
                         preset.source_crop_initialized = true;
@@ -2033,8 +2043,10 @@ impl CrosshairApp {
         preview: Option<&ZoomPreviewView>,
         target_preview_source: Option<(i32, i32, i32, i32)>,
         keep_aspect_ratio: Option<f32>,
+        ctrl_aspect_ratio: Option<f32>,
         use_preview_local_coordinates: bool,
         show_preview_image: bool,
+        allow_wheel_zoom: bool,
     ) -> bool {
         let mut changed = false;
         ui.label(RichText::new(label).strong());
@@ -2093,20 +2105,80 @@ impl CrosshairApp {
             coords_origin_x,
             coords_origin_y,
         ) = if let Some(preview_frame) = preview {
-            let window_pos = egui::pos2(
+            let base_window_pos = egui::pos2(
                 selection_bounds_rect.left() + (preview_frame.screen_x as f32 * scale),
                 selection_bounds_rect.top() + (preview_frame.screen_y as f32 * scale),
             );
-            let window_size = vec2(
+            let base_window_size = vec2(
                 preview_frame.logical_width.max(1) as f32 * scale,
                 preview_frame.logical_height.max(1) as f32 * scale,
             );
-            let preview_content_rect = egui::Rect::from_min_size(window_pos, window_size);
+            let (content_scale, preview_content_rect) =
+                if allow_wheel_zoom && use_preview_local_coordinates {
+                    let zoom_id = ui.make_persistent_id((id_source, "zoom-editor-view-scale"));
+                    let pan_id = ui.make_persistent_id((id_source, "zoom-editor-view-pan"));
+                    let mut view_zoom =
+                        ui.data_mut(|d| d.get_temp::<f32>(zoom_id).unwrap_or(1.0).clamp(1.0, 16.0));
+                    let mut view_pan =
+                        ui.data_mut(|d| d.get_temp::<egui::Vec2>(pan_id).unwrap_or_default());
+                    let base_rect = egui::Rect::from_min_size(base_window_pos, base_window_size);
+
+                    if response.hovered() {
+                        let scroll_y = ui.input(|input| input.raw_scroll_delta.y);
+                        if scroll_y.abs() > 0.0 {
+                            let old_zoom = view_zoom;
+                            let factor = if scroll_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
+                            view_zoom = (view_zoom * factor).clamp(1.0, 16.0);
+                            if (view_zoom - old_zoom).abs() > f32::EPSILON {
+                                let pointer_pos = ui
+                                    .input(|input| input.pointer.hover_pos())
+                                    .unwrap_or_else(|| base_rect.center());
+                                let old_size = base_rect.size() * old_zoom;
+                                let old_min = base_rect.center() - old_size * 0.5 + view_pan;
+                                let rel_x = if old_size.x > 0.0 {
+                                    ((pointer_pos.x - old_min.x) / old_size.x).clamp(0.0, 1.0)
+                                } else {
+                                    0.5
+                                };
+                                let rel_y = if old_size.y > 0.0 {
+                                    ((pointer_pos.y - old_min.y) / old_size.y).clamp(0.0, 1.0)
+                                } else {
+                                    0.5
+                                };
+                                let new_size = base_rect.size() * view_zoom;
+                                let new_min = egui::pos2(
+                                    pointer_pos.x - rel_x * new_size.x,
+                                    pointer_pos.y - rel_y * new_size.y,
+                                );
+                                view_pan = new_min - (base_rect.center() - new_size * 0.5);
+                            }
+                        }
+                    }
+
+                    if view_zoom <= 1.0001 {
+                        view_zoom = 1.0;
+                        view_pan = egui::Vec2::ZERO;
+                    }
+                    ui.data_mut(|d| {
+                        d.insert_temp(zoom_id, view_zoom);
+                        d.insert_temp(pan_id, view_pan);
+                    });
+
+                    let zoomed_size = base_rect.size() * view_zoom;
+                    let zoomed_rect =
+                        egui::Rect::from_center_size(base_rect.center() + view_pan, zoomed_size);
+                    (scale * view_zoom, zoomed_rect)
+                } else {
+                    (
+                        scale,
+                        egui::Rect::from_min_size(base_window_pos, base_window_size),
+                    )
+                };
             if use_preview_local_coordinates {
                 (
                     preview_frame.logical_width.max(1) as f32,
                     preview_frame.logical_height.max(1) as f32,
-                    scale,
+                    content_scale,
                     preview_content_rect,
                     preview_content_rect.left(),
                     preview_content_rect.top(),
@@ -2115,7 +2187,7 @@ impl CrosshairApp {
                 (
                     screen_size.x,
                     screen_size.y,
-                    scale,
+                    content_scale,
                     preview_content_rect,
                     selection_bounds_rect.left(),
                     selection_bounds_rect.top(),
@@ -2133,13 +2205,18 @@ impl CrosshairApp {
         };
 
         if show_preview_image && let Some(preview_frame) = preview {
-            ui.painter().image(
+            let painter = if allow_wheel_zoom {
+                ui.painter().with_clip_rect(selection_bounds_rect)
+            } else {
+                ui.painter().clone()
+            };
+            painter.image(
                 preview_frame.texture.id(),
                 preview_content_rect,
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 Color32::WHITE,
             );
-            ui.painter().text(
+            painter.text(
                 preview_content_rect.left_top() + vec2(8.0, 8.0),
                 egui::Align2::LEFT_TOP,
                 &preview_frame.title,
@@ -2327,13 +2404,15 @@ impl CrosshairApp {
                         16.0 / 9.0
                     }
                 };
-                let lock_aspect = keep_aspect_ratio.unwrap_or(if ctrl_pressed {
-                    target_aspect
+                let lock_aspect = if let Some(keep_aspect_ratio) = keep_aspect_ratio {
+                    keep_aspect_ratio
+                } else if ctrl_pressed {
+                    ctrl_aspect_ratio.unwrap_or(target_aspect)
                 } else if shift_pressed {
                     aspect
                 } else {
                     0.0
-                });
+                };
 
                 changed = true;
 
@@ -2556,8 +2635,11 @@ impl CrosshairApp {
                 ),
             );
             if uv.width() > 0.0 && uv.height() > 0.0 {
-                ui.painter()
-                    .image(preview_frame.texture.id(), rect, uv, Color32::WHITE);
+                let texture = preview_frame
+                    .filtered_texture
+                    .as_ref()
+                    .unwrap_or(&preview_frame.texture);
+                ui.painter().image(texture.id(), rect, uv, Color32::WHITE);
             }
         }
 
