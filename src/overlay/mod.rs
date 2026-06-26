@@ -4630,6 +4630,12 @@ mod windows_overlay {
                     message,
                     ((info.mouseData >> 16) & 0xFFFF) as u16,
                 );
+                if let Some(key_name) = event_key_name
+                    && consume_suppressed_mouse_trigger(key_name)
+                {
+                    return CallNextHookEx(None, code, wparam, lparam);
+                }
+
                 update_held_mouse_button(message, ((info.mouseData >> 16) & 0xFFFF) as u16);
                 if matches!(
                     message,
@@ -4668,11 +4674,6 @@ mod windows_overlay {
                             | WM_XBUTTONUP
                     );
                     update_quick_key_display_key(key_name, 0, is_down, is_key_up);
-                }
-                if let Some(key_name) = event_key_name
-                    && consume_suppressed_mouse_trigger(key_name)
-                {
-                    return CallNextHookEx(None, code, wparam, lparam);
                 }
 
                 let swallow_release = if !is_down {
@@ -22691,12 +22692,6 @@ mod windows_overlay {
                 && crate::platform::is_interception_driver_installed()
         };
         if use_interception {
-            if let Some(key_name) = suppressed_mouse_name {
-                suppress_next_mouse_trigger(key_name);
-            }
-        }
-
-        if use_interception {
             let interception_dll = { HOOK_STATE.lock().interception_dll_path.clone() };
             unsafe {
                 if let Ok(lib) = libloading::Library::new(&interception_dll) {
@@ -22795,6 +22790,10 @@ mod windows_overlay {
                             let sent = send_fn(context, 12, stroke_ptr, 1);
                             destroy_fn(context);
                             if sent > 0 {
+                                if let Some(key_name) = suppressed_mouse_name {
+                                    suppress_next_mouse_trigger(key_name);
+                                }
+
                                 set_interception_runtime_status(InterceptionRuntimeStatus::Active);
                                 return Ok(());
                             }
