@@ -1,6 +1,12 @@
 #[cfg(windows)]
 mod windows_platform {
-    use std::{env, path::Path, process::Command};
+    use std::{
+        env,
+        path::Path,
+        process::{Command, Output},
+        sync::{Mutex, OnceLock},
+        time::{Duration, Instant},
+    };
 
     use anyhow::{Result, bail};
     use eframe::Frame;
@@ -35,6 +41,10 @@ mod windows_platform {
     };
 
     const MUTEX_NAME: &str = "Global\\CrosshairOverlaySingleInstance_v2";
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    static INTERCEPTION_DRIVER_INSTALLED_CACHE: OnceLock<Mutex<Option<(Instant, bool)>>> =
+        OnceLock::new();
+
     fn spawn_popup_arg(arg: &str) {
         if let Ok(exe) = env::current_exe() {
             let exe_wide = widestring(exe.as_os_str().to_string_lossy().as_ref());
@@ -187,7 +197,7 @@ mod windows_platform {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            powershell.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            powershell.creation_flags(CREATE_NO_WINDOW);
         }
         let status = powershell
             .args(["-NoProfile", "-NonInteractive", "-Command", &command])
@@ -198,27 +208,32 @@ mod windows_platform {
         }
     }
 
+    fn hidden_command_output(command: &mut Command) -> std::io::Result<Output> {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        command.output()
+    }
+
     fn registry_key_exists(key_path: &str) -> bool {
         let system_root = env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_owned());
-        let reg_exe = Path::new(&system_root)
-            .join("System32")
-            .join("reg.exe");
-        Command::new(reg_exe)
-            .args(["query", key_path])
-            .output()
+        let reg_exe = Path::new(&system_root).join("System32").join("reg.exe");
+        let mut command = Command::new(reg_exe);
+        command.args(["query", key_path]);
+        hidden_command_output(&mut command)
             .map(|output| output.status.success())
             .unwrap_or(false)
     }
 
     fn registry_value_contains_token(key_path: &str, value_name: &str, token: &str) -> bool {
         let system_root = env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_owned());
-        let reg_exe = Path::new(&system_root)
-            .join("System32")
-            .join("reg.exe");
-        let Ok(output) = Command::new(reg_exe)
-            .args(["query", key_path, "/v", value_name])
-            .output()
-        else {
+        let reg_exe = Path::new(&system_root).join("System32").join("reg.exe");
+        let mut command = Command::new(reg_exe);
+        command.args(["query", key_path, "/v", value_name]);
+        let Ok(output) = hidden_command_output(&mut command) else {
             return false;
         };
         if !output.status.success() {
@@ -228,12 +243,10 @@ mod windows_platform {
         let token = token.to_ascii_lowercase();
         let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
         let cleaned = stdout.replace("\\0", " ").replace('\0', " ");
-        cleaned
-            .split_whitespace()
-            .any(|part| part == token)
+        cleaned.split_whitespace().any(|part| part == token)
     }
 
-    pub fn is_interception_driver_installed() -> bool {
+    fn detect_interception_driver_installed() -> bool {
         let system_root = env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_owned());
         let drivers_dir = Path::new(&system_root).join("System32").join("drivers");
 
@@ -257,6 +270,27 @@ mod windows_platform {
                 "UpperFilters",
                 "mouse",
             )
+    }
+
+    pub fn is_interception_driver_installed() -> bool {
+        let cache = INTERCEPTION_DRIVER_INSTALLED_CACHE.get_or_init(|| Mutex::new(None));
+        {
+            let guard = cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some((checked_at, installed)) = *guard
+                && checked_at.elapsed() < Duration::from_secs(5)
+            {
+                return installed;
+            }
+        }
+
+        let installed = detect_interception_driver_installed();
+        let mut guard = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = Some((Instant::now(), installed));
+        installed
     }
 
     pub fn get_system_uptime() -> std::time::Duration {

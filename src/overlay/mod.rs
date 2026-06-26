@@ -22687,9 +22687,7 @@ mod windows_overlay {
             };
         let use_interception = {
             let state = HOOK_STATE.lock();
-            state.use_interception
-                && state.interception_dll_path.exists()
-                && crate::platform::is_interception_driver_installed()
+            state.use_interception && state.interception_dll_path.exists()
         };
         if use_interception {
             let interception_dll = { HOOK_STATE.lock().interception_dll_path.clone() };
@@ -22962,9 +22960,7 @@ mod windows_overlay {
 
         let use_interception = {
             let state = HOOK_STATE.lock();
-            state.use_interception
-                && state.interception_dll_path.exists()
-                && crate::platform::is_interception_driver_installed()
+            state.use_interception && state.interception_dll_path.exists()
         };
         if use_interception {
             let interception_dll = { HOOK_STATE.lock().interception_dll_path.clone() };
@@ -23138,9 +23134,7 @@ mod windows_overlay {
 
         let use_interception = {
             let state = HOOK_STATE.lock();
-            state.use_interception
-                && state.interception_dll_path.exists()
-                && crate::platform::is_interception_driver_installed()
+            state.use_interception && state.interception_dll_path.exists()
         };
         if use_interception {
             let interception_dll = { HOOK_STATE.lock().interception_dll_path.clone() };
