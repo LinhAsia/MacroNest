@@ -234,6 +234,7 @@ struct StartupSplashState {
 #[derive(Clone)]
 pub(crate) struct ZoomPreviewView {
     texture: TextureHandle,
+    filtered_texture: Option<TextureHandle>,
     title: String,
     screen_x: i32,
     screen_y: i32,
@@ -10471,14 +10472,15 @@ impl eframe::App for CrosshairApp {
                     source_window_key,
                     source_window_extra_keys,
                     match_duplicate_window_titles,
-                    mut frame,
+                    frame,
                 } => {
-                    if cache_id >= 100_000 {
+                    let filtered_image = if cache_id >= 100_000 {
                         let preset_id = cache_id - 100_000;
                         if let Some(preset) =
                             self.state.pin_presets.iter().find(|p| p.id == preset_id)
                         {
                             if preset.binary_filter {
+                                let mut filtered_rgba = frame.rgba.clone();
                                 let threshold = preset.binary_threshold;
                                 let threshold_sq = (threshold as i32).pow(2);
                                 let binary_mode = preset.binary_mode;
@@ -10487,7 +10489,7 @@ impl eframe::App for CrosshairApp {
                                 let target_colors = preset.binary_target_colors();
                                 let single_target_color = preset.binary_target_color;
 
-                                for chunk in frame.rgba.chunks_exact_mut(4) {
+                                for chunk in filtered_rgba.chunks_exact_mut(4) {
                                     let r = chunk[0];
                                     let g = chunk[1];
                                     let b = chunk[2];
@@ -10536,9 +10538,19 @@ impl eframe::App for CrosshairApp {
                                         a
                                     };
                                 }
+                                Some(ColorImage::from_rgba_unmultiplied(
+                                    [frame.width, frame.height],
+                                    &filtered_rgba,
+                                ))
+                            } else {
+                                None
                             }
+                        } else {
+                            None
                         }
-                    }
+                    } else {
+                        None
+                    };
 
                     let image = ColorImage::from_rgba_unmultiplied(
                         [frame.width, frame.height],
@@ -10546,6 +10558,22 @@ impl eframe::App for CrosshairApp {
                     );
                     if let Some(cache) = self.zoom_preview_cache.get_mut(&cache_id) {
                         cache.view.texture.set(image, TextureOptions::LINEAR);
+                        match filtered_image {
+                            Some(filtered_image) => {
+                                if let Some(texture) = cache.view.filtered_texture.as_mut() {
+                                    texture.set(filtered_image, TextureOptions::LINEAR);
+                                } else {
+                                    cache.view.filtered_texture = Some(ctx.load_texture(
+                                        format!("window-preview-{cache_id}-filtered"),
+                                        filtered_image,
+                                        TextureOptions::LINEAR,
+                                    ));
+                                }
+                            }
+                            None => {
+                                cache.view.filtered_texture = None;
+                            }
+                        }
                         cache.updated_at = Instant::now();
                         cache.source_window_key = source_window_key;
                         cache.source_window_extra_keys = source_window_extra_keys;
@@ -10563,6 +10591,13 @@ impl eframe::App for CrosshairApp {
                         );
                         let view = ZoomPreviewView {
                             texture,
+                            filtered_texture: filtered_image.map(|image| {
+                                ctx.load_texture(
+                                    format!("window-preview-{cache_id}-filtered"),
+                                    image,
+                                    TextureOptions::LINEAR,
+                                )
+                            }),
                             title: frame.title,
                             screen_x: frame.screen_x,
                             screen_y: frame.screen_y,
