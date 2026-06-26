@@ -583,6 +583,7 @@ impl CrosshairApp {
                     None,
                     None,
                     None,
+                    None,
                     false,
                     true,
                     false,
@@ -598,6 +599,7 @@ impl CrosshairApp {
                     &mut preset.target_height,
                     screen_size,
                     preview.as_ref(),
+                    None,
                     Some((
                         preset.source_x,
                         preset.source_y,
@@ -1208,6 +1210,7 @@ impl CrosshairApp {
                         &mut preset.height,
                         screen_size,
                         preview.as_ref(),
+                        None,
                         if preset.use_source_crop {
                             Some((
                                 preset.source_x,
@@ -1255,8 +1258,26 @@ impl CrosshairApp {
                 }
 
                 if preset.use_source_crop {
+                    let source_crop_metrics_id =
+                        ui.make_persistent_id((preset.id, "pin-source-crop-preview-metrics"));
+                    if let Some(preview_frame) = source_preview.as_ref() {
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(
+                                source_crop_metrics_id,
+                                (
+                                    preview_frame.screen_x,
+                                    preview_frame.screen_y,
+                                    preview_frame.logical_width.max(1),
+                                    preview_frame.logical_height.max(1),
+                                ),
+                            );
+                        });
+                    }
+                    let source_crop_preview_metrics = ui
+                        .ctx()
+                        .data(|data| data.get_temp::<(i32, i32, i32, i32)>(source_crop_metrics_id));
                     if (!preset.source_crop_initialized || preset.source_crop_fit_version < 1)
-                        && let Some(preview_frame) = preview.as_ref()
+                        && let Some(preview_frame) = source_preview.as_ref()
                     {
                         preset.source_x = 0;
                         preset.source_y = 0;
@@ -1268,7 +1289,7 @@ impl CrosshairApp {
                     }
                     if preset.source_crop_initialized
                         && preset.source_crop_fit_version < 2
-                        && let Some(preview_frame) = preview.as_ref()
+                        && let Some(preview_frame) = source_preview.as_ref()
                     {
                         let logical_width = preview_frame.logical_width.max(1);
                         let logical_height = preview_frame.logical_height.max(1);
@@ -1307,6 +1328,7 @@ impl CrosshairApp {
                         &mut preset.source_height,
                         screen_size,
                         source_preview.as_ref(),
+                        source_crop_preview_metrics,
                         None,
                         None,
                         None,
@@ -1329,7 +1351,7 @@ impl CrosshairApp {
                             .clicked()
                         {
                             let mut target_frame = None;
-                            if let Some(preview_frame) = preview.as_ref() {
+                            if let Some(preview_frame) = source_preview.as_ref() {
                                 target_frame = Some((
                                     preview_frame.logical_width,
                                     preview_frame.logical_height,
@@ -2041,6 +2063,7 @@ impl CrosshairApp {
         height: &mut i32,
         screen_size: egui::Vec2,
         preview: Option<&ZoomPreviewView>,
+        preview_metrics_fallback: Option<(i32, i32, i32, i32)>,
         target_preview_source: Option<(i32, i32, i32, i32)>,
         keep_aspect_ratio: Option<f32>,
         ctrl_aspect_ratio: Option<f32>,
@@ -2097,6 +2120,10 @@ impl CrosshairApp {
         );
 
         let selection_bounds_rect = preview_rect;
+        let has_fallback_preview_metrics =
+            preview_metrics_fallback.is_some_and(|(_, _, logical_width, logical_height)| {
+                logical_width > 0 && logical_height > 0
+            });
         let (
             coord_width,
             coord_height,
@@ -2122,12 +2149,21 @@ impl CrosshairApp {
                     let mut view_pan =
                         ui.data_mut(|d| d.get_temp::<egui::Vec2>(pan_id).unwrap_or_default());
                     let base_rect = egui::Rect::from_min_size(base_window_pos, base_window_size);
+                    let visible_zoom_rect = egui::Rect::from_center_size(
+                        base_rect.center() + view_pan,
+                        base_rect.size() * view_zoom,
+                    )
+                    .intersect(selection_bounds_rect);
 
                     if let Some(pointer_pos) = ui.input(|input| input.pointer.hover_pos())
-                        && base_rect.contains(pointer_pos)
+                        && visible_zoom_rect.contains(pointer_pos)
                     {
                         let scroll_y = ui.input(|input| input.raw_scroll_delta.y);
                         if scroll_y.abs() > 0.0 {
+                            ui.ctx().input_mut(|input| {
+                                input.raw_scroll_delta = egui::Vec2::ZERO;
+                                input.smooth_scroll_delta = egui::Vec2::ZERO;
+                            });
                             let old_zoom = view_zoom;
                             let factor = if scroll_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
                             view_zoom = (view_zoom * factor).clamp(1.0, 16.0);
@@ -2192,6 +2228,43 @@ impl CrosshairApp {
                     selection_bounds_rect.top(),
                 )
             }
+        } else if let Some((
+            fallback_screen_x,
+            fallback_screen_y,
+            fallback_logical_width,
+            fallback_logical_height,
+        )) = preview_metrics_fallback.filter(|(_, _, logical_width, logical_height)| {
+            *logical_width > 0 && *logical_height > 0
+        }) {
+            let preview_content_rect = egui::Rect::from_min_size(
+                egui::pos2(
+                    selection_bounds_rect.left() + (fallback_screen_x as f32 * scale),
+                    selection_bounds_rect.top() + (fallback_screen_y as f32 * scale),
+                ),
+                vec2(
+                    fallback_logical_width.max(1) as f32 * scale,
+                    fallback_logical_height.max(1) as f32 * scale,
+                ),
+            );
+            if use_preview_local_coordinates {
+                (
+                    fallback_logical_width.max(1) as f32,
+                    fallback_logical_height.max(1) as f32,
+                    scale,
+                    preview_content_rect,
+                    preview_content_rect.left(),
+                    preview_content_rect.top(),
+                )
+            } else {
+                (
+                    screen_size.x,
+                    screen_size.y,
+                    scale,
+                    preview_content_rect,
+                    selection_bounds_rect.left(),
+                    selection_bounds_rect.top(),
+                )
+            }
         } else {
             (
                 screen_size.x,
@@ -2222,6 +2295,30 @@ impl CrosshairApp {
                 egui::TextStyle::Small.resolve(ui.style()),
                 Color32::WHITE,
             );
+        } else if show_preview_image && has_fallback_preview_metrics {
+            let painter = if allow_wheel_zoom {
+                ui.painter().with_clip_rect(selection_bounds_rect)
+            } else {
+                ui.painter().clone()
+            };
+            painter.rect_filled(
+                preview_content_rect,
+                4.0,
+                Color32::from_rgba_premultiplied(18, 24, 24, 120),
+            );
+            painter.rect_stroke(
+                preview_content_rect,
+                4.0,
+                egui::Stroke::new(1.0, Color32::from_rgb(88, 110, 98)),
+                egui::StrokeKind::Outside,
+            );
+            painter.text(
+                preview_content_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Preview unavailable",
+                egui::TextStyle::Small.resolve(ui.style()),
+                Color32::from_gray(190),
+            );
         }
 
         let min_size = vec2(6.0, 6.0);
@@ -2235,7 +2332,9 @@ impl CrosshairApp {
                 (*height).max(1) as f32 * content_scale,
             ),
         );
-        let active_bounds_rect = if use_preview_local_coordinates && preview.is_some() {
+        let active_bounds_rect = if use_preview_local_coordinates
+            && (preview.is_some() || has_fallback_preview_metrics)
+        {
             preview_content_rect
         } else {
             selection_bounds_rect
