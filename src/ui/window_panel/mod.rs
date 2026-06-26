@@ -2123,16 +2123,15 @@ impl CrosshairApp {
                         ui.data_mut(|d| d.get_temp::<egui::Vec2>(pan_id).unwrap_or_default());
                     let base_rect = egui::Rect::from_min_size(base_window_pos, base_window_size);
 
-                    if response.hovered() {
+                    if let Some(pointer_pos) = ui.input(|input| input.pointer.hover_pos())
+                        && base_rect.contains(pointer_pos)
+                    {
                         let scroll_y = ui.input(|input| input.raw_scroll_delta.y);
                         if scroll_y.abs() > 0.0 {
                             let old_zoom = view_zoom;
                             let factor = if scroll_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
                             view_zoom = (view_zoom * factor).clamp(1.0, 16.0);
                             if (view_zoom - old_zoom).abs() > f32::EPSILON {
-                                let pointer_pos = ui
-                                    .input(|input| input.pointer.hover_pos())
-                                    .unwrap_or_else(|| base_rect.center());
                                 let old_size = base_rect.size() * old_zoom;
                                 let old_min = base_rect.center() - old_size * 0.5 + view_pan;
                                 let rel_x = if old_size.x > 0.0 {
