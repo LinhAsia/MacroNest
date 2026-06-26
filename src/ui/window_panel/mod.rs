@@ -2415,7 +2415,52 @@ impl CrosshairApp {
 
                 changed = true;
 
-                let target_pos = pointer_pos - drag_offset;
+                let mut target_pos = pointer_pos - drag_offset;
+
+                match active_handle {
+                    SelectionDragHandle::Left
+                    | SelectionDragHandle::TopLeft
+                    | SelectionDragHandle::BottomLeft => {
+                        target_pos.x = target_pos
+                            .x
+                            .clamp(active_bounds_rect.left(), drag_anchor.x - min_size.x);
+                    }
+                    SelectionDragHandle::Right
+                    | SelectionDragHandle::TopRight
+                    | SelectionDragHandle::BottomRight => {
+                        target_pos.x = target_pos
+                            .x
+                            .clamp(drag_anchor.x + min_size.x, active_bounds_rect.right());
+                    }
+                    _ => {}
+                }
+                match active_handle {
+                    SelectionDragHandle::Top
+                    | SelectionDragHandle::TopLeft
+                    | SelectionDragHandle::TopRight => {
+                        target_pos.y = target_pos
+                            .y
+                            .clamp(active_bounds_rect.top(), drag_anchor.y - min_size.y);
+                    }
+                    SelectionDragHandle::Bottom
+                    | SelectionDragHandle::BottomLeft
+                    | SelectionDragHandle::BottomRight => {
+                        target_pos.y = target_pos
+                            .y
+                            .clamp(drag_anchor.y + min_size.y, active_bounds_rect.bottom());
+                    }
+                    _ => {}
+                }
+                if active_handle == SelectionDragHandle::Center {
+                    target_pos.x = target_pos.x.clamp(
+                        active_bounds_rect.left(),
+                        active_bounds_rect.right() - rect.width(),
+                    );
+                    target_pos.y = target_pos.y.clamp(
+                        active_bounds_rect.top(),
+                        active_bounds_rect.bottom() - rect.height(),
+                    );
+                }
 
                 match active_handle {
                     SelectionDragHandle::Center => {
