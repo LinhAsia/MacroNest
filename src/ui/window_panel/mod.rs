@@ -2619,6 +2619,12 @@ impl CrosshairApp {
             }
         }
 
+        let selection_painter = if allow_wheel_zoom {
+            ui.painter().with_clip_rect(selection_bounds_rect)
+        } else {
+            ui.painter().clone()
+        };
+
         if let (Some(preview_frame), Some((src_x, src_y, src_w, src_h))) =
             (preview, target_preview_source)
         {
@@ -2639,11 +2645,11 @@ impl CrosshairApp {
                     .filtered_texture
                     .as_ref()
                     .unwrap_or(&preview_frame.texture);
-                ui.painter().image(texture.id(), rect, uv, Color32::WHITE);
+                selection_painter.image(texture.id(), rect, uv, Color32::WHITE);
             }
         }
 
-        ui.painter().rect_stroke(
+        selection_painter.rect_stroke(
             rect,
             6.0,
             egui::Stroke::new(2.0, Color32::from_rgb(124, 240, 164)),
@@ -2651,7 +2657,7 @@ impl CrosshairApp {
         );
 
         let size_text = format!("{}x{}", *width, *height);
-        ui.painter().text(
+        selection_painter.text(
             rect.left_top() + egui::vec2(0.0, -4.0),
             egui::Align2::LEFT_BOTTOM,
             size_text,
