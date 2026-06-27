@@ -1,9 +1,9 @@
 <p align="left">
-  <a href="https://github.com/NBaoLinh/MacroNest">
+  <a href="https://github.com/LinhAsia/MacroNest">
     <img src="assets/banner-v4.svg" alt="MacroNest Banner" width="100%" />
   </a>
-  <a href="https://github.com/NBaoLinh/MacroNest/stargazers"><img src="assets/star-button-v2.svg" alt="Star MacroNest" height="38" /></a>
-  <a href="https://github.com/NBaoLinh/MacroNest/releases/latest"><img src="assets/download-button-v2.svg" alt="Download MacroNest" height="38" /></a>
+  <a href="https://github.com/LinhAsia/MacroNest/stargazers"><img src="assets/star-button-v2.svg" alt="Star MacroNest" height="38" /></a>
+  <a href="https://github.com/LinhAsia/MacroNest/releases/latest"><img src="assets/download-button-v2.svg" alt="Download MacroNest" height="38" /></a>
 </p>
 
 > **MacroNest is a Windows desktop macro tool.**
@@ -55,7 +55,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 
 ### Installation
 
-1. Download **`MacroNest.exe`** from the [latest release](https://github.com/NBaoLinh/MacroNest/releases/latest).
+1. Download **`MacroNest.exe`** from the [latest release](https://github.com/LinhAsia/MacroNest/releases/latest).
 2. Run the file.
 
 ### Optional Downloads

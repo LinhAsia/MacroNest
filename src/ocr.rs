@@ -13,7 +13,7 @@ use zip::ZipArchive;
 pub const OCR_DEFAULT_CODE: &str = "multilingual";
 
 const OCR_ASSETS_ARCHIVE_URL: &str =
-    "https://github.com/NBaoLinh/MacroNest/releases/download/tools/ocr-assets.zip";
+    "https://github.com/LinhAsia/MacroNest/releases/download/tools/ocr-assets.zip";
 const OCR_ASSETS_ARCHIVE_EXPECTED_SIZE_BYTES: u64 = 55_223_788;
 const OCR_DET_MODEL_FILE: &str = "PP-OCRv5_mobile_det.mnn";
 const OCR_MULTILINGUAL_REC_FILE: &str = "PP-OCRv5_mobile_rec.mnn";
