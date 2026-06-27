@@ -10723,13 +10723,17 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     child_ui.memory_mut(|mem| mem.data.insert_temp(has_dragged_id, true));
                                                     let accum_id = edit_id.with("drag-accum");
                                                     let mut accum = child_ui.memory(|mem| mem.data.get_temp::<f32>(accum_id).unwrap_or(0.0));
-                                                    accum += response.drag_delta().x;
-                                                    let step_size = if child_ui.input(|i| i.modifiers.shift) {
-                                                        10.0
-                                                    } else {
-                                                        1.0
-                                                    };
-                                                    let pixels_per_unit = 2.0;
+                                                    accum += response.drag_motion().x;
+                                                    let step_size = child_ui.input(|i| {
+                                                        if i.modifiers.shift {
+                                                            25.0
+                                                        } else if i.modifiers.ctrl {
+                                                            1.0
+                                                        } else {
+                                                            5.0
+                                                        }
+                                                    });
+                                                    let pixels_per_unit = 1.0;
                                                     let delta_units = (accum / pixels_per_unit).trunc();
                                                     if delta_units != 0.0 {
                                                         accum -= delta_units * pixels_per_unit;
