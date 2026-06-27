@@ -33,7 +33,10 @@ use crate::{
 #[cfg(not(windows))]
 compile_error!("This application currently supports Windows only.");
 
-fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool)> {
+fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool, bool)> {
+    let startup_state_needs_cjk_fallback = std::fs::read_to_string(&paths.state_file)
+        .map(|json| ui::text_has_cjk(&json))
+        .unwrap_or(false);
     let (mut state, _) = paths.load_state()?;
     let mut state_changed = false;
     for preset in &mut state.vision_presets {
@@ -52,7 +55,7 @@ fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool)> {
         state_changed = true;
     }
     state.show_window = true;
-    Ok((state, state_changed))
+    Ok((state, state_changed, startup_state_needs_cjk_fallback))
 }
 
 fn make_default_geometry_object(preset_id: u32) -> GeometryObject {
@@ -340,10 +343,11 @@ fn main() -> Result<()> {
         let startup_paths = paths.clone();
         let startup_ui_tx = ui_tx.clone();
         std::thread::spawn(move || match load_startup_state(&startup_paths) {
-            Ok((state, startup_state_dirty)) => {
+            Ok((state, startup_state_dirty, startup_state_needs_cjk_fallback)) => {
                 let _ = startup_ui_tx.send(crate::overlay::UiCommand::StartupStateLoaded {
                     state,
                     startup_state_dirty,
+                    startup_state_needs_cjk_fallback,
                 });
             }
             Err(error) => {
@@ -468,7 +472,7 @@ fn main() -> Result<()> {
         &app_title,
         native_options,
         Box::new(move |cc| {
-            ui::configure_fonts(&cc.egui_ctx, true);
+            ui::configure_fonts(&cc.egui_ctx, false);
             ui::configure_theme(&cc.egui_ctx, state.ui_theme);
             Ok(Box::new(CrosshairApp::new(
                 paths,
@@ -516,7 +520,7 @@ fn run_popup_blob(kind: PopupBlobKind) -> Result<()> {
         &app_title,
         native_options,
         Box::new(move |cc| {
-            ui::configure_fonts(&cc.egui_ctx, true);
+            ui::configure_fonts(&cc.egui_ctx, false);
             ui::configure_theme(&cc.egui_ctx, crate::model::UiThemeMode::Dark);
             Ok(Box::new(PopupBlobApp::new(
                 kind,

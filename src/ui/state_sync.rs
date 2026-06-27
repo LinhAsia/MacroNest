@@ -239,8 +239,10 @@ impl CrosshairApp {
         ctx: &egui::Context,
         state: AppState,
         startup_state_dirty: bool,
+        startup_state_needs_cjk_fallback: bool,
     ) {
         self.state = state;
+        self.startup_state_needs_cjk_fallback = startup_state_needs_cjk_fallback;
         self.save_name = self.state.selected_profile.clone().unwrap_or_default();
         self.last_active_panel = self.state.active_panel;
         self.panel_warmup_target = Some(self.state.active_panel);

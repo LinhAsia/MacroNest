@@ -57,7 +57,7 @@ mod window_panel;
 
 pub(crate) use theme::MATERIAL_ICONS_FONT;
 pub(crate) use theme::configure_theme;
-pub use theme::{app_state_needs_cjk_fallback, configure_fonts};
+pub use theme::{configure_fonts, text_has_cjk};
 
 #[cfg(windows)]
 pub(crate) use windows::Win32::{
@@ -601,6 +601,7 @@ pub struct CrosshairApp {
     startup_overlay_sync_pending: bool,
     startup_state_persist_pending: bool,
     startup_cjk_font_check_pending: bool,
+    startup_state_needs_cjk_fallback: bool,
     background_panel_preload_index: usize,
     startup_gate: Option<std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>>,
     panel_warmup_target: Option<AppPanel>,
@@ -840,6 +841,7 @@ impl CrosshairApp {
             startup_overlay_sync_pending: true,
             startup_state_persist_pending: false,
             startup_cjk_font_check_pending: true,
+            startup_state_needs_cjk_fallback: false,
             background_panel_preload_index: 0,
             startup_gate: Some(startup_gate),
             update_status: UpdateStatus::Idle,
@@ -9652,7 +9654,7 @@ impl CrosshairApp {
             self.startup_state_persist_pending = false;
         }
         if self.startup_cjk_font_check_pending {
-            if app_state_needs_cjk_fallback(&self.state) {
+            if self.startup_state_needs_cjk_fallback {
                 configure_fonts(ctx, true);
                 self.last_applied_theme = None;
                 self.apply_theme(ctx);
@@ -9926,8 +9928,14 @@ impl eframe::App for CrosshairApp {
                 UiCommand::StartupStateLoaded {
                     state,
                     startup_state_dirty,
+                    startup_state_needs_cjk_fallback,
                 } => {
-                    self.apply_loaded_startup_state(ctx, state, startup_state_dirty);
+                    self.apply_loaded_startup_state(
+                        ctx,
+                        state,
+                        startup_state_dirty,
+                        startup_state_needs_cjk_fallback,
+                    );
                 }
                 UiCommand::StartupStateLoadFailed(error) => {
                     self.status = format!("Failed to load app state: {error}");

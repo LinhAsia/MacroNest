@@ -8,7 +8,7 @@ pub(crate) const MATERIAL_ICONS_FONT: &str = "material_icons";
 const UI_SANS_FONT: &str = "ui_sans";
 const UI_SANS_SEMIBOLD_FONT: &str = "ui_sans_semibold";
 
-fn text_has_cjk(text: &str) -> bool {
+pub fn text_has_cjk(text: &str) -> bool {
     text.chars().any(|ch| {
         matches!(
             ch as u32,
