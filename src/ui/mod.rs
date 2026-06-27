@@ -10654,10 +10654,7 @@ impl eframe::App for CrosshairApp {
                     frame,
                 } => {
                     self.window_preview_loading.remove(&cache_id);
-                    let Some(frame) = frame else {
-                        ctx.request_repaint();
-                        continue;
-                    };
+                    let Some(frame) = frame else { continue; };
                     let filtered_image = if cache_id >= 100_000 {
                         let preset_id = cache_id - 100_000;
                         if let Some(preset) =
