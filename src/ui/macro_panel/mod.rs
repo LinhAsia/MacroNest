@@ -10707,11 +10707,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     self.state.vietnamese_input_mode,
                                                     &mut step.delay_expr,
                                                 );
-                                                let just_started_id = edit_id.with("just_started");
-                                                let just_started = child_ui.memory(|mem| mem.data.get_temp::<bool>(just_started_id).unwrap_or(false));
-                                                if just_started {
-                                                    response.request_focus();
-                                                    child_ui.memory_mut(|mem| mem.data.insert_temp(just_started_id, false));
+                                                let pending_focus_id = edit_id.with("pending-focus");
+                                                let pending_focus = child_ui
+                                                    .memory(|mem| mem.data.get_temp::<bool>(pending_focus_id).unwrap_or(false));
+                                                if pending_focus {
+                                                    child_ui.memory_mut(|mem| {
+                                                        mem.request_focus(delay_id);
+                                                        mem.data.insert_temp(pending_focus_id, false);
+                                                    });
                                                 }
                                                 if response.changed() {
                                                     Self::sync_delay_expr_to_value(&step.delay_expr, &mut step.delay_ms);
@@ -10797,7 +10800,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     if !has_dragged {
                                                         child_ui.memory_mut(|mem| {
                                                             mem.data.insert_temp(edit_id, true);
-                                                            mem.data.insert_temp(edit_id.with("just_started"), true);
+                                                            mem.data.insert_temp(edit_id.with("pending-focus"), true);
                                                         });
                                                     }
                                                 }
