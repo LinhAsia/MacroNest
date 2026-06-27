@@ -333,7 +333,7 @@ impl CrosshairApp {
 
                     if delay_changed {
                         self.sync_macro_delay_settings();
-                        self.persist();
+                        self.persist_deferred(ui.ctx());
                     }
                 }
             });

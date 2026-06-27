@@ -3607,7 +3607,7 @@ impl CrosshairApp {
                                                 .changed();
                                                 if color_changed {
                                                     self.sync_focus_highlight_config();
-                                                    self.persist();
+                                                    self.persist_deferred(ui.ctx());
                                                 }
                                             },
                                         );
@@ -4107,7 +4107,7 @@ impl CrosshairApp {
                                             ui.end_row();
                                             if x_changed || y_changed {
                                                 self.sync_quick_key_display_config();
-                                                self.persist();
+                                                self.persist_deferred(ui.ctx());
                                             }
                                         });
 
@@ -4133,7 +4133,7 @@ impl CrosshairApp {
                                             .changed();
                                         if size_changed {
                                             self.sync_quick_key_display_config();
-                                            self.persist();
+                                            self.persist_deferred(ui.ctx());
                                         }
                                     });
 
@@ -4563,7 +4563,7 @@ impl CrosshairApp {
                                     if (self.state.quick_key_sound_volume - vol_before).abs() > 1e-4
                                     {
                                         self.sync_quick_key_sound_config();
-                                        self.persist();
+                                        self.persist_deferred(ui.ctx());
                                     }
 
                                     false
