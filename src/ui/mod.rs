@@ -21,7 +21,7 @@ use resvg::usvg;
 use crate::{
     ai, audio, audiosense, hotkey,
     model::{
-        AppPanel, AppState, AudioClipSettings, CaptureRequest, CapturedInput, CommandPreset,
+        AppPanel, AppState, AudioClipSettings, AudioSettings, CaptureRequest, CapturedInput, CommandPreset,
         CrosshairStyle, FocusHighlightDecoration, GeometrySpec, HotkeyBinding, MacroAction,
         MacroFolder, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode, MasterMacroGroupState,
         MasterMacroPresetState, MasterPreset, MasterWindowFocusPresetState,
@@ -532,6 +532,7 @@ pub struct CrosshairApp {
     show_startup_audio_editor: bool,
     show_exit_audio_editor: bool,
     audio_waveforms: HashMap<String, Vec<f32>>,
+    last_synced_audio_settings: Option<AudioSettings>,
     sound_preset_clip_duration_ms: HashMap<u32, Option<u64>>,
     show_sound_preset_audio_editor: HashSet<u32>,
     library_clip_duration_ms: HashMap<u32, Option<u64>>,
@@ -771,6 +772,7 @@ impl CrosshairApp {
             show_startup_audio_editor: false,
             show_exit_audio_editor: false,
             audio_waveforms: HashMap::new(),
+            last_synced_audio_settings: None,
             sound_preset_clip_duration_ms: HashMap::new(),
             show_sound_preset_audio_editor: HashSet::new(),
             library_clip_duration_ms: HashMap::new(),
