@@ -2010,12 +2010,13 @@ mod windows_overlay {
         AudioSenseDevicesLoaded {
             devices: Vec<String>,
         },
+        PersistFailed(String),
         WindowPreviewLoaded {
             cache_id: u32,
             source_window_key: Option<String>,
             source_window_extra_keys: Vec<String>,
             match_duplicate_window_titles: bool,
-            frame: crate::window_list::WindowPreviewFrame,
+            frame: Option<crate::window_list::WindowPreviewFrame>,
         },
         SetProtractorEnabled(bool),
         UpdateProtractorConfig {

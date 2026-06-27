@@ -1,4 +1,5 @@
 use eframe::egui;
+use std::time::Instant;
 
 use crate::{
     audio, audiosense,
@@ -399,7 +400,7 @@ impl CrosshairApp {
         changed
     }
 
-    pub(crate) fn persist(&mut self) {
+    pub(crate) fn persist_blocking(&mut self) {
         self.invalidate_macro_variable_cache();
         if let Err(error) = self.paths.save_profiles(&self.state.profiles) {
             self.status = format!("Failed to save profiles: {error}");
@@ -410,14 +411,14 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn persist_deferred(&mut self, ctx: &egui::Context) {
-        let id = egui::Id::new("app_needs_persist");
-        if ctx.input(|i| i.pointer.any_down()) {
-            ctx.data_mut(|d| d.insert_temp(id, true));
-        } else {
-            self.persist();
-            ctx.data_mut(|d| d.insert_temp(id, false));
-        }
+    pub(crate) fn persist(&mut self) {
+        self.invalidate_macro_variable_cache();
+        self.persist_dirty = true;
+        self.persist_requested_at = Some(Instant::now());
+    }
+
+    pub(crate) fn persist_deferred(&mut self, _ctx: &egui::Context) {
+        self.persist();
     }
 
     pub(crate) fn persist_timer_presets_deferred(&mut self, ctx: &egui::Context) {

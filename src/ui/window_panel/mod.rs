@@ -4600,29 +4600,29 @@ impl CrosshairApp {
             true
         };
 
-        if should_request {
+        if should_request && !self.window_preview_loading.contains(&cache_id) {
             self.window_preview_requested
                 .insert(cache_id, Instant::now());
+            self.window_preview_loading.insert(cache_id);
 
             let ui_tx = self.ui_tx.clone();
             let target_title = target_window_title.cloned();
             let extra_titles = extra_target_window_titles.to_vec();
 
             std::thread::spawn(move || {
-                if let Some(frame) = crate::window_list::capture_window_preview_with_candidates(
+                let frame = crate::window_list::capture_window_preview_with_candidates(
                     target_title.as_deref(),
                     &extra_titles,
                     match_duplicate_window_titles,
                     720,
-                ) {
-                    let _ = ui_tx.send(crate::overlay::UiCommand::WindowPreviewLoaded {
-                        cache_id,
-                        source_window_key: target_title,
-                        source_window_extra_keys: extra_titles,
-                        match_duplicate_window_titles,
-                        frame,
-                    });
-                }
+                );
+                let _ = ui_tx.send(crate::overlay::UiCommand::WindowPreviewLoaded {
+                    cache_id,
+                    source_window_key: target_title,
+                    source_window_extra_keys: extra_titles,
+                    match_duplicate_window_titles,
+                    frame,
+                });
             });
         }
 
@@ -4655,31 +4655,29 @@ impl CrosshairApp {
             true
         };
 
-        if should_request {
+        if should_request && !self.window_preview_loading.contains(&cache_id) {
             self.window_preview_requested
                 .insert(cache_id, Instant::now());
+            self.window_preview_loading.insert(cache_id);
 
             let ui_tx = self.ui_tx.clone();
             let target_title = target_window_title.cloned();
             let extra_titles = extra_target_window_titles.to_vec();
 
             std::thread::spawn(move || {
-                if let Some(frame) =
-                    crate::window_list::capture_window_client_preview_with_candidates(
-                        target_title.as_deref(),
-                        &extra_titles,
-                        match_duplicate_window_titles,
-                        720,
-                    )
-                {
-                    let _ = ui_tx.send(crate::overlay::UiCommand::WindowPreviewLoaded {
-                        cache_id,
-                        source_window_key: target_title,
-                        source_window_extra_keys: extra_titles,
-                        match_duplicate_window_titles,
-                        frame,
-                    });
-                }
+                let frame = crate::window_list::capture_window_client_preview_with_candidates(
+                    target_title.as_deref(),
+                    &extra_titles,
+                    match_duplicate_window_titles,
+                    720,
+                );
+                let _ = ui_tx.send(crate::overlay::UiCommand::WindowPreviewLoaded {
+                    cache_id,
+                    source_window_key: target_title,
+                    source_window_extra_keys: extra_titles,
+                    match_duplicate_window_titles,
+                    frame,
+                });
             });
         }
 
