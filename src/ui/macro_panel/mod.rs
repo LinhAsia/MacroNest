@@ -2598,6 +2598,22 @@ impl CrosshairApp {
 
     pub(crate) fn render_macro_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
+        if self.open_windows.is_empty() {
+            self.ensure_open_windows_ready(false);
+        }
+        let should_prime_audio_sense_devices = self.audio_sense_devices.is_empty()
+            && self.state.macro_groups.iter().any(|group| {
+                group.presets.iter().any(|preset| {
+                    Self::macro_action_is_audio_sense(preset.hold_stop_step.action)
+                        || preset
+                            .steps
+                            .iter()
+                            .any(|step| Self::macro_action_is_audio_sense(step.action))
+                })
+            });
+        if should_prime_audio_sense_devices {
+            self.ensure_audio_sense_devices_ready(false);
+        }
         let window_presets = self.state.window_presets.clone();
         let window_layouts = self.state.window_layouts.clone();
         if self.sanitize_legacy_macro_ocr_target_texts() {
