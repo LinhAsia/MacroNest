@@ -14,24 +14,15 @@ pub use settings_model::*;
 pub use vision_model::*;
 pub use window_model::*;
 
+pub const DEFAULT_CROSSHAIR_X_OFFSET: i32 = 960;
+pub const DEFAULT_CROSSHAIR_Y_OFFSET: i32 = 540;
+
 fn default_x_offset() -> i32 {
-    #[cfg(windows)]
-    unsafe {
-        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN};
-        (GetSystemMetrics(SM_CXSCREEN).max(1) - 1) / 2
-    }
-    #[cfg(not(windows))]
-    959
+    DEFAULT_CROSSHAIR_X_OFFSET
 }
 
 fn default_y_offset() -> i32 {
-    #[cfg(windows)]
-    unsafe {
-        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CYSCREEN};
-        (GetSystemMetrics(SM_CYSCREEN).max(1) - 1) / 2
-    }
-    #[cfg(not(windows))]
-    539
+    DEFAULT_CROSSHAIR_Y_OFFSET
 }
 
 fn default_crosshair_length() -> f32 {
