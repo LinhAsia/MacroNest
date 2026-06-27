@@ -10686,37 +10686,49 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                             child_ui.visuals_mut().widgets.active.corner_radius = left_rounding;
                                             child_ui.visuals_mut().widgets.open.corner_radius = left_rounding;
                                             child_ui.visuals_mut().widgets.noninteractive.corner_radius = left_rounding;
+                                            let edit_id = child_ui.make_persistent_id((group.id, preset.id, step_index, "delay-edit-state"));
+                                            let is_editing = child_ui.memory(|mem| mem.data.get_temp::<bool>(edit_id).unwrap_or(false));
                                             let delay_id = child_ui.make_persistent_id((group.id, preset.id, step_index, "delay-input"));
-                                            let response = Self::render_variable_text_edit(
-                                                &mut child_ui,
-                                                &mut step.delay_expr,
-                                                delay_id,
-                                                78.0,
-                                                130.0,
-                                                20.0,
-                                                20.0,
-                                                "0",
-                                                false,
-                                            );
-                                            if response.changed() {
-                                                Self::sync_delay_expr_to_value(&step.delay_expr, &mut step.delay_ms);
-                                                live_sync = true;
-                                            }
-                                            if !response.has_focus() {
-                                                let drag_surface_id = delay_id.with("drag-surface");
-                                                let drag_response = child_ui
-                                                    .interact(response.rect, drag_surface_id, egui::Sense::click_and_drag())
-                                                    .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-                                                let has_dragged_id = drag_surface_id.with("has-dragged");
-                                                let drag_start_x_id = drag_surface_id.with("drag-start-x");
-                                                let drag_start_expr_id = drag_surface_id.with("drag-start-expr");
-                                                if drag_response.is_pointer_button_down_on() {
+                                            if is_editing {
+                                                let response = Self::render_variable_text_edit(
+                                                    &mut child_ui,
+                                                    &mut step.delay_expr,
+                                                    delay_id,
+                                                    78.0,
+                                                    130.0,
+                                                    20.0,
+                                                    20.0,
+                                                    "0",
+                                                    false,
+                                                );
+                                                if response.changed() {
+                                                    Self::sync_delay_expr_to_value(&step.delay_expr, &mut step.delay_ms);
+                                                    live_sync = true;
+                                                }
+                                                if response.lost_focus() || child_ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                                    child_ui.memory_mut(|mem| mem.data.insert_temp(edit_id, false));
+                                                }
+                                            } else {
+                                                let display_text = if step.delay_expr.is_empty() {
+                                                    "0".to_string()
+                                                } else {
+                                                    step.delay_expr.clone()
+                                                };
+                                                let response = child_ui.add_sized(
+                                                    [78.0, 20.0],
+                                                    egui::Button::new(display_text)
+                                                        .wrap_mode(egui::TextWrapMode::Truncate)
+                                                        .sense(egui::Sense::click_and_drag()),
+                                                )
+                                                .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+                                                let has_dragged_id = edit_id.with("has-dragged");
+                                                let drag_start_x_id = edit_id.with("drag-start-x");
+                                                let drag_start_expr_id = edit_id.with("drag-start-expr");
+                                                if response.is_pointer_button_down_on() {
                                                     let pointer_x =
                                                         child_ui.input(|i| i.pointer.interact_pos().map(|pos| pos.x));
-                                                    let start_x =
-                                                        child_ui.memory(|mem| mem.data.get_temp::<f32>(drag_start_x_id));
-                                                    let start_expr = child_ui
-                                                        .memory(|mem| mem.data.get_temp::<String>(drag_start_expr_id));
+                                                    let start_x = child_ui.memory(|mem| mem.data.get_temp::<f32>(drag_start_x_id));
+                                                    let start_expr = child_ui.memory(|mem| mem.data.get_temp::<String>(drag_start_expr_id));
                                                     match (start_x, start_expr, pointer_x) {
                                                         (Some(start_x), Some(start_expr), Some(pointer_x)) => {
                                                             let step_size = child_ui.input(|i| {
@@ -10742,10 +10754,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                     )
                                                                 });
                                                                 step.delay_expr = next_expr;
-                                                                Self::sync_delay_expr_to_value(
-                                                                    &step.delay_expr,
-                                                                    &mut step.delay_ms,
-                                                                );
+                                                                Self::sync_delay_expr_to_value(&step.delay_expr, &mut step.delay_ms);
                                                                 live_sync = true;
                                                             }
                                                         }
@@ -10766,16 +10775,15 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     child_ui.memory_mut(|mem| {
                                                         mem.data.remove::<f32>(drag_start_x_id);
                                                         mem.data.remove::<String>(drag_start_expr_id);
-                                                        if !drag_response.clicked() {
+                                                        if !response.clicked() {
                                                             mem.data.insert_temp(has_dragged_id, false);
                                                         }
                                                     });
                                                 }
-                                                if drag_response.clicked() {
-                                                    let has_dragged = child_ui
-                                                        .memory(|mem| mem.data.get_temp::<bool>(has_dragged_id).unwrap_or(false));
+                                                if response.clicked() {
+                                                    let has_dragged = child_ui.memory(|mem| mem.data.get_temp::<bool>(has_dragged_id).unwrap_or(false));
                                                     if !has_dragged {
-                                                        child_ui.memory_mut(|mem| mem.request_focus(delay_id));
+                                                        child_ui.memory_mut(|mem| mem.data.insert_temp(edit_id, true));
                                                     }
                                                 }
                                             }
