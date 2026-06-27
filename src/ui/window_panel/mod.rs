@@ -4578,7 +4578,7 @@ impl CrosshairApp {
 
     pub(crate) fn window_preview_for_target(
         &mut self,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,
         cache_id: u32,
         target_window_title: Option<&String>,
         extra_target_window_titles: &[String],
@@ -4633,7 +4633,7 @@ impl CrosshairApp {
 
     pub(crate) fn pin_preview_for_target(
         &mut self,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,
         cache_id: u32,
         target_window_title: Option<&String>,
         extra_target_window_titles: &[String],
