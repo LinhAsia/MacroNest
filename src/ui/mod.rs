@@ -271,6 +271,38 @@ pub(crate) struct VisionPreviewCache {
 
 const OPEN_WINDOWS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const AUDIO_SENSE_DEVICES_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
+const PERSIST_DEBOUNCE: Duration = Duration::from_millis(180);
+
+#[derive(Clone)]
+pub(crate) struct PersistSnapshot {
+    profiles: Vec<ProfileRecord>,
+    state: AppState,
+}
+
+fn spawn_persist_worker(
+    paths: AppPaths,
+    ui_tx: Sender<UiCommand>,
+) -> Sender<PersistSnapshot> {
+    let (tx, rx) = crossbeam_channel::unbounded::<PersistSnapshot>();
+    std::thread::spawn(move || {
+        while let Ok(mut snapshot) = rx.recv() {
+            // ponytail: collapse rapid-fire UI edits into the newest snapshot; if saves ever need
+            // stronger ordering guarantees, switch this worker to versioned acknowledgements.
+            while let Ok(newer_snapshot) = rx.recv_timeout(PERSIST_DEBOUNCE) {
+                snapshot = newer_snapshot;
+            }
+            let result = paths
+                .save_profiles(&snapshot.profiles)
+                .and_then(|_| paths.save_state(&snapshot.state));
+            if let Err(error) = result {
+                let _ = ui_tx.send(UiCommand::PersistFailed(format!(
+                    "Failed to save app state: {error}"
+                )));
+            }
+        }
+    });
+    tx
+}
 
 pub fn build_runtime_macro_groups(state: &AppState) -> Vec<MacroGroup> {
     let mut macro_groups = state.macro_groups.clone();
@@ -494,6 +526,9 @@ pub struct CrosshairApp {
     capture_target: Option<CaptureRequest>,
     startup_clip_duration_ms: Option<u64>,
     exit_clip_duration_ms: Option<u64>,
+    persist_tx: Sender<PersistSnapshot>,
+    persist_dirty: bool,
+    persist_requested_at: Option<Instant>,
     show_startup_audio_editor: bool,
     show_exit_audio_editor: bool,
     audio_waveforms: HashMap<String, Vec<f32>>,
@@ -575,6 +610,7 @@ pub struct CrosshairApp {
     zoom_preview_cache: HashMap<u32, ZoomPreviewCache>,
     vision_preview_cache: HashMap<u32, VisionPreviewCache>,
     window_preview_requested: HashMap<u32, Instant>,
+    window_preview_loading: HashSet<u32>,
     vision_color_pick_texture: Option<TextureHandle>,
     vision_color_pick_preview_color: Option<RgbaColor>,
     vietnamese_input_enabled_texture: Option<TextureHandle>,
@@ -690,6 +726,7 @@ impl CrosshairApp {
     ) -> Self {
         let save_name = state.selected_profile.clone().unwrap_or_default();
         let initial_active_panel = state.active_panel;
+        let persist_tx = spawn_persist_worker(paths.clone(), ui_tx.clone());
 
         let opencv_installed = paths.opencv_dll.exists();
         let interception_pending_marker = paths.bin_dir.join("interception.install.pending");
@@ -728,6 +765,9 @@ impl CrosshairApp {
             capture_target: None,
             startup_clip_duration_ms: None,
             exit_clip_duration_ms: None,
+            persist_tx,
+            persist_dirty: false,
+            persist_requested_at: None,
             show_startup_audio_editor: false,
             show_exit_audio_editor: false,
             audio_waveforms: HashMap::new(),
@@ -815,6 +855,7 @@ impl CrosshairApp {
             zoom_preview_cache: HashMap::new(),
             vision_preview_cache: HashMap::new(),
             window_preview_requested: HashMap::new(),
+            window_preview_loading: HashSet::new(),
             vision_color_pick_texture: None,
             vision_color_pick_preview_color: None,
             vietnamese_input_enabled_texture: None,
@@ -3034,7 +3075,9 @@ impl CrosshairApp {
         ui: &mut egui::Ui,
         taskbar_hidden: bool,
     ) -> bool {
-        self.ensure_open_windows_ready(false);
+        if self.open_windows.is_empty() {
+            self.ensure_open_windows_ready(false);
+        }
         self.sync_quick_action_window_selection();
         let pin_window_available = !self.quick_action_window_selector.is_empty();
         let pinned_window_active = pin_window_available
@@ -3467,6 +3510,9 @@ impl CrosshairApp {
                                         ui.add_sized([164.0, 22.0], selector_button);
                                     if selector_response.clicked() {
                                         selector_popup_open = !selector_popup_open;
+                                        if selector_popup_open {
+                                            self.ensure_open_windows_ready(true);
+                                        }
                                     }
 
                                     let mut close_selector_popup = false;
@@ -10608,6 +10654,11 @@ impl eframe::App for CrosshairApp {
                     match_duplicate_window_titles,
                     frame,
                 } => {
+                    self.window_preview_loading.remove(&cache_id);
+                    let Some(frame) = frame else {
+                        ctx.request_repaint();
+                        continue;
+                    };
                     let filtered_image = if cache_id >= 100_000 {
                         let preset_id = cache_id - 100_000;
                         if let Some(preset) =
@@ -10792,6 +10843,10 @@ impl eframe::App for CrosshairApp {
                     self.audio_sense_devices_loaded_once = true;
                     self.audio_sense_devices_loading = false;
                     self.last_audio_sense_devices_refresh_at = Instant::now();
+                    ctx.request_repaint();
+                }
+                UiCommand::PersistFailed(error) => {
+                    self.status = error;
                     ctx.request_repaint();
                 }
 
@@ -11779,11 +11834,24 @@ impl eframe::App for CrosshairApp {
             ctx.request_repaint();
         }
 
-        let needs_persist_id = egui::Id::new("app_needs_persist");
-        let needs_persist = ctx.data_mut(|d| d.get_temp::<bool>(needs_persist_id).unwrap_or(false));
-        if needs_persist && !ctx.input(|i| i.pointer.any_down()) {
-            self.persist();
-            ctx.data_mut(|d| d.insert_temp(needs_persist_id, false));
+        if self.persist_dirty {
+            let pointer_down = ctx.input(|i| i.pointer.any_down());
+            let ready = self
+                .persist_requested_at
+                .is_some_and(|requested_at| requested_at.elapsed() >= PERSIST_DEBOUNCE);
+            if ready && !pointer_down {
+                let snapshot = PersistSnapshot {
+                    profiles: self.state.profiles.clone(),
+                    state: self.state.clone(),
+                };
+                self.persist_dirty = false;
+                self.persist_requested_at = None;
+                if self.persist_tx.send(snapshot).is_err() {
+                    self.status = "Failed to queue app state save.".to_owned();
+                }
+            } else {
+                ctx.request_repaint_after(PERSIST_DEBOUNCE);
+            }
         }
 
         self.poll_capture_input(ctx);
@@ -11801,7 +11869,7 @@ impl eframe::App for CrosshairApp {
         self.sync_macro_master_hotkey();
         self.sync_vietnamese_input_enabled();
         let _ = self.overlay_tx.send(OverlayCommand::Exit);
-        self.persist();
+        self.persist_blocking();
     }
 }
 
