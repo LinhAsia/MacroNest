@@ -1357,14 +1357,13 @@ impl CrosshairApp {
             panel,
             AppPanel::WindowPresets
                 | AppPanel::Pin
-                | AppPanel::Macros
                 | AppPanel::Vision
                 | AppPanel::Commands
         )
     }
 
     fn active_panel_needs_audio_sense_devices(panel: AppPanel) -> bool {
-        matches!(panel, AppPanel::AudioSense | AppPanel::Macros)
+        matches!(panel, AppPanel::AudioSense)
     }
 
     fn all_panels_for_background_preload() -> &'static [AppPanel] {
