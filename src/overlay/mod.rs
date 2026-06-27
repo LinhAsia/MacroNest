@@ -2556,6 +2556,9 @@ mod windows_overlay {
         background_color: RgbaColor,
         background_opacity: f32,
         rounded_background: bool,
+        border_enabled: bool,
+        border_color: RgbaColor,
+        border_thickness: f32,
         font_size: f32,
         x: i32,
         y: i32,
@@ -8440,6 +8443,7 @@ mod windows_overlay {
                         let _ = set_input_hooks_enabled(runtime, desired_hooks_enabled(runtime));
                         let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
                         let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
+                        runtime.hud_display = None;
                         runtime.quick_key_display_entries.clear();
                         runtime.quick_key_display_slot_memory.clear();
                         runtime.quick_key_display_slot_labels.clear();
@@ -8490,6 +8494,7 @@ mod windows_overlay {
         if visible {
             let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
             let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
+            runtime.hud_display = None;
             let _ = ShowWindow(runtime.mouse_trail_hwnd, SW_HIDE);
         }
     }
@@ -8506,6 +8511,7 @@ mod windows_overlay {
             reset_all_input_and_locks();
             let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
             let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
+            runtime.hud_display = None;
             runtime.quick_key_display_entries.clear();
             runtime.quick_key_display_slot_memory.clear();
             runtime.quick_key_display_slot_labels.clear();
@@ -8690,7 +8696,10 @@ mod windows_overlay {
             return Ok(());
         };
         display.text = resolve_variables_in_text(&display.text);
-        if runtime.hud_display.as_ref() == Some(&display) {
+        let hud_visible =
+            unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(runtime.hud_hwnd) }
+                .as_bool();
+        if runtime.hud_display.as_ref() == Some(&display) && hud_visible {
             return Ok(());
         }
 
@@ -17637,6 +17646,46 @@ mod windows_overlay {
         Ok(())
     }
 
+    fn rounded_rect_contains_point(
+        px: f32,
+        py: f32,
+        left: f32,
+        top: f32,
+        right: f32,
+        bottom: f32,
+        radius: f32,
+    ) -> bool {
+        if px < left || py < top || px > right || py > bottom {
+            return false;
+        }
+
+        if radius <= 0.0 {
+            return true;
+        }
+
+        let inner_left = left + radius;
+        let inner_right = right - radius;
+        let inner_top = top + radius;
+        let inner_bottom = bottom - radius;
+        if (px >= inner_left && px <= inner_right) || (py >= inner_top && py <= inner_bottom) {
+            return true;
+        }
+
+        let corner_x = if px < inner_left {
+            inner_left
+        } else {
+            inner_right
+        };
+        let corner_y = if py < inner_top {
+            inner_top
+        } else {
+            inner_bottom
+        };
+        let dx = px - corner_x;
+        let dy = py - corner_y;
+        (dx * dx) + (dy * dy) <= radius * radius
+    }
+
     unsafe fn paint_hud(hwnd: HWND, display: &HudDisplayState) -> Result<()> {
         let window_x = display.x.max(0);
         let window_y = display.y.max(0);
@@ -17680,35 +17729,15 @@ mod windows_overlay {
         for py in 0..height {
             for px in 0..width {
                 let index = ((py as usize) * (width as usize) + (px as usize)) * 4;
-                let inside = if radius <= 0.0 {
-                    true
-                } else {
-                    let px_f = px as f32 + 0.5;
-                    let py_f = py as f32 + 0.5;
-                    let inner_left = radius;
-                    let inner_right = width as f32 - radius;
-                    let inner_top = radius;
-                    let inner_bottom = height as f32 - radius;
-                    if (px_f >= inner_left && px_f <= inner_right)
-                        || (py_f >= inner_top && py_f <= inner_bottom)
-                    {
-                        true
-                    } else {
-                        let corner_x = if px_f < inner_left {
-                            inner_left
-                        } else {
-                            inner_right
-                        };
-                        let corner_y = if py_f < inner_top {
-                            inner_top
-                        } else {
-                            inner_bottom
-                        };
-                        let dx = px_f - corner_x;
-                        let dy = py_f - corner_y;
-                        (dx * dx) + (dy * dy) <= radius * radius
-                    }
-                };
+                let inside = rounded_rect_contains_point(
+                    px as f32 + 0.5,
+                    py as f32 + 0.5,
+                    0.0,
+                    0.0,
+                    width as f32,
+                    height as f32,
+                    radius,
+                );
                 if inside && bg_alpha > 0 {
                     pixels[index] = bg_b;
                     pixels[index + 1] = bg_g;
@@ -17790,6 +17819,61 @@ mod windows_overlay {
                 chunk[0] = ((chunk[0] as u32 * alpha as u32) / 255) as u8;
                 chunk[1] = ((chunk[1] as u32 * alpha as u32) / 255) as u8;
                 chunk[2] = ((chunk[2] as u32 * alpha as u32) / 255) as u8;
+            }
+        }
+
+        let border_alpha = display.border_color.a.max(1);
+        let border_thickness = display
+            .border_thickness
+            .max(0.0)
+            .min((width.min(height) as f32) * 0.5);
+        if display.border_enabled && border_alpha > 0 && border_thickness > 0.0 {
+            let border_b = ((display.border_color.b as u32 * border_alpha as u32) / 255) as u8;
+            let border_g = ((display.border_color.g as u32 * border_alpha as u32) / 255) as u8;
+            let border_r = ((display.border_color.r as u32 * border_alpha as u32) / 255) as u8;
+            let inner_left = border_thickness;
+            let inner_top = border_thickness;
+            let inner_right = (width as f32 - border_thickness).max(inner_left);
+            let inner_bottom = (height as f32 - border_thickness).max(inner_top);
+            let inner_radius = (radius - border_thickness).max(0.0);
+            for py in 0..height {
+                for px in 0..width {
+                    let px_f = px as f32 + 0.5;
+                    let py_f = py as f32 + 0.5;
+                    let inside_outer = rounded_rect_contains_point(
+                        px_f,
+                        py_f,
+                        0.0,
+                        0.0,
+                        width as f32,
+                        height as f32,
+                        radius,
+                    );
+                    if !inside_outer {
+                        continue;
+                    }
+
+                    let inside_inner = border_thickness * 2.0 < width as f32
+                        && border_thickness * 2.0 < height as f32
+                        && rounded_rect_contains_point(
+                            px_f,
+                            py_f,
+                            inner_left,
+                            inner_top,
+                            inner_right,
+                            inner_bottom,
+                            inner_radius,
+                        );
+                    if inside_inner {
+                        continue;
+                    }
+
+                    let index = ((py as usize) * (width as usize) + (px as usize)) * 4;
+                    pixels[index] = border_b;
+                    pixels[index + 1] = border_g;
+                    pixels[index + 2] = border_r;
+                    pixels[index + 3] = border_alpha;
+                }
             }
         }
 
@@ -18530,9 +18614,16 @@ mod windows_overlay {
         Ok(())
     }
 
-    fn disable_pin_overlay() {
-        HOOK_STATE.lock().active_pin_preset_id = None;
+    pub(crate) fn clear_pin_overlay_now() {
+        let mut hook_state = HOOK_STATE.lock();
+        hook_state.active_pin_preset_id = None;
+        hook_state.active_pin_expires = None;
+        drop(hook_state);
         send_overlay_command(OverlayCommand::RefreshPinOverlay);
+    }
+
+    fn disable_pin_overlay() {
+        clear_pin_overlay_now();
     }
 
     pub(crate) fn disable_crosshair_profile(spec: &str) {
@@ -22196,6 +22287,9 @@ mod windows_overlay {
             background_color: preset.background_color,
             background_opacity: preset.background_opacity.clamp(0.0, 1.0),
             rounded_background: preset.rounded_background,
+            border_enabled: preset.border_enabled,
+            border_color: preset.border_color,
+            border_thickness: preset.border_thickness.max(0.0),
             font_size: preset.font_size.max(1.0),
             x: (preset.x as f32 * scale_x).round() as i32,
             y: (preset.y as f32 * scale_y).round() as i32,
@@ -22220,6 +22314,9 @@ mod windows_overlay {
             background_color: preset.background_color,
             background_opacity: preset.background_opacity.clamp(0.0, 1.0),
             rounded_background: preset.rounded_background,
+            border_enabled: preset.border_enabled,
+            border_color: preset.border_color,
+            border_thickness: preset.border_thickness.max(0.0),
             font_size: preset.font_size.max(1.0),
             x: (preset.x as f32 * scale_x).round() as i32,
             y: (preset.y as f32 * scale_y).round() as i32,
@@ -22260,6 +22357,14 @@ mod windows_overlay {
             },
             background_opacity: 0.72,
             rounded_background: true,
+            border_enabled: false,
+            border_color: RgbaColor {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
+            border_thickness: 1.0,
             font_size: 28.0,
             x: 660,
             y: 36,
@@ -25610,6 +25715,10 @@ mod windows_overlay {
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
+    pub(crate) fn clear_geometry_overlay_now() {
+        clear_geometry_overlay();
+    }
+
     fn macro_preset_trigger_matches(preset: &MacroPreset, binding: &HotkeyBinding) -> bool {
         if preset
             .hotkey
@@ -27998,6 +28107,20 @@ mod windows_overlay {
         let preview_state = HUD_PREVIEW_DISPLAY.lock();
         preview_state.as_ref().and_then(|h| h.preset_id) == Some(preset_id)
     }
+
+    pub(crate) fn has_active_macro_visual_overlay() -> bool {
+        if HOOK_STATE.lock().active_pin_preset_id.is_some() {
+            return true;
+        }
+
+        if HUD_DISPLAY.lock().is_some() || HUD_PREVIEW_DISPLAY.lock().is_some() {
+            return true;
+        }
+
+        let hook_state = HOOK_STATE.lock();
+        !hook_state.active_geometry_preset_ids.is_empty()
+            || !hook_state.active_geometry_steps.is_empty()
+    }
 }
 
 #[cfg(windows)]
@@ -28178,6 +28301,10 @@ mod fallback {
         false
     }
 
+    pub(crate) fn has_active_macro_visual_overlay() -> bool {
+        false
+    }
+
     pub(crate) fn enable_crosshair_profile(_spec: &str) -> Result<()> {
         Ok(())
     }
@@ -28188,7 +28315,11 @@ mod fallback {
         Ok(())
     }
 
+    pub(crate) fn clear_pin_overlay_now() {}
+
     pub(crate) fn disable_pin_preset(_spec: &str) {}
+
+    pub(crate) fn clear_geometry_overlay_now() {}
 
     pub(crate) fn hide_hud_now() {}
 }

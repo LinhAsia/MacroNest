@@ -18,6 +18,17 @@ use std::time::{Duration, Instant};
 use crate::ui::{GetAsyncKeyState, GetCursorPos, POINT};
 
 impl CrosshairApp {
+    pub(crate) fn native_selected_region_target_handles_cleanup(
+        target: VisionCaptureTarget,
+    ) -> bool {
+        matches!(
+            target,
+            VisionCaptureTarget::Preset(_)
+                | VisionCaptureTarget::OcrPreset(_)
+                | VisionCaptureTarget::OcrStepRegion { .. }
+        )
+    }
+
     pub(crate) fn render_vision_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let language = self.state.ui_language;
         let capture_target_snapshot = self.capture_target.clone();
@@ -2202,7 +2213,8 @@ impl CrosshairApp {
                         | VisionCaptureTarget::PinPresetRegion(_)
                         | VisionCaptureTarget::PinPresetSourceCrop(_)
                         | VisionCaptureTarget::HudPresetRegion(_) => {
-                            self.status = "Pin/HUD presets do not support search regions.".to_owned();
+                            self.status =
+                                "Pin/HUD presets do not support search regions.".to_owned();
                         }
                     }
                 } else {
@@ -3213,5 +3225,42 @@ impl CrosshairApp {
             }
         }
         ctx.request_repaint();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_selected_region_cleanup_is_only_delegated_to_shared_finishers() {
+        assert!(CrosshairApp::native_selected_region_target_handles_cleanup(
+            VisionCaptureTarget::Preset(1)
+        ));
+        assert!(CrosshairApp::native_selected_region_target_handles_cleanup(
+            VisionCaptureTarget::OcrPreset(1)
+        ));
+        assert!(CrosshairApp::native_selected_region_target_handles_cleanup(
+            VisionCaptureTarget::OcrStepRegion {
+                group_id: 1,
+                preset_id: 2,
+                step_index: 3,
+            }
+        ));
+        assert!(
+            !CrosshairApp::native_selected_region_target_handles_cleanup(
+                VisionCaptureTarget::PinPresetRegion(1)
+            )
+        );
+        assert!(
+            !CrosshairApp::native_selected_region_target_handles_cleanup(
+                VisionCaptureTarget::PinPresetSourceCrop(1)
+            )
+        );
+        assert!(
+            !CrosshairApp::native_selected_region_target_handles_cleanup(
+                VisionCaptureTarget::HudPresetRegion(1)
+            )
+        );
     }
 }

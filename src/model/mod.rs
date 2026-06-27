@@ -59,6 +59,19 @@ fn default_timer_progress_border_thickness() -> f32 {
     1.0
 }
 
+fn default_hud_border_color() -> RgbaColor {
+    RgbaColor {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    }
+}
+
+fn default_hud_border_thickness() -> f32 {
+    1.0
+}
+
 fn default_timer_progress_smoothness_fps() -> u32 {
     30
 }
