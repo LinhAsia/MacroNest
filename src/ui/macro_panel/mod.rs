@@ -23,24 +23,6 @@ enum VariableValueKind {
     Text,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::CrosshairApp;
-
-    #[test]
-    fn sync_delay_expr_to_value_only_caches_plain_numbers() {
-        let mut value = 999;
-        CrosshairApp::sync_delay_expr_to_value("1500", &mut value);
-        assert_eq!(value, 1500);
-
-        CrosshairApp::sync_delay_expr_to_value("{Timer1.ms} + 20", &mut value);
-        assert_eq!(value, 0);
-
-        CrosshairApp::sync_delay_expr_to_value("   ", &mut value);
-        assert_eq!(value, 0);
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TextHighlightMode {
     None,
@@ -10688,8 +10670,8 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                             child_ui.visuals_mut().widgets.noninteractive.corner_radius = left_rounding;
                                             let edit_id = child_ui.make_persistent_id((group.id, preset.id, step_index, "delay-edit-state"));
                                             let is_editing = child_ui.memory(|mem| mem.data.get_temp::<bool>(edit_id).unwrap_or(false));
-                                            let delay_id = child_ui.make_persistent_id((group.id, preset.id, step_index, "delay-input"));
                                             if is_editing {
+                                                let delay_id = child_ui.id().with((step_index, "delay"));
                                                 let response = Self::render_variable_text_edit(
                                                     &mut child_ui,
                                                     &mut step.delay_expr,
@@ -10701,8 +10683,24 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     "0",
                                                     false,
                                                 );
+                                                Self::apply_vietnamese_input_if_changed(
+                                                    &response,
+                                                    self.state.vietnamese_input_enabled,
+                                                    self.state.vietnamese_input_mode,
+                                                    &mut step.delay_expr,
+                                                );
+                                                let just_started_id = edit_id.with("just_started");
+                                                let just_started = child_ui.memory(|mem| mem.data.get_temp::<bool>(just_started_id).unwrap_or(false));
+                                                if just_started {
+                                                    response.request_focus();
+                                                    child_ui.memory_mut(|mem| mem.data.insert_temp(just_started_id, false));
+                                                }
                                                 if response.changed() {
-                                                    Self::sync_delay_expr_to_value(&step.delay_expr, &mut step.delay_ms);
+                                                    if let Ok(val) = step.delay_expr.trim().parse::<u64>() {
+                                                        step.delay_ms = val;
+                                                    } else {
+                                                        step.delay_ms = 0;
+                                                    }
                                                     live_sync = true;
                                                 }
                                                 if response.lost_focus() || child_ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -10754,7 +10752,11 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                     )
                                                                 });
                                                                 step.delay_expr = next_expr;
-                                                                Self::sync_delay_expr_to_value(&step.delay_expr, &mut step.delay_ms);
+                                                                if let Ok(val) = step.delay_expr.trim().parse::<u64>() {
+                                                                    step.delay_ms = val;
+                                                                } else {
+                                                                    step.delay_ms = 0;
+                                                                }
                                                                 live_sync = true;
                                                             }
                                                         }
@@ -10783,7 +10785,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 if response.clicked() {
                                                     let has_dragged = child_ui.memory(|mem| mem.data.get_temp::<bool>(has_dragged_id).unwrap_or(false));
                                                     if !has_dragged {
-                                                        child_ui.memory_mut(|mem| mem.data.insert_temp(edit_id, true));
+                                                        child_ui.memory_mut(|mem| {
+                                                            mem.data.insert_temp(edit_id, true);
+                                                            mem.data.insert_temp(edit_id.with("just_started"), true);
+                                                        });
                                                     }
                                                 }
                                             }
@@ -15097,15 +15102,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
         }
         let interpolated = crate::overlay::interpolate_variables(trimmed);
         *value = crate::overlay::evaluate_math_expression(&interpolated);
-    }
-
-    fn sync_delay_expr_to_value(expr: &str, value: &mut u64) {
-        let trimmed = expr.trim();
-        if trimmed.is_empty() {
-            *value = 0;
-            return;
-        }
-        *value = trimmed.parse::<u64>().unwrap_or(0);
     }
 
     fn builtin_variable_suggestions() -> &'static [&'static str] {
