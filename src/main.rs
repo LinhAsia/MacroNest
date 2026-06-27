@@ -297,7 +297,6 @@ fn apply_process_startup_tuning(paths: &AppPaths) {
 }
 
 fn main() -> Result<()> {
-
     let args = std::env::args().collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--already-running-popup") {
         return run_popup_blob(PopupBlobKind::AlreadyRunning);
@@ -356,10 +355,10 @@ fn main() -> Result<()> {
     }
     let startup_gate: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
     {
+        // Load the icon immediately in the background (no gate wait) so it can be
+        // sent to the UI thread as early as possible via StartupIconLoaded.
         let icon_ui_tx = ui_tx.clone();
-        let icon_gate = Arc::clone(&startup_gate);
         std::thread::spawn(move || {
-            wait_for_startup_gate(&icon_gate);
             if let Ok(icon) = app_icon::icon_data(128) {
                 let _ = icon_ui_tx.send(crate::overlay::UiCommand::StartupIconLoaded(
                     std::sync::Arc::new(icon),
@@ -436,7 +435,7 @@ fn main() -> Result<()> {
         "MacroNest v{}",
         option_env!("MACRONEST_BUILD_TAG").unwrap_or(env!("CARGO_PKG_VERSION"))
     );
-    let app_icon = app_icon::icon_data(128).ok().map(Arc::new);
+    // Icon is loaded off the main thread and applied later via UiCommand::StartupIconLoaded.
     let mut viewport_builder = eframe::egui::ViewportBuilder::default()
         .with_title(&app_title)
         .with_inner_size([1180.0, 780.0])
@@ -444,9 +443,6 @@ fn main() -> Result<()> {
         .with_visible(false)
         .with_decorations(false)
         .with_transparent(true);
-    if let Some(icon) = app_icon {
-        viewport_builder = viewport_builder.with_icon(icon);
-    }
 
     #[cfg(windows)]
     {

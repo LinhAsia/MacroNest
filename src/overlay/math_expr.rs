@@ -1,14 +1,15 @@
 use std::sync::atomic::Ordering;
-use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetSystemMetrics, GetWindowRect, SM_CXSCREEN, SM_CYSCREEN, GetCursorPos};
-use windows::Win32::Foundation::{RECT, POINT};
-
-use crate::model::TimerPreset;
-use super::{
-    HOOK_STATE, RANDOM_STATE, RUNTIME_VARIABLES, TEXT_VARIABLES,
-    ActiveTimerState,
-    current_mouse_speed, current_system_volume_percent, window_title,
-    wake_command_queue, request_ui_repaint,
+use windows::Win32::Foundation::{POINT, RECT};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowRect, SM_CXSCREEN, SM_CYSCREEN,
 };
+
+use super::{
+    ActiveTimerState, HOOK_STATE, RANDOM_STATE, RUNTIME_VARIABLES, TEXT_VARIABLES,
+    current_mouse_speed, current_system_volume_percent, request_ui_repaint, wake_command_queue,
+    window_title,
+};
+use crate::model::TimerPreset;
 
 pub fn interpolate_variables(text: &str) -> String {
     let mut result = String::new();
@@ -92,18 +93,27 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
             let sub_expr = &expr_str[open_idx + 1..close_idx];
             if !func_name.is_empty() {
                 let args: Vec<&str> = sub_expr.split(',').map(|s| s.trim()).collect();
-                let resolved_args: Vec<f64> = args
-                    .into_iter()
-                    .map(evaluate_math_expression_f64)
-                    .collect();
+                let resolved_args: Vec<f64> =
+                    args.into_iter().map(evaluate_math_expression_f64).collect();
                 let result_val = match func_name.to_ascii_lowercase().as_str() {
                     "random" => {
-                        let min_val = clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
-                        let max_val = clamp_f64_to_i32(resolved_args.get(1).copied().unwrap_or(min_val as f64));
+                        let min_val =
+                            clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
+                        let max_val = clamp_f64_to_i32(
+                            resolved_args.get(1).copied().unwrap_or(min_val as f64),
+                        );
                         get_pseudo_random(min_val, max_val) as f64
                     }
-                    "min" => resolved_args.first().copied().unwrap_or(0.0).min(resolved_args.get(1).copied().unwrap_or(0.0)),
-                    "max" => resolved_args.first().copied().unwrap_or(0.0).max(resolved_args.get(1).copied().unwrap_or(0.0)),
+                    "min" => resolved_args
+                        .first()
+                        .copied()
+                        .unwrap_or(0.0)
+                        .min(resolved_args.get(1).copied().unwrap_or(0.0)),
+                    "max" => resolved_args
+                        .first()
+                        .copied()
+                        .unwrap_or(0.0)
+                        .max(resolved_args.get(1).copied().unwrap_or(0.0)),
                     "abs" => resolved_args.first().copied().unwrap_or(0.0).abs(),
                     "atan" => resolved_args.first().copied().unwrap_or(0.0).atan(),
                     "atan2" => {
@@ -146,7 +156,11 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                     "radians" => resolved_args.first().copied().unwrap_or(0.0).to_radians(),
                     "factorial" => {
                         let value = clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
-                        if value < 0 { 0.0 } else { factorial_u128(value as u64).min(i32::MAX as u128) as f64 }
+                        if value < 0 {
+                            0.0
+                        } else {
+                            factorial_u128(value as u64).min(i32::MAX as u128) as f64
+                        }
                     }
                     "gcd" => {
                         let mut result = 0i64;
@@ -169,23 +183,36 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                     }
                     "isqrt" => {
                         let value = resolved_args.first().copied().unwrap_or(0.0);
-                        if value < 0.0 { 0.0 } else { value.sqrt().floor() }
+                        if value < 0.0 {
+                            0.0
+                        } else {
+                            value.sqrt().floor()
+                        }
                     }
                     "comb" => {
                         let n = clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
                         let k = clamp_f64_to_i32(resolved_args.get(1).copied().unwrap_or(0.0));
-                        if n < 0 || k < 0 { 0.0 } else { combination_u128(n as u64, k as u64).min(i32::MAX as u128) as f64 }
+                        if n < 0 || k < 0 {
+                            0.0
+                        } else {
+                            combination_u128(n as u64, k as u64).min(i32::MAX as u128) as f64
+                        }
                     }
                     "perm" => {
                         let n = clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
                         let k = clamp_f64_to_i32(resolved_args.get(1).copied().unwrap_or(0.0));
-                        if n < 0 || k < 0 { 0.0 } else { permutation_u128(n as u64, k as u64).min(i32::MAX as u128) as f64 }
+                        if n < 0 || k < 0 {
+                            0.0
+                        } else {
+                            permutation_u128(n as u64, k as u64).min(i32::MAX as u128) as f64
+                        }
                     }
                     "choice" => {
                         if resolved_args.is_empty() {
                             0.0
                         } else {
-                            let idx = get_pseudo_random(0, (resolved_args.len() - 1) as i32) as usize;
+                            let idx =
+                                get_pseudo_random(0, (resolved_args.len() - 1) as i32) as usize;
                             resolved_args.get(idx).copied().unwrap_or(0.0)
                         }
                     }
@@ -291,7 +318,11 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
     val_stack.push(values[0]);
     let mut val_idx = 1;
     for op in operators {
-        let next_val = if val_idx < values.len() { values[val_idx] } else { 0.0 };
+        let next_val = if val_idx < values.len() {
+            values[val_idx]
+        } else {
+            0.0
+        };
         val_idx += 1;
         if op == "*" {
             if let Some(prev) = val_stack.pop() {
@@ -314,7 +345,11 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
 
     let mut result = val_stack[0];
     for (idx, op) in op_stack.into_iter().enumerate() {
-        let next_val = if idx + 1 < val_stack.len() { val_stack[idx + 1] } else { 0.0 };
+        let next_val = if idx + 1 < val_stack.len() {
+            val_stack[idx + 1]
+        } else {
+            0.0
+        };
         if op == "+" {
             result += next_val;
         } else if op == "-" {
@@ -377,14 +412,16 @@ pub(crate) fn set_variable_value(target_var: &str, value: f64) {
             let mut hook_state = HOOK_STATE.lock();
             let timer_preset = resolve_timer_preset_ref(&hook_state, &obj_name);
             if let Some(timer) = timer_preset {
-                let state = hook_state.active_timers.entry(timer.id).or_insert_with(|| {
-                    ActiveTimerState {
-                        running: false,
-                        start_time: None,
-                        elapsed_ms: 0,
-                        on_complete_macro_preset_id: None,
-                    }
-                });
+                let state =
+                    hook_state
+                        .active_timers
+                        .entry(timer.id)
+                        .or_insert_with(|| ActiveTimerState {
+                            running: false,
+                            start_time: None,
+                            elapsed_ms: 0,
+                            on_complete_macro_preset_id: None,
+                        });
                 let current_elapsed = state.get_elapsed_ms();
                 let current_ms = if timer.is_countdown {
                     let total_ms = (timer.duration_secs as u64) * 1000;
@@ -558,10 +595,7 @@ fn looks_like_math_expression_text(text: &str) -> bool {
 
 pub(crate) fn resolve_choice_expression_value(expr: &str) -> Option<String> {
     let trimmed = expr.trim();
-    let inner = trimmed
-        .strip_prefix("choice(")?
-        .strip_suffix(')')?
-        .trim();
+    let inner = trimmed.strip_prefix("choice(")?.strip_suffix(')')?.trim();
     let args = split_expression_arguments(inner);
     if args.is_empty() {
         return None;
@@ -642,12 +676,8 @@ fn get_pseudo_random(min: i32, max: i32) -> i32 {
         next ^= next << 25;
         next ^= next >> 27;
         next = next.wrapping_mul(2685821657736338717);
-        match RANDOM_STATE.compare_exchange_weak(
-            state,
-            next,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
+        match RANDOM_STATE.compare_exchange_weak(state, next, Ordering::Relaxed, Ordering::Relaxed)
+        {
             Ok(_) => return min + (next % range) as i32,
             Err(observed) => state = observed,
         }

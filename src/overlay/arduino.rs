@@ -1,19 +1,18 @@
-use std::ffi::CString;
-use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use hidapi::HidApi;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
+use std::ffi::CString;
+use std::time::Instant;
 
-use windows::core::PCSTR;
-use windows::Win32::Foundation::{HANDLE, CloseHandle};
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileA, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    OPEN_EXISTING,
+    CreateFileA, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
+use windows::core::PCSTR;
 
-use crate::model::ArduinoTransport;
 use super::HOOK_STATE;
+use crate::model::ArduinoTransport;
 
 pub(crate) struct ArduinoRawHidRuntime {
     pub(crate) handle: HANDLE,
@@ -81,7 +80,10 @@ pub fn arduino_connection_snapshot() -> (bool, String, bool) {
 }
 
 pub(crate) fn parse_hex_u16_runtime(value: &str, fallback: u16) -> u16 {
-    let cleaned = value.trim().trim_start_matches("0x").trim_start_matches("0X");
+    let cleaned = value
+        .trim()
+        .trim_start_matches("0x")
+        .trim_start_matches("0X");
     u16::from_str_radix(cleaned, 16).unwrap_or(fallback)
 }
 

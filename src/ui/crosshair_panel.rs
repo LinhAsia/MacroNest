@@ -159,7 +159,11 @@ impl CrosshairApp {
                 ui.end_row();
 
                 if style.center_dot {
-                    ui.label(Self::tr_lang(language, "Center dot size", "Center dot size"));
+                    ui.label(Self::tr_lang(
+                        language,
+                        "Center dot size",
+                        "Center dot size",
+                    ));
                     let response = ui.add_sized(
                         [340.0, 20.0],
                         DragValue::new(&mut style.center_dot_size)
@@ -171,7 +175,11 @@ impl CrosshairApp {
                     ui.end_row();
                 }
 
-                ui.label(Self::tr_lang(language, "Crosshair color", "Crosshair color"));
+                ui.label(Self::tr_lang(
+                    language,
+                    "Crosshair color",
+                    "Crosshair color",
+                ));
                 let response = Self::edit_rgba_color(ui, &mut style.color);
                 changed |= response.changed();
                 dragging |= response.dragged();
@@ -401,7 +409,11 @@ impl CrosshairApp {
                     // ---- Hint text ----
                     ui.add_space(4.0);
                     ui.label(
-                        egui::RichText::new(Self::tr_lang(language, "Left-click: paint  |  Right-click: erase  |  Red marker = center", "Left-click: paint  |  Right-click: erase  |  Red marker = center"))
+                        egui::RichText::new(Self::tr_lang(
+                            language,
+                            "Left-click: paint  |  Right-click: erase  |  Red marker = center",
+                            "Left-click: paint  |  Right-click: erase  |  Red marker = center",
+                        ))
                         .small()
                         .color(Color32::from_gray(140)),
                     );
@@ -431,7 +443,11 @@ impl CrosshairApp {
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             if ui
-                .button(Self::tr_lang(language, "+ Add crosshair preset", "+ Add crosshair preset"))
+                .button(Self::tr_lang(
+                    language,
+                    "+ Add crosshair preset",
+                    "+ Add crosshair preset",
+                ))
                 .clicked()
             {
                 self.add_profile();
@@ -528,7 +544,11 @@ impl CrosshairApp {
                     });
                     if !preset.collapsed {
                         ui.add_space(4.0);
-                        ui.label(Self::tr_lang(language, "Crosshair Settings", "Crosshair Settings"));
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Crosshair Settings",
+                            "Crosshair Settings",
+                        ));
                         let (style_changed, style_dragging) = Self::render_crosshair_style_editor(
                             ui,
                             language,
@@ -599,4 +619,3 @@ impl CrosshairApp {
         }
     }
 }
-

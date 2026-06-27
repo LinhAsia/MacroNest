@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
 use eframe::egui::IconData;
-use image::{codecs::ico::IcoEncoder, ColorType, ImageEncoder};
+use image::{ColorType, ImageEncoder, codecs::ico::IcoEncoder};
 use tiny_skia::Pixmap;
 
 const APP_ICON_SVG: &str = include_str!("../assets/app-icon.svg");

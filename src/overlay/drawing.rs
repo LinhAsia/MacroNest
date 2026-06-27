@@ -1,18 +1,15 @@
-use std::mem::size_of;
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::WindowsAndMessaging::{
-    LoadImageW, DestroyIcon, IMAGE_ICON, LR_LOADFROMFILE,
-};
-use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NOTIFYICONDATAW, NIM_ADD, NIM_MODIFY,
-    NIF_MESSAGE, NIF_ICON, NIF_TIP,
-};
 use anyhow::Result;
-
-use super::{
-    HOOK_STATE, TRAY_UID, WMAPP_TRAYICON, runtime_icon_path,
+use std::mem::size_of;
+use windows::Win32::Foundation::HWND;
+use windows::Win32::UI::Shell::{
+    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_MODIFY, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
+use windows::Win32::UI::WindowsAndMessaging::{
+    DestroyIcon, IMAGE_ICON, LR_LOADFROMFILE, LoadImageW,
+};
+use windows::core::PCWSTR;
+
+use super::{HOOK_STATE, TRAY_UID, WMAPP_TRAYICON, runtime_icon_path};
 
 pub(crate) fn blend_rgba_pixel(
     pixels: &mut [u8],

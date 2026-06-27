@@ -1399,8 +1399,11 @@ impl CrosshairApp {
             .unwrap_or_else(|| self.paths.bin_dir.clone());
         let job = std::thread::spawn(move || -> Result<()> {
             let installer = installer_dir.join("install-interception.exe");
-            let _ =
-                crate::platform::run_hidden_process_as_admin_and_wait(&installer, Some("/install"), 60_000)?;
+            let _ = crate::platform::run_hidden_process_as_admin_and_wait(
+                &installer,
+                Some("/install"),
+                60_000,
+            )?;
             Ok(())
         });
 

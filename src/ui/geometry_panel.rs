@@ -66,7 +66,11 @@ impl CrosshairApp {
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             if ui
-                .button(Self::tr_lang(language, "+ Add geometry preset", "+ Add geometry preset"))
+                .button(Self::tr_lang(
+                    language,
+                    "+ Add geometry preset",
+                    "+ Add geometry preset",
+                ))
                 .clicked()
             {
                 let id = self
@@ -108,7 +112,11 @@ impl CrosshairApp {
                     changed |= response.changed();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if Self::sound_style_remove_button(ui)
-                            .on_hover_text(Self::tr_lang(language, "Delete preset", "Delete preset"))
+                            .on_hover_text(Self::tr_lang(
+                                language,
+                                "Delete preset",
+                                "Delete preset",
+                            ))
                             .clicked()
                         {
                             remove_preset_id = Some(preset.id);
@@ -461,7 +469,11 @@ impl CrosshairApp {
                                 [24.0, 21.0],
                                 Button::new(Self::material_icon_text(0xe55f, 16.0)),
                             )
-                            .on_hover_text(Self::tr_lang(language, "Pick coordinates from screen", "Pick coordinates from screen"))
+                            .on_hover_text(Self::tr_lang(
+                                language,
+                                "Pick coordinates from screen",
+                                "Pick coordinates from screen",
+                            ))
                             .clicked()
                         {
                             *begin_mouse_move_absolute_capture_target =
@@ -1523,7 +1535,11 @@ impl CrosshairApp {
                             [24.0, 21.0],
                             Button::new(Self::material_icon_text(0xe55f, 16.0)),
                         )
-                        .on_hover_text(Self::tr_lang(language, "Pick coordinates from screen", "Pick coordinates from screen"))
+                        .on_hover_text(Self::tr_lang(
+                            language,
+                            "Pick coordinates from screen",
+                            "Pick coordinates from screen",
+                        ))
                         .clicked()
                     {
                         *begin_mouse_move_absolute_capture_target =
@@ -1566,11 +1582,7 @@ impl CrosshairApp {
             })
             .show_ui(ui, |ui| {
                 changed |= ui
-                    .selectable_value(
-                        filled,
-                        false,
-                        Self::tr_lang(language, "Outline", "Outline"),
-                    )
+                    .selectable_value(filled, false, Self::tr_lang(language, "Outline", "Outline"))
                     .changed();
                 changed |= ui
                     .selectable_value(filled, true, Self::tr_lang(language, "Filled", "Filled"))
@@ -1612,7 +1624,11 @@ impl CrosshairApp {
             "#{:02X}{:02X}{:02X}{:02X} rgba({}, {}, {}, {})",
             color.r, color.g, color.b, color.a, color.r, color.g, color.b, color.a
         );
-        let empty_tooltip = Self::tr_lang(language, "No override color set yet.", "No override color set yet.");
+        let empty_tooltip = Self::tr_lang(
+            language,
+            "No override color set yet.",
+            "No override color set yet.",
+        );
         ui.add_sized(
             [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
             egui::Label::new(label),
@@ -1640,7 +1656,11 @@ impl CrosshairApp {
                     expr,
                 );
                 Self::render_variable_suggestions(ui, &expr_response, expr, &[], language);
-                expr_response.on_hover_text(Self::tr_lang(language, "Optional color expression. Example: {A} or #BAD1C4", "Optional color expression. Example: {A} or #BAD1C4"));
+                expr_response.on_hover_text(Self::tr_lang(
+                    language,
+                    "Optional color expression. Example: {A} or #BAD1C4",
+                    "Optional color expression. Example: {A} or #BAD1C4",
+                ));
             }
 
             let _swatch_response = ui
@@ -1766,7 +1786,11 @@ impl CrosshairApp {
                     [24.0, 21.0],
                     Button::new(Self::material_icon_text(0xe3b8, 16.0)),
                 )
-                .on_hover_text(Self::tr_lang(language, "Pick from screen", "Pick from screen"));
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Pick from screen",
+                    "Pick from screen",
+                ));
             if screen_pick_response.clicked() {
                 *request_screen_color_pick = true;
                 *pending_screen_color_target = Some((preset_id, object_id, is_fill));

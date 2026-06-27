@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use arboard::{Clipboard, ImageData};
 use image::DynamicImage;
 use serde::Deserialize;

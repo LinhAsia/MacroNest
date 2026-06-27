@@ -63,15 +63,23 @@ impl CrosshairApp {
                                 .input_device_name
                                 .clone()
                                 .unwrap_or_else(|| {
-                                    Self::tr_lang(language, "Default microphone", "Default microphone")
-                                        .to_owned()
+                                    Self::tr_lang(
+                                        language,
+                                        "Default microphone",
+                                        "Default microphone",
+                                    )
+                                    .to_owned()
                                 }),
                         )
                         .show_ui(ui, |ui| {
                             if ui
                                 .selectable_label(
                                     self.audio_sense_test_settings.input_device_name.is_none(),
-                                    Self::tr_lang(language, "Default microphone", "Default microphone"),
+                                    Self::tr_lang(
+                                        language,
+                                        "Default microphone",
+                                        "Default microphone",
+                                    ),
                                 )
                                 .clicked()
                             {
@@ -139,7 +147,11 @@ impl CrosshairApp {
             Self::show_preset_card(ui, self.audio_sense_test_active, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new(Self::tr_lang(language, "Live input preview", "Live input preview"))
+                        egui::RichText::new(Self::tr_lang(
+                            language,
+                            "Live input preview",
+                            "Live input preview",
+                        ))
                         .strong(),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -261,7 +273,11 @@ impl CrosshairApp {
                                         .input_device_name
                                         .clone()
                                         .unwrap_or_else(|| {
-                                            Self::tr_lang(language, "Default microphone", "Default microphone")
+                                            Self::tr_lang(
+                                                language,
+                                                "Default microphone",
+                                                "Default microphone",
+                                            )
                                             .to_owned()
                                         }),
                                 )
@@ -269,7 +285,11 @@ impl CrosshairApp {
                                     if ui
                                         .selectable_label(
                                             preset.pitch.monitor.input_device_name.is_none(),
-                                            Self::tr_lang(language, "Default microphone", "Default microphone"),
+                                            Self::tr_lang(
+                                                language,
+                                                "Default microphone",
+                                                "Default microphone",
+                                            ),
                                         )
                                         .clicked()
                                     {

@@ -201,11 +201,17 @@ impl AppPaths {
             let temp_file = self.state_temp_file();
             {
                 let mut file = fs::File::create(&temp_file).with_context(|| {
-                    format!("Failed to create temporary state file {}", temp_file.display())
+                    format!(
+                        "Failed to create temporary state file {}",
+                        temp_file.display()
+                    )
                 })?;
                 let content = serde_json::to_string_pretty(&state)?;
                 file.write_all(content.as_bytes()).with_context(|| {
-                    format!("Failed to write temporary state file {}", temp_file.display())
+                    format!(
+                        "Failed to write temporary state file {}",
+                        temp_file.display()
+                    )
                 })?;
                 file.sync_all().ok();
             }
@@ -633,7 +639,8 @@ impl AppPaths {
                         .extra_conditions
                         .iter()
                         .any(|c| c.condition_type == crate::model::IfConditionType::Unknown)
-                    || preset.press_stop_step.if_condition_type == crate::model::IfConditionType::Unknown
+                    || preset.press_stop_step.if_condition_type
+                        == crate::model::IfConditionType::Unknown
                     || preset
                         .press_stop_step
                         .extra_conditions
