@@ -229,10 +229,19 @@ impl CrosshairApp {
             .send(OverlayCommand::UpdateAudioSettings(settings));
     }
 
-    pub(crate) fn sync_groq_settings(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateGroqSettings(
-            self.state.groq_settings.clone(),
-        ));
+    pub(crate) fn sync_groq_settings(&mut self) {
+        if self
+            .last_synced_groq_settings
+            .as_ref()
+            .is_some_and(|last| last == &self.state.groq_settings)
+        {
+            return;
+        }
+        let settings = self.state.groq_settings.clone();
+        self.last_synced_groq_settings = Some(settings.clone());
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateGroqSettings(settings));
     }
 
     pub(crate) fn apply_loaded_startup_state(
@@ -268,10 +277,19 @@ impl CrosshairApp {
         ctx.request_repaint();
     }
 
-    pub(crate) fn sync_vision_settings(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateVisionSettings(
-            self.state.vision_settings.clone(),
-        ));
+    pub(crate) fn sync_vision_settings(&mut self) {
+        if self
+            .last_synced_vision_settings
+            .as_ref()
+            .is_some_and(|last| last == &self.state.vision_settings)
+        {
+            return;
+        }
+        let settings = self.state.vision_settings.clone();
+        self.last_synced_vision_settings = Some(settings.clone());
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateVisionSettings(settings));
     }
 
     pub(crate) fn sync_timer_presets(&self) {
