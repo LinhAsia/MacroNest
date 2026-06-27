@@ -5140,8 +5140,6 @@ impl CrosshairApp {
             MacroAction::ShowGeometryPreset => "ShowGeometry",
             MacroAction::HideGeometryPreset => "HideGeometry",
             MacroAction::FunnyMemeReply => "MemeReply",
-            MacroAction::FakeTitlebarFreeze => "FakeTitlebarFreeze",
-            MacroAction::StopFakeTitlebarFreeze => "StopFakeTitlebarFreeze",
             MacroAction::JumpToStep => "JumpToStep",
             _ => "Legacy (Deprecated)",
         }
@@ -5426,14 +5424,6 @@ impl CrosshairApp {
                 "macro_action_tooltip.funny_meme_reply",
                 "Turn one message into a meme search query, fetch the best image result, and copy it to the clipboard.",
             ),
-            MacroAction::FakeTitlebarFreeze => (
-                "macro_action_tooltip.fake_titlebar_freeze",
-                "Pretend to grab a window title bar so the target window enters the Windows move loop. Leave Input blank to use the focused window.",
-            ),
-            MacroAction::StopFakeTitlebarFreeze => (
-                "macro_action_tooltip.stop_fake_titlebar_freeze",
-                "Stop the fake titlebar hold by canceling the target window move loop. Leave Input blank to stop the last fake hold target.",
-            ),
             MacroAction::JumpToStep => (
                 "macro_action_tooltip.jump_to_step",
                 "Jump to a specified step (1-indexed or math expression).",
@@ -5524,8 +5514,6 @@ impl CrosshairApp {
             MacroAction::ShowGeometryPreset => 0xe8f4,
             MacroAction::HideGeometryPreset => 0xe8f5,
             MacroAction::FunnyMemeReply => 0xe420,
-            MacroAction::FakeTitlebarFreeze => 0xe8b8,
-            MacroAction::StopFakeTitlebarFreeze => 0xe047,
             MacroAction::JumpToStep => 0xe5c8,
             _ => 0xe8b5,
         };
@@ -5666,12 +5654,6 @@ impl CrosshairApp {
                 ("macro_action_short_label.hide_geometry_preset", "HideGeo")
             }
             MacroAction::FunnyMemeReply => ("macro_action_short_label.funny_meme_reply", "Meme"),
-            MacroAction::FakeTitlebarFreeze => {
-                ("macro_action_short_label.fake_titlebar_freeze", "Fake")
-            }
-            MacroAction::StopFakeTitlebarFreeze => {
-                ("macro_action_short_label.stop_fake_titlebar_freeze", "NoFake")
-            }
             MacroAction::OcrSearch => ("macro_action_short_label.ocr_search", "OCR"),
             MacroAction::JumpToStep => ("macro_action_short_label.jump_to_step", "Jump"),
             _ => ("macro_action_short_label.legacy", "Legacy"),
@@ -5690,9 +5672,6 @@ impl CrosshairApp {
             MacroAction::LockKeys | MacroAction::UnlockKeys => Some("KLOCK"),
             MacroAction::LockMouse | MacroAction::UnlockMouse => Some("MLOCK"),
             MacroAction::HideTaskbar | MacroAction::ShowTaskbar => Some("TASKBAR"),
-            MacroAction::FakeTitlebarFreeze | MacroAction::StopFakeTitlebarFreeze => {
-                Some("FAKECAP")
-            }
             _ => None,
         }
     }
@@ -5839,8 +5818,6 @@ impl CrosshairApp {
                 | MacroAction::IfEnd
                 | MacroAction::SetVariable
                 | MacroAction::FunnyMemeReply
-                | MacroAction::FakeTitlebarFreeze
-                | MacroAction::StopFakeTitlebarFreeze
                 | MacroAction::DisableCrosshair
                 | MacroAction::DisableZoom
                 | MacroAction::DisablePin
