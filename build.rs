@@ -44,7 +44,7 @@ fn embed_windows_icon() -> Result<()> {
     let rc_path = out_dir.join("macronest-app.rc");
     let res_path = out_dir.join("macronest-app.res");
     let package_name = env::var("CARGO_PKG_NAME").unwrap_or_else(|_| "MacroNest".to_owned());
-    let company_name = "NBaoLinh".to_owned();
+    let company_name = "LinhAsia".to_owned();
     let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "1.1.0".to_owned());
     let version_parts = parse_version_components(&version);
     let file_version = format!(
