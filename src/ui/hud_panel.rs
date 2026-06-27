@@ -149,12 +149,20 @@ impl CrosshairApp {
                         changed |= Self::edit_rgba_color(ui, &mut preset.text_color).changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Background Color", "Background Color"));
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Background Color",
+                            "Background Color",
+                        ));
                         changed |=
                             Self::edit_rgba_color(ui, &mut preset.background_color).changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Background Opacity", "Background Opacity"));
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Background Opacity",
+                            "Background Opacity",
+                        ));
                         changed |= ui
                             .add(
                                 Slider::new(&mut preset.background_opacity, 0.0..=1.0)
@@ -164,7 +172,11 @@ impl CrosshairApp {
                             .changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Rounded Background", "Rounded Background"));
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Rounded Background",
+                            "Rounded Background",
+                        ));
                         changed |= ui
                             .checkbox(
                                 &mut preset.rounded_background,
@@ -176,7 +188,11 @@ impl CrosshairApp {
 
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new(Self::tr_lang(language, "Position Preview", "Position Preview"))
+                    RichText::new(Self::tr_lang(
+                        language,
+                        "Position Preview",
+                        "Position Preview",
+                    ))
                     .strong(),
                 );
                 changed |= Self::render_hud_rect_editor(ui, (preset.id, "toolbox-editor"), preset);
@@ -296,22 +312,14 @@ impl CrosshairApp {
                                         .selectable_value(
                                             &mut selected_type,
                                             0,
-                                            Self::tr_lang(
-                                                language,
-                                                "Stopwatch",
-                                                "Stopwatch",
-                                            ),
+                                            Self::tr_lang(language, "Stopwatch", "Stopwatch"),
                                         )
                                         .clicked();
                                     changed |= ui
                                         .selectable_value(
                                             &mut selected_type,
                                             1,
-                                            Self::tr_lang(
-                                                language,
-                                                "Countdown",
-                                                "Countdown",
-                                            ),
+                                            Self::tr_lang(language, "Countdown", "Countdown"),
                                         )
                                         .clicked();
                                     changed
@@ -377,12 +385,20 @@ impl CrosshairApp {
                             ui.end_row();
                         }
 
-                        ui.label(Self::tr_lang(language, "Background Color", "Background Color"));
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Background Color",
+                            "Background Color",
+                        ));
                         timer_changed |=
                             Self::edit_rgba_color(ui, &mut preset.background_color).changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Background Opacity", "Background Opacity"));
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Background Opacity",
+                            "Background Opacity",
+                        ));
                         timer_changed |= ui
                             .add(
                                 Slider::new(&mut preset.background_opacity, 0.0..=1.0)
@@ -392,7 +408,11 @@ impl CrosshairApp {
                             .changed();
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Rounded Background", "Rounded Background"));
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Rounded Background",
+                            "Rounded Background",
+                        ));
                         timer_changed |= ui
                             .checkbox(
                                 &mut preset.rounded_background,
@@ -405,7 +425,11 @@ impl CrosshairApp {
                         timer_changed |= ui
                             .checkbox(
                                 &mut preset.preview_enabled,
-                                Self::tr_lang(language, "Stream preview in editor", "Stream preview in editor"),
+                                Self::tr_lang(
+                                    language,
+                                    "Stream preview in editor",
+                                    "Stream preview in editor",
+                                ),
                             )
                             .changed();
                         ui.end_row();
@@ -413,7 +437,11 @@ impl CrosshairApp {
 
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new(Self::tr_lang(language, "Position Preview", "Position Preview"))
+                    RichText::new(Self::tr_lang(
+                        language,
+                        "Position Preview",
+                        "Position Preview",
+                    ))
                     .strong(),
                 );
                 timer_changed |=

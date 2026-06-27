@@ -1,0 +1,28 @@
+diff --git a/src/ui/mouse_panel.rs b/src/ui/mouse_panel.rs
+--- a/src/ui/mouse_panel.rs
++++ b/src/ui/mouse_panel.rs
+@@ -2831 +2912 @@ impl CrosshairApp {
+-                let p = (downloaded as f32 / total_size as f32 * 1000.0) as u32;
++                let p = ((downloaded as f32 / total_size as f32) * 999.0).round() as u32;
+@@ -2837,18 +2918 @@ impl CrosshairApp {
+-            // Extract using PowerShell
+-            let extract_script = format!(
+-                "Expand-Archive -LiteralPath {} -DestinationPath {} -Force",
+-                Self::powershell_quote(&paths.arduino_tools_zip.to_string_lossy()),
+-                Self::powershell_quote(&paths.bin_dir.to_string_lossy()),
+-            );
+-            let mut cmd = std::process::Command::new("powershell");
+-            #[cfg(windows)]
+-            {
+-                use std::os::windows::process::CommandExt;
+-                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+-            }
+-            let extract_status = cmd
+-                .args(["-NoProfile", "-NonInteractive", "-Command", &extract_script])
+-                .status()?;
+-            if !extract_status.success() {
+-                anyhow::bail!("Failed to extract arduino_tools.zip");
+-            }
++            Self::extract_zip_archive(&paths.arduino_tools_zip, &paths.bin_dir)?;
+@@ -2856,0 +2921 @@ impl CrosshairApp {
++            progress.store(1000, std::sync::atomic::Ordering::SeqCst);

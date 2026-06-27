@@ -40,7 +40,6 @@ impl CrosshairApp {
         self.sync_command_presets();
         self.sync_audio_sense_presets();
         self.sync_geometry_presets();
-        self.preload_primary_sound_preset_audio();
         self.sync_macro_master_enabled();
         self.sync_windows_key_locked();
         self.sync_native_focus_highlight_enabled();

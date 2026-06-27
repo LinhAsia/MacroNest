@@ -627,7 +627,11 @@ fn computed_duration_ms(sample_count: usize, channels: u16, sample_rate: u32) ->
     }
 
     let frame_count = sample_count / channel_count;
-    Some(((frame_count as f64 / rate as f64) * 1000.0).round().max(0.0) as u64)
+    Some(
+        ((frame_count as f64 / rate as f64) * 1000.0)
+            .round()
+            .max(0.0) as u64,
+    )
 }
 
 fn decode_media_audio(path: &str) -> Result<CachedAudio> {
@@ -764,8 +768,8 @@ impl KeySoundStyle {
 
     fn samples_for_vk(&self, vk: u32) -> &(Vec<f32>, u32, u16) {
         match vk {
-            0x20 => self.space.as_ref().unwrap_or(&self.generic),   // VK_SPACE
-            0x0D => self.enter.as_ref().unwrap_or(&self.generic),   // VK_RETURN
+            0x20 => self.space.as_ref().unwrap_or(&self.generic), // VK_SPACE
+            0x0D => self.enter.as_ref().unwrap_or(&self.generic), // VK_RETURN
             0x08 => self.backspace.as_ref().unwrap_or(&self.generic), // VK_BACK
             _ => &self.generic,
         }
@@ -812,7 +816,12 @@ pub fn init_key_sound_player() {
                 let mixer = stream.mixer().clone();
                 while let Ok(msg) = rx.recv() {
                     match msg {
-                        KeySoundMessage::Play { samples, sample_rate, channels, volume } => {
+                        KeySoundMessage::Play {
+                            samples,
+                            sample_rate,
+                            channels,
+                            volume,
+                        } => {
                             let mixer_clone = mixer.clone();
                             thread::spawn(move || {
                                 let sink = rodio::Sink::connect_new(&mixer_clone);
@@ -856,4 +865,3 @@ pub fn play_key_sound_vk(style: u32, vk: u32, volume: f32) {
         });
     }
 }
-

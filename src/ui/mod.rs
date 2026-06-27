@@ -926,8 +926,6 @@ impl CrosshairApp {
                 vars.insert(name.clone(), *val as f64);
             }
         }
-        app.preload_primary_sound_preset_audio();
-        crate::audio::play_key_sound_vk(0, 0, 1.0);
         app
     }
 
@@ -1321,23 +1319,9 @@ impl CrosshairApp {
     }
 
     fn all_panels_for_background_preload() -> &'static [AppPanel] {
-        &[
-            AppPanel::Crosshair,
-            AppPanel::WindowPresets,
-            AppPanel::Pin,
-            AppPanel::Mouse,
-            AppPanel::Vision,
-            AppPanel::AudioSense,
-            AppPanel::Zoom,
-            AppPanel::Modes,
-            AppPanel::Macros,
-            AppPanel::Commands,
-            AppPanel::Sound,
-            AppPanel::Media,
-            AppPanel::Hud,
-            AppPanel::Ocr,
-            AppPanel::Geometry,
-        ]
+        // Keep startup focused on showing the active panel quickly.
+        // Other panels can warm lazily when the user actually opens them.
+        &[]
     }
 
     fn panel_is_warmed(&self, panel: AppPanel) -> bool {
@@ -3074,32 +3058,29 @@ impl CrosshairApp {
 
                 // Keep open if user is actively dragging or has a combobox/sub-popup open (current or previous frame)
                 let is_dragging = ui.ctx().dragged_id().is_some();
-                let is_any_popup_open = egui::Popup::is_any_open(ui.ctx()) || {
-                    let ctx = ui.ctx();
-                    let mode_open = ctx
-                        .data(|d| {
-                            d.get_temp::<egui::Id>(egui::Id::new(
-                                "quick-key-display-mode-actual-id",
-                            ))
-                        })
-                        .map_or(false, |id| egui::ComboBox::is_open(ctx, id));
-                    let decoration_open = ctx
-                        .data(|d| {
-                            d.get_temp::<egui::Id>(egui::Id::new(
-                                "focus-highlight-decoration-actual-id",
-                            ))
-                        })
-                        .map_or(false, |id| egui::ComboBox::is_open(ctx, id));
-                    let sound_open = ctx
-                        .data(|d| {
-                            d.get_temp::<egui::Id>(egui::Id::new("quick-key-sound-style-actual-id"))
-                        })
-                        .map_or(false, |id| egui::ComboBox::is_open(ctx, id));
-                    mode_open || decoration_open || sound_open
-                };
+                let is_any_popup_open = egui::Popup::is_any_open(ui.ctx());
+
+                // Read the card rect from the previous frame to check if mouse is inside the card.
+                // This ensures the card stays alive on the frame the user clicks a ComboBox inside it
+                // (before the ComboBox popup gets a chance to open and make is_any_popup_open true).
+                let card_rect_id = ui.make_persistent_id(format!("qa-card-rect-{:?}", action_kind));
+                let prev_card_rect = ui
+                    .ctx()
+                    .data(|d| d.get_temp::<egui::Rect>(card_rect_id))
+                    .unwrap_or(egui::Rect::NOTHING);
+                let mouse_in_card_prev =
+                    if let Some(mouse_pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
+                        prev_card_rect.contains(mouse_pos)
+                    } else {
+                        false
+                    };
+
                 // One-frame buffer: if popup was open last frame, treat this frame as interacting too
-                let is_interacting =
-                    is_active && (is_dragging || is_any_popup_open || popup_was_open_prev);
+                let is_interacting = is_active
+                    && (is_dragging
+                        || is_any_popup_open
+                        || popup_was_open_prev
+                        || mouse_in_card_prev);
 
                 if is_interacting {
                     last_active_time = current_time;
@@ -3124,7 +3105,7 @@ impl CrosshairApp {
                     let pos = button_response.rect.left_bottom() + vec2(-42.0, 4.0);
                     let mut content_rect = egui::Rect::NOTHING;
                     let area_response = egui::Area::new(popup_id)
-                        .order(egui::Order::Tooltip)
+                        .order(egui::Order::Foreground)
                         .fixed_pos(pos)
                         .show(ui.ctx(), |ui| {
                             let frame_response = egui::Frame::popup(ui.style())
@@ -3139,6 +3120,10 @@ impl CrosshairApp {
                             content_rect = frame_response.response.rect;
                             frame_response.inner
                         });
+
+                    // Persist card rect for next frame's mouse-in-card check
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(card_rect_id, content_rect));
 
                     // Keep active if pointer is over the card, any sub-popup is open, or inner controls returned true
                     let mouse_in_card =
@@ -3155,6 +3140,9 @@ impl CrosshairApp {
                         });
                     }
                 } else {
+                    // Clear stored card rect so it doesn't keep the popup alive after close
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(card_rect_id, egui::Rect::NOTHING));
                     // If this was the active action but the decay expired, clear it
                     if is_active {
                         ui.ctx().data_mut(|data| {
@@ -3616,14 +3604,7 @@ impl CrosshairApp {
                                             "Cyber Mech",
                                         ),
                                     };
-                                    let combo_id =
-                                        ui.make_persistent_id("focus-highlight-decoration");
-                                    ui.ctx().data_mut(|data| {
-                                        data.insert_temp(
-                                            egui::Id::new("focus-highlight-decoration-actual-id"),
-                                            combo_id,
-                                        );
-                                    });
+
                                     let decoration_changed =
                                         egui::ComboBox::from_id_salt("focus-highlight-decoration")
                                             .width(164.0)
@@ -3979,13 +3960,7 @@ impl CrosshairApp {
                                         .size(10.0),
                                     );
                                     let mode_before = self.state.quick_key_display_mode;
-                                    let combo_id = ui.make_persistent_id("quick-key-display-mode");
-                                    ui.ctx().data_mut(|data| {
-                                        data.insert_temp(
-                                            egui::Id::new("quick-key-display-mode-actual-id"),
-                                            combo_id,
-                                        );
-                                    });
+
                                     egui::ComboBox::from_id_salt("quick-key-display-mode")
                                         .width(164.0)
                                         .selected_text(match self.state.quick_key_display_mode {
@@ -4023,16 +3998,7 @@ impl CrosshairApp {
                                         );
                                         let style_before =
                                             self.state.quick_key_display_mascot_style;
-                                        let combo_id =
-                                            ui.make_persistent_id("quick-key-display-mascot-style");
-                                        ui.ctx().data_mut(|data| {
-                                            data.insert_temp(
-                                                egui::Id::new(
-                                                    "quick-key-display-mascot-style-actual-id",
-                                                ),
-                                                combo_id,
-                                            );
-                                        });
+
                                         egui::ComboBox::from_id_salt(
                                             "quick-key-display-mascot-style",
                                         )
@@ -4460,13 +4426,7 @@ impl CrosshairApp {
                                         .get(self.state.quick_key_sound_style as usize)
                                         .copied()
                                         .unwrap_or(SWITCH_NAMES[0]);
-                                    let combo_id = ui.make_persistent_id("quick-key-sound-style");
-                                    ui.ctx().data_mut(|data| {
-                                        data.insert_temp(
-                                            egui::Id::new("quick-key-sound-style-actual-id"),
-                                            combo_id,
-                                        );
-                                    });
+
                                     egui::ComboBox::from_id_salt("quick-key-sound-style")
                                         .width(164.0)
                                         .selected_text(selected_name)

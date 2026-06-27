@@ -4,44 +4,41 @@
 mod windows_impl {
     use windows::{
         Win32::{
-            Foundation::{HWND, LPARAM, POINT, RECT, HMODULE},
+            Foundation::{HMODULE, HWND, LPARAM, POINT, RECT},
             Graphics::Gdi::{
-                BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, ClientToScreen, CreateCompatibleDC, CreateDIBSection,
-                DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetWindowDC, HALFTONE, HGDIOBJ,
-                ReleaseDC, SRCCOPY, SelectObject, SetStretchBltMode, StretchBlt,
+                BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, ClientToScreen, CreateCompatibleDC,
+                CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetWindowDC,
+                HALFTONE, HGDIOBJ, ReleaseDC, SRCCOPY, SelectObject, SetStretchBltMode, StretchBlt,
             },
             Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
             UI::WindowsAndMessaging::{
-                BringWindowToTop, EnumWindows, GetForegroundWindow, GetSystemMetrics,
-                GetClientRect,
-                GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-                HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindow, IsWindowVisible,
-                PW_RENDERFULLCONTENT, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
-                SetForegroundWindow, SetWindowPos, ShowWindow, GWL_EXSTYLE,
-                SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-                WS_EX_TOPMOST,
+                BringWindowToTop, EnumWindows, GWL_EXSTYLE, GetClientRect, GetForegroundWindow,
+                GetSystemMetrics, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
+                GetWindowTextW, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindow, IsWindowVisible,
+                PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+                SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+                SetForegroundWindow, SetWindowPos, ShowWindow, WS_EX_TOPMOST,
             },
         },
         core::BOOL,
     };
 
+    use anyhow::Context;
     use once_cell::sync::Lazy;
     use parking_lot::Mutex;
-    use anyhow::Context;
     use windows::{
-        core::Interface,
         Graphics::{
-            Capture::{GraphicsCaptureItem, Direct3D11CaptureFramePool, GraphicsCaptureSession},
+            Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession},
             DirectX::DirectXPixelFormat,
         },
         Win32::{
             Graphics::{
                 Direct3D::D3D_DRIVER_TYPE_HARDWARE,
                 Direct3D11::{
-                    D3D11CreateDevice, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
-                    ID3D11Device, ID3D11Texture2D, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-                    D3D11_BIND_FLAG, D3D11_CPU_ACCESS_READ, D3D11_RESOURCE_MISC_FLAG,
-                    D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
+                    D3D11_BIND_FLAG, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                    D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_FLAG,
+                    D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+                    D3D11CreateDevice, ID3D11Device, ID3D11Texture2D,
                 },
                 Dxgi::IDXGIDevice,
             },
@@ -50,6 +47,7 @@ mod windows_impl {
                 Graphics::Capture::IGraphicsCaptureItemInterop,
             },
         },
+        core::Interface,
     };
 
     #[derive(Debug, Clone)]
@@ -178,7 +176,11 @@ mod windows_impl {
 
             let success = SetWindowPos(
                 hwnd,
-                Some(if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST }),
+                Some(if topmost {
+                    HWND_TOPMOST
+                } else {
+                    HWND_NOTOPMOST
+                }),
                 0,
                 0,
                 0,
@@ -236,18 +238,17 @@ mod windows_impl {
         }
 
         if let Some(title_or_selector) = primary_title
-            && let Some(hwnd) = find_window_by_candidate_exact(title_or_selector)
-                .or_else(|| {
-                    find_window_by_candidate(title_or_selector, match_duplicate_window_titles)
-                })
+            && let Some(hwnd) = find_window_by_candidate_exact(title_or_selector).or_else(|| {
+                find_window_by_candidate(title_or_selector, match_duplicate_window_titles)
+            })
         {
             return Some(hwnd);
         }
 
         for title in extra_titles {
-            if let Some(hwnd) = find_window_by_candidate_exact(title).or_else(|| {
-                find_window_by_candidate(title, match_duplicate_window_titles)
-            }) {
+            if let Some(hwnd) = find_window_by_candidate_exact(title)
+                .or_else(|| find_window_by_candidate(title, match_duplicate_window_titles))
+            {
                 return Some(hwnd);
             }
         }
@@ -291,13 +292,25 @@ mod windows_impl {
         match_duplicate_window_titles: bool,
     ) -> Option<HWND> {
         let (base_title, rule) = if title_or_selector.ends_with(" [Lowest]") {
-            (title_or_selector.strip_suffix(" [Lowest]").unwrap(), Some("Lowest"))
+            (
+                title_or_selector.strip_suffix(" [Lowest]").unwrap(),
+                Some("Lowest"),
+            )
         } else if title_or_selector.ends_with(" [Highest]") {
-            (title_or_selector.strip_suffix(" [Highest]").unwrap(), Some("Highest"))
+            (
+                title_or_selector.strip_suffix(" [Highest]").unwrap(),
+                Some("Highest"),
+            )
         } else if title_or_selector.ends_with(" [Leftmost]") {
-            (title_or_selector.strip_suffix(" [Leftmost]").unwrap(), Some("Leftmost"))
+            (
+                title_or_selector.strip_suffix(" [Leftmost]").unwrap(),
+                Some("Leftmost"),
+            )
         } else if title_or_selector.ends_with(" [Rightmost]") {
-            (title_or_selector.strip_suffix(" [Rightmost]").unwrap(), Some("Rightmost"))
+            (
+                title_or_selector.strip_suffix(" [Rightmost]").unwrap(),
+                Some("Rightmost"),
+            )
         } else {
             (title_or_selector, None)
         };
@@ -421,7 +434,10 @@ mod windows_impl {
         true.into()
     }
 
-    unsafe extern "system" fn find_all_windows_by_candidate_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    unsafe extern "system" fn find_all_windows_by_candidate_proc(
+        hwnd: HWND,
+        lparam: LPARAM,
+    ) -> BOOL {
         let (target_title, match_duplicate_window_titles, candidates) =
             &mut *(lparam.0 as *mut (&str, bool, &mut Vec<HWND>));
         let clean_title = strip_rule_suffix(*target_title);
@@ -495,9 +511,11 @@ mod windows_impl {
         let clean_candidate = clean_invisible_chars(candidate);
         let target_base = selector_base_title(&clean_target);
         let candidate_base = selector_base_title(&clean_candidate);
-        
-        let is_target_anti = target_base.contains(" - Antigravity IDE - ") || target_base.ends_with(" - Antigravity IDE");
-        let is_cand_anti = candidate_base.contains(" - Antigravity IDE - ") || candidate_base.ends_with(" - Antigravity IDE");
+
+        let is_target_anti = target_base.contains(" - Antigravity IDE - ")
+            || target_base.ends_with(" - Antigravity IDE");
+        let is_cand_anti = candidate_base.contains(" - Antigravity IDE - ")
+            || candidate_base.ends_with(" - Antigravity IDE");
         if is_target_anti && is_cand_anti {
             return true;
         }
@@ -820,7 +838,8 @@ mod windows_impl {
         let d3d_device = d3d_device.context("Failed to create D3D11 Device")?;
         let dxgi_device: IDXGIDevice = d3d_device.cast()?;
         let dxgi_device_winrt = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
-        let dxgi_device_winrt: windows::Graphics::DirectX::Direct3D11::IDirect3DDevice = dxgi_device_winrt.cast()?;
+        let dxgi_device_winrt: windows::Graphics::DirectX::Direct3D11::IDirect3DDevice =
+            dxgi_device_winrt.cast()?;
 
         let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
         let item: GraphicsCaptureItem = unsafe { interop.CreateForWindow(hwnd)? };
@@ -867,7 +886,9 @@ mod windows_impl {
             let texture: ID3D11Texture2D = unsafe { access.GetInterface()? };
 
             let mut desc = D3D11_TEXTURE2D_DESC::default();
-            unsafe { texture.GetDesc(&mut desc); }
+            unsafe {
+                texture.GetDesc(&mut desc);
+            }
             let width = desc.Width;
             let height = desc.Height;
 
@@ -887,16 +908,15 @@ mod windows_impl {
 
                 let mut staging = None;
                 unsafe {
-                    self.d3d_device.CreateTexture2D(&staging_desc, None, Some(&mut staging))?;
+                    self.d3d_device
+                        .CreateTexture2D(&staging_desc, None, Some(&mut staging))?;
                 }
                 self.staging_texture = Some((staging.unwrap(), width, height));
             }
 
             let (staging_tex, _, _) = self.staging_texture.as_ref().unwrap();
 
-            let d3d_context = unsafe {
-                self.d3d_device.GetImmediateContext()?
-            };
+            let d3d_context = unsafe { self.d3d_device.GetImmediateContext()? };
 
             unsafe {
                 d3d_context.CopyResource(staging_tex, &texture);
@@ -908,7 +928,9 @@ mod windows_impl {
             }
 
             let pitch = mapped.RowPitch as usize;
-            let src_slice = unsafe { std::slice::from_raw_parts(mapped.pData as *const u8, pitch * height as usize) };
+            let src_slice = unsafe {
+                std::slice::from_raw_parts(mapped.pData as *const u8, pitch * height as usize)
+            };
             let mut rgba = vec![0u8; (width as usize) * (height as usize) * 4];
             for y in 0..height as usize {
                 let src_offset = y * pitch;

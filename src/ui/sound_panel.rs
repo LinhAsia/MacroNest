@@ -3,8 +3,6 @@ use crate::model::*;
 use crate::ui::{AudioCardOutcome, AudioEditorTarget, CrosshairApp};
 use eframe::egui::{self, *};
 
-
-
 #[derive(Clone, Copy, Default)]
 struct AudioTrimTimelineOutcome {
     changed: bool,
@@ -711,7 +709,11 @@ impl CrosshairApp {
             ui.horizontal_wrapped(|ui| {
                 if ui
                     .button(Self::material_icon_text(0xe145, 18.0))
-                    .on_hover_text(Self::tr_lang(language, "Choose audio file", "Choose audio file"))
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Choose audio file",
+                        "Choose audio file",
+                    ))
                     .clicked()
                 {
                     outcome.choose_file = true;
@@ -721,7 +723,11 @@ impl CrosshairApp {
                         !clip.file_path.trim().is_empty(),
                         Button::new(Self::material_icon_text(0xe3c9, 18.0)),
                     )
-                    .on_hover_text(Self::tr_lang(language, "Open Media editor", "Open Media editor"))
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Open Media editor",
+                        "Open Media editor",
+                    ))
                     .clicked()
                 {
                     outcome.open_editor = true;
@@ -769,7 +775,11 @@ impl CrosshairApp {
             });
 
             ui.label(if clip.file_path.is_empty() {
-                Self::tr_lang(language, "No audio file selected.", "No audio file selected.")
+                Self::tr_lang(
+                    language,
+                    "No audio file selected.",
+                    "No audio file selected.",
+                )
             } else {
                 clip.file_path.as_str()
             });
@@ -790,8 +800,6 @@ impl CrosshairApp {
 
         outcome
     }
-
-
 
     pub(crate) fn render_sound_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
@@ -822,7 +830,6 @@ impl CrosshairApp {
                 self.show_sound_preset_audio_editor.insert(id);
                 changed = true;
             }
-
         });
 
         ui.add_space(16.0);
@@ -877,7 +884,11 @@ impl CrosshairApp {
                                 [36.0, 21.0],
                                 Button::new(Self::material_icon_text(0xe872, 18.0)),
                             )
-                            .on_hover_text(Self::tr_lang(language, "Delete sound preset", "Delete sound preset"))
+                            .on_hover_text(Self::tr_lang(
+                                language,
+                                "Delete sound preset",
+                                "Delete sound preset",
+                            ))
                             .clicked()
                         {
                             remove_sound_preset = Some(preset.id);
@@ -978,7 +989,11 @@ impl CrosshairApp {
 
         ui.horizontal(|ui| {
             if ui
-                .button(Self::tr_lang(language, "Choose audio file", "Choose audio file"))
+                .button(Self::tr_lang(
+                    language,
+                    "Choose audio file",
+                    "Choose audio file",
+                ))
                 .clicked()
             {
                 outcome.choose_file = true;

@@ -175,7 +175,9 @@ impl CrosshairApp {
         }
 
         egui::ComboBox::from_id_salt((group_id, preset_id, step_index, "ocr-language-step"))
-            .selected_text(crate::ocr::compact_label_for_language_code(&step.ocr_language).to_owned())
+            .selected_text(
+                crate::ocr::compact_label_for_language_code(&step.ocr_language).to_owned(),
+            )
             .width(92.0)
             .show_ui(ui, |ui| {
                 for pack in crate::ocr::ocr_language_packs() {
@@ -200,8 +202,7 @@ impl CrosshairApp {
                         .inner;
                     if row.clicked() {
                         step.ocr_language = pack.code.to_owned();
-                        step.ocr_language =
-                            crate::ocr::normalize_language_code(&step.ocr_language);
+                        step.ocr_language = crate::ocr::normalize_language_code(&step.ocr_language);
                         *live_sync = true;
                     }
                 }

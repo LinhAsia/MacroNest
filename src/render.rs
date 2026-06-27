@@ -63,7 +63,8 @@ fn render_custom_pixels(style: &CrosshairStyle, pixels_str: &str) -> Result<Rend
     let canvas_width = ((width as f32 * pixel_scale) + pad * 2.0).ceil() as u32;
     let canvas_height = ((height as f32 * pixel_scale) + pad * 2.0).ceil() as u32;
 
-    let mut pixmap = Pixmap::new(canvas_width, canvas_height).context("Failed to create custom pixels pixmap")?;
+    let mut pixmap = Pixmap::new(canvas_width, canvas_height)
+        .context("Failed to create custom pixels pixmap")?;
 
     let fill_color = style.color.with_alpha(style.opacity);
     let outline_color = style.outline_color.with_alpha(style.opacity);
@@ -305,7 +306,13 @@ fn apply_global_alpha(rgba: &mut [u8], alpha: f32) {
     }
 }
 
-pub fn render_svg_image(path_or_code: &str, target_width: u32, target_height: u32, opacity: f32, rotation: f32) -> Result<RenderedSvgImage> {
+pub fn render_svg_image(
+    path_or_code: &str,
+    target_width: u32,
+    target_height: u32,
+    opacity: f32,
+    rotation: f32,
+) -> Result<RenderedSvgImage> {
     let trimmed = path_or_code.trim();
     let is_code = trimmed.starts_with('<') || trimmed.contains("<svg");
 
@@ -352,8 +359,7 @@ pub fn render_svg_image(path_or_code: &str, target_width: u32, target_height: u3
 fn render_svg_code_to_pixmap(code: &str, target_width: u32, target_height: u32) -> Result<Pixmap> {
     let options = resvg::usvg::Options::default();
     let bytes = code.as_bytes();
-    let tree = resvg::usvg::Tree::from_data(bytes, &options)
-        .context("Invalid SVG inline code")?;
+    let tree = resvg::usvg::Tree::from_data(bytes, &options).context("Invalid SVG inline code")?;
     let size = tree.size();
     let (out_w, out_h) = resolve_dimensions(
         size.width().round() as u32,
@@ -363,19 +369,27 @@ fn render_svg_code_to_pixmap(code: &str, target_width: u32, target_height: u32) 
     );
     let scale_x = out_w as f32 / size.width();
     let scale_y = out_h as f32 / size.height();
-    let mut pixmap = Pixmap::new(out_w.max(1), out_h.max(1)).context("Failed to create SVG pixmap")?;
+    let mut pixmap =
+        Pixmap::new(out_w.max(1), out_h.max(1)).context("Failed to create SVG pixmap")?;
     let transform = Transform::from_scale(scale_x, scale_y);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     Ok(pixmap)
 }
 
-fn resolve_dimensions(intrinsic_w: u32, intrinsic_h: u32, target_w: u32, target_h: u32) -> (u32, u32) {
+fn resolve_dimensions(
+    intrinsic_w: u32,
+    intrinsic_h: u32,
+    target_w: u32,
+    target_h: u32,
+) -> (u32, u32) {
     const MAX: u32 = 2048;
     match (target_w, target_h) {
         (0, 0) => (intrinsic_w.min(MAX), intrinsic_h.min(MAX)),
         (w, 0) => {
             let h = if intrinsic_w > 0 {
-                ((w as f32 / intrinsic_w as f32) * intrinsic_h as f32).round().max(1.0) as u32
+                ((w as f32 / intrinsic_w as f32) * intrinsic_h as f32)
+                    .round()
+                    .max(1.0) as u32
             } else {
                 w
             };
@@ -383,7 +397,9 @@ fn resolve_dimensions(intrinsic_w: u32, intrinsic_h: u32, target_w: u32, target_
         }
         (0, h) => {
             let w = if intrinsic_h > 0 {
-                ((h as f32 / intrinsic_h as f32) * intrinsic_w as f32).round().max(1.0) as u32
+                ((h as f32 / intrinsic_h as f32) * intrinsic_w as f32)
+                    .round()
+                    .max(1.0) as u32
             } else {
                 h
             };
@@ -407,7 +423,8 @@ fn render_svg_to_pixmap(path: &Path, target_width: u32, target_height: u32) -> R
     );
     let scale_x = out_w as f32 / size.width();
     let scale_y = out_h as f32 / size.height();
-    let mut pixmap = Pixmap::new(out_w.max(1), out_h.max(1)).context("Failed to create SVG pixmap")?;
+    let mut pixmap =
+        Pixmap::new(out_w.max(1), out_h.max(1)).context("Failed to create SVG pixmap")?;
     let transform = Transform::from_scale(scale_x, scale_y);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     Ok(pixmap)
@@ -429,23 +446,23 @@ fn render_raster_to_pixmap(path: &Path, target_width: u32, target_height: u32) -
 }
 
 fn rotate_pixmap(src: &Pixmap, rotation: f32) -> Result<Pixmap> {
-    use tiny_skia::{Paint, Pattern, SpreadMode, FilterQuality};
+    use tiny_skia::{FilterQuality, Paint, Pattern, SpreadMode};
 
     let w = src.width();
     let h = src.height();
-    
+
     let rad = rotation.to_radians();
     let cos_a = rad.cos().abs();
     let sin_a = rad.sin().abs();
     let out_w = (w as f32 * cos_a + h as f32 * sin_a).round().max(1.0) as u32;
     let out_h = (w as f32 * sin_a + h as f32 * cos_a).round().max(1.0) as u32;
-    
+
     let mut dest = Pixmap::new(out_w, out_h).context("Failed to create rotated pixmap")?;
-    
+
     let transform = Transform::from_translate(-(w as f32) / 2.0, -(h as f32) / 2.0)
         .post_rotate(rotation)
         .post_translate(out_w as f32 / 2.0, out_h as f32 / 2.0);
-        
+
     let paint = Paint {
         shader: Pattern::new(
             src.as_ref(),
@@ -456,9 +473,9 @@ fn rotate_pixmap(src: &Pixmap, rotation: f32) -> Result<Pixmap> {
         ),
         ..Default::default()
     };
-    
+
     let rect = Rect::from_xywh(0.0, 0.0, out_w as f32, out_h as f32).context("Invalid rect")?;
     dest.fill_rect(rect, &paint, Transform::identity(), None);
-    
+
     Ok(dest)
 }

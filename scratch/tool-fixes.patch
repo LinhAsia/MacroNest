@@ -1,0 +1,149 @@
+diff --git a/src/platform.rs b/src/platform.rs
+--- a/src/platform.rs
++++ b/src/platform.rs
+@@ -183,7 +183,13 @@
+         let command = format!(
+             "$p = Start-Process -FilePath {exe} -ArgumentList {args} -Verb RunAs -WindowStyle {window_style} -PassThru; if (-not $p) { exit 1 }; if (-not $p.WaitForExit({timeout_ms})) { try { $p.Kill() } catch {}; exit 124 }; exit $p.ExitCode"
+         );
+-        let status = Command::new("powershell")
++        let mut powershell = Command::new("powershell");
++        #[cfg(windows)]
++        {
++            use std::os::windows::process::CommandExt;
++            powershell.creation_flags(0x08000000); // CREATE_NO_WINDOW
++        }
++        let status = powershell
+             .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+             .status()?;
+         match status.code() {
+diff --git a/src/ui/mod.rs b/src/ui/mod.rs
+--- a/src/ui/mod.rs
++++ b/src/ui/mod.rs
+@@ -2241,8 +2241,47 @@
+     fn current_mouse_speed() -> Option<u32> {
+         None
+     }
+ 
+-    fn powershell_quote(value: &str) -> String {
+-        value.replace('\'', "''")
++    #[cfg(windows)]
++    pub(crate) fn extract_zip_archive(
++        archive_path: &std::path::Path,
++        destination_dir: &std::path::Path,
++    ) -> anyhow::Result<()> {
++        use anyhow::Context;
++        use std::fs;
++        use std::io::{self, Write};
++        use zip::ZipArchive;
++
++        let file = fs::File::open(archive_path)
++            .with_context(|| format!("Failed to open archive {}", archive_path.display()))?;
++        let mut archive = ZipArchive::new(file)
++            .with_context(|| format!("Failed to read zip archive {}", archive_path.display()))?;
++
++        for index in 0..archive.len() {
++            let mut entry = archive
++                .by_index(index)
++                .with_context(|| format!("Failed to read zip entry #{index}"))?;
++            let Some(relative_path) = entry.enclosed_name().map(|path| path.to_path_buf()) else {
++                continue;
++            };
++            let output_path = destination_dir.join(relative_path);
++
++            if entry.is_dir() {
++                fs::create_dir_all(&output_path)?;
++                continue;
++            }
++
++            if let Some(parent) = output_path.parent() {
++                fs::create_dir_all(parent)?;
++            }
++
++            let mut output = fs::File::create(&output_path)
++                .with_context(|| format!("Failed to create {}", output_path.display()))?;
++            io::copy(&mut entry, &mut output)
++                .with_context(|| format!("Failed to extract {}", output_path.display()))?;
++            output.flush()?;
++        }
++
++        Ok(())
+     }
+ 
+     fn choose_audio_file(&mut self, startup: bool) {
+diff --git a/src/ui/settings_panel.rs b/src/ui/settings_panel.rs
+--- a/src/ui/settings_panel.rs
++++ b/src/ui/settings_panel.rs
+@@ -1366,24 +1366,14 @@
+                 }
+                 file.write_all(&buffer[..n])?;
+                 downloaded += n as u64;
+-                let p = (downloaded as f32 / total_size as f32 * 1000.0) as u32;
++                let p = ((downloaded as f32 / total_size as f32) * 999.0).round() as u32;
+                 progress.store(p, Ordering::SeqCst);
+             }
+ 
+             drop(file);
+ 
+             let _ = fs::remove_dir_all(&paths.interception_package_dir);
+-            let extract_script = format!(
+-                "Expand-Archive -LiteralPath {} -DestinationPath {} -Force",
+-                Self::powershell_quote(&paths.interception_zip.to_string_lossy()),
+-                Self::powershell_quote(&paths.bin_dir.to_string_lossy()),
+-            );
+-            let extract_status = Command::new("powershell")
+-                .args(["-NoProfile", "-NonInteractive", "-Command", &extract_script])
+-                .status()?;
+-            if !extract_status.success() {
+-                bail!("Failed to extract Interception.zip");
+-            }
++            Self::extract_zip_archive(&paths.interception_zip, &paths.bin_dir)?;
+ 
+             let extracted_dll = paths
+                 .interception_package_dir
+@@ -1395,6 +1385,7 @@
+             }
+ 
+             fs::copy(&extracted_dll, &paths.interception_dll)?;
++            progress.store(1000, Ordering::SeqCst);
+ 
+             Ok(())
+         });
+diff --git a/src/ui/mouse_panel.rs b/src/ui/mouse_panel.rs
+--- a/src/ui/mouse_panel.rs
++++ b/src/ui/mouse_panel.rs
+@@ -2828,32 +2909,16 @@
+                 }
+                 file.write_all(&buffer[..n])?;
+                 downloaded += n as u64;
+-                let p = (downloaded as f32 / total_size as f32 * 1000.0) as u32;
++                let p = ((downloaded as f32 / total_size as f32) * 999.0).round() as u32;
+                 progress.store(p, std::sync::atomic::Ordering::SeqCst);
+             }
+ 
+             drop(file);
+ 
+-            // Extract using PowerShell
+-            let extract_script = format!(
+-                "Expand-Archive -LiteralPath {} -DestinationPath {} -Force",
+-                Self::powershell_quote(&paths.arduino_tools_zip.to_string_lossy()),
+-                Self::powershell_quote(&paths.bin_dir.to_string_lossy()),
+-            );
+-            let mut cmd = std::process::Command::new("powershell");
+-            #[cfg(windows)]
+-            {
+-                use std::os::windows::process::CommandExt;
+-                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+-            }
+-            let extract_status = cmd
+-                .args(["-NoProfile", "-NonInteractive", "-Command", &extract_script])
+-                .status()?;
+-            if !extract_status.success() {
+-                anyhow::bail!("Failed to extract arduino_tools.zip");
+-            }
++            Self::extract_zip_archive(&paths.arduino_tools_zip, &paths.bin_dir)?;
+ 
+             let _ = std::fs::remove_file(&paths.arduino_tools_zip);
++            progress.store(1000, std::sync::atomic::Ordering::SeqCst);
+ 
+             Ok(())
+         });

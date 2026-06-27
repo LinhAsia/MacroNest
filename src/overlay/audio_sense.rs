@@ -1,13 +1,10 @@
+use anyhow::{Context, Result};
 use std::thread;
 use std::time::Duration;
-use anyhow::{Context, Result};
 
-use crate::model::{AudioSensePreset, AudioSenseSpec, MacroStep, MacroAction};
+use super::{HOOK_STATE, is_ui_in_foreground, set_text_variable_value, set_variable_value};
 use crate::audiosense;
-use super::{
-    HOOK_STATE, set_text_variable_value, set_variable_value,
-    is_ui_in_foreground,
-};
+use crate::model::{AudioSensePreset, AudioSenseSpec, MacroAction, MacroStep};
 
 pub(crate) fn audio_sense_monitor_key_for_preset(preset_id: u32) -> String {
     format!("preset:{preset_id}")
@@ -22,10 +19,7 @@ pub(crate) fn custom_audio_sense_monitor_key(
 }
 
 pub(crate) fn audio_sense_is_active(key: &str) -> bool {
-    HOOK_STATE
-        .lock()
-        .active_audio_sense_keys
-        .contains(key)
+    HOOK_STATE.lock().active_audio_sense_keys.contains(key)
 }
 
 pub(crate) fn set_audio_sense_active(key: &str, active: bool) {
@@ -66,10 +60,7 @@ pub(crate) fn write_pitch_snapshot_vars(
         set_text_variable_value(&settings.output_note_var, &snapshot.note);
     }
     if !settings.output_level_var.trim().is_empty() {
-        set_variable_value(
-            &settings.output_level_var,
-            (snapshot.level * 1000.0) as f64,
-        );
+        set_variable_value(&settings.output_level_var, (snapshot.level * 1000.0) as f64);
     }
 }
 
@@ -101,7 +92,10 @@ pub(crate) fn run_pitch_monitor_loop(
             break;
         }
 
-        HOOK_STATE.lock().active_audio_sense_snapshots.insert(monitor_key.clone(), snapshot.clone());
+        HOOK_STATE
+            .lock()
+            .active_audio_sense_snapshots
+            .insert(monitor_key.clone(), snapshot.clone());
         if !is_preview {
             write_pitch_snapshot_vars(&config, &snapshot);
         }
@@ -120,7 +114,9 @@ pub(crate) fn start_audio_sense_preset(spec: &str, stop_when_ui_foreground: bool
     }
 
     set_audio_sense_active(&monitor_key, true);
-    thread::spawn(move || run_pitch_monitor_loop(monitor_key, preset.pitch, stop_when_ui_foreground, false));
+    thread::spawn(move || {
+        run_pitch_monitor_loop(monitor_key, preset.pitch, stop_when_ui_foreground, false)
+    });
     Ok(())
 }
 
@@ -142,7 +138,9 @@ pub(crate) fn start_custom_audio_sense(
     }
 
     set_audio_sense_active(&monitor_key, true);
-    thread::spawn(move || run_pitch_monitor_loop(monitor_key, spec.pitch, stop_when_ui_foreground, is_preview));
+    thread::spawn(move || {
+        run_pitch_monitor_loop(monitor_key, spec.pitch, stop_when_ui_foreground, is_preview)
+    });
 }
 
 pub(crate) fn start_audio_sense_from_step(
@@ -157,11 +155,23 @@ pub(crate) fn start_audio_sense_from_step(
         MacroAction::StartAudioSensePreset => {
             if let Some(preset_id) = step.audio_sense_preset_id {
                 if let Ok(mut preset) = audio_sense_preset_by_id(&preset_id.to_string()) {
-                    if !step.audio_sense_spec.pitch.output_note_var.trim().is_empty() {
+                    if !step
+                        .audio_sense_spec
+                        .pitch
+                        .output_note_var
+                        .trim()
+                        .is_empty()
+                    {
                         preset.pitch.output_note_var =
                             step.audio_sense_spec.pitch.output_note_var.clone();
                     }
-                    if !step.audio_sense_spec.pitch.output_level_var.trim().is_empty() {
+                    if !step
+                        .audio_sense_spec
+                        .pitch
+                        .output_level_var
+                        .trim()
+                        .is_empty()
+                    {
                         preset.pitch.output_level_var =
                             step.audio_sense_spec.pitch.output_level_var.clone();
                     }
@@ -180,11 +190,8 @@ pub(crate) fn start_audio_sense_from_step(
                 }
             } else {
                 let spec = step.audio_sense_spec.clone();
-                let monitor_key = custom_audio_sense_monitor_key(
-                    macro_preset_id,
-                    step_index,
-                    is_hold_stop,
-                );
+                let monitor_key =
+                    custom_audio_sense_monitor_key(macro_preset_id, step_index, is_hold_stop);
                 start_custom_audio_sense(monitor_key, spec, stop_when_ui_foreground, is_preview);
             }
         }
@@ -205,11 +212,8 @@ pub(crate) fn stop_audio_sense_from_step(
             } else if let Some(preset_id) = step.audio_sense_preset_id {
                 let _ = stop_audio_sense_preset(&preset_id.to_string());
             } else {
-                let pitch_key = custom_audio_sense_monitor_key(
-                    macro_preset_id,
-                    step_index,
-                    is_hold_stop,
-                );
+                let pitch_key =
+                    custom_audio_sense_monitor_key(macro_preset_id, step_index, is_hold_stop);
                 set_audio_sense_active(&pitch_key, false);
             }
         }
@@ -265,5 +269,9 @@ pub(crate) fn get_audio_sense_snapshot(
     } else {
         custom_audio_sense_monitor_key(macro_preset_id, step_index, is_hold_stop)
     };
-    HOOK_STATE.lock().active_audio_sense_snapshots.get(&key).cloned()
+    HOOK_STATE
+        .lock()
+        .active_audio_sense_snapshots
+        .get(&key)
+        .cloned()
 }

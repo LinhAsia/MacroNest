@@ -70,8 +70,9 @@ fn z85_decode(encoded: &str) -> Result<Vec<u8>> {
     for chunk in bytes.chunks_exact(5) {
         let mut value = 0u32;
         for &byte in chunk {
-            let digit = z85_value(byte)
-                .ok_or_else(|| anyhow::anyhow!("The encoded payload contains invalid characters"))?;
+            let digit = z85_value(byte).ok_or_else(|| {
+                anyhow::anyhow!("The encoded payload contains invalid characters")
+            })?;
             value = value
                 .checked_mul(85)
                 .and_then(|current| current.checked_add(digit))
@@ -109,7 +110,8 @@ fn decode_v1<T: DeserializeOwned>(encoded: &str, kind: &str) -> Result<T> {
 }
 
 fn decode_v2<T: DeserializeOwned>(encoded: &str, kind: &str) -> Result<T> {
-    let compressed = z85_decode(encoded).with_context(|| format!("Failed to decode the {kind} code"))?;
+    let compressed =
+        z85_decode(encoded).with_context(|| format!("Failed to decode the {kind} code"))?;
     let binary = decompress_bytes(&compressed, kind)?;
     rmp_serde::from_slice(&binary).with_context(|| format!("The {kind} code contents are invalid"))
 }

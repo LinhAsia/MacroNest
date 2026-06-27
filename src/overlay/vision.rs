@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
-use std::sync::Arc;
-use std::thread;
 use anyhow::{Context, Result, bail};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use opencv::{
     core::{self as cv, Mat, Size},
@@ -13,13 +13,12 @@ use opencv::{
     prelude::*,
 };
 
-use crate::model::{VisionPreset, RgbaColor};
-use crate::window_list;
 use super::{
-    HOOK_STATE, UiCommand,
-    set_variable_value, set_text_variable_value, resolve_text_variable_value,
-    settle_image_search_mouse_move, send_mouse_left_click_backend,
+    HOOK_STATE, UiCommand, resolve_text_variable_value, send_mouse_left_click_backend,
+    set_text_variable_value, set_variable_value, settle_image_search_mouse_move,
 };
+use crate::model::{RgbaColor, VisionPreset};
+use crate::window_list;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TemplateMatchHit {
@@ -202,7 +201,11 @@ pub(crate) fn configured_image_search_region(preset: &VisionPreset) -> Option<Vi
     })
 }
 
-pub(crate) fn image_search_region_contains_point(region: Option<&VisionRegion>, x: i32, y: i32) -> bool {
+pub(crate) fn image_search_region_contains_point(
+    region: Option<&VisionRegion>,
+    x: i32,
+    y: i32,
+) -> bool {
     let Some(region) = region else {
         return true;
     };
@@ -326,8 +329,7 @@ pub(crate) fn find_template_match_exact_rgba(
         return None;
     }
 
-    let anchor_hint =
-        anchor_hint_screen.map(|(x, y)| (x - screen.screen_x, y - screen.screen_y));
+    let anchor_hint = anchor_hint_screen.map(|(x, y)| (x - screen.screen_x, y - screen.screen_y));
     let mut best_hit: Option<TemplateMatchHit> = None;
     for y in 0..=(screen.height - template_height) {
         for x in 0..=(screen.width - template_width) {
@@ -345,13 +347,10 @@ pub(crate) fn find_template_match_exact_rgba(
                 for col in 0..template_width {
                     let screen_idx = screen_row + col * 4;
                     let template_idx = template_row + col * 4;
-                    let dr =
-                        screen.rgba[screen_idx].abs_diff(template_rgba[template_idx]) as u64;
-                    let dg = screen.rgba[screen_idx + 1]
-                        .abs_diff(template_rgba[template_idx + 1])
+                    let dr = screen.rgba[screen_idx].abs_diff(template_rgba[template_idx]) as u64;
+                    let dg = screen.rgba[screen_idx + 1].abs_diff(template_rgba[template_idx + 1])
                         as u64;
-                    let db = screen.rgba[screen_idx + 2]
-                        .abs_diff(template_rgba[template_idx + 2])
+                    let db = screen.rgba[screen_idx + 2].abs_diff(template_rgba[template_idx + 2])
                         as u64;
                     total_diff += dr + dg + db;
                     let processed = ((row * template_width) + (col + 1)) as f32;
@@ -562,11 +561,8 @@ pub(crate) fn count_matching_pixels(
     let mut count = 0;
     for y in 0..height {
         for x in 0..width {
-            if !image_search_region_contains_point(
-                region,
-                screen.screen_x + x,
-                screen.screen_y + y,
-            ) {
+            if !image_search_region_contains_point(region, screen.screen_x + x, screen.screen_y + y)
+            {
                 continue;
             }
 
@@ -748,8 +744,7 @@ pub(crate) fn find_connected_color_match(
             let cluster_x = sum_x / pixel_count;
             let cluster_y = sum_y / pixel_count;
             let avg_score = score_sum / (pixel_count as u32);
-            let distance_sq =
-                (cluster_x - reference.0).pow(2) + (cluster_y - reference.1).pow(2);
+            let distance_sq = (cluster_x - reference.0).pow(2) + (cluster_y - reference.1).pow(2);
             let candidate = ConnectedColorClusterHit {
                 x: cluster_x,
                 y: cluster_y,
@@ -905,8 +900,8 @@ pub(crate) fn find_dual_color_midpoint_match(
 ) -> Option<ColorMatchHit> {
     let mid = (screen.width / 2).max(1);
     let (left_hit, right_hit) = thread::scope(|scope| {
-        let left = scope
-            .spawn(|| find_color_match_in_range(screen, targets, tolerance, 0, mid, region));
+        let left =
+            scope.spawn(|| find_color_match_in_range(screen, targets, tolerance, 0, mid, region));
         let right = scope.spawn(|| {
             find_color_match_in_range(screen, targets, tolerance, mid, screen.width, region)
         });
@@ -946,11 +941,8 @@ pub(crate) fn find_color_average_centroid_match(
 
     for y in 0..height {
         for x in 0..width {
-            if !image_search_region_contains_point(
-                region,
-                screen.screen_x + x,
-                screen.screen_y + y,
-            ) {
+            if !image_search_region_contains_point(region, screen.screen_x + x, screen.screen_y + y)
+            {
                 continue;
             }
 
@@ -1156,13 +1148,8 @@ pub(crate) fn run_vision_once_with_options(
             bail!("No pixel has been picked yet.");
         };
 
-        let screen = window_list::capture_virtual_screen_region(
-            region.left,
-            region.top,
-            1,
-            1,
-        )
-        .context("Failed to capture the selected pixel")?;
+        let screen = window_list::capture_virtual_screen_region(region.left, region.top, 1, 1)
+            .context("Failed to capture the selected pixel")?;
 
         if screen.rgba.len() < 4 {
             bail!("Failed to read captured pixel color.");
@@ -1414,8 +1401,7 @@ pub(crate) fn run_vision_once_with_options(
             region.height,
         )
         .context("Failed to capture the selected search area")?
-    } else if preset.target_window_title.is_some()
-        || !preset.extra_target_window_titles.is_empty()
+    } else if preset.target_window_title.is_some() || !preset.extra_target_window_titles.is_empty()
     {
         window_list::capture_window_region_with_candidates(
             preset.target_window_title.as_deref(),
@@ -1424,13 +1410,8 @@ pub(crate) fn run_vision_once_with_options(
         )
         .context("Failed to capture the target window")?
     } else if let Some((capture_x, capture_y)) = anchor_hint {
-        capture_near_last_image_search_region(
-            capture_x,
-            capture_y,
-            template_width,
-            template_height,
-        )
-        .context("Failed to capture the area near the original template")?
+        capture_near_last_image_search_region(capture_x, capture_y, template_width, template_height)
+            .context("Failed to capture the area near the original template")?
     } else {
         let (left, top, width, height) = window_list::virtual_screen_bounds();
         window_list::capture_virtual_screen_region(left, top, width, height)
@@ -1549,8 +1530,16 @@ pub(crate) fn run_vision_once_with_options(
 }
 
 pub(crate) fn run_vision_once(preset: &VisionPreset) -> Result<String> {
-    run_vision_once_with_options(preset, true, preset.click_after_move, None, None, None, None)
-        .map(|outcome| outcome.status)
+    run_vision_once_with_options(
+        preset,
+        true,
+        preset.click_after_move,
+        None,
+        None,
+        None,
+        None,
+    )
+    .map(|outcome| outcome.status)
 }
 
 pub(crate) fn run_image_search_follow_loop(
@@ -1617,8 +1606,8 @@ pub(crate) fn trigger_vision_move(spec: &str) -> Result<()> {
 }
 
 use super::{
-    macro_runtime_target_matches, trigger_nested_macro_preset,
-    MacroRunFlow, MouseMoveLockMask, STOP_REQUESTED_MACRO_PRESETS,
+    MacroRunFlow, MouseMoveLockMask, STOP_REQUESTED_MACRO_PRESETS, macro_runtime_target_matches,
+    trigger_nested_macro_preset,
 };
 
 pub(crate) fn trigger_vision_move_with_options(

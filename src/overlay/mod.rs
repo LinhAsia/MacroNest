@@ -18837,43 +18837,140 @@ mod windows_overlay {
 
     fn disable_zoom_overlay() {}
 
-    fn set_macro_preset_enabled(spec: &str, enabled: bool) -> Result<()> {
-        let preset_id = spec
-            .trim()
+    fn parse_macro_preset_id(spec: &str) -> Result<u32> {
+        spec.trim()
             .parse::<u32>()
-            .context("Macro preset id is invalid")?;
+            .context("Macro preset id is invalid")
+    }
+
+    fn set_macro_preset_enabled_batch(changes: &HashMap<u32, bool>) -> Result<()> {
+        if changes.is_empty() {
+            return Ok(());
+        }
+
+        let mut updates: Vec<(u32, bool)> = changes
+            .iter()
+            .map(|(&id, &enabled)| (id, enabled))
+            .collect();
+        updates.sort_by_key(|(preset_id, _)| *preset_id);
         let mut hook_state = HOOK_STATE.lock();
-        for group in &mut hook_state.macro_groups {
-            if let Some(preset) = group
-                .presets
-                .iter_mut()
-                .find(|preset| preset.id == preset_id)
-            {
-                preset.enabled = enabled;
-                if !enabled {
-                    STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
+        let mut applied = Vec::with_capacity(updates.len());
+        for (preset_id, enabled) in updates {
+            let mut found = false;
+            for group in &mut hook_state.macro_groups {
+                if let Some(preset) = group
+                    .presets
+                    .iter_mut()
+                    .find(|preset| preset.id == preset_id)
+                {
+                    preset.enabled = enabled;
+                    applied.push((preset_id, enabled));
+                    found = true;
+                    break;
                 }
+            }
 
-                let updated_groups = hook_state.macro_groups.clone();
-                let status = format!(
-                    "{} macro preset {}.",
-                    if enabled { "Enabled" } else { "Disabled" },
-                    preset_id
-                );
-                if let Some(tx) = hook_state.ui_tx.clone() {
-                    let _ = tx.send(UiCommand::SyncMacroGroups(updated_groups, status));
-                }
-
-                drop(hook_state);
-                if !enabled {
-                    deactivate_hold_macro(preset_id);
-                }
-
-                return Ok(());
+            if !found {
+                bail!("Macro preset was not found");
             }
         }
 
-        bail!("Macro preset was not found")
+        let updated_groups = hook_state.macro_groups.clone();
+        let status = if applied.len() == 1 {
+            let (preset_id, enabled) = applied[0];
+            format!(
+                "{} macro preset {}.",
+                if enabled { "Enabled" } else { "Disabled" },
+                preset_id
+            )
+        } else {
+            let summary = applied
+                .iter()
+                .map(|(preset_id, enabled)| {
+                    format!(
+                        "{preset_id}={}",
+                        if *enabled { "enabled" } else { "disabled" }
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("Updated macro presets: {summary}.")
+        };
+        let ui_tx = hook_state.ui_tx.clone();
+        drop(hook_state);
+
+        for (preset_id, enabled) in &applied {
+            if !enabled {
+                STOP_REQUESTED_MACRO_PRESETS.lock().insert(*preset_id);
+                deactivate_hold_macro(*preset_id);
+            }
+        }
+
+        if let Some(tx) = ui_tx {
+            let _ = tx.send(UiCommand::SyncMacroGroups(updated_groups, status));
+        }
+
+        Ok(())
+    }
+
+    fn set_macro_preset_enabled(spec: &str, enabled: bool) -> Result<()> {
+        let preset_id = parse_macro_preset_id(spec)?;
+        let mut changes = HashMap::new();
+        changes.insert(preset_id, enabled);
+        set_macro_preset_enabled_batch(&changes)
+    }
+
+    fn queue_macro_preset_enabled_change(
+        pending_changes: &mut HashMap<u32, bool>,
+        spec: &str,
+        enabled: bool,
+    ) -> Result<()> {
+        let preset_id = parse_macro_preset_id(spec)?;
+        pending_changes.insert(preset_id, enabled);
+        Ok(())
+    }
+
+    fn flush_pending_macro_preset_enabled_changes(
+        pending_changes: &mut HashMap<u32, bool>,
+    ) -> Result<()> {
+        if pending_changes.is_empty() {
+            return Ok(());
+        }
+
+        let changes = std::mem::take(pending_changes);
+        set_macro_preset_enabled_batch(&changes)
+    }
+
+    fn is_macro_preset_enabled_with_pending(
+        preset_id: u32,
+        pending_changes: &HashMap<u32, bool>,
+    ) -> bool {
+        pending_changes
+            .get(&preset_id)
+            .copied()
+            .unwrap_or_else(|| is_macro_preset_enabled(preset_id))
+    }
+
+    fn collect_trigger_macro_target_ids_with_pending(
+        spec: &str,
+        bypass_enabled: bool,
+        pending_changes: &HashMap<u32, bool>,
+    ) -> Vec<u32> {
+        let target_ids = parse_macro_trigger_preset_ids(spec);
+        if bypass_enabled {
+            return target_ids;
+        }
+
+        let hook_state = HOOK_STATE.lock();
+        target_ids
+            .into_iter()
+            .filter(|preset_id| {
+                pending_changes
+                    .get(preset_id)
+                    .copied()
+                    .unwrap_or_else(|| is_macro_preset_enabled_with_guard(*preset_id, &hook_state))
+            })
+            .collect()
     }
 
     fn parse_macro_trigger_preset_ids(spec: &str) -> Vec<u32> {
@@ -19283,6 +19380,25 @@ mod windows_overlay {
         None
     }
 
+    fn should_flush_pending_macro_preset_changes(
+        step: &MacroStep,
+        pending_changes: &HashMap<u32, bool>,
+    ) -> bool {
+        !pending_changes.is_empty()
+            && (!matches!(
+                step.action,
+                MacroAction::EnableMacroPreset | MacroAction::DisableMacroPreset
+            ) || step.get_delay_ms() > 0)
+    }
+
+    fn finish_macro_run(
+        flow: MacroRunFlow,
+        pending_changes: &mut HashMap<u32, bool>,
+    ) -> MacroRunFlow {
+        let _ = flush_pending_macro_preset_enabled_changes(pending_changes);
+        flow
+    }
+
     fn execute_macro_sequence(
         preset_id: u32,
         steps: &[MacroStep],
@@ -19295,10 +19411,41 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         bypass_enabled: bool,
     ) -> MacroRunFlow {
+        let mut pending_macro_preset_changes = HashMap::new();
+        execute_macro_sequence_with_pending(
+            preset_id,
+            steps,
+            step_indices,
+            press_locked_keys,
+            press_locked_mouse_masks,
+            stop_immediately_on_retrigger,
+            target_window_title,
+            extra_target_window_titles,
+            match_duplicate_window_titles,
+            bypass_enabled,
+            &mut pending_macro_preset_changes,
+        )
+    }
+
+    fn execute_macro_sequence_with_pending(
+        preset_id: u32,
+        steps: &[MacroStep],
+        step_indices: &[usize],
+        press_locked_keys: &mut Vec<String>,
+        press_locked_mouse_masks: &mut Vec<MouseMoveLockMask>,
+        stop_immediately_on_retrigger: bool,
+        target_window_title: Option<&str>,
+        extra_target_window_titles: &[String],
+        match_duplicate_window_titles: bool,
+        bypass_enabled: bool,
+        pending_macro_preset_changes: &mut HashMap<u32, bool>,
+    ) -> MacroRunFlow {
         let mut index = 0usize;
         'outer: while index < steps.len() {
-            if !bypass_enabled && !is_macro_preset_enabled(preset_id) {
-                return MacroRunFlow::StopExecution;
+            if !bypass_enabled
+                && !is_macro_preset_enabled_with_pending(preset_id, pending_macro_preset_changes)
+            {
+                return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
             if !macro_runtime_target_matches(
@@ -19306,15 +19453,18 @@ mod windows_overlay {
                 extra_target_window_titles,
                 match_duplicate_window_titles,
             ) {
-                return MacroRunFlow::StopExecution;
+                return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
             if macro_stop_requested(preset_id, stop_immediately_on_retrigger) {
-                return MacroRunFlow::StopExecution;
+                return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
             let step = &steps[index];
             let absolute_index = step_indices[index];
+            if should_flush_pending_macro_preset_changes(step, pending_macro_preset_changes) {
+                let _ = flush_pending_macro_preset_enabled_changes(pending_macro_preset_changes);
+            }
             let is_enabled = is_macro_step_enabled(preset_id, absolute_index, step.enabled);
             let mut run_step = is_enabled;
             if step.toggle_enabled_on_run {
@@ -19338,7 +19488,7 @@ mod windows_overlay {
                 match_duplicate_window_titles,
                 bypass_enabled,
             ) {
-                return MacroRunFlow::StopExecution;
+                return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
             match step.action {
@@ -19352,7 +19502,7 @@ mod windows_overlay {
                     let loop_end_delay_ms = steps[loop_end].get_delay_ms();
                     if is_infinite_loop_marker(&step.key) {
                         loop {
-                            match execute_macro_sequence(
+                            match execute_macro_sequence_with_pending(
                                 preset_id,
                                 loop_body,
                                 loop_body_indices,
@@ -19363,9 +19513,15 @@ mod windows_overlay {
                                 extra_target_window_titles,
                                 match_duplicate_window_titles,
                                 bypass_enabled,
+                                pending_macro_preset_changes,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
-                                MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
+                                MacroRunFlow::StopExecution => {
+                                    return finish_macro_run(
+                                        MacroRunFlow::StopExecution,
+                                        pending_macro_preset_changes,
+                                    );
+                                }
                                 MacroRunFlow::Continue => {}
                                 MacroRunFlow::JumpTo(target) => {
                                     if let Some(pos) =
@@ -19374,7 +19530,10 @@ mod windows_overlay {
                                         index = pos;
                                         continue 'outer;
                                     } else {
-                                        return MacroRunFlow::JumpTo(target);
+                                        return finish_macro_run(
+                                            MacroRunFlow::JumpTo(target),
+                                            pending_macro_preset_changes,
+                                        );
                                     }
                                 }
                             }
@@ -19390,14 +19549,17 @@ mod windows_overlay {
                                     bypass_enabled,
                                 )
                             {
-                                return MacroRunFlow::StopExecution;
+                                return finish_macro_run(
+                                    MacroRunFlow::StopExecution,
+                                    pending_macro_preset_changes,
+                                );
                             }
                         }
                     } else {
                         let loop_count_str = interpolate_variables(&step.key);
                         let loop_count = loop_count_str.trim().parse::<u32>().unwrap_or(1).max(1);
                         for _ in 0..loop_count {
-                            match execute_macro_sequence(
+                            match execute_macro_sequence_with_pending(
                                 preset_id,
                                 loop_body,
                                 loop_body_indices,
@@ -19408,9 +19570,15 @@ mod windows_overlay {
                                 extra_target_window_titles,
                                 match_duplicate_window_titles,
                                 bypass_enabled,
+                                pending_macro_preset_changes,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
-                                MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
+                                MacroRunFlow::StopExecution => {
+                                    return finish_macro_run(
+                                        MacroRunFlow::StopExecution,
+                                        pending_macro_preset_changes,
+                                    );
+                                }
                                 MacroRunFlow::Continue => {}
                                 MacroRunFlow::JumpTo(target) => {
                                     if let Some(pos) =
@@ -19419,7 +19587,10 @@ mod windows_overlay {
                                         index = pos;
                                         continue 'outer;
                                     } else {
-                                        return MacroRunFlow::JumpTo(target);
+                                        return finish_macro_run(
+                                            MacroRunFlow::JumpTo(target),
+                                            pending_macro_preset_changes,
+                                        );
                                     }
                                 }
                             }
@@ -19435,7 +19606,10 @@ mod windows_overlay {
                                     bypass_enabled,
                                 )
                             {
-                                return MacroRunFlow::StopExecution;
+                                return finish_macro_run(
+                                    MacroRunFlow::StopExecution,
+                                    pending_macro_preset_changes,
+                                );
                             }
                         }
                     }
@@ -19444,7 +19618,9 @@ mod windows_overlay {
                     continue;
                 }
 
-                MacroAction::LoopEnd => return MacroRunFlow::Continue,
+                MacroAction::LoopEnd => {
+                    return finish_macro_run(MacroRunFlow::Continue, pending_macro_preset_changes);
+                }
                 MacroAction::IfStart => {
                     let (else_index, if_end_index) = find_matching_if_structure(steps, index);
                     let condition_met = evaluate_if_condition(step);
@@ -19512,7 +19688,10 @@ mod windows_overlay {
                         evaluate_math_expression_f64(&interpolated)
                     };
                     if target_val.is_nan() || target_val.is_infinite() {
-                        return MacroRunFlow::StopExecution;
+                        return finish_macro_run(
+                            MacroRunFlow::StopExecution,
+                            pending_macro_preset_changes,
+                        );
                     }
                     let target_idx = (target_val.round() as isize) - 1;
                     if target_idx >= 0 {
@@ -19521,35 +19700,53 @@ mod windows_overlay {
                             index = pos;
                             continue 'outer;
                         } else {
-                            return MacroRunFlow::JumpTo(target_abs);
+                            return finish_macro_run(
+                                MacroRunFlow::JumpTo(target_abs),
+                                pending_macro_preset_changes,
+                            );
                         }
                     } else {
-                        return MacroRunFlow::StopExecution;
+                        return finish_macro_run(
+                            MacroRunFlow::StopExecution,
+                            pending_macro_preset_changes,
+                        );
                     }
                 }
 
                 MacroAction::StopIfTriggerPressedAgain => {
                     if STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id) {
-                        return MacroRunFlow::BreakLoop;
+                        return finish_macro_run(
+                            MacroRunFlow::BreakLoop,
+                            pending_macro_preset_changes,
+                        );
                     }
                 }
 
                 MacroAction::StopIfKeyPressed => match step.get_break_loop_mode() {
                     "VarCompare" => {
                         if evaluate_if_condition(step) {
-                            return MacroRunFlow::BreakLoop;
+                            return finish_macro_run(
+                                MacroRunFlow::BreakLoop,
+                                pending_macro_preset_changes,
+                            );
                         }
                     }
 
                     "StopKey" => {
                         let keys = parse_stop_keys(&step.key);
                         if keys.iter().any(|key| stop_key_triggered(preset_id, key)) {
-                            return MacroRunFlow::BreakLoop;
+                            return finish_macro_run(
+                                MacroRunFlow::BreakLoop,
+                                pending_macro_preset_changes,
+                            );
                         }
                     }
 
                     _ => {
-                        return MacroRunFlow::BreakLoop;
+                        return finish_macro_run(
+                            MacroRunFlow::BreakLoop,
+                            pending_macro_preset_changes,
+                        );
                     }
                 },
                 MacroAction::ApplyWindowPreset => {
@@ -19565,7 +19762,11 @@ mod windows_overlay {
                 }
 
                 MacroAction::TriggerMacroPreset => {
-                    let target_ids = collect_trigger_macro_target_ids(&step.key, true);
+                    let target_ids = collect_trigger_macro_target_ids_with_pending(
+                        &step.key,
+                        true,
+                        pending_macro_preset_changes,
+                    );
                     if step.wait_for_completion {
                         for preset_id in target_ids {
                             let _ = trigger_nested_macro_preset(
@@ -19587,7 +19788,11 @@ mod windows_overlay {
                 }
 
                 MacroAction::TriggerMacroPresetIfEnabled => {
-                    let target_ids = collect_trigger_macro_target_ids(&step.key, false);
+                    let target_ids = collect_trigger_macro_target_ids_with_pending(
+                        &step.key,
+                        false,
+                        pending_macro_preset_changes,
+                    );
                     if step.wait_for_completion {
                         for preset_id in target_ids {
                             let _ = trigger_nested_macro_preset(
@@ -19718,7 +19923,10 @@ mod windows_overlay {
                             Ok(outcome) => outcome,
                             Err(error) => {
                                 eprintln!("ScanVisionOnce failed: {error}");
-                                return MacroRunFlow::Continue;
+                                return finish_macro_run(
+                                    MacroRunFlow::Continue,
+                                    pending_macro_preset_changes,
+                                );
                             }
                         };
                         let ui_tx = HOOK_STATE.lock().ui_tx.clone();
@@ -19854,11 +20062,19 @@ mod windows_overlay {
                 }
 
                 MacroAction::EnableMacroPreset => {
-                    let _ = set_macro_preset_enabled(&step.key, true);
+                    let _ = queue_macro_preset_enabled_change(
+                        pending_macro_preset_changes,
+                        &step.key,
+                        true,
+                    );
                 }
 
                 MacroAction::DisableMacroPreset => {
-                    let _ = set_macro_preset_enabled(&step.key, false);
+                    let _ = queue_macro_preset_enabled_change(
+                        pending_macro_preset_changes,
+                        &step.key,
+                        false,
+                    );
                 }
 
                 MacroAction::EnableStep => {
@@ -19883,7 +20099,7 @@ mod windows_overlay {
             index += 1;
         }
 
-        MacroRunFlow::Continue
+        finish_macro_run(MacroRunFlow::Continue, pending_macro_preset_changes)
     }
 
     fn execute_hold_macro_sequence(
@@ -19897,14 +20113,43 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         bypass_enabled: bool,
     ) -> MacroRunFlow {
+        let mut pending_macro_preset_changes = HashMap::new();
+        execute_hold_macro_sequence_with_pending(
+            preset_id,
+            steps,
+            step_indices,
+            stop_immediately_on_retrigger,
+            run_token,
+            target_window_title,
+            extra_target_window_titles,
+            match_duplicate_window_titles,
+            bypass_enabled,
+            &mut pending_macro_preset_changes,
+        )
+    }
+
+    fn execute_hold_macro_sequence_with_pending(
+        preset_id: u32,
+        steps: &[MacroStep],
+        step_indices: &[usize],
+        stop_immediately_on_retrigger: bool,
+        run_token: u64,
+        target_window_title: Option<&str>,
+        extra_target_window_titles: &[String],
+        match_duplicate_window_titles: bool,
+        bypass_enabled: bool,
+        pending_macro_preset_changes: &mut HashMap<u32, bool>,
+    ) -> MacroRunFlow {
         let mut index = 0usize;
         'outer_hold: while index < steps.len() {
-            if !bypass_enabled && !is_macro_preset_enabled(preset_id) {
-                return MacroRunFlow::StopExecution;
+            if !bypass_enabled
+                && !is_macro_preset_enabled_with_pending(preset_id, pending_macro_preset_changes)
+            {
+                return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
             if !current_hold_run_matches(preset_id, run_token) {
-                return MacroRunFlow::StopExecution;
+                return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
             if !macro_runtime_target_matches(
@@ -19912,15 +20157,18 @@ mod windows_overlay {
                 extra_target_window_titles,
                 match_duplicate_window_titles,
             ) {
-                return MacroRunFlow::StopExecution;
+                return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
             if macro_stop_requested(preset_id, stop_immediately_on_retrigger) {
-                return MacroRunFlow::StopExecution;
+                return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
             let step = &steps[index];
             let absolute_index = step_indices[index];
+            if should_flush_pending_macro_preset_changes(step, pending_macro_preset_changes) {
+                let _ = flush_pending_macro_preset_enabled_changes(pending_macro_preset_changes);
+            }
             let is_enabled = is_macro_step_enabled(preset_id, absolute_index, step.enabled);
             let mut run_step = is_enabled;
             if step.toggle_enabled_on_run {
@@ -19945,7 +20193,7 @@ mod windows_overlay {
                 match_duplicate_window_titles,
                 bypass_enabled,
             ) {
-                return MacroRunFlow::StopExecution;
+                return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
             match step.action {
@@ -19959,7 +20207,7 @@ mod windows_overlay {
                     let loop_end_delay_ms = steps[loop_end].get_delay_ms();
                     if is_infinite_loop_marker(&step.key) {
                         loop {
-                            match execute_hold_macro_sequence(
+                            match execute_hold_macro_sequence_with_pending(
                                 preset_id,
                                 loop_body,
                                 loop_body_indices,
@@ -19969,9 +20217,15 @@ mod windows_overlay {
                                 extra_target_window_titles,
                                 match_duplicate_window_titles,
                                 bypass_enabled,
+                                pending_macro_preset_changes,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
-                                MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
+                                MacroRunFlow::StopExecution => {
+                                    return finish_macro_run(
+                                        MacroRunFlow::StopExecution,
+                                        pending_macro_preset_changes,
+                                    );
+                                }
                                 MacroRunFlow::Continue => {}
                                 MacroRunFlow::JumpTo(target) => {
                                     if let Some(pos) =
@@ -19980,7 +20234,10 @@ mod windows_overlay {
                                         index = pos;
                                         continue 'outer_hold;
                                     } else {
-                                        return MacroRunFlow::JumpTo(target);
+                                        return finish_macro_run(
+                                            MacroRunFlow::JumpTo(target),
+                                            pending_macro_preset_changes,
+                                        );
                                     }
                                 }
                             }
@@ -19997,14 +20254,17 @@ mod windows_overlay {
                                     bypass_enabled,
                                 )
                             {
-                                return MacroRunFlow::StopExecution;
+                                return finish_macro_run(
+                                    MacroRunFlow::StopExecution,
+                                    pending_macro_preset_changes,
+                                );
                             }
                         }
                     } else {
                         let loop_count_str = interpolate_variables(&step.key);
                         let loop_count = loop_count_str.trim().parse::<u32>().unwrap_or(1).max(1);
                         for _ in 0..loop_count {
-                            match execute_hold_macro_sequence(
+                            match execute_hold_macro_sequence_with_pending(
                                 preset_id,
                                 loop_body,
                                 loop_body_indices,
@@ -20014,9 +20274,15 @@ mod windows_overlay {
                                 extra_target_window_titles,
                                 match_duplicate_window_titles,
                                 bypass_enabled,
+                                pending_macro_preset_changes,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
-                                MacroRunFlow::StopExecution => return MacroRunFlow::StopExecution,
+                                MacroRunFlow::StopExecution => {
+                                    return finish_macro_run(
+                                        MacroRunFlow::StopExecution,
+                                        pending_macro_preset_changes,
+                                    );
+                                }
                                 MacroRunFlow::Continue => {}
                                 MacroRunFlow::JumpTo(target) => {
                                     if let Some(pos) =
@@ -20025,7 +20291,10 @@ mod windows_overlay {
                                         index = pos;
                                         continue 'outer_hold;
                                     } else {
-                                        return MacroRunFlow::JumpTo(target);
+                                        return finish_macro_run(
+                                            MacroRunFlow::JumpTo(target),
+                                            pending_macro_preset_changes,
+                                        );
                                     }
                                 }
                             }
@@ -20042,7 +20311,10 @@ mod windows_overlay {
                                     bypass_enabled,
                                 )
                             {
-                                return MacroRunFlow::StopExecution;
+                                return finish_macro_run(
+                                    MacroRunFlow::StopExecution,
+                                    pending_macro_preset_changes,
+                                );
                             }
                         }
                     }
@@ -20051,7 +20323,9 @@ mod windows_overlay {
                     continue;
                 }
 
-                MacroAction::LoopEnd => return MacroRunFlow::Continue,
+                MacroAction::LoopEnd => {
+                    return finish_macro_run(MacroRunFlow::Continue, pending_macro_preset_changes);
+                }
                 MacroAction::IfStart => {
                     let (else_index, if_end_index) = find_matching_if_structure(steps, index);
                     let condition_met = evaluate_if_condition(step);
@@ -20119,7 +20393,10 @@ mod windows_overlay {
                         evaluate_math_expression_f64(&interpolated)
                     };
                     if target_val.is_nan() || target_val.is_infinite() {
-                        return MacroRunFlow::StopExecution;
+                        return finish_macro_run(
+                            MacroRunFlow::StopExecution,
+                            pending_macro_preset_changes,
+                        );
                     }
                     let target_idx = (target_val.round() as isize) - 1;
                     if target_idx >= 0 {
@@ -20128,35 +20405,53 @@ mod windows_overlay {
                             index = pos;
                             continue 'outer_hold;
                         } else {
-                            return MacroRunFlow::JumpTo(target_abs);
+                            return finish_macro_run(
+                                MacroRunFlow::JumpTo(target_abs),
+                                pending_macro_preset_changes,
+                            );
                         }
                     } else {
-                        return MacroRunFlow::StopExecution;
+                        return finish_macro_run(
+                            MacroRunFlow::StopExecution,
+                            pending_macro_preset_changes,
+                        );
                     }
                 }
 
                 MacroAction::StopIfTriggerPressedAgain => {
                     if STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id) {
-                        return MacroRunFlow::BreakLoop;
+                        return finish_macro_run(
+                            MacroRunFlow::BreakLoop,
+                            pending_macro_preset_changes,
+                        );
                     }
                 }
 
                 MacroAction::StopIfKeyPressed => match step.get_break_loop_mode() {
                     "VarCompare" => {
                         if evaluate_if_condition(step) {
-                            return MacroRunFlow::BreakLoop;
+                            return finish_macro_run(
+                                MacroRunFlow::BreakLoop,
+                                pending_macro_preset_changes,
+                            );
                         }
                     }
 
                     "StopKey" => {
                         let keys = parse_stop_keys(&step.key);
                         if keys.iter().any(|key| stop_key_triggered(preset_id, key)) {
-                            return MacroRunFlow::BreakLoop;
+                            return finish_macro_run(
+                                MacroRunFlow::BreakLoop,
+                                pending_macro_preset_changes,
+                            );
                         }
                     }
 
                     _ => {
-                        return MacroRunFlow::BreakLoop;
+                        return finish_macro_run(
+                            MacroRunFlow::BreakLoop,
+                            pending_macro_preset_changes,
+                        );
                     }
                 },
                 MacroAction::ApplyWindowPreset => {
@@ -20296,7 +20591,10 @@ mod windows_overlay {
                             Ok(outcome) => outcome,
                             Err(error) => {
                                 eprintln!("ScanVisionOnce failed: {error}");
-                                return MacroRunFlow::Continue;
+                                return finish_macro_run(
+                                    MacroRunFlow::Continue,
+                                    pending_macro_preset_changes,
+                                );
                             }
                         };
                         let ui_tx = HOOK_STATE.lock().ui_tx.clone();
@@ -20402,11 +20700,19 @@ mod windows_overlay {
                 }
 
                 MacroAction::EnableMacroPreset => {
-                    let _ = set_macro_preset_enabled(&step.key, true);
+                    let _ = queue_macro_preset_enabled_change(
+                        pending_macro_preset_changes,
+                        &step.key,
+                        true,
+                    );
                 }
 
                 MacroAction::DisableMacroPreset => {
-                    let _ = set_macro_preset_enabled(&step.key, false);
+                    let _ = queue_macro_preset_enabled_change(
+                        pending_macro_preset_changes,
+                        &step.key,
+                        false,
+                    );
                 }
 
                 MacroAction::EnableStep => {
@@ -20431,7 +20737,7 @@ mod windows_overlay {
             index += 1;
         }
 
-        MacroRunFlow::Continue
+        finish_macro_run(MacroRunFlow::Continue, pending_macro_preset_changes)
     }
 
     fn sleep_for_hold_delay(

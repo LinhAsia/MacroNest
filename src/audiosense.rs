@@ -1,6 +1,6 @@
+use anyhow::Result;
 #[cfg(not(windows))]
 use anyhow::bail;
-use anyhow::Result;
 #[cfg(windows)]
 use std::collections::VecDeque;
 use std::sync::{
@@ -11,9 +11,7 @@ use std::thread::{self, JoinHandle};
 #[cfg(windows)]
 use std::time::{Duration, Instant};
 
-use crate::model::{
-    AudioSenseMonitorSettings, AudioSenseSource, PitchAudioSenseSettings,
-};
+use crate::model::{AudioSenseMonitorSettings, AudioSenseSource, PitchAudioSenseSettings};
 
 #[derive(Clone, Debug)]
 pub struct PitchSnapshot {
@@ -86,7 +84,8 @@ impl PitchMonitor {
         let worker = thread::Builder::new()
             .name("audiosense-pitch".to_owned())
             .spawn(move || {
-                let result = run_pitch_loop(Arc::clone(&state), Arc::clone(&stop_for_thread), config);
+                let result =
+                    run_pitch_loop(Arc::clone(&state), Arc::clone(&stop_for_thread), config);
                 let mut snapshot = state.lock().unwrap();
                 snapshot.running = false;
                 if let Err(error) = result {
@@ -269,9 +268,12 @@ fn run_pitch_loop(
                 let analysis_window = pitch_samples.iter().copied().collect::<Vec<_>>();
                 let accept_confidence = (config.min_confidence as f32 / 1000.0).max(0.0).min(1.0);
                 let level_gate = (config.min_level as f32 / 1000.0).max(0.0);
-                if let Some((frequency, confidence)) =
-                    detect_pitch(&analysis_window, ANALYSIS_SAMPLE_RATE, accept_confidence, level_gate)
-                {
+                if let Some((frequency, confidence)) = detect_pitch(
+                    &analysis_window,
+                    ANALYSIS_SAMPLE_RATE,
+                    accept_confidence,
+                    level_gate,
+                ) {
                     let candidate_note = pitch_to_spn(frequency, config.show_sharps);
                     let sustain_confidence = accept_confidence * 0.75;
                     let sustained_note =
@@ -358,7 +360,12 @@ fn rms_level(samples: &[f32]) -> f32 {
     (sum / samples.len() as f32).sqrt()
 }
 
-fn detect_pitch(samples: &[f32], sample_rate: u32, accept_confidence: f32, level_gate: f32) -> Option<(f32, f32)> {
+fn detect_pitch(
+    samples: &[f32],
+    sample_rate: u32,
+    accept_confidence: f32,
+    level_gate: f32,
+) -> Option<(f32, f32)> {
     if samples.len() < 1024 {
         return None;
     }

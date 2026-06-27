@@ -1228,7 +1228,7 @@ impl CrosshairApp {
                         ),
                         false,
                         true,
-                        false,
+                        true,
                     );
                     ui.horizontal_wrapped(|ui| {
                         if ui
@@ -2129,6 +2129,7 @@ impl CrosshairApp {
             coord_height,
             content_scale,
             preview_content_rect,
+            coordinate_space_rect,
             coords_origin_x,
             coords_origin_y,
         ) = if let Some(preview_frame) = preview {
@@ -2140,81 +2141,129 @@ impl CrosshairApp {
                 preview_frame.logical_width.max(1) as f32 * scale,
                 preview_frame.logical_height.max(1) as f32 * scale,
             );
-            let (content_scale, preview_content_rect) =
-                if allow_wheel_zoom && use_preview_local_coordinates {
-                    let zoom_id = ui.make_persistent_id((id_source, "zoom-editor-view-scale"));
-                    let pan_id = ui.make_persistent_id((id_source, "zoom-editor-view-pan"));
-                    let mut view_zoom =
-                        ui.data_mut(|d| d.get_temp::<f32>(zoom_id).unwrap_or(1.0).clamp(1.0, 16.0));
-                    let mut view_pan =
-                        ui.data_mut(|d| d.get_temp::<egui::Vec2>(pan_id).unwrap_or_default());
-                    let base_rect = egui::Rect::from_min_size(base_window_pos, base_window_size);
-                    let visible_zoom_rect = egui::Rect::from_center_size(
-                        base_rect.center() + view_pan,
-                        base_rect.size() * view_zoom,
-                    )
-                    .intersect(selection_bounds_rect);
+            let base_window_rect = egui::Rect::from_min_size(base_window_pos, base_window_size);
+            let (
+                content_scale,
+                preview_content_rect,
+                coordinate_space_rect,
+                screen_coords_origin_x,
+                screen_coords_origin_y,
+            ) = if allow_wheel_zoom {
+                let zoom_id = ui.make_persistent_id((id_source, "zoom-editor-view-scale"));
+                let pan_id = ui.make_persistent_id((id_source, "zoom-editor-view-pan"));
+                let mut view_zoom =
+                    ui.data_mut(|d| d.get_temp::<f32>(zoom_id).unwrap_or(1.0).clamp(1.0, 16.0));
+                let mut view_pan =
+                    ui.data_mut(|d| d.get_temp::<egui::Vec2>(pan_id).unwrap_or_default());
+                let base_view_rect = if use_preview_local_coordinates {
+                    base_window_rect
+                } else {
+                    selection_bounds_rect
+                };
+                let zoom_hit_rect = if use_preview_local_coordinates {
+                    base_window_rect.intersect(selection_bounds_rect)
+                } else {
+                    selection_bounds_rect
+                };
 
-                    if let Some(pointer_pos) = ui.input(|input| input.pointer.hover_pos())
-                        && visible_zoom_rect.contains(pointer_pos)
-                    {
-                        let scroll_y = ui.input(|input| input.raw_scroll_delta.y);
-                        if scroll_y.abs() > 0.0 {
-                            ui.ctx().input_mut(|input| {
-                                input.raw_scroll_delta = egui::Vec2::ZERO;
-                                input.smooth_scroll_delta = egui::Vec2::ZERO;
-                            });
-                            let old_zoom = view_zoom;
-                            let factor = if scroll_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
-                            view_zoom = (view_zoom * factor).clamp(1.0, 16.0);
-                            if (view_zoom - old_zoom).abs() > f32::EPSILON {
-                                let old_size = base_rect.size() * old_zoom;
-                                let old_min = base_rect.center() - old_size * 0.5 + view_pan;
-                                let rel_x = if old_size.x > 0.0 {
-                                    ((pointer_pos.x - old_min.x) / old_size.x).clamp(0.0, 1.0)
-                                } else {
-                                    0.5
-                                };
-                                let rel_y = if old_size.y > 0.0 {
-                                    ((pointer_pos.y - old_min.y) / old_size.y).clamp(0.0, 1.0)
-                                } else {
-                                    0.5
-                                };
-                                let new_size = base_rect.size() * view_zoom;
-                                let new_min = egui::pos2(
-                                    pointer_pos.x - rel_x * new_size.x,
-                                    pointer_pos.y - rel_y * new_size.y,
-                                );
-                                view_pan = new_min - (base_rect.center() - new_size * 0.5);
-                            }
+                if let Some(pointer_pos) = ui.input(|input| input.pointer.hover_pos())
+                    && zoom_hit_rect.contains(pointer_pos)
+                {
+                    let scroll_y = ui.input(|input| {
+                        if input.modifiers.ctrl {
+                            input.raw_scroll_delta.y
+                        } else {
+                            0.0
+                        }
+                    });
+                    if scroll_y.abs() > 0.0 {
+                        ui.ctx().input_mut(|input| {
+                            input.raw_scroll_delta = egui::Vec2::ZERO;
+                            input.smooth_scroll_delta = egui::Vec2::ZERO;
+                        });
+                        let old_zoom = view_zoom;
+                        let factor = if scroll_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
+                        view_zoom = (view_zoom * factor).clamp(1.0, 16.0);
+                        if (view_zoom - old_zoom).abs() > f32::EPSILON {
+                            let old_size = base_view_rect.size() * old_zoom;
+                            let old_min = base_view_rect.center() - old_size * 0.5 + view_pan;
+                            let rel_x = if old_size.x > 0.0 {
+                                ((pointer_pos.x - old_min.x) / old_size.x).clamp(0.0, 1.0)
+                            } else {
+                                0.5
+                            };
+                            let rel_y = if old_size.y > 0.0 {
+                                ((pointer_pos.y - old_min.y) / old_size.y).clamp(0.0, 1.0)
+                            } else {
+                                0.5
+                            };
+                            let new_size = base_view_rect.size() * view_zoom;
+                            let new_min = egui::pos2(
+                                pointer_pos.x - rel_x * new_size.x,
+                                pointer_pos.y - rel_y * new_size.y,
+                            );
+                            view_pan = new_min - (base_view_rect.center() - new_size * 0.5);
                         }
                     }
+                }
 
-                    if view_zoom <= 1.0001 {
-                        view_zoom = 1.0;
-                        view_pan = egui::Vec2::ZERO;
-                    }
-                    ui.data_mut(|d| {
-                        d.insert_temp(zoom_id, view_zoom);
-                        d.insert_temp(pan_id, view_pan);
-                    });
+                if view_zoom <= 1.0001 {
+                    view_zoom = 1.0;
+                    view_pan = egui::Vec2::ZERO;
+                }
+                ui.data_mut(|d| {
+                    d.insert_temp(zoom_id, view_zoom);
+                    d.insert_temp(pan_id, view_pan);
+                });
 
-                    let zoomed_size = base_rect.size() * view_zoom;
-                    let zoomed_rect =
-                        egui::Rect::from_center_size(base_rect.center() + view_pan, zoomed_size);
-                    (scale * view_zoom, zoomed_rect)
+                let zoomed_view_rect = egui::Rect::from_center_size(
+                    base_view_rect.center() + view_pan,
+                    base_view_rect.size() * view_zoom,
+                );
+                let content_scale = scale * view_zoom;
+                let preview_content_rect = if use_preview_local_coordinates {
+                    zoomed_view_rect
                 } else {
-                    (
-                        scale,
-                        egui::Rect::from_min_size(base_window_pos, base_window_size),
+                    egui::Rect::from_min_size(
+                        egui::pos2(
+                            zoomed_view_rect.left()
+                                + (preview_frame.screen_x as f32 * content_scale),
+                            zoomed_view_rect.top()
+                                + (preview_frame.screen_y as f32 * content_scale),
+                        ),
+                        vec2(
+                            preview_frame.logical_width.max(1) as f32 * content_scale,
+                            preview_frame.logical_height.max(1) as f32 * content_scale,
+                        ),
                     )
                 };
+                (
+                    content_scale,
+                    preview_content_rect,
+                    if use_preview_local_coordinates {
+                        preview_content_rect
+                    } else {
+                        zoomed_view_rect
+                    },
+                    zoomed_view_rect.left(),
+                    zoomed_view_rect.top(),
+                )
+            } else {
+                (
+                    scale,
+                    base_window_rect,
+                    selection_bounds_rect,
+                    selection_bounds_rect.left(),
+                    selection_bounds_rect.top(),
+                )
+            };
             if use_preview_local_coordinates {
                 (
                     preview_frame.logical_width.max(1) as f32,
                     preview_frame.logical_height.max(1) as f32,
                     content_scale,
                     preview_content_rect,
+                    coordinate_space_rect,
                     preview_content_rect.left(),
                     preview_content_rect.top(),
                 )
@@ -2224,8 +2273,9 @@ impl CrosshairApp {
                     screen_size.y,
                     content_scale,
                     preview_content_rect,
-                    selection_bounds_rect.left(),
-                    selection_bounds_rect.top(),
+                    coordinate_space_rect,
+                    screen_coords_origin_x,
+                    screen_coords_origin_y,
                 )
             }
         } else if let Some((
@@ -2236,7 +2286,7 @@ impl CrosshairApp {
         )) = preview_metrics_fallback.filter(|(_, _, logical_width, logical_height)| {
             *logical_width > 0 && *logical_height > 0
         }) {
-            let preview_content_rect = egui::Rect::from_min_size(
+            let base_window_rect = egui::Rect::from_min_size(
                 egui::pos2(
                     selection_bounds_rect.left() + (fallback_screen_x as f32 * scale),
                     selection_bounds_rect.top() + (fallback_screen_y as f32 * scale),
@@ -2246,12 +2296,126 @@ impl CrosshairApp {
                     fallback_logical_height.max(1) as f32 * scale,
                 ),
             );
+            let (
+                content_scale,
+                preview_content_rect,
+                coordinate_space_rect,
+                screen_coords_origin_x,
+                screen_coords_origin_y,
+            ) = if allow_wheel_zoom {
+                let zoom_id = ui.make_persistent_id((id_source, "zoom-editor-view-scale"));
+                let pan_id = ui.make_persistent_id((id_source, "zoom-editor-view-pan"));
+                let mut view_zoom =
+                    ui.data_mut(|d| d.get_temp::<f32>(zoom_id).unwrap_or(1.0).clamp(1.0, 16.0));
+                let mut view_pan =
+                    ui.data_mut(|d| d.get_temp::<egui::Vec2>(pan_id).unwrap_or_default());
+                let base_view_rect = if use_preview_local_coordinates {
+                    base_window_rect
+                } else {
+                    selection_bounds_rect
+                };
+                let zoom_hit_rect = if use_preview_local_coordinates {
+                    base_window_rect.intersect(selection_bounds_rect)
+                } else {
+                    selection_bounds_rect
+                };
+
+                if let Some(pointer_pos) = ui.input(|input| input.pointer.hover_pos())
+                    && zoom_hit_rect.contains(pointer_pos)
+                {
+                    let scroll_y = ui.input(|input| {
+                        if input.modifiers.ctrl {
+                            input.raw_scroll_delta.y
+                        } else {
+                            0.0
+                        }
+                    });
+                    if scroll_y.abs() > 0.0 {
+                        ui.ctx().input_mut(|input| {
+                            input.raw_scroll_delta = egui::Vec2::ZERO;
+                            input.smooth_scroll_delta = egui::Vec2::ZERO;
+                        });
+                        let old_zoom = view_zoom;
+                        let factor = if scroll_y > 0.0 { 1.12 } else { 1.0 / 1.12 };
+                        view_zoom = (view_zoom * factor).clamp(1.0, 16.0);
+                        if (view_zoom - old_zoom).abs() > f32::EPSILON {
+                            let old_size = base_view_rect.size() * old_zoom;
+                            let old_min = base_view_rect.center() - old_size * 0.5 + view_pan;
+                            let rel_x = if old_size.x > 0.0 {
+                                ((pointer_pos.x - old_min.x) / old_size.x).clamp(0.0, 1.0)
+                            } else {
+                                0.5
+                            };
+                            let rel_y = if old_size.y > 0.0 {
+                                ((pointer_pos.y - old_min.y) / old_size.y).clamp(0.0, 1.0)
+                            } else {
+                                0.5
+                            };
+                            let new_size = base_view_rect.size() * view_zoom;
+                            let new_min = egui::pos2(
+                                pointer_pos.x - rel_x * new_size.x,
+                                pointer_pos.y - rel_y * new_size.y,
+                            );
+                            view_pan = new_min - (base_view_rect.center() - new_size * 0.5);
+                        }
+                    }
+                }
+
+                if view_zoom <= 1.0001 {
+                    view_zoom = 1.0;
+                    view_pan = egui::Vec2::ZERO;
+                }
+                ui.data_mut(|d| {
+                    d.insert_temp(zoom_id, view_zoom);
+                    d.insert_temp(pan_id, view_pan);
+                });
+
+                let zoomed_view_rect = egui::Rect::from_center_size(
+                    base_view_rect.center() + view_pan,
+                    base_view_rect.size() * view_zoom,
+                );
+                let content_scale = scale * view_zoom;
+                let preview_content_rect = if use_preview_local_coordinates {
+                    zoomed_view_rect
+                } else {
+                    egui::Rect::from_min_size(
+                        egui::pos2(
+                            zoomed_view_rect.left() + (fallback_screen_x as f32 * content_scale),
+                            zoomed_view_rect.top() + (fallback_screen_y as f32 * content_scale),
+                        ),
+                        vec2(
+                            fallback_logical_width.max(1) as f32 * content_scale,
+                            fallback_logical_height.max(1) as f32 * content_scale,
+                        ),
+                    )
+                };
+                (
+                    content_scale,
+                    preview_content_rect,
+                    if use_preview_local_coordinates {
+                        preview_content_rect
+                    } else {
+                        zoomed_view_rect
+                    },
+                    zoomed_view_rect.left(),
+                    zoomed_view_rect.top(),
+                )
+            } else {
+                (
+                    scale,
+                    base_window_rect,
+                    selection_bounds_rect,
+                    selection_bounds_rect.left(),
+                    selection_bounds_rect.top(),
+                )
+            };
             if use_preview_local_coordinates {
                 (
                     fallback_logical_width.max(1) as f32,
                     fallback_logical_height.max(1) as f32,
-                    scale,
+                    content_scale,
                     preview_content_rect,
+                    coordinate_space_rect,
                     preview_content_rect.left(),
                     preview_content_rect.top(),
                 )
@@ -2259,10 +2423,11 @@ impl CrosshairApp {
                 (
                     screen_size.x,
                     screen_size.y,
-                    scale,
+                    content_scale,
                     preview_content_rect,
-                    selection_bounds_rect.left(),
-                    selection_bounds_rect.top(),
+                    coordinate_space_rect,
+                    screen_coords_origin_x,
+                    screen_coords_origin_y,
                 )
             }
         } else {
@@ -2270,6 +2435,7 @@ impl CrosshairApp {
                 screen_size.x,
                 screen_size.y,
                 scale,
+                selection_bounds_rect,
                 selection_bounds_rect,
                 selection_bounds_rect.left(),
                 selection_bounds_rect.top(),
@@ -2337,7 +2503,7 @@ impl CrosshairApp {
         {
             preview_content_rect
         } else {
-            selection_bounds_rect
+            coordinate_space_rect
         };
         rect = rect.intersect(active_bounds_rect);
         if rect.width() < min_size.x {

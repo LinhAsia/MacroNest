@@ -148,10 +148,7 @@ impl CrosshairApp {
                                         .horizontal(|ui| {
                                             let label_response = ui.add_sized(
                                                 [148.0, 0.0],
-                                                egui::Button::selectable(
-                                                    is_selected,
-                                                    pack.label,
-                                                ),
+                                                egui::Button::selectable(is_selected, pack.label),
                                             );
                                             if is_downloading {
                                                 ui.add_sized([82.0, 18.0], egui::Spinner::new());
@@ -173,28 +170,40 @@ impl CrosshairApp {
                         ui.end_row();
 
                         // Scan Region (X, Y, W, H)
-                        ui.label(Self::tr_lang(language, "Scan Region (X, Y, W, H)", "Scan Region (X, Y, W, H)"));
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Scan Region (X, Y, W, H)",
+                            "Scan Region (X, Y, W, H)",
+                        ));
                         ui.horizontal(|ui| {
                             let mut changed = false;
                             ui.label("X:");
-                            changed |= ui.add(egui::DragValue::new(&mut preset.x).range(0..=10000)).changed();
+                            changed |= ui
+                                .add(egui::DragValue::new(&mut preset.x).range(0..=10000))
+                                .changed();
                             ui.add_space(6.0);
                             ui.label("Y:");
-                            changed |= ui.add(egui::DragValue::new(&mut preset.y).range(0..=10000)).changed();
+                            changed |= ui
+                                .add(egui::DragValue::new(&mut preset.y).range(0..=10000))
+                                .changed();
                             ui.add_space(6.0);
                             ui.label("W:");
-                            changed |= ui.add(egui::DragValue::new(&mut preset.width).range(10..=5000)).changed();
+                            changed |= ui
+                                .add(egui::DragValue::new(&mut preset.width).range(10..=5000))
+                                .changed();
                             ui.add_space(6.0);
                             ui.label("H:");
-                            changed |= ui.add(egui::DragValue::new(&mut preset.height).range(10..=5000)).changed();
+                            changed |= ui
+                                .add(egui::DragValue::new(&mut preset.height).range(10..=5000))
+                                .changed();
 
-                             ui.add_space(10.0);
-                             if ui
-                                 .button(Self::tr_lang(language, "Pick area", "Pick area"))
-                                 .clicked()
-                             {
-                                 start_ocr_capture_preset_id = Some(preset.id);
-                             }
+                            ui.add_space(10.0);
+                            if ui
+                                .button(Self::tr_lang(language, "Pick area", "Pick area"))
+                                .clicked()
+                            {
+                                start_ocr_capture_preset_id = Some(preset.id);
+                            }
 
                             if changed {
                                 live_sync = true;
@@ -206,7 +215,11 @@ impl CrosshairApp {
                         ui.label(Self::tr_lang(language, "Preview", "Preview"));
                         let prev_resp = ui.checkbox(
                             &mut preset.preview_enabled,
-                            Self::tr_lang(language, "Stream preview in editor", "Stream preview in editor"),
+                            Self::tr_lang(
+                                language,
+                                "Stream preview in editor",
+                                "Stream preview in editor",
+                            ),
                         );
                         if prev_resp.changed() {
                             live_sync = true;
