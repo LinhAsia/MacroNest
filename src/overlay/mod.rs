@@ -1912,6 +1912,7 @@ mod windows_overlay {
         StartupStateLoaded {
             state: crate::model::AppState,
             startup_state_dirty: bool,
+            startup_state_needs_cjk_fallback: bool,
         },
         StartupStateLoadFailed(String),
         SyncMacroGroups(Vec<MacroGroup>, String),
@@ -28309,6 +28310,7 @@ mod fallback {
         StartupStateLoaded {
             state: crate::model::AppState,
             startup_state_dirty: bool,
+            startup_state_needs_cjk_fallback: bool,
         },
         VisionFinished(String),
         MacroStepInlineFeedback {
