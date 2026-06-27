@@ -2,7 +2,7 @@ use eframe::egui;
 use std::time::Instant;
 
 use crate::{
-    audio, audiosense,
+    audiosense,
     model::{AppState, AudioSensePresetKind, ProfileRecord, TimerPreset},
     overlay::{OverlayCommand, UiCommand},
     window_list,
@@ -223,16 +223,6 @@ impl CrosshairApp {
         let _ = self.overlay_tx.send(OverlayCommand::UpdateGroqSettings(
             self.state.groq_settings.clone(),
         ));
-    }
-
-    pub(crate) fn preload_primary_sound_preset_audio(&self) {
-        let Some(path) = self.state.audio_settings.presets.iter().find_map(|preset| {
-            let path = preset.clip.file_path.trim();
-            (!path.is_empty()).then(|| path.to_owned())
-        }) else {
-            return;
-        };
-        let _ = audio::preload_preview_audio(&path);
     }
 
     pub(crate) fn apply_loaded_startup_state(
