@@ -1764,8 +1764,11 @@ impl CrosshairApp {
             }
         };
 
-        if response.drag_started() {
-            if let Some(pointer_pos) = response.interact_pointer_pos() {
+        if response.hovered() && ui.input(|i| i.pointer.primary_pressed()) {
+            if let Some(pointer_pos) = ui
+                .input(|i| i.pointer.press_origin())
+                .or_else(|| response.interact_pointer_pos())
+            {
                 active_handle = pick_window_drag_handle(pointer_pos, window_rect);
                 ui.data_mut(|d| d.insert_temp(drag_id, active_handle));
             }
@@ -2630,8 +2633,11 @@ impl CrosshairApp {
         let mut drag_anchor: egui::Pos2 =
             ui.data_mut(|d| d.get_temp(anchor_id).unwrap_or(egui::Pos2::ZERO));
 
-        if response.drag_started() {
-            if let Some(pointer_pos) = response.interact_pointer_pos() {
+        if response.hovered() && ui.input(|i| i.pointer.primary_pressed()) {
+            if let Some(pointer_pos) = ui
+                .input(|i| i.pointer.press_origin())
+                .or_else(|| response.interact_pointer_pos())
+            {
                 active_handle = pick_selection_drag_handle(pointer_pos, rect);
                 ui.data_mut(|d| d.insert_temp(drag_id, active_handle));
 
