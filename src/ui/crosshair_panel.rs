@@ -19,6 +19,8 @@ impl CrosshairApp {
         let mut dragging = false;
         let screen_size = Self::screen_size();
         let (offset_limit_x, offset_limit_y) = Self::crosshair_position_limits(screen_size);
+        let inline_field_width = 280.0;
+        let side_button_size = [60.0, 20.0];
         egui::Grid::new(grid_id)
             .num_columns(2)
             .spacing([14.0, 8.0])
@@ -64,19 +66,28 @@ impl CrosshairApp {
                 ui.end_row();
 
                 ui.label(Self::tr_lang(language, "Link lengths", "Link lengths"));
-                if ui
-                    .selectable_label(
-                        *link_lengths,
-                        Self::tr_lang(language, "Keep H/V equal", "Keep H/V equal"),
-                    )
-                    .clicked()
-                {
-                    *link_lengths = !*link_lengths;
-                    if *link_lengths {
-                        style.vertical_length = style.horizontal_length;
+                ui.horizontal(|ui| {
+                    let status_text = if *link_lengths {
+                        Self::tr_lang(language, "Keep H/V equal", "Keep H/V equal")
+                    } else {
+                        Self::tr_lang(language, "Horizontal/vertical separate", "Horizontal/vertical separate")
+                    };
+                    ui.add_sized([inline_field_width, 20.0], Label::new(status_text));
+                    if ui
+                        .add_sized(
+                            side_button_size,
+                            Button::new(Self::tr_lang(language, "Link", "Link"))
+                                .selected(*link_lengths),
+                        )
+                        .clicked()
+                    {
+                        *link_lengths = !*link_lengths;
+                        if *link_lengths {
+                            style.vertical_length = style.horizontal_length;
+                        }
+                        changed = true;
                     }
-                    changed = true;
-                }
+                });
                 ui.end_row();
 
                 ui.label(Self::tr_lang(language, "Thickness", "Thickness"));
@@ -102,7 +113,7 @@ impl CrosshairApp {
                 ui.label(Self::tr_lang(language, "X", "X"));
                 ui.horizontal(|ui| {
                     let response = ui.add_sized(
-                        [280.0, 20.0],
+                        [inline_field_width, 20.0],
                         DragValue::new(&mut style.x_offset)
                             .range(0..=offset_limit_x)
                             .speed(1.0),
@@ -110,7 +121,10 @@ impl CrosshairApp {
                     changed |= response.changed();
                     dragging |= response.dragged();
                     if ui
-                        .button(Self::tr_lang(language, "Center", "Center"))
+                        .add_sized(
+                            side_button_size,
+                            Button::new(Self::tr_lang(language, "Center", "Center")),
+                        )
                         .clicked()
                     {
                         style.x_offset = DEFAULT_CROSSHAIR_X_OFFSET;
@@ -122,7 +136,7 @@ impl CrosshairApp {
                 ui.label(Self::tr_lang(language, "Y", "Y"));
                 ui.horizontal(|ui| {
                     let response = ui.add_sized(
-                        [280.0, 20.0],
+                        [inline_field_width, 20.0],
                         DragValue::new(&mut style.y_offset)
                             .range(0..=offset_limit_y)
                             .speed(1.0),
@@ -130,7 +144,10 @@ impl CrosshairApp {
                     changed |= response.changed();
                     dragging |= response.dragged();
                     if ui
-                        .button(Self::tr_lang(language, "Center", "Center"))
+                        .add_sized(
+                            side_button_size,
+                            Button::new(Self::tr_lang(language, "Center", "Center")),
+                        )
                         .clicked()
                     {
                         style.y_offset = DEFAULT_CROSSHAIR_Y_OFFSET;
