@@ -7266,23 +7266,7 @@ mod windows_overlay {
         entries: &[QuickKeyDisplayEntry],
         now: Instant,
     ) -> Option<(Instant, f32)> {
-        let modifier_aliases: Option<&[&str]> =
-            if aliases.contains(&"LShift") || aliases.contains(&"RShift") {
-                Some(&["Shift"])
-            } else if aliases.contains(&"LCtrl") || aliases.contains(&"RCtrl") {
-                Some(&["Ctrl"])
-            } else if aliases.contains(&"LAlt") || aliases.contains(&"RAlt") {
-                Some(&["Alt"])
-            } else {
-                None
-            };
-
-        let matches_aliases = |key_name: &str| {
-            quick_key_display_alias_match(key_name, aliases)
-                || modifier_aliases.is_some_and(|extra_aliases| {
-                    quick_key_display_alias_match(key_name, extra_aliases)
-                })
-        };
+        let matches_aliases = |key_name: &str| quick_key_display_alias_match(key_name, aliases);
 
         let held = held_keys.iter().any(|key_name| matches_aliases(key_name));
         let mut latest_activity: Option<(Instant, f32)> = None;
@@ -21861,6 +21845,30 @@ mod windows_overlay {
                 older,
                 1.0,
             ));
+        }
+
+        #[test]
+        fn test_mascot_keeps_left_right_modifiers_separate() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let now = Instant::now();
+            let mut held_keys = HashSet::new();
+            held_keys.insert("Shift".to_owned());
+            held_keys.insert("LShift".to_owned());
+
+            assert!(quick_key_display_mascot_key_activity(
+                &["LShift"],
+                &held_keys,
+                &[],
+                now,
+            )
+            .is_some());
+            assert!(quick_key_display_mascot_key_activity(
+                &["RShift"],
+                &held_keys,
+                &[],
+                now,
+            )
+            .is_none());
         }
 
         #[test]

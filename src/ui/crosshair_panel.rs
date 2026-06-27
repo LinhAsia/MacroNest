@@ -67,12 +67,7 @@ impl CrosshairApp {
 
                 ui.label(Self::tr_lang(language, "Link lengths", "Link lengths"));
                 ui.horizontal(|ui| {
-                    let status_text = if *link_lengths {
-                        Self::tr_lang(language, "Keep H/V equal", "Keep H/V equal")
-                    } else {
-                        Self::tr_lang(language, "Horizontal/vertical separate", "Horizontal/vertical separate")
-                    };
-                    ui.add_sized([inline_field_width, 20.0], Label::new(status_text));
+                    ui.add_space(inline_field_width);
                     if ui
                         .add_sized(
                             side_button_size,
