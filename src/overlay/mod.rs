@@ -132,10 +132,11 @@ mod windows_overlay {
                     GetAncestor, GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow,
                     GetMessageW, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW,
                     GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU,
-                    HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT,
+                    HTCAPTION, HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT,
                     KillTimer, LR_LOADFROMFILE, LoadCursorW, LoadImageW, MA_NOACTIVATE,
                     MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage,
                     RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN,
+                    SC_MOVE,
                     SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SPI_GETMOUSESPEED,
                     SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOWNA, SWP_FRAMECHANGED,
                     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
@@ -144,10 +145,11 @@ mod windows_overlay {
                     TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
                     UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
                     WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
+                    WM_CANCELMODE,
                     WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
                     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
                     WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE,
-                    WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+                    WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP,
                     WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION, WS_EX_LAYERED,
                     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
                     WS_OVERLAPPEDWINDOW, WS_POPUP, WindowFromPoint,
@@ -2206,6 +2208,7 @@ mod windows_overlay {
         pub(crate) quick_key_sound_style: u32,
         pub(crate) quick_key_sound_volume: f32,
         pub(crate) quick_key_mascot_active: bool,
+        active_fake_titlebar_freeze_hwnd: Option<isize>,
     }
 
     impl Default for HookState {
@@ -2308,6 +2311,7 @@ mod windows_overlay {
                 quick_key_sound_style: 2,
                 quick_key_sound_volume: 1.0,
                 quick_key_mascot_active: false,
+                active_fake_titlebar_freeze_hwnd: None,
             }
         }
     }
@@ -18524,6 +18528,68 @@ mod windows_overlay {
         result.map(|_| ())
     }
 
+    fn resolve_fake_titlebar_freeze_target(selector: &str, prefer_last_active: bool) -> Option<HWND> {
+        let trimmed = selector.trim();
+        if !trimmed.is_empty() {
+            return find_target_window_hwnd(Some(trimmed), &[], false, false);
+        }
+
+        if prefer_last_active
+            && let Some(hwnd) = HOOK_STATE
+                .lock()
+                .active_fake_titlebar_freeze_hwnd
+                .map(|value| HWND(value as *mut c_void))
+            && !hwnd.0.is_null()
+        {
+            return Some(hwnd);
+        }
+
+        let hwnd = unsafe { GetForegroundWindow() };
+        if hwnd.0.is_null() { None } else { Some(hwnd) }
+    }
+
+    fn trigger_fake_titlebar_freeze_step(step: &MacroStep) -> Result<()> {
+        let selector = interpolate_variables(&step.key);
+        let Some(hwnd) = resolve_fake_titlebar_freeze_target(&selector, false) else {
+            bail!("Could not find a target window for Fake Titlebar Freeze");
+        };
+
+        unsafe {
+            let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+            let _ = SetForegroundWindow(hwnd);
+            PostMessageW(
+                Some(hwnd),
+                WM_SYSCOMMAND,
+                WPARAM((SC_MOVE as usize) + (HTCAPTION as usize)),
+                LPARAM(0),
+            )?;
+        }
+
+        HOOK_STATE.lock().active_fake_titlebar_freeze_hwnd = Some(hwnd.0 as isize);
+        Ok(())
+    }
+
+    fn stop_fake_titlebar_freeze_step(step: &MacroStep) -> Result<()> {
+        let selector = interpolate_variables(&step.key);
+        let Some(hwnd) = resolve_fake_titlebar_freeze_target(&selector, true) else {
+            bail!("Could not find a target window for Stop Fake Titlebar Freeze");
+        };
+
+        unsafe {
+            PostMessageW(Some(hwnd), WM_CANCELMODE, WPARAM(0), LPARAM(0))?;
+        }
+
+        let mut hook_state = HOOK_STATE.lock();
+        if hook_state
+            .active_fake_titlebar_freeze_hwnd
+            .is_some_and(|active_hwnd| active_hwnd == hwnd.0 as isize)
+        {
+            hook_state.active_fake_titlebar_freeze_hwnd = None;
+        }
+        Ok(())
+    }
+
     fn focus_window_by_preset_id(spec: &str) -> Result<()> {
         window_preset::focus_window_by_preset_id(spec)
     }
@@ -19272,6 +19338,14 @@ mod windows_overlay {
                 let _ = trigger_funny_meme_reply_step(preset_id, None, step);
             }
 
+            MacroAction::FakeTitlebarFreeze => {
+                let _ = trigger_fake_titlebar_freeze_step(step);
+            }
+
+            MacroAction::StopFakeTitlebarFreeze => {
+                let _ = stop_fake_titlebar_freeze_step(step);
+            }
+
             MacroAction::EnableCrosshairProfile => {
                 let _ = enable_crosshair_profile(&step.key);
                 let duration = step.get_duration_ms();
@@ -19959,6 +20033,14 @@ mod windows_overlay {
                     let _ = trigger_funny_meme_reply_step(preset_id, Some(absolute_index), step);
                 }
 
+                MacroAction::FakeTitlebarFreeze => {
+                    let _ = trigger_fake_titlebar_freeze_step(step);
+                }
+
+                MacroAction::StopFakeTitlebarFreeze => {
+                    let _ = stop_fake_titlebar_freeze_step(step);
+                }
+
                 MacroAction::EnableCrosshairProfile => {
                     let _ = enable_crosshair_profile(&step.key);
                     let duration = step.get_duration_ms();
@@ -20632,6 +20714,14 @@ mod windows_overlay {
 
                 MacroAction::FunnyMemeReply => {
                     let _ = trigger_funny_meme_reply_step(preset_id, Some(absolute_index), step);
+                }
+
+                MacroAction::FakeTitlebarFreeze => {
+                    let _ = trigger_fake_titlebar_freeze_step(step);
+                }
+
+                MacroAction::StopFakeTitlebarFreeze => {
+                    let _ = stop_fake_titlebar_freeze_step(step);
                 }
 
                 MacroAction::EnableCrosshairProfile => {
@@ -22681,6 +22771,8 @@ mod windows_overlay {
                 | MacroAction::ShowTaskbar
                 | MacroAction::LockKeys
                 | MacroAction::UnlockKeys
+                | MacroAction::FakeTitlebarFreeze
+                | MacroAction::StopFakeTitlebarFreeze
                 | MacroAction::LockMouse
                 | MacroAction::UnlockMouse
                 | MacroAction::EnableMacroPreset
@@ -22835,6 +22927,8 @@ mod windows_overlay {
             | MacroAction::ShowTaskbar
             | MacroAction::LockKeys
             | MacroAction::UnlockKeys
+            | MacroAction::FakeTitlebarFreeze
+            | MacroAction::StopFakeTitlebarFreeze
             | MacroAction::LockMouse
             | MacroAction::UnlockMouse
             | MacroAction::EnableMacroPreset
