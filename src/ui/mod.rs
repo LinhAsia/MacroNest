@@ -1747,7 +1747,6 @@ impl CrosshairApp {
         if path.is_empty() {
             return;
         }
-        let _ = audio::preload_preview_audio(path);
         if self.audio_waveforms.contains_key(path) {
             return;
         }
@@ -1766,7 +1765,6 @@ impl CrosshairApp {
 
         let ui_tx = self.ui_tx.clone();
         std::thread::spawn(move || {
-            let _ = audio::preload_preview_audio(&trimmed);
             let waveform = audio::load_waveform(&trimmed, 320).unwrap_or_default();
             let duration_ms = audio::load_duration_ms(&trimmed).ok();
             let _ = ui_tx.send(UiCommand::AudioWaveformLoaded {
