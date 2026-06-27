@@ -152,6 +152,9 @@ pub(crate) enum VisionCaptureTarget {
         is_hold_stop: bool,
     },
     PinPresetColor(u32),
+    PinPresetRegion(u32),
+    PinPresetSourceCrop(u32),
+    HudPresetRegion(u32),
     QuickActionsCoordinates,
     QuickActionsColor,
     QuickActionsKeyDisplayPosition,
@@ -10179,6 +10182,45 @@ impl eframe::App for CrosshairApp {
                                     self.finish_ocr_step_region_capture_command(
                                         ctx, group_id, preset_id, step_index, x, y, width, height,
                                     );
+                                }
+                                VisionCaptureTarget::PinPresetRegion(preset_id) => {
+                                    if let Some(preset) = self.state.pin_presets.iter_mut().find(|p| p.id == preset_id) {
+                                        preset.x = x;
+                                        preset.y = y;
+                                        preset.width = width;
+                                        preset.height = height;
+                                        preset.use_custom_bounds = true;
+                                        self.sync_window_presets();
+                                        self.persist();
+                                    }
+                                }
+                                VisionCaptureTarget::PinPresetSourceCrop(preset_id) => {
+                                    if let Some(preset) = self.state.pin_presets.iter_mut().find(|p| p.id == preset_id) {
+                                        let mut sx = x;
+                                        let mut sy = y;
+                                        if let Some(cache) = self.zoom_preview_cache.get(&(preset_id + 100_000)) {
+                                            sx -= cache.view.screen_x;
+                                            sy -= cache.view.screen_y;
+                                        }
+                                        preset.source_x = sx;
+                                        preset.source_y = sy;
+                                        preset.source_width = width;
+                                        preset.source_height = height;
+                                        preset.source_crop_initialized = true;
+                                        preset.source_crop_fit_version = 2;
+                                        self.sync_window_presets();
+                                        self.persist();
+                                    }
+                                }
+                                VisionCaptureTarget::HudPresetRegion(preset_id) => {
+                                    if let Some(preset) = self.state.hud_presets.iter_mut().find(|p| p.id == preset_id) {
+                                        preset.x = x;
+                                        preset.y = y;
+                                        preset.width = width;
+                                        preset.height = height;
+                                        self.sync_hud_presets();
+                                        self.persist();
+                                    }
                                 }
                                 _ => {}
                             }
