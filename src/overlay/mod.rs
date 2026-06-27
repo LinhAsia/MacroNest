@@ -7260,48 +7260,83 @@ mod windows_overlay {
         strength
     }
 
-    fn quick_key_display_mascot_key_strength(
+    fn quick_key_display_mascot_key_activity(
         aliases: &[&str],
         held_keys: &HashSet<String>,
         entries: &[QuickKeyDisplayEntry],
         now: Instant,
-    ) -> f32 {
-        let held = held_keys
-            .iter()
-            .any(|key_name| quick_key_display_alias_match(key_name, aliases));
+    ) -> Option<(Instant, f32)> {
+        let modifier_aliases: Option<&[&str]> =
+            if aliases.contains(&"LShift") || aliases.contains(&"RShift") {
+                Some(&["Shift"])
+            } else if aliases.contains(&"LCtrl") || aliases.contains(&"RCtrl") {
+                Some(&["Ctrl"])
+            } else if aliases.contains(&"LAlt") || aliases.contains(&"RAlt") {
+                Some(&["Alt"])
+            } else {
+                None
+            };
+
+        let matches_aliases = |key_name: &str| {
+            quick_key_display_alias_match(key_name, aliases)
+                || modifier_aliases.is_some_and(|extra_aliases| {
+                    quick_key_display_alias_match(key_name, extra_aliases)
+                })
+        };
+
+        let held = held_keys.iter().any(|key_name| matches_aliases(key_name));
+        let mut latest_activity: Option<(Instant, f32)> = None;
+
+        for entry in entries {
+            if !entry.combo_keys.iter().any(|key_name| matches_aliases(key_name)) {
+                continue;
+            }
+
+            let strength = if entry.held {
+                1.0
+            } else {
+                let age = now
+                    .saturating_duration_since(entry.shown_at)
+                    .as_secs_f32()
+                    .min(1.0);
+                (1.0 - age / 0.05).clamp(0.0, 1.0)
+            };
+
+            if strength <= 0.0 {
+                continue;
+            }
+
+            let should_replace = latest_activity
+                .map(|(current_at, current_strength)| {
+                    entry.shown_at > current_at
+                        || (entry.shown_at == current_at && strength > current_strength)
+                })
+                .unwrap_or(true);
+            if should_replace {
+                latest_activity = Some((entry.shown_at, strength));
+            }
+        }
 
         if held {
-            return 1.0;
+            let shown_at = latest_activity.map(|(shown_at, _)| shown_at).unwrap_or(now);
+            return Some((shown_at, 1.0));
         }
 
-        let is_lshift = aliases.contains(&"LShift");
-        let is_rshift = aliases.contains(&"RShift");
-        let is_lctrl = aliases.contains(&"LCtrl");
-        let is_rctrl = aliases.contains(&"RCtrl");
-        let is_lalt = aliases.contains(&"LAlt");
-        let is_ralt = aliases.contains(&"RAlt");
+        latest_activity
+    }
 
-        let mut strength = quick_key_display_recent_entry_strength(aliases, entries, now);
-        if is_lshift || is_rshift {
-            strength = strength.max(quick_key_display_recent_entry_strength(
-                &["Shift"],
-                entries,
-                now,
-            ));
-        } else if is_lctrl || is_rctrl {
-            strength = strength.max(quick_key_display_recent_entry_strength(
-                &["Ctrl"],
-                entries,
-                now,
-            ));
-        } else if is_lalt || is_ralt {
-            strength = strength.max(quick_key_display_recent_entry_strength(
-                &["Alt"],
-                entries,
-                now,
-            ));
-        }
-        strength
+    fn quick_key_display_should_replace_paw_target(
+        current_last_active: Option<Instant>,
+        current_strength: f32,
+        candidate_last_active: Instant,
+        candidate_strength: f32,
+    ) -> bool {
+        current_last_active
+            .map(|current_at| {
+                candidate_last_active > current_at
+                    || (candidate_last_active == current_at && candidate_strength > current_strength)
+            })
+            .unwrap_or(true)
     }
 
     fn update_quick_key_display_mascot_mouse(runtime: &mut Runtime) {
@@ -17158,37 +17193,61 @@ mod windows_overlay {
 
         let mut left_paw_strength = 0.0f32;
         let mut right_paw_strength = 0.0f32;
+        let mut left_paw_last_active: Option<Instant> = None;
+        let mut right_paw_last_active: Option<Instant> = None;
 
         let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
 
         for key in keys {
-            let strength =
-                quick_key_display_mascot_key_strength(key.aliases, &held_keys, entries, now);
-            let glow = strength.clamp(0.0, 1.0);
+            let activity =
+                quick_key_display_mascot_key_activity(key.aliases, &held_keys, entries, now);
+            let glow = activity
+                .map(|(_, strength)| strength.clamp(0.0, 1.0))
+                .unwrap_or(0.0);
 
             // Project keycap's midpoint for target paw alignment
             let key_center_x = key.x + key.w * 0.5;
             let key_target_y = key.y - 3.0 + key.h * 0.22;
             let key_proj_target = project_point(key_center_x, key_target_y);
 
-            if glow > 0.0 {
+            if let Some((last_active_at, _)) = activity {
                 if mouse_active {
                     // Left hand is on mouse, right hand handles all keypresses
-                    if glow > right_paw_strength {
+                    if quick_key_display_should_replace_paw_target(
+                        right_paw_last_active,
+                        right_paw_strength,
+                        last_active_at,
+                        glow,
+                    ) {
                         right_paw_target = key_proj_target;
                         right_paw_strength = glow;
+                        right_paw_last_active = Some(last_active_at);
                     }
                 } else {
                     // Both hands on keyboard, split by midpoint
                     let keyboard_mid_x = keyboard_left + keyboard_width * 0.5;
                     if key_center_x < keyboard_mid_x {
-                        if glow > left_paw_strength {
+                        if quick_key_display_should_replace_paw_target(
+                            left_paw_last_active,
+                            left_paw_strength,
+                            last_active_at,
+                            glow,
+                        ) {
                             left_paw_target = key_proj_target;
                             left_paw_strength = glow;
+                            left_paw_last_active = Some(last_active_at);
                         }
-                    } else if glow > right_paw_strength {
-                        right_paw_target = key_proj_target;
-                        right_paw_strength = glow;
+                    } else {
+                        if quick_key_display_should_replace_paw_target(
+                            right_paw_last_active,
+                            right_paw_strength,
+                            last_active_at,
+                            glow,
+                        ) {
+                            right_paw_target = key_proj_target;
+                            right_paw_strength = glow;
+                            right_paw_last_active = Some(last_active_at);
+                        }
                     }
                 }
             }
@@ -21781,6 +21840,27 @@ mod windows_overlay {
             let separated_hit =
                 find_connected_color_match(&separated_screen, &[red, blue], 0, None, None);
             assert!(separated_hit.is_none());
+        }
+
+        #[test]
+        fn test_mascot_switches_to_newer_active_key() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let now = Instant::now();
+            let older = now - Duration::from_millis(120);
+            let newer = now - Duration::from_millis(20);
+
+            assert!(quick_key_display_should_replace_paw_target(
+                Some(older),
+                1.0,
+                newer,
+                1.0,
+            ));
+            assert!(!quick_key_display_should_replace_paw_target(
+                Some(newer),
+                1.0,
+                older,
+                1.0,
+            ));
         }
 
         #[test]

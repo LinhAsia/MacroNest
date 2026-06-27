@@ -13,6 +13,7 @@ impl CrosshairApp {
         language: UiLanguage,
         grid_id: H,
         style: &mut CrosshairStyle,
+        link_lengths: &mut bool,
     ) -> (bool, bool) {
         let mut changed = false;
         let mut dragging = false;
@@ -27,14 +28,19 @@ impl CrosshairApp {
                     "Horizontal length",
                     "Horizontal length",
                 ));
-                let response = ui.add_sized(
-                    [340.0, 20.0],
-                    DragValue::new(&mut style.horizontal_length)
-                        .range(0.0..=80.0)
-                        .speed(0.1),
-                );
-                changed |= response.changed();
+                let response =
+                    ui.add_sized(
+                        [340.0, 20.0],
+                        DragValue::new(&mut style.horizontal_length)
+                            .range(0.0..=80.0)
+                            .speed(0.1),
+                    );
+                let horizontal_changed = response.changed();
+                changed |= horizontal_changed;
                 dragging |= response.dragged();
+                if horizontal_changed && *link_lengths {
+                    style.vertical_length = style.horizontal_length;
+                }
                 ui.end_row();
 
                 ui.label(Self::tr_lang(
@@ -42,14 +48,35 @@ impl CrosshairApp {
                     "Vertical length",
                     "Vertical length",
                 ));
-                let response = ui.add_sized(
-                    [340.0, 20.0],
-                    DragValue::new(&mut style.vertical_length)
-                        .range(0.0..=80.0)
-                        .speed(0.1),
-                );
-                changed |= response.changed();
+                let response =
+                    ui.add_sized(
+                        [340.0, 20.0],
+                        DragValue::new(&mut style.vertical_length)
+                            .range(0.0..=80.0)
+                            .speed(0.1),
+                    );
+                let vertical_changed = response.changed();
+                changed |= vertical_changed;
                 dragging |= response.dragged();
+                if vertical_changed && *link_lengths {
+                    style.horizontal_length = style.vertical_length;
+                }
+                ui.end_row();
+
+                ui.label(Self::tr_lang(language, "Link lengths", "Link lengths"));
+                if ui
+                    .selectable_label(
+                        *link_lengths,
+                        Self::tr_lang(language, "Keep H/V equal", "Keep H/V equal"),
+                    )
+                    .clicked()
+                {
+                    *link_lengths = !*link_lengths;
+                    if *link_lengths {
+                        style.vertical_length = style.horizontal_length;
+                    }
+                    changed = true;
+                }
                 ui.end_row();
 
                 ui.label(Self::tr_lang(language, "Thickness", "Thickness"));
@@ -86,7 +113,7 @@ impl CrosshairApp {
                         .button(Self::tr_lang(language, "Center", "Center"))
                         .clicked()
                     {
-                        style.x_offset = (screen_size.x.round() as i32).saturating_sub(1) / 2;
+                        style.x_offset = DEFAULT_CROSSHAIR_X_OFFSET;
                         changed = true;
                     }
                 });
@@ -106,7 +133,7 @@ impl CrosshairApp {
                         .button(Self::tr_lang(language, "Center", "Center"))
                         .clicked()
                     {
-                        style.y_offset = (screen_size.y.round() as i32).saturating_sub(1) / 2;
+                        style.y_offset = DEFAULT_CROSSHAIR_Y_OFFSET;
                         changed = true;
                     }
                 });
@@ -554,6 +581,7 @@ impl CrosshairApp {
                             language,
                             (index, "crosshair-style-grid"),
                             &mut preset.style,
+                            &mut self.crosshair_link_lengths,
                         );
                         preset_changed |= style_changed;
                         any_dragging |= style_dragging;
