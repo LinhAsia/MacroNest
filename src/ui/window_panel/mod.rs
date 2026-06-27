@@ -1710,55 +1710,63 @@ impl CrosshairApp {
         let drag_id = ui.make_persistent_id((preset.id, "preview-drag-handle"));
         let mut active_handle: DragHandle =
             ui.data_mut(|d| d.get_temp(drag_id).unwrap_or(DragHandle::None));
+        let pick_window_drag_handle = |pointer_pos: egui::Pos2, window_rect: egui::Rect| {
+            let dist_tl = pointer_pos.distance(window_rect.left_top());
+            let dist_tr = pointer_pos.distance(window_rect.right_top());
+            let dist_bl = pointer_pos.distance(window_rect.left_bottom());
+            let dist_br = pointer_pos.distance(window_rect.right_bottom());
+            let edge_threshold = 8.0;
+            let center_threshold = 20.0;
+            let vertical_hit_min = window_rect.top() - edge_threshold;
+            let vertical_hit_max = window_rect.bottom() + edge_threshold;
+            let horizontal_hit_min = window_rect.left() - edge_threshold;
+            let horizontal_hit_max = window_rect.right() + edge_threshold;
+            let nearest_on_box = egui::pos2(
+                pointer_pos.x.clamp(window_rect.left(), window_rect.right()),
+                pointer_pos.y.clamp(window_rect.top(), window_rect.bottom()),
+            );
+            let dist_to_box = pointer_pos.distance(nearest_on_box);
+
+            if dist_tl < 12.0 {
+                DragHandle::TopLeft
+            } else if dist_tr < 12.0 {
+                DragHandle::TopRight
+            } else if dist_bl < 12.0 {
+                DragHandle::BottomLeft
+            } else if dist_br < 12.0 {
+                DragHandle::BottomRight
+            } else if (pointer_pos.x - window_rect.left()).abs() < edge_threshold
+                && pointer_pos.y >= vertical_hit_min
+                && pointer_pos.y <= vertical_hit_max
+            {
+                DragHandle::Left
+            } else if (pointer_pos.x - window_rect.right()).abs() < edge_threshold
+                && pointer_pos.y >= vertical_hit_min
+                && pointer_pos.y <= vertical_hit_max
+            {
+                DragHandle::Right
+            } else if (pointer_pos.y - window_rect.top()).abs() < edge_threshold
+                && pointer_pos.x >= horizontal_hit_min
+                && pointer_pos.x <= horizontal_hit_max
+            {
+                DragHandle::Top
+            } else if (pointer_pos.y - window_rect.bottom()).abs() < edge_threshold
+                && pointer_pos.x >= horizontal_hit_min
+                && pointer_pos.x <= horizontal_hit_max
+            {
+                DragHandle::Bottom
+            } else if window_rect.contains(pointer_pos) {
+                DragHandle::Center
+            } else if dist_to_box < center_threshold {
+                DragHandle::Center
+            } else {
+                DragHandle::None
+            }
+        };
 
         if response.drag_started() {
             if let Some(pointer_pos) = response.interact_pointer_pos() {
-                let dist_tl = pointer_pos.distance(window_rect.left_top());
-                let dist_tr = pointer_pos.distance(window_rect.right_top());
-                let dist_bl = pointer_pos.distance(window_rect.left_bottom());
-                let dist_br = pointer_pos.distance(window_rect.right_bottom());
-
-                let nearest_on_box = egui::pos2(
-                    pointer_pos.x.clamp(window_rect.left(), window_rect.right()),
-                    pointer_pos.y.clamp(window_rect.top(), window_rect.bottom()),
-                );
-                let dist_to_box = pointer_pos.distance(nearest_on_box);
-
-                active_handle = if dist_tl < 12.0 {
-                    DragHandle::TopLeft
-                } else if dist_tr < 12.0 {
-                    DragHandle::TopRight
-                } else if dist_bl < 12.0 {
-                    DragHandle::BottomLeft
-                } else if dist_br < 12.0 {
-                    DragHandle::BottomRight
-                } else if (pointer_pos.x - window_rect.left()).abs() < 8.0
-                    && pointer_pos.y >= window_rect.top()
-                    && pointer_pos.y <= window_rect.bottom()
-                {
-                    DragHandle::Left
-                } else if (pointer_pos.x - window_rect.right()).abs() < 8.0
-                    && pointer_pos.y >= window_rect.top()
-                    && pointer_pos.y <= window_rect.bottom()
-                {
-                    DragHandle::Right
-                } else if (pointer_pos.y - window_rect.top()).abs() < 8.0
-                    && pointer_pos.x >= window_rect.left()
-                    && pointer_pos.x <= window_rect.right()
-                {
-                    DragHandle::Top
-                } else if (pointer_pos.y - window_rect.bottom()).abs() < 8.0
-                    && pointer_pos.x >= window_rect.left()
-                    && pointer_pos.x <= window_rect.right()
-                {
-                    DragHandle::Bottom
-                } else if window_rect.contains(pointer_pos) {
-                    DragHandle::Center
-                } else if dist_to_box < 20.0 {
-                    DragHandle::Center
-                } else {
-                    DragHandle::None
-                };
+                active_handle = pick_window_drag_handle(pointer_pos, window_rect);
                 ui.data_mut(|d| d.insert_temp(drag_id, active_handle));
             }
         }
@@ -1945,45 +1953,10 @@ impl CrosshairApp {
 
         if response.hovered() || active_handle != DragHandle::None {
             if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                let dist_tl = pointer_pos.distance(window_rect.left_top());
-                let dist_tr = pointer_pos.distance(window_rect.right_top());
-                let dist_bl = pointer_pos.distance(window_rect.left_bottom());
-                let dist_br = pointer_pos.distance(window_rect.right_bottom());
-
                 let handle_to_use = if active_handle != DragHandle::None {
                     active_handle
-                } else if dist_tl < 12.0 {
-                    DragHandle::TopLeft
-                } else if dist_tr < 12.0 {
-                    DragHandle::TopRight
-                } else if dist_bl < 12.0 {
-                    DragHandle::BottomLeft
-                } else if dist_br < 12.0 {
-                    DragHandle::BottomRight
-                } else if (pointer_pos.x - window_rect.left()).abs() < 8.0
-                    && pointer_pos.y >= window_rect.top()
-                    && pointer_pos.y <= window_rect.bottom()
-                {
-                    DragHandle::Left
-                } else if (pointer_pos.x - window_rect.right()).abs() < 8.0
-                    && pointer_pos.y >= window_rect.top()
-                    && pointer_pos.y <= window_rect.bottom()
-                {
-                    DragHandle::Right
-                } else if (pointer_pos.y - window_rect.top()).abs() < 8.0
-                    && pointer_pos.x >= window_rect.left()
-                    && pointer_pos.x <= window_rect.right()
-                {
-                    DragHandle::Top
-                } else if (pointer_pos.y - window_rect.bottom()).abs() < 8.0
-                    && pointer_pos.x >= window_rect.left()
-                    && pointer_pos.x <= window_rect.right()
-                {
-                    DragHandle::Bottom
-                } else if window_rect.contains(pointer_pos) {
-                    DragHandle::Center
                 } else {
-                    DragHandle::None
+                    pick_window_drag_handle(pointer_pos, window_rect)
                 };
 
                 match handle_to_use {
@@ -2470,6 +2443,37 @@ impl CrosshairApp {
             )
         };
 
+        let show_preview_reference_frame = use_preview_local_coordinates
+            && !show_preview_image
+            && (preview.is_some() || has_fallback_preview_metrics);
+        if show_preview_reference_frame {
+            let painter = if allow_wheel_zoom {
+                ui.painter().with_clip_rect(selection_bounds_rect)
+            } else {
+                ui.painter().clone()
+            };
+            painter.rect_filled(
+                preview_content_rect,
+                6.0,
+                Color32::from_rgba_premultiplied(50, 82, 120, 28),
+            );
+            painter.rect_stroke(
+                preview_content_rect,
+                6.0,
+                egui::Stroke::new(1.5, Color32::from_rgb(108, 176, 255)),
+                egui::StrokeKind::Outside,
+            );
+            painter.text(
+                preview_content_rect.left_top() + vec2(8.0, 8.0),
+                egui::Align2::LEFT_TOP,
+                preview
+                    .map(|frame| frame.title.as_str())
+                    .unwrap_or("Target window frame"),
+                egui::TextStyle::Small.resolve(ui.style()),
+                Color32::from_rgb(182, 220, 255),
+            );
+        }
+
         if show_preview_image && let Some(preview_frame) = preview {
             let painter = if allow_wheel_zoom {
                 ui.painter().with_clip_rect(selection_bounds_rect)
@@ -2558,6 +2562,59 @@ impl CrosshairApp {
         let drag_id = ui.make_persistent_id((id_source, "zoom-selection-drag-handle"));
         let mut active_handle: SelectionDragHandle =
             ui.data_mut(|d| d.get_temp(drag_id).unwrap_or(SelectionDragHandle::None));
+        let pick_selection_drag_handle = |pointer_pos: egui::Pos2, rect: egui::Rect| {
+            let dist_tl = pointer_pos.distance(rect.left_top());
+            let dist_tr = pointer_pos.distance(rect.right_top());
+            let dist_bl = pointer_pos.distance(rect.left_bottom());
+            let dist_br = pointer_pos.distance(rect.right_bottom());
+            let edge_threshold = 10.0;
+            let center_threshold = 20.0;
+            let vertical_hit_min = rect.top() - edge_threshold;
+            let vertical_hit_max = rect.bottom() + edge_threshold;
+            let horizontal_hit_min = rect.left() - edge_threshold;
+            let horizontal_hit_max = rect.right() + edge_threshold;
+            let nearest_on_box = egui::pos2(
+                pointer_pos.x.clamp(rect.left(), rect.right()),
+                pointer_pos.y.clamp(rect.top(), rect.bottom()),
+            );
+            let dist_to_box = pointer_pos.distance(nearest_on_box);
+
+            if dist_tl < 14.0 {
+                SelectionDragHandle::TopLeft
+            } else if dist_tr < 14.0 {
+                SelectionDragHandle::TopRight
+            } else if dist_bl < 14.0 {
+                SelectionDragHandle::BottomLeft
+            } else if dist_br < 14.0 {
+                SelectionDragHandle::BottomRight
+            } else if (pointer_pos.x - rect.left()).abs() < edge_threshold
+                && pointer_pos.y >= vertical_hit_min
+                && pointer_pos.y <= vertical_hit_max
+            {
+                SelectionDragHandle::Left
+            } else if (pointer_pos.x - rect.right()).abs() < edge_threshold
+                && pointer_pos.y >= vertical_hit_min
+                && pointer_pos.y <= vertical_hit_max
+            {
+                SelectionDragHandle::Right
+            } else if (pointer_pos.y - rect.top()).abs() < edge_threshold
+                && pointer_pos.x >= horizontal_hit_min
+                && pointer_pos.x <= horizontal_hit_max
+            {
+                SelectionDragHandle::Top
+            } else if (pointer_pos.y - rect.bottom()).abs() < edge_threshold
+                && pointer_pos.x >= horizontal_hit_min
+                && pointer_pos.x <= horizontal_hit_max
+            {
+                SelectionDragHandle::Bottom
+            } else if rect.contains(pointer_pos) {
+                SelectionDragHandle::Center
+            } else if dist_to_box < center_threshold {
+                SelectionDragHandle::Center
+            } else {
+                SelectionDragHandle::None
+            }
+        };
 
         let offset_id = ui.make_persistent_id((id_source, "zoom-selection-drag-offset"));
         let mut drag_offset: egui::Vec2 =
@@ -2569,53 +2626,7 @@ impl CrosshairApp {
 
         if response.drag_started() {
             if let Some(pointer_pos) = response.interact_pointer_pos() {
-                let dist_tl = pointer_pos.distance(rect.left_top());
-                let dist_tr = pointer_pos.distance(rect.right_top());
-                let dist_bl = pointer_pos.distance(rect.left_bottom());
-                let dist_br = pointer_pos.distance(rect.right_bottom());
-
-                // Also allow drag start from near-but-outside the box (helps with tiny boxes)
-                let nearest_on_box = egui::pos2(
-                    pointer_pos.x.clamp(rect.left(), rect.right()),
-                    pointer_pos.y.clamp(rect.top(), rect.bottom()),
-                );
-                let dist_to_box = pointer_pos.distance(nearest_on_box);
-
-                active_handle = if dist_tl < 14.0 {
-                    SelectionDragHandle::TopLeft
-                } else if dist_tr < 14.0 {
-                    SelectionDragHandle::TopRight
-                } else if dist_bl < 14.0 {
-                    SelectionDragHandle::BottomLeft
-                } else if dist_br < 14.0 {
-                    SelectionDragHandle::BottomRight
-                } else if (pointer_pos.x - rect.left()).abs() < 10.0
-                    && pointer_pos.y >= rect.top()
-                    && pointer_pos.y <= rect.bottom()
-                {
-                    SelectionDragHandle::Left
-                } else if (pointer_pos.x - rect.right()).abs() < 10.0
-                    && pointer_pos.y >= rect.top()
-                    && pointer_pos.y <= rect.bottom()
-                {
-                    SelectionDragHandle::Right
-                } else if (pointer_pos.y - rect.top()).abs() < 10.0
-                    && pointer_pos.x >= rect.left()
-                    && pointer_pos.x <= rect.right()
-                {
-                    SelectionDragHandle::Top
-                } else if (pointer_pos.y - rect.bottom()).abs() < 10.0
-                    && pointer_pos.x >= rect.left()
-                    && pointer_pos.x <= rect.right()
-                {
-                    SelectionDragHandle::Bottom
-                } else if rect.contains(pointer_pos) {
-                    SelectionDragHandle::Center
-                } else if dist_to_box < 20.0 {
-                    SelectionDragHandle::Center
-                } else {
-                    SelectionDragHandle::None
-                };
+                active_handle = pick_selection_drag_handle(pointer_pos, rect);
                 ui.data_mut(|d| d.insert_temp(drag_id, active_handle));
 
                 // Compute offsets and anchors for the handles
@@ -2890,45 +2901,10 @@ impl CrosshairApp {
 
         if response.hovered() || active_handle != SelectionDragHandle::None {
             if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                let dist_tl = pointer_pos.distance(rect.left_top());
-                let dist_tr = pointer_pos.distance(rect.right_top());
-                let dist_bl = pointer_pos.distance(rect.left_bottom());
-                let dist_br = pointer_pos.distance(rect.right_bottom());
-
                 let handle_to_use = if active_handle != SelectionDragHandle::None {
                     active_handle
-                } else if dist_tl < 14.0 {
-                    SelectionDragHandle::TopLeft
-                } else if dist_tr < 14.0 {
-                    SelectionDragHandle::TopRight
-                } else if dist_bl < 14.0 {
-                    SelectionDragHandle::BottomLeft
-                } else if dist_br < 14.0 {
-                    SelectionDragHandle::BottomRight
-                } else if (pointer_pos.x - rect.left()).abs() < 10.0
-                    && pointer_pos.y >= rect.top()
-                    && pointer_pos.y <= rect.bottom()
-                {
-                    SelectionDragHandle::Left
-                } else if (pointer_pos.x - rect.right()).abs() < 10.0
-                    && pointer_pos.y >= rect.top()
-                    && pointer_pos.y <= rect.bottom()
-                {
-                    SelectionDragHandle::Right
-                } else if (pointer_pos.y - rect.top()).abs() < 10.0
-                    && pointer_pos.x >= rect.left()
-                    && pointer_pos.x <= rect.right()
-                {
-                    SelectionDragHandle::Top
-                } else if (pointer_pos.y - rect.bottom()).abs() < 10.0
-                    && pointer_pos.x >= rect.left()
-                    && pointer_pos.x <= rect.right()
-                {
-                    SelectionDragHandle::Bottom
-                } else if rect.contains(pointer_pos) {
-                    SelectionDragHandle::Center
                 } else {
-                    SelectionDragHandle::None
+                    pick_selection_drag_handle(pointer_pos, rect)
                 };
 
                 match handle_to_use {
@@ -4535,6 +4511,29 @@ impl CrosshairApp {
                 .overlay_tx
                 .send(OverlayCommand::PreviewHudPreset(Vec::new()));
         }
+    }
+
+    pub(crate) fn clear_macro_visual_overlays(&mut self) {
+        self.geometry_preview_target = None;
+        self.geometry_preset_preview_target = None;
+        self.geometry_preview_sent = None;
+        self.draw_geometry_step_preview_target = None;
+        self.draw_geometry_step_preview_sent = None;
+        self.show_geometry_preset_preview_target = None;
+        let _ = self
+            .overlay_tx
+            .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+        let _ = self
+            .overlay_tx
+            .send(crate::overlay::OverlayCommand::PreviewGeometryPreset(None));
+
+        self.disable_hud_preview_modes();
+        crate::overlay::hide_hud_now();
+
+        self.disable_pin_preview_modes();
+        crate::overlay::clear_pin_overlay_now();
+
+        crate::overlay::clear_geometry_overlay_now();
     }
 
     pub(crate) fn disable_pin_preview_modes(&mut self) -> bool {

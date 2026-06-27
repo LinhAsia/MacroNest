@@ -483,8 +483,16 @@ impl CrosshairApp {
                 preview_enabled: true,
                 text: format!("OCR Zone: {}", preset.name),
                 font_size: 16.0,
-                background_opacity: 0.15,
+                background_opacity: 0.08,
                 rounded_background: true,
+                border_enabled: true,
+                border_color: RgbaColor {
+                    r: 0,
+                    g: 255,
+                    b: 170,
+                    a: 255,
+                },
+                border_thickness: 2.0,
                 text_color: RgbaColor {
                     r: 0,
                     g: 255,

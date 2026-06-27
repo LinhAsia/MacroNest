@@ -7,12 +7,12 @@ use super::{
     MacroGroup, MacroPreset, MasterPreset, MousePathPreset, MouseSensitivityPreset, OcrPreset,
     PinPreset, ProfileRecord, RgbaColor, VisionPreset, VisionSettings, WindowExpandControls,
     WindowFocusPreset, WindowLayout, WindowPreset, ZoomPreset, default_focus_highlight_color,
-    default_key_sound_volume, default_macro_keyboard_key_press_delay_ms,
-    default_macro_mouse_click_delay_ms, default_ocr_language_code, default_protractor_center_x,
-    default_protractor_center_y, default_protractor_needle1_angle,
-    default_protractor_needle2_angle, default_protractor_scale, default_protractor_thickness,
-    default_quick_key_display_size, default_quick_key_display_x, default_quick_key_display_y,
-    default_screen_draw_brush_size, default_screen_draw_color,
+    default_hud_border_color, default_hud_border_thickness, default_key_sound_volume,
+    default_macro_keyboard_key_press_delay_ms, default_macro_mouse_click_delay_ms,
+    default_ocr_language_code, default_protractor_center_x, default_protractor_center_y,
+    default_protractor_needle1_angle, default_protractor_needle2_angle, default_protractor_scale,
+    default_protractor_thickness, default_quick_key_display_size, default_quick_key_display_x,
+    default_quick_key_display_y, default_screen_draw_brush_size, default_screen_draw_color,
     default_screen_draw_smoothing_amount, default_timer_progress_border_color,
     default_timer_progress_border_thickness, default_timer_progress_smoothness_fps, default_true,
 };
@@ -100,6 +100,12 @@ pub struct HudPreset {
     pub font_size: f32,
     pub background_opacity: f32,
     pub rounded_background: bool,
+    #[serde(default)]
+    pub border_enabled: bool,
+    #[serde(default = "default_hud_border_color")]
+    pub border_color: RgbaColor,
+    #[serde(default = "default_hud_border_thickness")]
+    pub border_thickness: f32,
     pub text_color: RgbaColor,
     pub background_color: RgbaColor,
     pub x: i32,
@@ -119,6 +125,9 @@ impl HudPreset {
             font_size: 28.0,
             background_opacity: 0.72,
             rounded_background: true,
+            border_enabled: false,
+            border_color: default_hud_border_color(),
+            border_thickness: default_hud_border_thickness(),
             text_color: RgbaColor {
                 r: 244,
                 g: 244,

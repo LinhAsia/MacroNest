@@ -119,6 +119,7 @@ enum TitlebarQuickActionKind {
     GetColor,
     KeyDisplay,
     ScreenDraw,
+    ClearOverlays,
     KeySound,
 }
 
@@ -2844,6 +2845,37 @@ impl CrosshairApp {
                     icon_color,
                 );
             }
+            TitlebarQuickActionKind::ClearOverlays => {
+                let body =
+                    egui::Rect::from_center_size(rect.center() + vec2(-1.0, 2.0), vec2(26.0, 18.0));
+                painter.rect_stroke(
+                    body,
+                    5.0,
+                    egui::Stroke::new(1.8, icon_color),
+                    StrokeKind::Inside,
+                );
+                painter.line_segment(
+                    [
+                        pos2(body.left() + 4.0, body.top() + 6.0),
+                        pos2(body.right() - 4.0, body.bottom() - 5.0),
+                    ],
+                    egui::Stroke::new(2.4, icon_color),
+                );
+                painter.line_segment(
+                    [
+                        pos2(body.center().x - 4.0, body.top() - 8.0),
+                        pos2(body.center().x + 9.0, body.top() + 5.0),
+                    ],
+                    egui::Stroke::new(2.4, icon_color),
+                );
+                painter.line_segment(
+                    [
+                        pos2(body.center().x + 6.0, body.top() - 8.0),
+                        pos2(body.center().x + 11.0, body.top() - 3.0),
+                    ],
+                    egui::Stroke::new(2.0, icon_color),
+                );
+            }
             TitlebarQuickActionKind::KeySound => {
                 let center = rect.center();
                 let body_rect =
@@ -3003,6 +3035,7 @@ impl CrosshairApp {
         let pin_window_available = !self.quick_action_window_selector.is_empty();
         let pinned_window_active = pin_window_available
             && window_list::is_window_topmost(&self.quick_action_window_selector);
+        let macro_visual_overlay_active = crate::overlay::has_active_macro_visual_overlay();
         let mut keep_menu_open = false;
         // Reset hover-card visibility flag each frame before render_popup calls
         let qa_hover_card_key = egui::Id::new("qa-hover-card-visible");
@@ -4346,6 +4379,59 @@ impl CrosshairApp {
                         if keep_open {
                             keep_menu_open = true;
                         }
+                    },
+                );
+
+                // ClearOverlays Action
+                ui.allocate_ui_with_layout(
+                    vec2(action_width, action_height),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::ClearOverlays,
+                            macro_visual_overlay_active,
+                        );
+                        if button_response.clicked() {
+                            self.clear_macro_visual_overlays();
+                            self.status = if macro_visual_overlay_active {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Cleared geometry, HUD, and pin overlays.",
+                                    "Cleared geometry, HUD, and pin overlays.",
+                                )
+                            } else {
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "No geometry, HUD, or pin overlays were active.",
+                                    "No geometry, HUD, or pin overlays were active.",
+                                )
+                            }
+                            .to_owned();
+                        }
+
+                        ui.add_space(6.0);
+                        let clear_label = Self::tr_lang(
+                            self.state.ui_language,
+                            "Clear overlays",
+                            "Clear overlays",
+                        );
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(
+                                    egui::Label::new(RichText::new(clear_label).size(11.0).color(
+                                        if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        },
+                                    ))
+                                    .wrap(),
+                                );
+                            },
+                        );
                     },
                 );
 
@@ -10155,6 +10241,9 @@ impl eframe::App for CrosshairApp {
                             width,
                             height,
                         } => {
+                            if !Self::native_selected_region_target_handles_cleanup(target) {
+                                self.clear_image_search_capture_state();
+                            }
                             // Process selected region
                             match target {
                                 VisionCaptureTarget::Preset(preset_id) => {
@@ -10184,7 +10273,12 @@ impl eframe::App for CrosshairApp {
                                     );
                                 }
                                 VisionCaptureTarget::PinPresetRegion(preset_id) => {
-                                    if let Some(preset) = self.state.pin_presets.iter_mut().find(|p| p.id == preset_id) {
+                                    if let Some(preset) = self
+                                        .state
+                                        .pin_presets
+                                        .iter_mut()
+                                        .find(|p| p.id == preset_id)
+                                    {
                                         preset.x = x;
                                         preset.y = y;
                                         preset.width = width;
@@ -10192,13 +10286,24 @@ impl eframe::App for CrosshairApp {
                                         preset.use_custom_bounds = true;
                                         self.sync_window_presets();
                                         self.persist();
+                                        self.status = format!(
+                                            "Saved pinned region {}x{} at {}, {} for preset #{}.",
+                                            width, height, x, y, preset_id
+                                        );
                                     }
                                 }
                                 VisionCaptureTarget::PinPresetSourceCrop(preset_id) => {
-                                    if let Some(preset) = self.state.pin_presets.iter_mut().find(|p| p.id == preset_id) {
+                                    if let Some(preset) = self
+                                        .state
+                                        .pin_presets
+                                        .iter_mut()
+                                        .find(|p| p.id == preset_id)
+                                    {
                                         let mut sx = x;
                                         let mut sy = y;
-                                        if let Some(cache) = self.zoom_preview_cache.get(&(preset_id + 100_000)) {
+                                        if let Some(cache) =
+                                            self.zoom_preview_cache.get(&(preset_id + 100_000))
+                                        {
                                             sx -= cache.view.screen_x;
                                             sy -= cache.view.screen_y;
                                         }
@@ -10210,16 +10315,29 @@ impl eframe::App for CrosshairApp {
                                         preset.source_crop_fit_version = 2;
                                         self.sync_window_presets();
                                         self.persist();
+                                        self.status = format!(
+                                            "Saved source crop {}x{} at {}, {} for preset #{}.",
+                                            width, height, sx, sy, preset_id
+                                        );
                                     }
                                 }
                                 VisionCaptureTarget::HudPresetRegion(preset_id) => {
-                                    if let Some(preset) = self.state.hud_presets.iter_mut().find(|p| p.id == preset_id) {
+                                    if let Some(preset) = self
+                                        .state
+                                        .hud_presets
+                                        .iter_mut()
+                                        .find(|p| p.id == preset_id)
+                                    {
                                         preset.x = x;
                                         preset.y = y;
                                         preset.width = width;
                                         preset.height = height;
                                         self.sync_hud_presets();
                                         self.persist();
+                                        self.status = format!(
+                                            "Saved HUD region {}x{} at {}, {} for preset #{}.",
+                                            width, height, x, y, preset_id
+                                        );
                                     }
                                 }
                                 _ => {}
