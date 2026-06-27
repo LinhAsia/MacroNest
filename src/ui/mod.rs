@@ -1775,6 +1775,53 @@ impl CrosshairApp {
         });
     }
 
+    fn audio_path_is_referenced(&self, path: &str) -> bool {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        self.state.audio_settings.startup.file_path.trim() == trimmed
+            || self.state.audio_settings.exit.file_path.trim() == trimmed
+            || self
+                .state
+                .audio_settings
+                .presets
+                .iter()
+                .any(|preset| preset.clip.file_path.trim() == trimmed)
+            || self
+                .state
+                .audio_settings
+                .library
+                .iter()
+                .any(|item| item.clip.file_path.trim() == trimmed)
+    }
+
+    fn retain_referenced_audio_waveforms(&mut self) {
+        let mut referenced_paths = std::collections::HashSet::new();
+        for path in [
+            self.state.audio_settings.startup.file_path.trim(),
+            self.state.audio_settings.exit.file_path.trim(),
+        ] {
+            if !path.is_empty() {
+                referenced_paths.insert(path.to_owned());
+            }
+        }
+        for preset in &self.state.audio_settings.presets {
+            let path = preset.clip.file_path.trim();
+            if !path.is_empty() {
+                referenced_paths.insert(path.to_owned());
+            }
+        }
+        for item in &self.state.audio_settings.library {
+            let path = item.clip.file_path.trim();
+            if !path.is_empty() {
+                referenced_paths.insert(path.to_owned());
+            }
+        }
+        self.audio_waveforms
+            .retain(|path, _| referenced_paths.contains(path));
+    }
+
     fn preview_cursor_ms_for(
         preview_cursor: &Option<(AudioEditorTarget, u64)>,
         target: AudioEditorTarget,
@@ -10801,6 +10848,9 @@ impl eframe::App for CrosshairApp {
                     waveform,
                     duration_ms,
                 } => {
+                    if !self.audio_path_is_referenced(&path) {
+                        continue;
+                    }
                     self.audio_waveforms.insert(path.clone(), waveform);
                     for preset in &mut self.state.audio_settings.presets {
                         if preset.clip.file_path.trim() == path {
