@@ -30,44 +30,19 @@ impl CrosshairApp {
                     "Horizontal length",
                     "Horizontal length",
                 ));
-                let response =
-                    ui.add_sized(
-                        [340.0, 20.0],
+                ui.horizontal(|ui| {
+                    let response = ui.add_sized(
+                        [inline_field_width, 20.0],
                         DragValue::new(&mut style.horizontal_length)
                             .range(0.0..=80.0)
                             .speed(0.1),
                     );
-                let horizontal_changed = response.changed();
-                changed |= horizontal_changed;
-                dragging |= response.dragged();
-                if horizontal_changed && *link_lengths {
-                    style.vertical_length = style.horizontal_length;
-                }
-                ui.end_row();
-
-                ui.label(Self::tr_lang(
-                    language,
-                    "Vertical length",
-                    "Vertical length",
-                ));
-                let response =
-                    ui.add_sized(
-                        [340.0, 20.0],
-                        DragValue::new(&mut style.vertical_length)
-                            .range(0.0..=80.0)
-                            .speed(0.1),
-                    );
-                let vertical_changed = response.changed();
-                changed |= vertical_changed;
-                dragging |= response.dragged();
-                if vertical_changed && *link_lengths {
-                    style.horizontal_length = style.vertical_length;
-                }
-                ui.end_row();
-
-                ui.label(Self::tr_lang(language, "Link lengths", "Link lengths"));
-                ui.horizontal(|ui| {
-                    ui.add_space(inline_field_width);
+                    let horizontal_changed = response.changed();
+                    changed |= horizontal_changed;
+                    dragging |= response.dragged();
+                    if horizontal_changed && *link_lengths {
+                        style.vertical_length = style.horizontal_length;
+                    }
                     if ui
                         .add_sized(
                             side_button_size,
@@ -82,6 +57,28 @@ impl CrosshairApp {
                         }
                         changed = true;
                     }
+                });
+                ui.end_row();
+
+                ui.label(Self::tr_lang(
+                    language,
+                    "Vertical length",
+                    "Vertical length",
+                ));
+                ui.horizontal(|ui| {
+                    let response = ui.add_sized(
+                        [inline_field_width, 20.0],
+                        DragValue::new(&mut style.vertical_length)
+                            .range(0.0..=80.0)
+                            .speed(0.1),
+                    );
+                    let vertical_changed = response.changed();
+                    changed |= vertical_changed;
+                    dragging |= response.dragged();
+                    if vertical_changed && *link_lengths {
+                        style.horizontal_length = style.vertical_length;
+                    }
+                    ui.add_space(side_button_size[0]);
                 });
                 ui.end_row();
 
