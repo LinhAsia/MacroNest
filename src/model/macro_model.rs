@@ -98,6 +98,8 @@ pub enum MacroAction {
     ShowGeometryPreset,
     HideGeometryPreset,
     FunnyMemeReply,
+    FakeTitlebarFreeze,
+    StopFakeTitlebarFreeze,
     JumpToStep,
     #[serde(other)]
     Legacy,

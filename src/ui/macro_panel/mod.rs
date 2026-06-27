@@ -6866,8 +6866,28 @@ impl CrosshairApp {
                                                         live_sync |= response.changed();
                                                         Self::render_variable_suggestions_braced(ui, &response, &mut step.key, &timer_names, language);
                                                     });
-                                                } else if step.action == MacroAction::FunnyMemeReply {
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::FunnyMemeReply
+                                                        | MacroAction::FakeTitlebarFreeze
+                                                        | MacroAction::StopFakeTitlebarFreeze
+                                                ) {
                                                     ui.horizontal(|ui| {
+                                                        let hint = if step.action
+                                                            == MacroAction::FunnyMemeReply
+                                                        {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Message or variable",
+                                                                "Message or variable",
+                                                            )
+                                                        } else {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Window title (blank = focused)",
+                                                                "Window title (blank = focused)",
+                                                            )
+                                                        };
                                                         let response = Self::render_interpolated_text_edit(
                                                             ui,
                                                             &mut step.key,
@@ -6876,7 +6896,7 @@ impl CrosshairApp {
                                                             360.0,
                                                             17.0,
                                                             44.0,
-                                                            Self::tr_lang(language, "Message or variable", "Message or variable"),
+                                                            hint,
                                                             true,
                                                         );
                                                         Self::apply_vietnamese_input_if_changed(
@@ -9040,8 +9060,28 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         live_sync |= response.changed();
                                                         Self::render_variable_suggestions_braced(ui, &response, &mut step.key, &timer_names, language);
                                                     });
-                                                } else if step.action == MacroAction::FunnyMemeReply {
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::FunnyMemeReply
+                                                        | MacroAction::FakeTitlebarFreeze
+                                                        | MacroAction::StopFakeTitlebarFreeze
+                                                ) {
                                                     ui.horizontal(|ui| {
+                                                        let hint = if step.action
+                                                            == MacroAction::FunnyMemeReply
+                                                        {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Message or variable",
+                                                                "Message or variable",
+                                                            )
+                                                        } else {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Window title (blank = focused)",
+                                                                "Window title (blank = focused)",
+                                                            )
+                                                        };
                                                         let response = Self::render_interpolated_text_edit(
                                                             ui,
                                                             &mut step.key,
@@ -9050,7 +9090,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             360.0,
                                                             17.0,
                                                             44.0,
-                                                            Self::tr_lang(language, "Message or variable", "Message or variable"),
+                                                            hint,
                                                             true,
                                                         );
                                                         Self::apply_vietnamese_input_if_changed(
@@ -12272,8 +12312,28 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                          live_sync |= response.changed();
                                                          Self::render_variable_suggestions_braced(ui, &response, &mut step.key, &timer_names, language);
                                                      });
-                                                } else if step.action == MacroAction::FunnyMemeReply {
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::FunnyMemeReply
+                                                        | MacroAction::FakeTitlebarFreeze
+                                                        | MacroAction::StopFakeTitlebarFreeze
+                                                ) {
                                                     ui.vertical(|ui| {
+                                                        let hint = if step.action
+                                                            == MacroAction::FunnyMemeReply
+                                                        {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Message or variable",
+                                                                "Message or variable",
+                                                            )
+                                                        } else {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Window title (blank = focused)",
+                                                                "Window title (blank = focused)",
+                                                            )
+                                                        };
                                                         let response = Self::render_interpolated_text_edit(
                                                             ui,
                                                             &mut step.key,
@@ -12282,7 +12342,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             260.0,
                                                             21.0,
                                                             36.0,
-                                                            Self::tr_lang(language, "Message or variable", "Message or variable"),
+                                                            hint,
                                                             true,
                                                         );
                                                         Self::apply_vietnamese_input_if_changed(
@@ -12292,14 +12352,22 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             &mut step.key,
                                                         );
                                                         live_sync |= response.changed();
-                                                        if response.changed() {
+                                                        if response.changed()
+                                                            && step.action
+                                                                == MacroAction::FunnyMemeReply
+                                                        {
                                                             self.macro_step_inline_feedback
                                                                 .remove(&(preset.id, step_index));
                                                         }
-                                                        let inline_feedback = self
-                                                            .macro_step_inline_feedback
-                                                            .get(&(preset.id, step_index))
-                                                            .cloned();
+                                                        let inline_feedback = if step.action
+                                                            == MacroAction::FunnyMemeReply
+                                                        {
+                                                            self.macro_step_inline_feedback
+                                                                .get(&(preset.id, step_index))
+                                                                .cloned()
+                                                        } else {
+                                                            None
+                                                        };
                                                         Self::render_variable_suggestions_braced(
                                                             ui,
                                                             &response,
@@ -15388,7 +15456,11 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
     }
 
     fn funny_macro_actions() -> &'static [MacroAction] {
-        &[MacroAction::FunnyMemeReply]
+        &[
+            MacroAction::FunnyMemeReply,
+            MacroAction::FakeTitlebarFreeze,
+            MacroAction::StopFakeTitlebarFreeze,
+        ]
     }
 
     fn macro_action_is_funny(action: MacroAction) -> bool {
@@ -15863,7 +15935,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                     .open_bool(&mut open)
                     .align(egui::RectAlign::BOTTOM_START)
                     .layout(egui::Layout::top_down_justified(egui::Align::Min))
-                    .width(120.0)
+                    .width(220.0)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
                     .show(|ui| {
                         let rect = ui.max_rect();
@@ -15937,8 +16009,8 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                 &response,
                 Self::tr_lang(
                     language,
-                    "Funny\nOpen meme reply actions.",
-                    "Funny\nOpen meme reply actions.",
+                    "Funny\nOpen meme reply and fake titlebar freeze actions.",
+                    "Funny\nOpen meme reply and fake titlebar freeze actions.",
                 ),
             );
         }
