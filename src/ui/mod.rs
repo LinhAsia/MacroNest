@@ -3139,9 +3139,11 @@ impl CrosshairApp {
                         data.insert_temp(qa_hover_card_key, true);
                     });
                     let pos = button_response.rect.left_bottom() + vec2(-42.0, 4.0);
+                    let parent_layer = ui.layer_id();
+                    let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
                     let mut content_rect = egui::Rect::NOTHING;
                     let area_response = egui::Area::new(popup_id)
-                        .order(egui::Order::Tooltip)
+                        .order(egui::Order::Foreground)
                         .fixed_pos(pos)
                         .show(ui.ctx(), |ui| {
                             let frame_response = egui::Frame::popup(ui.style())
@@ -3156,6 +3158,8 @@ impl CrosshairApp {
                             content_rect = frame_response.response.rect;
                             frame_response.inner
                         });
+                    ui.ctx().set_sublayer(parent_layer, popup_layer);
+                    ui.ctx().move_to_top(popup_layer);
 
                     // Persist card rect for next frame's mouse-in-card check
                     ui.ctx()
