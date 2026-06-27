@@ -2389,8 +2389,6 @@ mod windows_overlay {
         window_layouts: Vec<crate::model::WindowLayout>,
         pin_presets: Vec<PinPreset>,
         mouse_path_presets: Vec<MousePathPreset>,
-        macro_groups: Vec<MacroGroup>,
-        active_macro_folder_scope: Option<u32>,
         audio_settings: AudioSettings,
         registered_window_hotkeys: HashMap<i32, WindowHotkeyAction>,
         registered_macro_hotkeys: HashMap<i32, MacroPreset>,
@@ -3154,8 +3152,6 @@ mod windows_overlay {
                 window_layouts: Vec::new(),
                 pin_presets: Vec::new(),
                 mouse_path_presets: Vec::new(),
-                macro_groups: Vec::new(),
-                active_macro_folder_scope: None,
                 audio_settings: AudioSettings::default(),
                 registered_window_hotkeys: HashMap::new(),
                 registered_macro_hotkeys: HashMap::new(),
@@ -8125,25 +8121,13 @@ mod windows_overlay {
                 }
 
                 OverlayCommand::UpdateMacroPresets(presets) => {
-                    let previous_enabled: HashMap<u32, bool> = runtime
-                        .macro_groups
-                        .iter()
-                        .flat_map(|group| {
-                            group
-                                .presets
-                                .iter()
-                                .map(|preset| (preset.id, group.enabled && preset.enabled))
-                        })
-                        .collect();
-                    let next_enabled: HashMap<u32, bool> = presets
-                        .iter()
-                        .flat_map(|group| {
-                            group
-                                .presets
-                                .iter()
-                                .map(|preset| (preset.id, group.enabled && preset.enabled))
-                        })
-                        .collect();
+                    let next_enabled = macro_enabled_map(&presets);
+                    let previous_enabled = {
+                        let mut hook_state = HOOK_STATE.lock();
+                        let previous_enabled = macro_enabled_map(&hook_state.macro_groups);
+                        hook_state.macro_groups = presets;
+                        previous_enabled
+                    };
                     let presets_to_stop: Vec<u32> = previous_enabled
                         .iter()
                         .filter_map(|(preset_id, was_enabled)| {
@@ -8156,7 +8140,6 @@ mod windows_overlay {
                             }
                         })
                         .collect();
-                    runtime.macro_groups = presets;
                     let _ = sync_macro_hotkeys(hwnd, runtime);
                     for preset_id in presets_to_stop {
                         STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
@@ -8170,17 +8153,19 @@ mod windows_overlay {
                 }
 
                 OverlayCommand::SetActiveMacroFolderScope(folder_id) => {
-                    runtime.active_macro_folder_scope = folder_id;
-                    HOOK_STATE.lock().active_macro_folder_scope = folder_id;
+                    let preset_ids_to_stop = {
+                        let mut hook_state = HOOK_STATE.lock();
+                        hook_state.active_macro_folder_scope = folder_id;
+                        if folder_id.is_some() {
+                            macro_presets_outside_scope(
+                                &hook_state.macro_groups,
+                                hook_state.active_macro_folder_scope,
+                            )
+                        } else {
+                            Vec::new()
+                        }
+                    };
                     if folder_id.is_some() {
-                        let preset_ids_to_stop = runtime
-                            .macro_groups
-                            .iter()
-                            .filter(|group| {
-                                !macro_group_scope_matches(group, runtime.active_macro_folder_scope)
-                            })
-                            .flat_map(|group| group.presets.iter().map(|preset| preset.id))
-                            .collect::<Vec<_>>();
                         for preset_id in preset_ids_to_stop {
                             STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
                             deactivate_hold_macro(preset_id);
@@ -18004,8 +17989,27 @@ mod windows_overlay {
         }
 
         runtime.registered_macro_hotkeys.clear();
-        HOOK_STATE.lock().macro_groups = runtime.macro_groups.clone();
         Ok(())
+    }
+
+    fn macro_enabled_map(groups: &[MacroGroup]) -> HashMap<u32, bool> {
+        groups
+            .iter()
+            .flat_map(|group| {
+                group
+                    .presets
+                    .iter()
+                    .map(|preset| (preset.id, group.enabled && preset.enabled))
+            })
+            .collect()
+    }
+
+    fn macro_presets_outside_scope(groups: &[MacroGroup], active_scope: Option<u32>) -> Vec<u32> {
+        groups
+            .iter()
+            .filter(|group| !macro_group_scope_matches(group, active_scope))
+            .flat_map(|group| group.presets.iter().map(|preset| preset.id))
+            .collect()
     }
 
     fn unregister_all_hotkeys(hwnd: HWND, runtime: Option<&mut Runtime>) {
@@ -28410,6 +28414,48 @@ mod fallback {
     pub(crate) fn clear_geometry_overlay_now() {}
 
     pub(crate) fn hide_hud_now() {}
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::windows_overlay::{macro_enabled_map, macro_presets_outside_scope};
+    use crate::model::{MacroGroup, MacroPreset};
+
+    #[test]
+    fn macro_enabled_map_respects_group_and_preset_flags() {
+        let mut enabled_group = MacroGroup::new(1);
+        enabled_group.enabled = true;
+        let mut enabled_preset = MacroPreset::new(10);
+        enabled_preset.enabled = true;
+        let mut disabled_preset = MacroPreset::new(11);
+        disabled_preset.enabled = false;
+        enabled_group.presets = vec![enabled_preset, disabled_preset];
+
+        let mut disabled_group = MacroGroup::new(2);
+        disabled_group.enabled = false;
+        let mut preset_in_disabled_group = MacroPreset::new(12);
+        preset_in_disabled_group.enabled = true;
+        disabled_group.presets = vec![preset_in_disabled_group];
+
+        let enabled = macro_enabled_map(&[enabled_group, disabled_group]);
+        assert_eq!(enabled.get(&10), Some(&true));
+        assert_eq!(enabled.get(&11), Some(&false));
+        assert_eq!(enabled.get(&12), Some(&false));
+    }
+
+    #[test]
+    fn macro_presets_outside_scope_filters_folder_scope() {
+        let mut group_a = MacroGroup::new(1);
+        group_a.folder_id = Some(7);
+        group_a.presets = vec![MacroPreset::new(10)];
+
+        let mut group_b = MacroGroup::new(2);
+        group_b.folder_id = Some(8);
+        group_b.presets = vec![MacroPreset::new(20)];
+
+        let outside = macro_presets_outside_scope(&[group_a, group_b], Some(7));
+        assert_eq!(outside, vec![20]);
+    }
 }
 
 #[cfg(not(windows))]
