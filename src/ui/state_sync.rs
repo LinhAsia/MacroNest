@@ -213,7 +213,8 @@ impl CrosshairApp {
             ));
     }
 
-    pub(crate) fn sync_audio_settings(&self) {
+    pub(crate) fn sync_audio_settings(&mut self) {
+        self.retain_referenced_audio_waveforms();
         let _ = self.overlay_tx.send(OverlayCommand::UpdateAudioSettings(
             self.state.audio_settings.clone(),
         ));
