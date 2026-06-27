@@ -33,6 +33,10 @@ enum TextHighlightMode {
 }
 
 impl CrosshairApp {
+    fn should_persist_delay_drag(response_dragged: bool, pointer_any_down: bool, has_dragged: bool) -> bool {
+        !response_dragged && !pointer_any_down && has_dragged
+    }
+
     fn ensure_draw_geometry_color_literals(spec: &mut crate::model::GeometrySpec) {
         if spec.stroke_color_expr.trim().is_empty() {
             if spec.stroke_color.a == 255 {
@@ -3774,6 +3778,7 @@ impl CrosshairApp {
         let mut live_sync = false;
         let mut geom_presets_changed = false;
         let mut audio_sense_presets_changed = false;
+        let mut macro_presets_persist_requested = false;
         let mut add_preset_to_group = None;
         let mut paste_preset_to_group: Option<u32> = None;
         ui.separator();
@@ -10670,6 +10675,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                             child_ui.visuals_mut().widgets.noninteractive.corner_radius = left_rounding;
                                             let edit_id = child_ui.make_persistent_id((group.id, preset.id, step_index, "delay-edit-state"));
                                             let is_editing = child_ui.memory(|mem| mem.data.get_temp::<bool>(edit_id).unwrap_or(false));
+                                            let edit_original_expr_id = edit_id.with("original-expr");
                                             if is_editing {
                                                 let delay_id = child_ui.id().with((step_index, "delay"));
                                                 let response = Self::render_variable_text_edit(
@@ -10701,10 +10707,19 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     } else {
                                                         step.delay_ms = 0;
                                                     }
-                                                    live_sync = true;
                                                 }
-                                                if response.lost_focus() || child_ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                                    child_ui.memory_mut(|mem| mem.data.insert_temp(edit_id, false));
+                                                let commit_edit =
+                                                    response.lost_focus()
+                                                        || child_ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                                if commit_edit {
+                                                    let original_expr = child_ui
+                                                        .memory(|mem| mem.data.get_temp::<String>(edit_original_expr_id))
+                                                        .unwrap_or_default();
+                                                    macro_presets_persist_requested |= step.delay_expr != original_expr;
+                                                    child_ui.memory_mut(|mem| {
+                                                        mem.data.insert_temp(edit_id, false);
+                                                        mem.data.remove::<String>(edit_original_expr_id);
+                                                    });
                                                 }
                                             } else {
                                                 let display_text = if step.delay_expr.is_empty() {
@@ -10742,12 +10757,22 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             } else {
                                                                 step.delay_ms = 0;
                                                             }
-                                                            live_sync = true;
                                                         }
                                                     }
                                                     child_ui.memory_mut(|mem| mem.data.insert_temp(accum_id, accum));
                                                 } else {
-                                                    if !child_ui.input(|i| i.pointer.any_down()) {
+                                                    let pointer_any_down = child_ui.input(|i| i.pointer.any_down());
+                                                    let has_dragged = child_ui.memory(|mem| {
+                                                        mem.data.get_temp::<bool>(has_dragged_id).unwrap_or(false)
+                                                    });
+                                                    if Self::should_persist_delay_drag(
+                                                        response.dragged(),
+                                                        pointer_any_down,
+                                                        has_dragged,
+                                                    ) {
+                                                        macro_presets_persist_requested = true;
+                                                    }
+                                                    if !pointer_any_down {
                                                         let accum_id = edit_id.with("drag-accum");
                                                         child_ui.memory_mut(|mem| {
                                                             mem.data.insert_temp(has_dragged_id, false);
@@ -10761,6 +10786,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         child_ui.memory_mut(|mem| {
                                                             mem.data.insert_temp(edit_id, true);
                                                             mem.data.insert_temp(edit_id.with("just_started"), true);
+                                                            mem.data.insert_temp(edit_original_expr_id, step.delay_expr.clone());
                                                         });
                                                     }
                                                 }
@@ -14405,7 +14431,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
         {
             live_sync = true;
         }
-        if live_sync {
+        if live_sync || macro_presets_persist_requested {
             self.persist_macro_presets();
         }
         if geom_presets_changed {
@@ -18861,5 +18887,18 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
             ui.memory_mut(|mem| mem.data.insert_temp(focus_key, now_focused));
         }
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CrosshairApp;
+
+    #[test]
+    fn delay_drag_persists_only_after_release() {
+        assert!(!CrosshairApp::should_persist_delay_drag(true, true, true));
+        assert!(!CrosshairApp::should_persist_delay_drag(false, true, true));
+        assert!(!CrosshairApp::should_persist_delay_drag(false, false, false));
+        assert!(CrosshairApp::should_persist_delay_drag(false, false, true));
     }
 }
