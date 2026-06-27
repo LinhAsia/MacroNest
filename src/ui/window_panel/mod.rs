@@ -1716,16 +1716,10 @@ impl CrosshairApp {
             let dist_bl = pointer_pos.distance(window_rect.left_bottom());
             let dist_br = pointer_pos.distance(window_rect.right_bottom());
             let edge_threshold = 8.0;
-            let center_threshold = 20.0;
             let vertical_hit_min = window_rect.top() - edge_threshold;
             let vertical_hit_max = window_rect.bottom() + edge_threshold;
             let horizontal_hit_min = window_rect.left() - edge_threshold;
             let horizontal_hit_max = window_rect.right() + edge_threshold;
-            let nearest_on_box = egui::pos2(
-                pointer_pos.x.clamp(window_rect.left(), window_rect.right()),
-                pointer_pos.y.clamp(window_rect.top(), window_rect.bottom()),
-            );
-            let dist_to_box = pointer_pos.distance(nearest_on_box);
 
             if dist_tl < 12.0 {
                 DragHandle::TopLeft
@@ -1756,8 +1750,6 @@ impl CrosshairApp {
             {
                 DragHandle::Bottom
             } else if window_rect.contains(pointer_pos) {
-                DragHandle::Center
-            } else if dist_to_box < center_threshold {
                 DragHandle::Center
             } else {
                 DragHandle::None
@@ -2577,16 +2569,10 @@ impl CrosshairApp {
             let dist_bl = pointer_pos.distance(rect.left_bottom());
             let dist_br = pointer_pos.distance(rect.right_bottom());
             let edge_threshold = 10.0;
-            let center_threshold = 20.0;
             let vertical_hit_min = rect.top() - edge_threshold;
             let vertical_hit_max = rect.bottom() + edge_threshold;
             let horizontal_hit_min = rect.left() - edge_threshold;
             let horizontal_hit_max = rect.right() + edge_threshold;
-            let nearest_on_box = egui::pos2(
-                pointer_pos.x.clamp(rect.left(), rect.right()),
-                pointer_pos.y.clamp(rect.top(), rect.bottom()),
-            );
-            let dist_to_box = pointer_pos.distance(nearest_on_box);
 
             if dist_tl < 14.0 {
                 SelectionDragHandle::TopLeft
@@ -2617,8 +2603,6 @@ impl CrosshairApp {
             {
                 SelectionDragHandle::Bottom
             } else if rect.contains(pointer_pos) {
-                SelectionDragHandle::Center
-            } else if dist_to_box < center_threshold {
                 SelectionDragHandle::Center
             } else {
                 SelectionDragHandle::None
