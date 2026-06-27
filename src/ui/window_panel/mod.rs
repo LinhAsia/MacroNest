@@ -687,6 +687,8 @@ impl CrosshairApp {
             let vietnamese_input_enabled = self.state.vietnamese_input_enabled;
             let vietnamese_input_mode = self.state.vietnamese_input_mode;
             let mut begin_color_picker_preset_id = None;
+            let mut begin_region_picker_preset_id = None;
+            let mut begin_source_crop_picker_preset_id = None;
             let preset = &mut self.state.pin_presets[index];
             preset.use_source_crop = true;
             preset.enabled = preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
@@ -1245,6 +1247,12 @@ impl CrosshairApp {
                             preset.y = ((screen_size.y as i32 - preset.height.max(1)) / 2).max(0);
                             live_sync = true;
                         }
+                        if ui
+                            .button(Self::tr_lang(language, "Pick area", "Pick area"))
+                            .clicked()
+                        {
+                            begin_region_picker_preset_id = Some(preset.id);
+                        }
                     });
                 } else {
                     ui.label(
@@ -1380,6 +1388,12 @@ impl CrosshairApp {
                                 live_sync = true;
                             }
                         }
+                        if ui
+                            .button(Self::tr_lang(language, "Pick area", "Pick area"))
+                            .clicked()
+                        {
+                            begin_source_crop_picker_preset_id = Some(preset.id);
+                        }
                     });
                 }
             });
@@ -1388,6 +1402,20 @@ impl CrosshairApp {
                     ui.ctx(),
                     VisionCaptureTarget::PinPresetColor(pid),
                     crate::ui::VisionCaptureMode::ColorSample,
+                );
+            }
+            if let Some(pid) = begin_region_picker_preset_id {
+                self.begin_image_search_capture(
+                    ui.ctx(),
+                    VisionCaptureTarget::PinPresetRegion(pid),
+                    crate::ui::VisionCaptureMode::SearchRegion,
+                );
+            }
+            if let Some(pid) = begin_source_crop_picker_preset_id {
+                self.begin_image_search_capture(
+                    ui.ctx(),
+                    VisionCaptureTarget::PinPresetSourceCrop(pid),
+                    crate::ui::VisionCaptureMode::SearchRegion,
                 );
             }
             if let Some((target, status)) = next_capture_target.take() {

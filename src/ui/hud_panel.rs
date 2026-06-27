@@ -56,6 +56,7 @@ impl CrosshairApp {
         let mut changed = false;
         let mut active_preview: Option<HudPreset> = None;
         let mut preview_toggled_preset_id = None;
+        let mut begin_hud_picker_preset_id = None;
         for index in 0..self.state.hud_presets.len() {
             let language = self.state.ui_language;
             ui.add_space(6.0);
@@ -213,12 +214,25 @@ impl CrosshairApp {
                             ((Self::screen_size().y as i32 - preset.height.max(1)) / 2).max(0);
                         changed = true;
                     }
+                    if ui
+                        .button(Self::tr_lang(language, "Pick area", "Pick area"))
+                        .clicked()
+                    {
+                        begin_hud_picker_preset_id = Some(preset.id);
+                    }
                 });
 
                 if preset.preview_enabled {
                     active_preview = Some(preset.clone());
                 }
             });
+        }
+        if let Some(pid) = begin_hud_picker_preset_id {
+            self.begin_image_search_capture(
+                ui.ctx(),
+                crate::ui::VisionCaptureTarget::HudPresetRegion(pid),
+                crate::ui::VisionCaptureMode::SearchRegion,
+            );
         }
 
         if let Some(id) = remove_id {

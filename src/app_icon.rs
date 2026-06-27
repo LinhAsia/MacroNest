@@ -9,6 +9,22 @@ const APP_ICON_SVG: &str = include_str!("../assets/app-icon.svg");
 
 const APP_ICON_DISABLED_SVG: &str = include_str!("../assets/app-icon-disabled.svg");
 
+/// Load icon data from an already-rendered .ico file on disk.
+/// Much faster than `icon_data` since it skips SVG parsing and rendering.
+pub fn icon_data_from_ico_file(path: &Path) -> Result<IconData> {
+    let bytes = fs::read(path).context("Failed to read icon file")?;
+    let image = image::load_from_memory_with_format(&bytes, image::ImageFormat::Ico)
+        .context("Failed to decode icon file")?
+        .into_rgba8();
+    let width = image.width();
+    let height = image.height();
+    Ok(IconData {
+        rgba: image.into_raw(),
+        width,
+        height,
+    })
+}
+
 pub fn icon_data(size: u32) -> Result<IconData> {
     let pixmap = render_pixmap(size, false)?;
     Ok(IconData {

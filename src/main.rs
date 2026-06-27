@@ -354,18 +354,8 @@ fn main() -> Result<()> {
         });
     }
     let startup_gate: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
-    {
-        // Load the icon immediately in the background (no gate wait) so it can be
-        // sent to the UI thread as early as possible via StartupIconLoaded.
-        let icon_ui_tx = ui_tx.clone();
-        std::thread::spawn(move || {
-            if let Ok(icon) = app_icon::icon_data(128) {
-                let _ = icon_ui_tx.send(crate::overlay::UiCommand::StartupIconLoaded(
-                    std::sync::Arc::new(icon),
-                ));
-            }
-        });
-    }
+    // No separate icon background thread needed — the icon is either loaded fast from .ico
+    // file below (for the viewport), or the background asset thread will generate it for next run.
     let overlay_handle_slot: Arc<Mutex<Option<overlay::OverlayHandle>>> =
         Arc::new(Mutex::new(None));
     let overlay_start_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -435,7 +425,10 @@ fn main() -> Result<()> {
         "MacroNest v{}",
         option_env!("MACRONEST_BUILD_TAG").unwrap_or(env!("CARGO_PKG_VERSION"))
     );
-    // Icon is loaded off the main thread and applied later via UiCommand::StartupIconLoaded.
+    // Try to load the viewport icon from the pre-generated .ico file (fast: just file I/O).
+    // This ensures Windows shows the correct icon in the taskbar and Alt+Tab from the start.
+    // If the .ico doesn't exist yet (first run), the background asset thread will create it
+    // and it will be available on the next launch.
     let mut viewport_builder = eframe::egui::ViewportBuilder::default()
         .with_title(&app_title)
         .with_inner_size([1180.0, 780.0])
@@ -443,6 +436,9 @@ fn main() -> Result<()> {
         .with_visible(false)
         .with_decorations(false)
         .with_transparent(true);
+    if let Ok(icon) = app_icon::icon_data_from_ico_file(&paths.icon_file) {
+        viewport_builder = viewport_builder.with_icon(std::sync::Arc::new(icon));
+    }
 
     #[cfg(windows)]
     {
