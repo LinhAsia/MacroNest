@@ -15255,13 +15255,13 @@ mod windows_overlay {
 
             let (svg_cx, svg_top, svg_h, mapping_ch, vertical_offset) =
                 if mascot_style == crate::model::MascotStyle::Hachiware {
-                    (1016.25, 165.0, 961.9, 290.0_f32, 10.0 * scale)
+                    (1016.25, 165.0, 961.9, 278.0_f32, 10.0 * scale)
                 } else {
                     (1070.35, 120.08, 961.9, 340.0_f32, 10.0 * scale)
                 };
 
             let cx_val = if mascot_style == crate::model::MascotStyle::Hachiware {
-                257.0
+                248.0
             } else {
                 200.0
             };
