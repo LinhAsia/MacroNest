@@ -14432,7 +14432,9 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
             live_sync = true;
         }
         if live_sync {
-            self.persist_macro_presets();
+            self.sync_macro_presets();
+            self.sync_macro_master_enabled();
+            self.persist_deferred(ui.ctx());
         }
         if geom_presets_changed {
             self.sync_geometry_presets();
