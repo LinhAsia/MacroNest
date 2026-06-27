@@ -17992,7 +17992,7 @@ mod windows_overlay {
         Ok(())
     }
 
-    fn macro_enabled_map(groups: &[MacroGroup]) -> HashMap<u32, bool> {
+    pub(super) fn macro_enabled_map(groups: &[MacroGroup]) -> HashMap<u32, bool> {
         groups
             .iter()
             .flat_map(|group| {
@@ -18004,7 +18004,7 @@ mod windows_overlay {
             .collect()
     }
 
-    fn macro_presets_outside_scope(groups: &[MacroGroup], active_scope: Option<u32>) -> Vec<u32> {
+    pub(super) fn macro_presets_outside_scope(groups: &[MacroGroup], active_scope: Option<u32>) -> Vec<u32> {
         groups
             .iter()
             .filter(|group| !macro_group_scope_matches(group, active_scope))
@@ -18120,7 +18120,7 @@ mod windows_overlay {
         let release_steps = collect_macro_release_steps(&preset.steps);
         let hold_stop_step = preset
             .hold_stop_step_enabled
-            .then(|| preset.hold_stop_step.clone());
+            .then(|| (*preset.hold_stop_step).clone());
         let image_search_preset_ids = collect_macro_image_search_start_ids(&preset.steps);
         let run_token = {
             let mut hook_state = HOOK_STATE.lock();

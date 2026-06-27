@@ -2444,7 +2444,7 @@ impl CrosshairApp {
                     .and_then(|g| g.presets.iter_mut().find(|p| p.id == preset_id))
                     .and_then(|p| {
                         if is_hold_stop {
-                            Some(&mut p.hold_stop_step)
+                            Some(&mut *p.hold_stop_step)
                         } else {
                             p.steps.get_mut(step_index)
                         }
@@ -3069,7 +3069,7 @@ impl CrosshairApp {
                     .and_then(|g| g.presets.iter_mut().find(|p| p.id == preset_id))
                     .and_then(|p| {
                         if is_hold_stop {
-                            Some(&mut p.hold_stop_step)
+                            Some(&mut *p.hold_stop_step)
                         } else {
                             p.steps.get_mut(step_index)
                         }

@@ -1,4 +1,6 @@
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::ops::{Deref, DerefMut};
 
 use super::audio_model::AudioSenseSpec;
 use super::geometry_model::{GeometrySpec, HideGeometryMode, SetVariableSource};
@@ -428,6 +430,68 @@ impl Default for MacroStep {
     }
 }
 
+static DEFAULT_LAZY_MACRO_STEP: Lazy<MacroStep> = Lazy::new(MacroStep::default);
+
+#[derive(Debug, Clone, Default)]
+pub struct LazyMacroStep(Option<Box<MacroStep>>);
+
+impl LazyMacroStep {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_none()
+    }
+}
+
+impl From<MacroStep> for LazyMacroStep {
+    fn from(step: MacroStep) -> Self {
+        if step == MacroStep::default() {
+            Self::default()
+        } else {
+            Self(Some(Box::new(step)))
+        }
+    }
+}
+
+impl PartialEq for LazyMacroStep {
+    fn eq(&self, other: &Self) -> bool {
+        self.deref() == other.deref()
+    }
+}
+
+impl Serialize for LazyMacroStep {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.deref().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for LazyMacroStep {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let step = Option::<MacroStep>::deserialize(deserializer)?.unwrap_or_default();
+        Ok(step.into())
+    }
+}
+
+impl Deref for LazyMacroStep {
+    type Target = MacroStep;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_deref().unwrap_or(&DEFAULT_LAZY_MACRO_STEP)
+    }
+}
+
+impl DerefMut for LazyMacroStep {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+            .get_or_insert_with(|| Box::new(MacroStep::default()))
+            .as_mut()
+    }
+}
+
 impl MacroStep {
     pub fn get_break_loop_mode(&self) -> &str {
         if self.break_loop_mode.is_empty() {
@@ -670,9 +734,11 @@ pub struct MacroPreset {
     #[serde(default = "default_true")]
     pub event_match_duplicate_window_titles: bool,
     pub hold_stop_step_enabled: bool,
-    pub hold_stop_step: MacroStep,
+    #[serde(default, skip_serializing_if = "LazyMacroStep::is_empty")]
+    pub hold_stop_step: LazyMacroStep,
     pub press_stop_step_enabled: bool,
-    pub press_stop_step: MacroStep,
+    #[serde(default, skip_serializing_if = "LazyMacroStep::is_empty")]
+    pub press_stop_step: LazyMacroStep,
     pub steps: Vec<MacroStep>,
     pub record_hotkey: Option<HotkeyBinding>,
     #[serde(skip)]
@@ -697,9 +763,9 @@ impl MacroPreset {
             event_extra_target_window_titles: Vec::new(),
             event_match_duplicate_window_titles: true,
             hold_stop_step_enabled: false,
-            hold_stop_step: MacroStep::default(),
+            hold_stop_step: LazyMacroStep::default(),
             press_stop_step_enabled: false,
-            press_stop_step: MacroStep::default(),
+            press_stop_step: LazyMacroStep::default(),
             steps: vec![MacroStep::default()],
             record_hotkey: None,
             acknowledged_infinite_loop: false,
@@ -776,5 +842,34 @@ impl MacroGroup {
 impl Default for MacroGroup {
     fn default() -> Self {
         Self::new(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LazyMacroStep, MacroPreset, MacroStep};
+
+    #[test]
+    fn default_stop_steps_are_omitted_from_macro_preset_json() {
+        let preset = MacroPreset::default();
+        let value = serde_json::to_value(&preset).expect("serialize preset");
+
+        let object = value.as_object().expect("macro preset json object");
+        assert!(!object.contains_key("hold_stop_step"));
+        assert!(!object.contains_key("press_stop_step"));
+    }
+
+    #[test]
+    fn non_default_stop_step_round_trips_through_macro_preset_json() {
+        let mut preset = MacroPreset::default();
+        let mut stop_step = MacroStep::default();
+        stop_step.delay_ms = 42;
+        preset.hold_stop_step = LazyMacroStep::from(stop_step.clone());
+
+        let json = serde_json::to_string(&preset).expect("serialize preset");
+        let restored: MacroPreset = serde_json::from_str(&json).expect("deserialize preset");
+
+        assert_eq!(*restored.hold_stop_step, stop_step);
+        assert!(restored.press_stop_step.is_empty());
     }
 }
