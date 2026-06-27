@@ -1953,11 +1953,17 @@ impl CrosshairApp {
 
         if response.hovered() || active_handle != DragHandle::None {
             if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                let handle_to_use = if active_handle != DragHandle::None {
+                let mut handle_to_use = if active_handle != DragHandle::None {
                     active_handle
                 } else {
                     pick_window_drag_handle(pointer_pos, window_rect)
                 };
+                if active_handle == DragHandle::None
+                    && handle_to_use == DragHandle::Center
+                    && !window_rect.contains(pointer_pos)
+                {
+                    handle_to_use = DragHandle::None;
+                }
 
                 match handle_to_use {
                     DragHandle::TopLeft | DragHandle::BottomRight => {
@@ -2901,11 +2907,17 @@ impl CrosshairApp {
 
         if response.hovered() || active_handle != SelectionDragHandle::None {
             if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                let handle_to_use = if active_handle != SelectionDragHandle::None {
+                let mut handle_to_use = if active_handle != SelectionDragHandle::None {
                     active_handle
                 } else {
                     pick_selection_drag_handle(pointer_pos, rect)
                 };
+                if active_handle == SelectionDragHandle::None
+                    && handle_to_use == SelectionDragHandle::Center
+                    && !rect.contains(pointer_pos)
+                {
+                    handle_to_use = SelectionDragHandle::None;
+                }
 
                 match handle_to_use {
                     SelectionDragHandle::TopLeft | SelectionDragHandle::BottomRight => {
