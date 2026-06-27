@@ -10719,44 +10719,67 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 )
                                                 .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
                                                 let has_dragged_id = edit_id.with("has-dragged");
-                                                if response.dragged() {
-                                                    child_ui.memory_mut(|mem| mem.data.insert_temp(has_dragged_id, true));
-                                                    let accum_id = edit_id.with("drag-accum");
-                                                    let mut accum = child_ui.memory(|mem| mem.data.get_temp::<f32>(accum_id).unwrap_or(0.0));
-                                                    accum += response.drag_motion().x;
-                                                    let step_size = child_ui.input(|i| {
-                                                        if i.modifiers.shift {
-                                                            25.0
-                                                        } else if i.modifiers.ctrl {
-                                                            1.0
-                                                        } else {
-                                                            5.0
+                                                let drag_start_x_id = edit_id.with("drag-start-x");
+                                                let drag_start_expr_id = edit_id.with("drag-start-expr");
+                                                if response.is_pointer_button_down_on() {
+                                                    let pointer_x =
+                                                        child_ui.input(|i| i.pointer.interact_pos().map(|pos| pos.x));
+                                                    let start_x = child_ui.memory(|mem| mem.data.get_temp::<f32>(drag_start_x_id));
+                                                    let start_expr = child_ui.memory(|mem| mem.data.get_temp::<String>(drag_start_expr_id));
+                                                    match (start_x, start_expr, pointer_x) {
+                                                        (Some(start_x), Some(start_expr), Some(pointer_x)) => {
+                                                            let step_size = child_ui.input(|i| {
+                                                                if i.modifiers.shift {
+                                                                    25.0
+                                                                } else if i.modifiers.ctrl {
+                                                                    1.0
+                                                                } else {
+                                                                    4.0
+                                                                }
+                                                            });
+                                                            let pixels_per_unit = 1.0;
+                                                            let delta_int =
+                                                                (((pointer_x - start_x) / pixels_per_unit) * step_size)
+                                                                    .round() as i32;
+                                                            let next_expr =
+                                                                Self::adjust_expression_by_delta(&start_expr, delta_int);
+                                                            if next_expr != step.delay_expr {
+                                                                child_ui.memory_mut(|mem| {
+                                                                    mem.data.insert_temp(
+                                                                        has_dragged_id,
+                                                                        delta_int != 0,
+                                                                    )
+                                                                });
+                                                                step.delay_expr = next_expr;
+                                                                if let Ok(val) = step.delay_expr.trim().parse::<u64>() {
+                                                                    step.delay_ms = val;
+                                                                } else {
+                                                                    step.delay_ms = 0;
+                                                                }
+                                                                live_sync = true;
+                                                            }
+                                                        }
+                                                        _ => {
+                                                            if let Some(pointer_x) = pointer_x {
+                                                                child_ui.memory_mut(|mem| {
+                                                                    mem.data.insert_temp(drag_start_x_id, pointer_x);
+                                                                    mem.data.insert_temp(
+                                                                        drag_start_expr_id,
+                                                                        step.delay_expr.clone(),
+                                                                    );
+                                                                    mem.data.insert_temp(has_dragged_id, false);
+                                                                });
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    child_ui.memory_mut(|mem| {
+                                                        mem.data.remove::<f32>(drag_start_x_id);
+                                                        mem.data.remove::<String>(drag_start_expr_id);
+                                                        if !response.clicked() {
+                                                            mem.data.insert_temp(has_dragged_id, false);
                                                         }
                                                     });
-                                                    let pixels_per_unit = 1.0;
-                                                    let delta_units = (accum / pixels_per_unit).trunc();
-                                                    if delta_units != 0.0 {
-                                                        accum -= delta_units * pixels_per_unit;
-                                                        let delta_int = (delta_units * step_size).round() as i32;
-                                                        if delta_int != 0 {
-                                                            step.delay_expr = Self::adjust_expression_by_delta(&step.delay_expr, delta_int);
-                                                            if let Ok(val) = step.delay_expr.trim().parse::<u64>() {
-                                                                step.delay_ms = val;
-                                                            } else {
-                                                                step.delay_ms = 0;
-                                                            }
-                                                            live_sync = true;
-                                                        }
-                                                    }
-                                                    child_ui.memory_mut(|mem| mem.data.insert_temp(accum_id, accum));
-                                                } else {
-                                                    if !child_ui.input(|i| i.pointer.any_down()) {
-                                                        let accum_id = edit_id.with("drag-accum");
-                                                        child_ui.memory_mut(|mem| {
-                                                            mem.data.insert_temp(has_dragged_id, false);
-                                                            mem.data.insert_temp(accum_id, 0.0);
-                                                        });
-                                                    }
                                                 }
                                                 if response.clicked() {
                                                     let has_dragged = child_ui.memory(|mem| mem.data.get_temp::<bool>(has_dragged_id).unwrap_or(false));
