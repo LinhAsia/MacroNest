@@ -7549,18 +7549,22 @@ impl CrosshairApp {
                                                     };
                                                     let x_id = ui.id().with((group.id, preset.id, "hold-stop-move-abs-x-22"));
                                                     let y_id = ui.id().with((group.id, preset.id, "hold-stop-move-abs-y-22"));
+                                                    let mut x_expr = std::mem::take(&mut step.x_expr);
+                                                    let mut y_expr = std::mem::take(&mut step.y_expr);
                                                     let (x_response, y_response) =
                                                         Self::render_coordinate_compact_pair(
                                                             ui,
-                                                            &mut step.x_expr,
+                                                            &mut x_expr,
                                                             x_id,
                                                             x_hint,
-                                                            &mut step.y_expr,
+                                                            &mut y_expr,
                                                             y_id,
                                                             y_hint,
                                                             58.0,
                                                             20.0,
                                                         );
+                                                    step.x_expr = x_expr;
+                                                    step.y_expr = y_expr;
                                                     Self::apply_vietnamese_input_if_changed(
                                                         &x_response,
                                                         self.state.vietnamese_input_enabled,
@@ -7568,7 +7572,8 @@ impl CrosshairApp {
                                                         &mut step.x_expr,
                                                     );
                                                     if x_response.changed() {
-                                                        Self::sync_coordinate_expr_to_value(&step.x_expr, &mut step.x);
+                                                        let x_expr = step.x_expr.clone();
+                                                        Self::sync_coordinate_expr_to_value(&x_expr, &mut step.x);
                                                         live_sync = true;
                                                     }
                                                     Self::render_variable_suggestions(
@@ -7585,7 +7590,8 @@ impl CrosshairApp {
                                                         &mut step.y_expr,
                                                     );
                                                     if y_response.changed() {
-                                                        Self::sync_coordinate_expr_to_value(&step.y_expr, &mut step.y);
+                                                        let y_expr = step.y_expr.clone();
+                                                        Self::sync_coordinate_expr_to_value(&y_expr, &mut step.y);
                                                         live_sync = true;
                                                     }
                                                     Self::render_variable_suggestions(
@@ -7776,7 +7782,7 @@ impl CrosshairApp {
                                             }
                                         });
                                         if clear_hold_stop_step {
-                                            preset.hold_stop_step = MacroStep::default();
+                                            preset.hold_stop_step = crate::model::LazyMacroStep::default();
                                             live_sync = true;
                                         }
                                 });
@@ -9723,18 +9729,22 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     };
                                                     let x_id = ui.id().with((group.id, preset.id, "press-stop-move-abs-x-22"));
                                                     let y_id = ui.id().with((group.id, preset.id, "press-stop-move-abs-y-22"));
+                                                    let mut x_expr = std::mem::take(&mut step.x_expr);
+                                                    let mut y_expr = std::mem::take(&mut step.y_expr);
                                                     let (x_response, y_response) =
                                                         Self::render_coordinate_compact_pair(
                                                             ui,
-                                                            &mut step.x_expr,
+                                                            &mut x_expr,
                                                             x_id,
                                                             x_hint,
-                                                            &mut step.y_expr,
+                                                            &mut y_expr,
                                                             y_id,
                                                             y_hint,
                                                             58.0,
                                                             20.0,
                                                         );
+                                                    step.x_expr = x_expr;
+                                                    step.y_expr = y_expr;
                                                     Self::apply_vietnamese_input_if_changed(
                                                         &x_response,
                                                         self.state.vietnamese_input_enabled,
@@ -9742,7 +9752,8 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         &mut step.x_expr,
                                                     );
                                                     if x_response.changed() {
-                                                        Self::sync_coordinate_expr_to_value(&step.x_expr, &mut step.x);
+                                                        let x_expr = step.x_expr.clone();
+                                                        Self::sync_coordinate_expr_to_value(&x_expr, &mut step.x);
                                                         live_sync = true;
                                                     }
                                                     Self::render_variable_suggestions(
@@ -9759,7 +9770,8 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         &mut step.y_expr,
                                                     );
                                                     if y_response.changed() {
-                                                        Self::sync_coordinate_expr_to_value(&step.y_expr, &mut step.y);
+                                                        let y_expr = step.y_expr.clone();
+                                                        Self::sync_coordinate_expr_to_value(&y_expr, &mut step.y);
                                                         live_sync = true;
                                                     }
                                                     Self::render_variable_suggestions(
@@ -9950,7 +9962,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                             }
                                         });
                                         if clear_press_stop_step {
-                                            preset.press_stop_step = MacroStep::default();
+                                            preset.press_stop_step = crate::model::LazyMacroStep::default();
                                             live_sync = true;
                                         }
                                 });

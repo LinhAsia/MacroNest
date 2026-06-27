@@ -10974,7 +10974,7 @@ impl eframe::App for CrosshairApp {
                 .and_then(|g| g.presets.iter().find(|p| p.id == preset_id))
                 .and_then(|p| {
                     if is_hold_stop {
-                        Some(&p.hold_stop_step)
+                        Some(&*p.hold_stop_step)
                     } else {
                         p.steps.get(step_index)
                     }
@@ -11013,7 +11013,7 @@ impl eframe::App for CrosshairApp {
                     .and_then(|g| g.presets.iter().find(|p| p.id == preset_id))
                     .and_then(|p| {
                         if is_hold_stop {
-                            Some(&p.hold_stop_step)
+                            Some(&*p.hold_stop_step)
                         } else {
                             p.steps.get(step_index)
                         }

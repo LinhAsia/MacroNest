@@ -2380,7 +2380,7 @@ impl CrosshairApp {
                     })
                     .and_then(|preset| {
                         if target.is_hold_stop {
-                            Some(&mut preset.hold_stop_step)
+                            Some(&mut *preset.hold_stop_step)
                         } else {
                             preset.steps.get_mut(target.step_index)
                         }
@@ -2459,7 +2459,7 @@ impl CrosshairApp {
                     })
                     .and_then(|preset| {
                         if target.is_hold_stop {
-                            Some(&mut preset.hold_stop_step)
+                            Some(&mut *preset.hold_stop_step)
                         } else {
                             preset.steps.get_mut(target.step_index)
                         }
@@ -2511,7 +2511,7 @@ impl CrosshairApp {
                 })
                 .and_then(|preset| {
                     if target.is_hold_stop {
-                        Some(&mut preset.hold_stop_step)
+                        Some(&mut *preset.hold_stop_step)
                     } else {
                         preset.steps.get_mut(target.step_index)
                     }
