@@ -13821,7 +13821,11 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                      }
                                      MacroAction::EnablePinPreset | MacroAction::DisablePin => {
                                          has_hover_support = true;
-                                         if let Some(preset) = step.key.trim().parse::<u32>().ok().and_then(|pid| self.state.pin_presets.iter().find(|p| p.id == pid)) {
+                                         if let Some(preset) = Self::find_item_by_trimmed_id(
+                                             step.key.trim(),
+                                             &self.state.pin_presets,
+                                             |preset| preset.id,
+                                         ) {
                                              if preset.use_source_crop {
                                                  hover_regions.push(crate::overlay::VisionRegion {
                                                      left: preset.source_x,
@@ -13848,7 +13852,11 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                      }
                                      MacroAction::ApplyWindowPreset => {
                                          has_hover_support = true;
-                                         if let Some(preset) = step.key.trim().parse::<u32>().ok().and_then(|pid| self.state.window_presets.iter().find(|p| p.id == pid)) {
+                                         if let Some(preset) = Self::find_item_by_trimmed_id(
+                                             step.key.trim(),
+                                             &self.state.window_presets,
+                                             |preset| preset.id,
+                                         ) {
                                              let (screen_width, screen_height) = {
                                                  let bounds = crate::window_list::virtual_screen_bounds();
                                                  (bounds.2, bounds.3)
@@ -16262,6 +16270,15 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                 .find(|item| name_of(item).trim().eq_ignore_ascii_case(trimmed))
                 .map(id_of)
         })
+    }
+
+    fn find_item_by_trimmed_id<'a, T>(
+        trimmed: &str,
+        items: &'a [T],
+        id_of: impl Fn(&T) -> u32,
+    ) -> Option<&'a T> {
+        let id = trimmed.parse::<u32>().ok()?;
+        items.iter().find(|item| id_of(item) == id)
     }
 
     fn clear_geometry_spec_override_inputs(spec: &mut crate::model::GeometrySpec) {
