@@ -25521,20 +25521,12 @@ mod windows_overlay {
         target: &str,
         match_duplicate_window_titles: bool,
     ) -> bool {
-        if title == target || format!("{title} (0x{:X})", hwnd.0 as usize) == target {
-            return true;
-        }
-
-        let base_title = selector_base_title(target);
-        if base_title != target && title == base_title {
-            return true;
-        }
-
-        if match_duplicate_window_titles && title == selector_base_title(target) {
-            return true;
-        }
-
-        matches_browser_suffix(target, title)
+        crate::window_list::window_matches_candidate_title(
+            title,
+            &format!("{title} (0x{:X})", hwnd.0 as usize),
+            target,
+            match_duplicate_window_titles,
+        )
     }
 
     fn title_matches_any_window_target(
@@ -26332,14 +26324,6 @@ mod windows_overlay {
         }
 
         std::process::exit(0);
-    }
-
-    fn selector_base_title(target: &str) -> &str {
-        crate::window_list::selector_base_title(target)
-    }
-
-    fn matches_browser_suffix(target: &str, candidate: &str) -> bool {
-        crate::window_list::matches_browser_suffix(target, candidate)
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
