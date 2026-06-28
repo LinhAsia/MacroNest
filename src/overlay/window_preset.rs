@@ -113,6 +113,7 @@ pub(super) fn apply_window_preset_animated(preset: &WindowPreset) -> Result<()> 
         return Ok(());
     }
     unsafe {
+        super::invalidate_runtime_open_window_snapshot();
         let target = resolve_window_target(
             preset.target_window_title.as_deref(),
             &preset.extra_target_window_titles,
@@ -151,6 +152,7 @@ pub(super) fn restore_window_title_bar_for_preset(preset: &WindowPreset) -> Resu
         return Ok(());
     }
     unsafe {
+        super::invalidate_runtime_open_window_snapshot();
         let target = resolve_window_target(
             preset.target_window_title.as_deref(),
             &preset.extra_target_window_titles,
@@ -269,6 +271,7 @@ fn apply_window_preset_impl(preset: &WindowPreset, require_enabled: bool) -> Res
         return apply_window_preset_animated(preset);
     }
     unsafe {
+        super::invalidate_runtime_open_window_snapshot();
         let target = resolve_window_target(
             preset.target_window_title.as_deref(),
             &preset.extra_target_window_titles,
@@ -307,13 +310,13 @@ fn apply_window_preset_impl(preset: &WindowPreset, require_enabled: bool) -> Res
 }
 
 pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result<()> {
-    use windows::Win32::Foundation::{HWND, LPARAM, POINT};
+    use windows::Win32::Foundation::{HWND, POINT};
     use windows::Win32::Graphics::Gdi::MonitorFromWindow;
-    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible};
 
     if layout.rows == 0 || layout.cols == 0 {
         bail!("Layout has no rows/cols");
     }
+    super::invalidate_runtime_open_window_snapshot();
 
     let rows = layout.rows.max(1);
     let cols = layout.cols.max(1);
@@ -416,63 +419,20 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
             .flatten()
             .collect();
 
-        struct FindPayload<'a> {
-            title: &'a str,
-            match_dup: bool,
-            used: &'a HashSet<isize>,
-            result: Option<HWND>,
-        }
-        fn clean_title_suffix(t: &str) -> &str {
-            if let Some(prefix) = t.strip_suffix(')')
-                && let Some((base, _)) = prefix.rsplit_once(" (0x")
-            {
-                base.trim()
-            } else {
-                t.trim()
-            }
-        }
-        unsafe extern "system" fn find_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
-            let p = &mut *(lparam.0 as *mut FindPayload<'_>);
-            if !IsWindowVisible(hwnd).as_bool() {
-                return true.into();
-            }
-            if p.used.contains(&(hwnd.0 as isize)) {
-                return true.into();
-            }
-            let mut buf = [0u16; 512];
-            let len = GetWindowTextW(hwnd, &mut buf);
-            if len == 0 {
-                return true.into();
-            }
-            let win_title = String::from_utf16_lossy(&buf[..len as usize]);
-            let clean_p_title = clean_title_suffix(p.title);
-            let clean_win_title = clean_title_suffix(&win_title);
-            let matches = if p.match_dup {
-                clean_win_title
-                    .to_lowercase()
-                    .contains(&clean_p_title.to_lowercase())
-            } else {
-                clean_win_title.eq_ignore_ascii_case(clean_p_title)
-            };
-            if matches {
-                p.result = Some(hwnd);
-                return false.into();
-            }
-            true.into()
-        }
-
         let hwnd: Option<HWND> = unsafe {
             let mut found = None;
+            let snapshot = super::runtime_open_windows_snapshot();
             for title in &titles {
-                let mut payload = FindPayload {
-                    title,
-                    match_dup: cell.match_duplicate_window_titles,
-                    used: &used_hwnds,
-                    result: None,
-                };
-                let _ = EnumWindows(Some(find_proc), LPARAM((&mut payload) as *mut _ as isize));
-                if payload.result.is_some() {
-                    found = payload.result;
+                if let Some(entry) = snapshot.iter().find(|entry| {
+                    !used_hwnds.contains(&entry.hwnd)
+                        && super::title_matches_window_target(
+                            &entry.title,
+                            HWND(entry.hwnd as *mut std::ffi::c_void),
+                            title,
+                            cell.match_duplicate_window_titles,
+                        )
+                }) {
+                    found = Some(HWND(entry.hwnd as *mut std::ffi::c_void));
                     break;
                 }
             }
