@@ -77,6 +77,14 @@ mod windows_impl {
         pub rgba: Vec<u8>,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum WindowMatchRule {
+        Lowest,
+        Highest,
+        Leftmost,
+        Rightmost,
+    }
+
     pub fn list_open_windows() -> Vec<WindowInfo> {
         let mut windows: Vec<WindowInfo> = Vec::new();
         unsafe {
@@ -257,18 +265,53 @@ mod windows_impl {
         if hwnd.0.is_null() { None } else { Some(hwnd) }
     }
 
-    fn strip_rule_suffix(target: &str) -> &str {
+    fn parse_window_match_rule(target: &str) -> (&str, Option<WindowMatchRule>) {
         if let Some(s) = target.strip_suffix(" [Lowest]") {
-            s
+            (s, Some(WindowMatchRule::Lowest))
         } else if let Some(s) = target.strip_suffix(" [Highest]") {
-            s
+            (s, Some(WindowMatchRule::Highest))
         } else if let Some(s) = target.strip_suffix(" [Leftmost]") {
-            s
+            (s, Some(WindowMatchRule::Leftmost))
         } else if let Some(s) = target.strip_suffix(" [Rightmost]") {
-            s
+            (s, Some(WindowMatchRule::Rightmost))
         } else {
-            target
+            (target, None)
         }
+    }
+
+    fn strip_rule_suffix(target: &str) -> &str {
+        parse_window_match_rule(target).0
+    }
+
+    fn select_window_by_match_rule(
+        candidates: &[HWND],
+        rule: WindowMatchRule,
+    ) -> Option<HWND> {
+        let mut best_hwnd = None;
+        let mut best_val = match rule {
+            WindowMatchRule::Lowest | WindowMatchRule::Rightmost => i32::MIN,
+            WindowMatchRule::Highest | WindowMatchRule::Leftmost => i32::MAX,
+        };
+
+        for hwnd in candidates {
+            let mut rect = RECT::default();
+            if unsafe { GetWindowRect(*hwnd, &mut rect) }.is_ok() {
+                let axis = match rule {
+                    WindowMatchRule::Lowest | WindowMatchRule::Highest => rect.top,
+                    WindowMatchRule::Leftmost | WindowMatchRule::Rightmost => rect.left,
+                };
+                let better = match rule {
+                    WindowMatchRule::Lowest | WindowMatchRule::Rightmost => axis > best_val,
+                    WindowMatchRule::Highest | WindowMatchRule::Leftmost => axis < best_val,
+                };
+                if better {
+                    best_val = axis;
+                    best_hwnd = Some(*hwnd);
+                }
+            }
+        }
+
+        best_hwnd.or_else(|| candidates.first().copied())
     }
 
     fn find_window_by_candidate_exact(title_or_selector: &str) -> Option<HWND> {
@@ -287,33 +330,31 @@ mod windows_impl {
         found
     }
 
+    fn window_matches_candidate_title(
+        title: &str,
+        selector: &str,
+        clean_target: &str,
+        match_duplicate_window_titles: bool,
+    ) -> bool {
+        let mut matches = if match_duplicate_window_titles {
+            title == selector_base_title(clean_target) || selector == clean_target
+        } else {
+            title == clean_target
+                || selector == clean_target
+                || (selector_base_title(clean_target) != clean_target
+                    && title == selector_base_title(clean_target))
+        };
+        if !matches {
+            matches = matches_browser_suffix(clean_target, title);
+        }
+        matches
+    }
+
     fn find_window_by_candidate(
         title_or_selector: &str,
         match_duplicate_window_titles: bool,
     ) -> Option<HWND> {
-        let (base_title, rule) = if title_or_selector.ends_with(" [Lowest]") {
-            (
-                title_or_selector.strip_suffix(" [Lowest]").unwrap(),
-                Some("Lowest"),
-            )
-        } else if title_or_selector.ends_with(" [Highest]") {
-            (
-                title_or_selector.strip_suffix(" [Highest]").unwrap(),
-                Some("Highest"),
-            )
-        } else if title_or_selector.ends_with(" [Leftmost]") {
-            (
-                title_or_selector.strip_suffix(" [Leftmost]").unwrap(),
-                Some("Leftmost"),
-            )
-        } else if title_or_selector.ends_with(" [Rightmost]") {
-            (
-                title_or_selector.strip_suffix(" [Rightmost]").unwrap(),
-                Some("Rightmost"),
-            )
-        } else {
-            (title_or_selector, None)
-        };
+        let (base_title, rule) = parse_window_match_rule(title_or_selector);
 
         if let Some(rule) = rule {
             let mut candidates = Vec::new();
@@ -329,50 +370,7 @@ mod windows_impl {
                 return None;
             }
 
-            let mut best_hwnd = None;
-            let mut best_val = match rule {
-                "Lowest" | "Rightmost" => i32::MIN,
-                "Highest" | "Leftmost" => i32::MAX,
-                _ => 0,
-            };
-
-            for hwnd in &candidates {
-                let mut rect = RECT::default();
-                if unsafe { GetWindowRect(*hwnd, &mut rect) }.is_ok() {
-                    match rule {
-                        "Lowest" => {
-                            let y = rect.top;
-                            if y > best_val {
-                                best_val = y;
-                                best_hwnd = Some(*hwnd);
-                            }
-                        }
-                        "Highest" => {
-                            let y = rect.top;
-                            if y < best_val {
-                                best_val = y;
-                                best_hwnd = Some(*hwnd);
-                            }
-                        }
-                        "Leftmost" => {
-                            let x = rect.left;
-                            if x < best_val {
-                                best_val = x;
-                                best_hwnd = Some(*hwnd);
-                            }
-                        }
-                        "Rightmost" => {
-                            let x = rect.left;
-                            if x > best_val {
-                                best_val = x;
-                                best_hwnd = Some(*hwnd);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            return best_hwnd.or_else(|| candidates.first().cloned());
+            return select_window_by_match_rule(&candidates, rule);
         }
 
         let mut found = None;
@@ -415,19 +413,13 @@ mod windows_impl {
         let Some(title) = window_title(hwnd) else {
             return true.into();
         };
-        let mut matches = if *match_duplicate_window_titles {
-            title == selector_base_title(clean_title)
-                || window_selector(hwnd, &title) == clean_title
-        } else {
-            title == clean_title
-                || window_selector(hwnd, &title) == clean_title
-                || (selector_base_title(clean_title) != clean_title
-                    && title == selector_base_title(clean_title))
-        };
-        if !matches {
-            matches = matches_browser_suffix(clean_title, &title);
-        }
-        if matches {
+        let selector = window_selector(hwnd, &title);
+        if window_matches_candidate_title(
+            &title,
+            &selector,
+            clean_title,
+            *match_duplicate_window_titles,
+        ) {
             **found = Some(hwnd);
             return false.into();
         }
@@ -447,19 +439,13 @@ mod windows_impl {
         let Some(title) = window_title(hwnd) else {
             return true.into();
         };
-        let mut matches = if *match_duplicate_window_titles {
-            title == selector_base_title(clean_title)
-                || window_selector(hwnd, &title) == clean_title
-        } else {
-            title == clean_title
-                || window_selector(hwnd, &title) == clean_title
-                || (selector_base_title(clean_title) != clean_title
-                    && title == selector_base_title(clean_title))
-        };
-        if !matches {
-            matches = matches_browser_suffix(clean_title, &title);
-        }
-        if matches {
+        let selector = window_selector(hwnd, &title);
+        if window_matches_candidate_title(
+            &title,
+            &selector,
+            clean_title,
+            *match_duplicate_window_titles,
+        ) {
             candidates.push(hwnd);
         }
         true.into()
@@ -473,7 +459,7 @@ mod windows_impl {
         target.ends_with(')') && target.contains(" (0x")
     }
 
-    fn selector_base_title(target: &str) -> &str {
+    pub fn selector_base_title(target: &str) -> &str {
         if let Some(prefix) = target.strip_suffix(')')
             && let Some((base, _)) = prefix.rsplit_once(" (0x")
         {
@@ -482,7 +468,7 @@ mod windows_impl {
         target
     }
 
-    fn clean_invisible_chars(s: &str) -> String {
+    pub fn clean_invisible_chars(s: &str) -> String {
         s.chars()
             .filter(|&c| c != '\u{200B}' && c != '\u{200C}' && c != '\u{200D}' && c != '\u{FEFF}')
             .collect()
@@ -506,7 +492,7 @@ mod windows_impl {
         " - Spotify",
     ];
 
-    fn matches_browser_suffix(target: &str, candidate: &str) -> bool {
+    pub fn matches_browser_suffix(target: &str, candidate: &str) -> bool {
         let clean_target = clean_invisible_chars(target);
         let clean_candidate = clean_invisible_chars(candidate);
         let target_base = selector_base_title(&clean_target);
@@ -526,6 +512,31 @@ mod windows_impl {
             }
         }
         false
+    }
+
+    pub fn simplify_window_title(title: &str) -> String {
+        let title = strip_rule_suffix(title);
+        let clean = clean_invisible_chars(title);
+        let base = selector_base_title(&clean);
+
+        if base.contains(" - Antigravity IDE - ") || base.ends_with(" - Antigravity IDE") {
+            return "Antigravity IDE".to_owned();
+        }
+
+        for suffix in BROWSER_SUFFIXES {
+            if base.ends_with(suffix) {
+                return suffix.trim_start_matches(" - ").to_owned();
+            }
+        }
+
+        if let Some((_, last)) = base.rsplit_once(" - ") {
+            let trimmed = last.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_owned();
+            }
+        }
+
+        base.to_owned()
     }
 
     fn window_title(hwnd: HWND) -> Option<String> {
