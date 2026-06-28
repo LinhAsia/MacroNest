@@ -3105,19 +3105,11 @@ impl CrosshairApp {
     }
 
     pub(crate) fn add_window_layout(&mut self) {
-        let mut id = 1;
-        while self.state.window_layouts.iter().any(|l| l.id == id) {
-            id += 1;
-        }
-        self.state.next_window_layout_id = (self
-            .state
-            .window_layouts
-            .iter()
-            .map(|l| l.id)
-            .max()
-            .unwrap_or(0)
-            + 1)
-        .max(id + 1);
+        let id = Self::allocate_next_id(
+            &self.state.window_layouts,
+            &mut self.state.next_window_layout_id,
+            |layout| layout.id,
+        );
         self.state.window_layouts.push(WindowLayout::new(id));
         self.sync_window_layouts();
         self.persist();
