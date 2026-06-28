@@ -1274,8 +1274,7 @@ impl CrosshairApp {
         match crate::macro_code::decode_preset(&code) {
             Ok(mut preset) => {
                 let source_preset_id = preset.id;
-                let id = self.state.next_macro_preset_id.max(1);
-                self.state.next_macro_preset_id = id + 1;
+                let id = self.allocate_next_macro_preset_id();
                 preset.id = id;
                 Self::remap_macro_step_self_ref(&mut preset.hold_stop_step, source_preset_id, id);
                 Self::bind_trigger_macro_step_to_group(&mut preset.hold_stop_step, group_id);
@@ -1358,8 +1357,11 @@ impl CrosshairApp {
         match crate::macro_code::decode_group(&code) {
             Ok(mut group) => {
                 let source_group_id = group.id;
-                let id = self.state.next_macro_group_id.max(1);
-                self.state.next_macro_group_id = id + 1;
+                let id = Self::allocate_next_id(
+                    &self.state.macro_groups,
+                    &mut self.state.next_macro_group_id,
+                    |group| group.id,
+                );
                 group.id = id;
                 group.name = self.unique_macro_group_name(&group.name);
                 group.folder_id = folder_id;
@@ -1367,8 +1369,7 @@ impl CrosshairApp {
                 let mut preset_id_map = HashMap::new();
                 for preset in &mut group.presets {
                     let old_preset_id = preset.id;
-                    let preset_id = self.state.next_macro_preset_id.max(1);
-                    self.state.next_macro_preset_id = preset_id + 1;
+                    let preset_id = self.allocate_next_macro_preset_id();
                     preset.id = preset_id;
                     preset_id_map.insert(old_preset_id, preset_id);
                 }
@@ -1529,6 +1530,14 @@ impl CrosshairApp {
             + 1)
         .max(id + 1);
         id
+    }
+
+    fn allocate_next_master_preset_id(&mut self) -> u32 {
+        Self::allocate_next_id(
+            &self.state.master_presets,
+            &mut self.state.next_master_preset_id,
+            |preset| preset.id,
+        )
     }
 
     #[cfg(windows)]
@@ -7287,8 +7296,7 @@ impl CrosshairApp {
         let before_selected = self.state.selected_master_preset_id;
 
         if self.state.master_presets.is_empty() {
-            let id = self.state.next_master_preset_id.max(1);
-            self.state.next_master_preset_id = id + 1;
+            let id = self.allocate_next_master_preset_id();
             self.state
                 .master_presets
                 .push(self.capture_master_preset_snapshot(id, "Default".to_owned()));
@@ -7498,8 +7506,7 @@ impl CrosshairApp {
     }
 
     fn add_master_preset_from_current(&mut self) {
-        let id = self.state.next_master_preset_id.max(1);
-        self.state.next_master_preset_id = id + 1;
+        let id = self.allocate_next_master_preset_id();
         let preset = self.capture_master_preset_snapshot(id, format!("Mode {id}"));
         self.state.master_presets.push(preset);
         self.state.selected_master_preset_id = Some(id);
@@ -8238,8 +8245,11 @@ impl CrosshairApp {
         source_group: &MacroGroup,
         target_folder_id: Option<u32>,
     ) -> MacroGroup {
-        let new_group_id = self.state.next_macro_group_id.max(1);
-        self.state.next_macro_group_id = new_group_id + 1;
+        let new_group_id = Self::allocate_next_id(
+            &self.state.macro_groups,
+            &mut self.state.next_macro_group_id,
+            |group| group.id,
+        );
 
         let mut copied_group = source_group.clone();
         copied_group.id = new_group_id;
@@ -8250,8 +8260,7 @@ impl CrosshairApp {
         let mut preset_id_map = HashMap::new();
         for preset in &mut copied_group.presets {
             let old_id = preset.id;
-            let new_preset_id = self.state.next_macro_preset_id.max(1);
-            self.state.next_macro_preset_id = new_preset_id + 1;
+            let new_preset_id = self.allocate_next_macro_preset_id();
             preset.id = new_preset_id;
             preset.collapsed = true;
             preset_id_map.insert(old_id, new_preset_id);
