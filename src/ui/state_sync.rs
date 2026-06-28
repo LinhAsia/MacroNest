@@ -102,6 +102,17 @@ impl CrosshairApp {
         let _ = overlay_tx.send(command(state));
     }
 
+    pub(crate) fn update_synced_state<T>(state: T, last_synced: &mut Option<T>) -> bool
+    where
+        T: Clone + PartialEq,
+    {
+        if last_synced.as_ref() == Some(&state) {
+            return false;
+        }
+        *last_synced = Some(state);
+        true
+    }
+
     pub(crate) fn sync_macro_presets(&mut self) {
         let macro_groups = build_runtime_macro_groups(&self.state);
         if self.last_synced_macro_groups.as_ref() == Some(&macro_groups) {
@@ -497,13 +508,11 @@ impl CrosshairApp {
 
     pub(crate) fn sync_audio_sense_presets(&mut self) {
         let presets = self.state.audio_sense_presets.clone();
-        if self.last_synced_audio_sense_presets.as_ref() == Some(&presets) {
-            return;
+        if Self::update_synced_state(presets.clone(), &mut self.last_synced_audio_sense_presets) {
+            let _ = self
+                .overlay_tx
+                .send(OverlayCommand::UpdateAudioSensePresets(presets));
         }
-        self.last_synced_audio_sense_presets = Some(presets.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateAudioSensePresets(presets));
     }
 
     pub(crate) fn persist_audio_sense_presets(&mut self) {
