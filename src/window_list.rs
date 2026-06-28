@@ -330,7 +330,7 @@ mod windows_impl {
         found
     }
 
-    fn window_matches_candidate_title(
+    pub fn window_matches_candidate_title(
         title: &str,
         selector: &str,
         clean_target: &str,
