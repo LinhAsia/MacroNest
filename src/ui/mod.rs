@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, atomic::AtomicU32},
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -1681,7 +1681,13 @@ impl CrosshairApp {
         else {
             return;
         };
-        let path_str = path.to_string_lossy().to_string();
+        let path_str = match self.import_audio_file_to_app_data(&path, if startup { "startup" } else { "exit" }) {
+            Ok(path_str) => path_str,
+            Err(error) => {
+                self.status = format!("Failed to import audio file: {error}");
+                return;
+            }
+        };
         let duration = audio::load_duration_ms(&path_str).ok();
         let clip = if startup {
             &mut self.state.audio_settings.startup
@@ -1710,7 +1716,13 @@ impl CrosshairApp {
         else {
             return;
         };
-        let path_str = path.to_string_lossy().to_string();
+        let path_str = match self.import_audio_file_to_app_data(&path, &format!("preset-{preset_id}")) {
+            Ok(path_str) => path_str,
+            Err(error) => {
+                self.status = format!("Failed to import audio file: {error}");
+                return;
+            }
+        };
         let duration = audio::load_duration_ms(&path_str).ok();
         if let Some(preset) = self
             .state
@@ -1735,7 +1747,13 @@ impl CrosshairApp {
     }
 
     fn replace_sound_preset_audio_file(&mut self, preset_id: u32, path: PathBuf) {
-        let path_str = path.to_string_lossy().to_string();
+        let path_str = match self.import_audio_file_to_app_data(&path, &format!("preset-{preset_id}")) {
+            Ok(path_str) => path_str,
+            Err(error) => {
+                self.status = format!("Failed to import audio file: {error}");
+                return;
+            }
+        };
         let duration = audio::load_duration_ms(&path_str).ok();
         if let Some(preset) = self
             .state
@@ -1766,7 +1784,13 @@ impl CrosshairApp {
         else {
             return;
         };
-        let path_str = path.to_string_lossy().to_string();
+        let path_str = match self.import_audio_file_to_app_data(&path, &format!("library-{item_id}")) {
+            Ok(path_str) => path_str,
+            Err(error) => {
+                self.status = format!("Failed to import audio file: {error}");
+                return;
+            }
+        };
         let duration = audio::load_duration_ms(&path_str).ok();
         if let Some(item) = self
             .state
@@ -1787,6 +1811,54 @@ impl CrosshairApp {
             self.sync_audio_settings();
             self.persist();
         }
+    }
+
+    fn audio_storage_dir(&self) -> PathBuf {
+        self.paths.root.join("audio")
+    }
+
+    fn import_audio_file_to_app_data(&self, source_path: &Path, prefix: &str) -> Result<String> {
+        let audio_dir = self.audio_storage_dir();
+        fs::create_dir_all(&audio_dir)?;
+
+        let source_stem = source_path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| !stem.trim().is_empty())
+            .unwrap_or("audio");
+        let extension = source_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .filter(|ext| !ext.trim().is_empty())
+            .unwrap_or("wav");
+        let sanitized_stem: String = source_stem
+            .chars()
+            .map(|ch| match ch {
+                'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => ch,
+                _ => '_',
+            })
+            .collect();
+        let sanitized_prefix: String = prefix
+            .chars()
+            .map(|ch| match ch {
+                'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => ch,
+                _ => '_',
+            })
+            .collect();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0);
+        let file_name = format!(
+            "{}-{}-{}.{}",
+            sanitized_prefix,
+            sanitized_stem.trim_matches('_').trim(),
+            timestamp,
+            extension
+        );
+        let target_path = audio_dir.join(file_name);
+        fs::copy(source_path, &target_path)?;
+        Ok(target_path.to_string_lossy().to_string())
     }
 
     fn save_clip_to_library(&mut self, name_prefix: &str, clip: &AudioClipSettings) {
