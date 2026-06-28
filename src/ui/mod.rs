@@ -8121,8 +8121,11 @@ impl CrosshairApp {
             return Some(preset.id);
         }
 
-        let id = self.state.next_command_preset_id.max(1);
-        self.state.next_command_preset_id = id + 1;
+        let id = Self::allocate_next_id(
+            &self.state.command_presets,
+            &mut self.state.next_command_preset_id,
+            |preset| preset.id,
+        );
         let mut preset = CommandPreset::new(id);
         preset.name = name;
         preset.command = command;
