@@ -1191,17 +1191,21 @@ impl CrosshairApp {
 
         match target {
             AudioEditorTarget::Preset(preset_id) => {
+                let mut choose_file_for = None;
                 let waveform_path = self
                     .state
                     .audio_settings
                     .presets
                     .iter()
                     .find(|preset| preset.id == preset_id)
-                    .map(|preset| preset.clip.file_path.trim().to_owned())
+                    .map(|preset| preset.clip.file_path.clone())
                     .unwrap_or_default();
-                self.refresh_audio_waveform_for_path(&waveform_path);
-                let waveform = self.audio_waveforms.get(&waveform_path).cloned();
-                let mut choose_file_for = None;
+                let waveform = self.prepare_audio_editor_waveform(&waveform_path);
+                let mut duration = self
+                    .sound_preset_clip_duration_ms
+                    .get(&preset_id)
+                    .copied()
+                    .flatten();
                 if let Some(preset) = self
                     .state
                     .audio_settings
@@ -1209,11 +1213,6 @@ impl CrosshairApp {
                     .iter_mut()
                     .find(|preset| preset.id == preset_id)
                 {
-                    let mut duration = self
-                        .sound_preset_clip_duration_ms
-                        .get(&preset.id)
-                        .copied()
-                        .flatten();
                     let outcome = Self::render_audio_media_editor(
                         ui,
                         language,
@@ -1249,11 +1248,123 @@ impl CrosshairApp {
                     self.choose_audio_file_for_sound_preset(preset_id);
                 }
             }
-            _ => {
-                self.close_audio_editor();
+            AudioEditorTarget::Library(item_id) => {
+                let mut choose_file_for = None;
+                let waveform_path = self
+                    .state
+                    .audio_settings
+                    .library
+                    .iter()
+                    .find(|item| item.id == item_id)
+                    .map(|item| item.clip.file_path.clone())
+                    .unwrap_or_default();
+                let waveform = self.prepare_audio_editor_waveform(&waveform_path);
+                let mut duration = self.library_clip_duration_ms.get(&item_id).copied().flatten();
+                if let Some(item) = self
+                    .state
+                    .audio_settings
+                    .library
+                    .iter_mut()
+                    .find(|item| item.id == item_id)
+                {
+                    let outcome = Self::render_audio_media_editor(
+                        ui,
+                        language,
+                        AudioEditorTarget::Library(item.id),
+                        ("library", item.id),
+                        &format!(
+                            "{}: {}",
+                            Self::tr_lang(language, "Library Sound", "Library Sound"),
+                            item.name
+                        ),
+                        &mut item.clip,
+                        &mut duration,
+                        waveform.as_deref(),
+                        &mut preview_cursor,
+                        &mut trim_timeline_zoom,
+                    );
+                    self.library_clip_duration_ms.insert(item.id, duration);
+                    if outcome.choose_file {
+                        choose_file_for = Some(item.id);
+                    }
+                    if let Some(status) = outcome.status {
+                        self.status = status;
+                    }
+                    if outcome.changed {
+                        self.sync_audio_settings();
+                        self.persist();
+                    }
+                } else {
+                    self.close_audio_editor();
+                }
+                if let Some(item_id) = choose_file_for {
+                    self.choose_audio_file_for_library_item(item_id);
+                }
+            }
+            AudioEditorTarget::Startup => {
+                let startup_path = self.state.audio_settings.startup.file_path.clone();
+                let waveform = self.prepare_audio_editor_waveform(&startup_path);
+                let mut duration = self.startup_clip_duration_ms;
+                let outcome = Self::render_audio_media_editor(
+                    ui,
+                    language,
+                    AudioEditorTarget::Startup,
+                    "startup-audio",
+                    Self::tr_lang(language, "Startup Sound", "Startup Sound"),
+                    &mut self.state.audio_settings.startup,
+                    &mut duration,
+                    waveform.as_deref(),
+                    &mut preview_cursor,
+                    &mut trim_timeline_zoom,
+                );
+                self.startup_clip_duration_ms = duration;
+                if outcome.choose_file {
+                    self.choose_audio_file(true);
+                }
+                if let Some(status) = outcome.status {
+                    self.status = status;
+                }
+                if outcome.changed {
+                    self.sync_audio_settings();
+                    self.persist();
+                }
+            }
+            AudioEditorTarget::Exit => {
+                let exit_path = self.state.audio_settings.exit.file_path.clone();
+                let waveform = self.prepare_audio_editor_waveform(&exit_path);
+                let mut duration = self.exit_clip_duration_ms;
+                let outcome = Self::render_audio_media_editor(
+                    ui,
+                    language,
+                    AudioEditorTarget::Exit,
+                    "exit-audio",
+                    Self::tr_lang(language, "Exit Sound", "Exit Sound"),
+                    &mut self.state.audio_settings.exit,
+                    &mut duration,
+                    waveform.as_deref(),
+                    &mut preview_cursor,
+                    &mut trim_timeline_zoom,
+                );
+                self.exit_clip_duration_ms = duration;
+                if outcome.choose_file {
+                    self.choose_audio_file(false);
+                }
+                if let Some(status) = outcome.status {
+                    self.status = status;
+                }
+                if outcome.changed {
+                    self.sync_audio_settings();
+                    self.persist();
+                }
             }
         }
         self.preview_cursor = preview_cursor;
         self.trim_timeline_zoom = trim_timeline_zoom;
+    }
+
+    fn prepare_audio_editor_waveform(&mut self, file_path: &str) -> Option<Vec<f32>> {
+        let waveform_path = file_path.trim().to_owned();
+        self.refresh_audio_waveform_for_path(&waveform_path);
+        self.audio_waveforms.get(&waveform_path).cloned()
     }
 }
