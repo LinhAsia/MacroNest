@@ -933,10 +933,9 @@ impl CrosshairApp {
 
     pub(crate) fn sync_vision_presets(&mut self) {
         let presets = self.state.vision_presets.clone();
-        if self.last_synced_vision_presets.as_ref() == Some(&presets) {
+        if !Self::update_synced_state(presets.clone(), &mut self.last_synced_vision_presets) {
             return;
         }
-        self.last_synced_vision_presets = Some(presets.clone());
         let preset_ids = presets.iter().map(|preset| preset.id).collect::<Vec<_>>();
         let _ = self
             .overlay_tx
