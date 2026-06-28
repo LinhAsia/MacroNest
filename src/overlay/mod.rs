@@ -25786,6 +25786,10 @@ mod windows_overlay {
     }
 
     fn resolve_geometry_preset_id_from_step(step: &MacroStep) -> Option<u32> {
+        fn normalize_geometry_preset_name(name: &str) -> String {
+            name.replace(' ', "").to_ascii_lowercase()
+        }
+
         if !step.geometry_preset_use_custom_ref {
             if step.geometry_preset_id.is_some() {
                 return step.geometry_preset_id;
@@ -25816,11 +25820,11 @@ mod windows_overlay {
             .iter()
             .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
             .or_else(|| {
-                let normalized = spec.replace(' ', "").to_ascii_lowercase();
+                let normalized = normalize_geometry_preset_name(spec);
                 hook_state
                     .geometry_presets
                     .iter()
-                    .find(|preset| preset.name.replace(' ', "").to_ascii_lowercase() == normalized)
+                    .find(|preset| normalize_geometry_preset_name(&preset.name) == normalized)
             })
             .map(|preset| preset.id)
             .or(step.geometry_preset_id)
