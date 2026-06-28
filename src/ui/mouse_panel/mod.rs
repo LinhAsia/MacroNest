@@ -2071,24 +2071,11 @@ impl CrosshairApp {
     }
 
     pub(crate) fn add_mouse_sensitivity_preset(&mut self) {
-        let mut id = 1;
-        while self
-            .state
-            .mouse_sensitivity_presets
-            .iter()
-            .any(|p| p.id == id)
-        {
-            id += 1;
-        }
-        self.state.next_mouse_sensitivity_preset_id = (self
-            .state
-            .mouse_sensitivity_presets
-            .iter()
-            .map(|p| p.id)
-            .max()
-            .unwrap_or(0)
-            + 1)
-        .max(id + 1);
+        let id = Self::allocate_next_id(
+            &self.state.mouse_sensitivity_presets,
+            &mut self.state.next_mouse_sensitivity_preset_id,
+            |preset| preset.id,
+        );
         self.state
             .mouse_sensitivity_presets
             .push(MouseSensitivityPreset::new(id));

@@ -893,19 +893,11 @@ impl CrosshairApp {
     }
 
     pub(crate) fn add_toolbox_preset(&mut self) {
-        let mut id = 1;
-        while self.state.hud_presets.iter().any(|p| p.id == id) {
-            id += 1;
-        }
-        self.state.next_hud_preset_id = (self
-            .state
-            .hud_presets
-            .iter()
-            .map(|p| p.id)
-            .max()
-            .unwrap_or(0)
-            + 1)
-        .max(id + 1);
+        let id = Self::allocate_next_id(
+            &self.state.hud_presets,
+            &mut self.state.next_hud_preset_id,
+            |preset| preset.id,
+        );
         self.state.hud_presets.push(HudPreset::new(id));
         self.sync_hud_presets();
         self.status = format!("Added HUD preset {id}.");
