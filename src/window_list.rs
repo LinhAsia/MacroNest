@@ -279,8 +279,12 @@ mod windows_impl {
         }
     }
 
-    fn strip_rule_suffix(target: &str) -> &str {
+    pub fn strip_rule_suffix(target: &str) -> &str {
         parse_window_match_rule(target).0
+    }
+
+    pub fn has_position_rule_suffix(target: &str) -> bool {
+        parse_window_match_rule(target).1.is_some()
     }
 
     fn select_window_by_match_rule(
