@@ -940,7 +940,7 @@ impl CrosshairApp {
                 self.show_sound_preset_audio_editor.remove(&preset.id);
             }
             if let Some(preset_id) = choose_file_for {
-                self.choose_audio_file_for_sound_preset(preset_id);
+                self.choose_audio_file_for_target(AudioEditorTarget::Preset(preset_id));
             }
             if let Some(target) = open_editor_target {
                 self.open_audio_editor(target);
@@ -1175,16 +1175,7 @@ impl CrosshairApp {
                 .button(self.tr("Choose audio file", "Choose audio file"))
                 .clicked()
             {
-                match target {
-                    AudioEditorTarget::Preset(preset_id) => {
-                        self.choose_audio_file_for_sound_preset(preset_id)
-                    }
-                    AudioEditorTarget::Library(item_id) => {
-                        self.choose_audio_file_for_library_item(item_id)
-                    }
-                    AudioEditorTarget::Startup => self.choose_audio_file(true),
-                    AudioEditorTarget::Exit => self.choose_audio_file(false),
-                }
+                self.choose_audio_file_for_target(target);
             }
         });
         ui.separator();
@@ -1245,7 +1236,7 @@ impl CrosshairApp {
                     self.close_audio_editor();
                 }
                 if let Some(preset_id) = choose_file_for {
-                    self.choose_audio_file_for_sound_preset(preset_id);
+                    self.choose_audio_file_for_target(AudioEditorTarget::Preset(preset_id));
                 }
             }
             AudioEditorTarget::Library(item_id) => {
@@ -1298,7 +1289,7 @@ impl CrosshairApp {
                     self.close_audio_editor();
                 }
                 if let Some(item_id) = choose_file_for {
-                    self.choose_audio_file_for_library_item(item_id);
+                    self.choose_audio_file_for_target(AudioEditorTarget::Library(item_id));
                 }
             }
             AudioEditorTarget::Startup => {
@@ -1319,7 +1310,7 @@ impl CrosshairApp {
                 );
                 self.startup_clip_duration_ms = duration;
                 if outcome.choose_file {
-                    self.choose_audio_file(true);
+                    self.choose_audio_file_for_target(AudioEditorTarget::Startup);
                 }
                 if let Some(status) = outcome.status {
                     self.status = status;
@@ -1347,7 +1338,7 @@ impl CrosshairApp {
                 );
                 self.exit_clip_duration_ms = duration;
                 if outcome.choose_file {
-                    self.choose_audio_file(false);
+                    self.choose_audio_file_for_target(AudioEditorTarget::Exit);
                 }
                 if let Some(status) = outcome.status {
                     self.status = status;

@@ -1674,44 +1674,17 @@ impl CrosshairApp {
         }
     }
 
-    fn choose_audio_file(&mut self, startup: bool) {
-        let Some((path_str, duration)) =
-            self.pick_and_import_audio_file(if startup { "startup" } else { "exit" })
-        else {
+    fn choose_audio_file_for_target(&mut self, target: AudioEditorTarget) {
+        let prefix = match target {
+            AudioEditorTarget::Preset(preset_id) => format!("preset-{preset_id}"),
+            AudioEditorTarget::Library(item_id) => format!("library-{item_id}"),
+            AudioEditorTarget::Startup => "startup".to_owned(),
+            AudioEditorTarget::Exit => "exit".to_owned(),
+        };
+        let Some((path_str, duration)) = self.pick_and_import_audio_file(&prefix) else {
             return;
         };
-        let clip = if startup {
-            &mut self.state.audio_settings.startup
-        } else {
-            &mut self.state.audio_settings.exit
-        };
-        Self::apply_audio_clip_file(clip, &path_str, duration);
-        if startup {
-            self.startup_clip_duration_ms = duration;
-            self.show_startup_audio_editor = true;
-        } else {
-            self.exit_clip_duration_ms = duration;
-            self.show_exit_audio_editor = true;
-        }
-        self.refresh_audio_waveform(startup);
-        self.sync_audio_settings();
-        self.persist();
-    }
-
-    fn choose_audio_file_for_sound_preset(&mut self, preset_id: u32) {
-        let Some((path_str, duration)) = self.pick_and_import_audio_file(&format!("preset-{preset_id}")) else {
-            return;
-        };
-        if let Some(preset) = self
-            .state
-            .audio_settings
-            .presets
-            .iter_mut()
-            .find(|preset| preset.id == preset_id)
-        {
-            Self::apply_audio_clip_file(&mut preset.clip, &path_str, duration);
-            self.finish_audio_file_assignment(AudioEditorTarget::Preset(preset_id), &path_str, duration);
-        }
+        self.apply_audio_file_to_target(target, &path_str, duration);
     }
 
     fn replace_sound_preset_audio_file(&mut self, preset_id: u32, path: PathBuf) {
@@ -1732,22 +1705,6 @@ impl CrosshairApp {
         {
             Self::apply_audio_clip_file(&mut preset.clip, &path_str, duration);
             self.finish_audio_file_assignment(AudioEditorTarget::Preset(preset_id), &path_str, duration);
-        }
-    }
-
-    fn choose_audio_file_for_library_item(&mut self, item_id: u32) {
-        let Some((path_str, duration)) = self.pick_and_import_audio_file(&format!("library-{item_id}")) else {
-            return;
-        };
-        if let Some(item) = self
-            .state
-            .audio_settings
-            .library
-            .iter_mut()
-            .find(|item| item.id == item_id)
-        {
-            Self::apply_audio_clip_file(&mut item.clip, &path_str, duration);
-            self.finish_audio_file_assignment(AudioEditorTarget::Library(item_id), &path_str, duration);
         }
     }
 
@@ -1775,6 +1732,48 @@ impl CrosshairApp {
         clip.start_ms = 0;
         clip.end_ms = duration.unwrap_or(0);
         clip.enabled = true;
+    }
+
+    fn apply_audio_file_to_target(
+        &mut self,
+        target: AudioEditorTarget,
+        path: &str,
+        duration: Option<u64>,
+    ) {
+        match target {
+            AudioEditorTarget::Preset(preset_id) => {
+                if let Some(preset) = self
+                    .state
+                    .audio_settings
+                    .presets
+                    .iter_mut()
+                    .find(|preset| preset.id == preset_id)
+                {
+                    Self::apply_audio_clip_file(&mut preset.clip, path, duration);
+                    self.finish_audio_file_assignment(target, path, duration);
+                }
+            }
+            AudioEditorTarget::Library(item_id) => {
+                if let Some(item) = self
+                    .state
+                    .audio_settings
+                    .library
+                    .iter_mut()
+                    .find(|item| item.id == item_id)
+                {
+                    Self::apply_audio_clip_file(&mut item.clip, path, duration);
+                    self.finish_audio_file_assignment(target, path, duration);
+                }
+            }
+            AudioEditorTarget::Startup => {
+                Self::apply_audio_clip_file(&mut self.state.audio_settings.startup, path, duration);
+                self.finish_audio_file_assignment(target, path, duration);
+            }
+            AudioEditorTarget::Exit => {
+                Self::apply_audio_clip_file(&mut self.state.audio_settings.exit, path, duration);
+                self.finish_audio_file_assignment(target, path, duration);
+            }
+        }
     }
 
     fn finish_audio_file_assignment(
