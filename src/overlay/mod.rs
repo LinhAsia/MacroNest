@@ -18346,26 +18346,27 @@ mod windows_overlay {
         });
     }
 
+    fn find_command_preset_by_spec(spec: &str) -> Option<CommandPreset> {
+        let hook_state = HOOK_STATE.lock();
+        let by_id = spec.parse::<u32>().ok().and_then(|preset_id| {
+            hook_state
+                .command_presets
+                .iter()
+                .find(|preset| preset.id == preset_id)
+                .cloned()
+        });
+        by_id.or_else(|| {
+            hook_state
+                .command_presets
+                .iter()
+                .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
+                .cloned()
+        })
+    }
+
     fn trigger_custom_preset_by_id(spec: &str) -> Result<()> {
         let spec = spec.trim();
-        let preset = {
-            let hook_state = HOOK_STATE.lock();
-            let by_id = spec.parse::<u32>().ok().and_then(|preset_id| {
-                hook_state
-                    .command_presets
-                    .iter()
-                    .find(|preset| preset.id == preset_id)
-                    .cloned()
-            });
-            by_id.or_else(|| {
-                hook_state
-                    .command_presets
-                    .iter()
-                    .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
-                    .cloned()
-            })
-        }
-        .context("Custom preset was not found")?;
+        let preset = find_command_preset_by_spec(spec).context("Custom preset was not found")?;
         if !preset.enabled {
             bail!("Custom preset is disabled");
         }
@@ -18396,23 +18397,7 @@ mod windows_overlay {
             bail!("Custom preset key is empty");
         }
 
-        let preset = {
-            let hook_state = HOOK_STATE.lock();
-            let by_id = spec.parse::<u32>().ok().and_then(|preset_id| {
-                hook_state
-                    .command_presets
-                    .iter()
-                    .find(|preset| preset.id == preset_id)
-                    .cloned()
-            });
-            by_id.or_else(|| {
-                hook_state
-                    .command_presets
-                    .iter()
-                    .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
-                    .cloned()
-            })
-        };
+        let preset = find_command_preset_by_spec(spec);
         if let Some(preset) = preset {
             if !preset.enabled {
                 bail!("Custom preset is disabled");
