@@ -1498,6 +1498,22 @@ impl CrosshairApp {
         Ok((group_index, preset_index))
     }
 
+    fn macro_preset(&self, group_id: u32, preset_id: u32) -> Option<&MacroPreset> {
+        let (group_index, preset_index) = self.macro_preset_indices(group_id, preset_id).ok()?;
+        self.state
+            .macro_groups
+            .get(group_index)
+            .and_then(|group| group.presets.get(preset_index))
+    }
+
+    fn allocate_next_sound_library_item_id(&mut self) -> u32 {
+        Self::allocate_next_id(
+            &self.state.audio_settings.library,
+            &mut self.state.audio_settings.next_library_item_id,
+            |item| item.id,
+        )
+    }
+
     #[cfg(windows)]
     fn current_mouse_speed() -> Option<u32> {
         let mut speed = 10u32;
@@ -1867,8 +1883,7 @@ impl CrosshairApp {
             self.status = "Choose a sound file before saving it to the library.".to_owned();
             return;
         }
-        let id = self.state.audio_settings.next_library_item_id.max(1);
-        self.state.audio_settings.next_library_item_id = id + 1;
+        let id = self.allocate_next_sound_library_item_id();
         let mut item = SoundLibraryItem::new(id);
         item.name = format!("{name_prefix} {id}");
         item.clip = clip.clone();
@@ -11255,11 +11270,7 @@ impl eframe::App for CrosshairApp {
             self.draw_geometry_step_preview_target
         {
             let preview_spec = self
-                .state
-                .macro_groups
-                .iter()
-                .find(|g| g.id == group_id)
-                .and_then(|g| g.presets.iter().find(|p| p.id == preset_id))
+                .macro_preset(group_id, preset_id)
                 .and_then(|p| {
                     if is_hold_stop {
                         Some(&*p.hold_stop_step)
@@ -11290,11 +11301,7 @@ impl eframe::App for CrosshairApp {
                 self.show_geometry_preset_preview_target
             {
                 let preview_preset_id = self
-                    .state
-                    .macro_groups
-                    .iter()
-                    .find(|g| g.id == group_id)
-                    .and_then(|g| g.presets.iter().find(|p| p.id == preset_id))
+                    .macro_preset(group_id, preset_id)
                     .and_then(|p| {
                         if is_hold_stop {
                             Some(&*p.hold_stop_step)
