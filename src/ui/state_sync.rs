@@ -4,17 +4,15 @@ use std::time::Instant;
 use crate::{
     audiosense,
     model::{AppState, AudioSensePresetKind, ProfileRecord, TimerPreset},
-    overlay::{OverlayCommand, UiCommand},
+    overlay::{MacroFolderScope, OverlayCommand, UiCommand},
     window_list,
 };
 
 use super::{CrosshairApp, build_runtime_macro_groups, configure_theme};
 
 impl CrosshairApp {
-    pub(crate) fn sync_crosshair(&self) {
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateProfiles(self.state.profiles.clone()));
+    pub(crate) fn sync_crosshair(&mut self) {
+        self.sync_profiles();
     }
 
     pub(crate) fn run_all_startup_overlay_sync(&mut self) {
@@ -54,17 +52,30 @@ impl CrosshairApp {
         self.startup_overlay_sync_pending = false;
     }
 
-    pub(crate) fn sync_macro_delay_settings(&self) {
+    pub(crate) fn sync_macro_delay_settings(&mut self) {
+        let delays = (
+            self.state.macro_mouse_click_delay_ms,
+            self.state.macro_keyboard_key_press_delay_ms,
+        );
+        if self.last_synced_macro_delays == Some(delays) {
+            return;
+        }
+        self.last_synced_macro_delays = Some(delays);
         let _ = self.overlay_tx.send(OverlayCommand::UpdateMacroDelays {
-            mouse_click_delay_ms: self.state.macro_mouse_click_delay_ms,
-            keyboard_key_press_delay_ms: self.state.macro_keyboard_key_press_delay_ms,
+            mouse_click_delay_ms: delays.0,
+            keyboard_key_press_delay_ms: delays.1,
         });
     }
 
-    pub(crate) fn sync_profiles(&self) {
+    pub(crate) fn sync_profiles(&mut self) {
+        let profiles = self.state.profiles.clone();
+        if self.last_synced_profiles.as_ref() == Some(&profiles) {
+            return;
+        }
+        self.last_synced_profiles = Some(profiles.clone());
         let _ = self
             .overlay_tx
-            .send(OverlayCommand::UpdateProfiles(self.state.profiles.clone()));
+            .send(OverlayCommand::UpdateProfiles(profiles));
     }
 
     pub(crate) fn sync_crosshair_profile(&self, index: usize, profile: &ProfileRecord) {
@@ -76,17 +87,18 @@ impl CrosshairApp {
             });
     }
 
-    pub(crate) fn sync_macro_presets(&self) {
+    pub(crate) fn sync_macro_presets(&mut self) {
         let macro_groups = build_runtime_macro_groups(&self.state);
+        if self.last_synced_macro_groups.as_ref() == Some(&macro_groups) {
+            return;
+        }
+        self.last_synced_macro_groups = Some(macro_groups.clone());
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateMacroPresets(macro_groups));
     }
 
     pub(crate) fn resolved_active_macro_folder_view(&self) -> Option<u32> {
-        if !self.macro_folders_panel_open {
-            return None;
-        }
         self.active_macro_folder_view.filter(|folder_id| {
             self.state
                 .macro_folders
@@ -106,111 +118,195 @@ impl CrosshairApp {
             })
     }
 
-    pub(crate) fn sync_active_macro_folder_scope(&self) {
-        let active_folder_scope = self.resolved_active_macro_folder_view();
+    pub(crate) fn sync_active_macro_folder_scope(&mut self) {
+        let active_folder_scope = self
+            .resolved_active_macro_folder_view()
+            .map(MacroFolderScope::Folder)
+            .unwrap_or(MacroFolderScope::Root);
+        if self.last_synced_active_macro_folder_scope == Some(active_folder_scope) {
+            return;
+        }
+        self.last_synced_active_macro_folder_scope = Some(active_folder_scope);
         let _ = self
             .overlay_tx
-            .send(OverlayCommand::SetActiveMacroFolderScope(
-                active_folder_scope,
-            ));
+            .send(OverlayCommand::SetActiveMacroFolderScope(active_folder_scope));
     }
 
-    pub(crate) fn sync_macro_master_enabled(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::SetMacrosMasterEnabled(
-            self.state.macros_master_enabled,
-        ));
-    }
-
-    pub(crate) fn sync_windows_key_locked(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::SetWindowsKeyLocked(
-            self.state.windows_key_locked,
-        ));
-    }
-
-    pub(crate) fn sync_native_focus_highlight_enabled(&self) {
+    pub(crate) fn sync_macro_master_enabled(&mut self) {
+        let enabled = self.state.macros_master_enabled;
+        if self.last_synced_macros_master_enabled == Some(enabled) {
+            return;
+        }
+        self.last_synced_macros_master_enabled = Some(enabled);
         let _ = self
             .overlay_tx
-            .send(OverlayCommand::SetNativeFocusHighlightEnabled(
-                self.state.native_focus_highlight_enabled,
-            ));
+            .send(OverlayCommand::SetMacrosMasterEnabled(enabled));
     }
 
-    pub(crate) fn sync_focus_highlight_config(&self) {
+    pub(crate) fn sync_windows_key_locked(&mut self) {
+        let locked = self.state.windows_key_locked;
+        if self.last_synced_windows_key_locked == Some(locked) {
+            return;
+        }
+        self.last_synced_windows_key_locked = Some(locked);
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::SetWindowsKeyLocked(locked));
+    }
+
+    pub(crate) fn sync_native_focus_highlight_enabled(&mut self) {
+        let enabled = self.state.native_focus_highlight_enabled;
+        if self.last_synced_native_focus_highlight_enabled == Some(enabled) {
+            return;
+        }
+        self.last_synced_native_focus_highlight_enabled = Some(enabled);
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::SetNativeFocusHighlightEnabled(enabled));
+    }
+
+    pub(crate) fn sync_focus_highlight_config(&mut self) {
+        let config = (
+            self.state.focus_highlight_color,
+            self.state.focus_highlight_decoration,
+        );
+        if self.last_synced_focus_highlight_config == Some(config) {
+            return;
+        }
+        self.last_synced_focus_highlight_config = Some(config);
         let _ = self
             .overlay_tx
             .send(OverlayCommand::SetFocusHighlightConfig {
-                color: self.state.focus_highlight_color,
-                decoration: self.state.focus_highlight_decoration,
+                color: config.0,
+                decoration: config.1,
             });
     }
 
-    pub(crate) fn sync_protractor_state(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::SetProtractorEnabled(
-            self.state.protractor_enabled,
-        ));
+    pub(crate) fn sync_protractor_state(&mut self) {
+        let enabled = self.state.protractor_enabled;
+        if self.last_synced_protractor_enabled != Some(enabled) {
+            self.last_synced_protractor_enabled = Some(enabled);
+            let _ = self
+                .overlay_tx
+                .send(OverlayCommand::SetProtractorEnabled(enabled));
+        }
+        let config = (
+            self.state.protractor_scale,
+            self.state.protractor_needle1_angle,
+            self.state.protractor_needle2_angle,
+            self.state.protractor_center_x,
+            self.state.protractor_center_y,
+            self.state.protractor_thickness,
+            self.protractor_picking_active,
+            self.state.ui_language,
+        );
+        if self.last_synced_protractor_config == Some(config) {
+            return;
+        }
+        self.last_synced_protractor_config = Some(config);
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateProtractorConfig {
-                scale: self.state.protractor_scale,
-                needle1_angle: self.state.protractor_needle1_angle,
-                needle2_angle: self.state.protractor_needle2_angle,
-                center_x: self.state.protractor_center_x,
-                center_y: self.state.protractor_center_y,
-                thickness: self.state.protractor_thickness,
-                calibrating: self.protractor_picking_active,
-                ui_language: self.state.ui_language,
+                scale: config.0,
+                needle1_angle: config.1,
+                needle2_angle: config.2,
+                center_x: config.3,
+                center_y: config.4,
+                thickness: config.5,
+                calibrating: config.6,
+                ui_language: config.7,
             });
     }
 
-    pub(crate) fn sync_quick_key_display_config(&self) {
+    pub(crate) fn sync_quick_key_display_config(&mut self) {
+        let config = (
+            self.state.quick_key_display_enabled,
+            self.state.quick_key_display_x,
+            self.state.quick_key_display_y,
+            self.state.quick_key_display_size,
+            self.state.quick_key_display_mode,
+            self.state.quick_key_display_mascot_style,
+        );
+        if self.last_synced_quick_key_display_config == Some(config) {
+            return;
+        }
+        self.last_synced_quick_key_display_config = Some(config);
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateQuickKeyDisplayConfig {
-                enabled: self.state.quick_key_display_enabled,
-                center_x: self.state.quick_key_display_x,
-                center_y: self.state.quick_key_display_y,
-                size: self.state.quick_key_display_size,
-                mode: self.state.quick_key_display_mode,
-                mascot_style: self.state.quick_key_display_mascot_style,
+                enabled: config.0,
+                center_x: config.1,
+                center_y: config.2,
+                size: config.3,
+                mode: config.4,
+                mascot_style: config.5,
             });
     }
 
-    pub(crate) fn sync_quick_screen_draw_config(&self) {
+    pub(crate) fn sync_quick_screen_draw_config(&mut self) {
+        let config = (
+            self.state.quick_screen_draw_enabled,
+            self.state.quick_screen_draw_hotkey.clone(),
+            self.state.quick_screen_draw_pass_trigger_through,
+            self.state.quick_screen_draw_color,
+            self.state.quick_screen_draw_brush_size,
+            self.state.quick_screen_draw_smoothing,
+            self.state.quick_screen_draw_smoothing_amount,
+        );
+        if self.last_synced_quick_screen_draw_config.as_ref() == Some(&config) {
+            return;
+        }
+        self.last_synced_quick_screen_draw_config = Some(config.clone());
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateScreenDrawConfig {
-                enabled: self.state.quick_screen_draw_enabled,
-                trigger: self.state.quick_screen_draw_hotkey.clone(),
-                pass_trigger_through: self.state.quick_screen_draw_pass_trigger_through,
-                color: self.state.quick_screen_draw_color,
-                brush_size: self.state.quick_screen_draw_brush_size,
-                smoothing: self.state.quick_screen_draw_smoothing,
-                smoothing_amount: self.state.quick_screen_draw_smoothing_amount,
+                enabled: config.0,
+                trigger: config.1,
+                pass_trigger_through: config.2,
+                color: config.3,
+                brush_size: config.4,
+                smoothing: config.5,
+                smoothing_amount: config.6,
             });
     }
 
-    pub(crate) fn sync_quick_key_sound_config(&self) {
+    pub(crate) fn sync_quick_key_sound_config(&mut self) {
+        let config = (
+            self.state.quick_key_sound_enabled,
+            self.state.quick_key_sound_style,
+            self.state.quick_key_sound_volume,
+        );
+        if self.last_synced_quick_key_sound_config == Some(config) {
+            return;
+        }
+        self.last_synced_quick_key_sound_config = Some(config);
         let _ = self.overlay_tx.send(OverlayCommand::UpdateKeySoundConfig {
-            enabled: self.state.quick_key_sound_enabled,
-            style: self.state.quick_key_sound_style,
-            volume: self.state.quick_key_sound_volume,
+            enabled: config.0,
+            style: config.1,
+            volume: config.2,
         });
     }
 
-    pub(crate) fn sync_vietnamese_input_enabled(&self) {
+    pub(crate) fn sync_vietnamese_input_enabled(&mut self) {
+        let enabled = self.state.vietnamese_input_enabled;
+        if self.last_synced_vietnamese_input_enabled == Some(enabled) {
+            return;
+        }
+        self.last_synced_vietnamese_input_enabled = Some(enabled);
         let _ = self
             .overlay_tx
-            .send(OverlayCommand::SetVietnameseInputEnabled(
-                self.state.vietnamese_input_enabled,
-            ));
+            .send(OverlayCommand::SetVietnameseInputEnabled(enabled));
     }
 
-    pub(crate) fn sync_macro_master_hotkey(&self) {
+    pub(crate) fn sync_macro_master_hotkey(&mut self) {
+        let binding = self.state.macros_master_hotkey.clone();
+        if self.last_synced_macro_master_hotkey.as_ref() == Some(&binding) {
+            return;
+        }
+        self.last_synced_macro_master_hotkey = Some(binding.clone());
         let _ = self
             .overlay_tx
-            .send(OverlayCommand::UpdateMacrosMasterHotkey(
-                self.state.macros_master_hotkey.clone(),
-            ));
+            .send(OverlayCommand::UpdateMacrosMasterHotkey(binding));
     }
 
     pub(crate) fn sync_audio_settings(&mut self) {
@@ -292,16 +388,30 @@ impl CrosshairApp {
             .send(OverlayCommand::UpdateVisionSettings(settings));
     }
 
-    pub(crate) fn sync_timer_presets(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateTimerPresets(
-            self.state.timer_presets.clone(),
-        ));
+    pub(crate) fn sync_timer_presets(&mut self) {
+        let presets = self.state.timer_presets.clone();
+        if self.last_synced_timer_presets.as_ref() == Some(&presets) {
+            return;
+        }
+        self.last_synced_timer_presets = Some(presets.clone());
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateTimerPresets(presets));
     }
 
-    pub(crate) fn sync_geometry_presets(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateGeometryPresets(
-            self.state.geometry_presets.clone(),
-        ));
+    pub(crate) fn sync_geometry_presets(&mut self) {
+        let presets = self.state.geometry_presets.clone();
+        if self.last_synced_geometry_presets.as_ref() == Some(&presets) {
+            return;
+        }
+        self.last_synced_geometry_presets = Some(presets.clone());
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateGeometryPresets(presets));
+    }
+
+    pub(crate) fn persist_geometry_presets(&mut self) {
+        self.persist_after_sync(Self::sync_geometry_presets);
     }
 
     pub(crate) fn migrate_legacy_audio_sense_state(&mut self) -> bool {
@@ -372,35 +482,43 @@ impl CrosshairApp {
         changed
     }
 
-    pub(crate) fn sync_audio_sense_presets(&self) {
+    pub(crate) fn sync_audio_sense_presets(&mut self) {
+        let presets = self.state.audio_sense_presets.clone();
+        if self.last_synced_audio_sense_presets.as_ref() == Some(&presets) {
+            return;
+        }
+        self.last_synced_audio_sense_presets = Some(presets.clone());
         let _ = self
             .overlay_tx
-            .send(OverlayCommand::UpdateAudioSensePresets(
-                self.state.audio_sense_presets.clone(),
-            ));
+            .send(OverlayCommand::UpdateAudioSensePresets(presets));
+    }
+
+    pub(crate) fn persist_audio_sense_presets(&mut self) {
+        self.sync_audio_sense_presets();
+        self.persist();
+    }
+
+    pub(crate) fn sync_timer_preview_preset(&mut self, preset: Option<TimerPreset>) {
+        self.active_timer_preview_preset_id = preset.as_ref().map(|preset| preset.id);
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::PreviewTimerPreset(preset));
     }
 
     pub(crate) fn sync_timer_preview(&mut self, preset: Option<&TimerPreset>) {
         let next_id = preset.map(|preset| preset.id);
         if self.active_timer_preview_preset_id == next_id {
             if let Some(preset) = preset {
-                let _ = self
-                    .overlay_tx
-                    .send(OverlayCommand::PreviewTimerPreset(Some(preset.clone())));
+                self.sync_timer_preview_preset(Some(preset.clone()));
             }
             return;
         }
-        self.active_timer_preview_preset_id = next_id;
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::PreviewTimerPreset(preset.cloned()));
+        self.sync_timer_preview_preset(preset.cloned());
     }
 
     pub(crate) fn clear_timer_preview(&mut self) {
         if self.active_timer_preview_preset_id.take().is_some() {
-            let _ = self
-                .overlay_tx
-                .send(OverlayCommand::PreviewTimerPreset(None));
+            self.sync_timer_preview_preset(None);
         }
     }
 
@@ -439,9 +557,22 @@ impl CrosshairApp {
         self.persist();
     }
 
-    pub(crate) fn persist_timer_presets_deferred(&mut self, ctx: &egui::Context) {
-        self.sync_timer_presets();
+    pub(crate) fn persist_after_sync(&mut self, sync: impl FnOnce(&mut Self)) {
+        sync(self);
+        self.persist();
+    }
+
+    pub(crate) fn persist_deferred_after_sync(
+        &mut self,
+        ctx: &egui::Context,
+        sync: impl FnOnce(&mut Self),
+    ) {
+        sync(self);
         self.persist_deferred(ctx);
+    }
+
+    pub(crate) fn persist_timer_presets_deferred(&mut self, ctx: &egui::Context) {
+        self.persist_deferred_after_sync(ctx, Self::sync_timer_presets);
     }
 
     pub(crate) fn invalidate_macro_variable_cache(&mut self) {
@@ -455,10 +586,7 @@ impl CrosshairApp {
         self.open_windows_loading = true;
         let ui_tx = self.ui_tx.clone();
         std::thread::spawn(move || {
-            let windows = window_list::list_open_windows()
-                .into_iter()
-                .map(|item| item.selector)
-                .collect();
+            let windows = window_list::list_open_windows();
             let _ = ui_tx.send(UiCommand::OpenWindowsLoaded { windows, status });
         });
     }
@@ -476,18 +604,24 @@ impl CrosshairApp {
         self.schedule_open_windows_refresh(None);
     }
 
+    pub(crate) fn prime_open_windows_if_empty(&mut self) {
+        if self.open_window_infos.is_empty() && !self.open_windows_loaded_once {
+            self.ensure_open_windows_ready(false);
+        }
+    }
+
     pub(crate) fn sync_quick_action_window_selection(&mut self) {
-        if self.open_windows.is_empty() {
+        if self.open_window_infos.is_empty() {
             self.quick_action_window_selector.clear();
             return;
         }
         if self.quick_action_window_selector.is_empty()
             || !self
-                .open_windows
+                .open_window_infos
                 .iter()
-                .any(|item| item == &self.quick_action_window_selector)
+                .any(|item| item.selector == self.quick_action_window_selector)
         {
-            self.quick_action_window_selector = self.open_windows[0].clone();
+            self.quick_action_window_selector = self.open_window_infos[0].selector.clone();
         }
     }
 
@@ -515,5 +649,11 @@ impl CrosshairApp {
             return;
         }
         self.schedule_audio_sense_devices_refresh();
+    }
+
+    pub(crate) fn prime_audio_sense_devices_if_empty(&mut self) {
+        if self.audio_sense_devices.is_empty() && !self.audio_sense_devices_loaded_once {
+            self.ensure_audio_sense_devices_ready(false);
+        }
     }
 }
