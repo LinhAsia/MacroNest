@@ -279,10 +279,12 @@ impl CrosshairApp {
             self.state.quick_screen_draw_smoothing,
             self.state.quick_screen_draw_smoothing_amount,
         );
-        if self.last_synced_quick_screen_draw_config.as_ref() == Some(&config) {
+        if !Self::update_synced_state(
+            config.clone(),
+            &mut self.last_synced_quick_screen_draw_config,
+        ) {
             return;
         }
-        self.last_synced_quick_screen_draw_config = Some(config.clone());
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateScreenDrawConfig {
@@ -302,10 +304,9 @@ impl CrosshairApp {
             self.state.quick_key_sound_style,
             self.state.quick_key_sound_volume,
         );
-        if self.last_synced_quick_key_sound_config == Some(config) {
+        if !Self::update_synced_state(config, &mut self.last_synced_quick_key_sound_config) {
             return;
         }
-        self.last_synced_quick_key_sound_config = Some(config);
         let _ = self.overlay_tx.send(OverlayCommand::UpdateKeySoundConfig {
             enabled: config.0,
             style: config.1,
@@ -315,10 +316,12 @@ impl CrosshairApp {
 
     pub(crate) fn sync_vietnamese_input_enabled(&mut self) {
         let enabled = self.state.vietnamese_input_enabled;
-        if self.last_synced_vietnamese_input_enabled == Some(enabled) {
+        if !Self::update_synced_state(
+            enabled,
+            &mut self.last_synced_vietnamese_input_enabled,
+        ) {
             return;
         }
-        self.last_synced_vietnamese_input_enabled = Some(enabled);
         let _ = self
             .overlay_tx
             .send(OverlayCommand::SetVietnameseInputEnabled(enabled));
@@ -326,10 +329,9 @@ impl CrosshairApp {
 
     pub(crate) fn sync_macro_master_hotkey(&mut self) {
         let binding = self.state.macros_master_hotkey.clone();
-        if self.last_synced_macro_master_hotkey.as_ref() == Some(&binding) {
+        if !Self::update_synced_state(binding.clone(), &mut self.last_synced_macro_master_hotkey) {
             return;
         }
-        self.last_synced_macro_master_hotkey = Some(binding.clone());
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateMacrosMasterHotkey(binding));
