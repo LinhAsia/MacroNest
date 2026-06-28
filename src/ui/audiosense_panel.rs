@@ -13,20 +13,15 @@ impl CrosshairApp {
                 .button(Self::tr_lang(language, "+ Pitch preset", "+ Pitch preset"))
                 .clicked()
             {
-                let id = self
-                    .state
-                    .audio_sense_presets
-                    .iter()
-                    .map(|preset| preset.id)
-                    .max()
-                    .unwrap_or(0)
-                    + 1;
-                self.state.next_audio_sense_preset_id = id + 1;
+                let id = Self::allocate_next_id(
+                    &self.state.audio_sense_presets,
+                    &mut self.state.next_audio_sense_preset_id,
+                    |preset| preset.id,
+                );
                 self.state
                     .audio_sense_presets
                     .push(AudioSensePreset::new_pitch(id));
-                self.sync_audio_sense_presets();
-                self.persist();
+                self.persist_audio_sense_presets();
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -369,8 +364,7 @@ impl CrosshairApp {
         }
 
         if changed {
-            self.sync_audio_sense_presets();
-            self.persist();
+            self.persist_audio_sense_presets();
         }
     }
 

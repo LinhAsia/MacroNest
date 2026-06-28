@@ -32,6 +32,25 @@ struct MousePathTimelineOutcome {
 }
 
 impl CrosshairApp {
+    pub(crate) fn sync_mouse_path_preview(
+        &mut self,
+        preset_id: Option<u32>,
+        events: Option<Vec<MousePathEvent>>,
+        preview_from_ms: Option<u64>,
+    ) {
+        self.mouse_path_step_preview_preset_id = preset_id;
+        let preview = preset_id.map(|active_id| (active_id, events.unwrap_or_default(), preview_from_ms));
+        let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(preview));
+        crate::overlay::wake_command_queue();
+    }
+
+    pub(crate) fn clear_mouse_path_preview(&mut self) {
+        if self.mouse_path_step_preview_preset_id.take().is_some() {
+            let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
+            crate::overlay::wake_command_queue();
+        }
+    }
+
     fn selected_mouse_input_backend_mode(&self) -> MouseInputBackendMode {
         if self.state.vision_settings.use_arduino_mouse
             || self.arduino_restore_emulation_after_flash
@@ -1085,17 +1104,14 @@ impl CrosshairApp {
             let has_move = events
                 .iter()
                 .any(|event| matches!(event.kind, MousePathEventKind::Move));
-            self.mouse_path_step_preview_preset_id = has_move.then_some(preset_id);
-            let _ = self
-                .overlay_tx
-                .send(OverlayCommand::PreviewMousePath(if has_move {
-                    Some((preset_id, events, preview_from_ms))
-                } else {
-                    None
-                }));
-            crate::overlay::wake_command_queue();
+            self.sync_mouse_path_preview(
+                has_move.then_some(preset_id),
+                has_move.then_some(events),
+                preview_from_ms,
+            );
         }
         if let Some((preset_id, start_ms, end_ms)) = trim_mouse_path_request {
+            let mut pending_trim_preview: Option<(Option<u32>, Option<Vec<MousePathEvent>>, Option<u64>)> = None;
             if let Some(preset) = self
                 .state
                 .mouse_path_presets
@@ -1110,18 +1126,19 @@ impl CrosshairApp {
                         .iter()
                         .any(|event| matches!(event.kind, MousePathEventKind::Move));
                     if has_move {
-                        let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(Some((
-                            preset_id,
-                            preset.events.clone(),
-                            Some(0),
-                        ))));
+                        pending_trim_preview = Some((Some(preset_id), Some(preset.events.clone()), Some(0)));
                     } else {
-                        self.mouse_path_step_preview_preset_id = None;
-                        let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
+                        pending_trim_preview = Some((None, None, None));
                     }
-                    crate::overlay::wake_command_queue();
                 }
                 live_sync = true;
+            }
+            if let Some((preview_preset_id, preview_events, preview_from_ms)) = pending_trim_preview {
+                if preview_preset_id.is_some() {
+                    self.sync_mouse_path_preview(preview_preset_id, preview_events, preview_from_ms);
+                } else {
+                    self.clear_mouse_path_preview();
+                }
             }
         }
         if let Some((preset_id, split_at_ms)) = split_mouse_path_request {
@@ -1151,9 +1168,7 @@ impl CrosshairApp {
             self.mouse_path_merge_selection.remove(&rem_id);
             Self::clear_mouse_path_timeline_state(ui.ctx(), rem_id);
             if self.mouse_path_step_preview_preset_id == Some(rem_id) {
-                self.mouse_path_step_preview_preset_id = None;
-                let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
-                crate::overlay::wake_command_queue();
+                self.clear_mouse_path_preview();
             }
             if self.mouse_path_draw_capture_preset_id == Some(rem_id) {
                 self.mouse_path_draw_capture_preset_id = None;
@@ -1886,19 +1901,11 @@ impl CrosshairApp {
         events: Vec<MousePathEvent>,
         replay_relative_motion: bool,
     ) -> u32 {
-        let mut id = 1;
-        while self.state.mouse_path_presets.iter().any(|p| p.id == id) {
-            id += 1;
-        }
-        self.state.next_mouse_path_preset_id = (self
-            .state
-            .mouse_path_presets
-            .iter()
-            .map(|p| p.id)
-            .max()
-            .unwrap_or(0)
-            + 1)
-        .max(id + 1);
+        let id = Self::allocate_next_id(
+            &self.state.mouse_path_presets,
+            &mut self.state.next_mouse_path_preset_id,
+            |preset| preset.id,
+        );
         let mut new_preset = MousePathPreset::new(id);
         new_preset.name = name;
         new_preset.collapsed = false;
@@ -1910,10 +1917,11 @@ impl CrosshairApp {
     }
 
     pub(crate) fn add_mouse_path_preset_from(&mut self, source_preset_id: Option<u32>) -> u32 {
-        let mut id = 1;
-        while self.state.mouse_path_presets.iter().any(|p| p.id == id) {
-            id += 1;
-        }
+        let id = Self::allocate_next_id(
+            &self.state.mouse_path_presets,
+            &mut self.state.next_mouse_path_preset_id,
+            |preset| preset.id,
+        );
         let source_preset = source_preset_id.and_then(|preset_id| {
             self.state
                 .mouse_path_presets
@@ -1921,15 +1929,6 @@ impl CrosshairApp {
                 .find(|preset| preset.id == preset_id)
                 .cloned()
         });
-        self.state.next_mouse_path_preset_id = (self
-            .state
-            .mouse_path_presets
-            .iter()
-            .map(|p| p.id)
-            .max()
-            .unwrap_or(0)
-            + 1)
-        .max(id + 1);
         let mut new_preset = MousePathPreset::new(id);
         new_preset.collapsed = false;
         if let Some(source_preset) = source_preset {
@@ -2061,10 +2060,15 @@ impl CrosshairApp {
         true
     }
 
-    pub(crate) fn sync_mouse_path_presets(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateMousePathPresets(
-            self.state.mouse_path_presets.clone(),
-        ));
+    pub(crate) fn sync_mouse_path_presets(&mut self) {
+        let presets = self.state.mouse_path_presets.clone();
+        if self.last_synced_mouse_path_presets.as_ref() == Some(&presets) {
+            return;
+        }
+        self.last_synced_mouse_path_presets = Some(presets.clone());
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateMousePathPresets(presets));
     }
 
     pub(crate) fn add_mouse_sensitivity_preset(&mut self) {
@@ -2093,12 +2097,15 @@ impl CrosshairApp {
         self.status = format!("Added mouse sensitivity preset {id}.");
     }
 
-    pub(crate) fn sync_mouse_sensitivity_presets(&self) {
+    pub(crate) fn sync_mouse_sensitivity_presets(&mut self) {
+        let presets = self.state.mouse_sensitivity_presets.clone();
+        if self.last_synced_mouse_sensitivity_presets.as_ref() == Some(&presets) {
+            return;
+        }
+        self.last_synced_mouse_sensitivity_presets = Some(presets.clone());
         let _ = self
             .overlay_tx
-            .send(OverlayCommand::UpdateMouseSensitivityPresets(
-                self.state.mouse_sensitivity_presets.clone(),
-            ));
+            .send(OverlayCommand::UpdateMouseSensitivityPresets(presets));
     }
 
     pub(crate) fn sync_mouse_sensitivity_settings(&self) {
@@ -2122,13 +2129,11 @@ impl CrosshairApp {
     }
 
     pub(crate) fn persist_mouse_path_presets(&mut self) {
-        self.sync_mouse_path_presets();
-        self.persist();
+        self.persist_after_sync(Self::sync_mouse_path_presets);
     }
 
     pub(crate) fn persist_mouse_sensitivity_presets(&mut self) {
-        self.sync_mouse_sensitivity_presets();
-        self.persist();
+        self.persist_after_sync(Self::sync_mouse_sensitivity_presets);
     }
 
     pub(crate) fn begin_mouse_path_draw_capture(&mut self, ctx: &egui::Context, preset_id: u32) {
@@ -2670,8 +2675,7 @@ impl CrosshairApp {
                 egui::UserAttentionType::Informational,
             ));
             ctx.request_repaint_after(Duration::from_millis(33));
-            self.sync_geometry_presets();
-            self.persist();
+            self.persist_geometry_presets();
             return;
         }
 

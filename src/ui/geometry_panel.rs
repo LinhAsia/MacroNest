@@ -15,6 +15,9 @@ impl CrosshairApp {
         let mut request_screen_color_pick = false;
         let mut pending_screen_color_target: Option<(u32, u32, bool)> = None;
         let mut clear_preview_target = false;
+        let mut clear_preset_preview_target = false;
+        let mut next_preset_preview_target: Option<u32> = None;
+        let mut next_geometry_preview_spec: Option<GeometrySpec> = None;
         let mut begin_mouse_move_absolute_capture_target = None;
 
         // Initialize autocomplete suggestions for geometry panel
@@ -73,15 +76,11 @@ impl CrosshairApp {
                 ))
                 .clicked()
             {
-                let id = self
-                    .state
-                    .geometry_presets
-                    .iter()
-                    .map(|p| p.id)
-                    .max()
-                    .unwrap_or(0)
-                    + 1;
-                self.state.next_geometry_preset_id = id + 1;
+                let id = Self::allocate_next_id(
+                    &self.state.geometry_presets,
+                    &mut self.state.next_geometry_preset_id,
+                    |preset| preset.id,
+                );
                 self.state.geometry_presets.push(GeometryPreset::new(id));
                 changed = true;
             }
@@ -129,10 +128,7 @@ impl CrosshairApp {
                                 clear_preview_target = true;
                             }
                             if self.geometry_preset_preview_target == Some(preset.id) {
-                                self.geometry_preset_preview_target = None;
-                                let _ = self.overlay_tx.send(
-                                    crate::overlay::OverlayCommand::PreviewGeometryPreset(None),
-                                );
+                                clear_preset_preview_target = true;
                             }
                         }
                         if Self::sound_style_toggle_button(
@@ -165,17 +161,9 @@ impl CrosshairApp {
                             .clicked()
                         {
                             if preview_all_active {
-                                self.geometry_preset_preview_target = None;
-                                let _ = self.overlay_tx.send(
-                                    crate::overlay::OverlayCommand::PreviewGeometryPreset(None),
-                                );
+                                clear_preset_preview_target = true;
                             } else {
-                                self.geometry_preset_preview_target = Some(preset.id);
-                                let _ = self.overlay_tx.send(
-                                    crate::overlay::OverlayCommand::PreviewGeometryPreset(Some(
-                                        preset.id,
-                                    )),
-                                );
+                                next_preset_preview_target = Some(preset.id);
                             }
                         }
                     });
@@ -229,19 +217,10 @@ impl CrosshairApp {
                                 .clicked()
                             {
                                 if preview_active {
-                                    self.geometry_preview_target = None;
-                                    self.geometry_preview_sent = None;
-                                    let _ = self.overlay_tx.send(
-                                        crate::overlay::OverlayCommand::PreviewGeometrySpec(None),
-                                    );
+                                    clear_preview_target = true;
                                 } else {
                                     self.geometry_preview_target = Some((preset_id, object.id));
-                                    self.geometry_preview_sent = Some(object.spec.clone());
-                                    let _ = self.overlay_tx.send(
-                                        crate::overlay::OverlayCommand::PreviewGeometrySpec(Some(
-                                            object.spec.clone(),
-                                        )),
-                                    );
+                                    next_geometry_preview_spec = Some(object.spec.clone());
                                 }
                             }
                         });
@@ -276,16 +255,13 @@ impl CrosshairApp {
         }
 
         if changed {
-            self.sync_geometry_presets();
-            self.persist();
+            self.persist_geometry_presets();
         }
 
         if clear_preview_target {
-            self.geometry_preview_target = None;
-            self.geometry_preview_sent = None;
-            let _ = self
-                .overlay_tx
-                .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+            self.clear_geometry_spec_preview();
+        } else if let Some(spec) = next_geometry_preview_spec.take() {
+            self.sync_geometry_spec_preview(Some(spec));
         } else if let Some((preview_preset_id, preview_object_id)) = self.geometry_preview_target {
             let preview_spec = self
                 .state
@@ -304,12 +280,7 @@ impl CrosshairApp {
                 self.geometry_preview_sent = None;
             }
             if self.geometry_preview_sent != preview_spec {
-                self.geometry_preview_sent = preview_spec.clone();
-                let _ = self
-                    .overlay_tx
-                    .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(
-                        preview_spec,
-                    ));
+                self.sync_geometry_spec_preview(preview_spec);
             }
         }
 
@@ -320,20 +291,19 @@ impl CrosshairApp {
                 .iter()
                 .any(|preset| preset.id == preview_preset_id);
             if !exists {
-                self.geometry_preset_preview_target = None;
-                let _ = self
-                    .overlay_tx
-                    .send(crate::overlay::OverlayCommand::PreviewGeometryPreset(None));
+                clear_preset_preview_target = true;
             }
+        }
+
+        if clear_preset_preview_target {
+            self.clear_geometry_preset_preview();
+        } else if let Some(preset_id) = next_preset_preview_target {
+            self.sync_geometry_preset_preview(Some(preset_id));
         }
 
         if request_screen_color_pick {
             self.geometry_color_pick_target = pending_screen_color_target;
-            self.begin_image_search_capture(
-                ui.ctx(),
-                crate::ui::VisionCaptureTarget::GeometryColor,
-                crate::ui::VisionCaptureMode::ColorSample,
-            );
+            self.begin_color_pick_capture(ui.ctx(), crate::ui::VisionCaptureTarget::GeometryColor);
         }
 
         if let Some(target) = begin_mouse_move_absolute_capture_target {
