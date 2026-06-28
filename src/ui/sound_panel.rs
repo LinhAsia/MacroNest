@@ -923,11 +923,13 @@ impl CrosshairApp {
                     &mut self.preview_cursor,
                     &mut self.trim_timeline_zoom,
                 );
-                changed |= outcome.changed;
-                if let Some(status) = outcome.status {
+                let (status, outcome_changed, choose_file) =
+                    Self::split_audio_media_editor_outcome(outcome);
+                changed |= outcome_changed;
+                if let Some(status) = status {
                     self.status = status;
                 }
-                if outcome.choose_file {
+                if choose_file {
                     choose_file_for = Some(preset.id);
                 }
             });
@@ -1377,14 +1379,21 @@ impl CrosshairApp {
         self.apply_audio_media_editor_outcome_shared(outcome)
     }
 
+    fn split_audio_media_editor_outcome(
+        outcome: AudioCardOutcome,
+    ) -> (Option<String>, bool, bool) {
+        (outcome.status, outcome.changed, outcome.choose_file)
+    }
+
     fn apply_audio_media_editor_outcome_shared(&mut self, outcome: AudioCardOutcome) -> bool {
-        if let Some(status) = outcome.status {
+        let (status, changed, choose_file) = Self::split_audio_media_editor_outcome(outcome);
+        if let Some(status) = status {
             self.status = status;
         }
-        if outcome.changed {
+        if changed {
             self.sync_audio_settings();
             self.persist();
         }
-        outcome.choose_file
+        choose_file
     }
 }
