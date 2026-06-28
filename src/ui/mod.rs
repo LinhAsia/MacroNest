@@ -1495,6 +1495,18 @@ impl CrosshairApp {
         self.capture_target.as_ref() == Some(target)
     }
 
+    fn allocate_next_id<T, F>(items: &[T], next_hint: &mut u32, id_of: F) -> u32
+    where
+        F: Fn(&T) -> u32,
+    {
+        let mut id = (*next_hint).max(1);
+        while items.iter().any(|item| id_of(item) == id) {
+            id += 1;
+        }
+        *next_hint = (items.iter().map(id_of).max().unwrap_or(0) + 1).max(id + 1);
+        id
+    }
+
     #[cfg(windows)]
     fn current_mouse_speed() -> Option<u32> {
         let mut speed = 10u32;

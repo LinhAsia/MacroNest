@@ -31,23 +31,14 @@ impl CrosshairApp {
                 ))
                 .clicked()
             {
-                let mut id = 1;
-                while self.state.ocr_presets.iter().any(|p| p.id == id) {
-                    id += 1;
-                }
-                self.state.next_ocr_preset_id = (self
-                    .state
-                    .ocr_presets
-                    .iter()
-                    .map(|p| p.id)
-                    .max()
-                    .unwrap_or(0)
-                    + 1)
-                .max(id + 1);
+                let id = Self::allocate_next_id(
+                    &self.state.ocr_presets,
+                    &mut self.state.next_ocr_preset_id,
+                    |preset| preset.id,
+                );
                 let preset = OcrPreset::new(id);
                 self.state.ocr_presets.push(preset);
-                self.sync_ocr_presets();
-                self.persist();
+                self.persist_ocr_presets();
             }
         });
 
@@ -451,11 +442,7 @@ impl CrosshairApp {
         self.sync_ocr_preview();
 
         if let Some(preset_id) = start_ocr_capture_preset_id {
-            self.begin_image_search_capture(
-                ui.ctx(),
-                VisionCaptureTarget::OcrPreset(preset_id),
-                VisionCaptureMode::SearchRegion,
-            );
+            self.begin_region_capture(ui.ctx(), VisionCaptureTarget::OcrPreset(preset_id));
         }
         if let Some(language_code) = start_ocr_download_language_code {
             self.start_ocr_download_for(&language_code);
@@ -467,10 +454,19 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn sync_ocr_presets(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateOcrPresets(
-            self.state.ocr_presets.clone(),
-        ));
+    pub(crate) fn sync_ocr_presets(&mut self) {
+        let presets = self.state.ocr_presets.clone();
+        if self.last_synced_ocr_presets.as_ref() == Some(&presets) {
+            return;
+        }
+        self.last_synced_ocr_presets = Some(presets.clone());
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateOcrPresets(presets));
+    }
+
+    pub(crate) fn persist_ocr_presets(&mut self) {
+        self.persist_after_sync(Self::sync_ocr_presets);
     }
 
     pub(crate) fn sync_ocr_preview(&mut self) {
@@ -510,14 +506,10 @@ impl CrosshairApp {
                 width: preset.width,
                 height: preset.height,
             };
-            let _ = self
-                .overlay_tx
-                .send(OverlayCommand::PreviewHudPreset(vec![hud]));
+            self.sync_hud_preview_presets(vec![hud]);
         } else {
             if self.state.active_panel == AppPanel::Ocr {
-                let _ = self
-                    .overlay_tx
-                    .send(OverlayCommand::PreviewHudPreset(Vec::new()));
+                self.sync_hud_preview_presets(Vec::new());
             }
         }
     }
@@ -531,9 +523,7 @@ impl CrosshairApp {
             }
         }
         if changed {
-            let _ = self
-                .overlay_tx
-                .send(OverlayCommand::PreviewHudPreset(Vec::new()));
+            self.sync_hud_preview_presets(Vec::new());
         }
         changed
     }
@@ -593,8 +583,7 @@ impl CrosshairApp {
             preset.height = height;
             preset.collapsed = false;
         }
-        self.sync_ocr_presets();
-        self.persist();
+        self.persist_ocr_presets();
         self.status = format!(
             "Saved OCR region {}x{} at {}, {} for preset #{}.",
             width, height, screen_x, screen_y, preset_id
@@ -632,8 +621,7 @@ impl CrosshairApp {
                 }
             }
         }
-        self.sync_macro_presets();
-        self.persist();
+        self.persist_macro_presets();
         self.status = format!(
             "Saved custom OCR region {}x{} at {}, {} for step.",
             width, height, screen_x, screen_y

@@ -42,48 +42,30 @@ impl CrosshairApp {
                 .button(Self::tr_lang(language, "+ Detect image", "+ Detect image"))
                 .clicked()
             {
-                let mut id = 1;
-                while self.state.vision_presets.iter().any(|p| p.id == id) {
-                    id += 1;
-                }
-                self.state.next_vision_preset_id = (self
-                    .state
-                    .vision_presets
-                    .iter()
-                    .map(|p| p.id)
-                    .max()
-                    .unwrap_or(0)
-                    + 1)
-                .max(id + 1);
+                let id = Self::allocate_next_id(
+                    &self.state.vision_presets,
+                    &mut self.state.next_vision_preset_id,
+                    |preset| preset.id,
+                );
                 let mut preset = VisionPreset::new(id);
                 preset.use_color_matching = false;
                 self.state.vision_presets.push(preset);
-                self.sync_vision_presets();
-                self.persist();
+                self.persist_vision_presets();
             }
             if ui
                 .button(Self::tr_lang(language, "+ Detect color", "+ Detect color"))
                 .clicked()
             {
-                let mut id = 1;
-                while self.state.vision_presets.iter().any(|p| p.id == id) {
-                    id += 1;
-                }
-                self.state.next_vision_preset_id = (self
-                    .state
-                    .vision_presets
-                    .iter()
-                    .map(|p| p.id)
-                    .max()
-                    .unwrap_or(0)
-                    + 1)
-                .max(id + 1);
+                let id = Self::allocate_next_id(
+                    &self.state.vision_presets,
+                    &mut self.state.next_vision_preset_id,
+                    |preset| preset.id,
+                );
                 let mut preset = VisionPreset::new(id);
                 preset.name = format!("Color Search {id}");
                 preset.use_color_matching = true;
                 self.state.vision_presets.push(preset);
-                self.sync_vision_presets();
-                self.persist();
+                self.persist_vision_presets();
             }
             if ui
                 .button(Self::tr_lang(
@@ -93,26 +75,17 @@ impl CrosshairApp {
                 ))
                 .clicked()
             {
-                let mut id = 1;
-                while self.state.vision_presets.iter().any(|p| p.id == id) {
-                    id += 1;
-                }
-                self.state.next_vision_preset_id = (self
-                    .state
-                    .vision_presets
-                    .iter()
-                    .map(|p| p.id)
-                    .max()
-                    .unwrap_or(0)
-                    + 1)
-                .max(id + 1);
+                let id = Self::allocate_next_id(
+                    &self.state.vision_presets,
+                    &mut self.state.next_vision_preset_id,
+                    |preset| preset.id,
+                );
                 let mut preset = VisionPreset::new(id);
                 preset.name = format!("Pixel Counter {id}");
                 preset.use_color_matching = true;
                 preset.is_pixel_counter = true;
                 self.state.vision_presets.push(preset);
-                self.sync_vision_presets();
-                self.persist();
+                self.persist_vision_presets();
             }
         });
 
@@ -168,7 +141,6 @@ impl CrosshairApp {
                 let mut start_color_priority_anchor_capture = None;
                 let mut start_single_pixel_capture = None;
                 let template_file = self.vision_template_file_for_preset(preset_snapshot.id);
-                let open_windows = self.open_windows.clone();
                 let preset = &mut self.state.vision_presets[index];
                 if preset.click_after_move {
                     preset.click_after_move = false;
@@ -893,11 +865,7 @@ impl CrosshairApp {
                     );
                 }
                 if let Some(preset_id) = start_search_region_capture {
-                    self.begin_image_search_capture(
-                        ctx,
-                        VisionCaptureTarget::Preset(preset_id),
-                        VisionCaptureMode::SearchRegion,
-                    );
+                    self.begin_region_capture(ctx, VisionCaptureTarget::Preset(preset_id));
                 }
                 if let Some(preset_id) = start_adjust_region_capture {
                     self.begin_image_search_capture(
@@ -907,11 +875,7 @@ impl CrosshairApp {
                     );
                 }
                 if let Some(preset_id) = start_color_pick_capture {
-                    self.begin_image_search_capture(
-                        ctx,
-                        VisionCaptureTarget::Preset(preset_id),
-                        VisionCaptureMode::ColorSample,
-                    );
+                    self.begin_color_pick_capture(ctx, VisionCaptureTarget::Preset(preset_id));
                 }
                 if let Some(preset_id) = start_color_priority_anchor_capture {
                     self.begin_image_search_capture(
@@ -921,11 +885,7 @@ impl CrosshairApp {
                     );
                 }
                 if let Some(preset_id) = start_single_pixel_capture {
-                    self.begin_image_search_capture(
-                        ctx,
-                        VisionCaptureTarget::Preset(preset_id),
-                        VisionCaptureMode::SinglePixel,
-                    );
+                    self.begin_single_pixel_capture(ctx, VisionCaptureTarget::Preset(preset_id));
                 }
                 if cancel_active_capture_local {
                     self.cancel_capture();
@@ -963,8 +923,7 @@ impl CrosshairApp {
         }
 
         if live_sync {
-            self.sync_vision_presets();
-            self.persist();
+            self.persist_vision_presets();
         }
     }
 
@@ -972,19 +931,23 @@ impl CrosshairApp {
         false
     }
 
-    pub(crate) fn sync_vision_presets(&self) {
-        let preset_ids = self
-            .state
-            .vision_presets
-            .iter()
-            .map(|preset| preset.id)
-            .collect::<Vec<_>>();
+    pub(crate) fn sync_vision_presets(&mut self) {
+        let presets = self.state.vision_presets.clone();
+        if self.last_synced_vision_presets.as_ref() == Some(&presets) {
+            return;
+        }
+        self.last_synced_vision_presets = Some(presets.clone());
+        let preset_ids = presets.iter().map(|preset| preset.id).collect::<Vec<_>>();
         let _ = self
             .overlay_tx
             .send(OverlayCommand::InvalidateVisionWaits(preset_ids));
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateVisionPresets(
-            self.state.vision_presets.clone(),
-        ));
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateVisionPresets(presets));
+    }
+
+    pub(crate) fn persist_vision_presets(&mut self) {
+        self.persist_after_sync(Self::sync_vision_presets);
     }
 
     pub(crate) fn image_search_preview_for_preset(
@@ -1515,6 +1478,30 @@ impl CrosshairApp {
             });
             egui_ctx.request_repaint();
         });
+    }
+
+    pub(crate) fn begin_region_capture(
+        &mut self,
+        ctx: &egui::Context,
+        target: VisionCaptureTarget,
+    ) {
+        self.begin_image_search_capture(ctx, target, VisionCaptureMode::SearchRegion);
+    }
+
+    pub(crate) fn begin_color_pick_capture(
+        &mut self,
+        ctx: &egui::Context,
+        target: VisionCaptureTarget,
+    ) {
+        self.begin_image_search_capture(ctx, target, VisionCaptureMode::ColorSample);
+    }
+
+    pub(crate) fn begin_single_pixel_capture(
+        &mut self,
+        ctx: &egui::Context,
+        target: VisionCaptureTarget,
+    ) {
+        self.begin_image_search_capture(ctx, target, VisionCaptureMode::SinglePixel);
     }
 
     pub(crate) fn handle_image_search_capture_mouse_down(
@@ -2137,8 +2124,7 @@ impl CrosshairApp {
                     ),
                 };
                 if sync_required {
-                    self.sync_vision_presets();
-                    self.persist();
+                    self.persist_vision_presets();
                 }
                 self.status = status;
                 ctx.request_repaint();
@@ -2161,8 +2147,7 @@ impl CrosshairApp {
                                 preset.search_region_width = Some(width);
                                 preset.search_region_height = Some(height);
                             }
-                            self.sync_vision_presets();
-                            self.persist();
+                            self.persist_vision_presets();
                             self.status = format!(
                                 "Saved search area {}x{} at {}, {} for preset #{}.",
                                 width, height, screen_x, screen_y, preset_id
@@ -2185,8 +2170,7 @@ impl CrosshairApp {
                                 preset.width = width;
                                 preset.height = height;
                             }
-                            self.sync_ocr_presets();
-                            self.persist();
+                            self.persist_ocr_presets();
                             self.status = format!(
                                 "Saved OCR area {}x{} at {}, {} for preset #{}.",
                                 width, height, screen_x, screen_y, preset_id
@@ -2412,9 +2396,7 @@ impl CrosshairApp {
                                     preset.objects.iter().find(|object| object.id == object_id)
                                 })
                                 .map(|object| object.spec.clone());
-                            let _ = self.overlay_tx.send(
-                                crate::overlay::OverlayCommand::PreviewGeometrySpec(preview_spec),
-                            );
+                            self.sync_geometry_spec_preview(preview_spec);
                         }
                         self.sync_geometry_presets();
                     }
@@ -2834,8 +2816,7 @@ impl CrosshairApp {
                 preset.last_capture_screen_y = Some(capture.screen_y);
             }
             self.vision_preview_cache.remove(&preset_id);
-            self.sync_vision_presets();
-            self.persist();
+            self.persist_vision_presets();
             self.status = match save_result {
                 Ok(()) => format!(
                     "Saved template {}x{} for preset #{}.",
@@ -2862,8 +2843,7 @@ impl CrosshairApp {
                     preset.search_region_width = Some(width);
                     preset.search_region_height = Some(height);
                 }
-                self.sync_vision_presets();
-                self.persist();
+                self.persist_vision_presets();
                 self.status = format!(
                     "Saved search area {}x{} at {}, {} for preset #{}.",
                     width, height, screen_x, screen_y, preset_id
@@ -2882,8 +2862,7 @@ impl CrosshairApp {
                     preset.width = width;
                     preset.height = height;
                 }
-                self.sync_ocr_presets();
-                self.persist();
+                self.persist_ocr_presets();
                 self.status = format!(
                     "Saved OCR area {}x{} at {}, {} for preset #{}.",
                     width, height, screen_x, screen_y, preset_id
@@ -3037,9 +3016,7 @@ impl CrosshairApp {
                                     preset.objects.iter().find(|object| object.id == object_id)
                                 })
                                 .map(|object| object.spec.clone());
-                            let _ = self.overlay_tx.send(
-                                crate::overlay::OverlayCommand::PreviewGeometrySpec(preview_spec),
-                            );
+                            self.sync_geometry_spec_preview(preview_spec);
                         }
                         self.sync_geometry_presets();
                     }
@@ -3193,8 +3170,7 @@ impl CrosshairApp {
                     preset.color_priority_anchor_screen_y = Some(screen_y);
                     preset.collapsed = false;
                 }
-                self.sync_vision_presets();
-                self.persist();
+                self.persist_vision_presets();
                 self.status = format!(
                     "Saved priority point at {}, {} for preset #{}.",
                     screen_x, screen_y, preset_id
