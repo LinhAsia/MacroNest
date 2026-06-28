@@ -1181,30 +1181,26 @@ impl CrosshairApp {
         match crate::macro_code::decode_step(&code) {
             Ok(mut step) => {
                 Self::bind_trigger_macro_step_to_group(&mut step, group_id);
-                if let Some(group) = self
-                    .state
-                    .macro_groups
-                    .iter_mut()
-                    .find(|g| g.id == group_id)
+                if let Ok((group_index, preset_index)) =
+                    self.macro_preset_indices(group_id, preset_id)
                 {
-                    if let Some(preset) = group.presets.iter_mut().find(|p| p.id == preset_id) {
-                        if let Some(idx) = insert_after_index {
-                            if idx < preset.steps.len() {
-                                preset.steps.insert(idx + 1, step);
-                            } else {
-                                preset.steps.push(step);
-                            }
+                    let preset = &mut self.state.macro_groups[group_index].presets[preset_index];
+                    if let Some(idx) = insert_after_index {
+                        if idx < preset.steps.len() {
+                            preset.steps.insert(idx + 1, step);
                         } else {
                             preset.steps.push(step);
                         }
-                        self.persist_macro_presets();
-                        self.status = Self::tr_lang(
-                            self.state.ui_language,
-                            "Step imported successfully.",
-                            "Step imported successfully.",
-                        )
-                        .to_owned();
+                    } else {
+                        preset.steps.push(step);
                     }
+                    self.persist_macro_presets();
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Step imported successfully.",
+                        "Step imported successfully.",
+                    )
+                    .to_owned();
                 }
             }
             Err(error) => self.status = format!("Import failed: {error}"),
@@ -1481,6 +1477,25 @@ impl CrosshairApp {
             &mut self.state.next_master_preset_id,
             |preset| preset.id,
         )
+    }
+
+    fn macro_group_index(&self, group_id: u32) -> Option<usize> {
+        self.state
+            .macro_groups
+            .iter()
+            .position(|group| group.id == group_id)
+    }
+
+    fn macro_preset_indices(&self, group_id: u32, preset_id: u32) -> Result<(usize, usize), &'static str> {
+        let group_index = self
+            .macro_group_index(group_id)
+            .ok_or("Macro group not found.")?;
+        let preset_index = self.state.macro_groups[group_index]
+            .presets
+            .iter()
+            .position(|preset| preset.id == preset_id)
+            .ok_or("Macro preset not found.")?;
+        Ok((group_index, preset_index))
     }
 
     #[cfg(windows)]
@@ -8441,20 +8456,18 @@ impl CrosshairApp {
         selected_indices.dedup();
 
         let mut clipboard = Vec::new();
-        if let Some(group) = self.state.macro_groups.iter().find(|g| g.id == group_id) {
-            if let Some(preset) = group.presets.iter().find(|p| p.id == preset_id) {
-                for &index in &selected_indices {
-                    if let Some(step) = preset.steps.get(index) {
-                        clipboard.push(step.clone());
-                    }
-                }
-            } else {
-                self.status = "Macro preset not found.".to_owned();
+        let (group_index, preset_index) = match self.macro_preset_indices(group_id, preset_id) {
+            Ok(indices) => indices,
+            Err(message) => {
+                self.status = message.to_owned();
                 return;
             }
-        } else {
-            self.status = "Macro group not found.".to_owned();
-            return;
+        };
+        let preset = &self.state.macro_groups[group_index].presets[preset_index];
+        for &index in &selected_indices {
+            if let Some(step) = preset.steps.get(index) {
+                clipboard.push(step.clone());
+            }
         }
 
         self.macro_step_clipboard = clipboard;
@@ -8481,17 +8494,11 @@ impl CrosshairApp {
         selected_indices.dedup();
         selected_indices.reverse();
 
-        if let Some(group) = self
-            .state
-            .macro_groups
-            .iter_mut()
-            .find(|g| g.id == group_id)
-        {
-            if let Some(preset) = group.presets.iter_mut().find(|p| p.id == preset_id) {
-                for index in selected_indices {
-                    if index < preset.steps.len() {
-                        preset.steps.remove(index);
-                    }
+        if let Ok((group_index, preset_index)) = self.macro_preset_indices(group_id, preset_id) {
+            let preset = &mut self.state.macro_groups[group_index].presets[preset_index];
+            for index in selected_indices {
+                if index < preset.steps.len() {
+                    preset.steps.remove(index);
                 }
             }
         }
@@ -8514,19 +8521,14 @@ impl CrosshairApp {
         let pasted_count = clipboard_steps.len();
         let mut final_insert_at = 0;
 
-        let Some(group) = self
-            .state
-            .macro_groups
-            .iter_mut()
-            .find(|g| g.id == group_id)
-        else {
-            self.status = "Macro group not found.".to_owned();
-            return None;
+        let (group_index, preset_index) = match self.macro_preset_indices(group_id, preset_id) {
+            Ok(indices) => indices,
+            Err(message) => {
+                self.status = message.to_owned();
+                return None;
+            }
         };
-        let Some(preset) = group.presets.iter_mut().find(|p| p.id == preset_id) else {
-            self.status = "Macro preset not found.".to_owned();
-            return None;
-        };
+        let preset = &mut self.state.macro_groups[group_index].presets[preset_index];
         let insert_at = (step_index + 1).min(preset.steps.len());
         final_insert_at = insert_at;
         for (offset, step) in clipboard_steps.into_iter().enumerate() {
@@ -8546,19 +8548,14 @@ impl CrosshairApp {
         let clipboard_steps = self.macro_step_clipboard.clone();
         let pasted_count = clipboard_steps.len();
 
-        let Some(group) = self
-            .state
-            .macro_groups
-            .iter_mut()
-            .find(|g| g.id == group_id)
-        else {
-            self.status = "Macro group not found.".to_owned();
-            return None;
+        let (group_index, preset_index) = match self.macro_preset_indices(group_id, preset_id) {
+            Ok(indices) => indices,
+            Err(message) => {
+                self.status = message.to_owned();
+                return None;
+            }
         };
-        let Some(preset) = group.presets.iter_mut().find(|p| p.id == preset_id) else {
-            self.status = "Macro preset not found.".to_owned();
-            return None;
-        };
+        let preset = &mut self.state.macro_groups[group_index].presets[preset_index];
 
         for (offset, step) in clipboard_steps.into_iter().enumerate() {
             preset.steps.insert(offset, step);
@@ -10296,87 +10293,66 @@ impl eframe::App for CrosshairApp {
                     self.status = status;
                 }
                 UiCommand::MacroRealtimeStepAdded(group_id, preset_id, step) => {
-                    if let Some(group) = self
-                        .state
-                        .macro_groups
-                        .iter_mut()
-                        .find(|g| g.id == group_id)
+                    if let Ok((group_index, preset_index)) =
+                        self.macro_preset_indices(group_id, preset_id)
                     {
-                        if let Some(preset) = group.presets.iter_mut().find(|p| p.id == preset_id) {
-                            if preset.steps.len() == 1
-                                && preset.steps[0].action == MacroAction::KeyPress
-                                && preset.steps[0].key.is_empty()
-                                && preset.steps[0].delay_ms == 100
-                            {
-                                preset.steps.clear();
-                            }
-                            preset.steps.push(step);
+                        let preset = &mut self.state.macro_groups[group_index].presets[preset_index];
+                        if preset.steps.len() == 1
+                            && preset.steps[0].action == MacroAction::KeyPress
+                            && preset.steps[0].key.is_empty()
+                            && preset.steps[0].delay_ms == 100
+                        {
+                            preset.steps.clear();
                         }
+                        preset.steps.push(step);
                     }
                     ctx.request_repaint();
                 }
                 UiCommand::MacroRealtimeStepRemoved(group_id, preset_id) => {
-                    if let Some(group) = self
-                        .state
-                        .macro_groups
-                        .iter_mut()
-                        .find(|g| g.id == group_id)
+                    if let Ok((group_index, preset_index)) =
+                        self.macro_preset_indices(group_id, preset_id)
                     {
-                        if let Some(preset) = group.presets.iter_mut().find(|p| p.id == preset_id) {
-                            preset.steps.pop();
-                        }
+                        self.state.macro_groups[group_index].presets[preset_index]
+                            .steps
+                            .pop();
                     }
                     ctx.request_repaint();
                 }
                 UiCommand::MacroRecordingFinished(group_id, preset_id, events, status) => {
-                    if let Some(group) = self
-                        .state
-                        .macro_groups
-                        .iter_mut()
-                        .find(|g| g.id == group_id)
+                    if let Ok((group_index, preset_index)) =
+                        self.macro_preset_indices(group_id, preset_id)
                     {
-                        if let Some(preset) = group.presets.iter_mut().find(|p| p.id == preset_id) {
-                            let record_hotkey = preset.record_hotkey.clone();
-                            let _ = preset;
-                            let mut filtered_events = events;
-                            if let Some(record_hotkey) = &record_hotkey {
-                                let hotkey_keys: Vec<String> =
-                                    crate::hotkey::binding_key_names(record_hotkey)
-                                        .into_iter()
-                                        .map(|k| k.trim().to_ascii_lowercase())
-                                        .collect();
-                                while let Some(last) = filtered_events.last() {
-                                    if last.action == MacroAction::KeyPress
-                                        && last.key.as_ref().is_some_and(|k| {
-                                            hotkey_keys.contains(&k.trim().to_ascii_lowercase())
-                                        })
-                                    {
-                                        filtered_events.pop();
-                                        continue;
-                                    }
-                                    break;
-                                }
-                            }
-                            let path_name = format!("Macro {}-{} Path", group_id, preset_id);
-                            let rebuilt_steps =
-                                self.build_macro_steps_from_recording(&path_name, &filtered_events);
-                            if let Some(group) = self
-                                .state
-                                .macro_groups
-                                .iter_mut()
-                                .find(|g| g.id == group_id)
-                            {
-                                if let Some(preset) =
-                                    group.presets.iter_mut().find(|p| p.id == preset_id)
+                        let record_hotkey = self.state.macro_groups[group_index].presets[preset_index]
+                            .record_hotkey
+                            .clone();
+                        let mut filtered_events = events;
+                        if let Some(record_hotkey) = &record_hotkey {
+                            let hotkey_keys: Vec<String> =
+                                crate::hotkey::binding_key_names(record_hotkey)
+                                    .into_iter()
+                                    .map(|k| k.trim().to_ascii_lowercase())
+                                    .collect();
+                            while let Some(last) = filtered_events.last() {
+                                if last.action == MacroAction::KeyPress
+                                    && last.key.as_ref().is_some_and(|k| {
+                                        hotkey_keys.contains(&k.trim().to_ascii_lowercase())
+                                    })
                                 {
-                                    preset.steps = if rebuilt_steps.is_empty() {
-                                        vec![MacroStep::default()]
-                                    } else {
-                                        rebuilt_steps
-                                    };
+                                    filtered_events.pop();
+                                    continue;
                                 }
+                                break;
                             }
                         }
+                        let path_name = format!("Macro {}-{} Path", group_id, preset_id);
+                        let rebuilt_steps =
+                            self.build_macro_steps_from_recording(&path_name, &filtered_events);
+                        self.state.macro_groups[group_index].presets[preset_index].steps =
+                            if rebuilt_steps.is_empty() {
+                                vec![MacroStep::default()]
+                            } else {
+                                rebuilt_steps
+                            };
                     }
                     self.active_macro_record_preset_id = None;
                     self.persist();
