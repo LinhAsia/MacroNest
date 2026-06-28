@@ -2982,52 +2982,65 @@ impl CrosshairApp {
     }
 
     pub(crate) fn add_window_preset(&mut self) {
-        let id = Self::allocate_next_id(
-            &self.state.window_presets,
+        let id = Self::add_window_panel_preset(
+            &mut self.state.window_presets,
             &mut self.state.next_preset_id,
             |preset| preset.id,
+            WindowPreset::new,
         );
-        self.state.window_presets.push(WindowPreset::new(id));
         self.reconcile_master_presets();
         self.sync_window_presets();
         self.status = format!("Added window preset {id}.");
     }
 
     pub(crate) fn add_window_focus_preset(&mut self) {
-        let id = Self::allocate_next_id(
-            &self.state.window_focus_presets,
+        let id = Self::add_window_panel_preset(
+            &mut self.state.window_focus_presets,
             &mut self.state.next_window_focus_preset_id,
             |preset| preset.id,
+            WindowFocusPreset::new,
         );
-        self.state
-            .window_focus_presets
-            .push(WindowFocusPreset::new(id));
         self.reconcile_master_presets();
         self.sync_window_presets();
         self.status = format!("Added window focus preset {id}.");
     }
 
     pub(crate) fn add_zoom_preset(&mut self) {
-        let id = Self::allocate_next_id(
-            &self.state.zoom_presets,
+        let id = Self::add_window_panel_preset(
+            &mut self.state.zoom_presets,
             &mut self.state.next_zoom_preset_id,
             |preset| preset.id,
+            ZoomPreset::new,
         );
-        self.state.zoom_presets.push(ZoomPreset::new(id));
         self.reconcile_master_presets();
         self.sync_window_presets();
         self.status = format!("Added zoom preset {id}.");
     }
 
     pub(crate) fn add_pin_preset(&mut self) {
-        let id = Self::allocate_next_id(
-            &self.state.pin_presets,
+        let id = Self::add_window_panel_preset(
+            &mut self.state.pin_presets,
             &mut self.state.next_pin_preset_id,
             |preset| preset.id,
+            PinPreset::new,
         );
-        self.state.pin_presets.push(PinPreset::new(id));
         self.sync_window_presets();
         self.status = format!("Added pin preset {id}.");
+    }
+
+    fn add_window_panel_preset<T, IdOf, NewPreset>(
+        presets: &mut Vec<T>,
+        next_id: &mut u32,
+        id_of: IdOf,
+        new_preset: NewPreset,
+    ) -> u32
+    where
+        IdOf: Fn(&T) -> u32,
+        NewPreset: FnOnce(u32) -> T,
+    {
+        let id = Self::allocate_next_id(presets, next_id, id_of);
+        presets.push(new_preset(id));
+        id
     }
 
     pub(crate) fn persist_window_presets(&mut self) {
