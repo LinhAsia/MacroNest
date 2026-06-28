@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use eframe::egui::{self, pos2, vec2};
 
 use crate::window_list;
+use crate::window_list::WindowInfo;
 
 use super::CrosshairApp;
 
@@ -50,70 +51,22 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn clean_invisible_chars(s: &str) -> String {
-        s.chars()
-            .filter(|&c| c != '\u{200B}' && c != '\u{200C}' && c != '\u{200D}' && c != '\u{FEFF}')
-            .collect()
-    }
-
     pub(crate) fn simplify_window_title(title: &str) -> String {
-        let title = if let Some(s) = title.strip_suffix(" [Lowest]") {
-            s
-        } else if let Some(s) = title.strip_suffix(" [Highest]") {
-            s
-        } else if let Some(s) = title.strip_suffix(" [Leftmost]") {
-            s
-        } else if let Some(s) = title.strip_suffix(" [Rightmost]") {
-            s
-        } else {
-            title
-        };
-        let clean = Self::clean_invisible_chars(title);
-        let base = Self::selector_base_title(&clean);
-
-        if base.contains(" - Antigravity IDE - ") || base.ends_with(" - Antigravity IDE") {
-            return "Antigravity IDE".to_owned();
-        }
-
-        const BROWSER_SUFFIXES: &[&str] = &[
-            " - Microsoft Edge",
-            " - Google Chrome",
-            " - Brave",
-            " - Firefox",
-            " - Opera GX",
-            " - Opera",
-            " - Vivaldi",
-            " - Chromium",
-            " - Tor Browser",
-            " - Arc",
-            " - Visual Studio Code",
-            " - VS Code",
-            " - Discord",
-            " - Slack",
-            " - Spotify",
-        ];
-
-        for suffix in BROWSER_SUFFIXES {
-            if base.ends_with(suffix) {
-                return suffix.trim_start_matches(" - ").to_owned();
-            }
-        }
-
-        if let Some((_, last)) = base.rsplit_once(" - ") {
-            let trimmed = last.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_owned();
-            }
-        }
-
-        base.to_owned()
+        window_list::simplify_window_title(title)
     }
 
-    pub(crate) fn quick_action_window_display(selector: &str, open_windows: &[String]) -> String {
-        let simplified = Self::simplify_window_title(selector);
+    pub(crate) fn quick_action_window_display(
+        selector: &str,
+        open_windows: &[WindowInfo],
+    ) -> String {
+        let simplified = open_windows
+            .iter()
+            .find(|candidate| candidate.selector == selector)
+            .map(|candidate| Self::simplify_window_title(&candidate.title))
+            .unwrap_or_else(|| Self::simplify_window_title(selector));
         let duplicate_count = open_windows
             .iter()
-            .filter(|candidate| Self::simplify_window_title(candidate) == simplified)
+            .filter(|candidate| Self::simplify_window_title(&candidate.title) == simplified)
             .count();
         if duplicate_count > 1 {
             Self::selector_base_title(selector).to_owned()
