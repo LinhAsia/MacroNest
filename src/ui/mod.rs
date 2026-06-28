@@ -1803,6 +1803,10 @@ impl CrosshairApp {
         self.refresh_audio_waveform_for_path(path);
         self.preview_cursor = None;
         self.trim_timeline_zoom = 1.0;
+        self.sync_and_persist_audio_settings();
+    }
+
+    fn sync_and_persist_audio_settings(&mut self) {
         self.sync_audio_settings();
         self.persist();
     }
@@ -1870,8 +1874,7 @@ impl CrosshairApp {
         self.library_clip_duration_ms
             .insert(id, audio_duration(clip));
         self.show_library_audio_editor.insert(id);
-        self.sync_audio_settings();
-        self.persist();
+        self.sync_and_persist_audio_settings();
         self.status = format!("Saved sound into library item {id}.");
     }
 
