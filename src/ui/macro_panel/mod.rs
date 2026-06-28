@@ -16203,13 +16203,8 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                 &mut step.key,
             );
             if response.changed() {
-                let trimmed = step.key.trim();
-                step.geometry_preset_id = trimmed.parse::<u32>().ok().or_else(|| {
-                    preset_options
-                        .iter()
-                        .find(|(_, name)| name.trim().eq_ignore_ascii_case(trimmed))
-                        .map(|(id, _)| *id)
-                });
+                step.geometry_preset_id =
+                    Self::find_named_id(step.key.trim(), preset_options, |(id, _)| *id, |(_, name)| name);
                 *live_sync = true;
             }
             Self::render_variable_suggestions_braced(
@@ -16251,16 +16246,22 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
             return step.geometry_preset_id;
         }
 
-        trimmed
-            .parse::<u32>()
-            .ok()
-            .or_else(|| {
-                presets
-                    .iter()
-                    .find(|preset| preset.name.trim().eq_ignore_ascii_case(trimmed))
-                    .map(|preset| preset.id)
-            })
+        Self::find_named_id(trimmed, presets, |preset| preset.id, |preset| &preset.name)
             .or(step.geometry_preset_id)
+    }
+
+    fn find_named_id<T>(
+        trimmed: &str,
+        items: &[T],
+        id_of: impl Fn(&T) -> u32,
+        name_of: impl Fn(&T) -> &str,
+    ) -> Option<u32> {
+        trimmed.parse::<u32>().ok().or_else(|| {
+            items
+                .iter()
+                .find(|item| name_of(item).trim().eq_ignore_ascii_case(trimmed))
+                .map(id_of)
+        })
     }
 
     fn clear_geometry_spec_override_inputs(spec: &mut crate::model::GeometrySpec) {
