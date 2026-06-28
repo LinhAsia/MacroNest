@@ -25,14 +25,14 @@ use crate::{
         CrosshairStyle, FocusHighlightDecoration, GeometrySpec, GroqSettings, HotkeyBinding, MacroAction,
         MacroFolder, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode, MasterMacroGroupState,
         MasterMacroPresetState, MasterPreset, MasterWindowFocusPresetState,
-        MasterWindowPresetState, MasterZoomPresetState, MousePathEvent, MousePathEventKind,
-        ProfileRecord, QuickKeyDisplayMode, RgbaColor, SoundLibraryItem, TimerPreset, UiLanguage,
-        UiThemeMode, VietnameseInputMode, VisionSettings, WindowAnchor, WindowExpandDirection,
-        WindowPreset,
+        MasterWindowPresetState, MasterZoomPresetState, MascotStyle, MousePathEvent,
+        MousePathEventKind, ProfileRecord, QuickKeyDisplayMode, RgbaColor, SoundLibraryItem,
+        TimerPreset, UiLanguage, UiThemeMode, VietnameseInputMode, VisionSettings, WindowAnchor,
+        WindowExpandDirection, WindowPreset,
     },
     overlay::{OverlayCommand, UiCommand},
     storage::AppPaths,
-    window_list,
+    window_list::{self, WindowInfo},
 };
 use vi::{self, TELEX, VNI};
 
@@ -512,6 +512,13 @@ pub(crate) enum MacroActionSubmenuKind {
     Funny,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MacroGroupClipboardFeedback {
+    Copy,
+    Paste,
+    Cut,
+}
+
 pub struct CrosshairApp {
     pub paths: AppPaths,
     pub state: AppState,
@@ -520,7 +527,7 @@ pub struct CrosshairApp {
     ui_rx: Receiver<UiCommand>,
     status: String,
     save_name: String,
-    open_windows: Vec<String>,
+    open_window_infos: Vec<WindowInfo>,
     open_windows_loaded_once: bool,
     open_windows_loading: bool,
     quit_requested: bool,
@@ -533,9 +540,39 @@ pub struct CrosshairApp {
     show_startup_audio_editor: bool,
     show_exit_audio_editor: bool,
     audio_waveforms: HashMap<String, Vec<f32>>,
+    last_synced_profiles: Option<Vec<ProfileRecord>>,
     last_synced_audio_settings: Option<AudioSettings>,
     last_synced_groq_settings: Option<GroqSettings>,
     last_synced_vision_settings: Option<VisionSettings>,
+    last_synced_macro_groups: Option<Vec<MacroGroup>>,
+    last_synced_window_presets: Option<Vec<WindowPreset>>,
+    last_synced_window_focus_presets: Option<Vec<crate::model::WindowFocusPreset>>,
+    last_synced_pin_presets: Option<Vec<crate::model::PinPreset>>,
+    last_synced_mouse_path_presets: Option<Vec<crate::model::MousePathPreset>>,
+    last_synced_window_layouts: Option<Vec<crate::model::WindowLayout>>,
+    last_synced_vision_presets: Option<Vec<crate::model::VisionPreset>>,
+    last_synced_ocr_presets: Option<Vec<crate::model::OcrPreset>>,
+    last_synced_hud_presets: Option<Vec<crate::model::HudPreset>>,
+    last_synced_command_presets: Option<Vec<CommandPreset>>,
+    last_synced_timer_presets: Option<Vec<TimerPreset>>,
+    last_synced_audio_sense_presets: Option<Vec<crate::model::AudioSensePreset>>,
+    last_synced_geometry_presets: Option<Vec<crate::model::GeometryPreset>>,
+    last_synced_mouse_sensitivity_presets: Option<Vec<crate::model::MouseSensitivityPreset>>,
+    last_synced_macro_delays: Option<(u32, u32)>,
+    last_synced_focus_highlight_config: Option<(RgbaColor, FocusHighlightDecoration)>,
+    last_synced_quick_key_display_config:
+        Option<(bool, i32, i32, f32, QuickKeyDisplayMode, MascotStyle)>,
+    last_synced_quick_screen_draw_config:
+        Option<(bool, Option<HotkeyBinding>, bool, RgbaColor, f32, bool, f32)>,
+    last_synced_quick_key_sound_config: Option<(bool, u32, f32)>,
+    last_synced_macro_master_hotkey: Option<Option<HotkeyBinding>>,
+    last_synced_macros_master_enabled: Option<bool>,
+    last_synced_windows_key_locked: Option<bool>,
+    last_synced_native_focus_highlight_enabled: Option<bool>,
+    last_synced_vietnamese_input_enabled: Option<bool>,
+    last_synced_active_macro_folder_scope: Option<crate::overlay::MacroFolderScope>,
+    last_synced_protractor_enabled: Option<bool>,
+    last_synced_protractor_config: Option<(f32, f32, f32, i32, i32, f32, bool, UiLanguage)>,
     sound_preset_clip_duration_ms: HashMap<u32, Option<u64>>,
     show_sound_preset_audio_editor: HashSet<u32>,
     library_clip_duration_ms: HashMap<u32, Option<u64>>,
@@ -584,6 +621,8 @@ pub struct CrosshairApp {
     macro_preset_search_query: String,
     macro_group_clipboard: Vec<u32>,
     macro_group_clipboard_is_cut: bool,
+    macro_group_clipboard_feedback: Option<MacroGroupClipboardFeedback>,
+    macro_group_clipboard_feedback_until: Option<Instant>,
     macro_preset_clipboard: Option<MacroPreset>,
     macro_step_clipboard: Vec<MacroStep>,
     pending_macro_group_scroll_target: Option<u32>,
@@ -762,7 +801,7 @@ impl CrosshairApp {
             ui_rx,
             status: String::new(),
             save_name,
-            open_windows: Vec::new(),
+            open_window_infos: Vec::new(),
             open_windows_loaded_once: false,
             open_windows_loading: false,
             quit_requested: false,
@@ -775,9 +814,37 @@ impl CrosshairApp {
             show_startup_audio_editor: false,
             show_exit_audio_editor: false,
             audio_waveforms: HashMap::new(),
+            last_synced_profiles: None,
             last_synced_audio_settings: None,
             last_synced_groq_settings: None,
             last_synced_vision_settings: None,
+            last_synced_macro_groups: None,
+            last_synced_window_presets: None,
+            last_synced_window_focus_presets: None,
+            last_synced_pin_presets: None,
+            last_synced_mouse_path_presets: None,
+            last_synced_window_layouts: None,
+            last_synced_vision_presets: None,
+            last_synced_ocr_presets: None,
+            last_synced_hud_presets: None,
+            last_synced_command_presets: None,
+            last_synced_timer_presets: None,
+            last_synced_audio_sense_presets: None,
+            last_synced_geometry_presets: None,
+            last_synced_mouse_sensitivity_presets: None,
+            last_synced_macro_delays: None,
+            last_synced_focus_highlight_config: None,
+            last_synced_quick_key_display_config: None,
+            last_synced_quick_screen_draw_config: None,
+            last_synced_quick_key_sound_config: None,
+            last_synced_macro_master_hotkey: None,
+            last_synced_macros_master_enabled: None,
+            last_synced_windows_key_locked: None,
+            last_synced_native_focus_highlight_enabled: None,
+            last_synced_vietnamese_input_enabled: None,
+            last_synced_active_macro_folder_scope: None,
+            last_synced_protractor_enabled: None,
+            last_synced_protractor_config: None,
             sound_preset_clip_duration_ms: HashMap::new(),
             show_sound_preset_audio_editor: HashSet::new(),
             library_clip_duration_ms: HashMap::new(),
@@ -829,6 +896,8 @@ impl CrosshairApp {
             macro_preset_search_query: String::new(),
             macro_group_clipboard: Vec::new(),
             macro_group_clipboard_is_cut: false,
+            macro_group_clipboard_feedback: None,
+            macro_group_clipboard_feedback_until: None,
             macro_preset_clipboard: None,
             macro_step_clipboard: Vec::new(),
             pending_macro_group_scroll_target: None,
@@ -1082,7 +1151,6 @@ impl CrosshairApp {
         self.save_name = name.clone();
         self.state.active_style = copied.style.clone();
         self.sync_crosshair();
-        self.sync_profiles();
         self.persist();
         self.status = format!("Pasted crosshair preset: {}.", name);
     }
@@ -1148,8 +1216,7 @@ impl CrosshairApp {
                         } else {
                             preset.steps.push(step);
                         }
-                        self.sync_macro_presets();
-                        self.persist();
+                        self.persist_macro_presets();
                         self.status = Self::tr_lang(
                             self.state.ui_language,
                             "Step imported successfully.",
@@ -1234,8 +1301,7 @@ impl CrosshairApp {
                         group.presets.push(preset);
                     }
                     self.reconcile_master_presets();
-                    self.sync_macro_presets();
-                    self.persist();
+                    self.persist_macro_presets();
                     self.status = Self::tr_lang(
                         self.state.ui_language,
                         "Preset imported successfully.",
@@ -1346,8 +1412,7 @@ impl CrosshairApp {
                 }
                 self.pending_macro_group_scroll_target = Some(id);
                 self.reconcile_master_presets();
-                self.sync_macro_presets();
-                self.persist();
+                self.persist_macro_presets();
                 self.status = Self::tr_lang(
                     self.state.ui_language,
                     "Group imported successfully.",
@@ -3126,9 +3191,7 @@ impl CrosshairApp {
         ui: &mut egui::Ui,
         taskbar_hidden: bool,
     ) -> bool {
-        if self.open_windows.is_empty() {
-            self.ensure_open_windows_ready(false);
-        }
+        self.prime_open_windows_if_empty();
         self.sync_quick_action_window_selection();
         let pin_window_available = !self.quick_action_window_selector.is_empty();
         let pinned_window_active = pin_window_available
@@ -3539,7 +3602,7 @@ impl CrosshairApp {
                                             Self::truncate_window_title(
                                                 &Self::quick_action_window_display(
                                                     &self.quick_action_window_selector,
-                                                    &self.open_windows,
+                                                    &self.open_window_infos,
                                                 ),
                                                 16,
                                             )
@@ -3579,11 +3642,12 @@ impl CrosshairApp {
                                             .show(|ui| {
                                                 ui.set_min_width(164.0);
                                                 ui.set_max_width(164.0);
-                                                for selector in &self.open_windows {
+                                                for window in &self.open_window_infos {
+                                                    let selector = &window.selector;
                                                     let display_title =
                                                         Self::quick_action_window_display(
                                                             selector,
-                                                            &self.open_windows,
+                                                            &self.open_window_infos,
                                                         );
                                                     let truncated_title =
                                                         Self::truncate_window_title(
@@ -3886,10 +3950,9 @@ impl CrosshairApp {
                             is_active,
                         );
                         if button_response.clicked() {
-                            self.begin_image_search_capture(
+                            self.begin_single_pixel_capture(
                                 ui.ctx(),
                                 VisionCaptureTarget::QuickActionsCoordinates,
-                                VisionCaptureMode::SinglePixel,
                             );
                         }
 
@@ -3973,10 +4036,9 @@ impl CrosshairApp {
                             is_active,
                         );
                         if button_response.clicked() {
-                            self.begin_image_search_capture(
+                            self.begin_color_pick_capture(
                                 ui.ctx(),
                                 VisionCaptureTarget::QuickActionsColor,
-                                VisionCaptureMode::ColorSample,
                             );
                         }
 
@@ -4690,7 +4752,7 @@ impl CrosshairApp {
         label_when_none: &str,
         primary: &mut Option<String>,
         extras: &mut Vec<String>,
-        open_windows: &[String],
+        open_windows: &[WindowInfo],
     ) -> bool {
         let mut changed = false;
         let extras_expanded_id =
@@ -4704,7 +4766,7 @@ impl CrosshairApp {
                 ui.spacing_mut().interact_size.y = 21.0;
                 let display_primary = primary
                     .as_deref()
-                    .map(|current| Self::simplify_window_title(current))
+                    .map(|current| Self::display_title_for_selector(current, open_windows))
                     .unwrap_or_else(|| label_when_none.to_owned());
                 let truncated_primary = Self::truncate_window_title(&display_primary, 40);
                 egui::ComboBox::from_id_salt((id_source, "primary-target-window"))
@@ -4718,18 +4780,19 @@ impl CrosshairApp {
                             *primary = None;
                             changed = true;
                         }
-                        for title in open_windows {
-                            let display_title = Self::simplify_window_title(title);
+                        for window in open_windows {
+                            let selector = &window.selector;
+                            let display_title = Self::simplify_window_title(&window.title);
                             let truncated_title = Self::truncate_window_title(&display_title, 50);
                             if ui
                                 .selectable_label(
-                                    primary.as_deref() == Some(title),
+                                    primary.as_deref() == Some(selector),
                                     truncated_title,
                                 )
-                                .on_hover_text(title)
+                                .on_hover_text(selector)
                                 .clicked()
                             {
-                                *primary = Some(title.clone());
+                                *primary = Some(selector.clone());
                                 changed = true;
                             }
                         }
@@ -4743,12 +4806,12 @@ impl CrosshairApp {
                 {
                     let next = open_windows
                         .iter()
-                        .find(|title| {
-                            primary.as_deref() != Some(title.as_str())
-                                && !extras.iter().any(|existing| existing == *title)
+                        .find(|window| {
+                            primary.as_deref() != Some(window.selector.as_str())
+                                && !extras.iter().any(|existing| existing == &window.selector)
                         })
-                        .cloned()
-                        .or_else(|| open_windows.first().cloned())
+                        .map(|window| window.selector.clone())
+                        .or_else(|| open_windows.first().map(|window| window.selector.clone()))
                         .unwrap_or_default();
                     if !next.is_empty() {
                         extras.push(next);
@@ -4780,22 +4843,23 @@ impl CrosshairApp {
                 for (index, extra) in extras.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().interact_size.y = 21.0;
-                        let display_extra = Self::simplify_window_title(extra);
+                        let display_extra = Self::display_title_for_selector(extra, open_windows);
                         let truncated_extra = Self::truncate_window_title(&display_extra, 40);
                         egui::ComboBox::from_id_salt((id_source, "extra-target-window", index))
                             .width(320.0)
                             .selected_text(truncated_extra)
                             .show_ui(ui, |ui| {
-                                for title in open_windows {
-                                    let display_title = Self::simplify_window_title(title);
+                                for window in open_windows {
+                                    let selector = &window.selector;
+                                    let display_title = Self::simplify_window_title(&window.title);
                                     let truncated_title =
                                         Self::truncate_window_title(&display_title, 50);
                                     if ui
-                                        .selectable_label(extra == title, truncated_title)
-                                        .on_hover_text(title)
+                                        .selectable_label(extra == selector, truncated_title)
+                                        .on_hover_text(selector)
                                         .clicked()
                                     {
-                                        *extra = title.clone();
+                                        *extra = selector.clone();
                                         changed = true;
                                     }
                                 }
@@ -4821,18 +4885,14 @@ impl CrosshairApp {
     }
 
     fn selector_base_title(target: &str) -> &str {
-        if let Some(prefix) = target.strip_suffix(')')
-            && let Some((base, _)) = prefix.rsplit_once(" (0x")
-        {
-            return base;
-        }
-        target
+        crate::window_list::selector_base_title(target)
     }
 
-    fn grouped_window_selectors(open_windows: &[String]) -> Vec<(String, Vec<String>)> {
+    fn grouped_window_selectors(open_windows: &[WindowInfo]) -> Vec<(String, Vec<String>)> {
         let mut groups: Vec<(String, Vec<String>)> = Vec::new();
-        for selector in open_windows {
-            let title = Self::simplify_window_title(selector);
+        for window in open_windows {
+            let selector = &window.selector;
+            let title = Self::simplify_window_title(&window.title);
             if let Some((_, selectors)) = groups
                 .iter_mut()
                 .find(|(existing_title, _)| existing_title == &title)
@@ -4847,6 +4907,14 @@ impl CrosshairApp {
         groups
     }
 
+    fn display_title_for_selector(selector: &str, open_windows: &[WindowInfo]) -> String {
+        open_windows
+            .iter()
+            .find(|window| window.selector == selector)
+            .map(|window| Self::simplify_window_title(&window.title))
+            .unwrap_or_else(|| Self::simplify_window_title(selector))
+    }
+
     fn render_window_target_combo_with_duplicate_mode(
         ui: &mut egui::Ui,
         language: UiLanguage,
@@ -4854,7 +4922,7 @@ impl CrosshairApp {
         label_when_none: &str,
         target: &mut Option<String>,
         match_duplicate_window_titles: &mut bool,
-        open_windows: &[String],
+        open_windows: &[WindowInfo],
         width: f32,
         allow_none: bool,
     ) -> bool {
@@ -4891,7 +4959,7 @@ impl CrosshairApp {
                 if matched_rule {
                     display
                 } else {
-                    let base_title = Self::simplify_window_title(current);
+                    let base_title = Self::display_title_for_selector(current, open_windows);
                     let selected_specific_duplicate = !*match_duplicate_window_titles
                         && window_groups
                             .iter()
@@ -4932,7 +5000,9 @@ impl CrosshairApp {
                     let first_selector = selectors.first().cloned().unwrap_or_default();
                     let main_selected = target
                         .as_deref()
-                        .is_some_and(|current| Self::simplify_window_title(current) == title)
+                        .is_some_and(|current| {
+                            Self::display_title_for_selector(current, open_windows) == title
+                        })
                         && *match_duplicate_window_titles;
                     let row_label = if has_duplicates {
                         format!("{title}  >")
@@ -5057,7 +5127,7 @@ impl CrosshairApp {
         primary: &mut Option<String>,
         extras: &mut Vec<String>,
         match_duplicate_window_titles: &mut bool,
-        open_windows: &[String],
+        open_windows: &[WindowInfo],
     ) -> bool {
         let mut changed = false;
         let extras_expanded_id =
@@ -5089,12 +5159,12 @@ impl CrosshairApp {
                 {
                     let next = open_windows
                         .iter()
-                        .find(|title| {
-                            primary.as_deref() != Some(title.as_str())
-                                && !extras.iter().any(|existing| existing == *title)
+                        .find(|window| {
+                            primary.as_deref() != Some(window.selector.as_str())
+                                && !extras.iter().any(|existing| existing == &window.selector)
                         })
-                        .cloned()
-                        .or_else(|| open_windows.first().cloned())
+                        .map(|window| window.selector.clone())
+                        .or_else(|| open_windows.first().map(|window| window.selector.clone()))
                         .unwrap_or_default();
                     if !next.is_empty() {
                         extras.push(next);
@@ -7494,10 +7564,14 @@ impl CrosshairApp {
         } else {
             preset.extra_target_window_titles.join(", ")
         };
-        let open_windows = if self.open_windows.is_empty() {
+        let open_windows = if self.open_window_infos.is_empty() {
             "None".to_owned()
         } else {
-            self.open_windows.join("\n- ")
+            self.open_window_infos
+                .iter()
+                .map(|window| window.selector.clone())
+                .collect::<Vec<_>>()
+                .join("\n- ")
         };
         let shell_type = if preset.use_powershell {
             "PowerShell"
@@ -7889,8 +7963,7 @@ impl CrosshairApp {
             }
             new_name
         };
-        self.sync_command_presets();
-        self.persist();
+        self.persist_command_presets();
         self.status = format!("Updated custom preset {}.", preset_name);
     }
 
@@ -8211,6 +8284,8 @@ impl CrosshairApp {
         ids.sort_unstable();
         self.macro_group_clipboard = ids;
         self.macro_group_clipboard_is_cut = false;
+        self.macro_group_clipboard_feedback = Some(MacroGroupClipboardFeedback::Copy);
+        self.macro_group_clipboard_feedback_until = Some(Instant::now() + Duration::from_secs(1));
         self.status = format!(
             "Copied {} macro group(s).",
             self.macro_group_clipboard.len()
@@ -8394,6 +8469,8 @@ impl CrosshairApp {
         ids.sort_unstable();
         self.macro_group_clipboard = ids;
         self.macro_group_clipboard_is_cut = true;
+        self.macro_group_clipboard_feedback = Some(MacroGroupClipboardFeedback::Cut);
+        self.macro_group_clipboard_feedback_until = Some(Instant::now() + Duration::from_secs(1));
         self.status = format!("Cut {} macro group(s).", self.macro_group_clipboard.len());
     }
 
@@ -8417,6 +8494,9 @@ impl CrosshairApp {
             }
             self.macro_group_clipboard.clear();
             self.macro_group_clipboard_is_cut = false;
+            self.macro_group_clipboard_feedback = Some(MacroGroupClipboardFeedback::Paste);
+            self.macro_group_clipboard_feedback_until =
+                Some(Instant::now() + Duration::from_secs(1));
             self.status = "Moved macro group selection.".to_owned();
         } else {
             let sources = clipboard_ids
@@ -8433,6 +8513,9 @@ impl CrosshairApp {
                 let copied_group = self.clone_macro_group_with_new_ids(source, target_folder_id);
                 self.state.macro_groups.push(copied_group);
             }
+            self.macro_group_clipboard_feedback = Some(MacroGroupClipboardFeedback::Paste);
+            self.macro_group_clipboard_feedback_until =
+                Some(Instant::now() + Duration::from_secs(1));
             self.status = format!("Pasted {} macro group copy(s).", sources.len());
         }
 
@@ -8486,6 +8569,35 @@ impl CrosshairApp {
 
     fn capture_request_keeps_open(&self, _target: &CaptureRequest) -> bool {
         false
+    }
+
+    pub(crate) fn clear_geometry_spec_preview(&mut self) {
+        self.geometry_preview_target = None;
+        self.geometry_preview_sent = None;
+        let _ = self
+            .overlay_tx
+            .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+    }
+
+    pub(crate) fn sync_geometry_spec_preview(&mut self, spec: Option<GeometrySpec>) {
+        self.geometry_preview_sent = spec.clone();
+        let _ = self
+            .overlay_tx
+            .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(spec));
+    }
+
+    pub(crate) fn clear_geometry_preset_preview(&mut self) {
+        self.geometry_preset_preview_target = None;
+        let _ = self
+            .overlay_tx
+            .send(crate::overlay::OverlayCommand::PreviewGeometryPreset(None));
+    }
+
+    pub(crate) fn sync_geometry_preset_preview(&mut self, preset_id: Option<u32>) {
+        self.geometry_preset_preview_target = preset_id;
+        let _ = self
+            .overlay_tx
+            .send(crate::overlay::OverlayCommand::PreviewGeometryPreset(preset_id));
     }
 
     fn capture_request_accepts_mouse(&self, target: &CaptureRequest) -> bool {
@@ -8762,8 +8874,7 @@ impl CrosshairApp {
                     preset.enabled =
                         preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
                 }
-                self.sync_vision_presets();
-                self.persist();
+                self.persist_vision_presets();
             }
             (CaptureRequest::MacrosMasterHotkey, CapturedInput::Binding(binding)) => {
                 self.state.macros_master_hotkey = Some(binding);
@@ -9764,12 +9875,6 @@ impl CrosshairApp {
             if !self.panel_is_warmed(panel) {
                 self.warmed_panels.push(panel);
             }
-            if Self::active_panel_needs_open_windows(panel) {
-                self.ensure_open_windows_ready(false);
-            }
-            if Self::active_panel_needs_audio_sense_devices(panel) {
-                self.ensure_audio_sense_devices_ready(false);
-            }
             self.background_panel_preload_index += 1;
             ctx.request_repaint_after(Duration::from_millis(16));
         }
@@ -10395,8 +10500,7 @@ impl eframe::App for CrosshairApp {
                                         preset.width = width;
                                         preset.height = height;
                                         preset.use_custom_bounds = true;
-                                        self.sync_window_presets();
-                                        self.persist();
+                                        self.persist_window_presets();
                                         self.status = format!(
                                             "Saved pinned region {}x{} at {}, {} for preset #{}.",
                                             width, height, x, y, preset_id
@@ -10424,8 +10528,7 @@ impl eframe::App for CrosshairApp {
                                         preset.source_height = height;
                                         preset.source_crop_initialized = true;
                                         preset.source_crop_fit_version = 2;
-                                        self.sync_window_presets();
-                                        self.persist();
+                                        self.persist_window_presets();
                                         self.status = format!(
                                             "Saved source crop {}x{} at {}, {} for preset #{}.",
                                             width, height, sx, sy, preset_id
@@ -10443,8 +10546,7 @@ impl eframe::App for CrosshairApp {
                                         preset.y = y;
                                         preset.width = width;
                                         preset.height = height;
-                                        self.sync_hud_presets();
-                                        self.persist();
+                                        self.persist_hud_presets();
                                         self.status = format!(
                                             "Saved HUD region {}x{} at {}, {} for preset #{}.",
                                             width, height, x, y, preset_id
@@ -10879,7 +10981,7 @@ impl eframe::App for CrosshairApp {
                     ctx.request_repaint();
                 }
                 UiCommand::OpenWindowsLoaded { windows, status } => {
-                    self.open_windows = windows;
+                    self.open_window_infos = windows;
                     self.sync_quick_action_window_selection();
                     self.open_windows_loaded_once = true;
                     self.open_windows_loading = false;
@@ -11040,8 +11142,7 @@ impl eframe::App for CrosshairApp {
                 }
             }
             if changed {
-                self.sync_vision_presets();
-                self.persist();
+                self.persist_vision_presets();
             }
         }
         let keep_geometry_preview =
@@ -11050,15 +11151,8 @@ impl eframe::App for CrosshairApp {
             && (self.geometry_preview_target.is_some()
                 || self.geometry_preset_preview_target.is_some())
         {
-            self.geometry_preview_target = None;
-            self.geometry_preview_sent = None;
-            self.geometry_preset_preview_target = None;
-            let _ = self
-                .overlay_tx
-                .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
-            let _ = self
-                .overlay_tx
-                .send(crate::overlay::OverlayCommand::PreviewGeometryPreset(None));
+            self.clear_geometry_spec_preview();
+            self.clear_geometry_preset_preview();
         }
 
         let keep_macro_geometry_preview =
@@ -11071,12 +11165,8 @@ impl eframe::App for CrosshairApp {
             self.draw_geometry_step_preview_sent = None;
             self.show_geometry_preset_preview_target = None;
             self.show_geometry_preset_preview_sent = None;
-            let _ = self
-                .overlay_tx
-                .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
-            let _ = self
-                .overlay_tx
-                .send(crate::overlay::OverlayCommand::PreviewGeometryPreset(None));
+            self.clear_geometry_spec_preview();
+            self.clear_geometry_preset_preview();
         } else if let Some((group_id, preset_id, step_index, is_hold_stop)) =
             self.draw_geometry_step_preview_target
         {
@@ -11108,11 +11198,7 @@ impl eframe::App for CrosshairApp {
 
             if self.draw_geometry_step_preview_sent != preview_spec {
                 self.draw_geometry_step_preview_sent = preview_spec.clone();
-                let _ = self
-                    .overlay_tx
-                    .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(
-                        preview_spec,
-                    ));
+                self.sync_geometry_spec_preview(preview_spec);
             }
         }
         if keep_macro_geometry_preview {
@@ -11145,25 +11231,9 @@ impl eframe::App for CrosshairApp {
 
                 if self.show_geometry_preset_preview_sent != Some(preview_preset_id) {
                     self.show_geometry_preset_preview_sent = Some(preview_preset_id);
-                    let _ = self.overlay_tx.send(
-                        crate::overlay::OverlayCommand::PreviewGeometryPreset(preview_preset_id),
-                    );
+                    self.sync_geometry_preset_preview(preview_preset_id);
                 }
             }
-        }
-
-        if viewport_focused
-            && self.state.show_window
-            && Self::active_panel_needs_open_windows(self.state.active_panel)
-        {
-            self.ensure_open_windows_ready(false);
-        }
-
-        if viewport_focused
-            && self.state.show_window
-            && Self::active_panel_needs_audio_sense_devices(self.state.active_panel)
-        {
-            self.ensure_audio_sense_devices_ready(false);
         }
 
         if !self.state.show_window {

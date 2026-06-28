@@ -37,6 +37,20 @@ impl CrosshairApp {
         !response_dragged && !pointer_any_down && has_dragged
     }
 
+    fn send_geometry_spec_preview_command(
+        overlay_tx: &crossbeam_channel::Sender<crate::overlay::OverlayCommand>,
+        spec: Option<crate::model::GeometrySpec>,
+    ) {
+        let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(spec));
+    }
+
+    fn send_geometry_preset_preview_command(
+        overlay_tx: &crossbeam_channel::Sender<crate::overlay::OverlayCommand>,
+        preset_id: Option<u32>,
+    ) {
+        let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometryPreset(preset_id));
+    }
+
     fn ensure_draw_geometry_color_literals(spec: &mut crate::model::GeometrySpec) {
         if spec.stroke_color_expr.trim().is_empty() {
             if spec.stroke_color.a == 255 {
@@ -2598,9 +2612,7 @@ impl CrosshairApp {
 
     pub(crate) fn render_macro_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
-        if self.open_windows.is_empty() {
-            self.ensure_open_windows_ready(false);
-        }
+        self.prime_open_windows_if_empty();
         let should_prime_audio_sense_devices = self.audio_sense_devices.is_empty()
             && self.state.macro_groups.iter().any(|group| {
                 group.presets.iter().any(|preset| {
@@ -2612,13 +2624,12 @@ impl CrosshairApp {
                 })
             });
         if should_prime_audio_sense_devices {
-            self.ensure_audio_sense_devices_ready(false);
+            self.prime_audio_sense_devices_if_empty();
         }
         let window_presets = self.state.window_presets.clone();
         let window_layouts = self.state.window_layouts.clone();
         if self.sanitize_legacy_macro_ocr_target_texts() {
-            self.sync_macro_presets();
-            self.persist();
+            self.persist_macro_presets();
         }
         let timer_names: Vec<String> = self
             .state
@@ -2951,14 +2962,27 @@ impl CrosshairApp {
                     self.import_macro_group_from_clipboard(None, None);
                 }
             }
+            let clipboard_feedback_active =
+                Self::is_copy_feedback_active(self.macro_group_clipboard_feedback_until);
+            let paste_feedback_active = clipboard_feedback_active
+                && self.macro_group_clipboard_feedback
+                    == Some(super::MacroGroupClipboardFeedback::Paste);
             let paste_enabled = !self.macro_group_clipboard.is_empty();
             let paste_fill = if paste_enabled {
-                Color32::from_rgb(84, 90, 102)
+                if paste_feedback_active {
+                    Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                } else {
+                    Color32::from_rgb(84, 90, 102)
+                }
             } else {
                 ui.visuals().faint_bg_color
             };
             let paste_stroke = if paste_enabled {
-                ui.visuals().widgets.active.bg_stroke.color
+                if paste_feedback_active {
+                    Color32::from_rgb(126, 224, 182)
+                } else {
+                    ui.visuals().widgets.active.bg_stroke.color
+                }
             } else {
                 ui.visuals().widgets.noninteractive.bg_stroke.color
             };
@@ -2973,21 +2997,40 @@ impl CrosshairApp {
             })
             .on_hover_text(Self::tr_lang(
                 language,
-                "Paste macro groups",
-                "Paste macro groups",
+                if paste_feedback_active {
+                    "Pasted"
+                } else {
+                    "Paste macro groups"
+                },
+                if paste_feedback_active {
+                    "Pasted"
+                } else {
+                    "Paste macro groups"
+                },
             ))
             .clicked()
             {
                 self.paste_macro_groups_into_folder(paste_target_folder);
             }
+            let copy_feedback_active = clipboard_feedback_active
+                && self.macro_group_clipboard_feedback
+                    == Some(super::MacroGroupClipboardFeedback::Copy);
             let copy_enabled = !self.selected_macro_groups.is_empty();
             let copy_fill = if copy_enabled {
-                Color32::from_rgb(84, 90, 102)
+                if copy_feedback_active {
+                    Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                } else {
+                    Color32::from_rgb(84, 90, 102)
+                }
             } else {
                 ui.visuals().faint_bg_color
             };
             let copy_stroke = if copy_enabled {
-                ui.visuals().widgets.active.bg_stroke.color
+                if copy_feedback_active {
+                    Color32::from_rgb(126, 224, 182)
+                } else {
+                    ui.visuals().widgets.active.bg_stroke.color
+                }
             } else {
                 ui.visuals().widgets.noninteractive.bg_stroke.color
             };
@@ -3002,21 +3045,40 @@ impl CrosshairApp {
             })
             .on_hover_text(Self::tr_lang(
                 language,
-                "Copy selected macro groups",
-                "Copy selected macro groups",
+                if copy_feedback_active {
+                    "Copied"
+                } else {
+                    "Copy selected macro groups"
+                },
+                if copy_feedback_active {
+                    "Copied"
+                } else {
+                    "Copy selected macro groups"
+                },
             ))
             .clicked()
             {
                 self.copy_selected_macro_groups();
             }
+            let cut_feedback_active = clipboard_feedback_active
+                && self.macro_group_clipboard_feedback
+                    == Some(super::MacroGroupClipboardFeedback::Cut);
             let cut_enabled = !self.selected_macro_groups.is_empty();
             let cut_fill = if cut_enabled {
-                Color32::from_rgb(84, 90, 102)
+                if cut_feedback_active {
+                    Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                } else {
+                    Color32::from_rgb(84, 90, 102)
+                }
             } else {
                 ui.visuals().faint_bg_color
             };
             let cut_stroke = if cut_enabled {
-                ui.visuals().widgets.active.bg_stroke.color
+                if cut_feedback_active {
+                    Color32::from_rgb(126, 224, 182)
+                } else {
+                    ui.visuals().widgets.active.bg_stroke.color
+                }
             } else {
                 ui.visuals().widgets.noninteractive.bg_stroke.color
             };
@@ -3031,8 +3093,16 @@ impl CrosshairApp {
             })
             .on_hover_text(Self::tr_lang(
                 language,
-                "Cut selected macro groups",
-                "Cut selected macro groups",
+                if cut_feedback_active {
+                    "Cut"
+                } else {
+                    "Cut selected macro groups"
+                },
+                if cut_feedback_active {
+                    "Cut"
+                } else {
+                    "Cut selected macro groups"
+                },
             ))
             .clicked()
             {
@@ -3795,6 +3865,7 @@ impl CrosshairApp {
         let mut geom_presets_changed = false;
         let mut audio_sense_presets_changed = false;
         let mut macro_presets_persist_requested = false;
+        let mut clear_draw_geometry_step_preview = false;
         let mut add_preset_to_group = None;
         let mut paste_preset_to_group: Option<u32> = None;
         ui.separator();
@@ -4536,7 +4607,7 @@ impl CrosshairApp {
                                             if let Some((preview_group_id, _, _, _)) = self.draw_geometry_step_preview_target {
                                                 if preview_group_id == group.id {
                                                     self.draw_geometry_step_preview_target = None;
-                                                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+                                                    clear_draw_geometry_step_preview = true;
                                                 }
                                             }
                                         }
@@ -4696,7 +4767,7 @@ impl CrosshairApp {
                                              &mut group.target_window_title,
                                              &mut group.extra_target_window_titles,
                                              &mut group.match_duplicate_window_titles,
-                                             &self.open_windows,
+                                             &self.open_window_infos,
                                          );
                                     }
                                 },
@@ -4893,7 +4964,7 @@ impl CrosshairApp {
                                                             &mut preset.event_target_window_title,
                                                             &mut preset.event_extra_target_window_titles,
                                                             &mut preset.event_match_duplicate_window_titles,
-                                                            &self.open_windows,
+                                                            &self.open_window_infos,
                                                         ) {
                                                             live_sync = true;
                                                         }
@@ -5364,7 +5435,7 @@ impl CrosshairApp {
                                                     if let Some((_, preview_preset_id, _, _)) = self.draw_geometry_step_preview_target {
                                                         if preview_preset_id == preset.id {
                                                             self.draw_geometry_step_preview_target = None;
-                                                            let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+                                                            clear_draw_geometry_step_preview = true;
                                                         }
                                                     }
                                                 }
@@ -5824,7 +5895,7 @@ impl CrosshairApp {
                                                         &Self::tr_lang(language, "Select window", "Select window"),
                                                         &mut selected_window,
                                                         &mut duplicate_mode,
-                                                        &self.open_windows,
+                                                        &self.open_window_infos,
                                                         160.0,
                                                         false,
                                                     ) {
@@ -8004,7 +8075,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         &Self::tr_lang(language, "Select window", "Select window"),
                                                         &mut selected_window,
                                                         &mut duplicate_mode,
-                                                        &self.open_windows,
+                                                        &self.open_window_infos,
                                                         160.0,
                                                         false,
                                                     ) {
@@ -11027,7 +11098,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         &Self::tr_lang(language, "Select window", "Select window"),
                                                         &mut selected_window,
                                                         &mut duplicate_mode,
-                                                        &self.open_windows,
+                                                        &self.open_window_infos,
                                                         160.0,
                                                         false,
                                                     ) {
@@ -14124,10 +14195,9 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                         self.open_command_ai_dialog_for_preset(preset_id);
                     }
                     if let Some((gid, pid, sidx)) = pending_ocr_step_capture {
-                        self.begin_image_search_capture(
+                        self.begin_region_capture(
                             ui.ctx(),
                             crate::ui::VisionCaptureTarget::OcrStepRegion { group_id: gid, preset_id: pid, step_index: sidx },
-                            crate::ui::VisionCaptureMode::SearchRegion,
                         );
                     }
                     if let Some(language_code) = pending_ocr_language_download.take() {
@@ -14143,7 +14213,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                         self.cancel_mouse_path_draw_capture(ui.ctx());
                     }
                     if let Some(path_preset_id) = preview_mouse_path_step_request.take() {
-                        self.mouse_path_step_preview_preset_id = path_preset_id;
                         let preview_events = path_preset_id.and_then(|active_id| {
                             self.state
                                 .mouse_path_presets
@@ -14151,14 +14220,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                 .find(|preset| preset.id == active_id)
                                 .map(|preset| preset.events.clone())
                         });
-                        let _ = self
-                            .overlay_tx
-                            .send(OverlayCommand::PreviewMousePath(
-                                path_preset_id.map(|active_id| {
-                                    (active_id, preview_events.unwrap_or_default(), None)
-                                }),
-                            ));
-                        crate::overlay::wake_command_queue();
+                        self.sync_mouse_path_preview(path_preset_id, preview_events, None);
                     }
                     if let Some((group_id, preset_id, step_index, selected_id)) =
                         add_mouse_path_preset_request.take()
@@ -14254,11 +14316,9 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                             self.persist_mouse_path_presets();
                         }
                         self.persist_macro_presets();
-                        self.mouse_path_step_preview_preset_id = None;
                         self.mouse_path_draw_capture_preset_id = None;
                         self.active_mouse_record_preset_id = None;
-                        let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
-                        crate::overlay::wake_command_queue();
+                        self.clear_mouse_path_preview();
                         self.begin_mouse_path_draw_capture(ui.ctx(), path_preset_id);
                     }
                     if should_scroll_to_group {
@@ -14462,13 +14522,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
         if live_sync || macro_presets_persist_requested {
             self.persist_macro_presets();
         }
+        if clear_draw_geometry_step_preview {
+            self.clear_geometry_spec_preview();
+        }
         if geom_presets_changed {
-            self.sync_geometry_presets();
-            self.persist();
+            self.persist_geometry_presets();
         }
         if audio_sense_presets_changed {
-            self.sync_audio_sense_presets();
-            self.persist();
+            self.persist_audio_sense_presets();
         }
         if let Some(folder_id) = release_folder_id {
             self.state
@@ -16893,8 +16954,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                             == Some((group_id, macro_preset_id, step_index, is_hold_stop));
                         if preview_active {
                             *preview_target = None;
-                            let _ = overlay_tx
-                                .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+                            Self::send_geometry_spec_preview_command(overlay_tx, None);
                         }
                         crate::overlay::stop_geometry(macro_preset_id, step_index);
                     }
@@ -16914,10 +16974,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                     MacroAction::DrawGeometry => {
                         *preview_target =
                             Some((group_id, macro_preset_id, step_index, is_hold_stop));
-                        let _ =
-                            overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(
-                                Some(step.geometry_spec.clone()),
-                            ));
+                        Self::send_geometry_spec_preview_command(
+                            overlay_tx,
+                            Some(step.geometry_spec.clone()),
+                        );
                     }
                     MacroAction::EnableCrosshairProfile => {
                         let _ = crate::overlay::enable_crosshair_profile(&step.key);
@@ -17062,7 +17122,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                 let current_target = (group_id, macro_preset_id, step_index, is_hold_stop);
                                 if *draw_geometry_step_preview_target == Some(current_target) {
                                     *draw_geometry_step_preview_target = None;
-                                    let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
+                                    Self::send_geometry_spec_preview_command(overlay_tx, None);
                                 }
                             }
                         }
@@ -17104,9 +17164,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                         if geometry_preview_dirty
                             && *draw_geometry_step_preview_target == Some(current_preview_target)
                         {
-                            let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometrySpec(
+                            Self::send_geometry_spec_preview_command(
+                                overlay_tx,
                                 Some(step.geometry_spec.clone()),
-                            ));
+                            );
                         }
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
@@ -17175,15 +17236,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                         if preview_response.clicked() {
                             if preview_active {
                                 *show_geometry_preset_preview_target = None;
-                                let _ = overlay_tx.send(
-                                    crate::overlay::OverlayCommand::PreviewGeometryPreset(None),
-                                );
+                                Self::send_geometry_preset_preview_command(overlay_tx, None);
                             } else if preview_preset_id.is_some() {
                                 *show_geometry_preset_preview_target = Some(current_preview_target);
-                                let _ = overlay_tx.send(
-                                    crate::overlay::OverlayCommand::PreviewGeometryPreset(
-                                        preview_preset_id,
-                                    ),
+                                Self::send_geometry_preset_preview_command(
+                                    overlay_tx,
+                                    preview_preset_id,
                                 );
                             }
                         }

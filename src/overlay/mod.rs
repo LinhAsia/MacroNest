@@ -247,6 +247,22 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static HOOKS_THREAD: Lazy<Mutex<Option<(u32, thread::JoinHandle<()>)>>> =
         Lazy::new(|| Mutex::new(None));
+    const OPEN_WINDOW_SNAPSHOT_TTL: Duration = Duration::from_millis(400);
+
+    #[derive(Clone)]
+    struct RuntimeWindowEntry {
+        hwnd: isize,
+        title: String,
+        selector: String,
+    }
+
+    struct RuntimeWindowSnapshot {
+        captured_at: Instant,
+        entries: Vec<RuntimeWindowEntry>,
+    }
+
+    static OPEN_WINDOW_SNAPSHOT: Lazy<Mutex<Option<RuntimeWindowSnapshot>>> =
+        Lazy::new(|| Mutex::new(None));
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -1657,7 +1673,7 @@ mod windows_overlay {
         UpdateGroqSettings(crate::model::GroqSettings),
         PreviewHudPreset(Vec<HudPreset>),
         UpdateMacroPresets(Vec<MacroGroup>),
-        SetActiveMacroFolderScope(Option<u32>),
+        SetActiveMacroFolderScope(MacroFolderScope),
         UpdateAudioSettings(AudioSettings),
         SetMacrosMasterEnabled(bool),
         SetWindowsKeyLocked(bool),
@@ -2004,7 +2020,7 @@ mod windows_overlay {
             duration_ms: Option<u64>,
         },
         OpenWindowsLoaded {
-            windows: Vec<String>,
+            windows: Vec<crate::window_list::WindowInfo>,
             status: Option<String>,
         },
         AudioSenseDevicesLoaded {
@@ -2170,7 +2186,7 @@ mod windows_overlay {
         command_presets: Vec<CommandPreset>,
         groq_settings: crate::model::GroqSettings,
         macro_groups: Vec<MacroGroup>,
-        active_macro_folder_scope: Option<u32>,
+        active_macro_folder_scope: MacroFolderScope,
         macros_master_enabled: bool,
         windows_key_locked: bool,
         macros_master_hotkey: Option<HotkeyBinding>,
@@ -2272,7 +2288,7 @@ mod windows_overlay {
                 command_presets: Vec::new(),
                 groq_settings: crate::model::GroqSettings::default(),
                 macro_groups: Vec::new(),
-                active_macro_folder_scope: None,
+                active_macro_folder_scope: MacroFolderScope::Root,
                 macros_master_enabled: true,
                 windows_key_locked: false,
                 macros_master_hotkey: None,
@@ -2344,6 +2360,12 @@ mod windows_overlay {
         Release {
             identity: String,
         },
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum MacroFolderScope {
+        Root,
+        Folder(u32),
     }
 
     #[derive(Clone)]
@@ -3753,6 +3775,7 @@ mod windows_overlay {
 
             WMAPP_WINDOW_FOCUS_CHANGED => {
                 let foreground = GetForegroundWindow();
+                invalidate_runtime_open_window_snapshot();
                 if let Some(runtime) = runtime_mut(hwnd) {
                     update_native_focus_highlight(runtime, foreground);
                     let ui_foreground = is_app_ui_currently_foreground();
@@ -3766,6 +3789,7 @@ mod windows_overlay {
 
             WMAPP_WINDOW_LOCATION_CHANGED => {
                 let target_hwnd = HWND(wparam.0 as *mut c_void);
+                invalidate_runtime_open_window_snapshot();
                 if let Some(runtime) = runtime_mut(hwnd) {
                     let active_hwnd = ACTIVE_HIGHLIGHT_HWND.load(Ordering::Relaxed);
                     let pin_source_hwnd = ACTIVE_PIN_SOURCE_HWND.load(Ordering::Relaxed);
@@ -5402,8 +5426,11 @@ mod windows_overlay {
         active.trigger.key.eq_ignore_ascii_case(&binding.key)
     }
 
-    fn macro_group_scope_matches(group: &MacroGroup, active_folder_scope: Option<u32>) -> bool {
-        active_folder_scope.is_none() || group.folder_id == active_folder_scope
+    fn macro_group_scope_matches(group: &MacroGroup, active_folder_scope: MacroFolderScope) -> bool {
+        match active_folder_scope {
+            MacroFolderScope::Root => group.folder_id.is_none(),
+            MacroFolderScope::Folder(folder_id) => group.folder_id == Some(folder_id),
+        }
     }
 
     fn binding_matches_any_hold_macro(binding: &HotkeyBinding) -> bool {
@@ -8154,24 +8181,18 @@ mod windows_overlay {
                     }
                 }
 
-                OverlayCommand::SetActiveMacroFolderScope(folder_id) => {
+                OverlayCommand::SetActiveMacroFolderScope(folder_scope) => {
                     let preset_ids_to_stop = {
                         let mut hook_state = HOOK_STATE.lock();
-                        hook_state.active_macro_folder_scope = folder_id;
-                        if folder_id.is_some() {
-                            macro_presets_outside_scope(
-                                &hook_state.macro_groups,
-                                hook_state.active_macro_folder_scope,
-                            )
-                        } else {
-                            Vec::new()
-                        }
+                        hook_state.active_macro_folder_scope = folder_scope;
+                        macro_presets_outside_scope(
+                            &hook_state.macro_groups,
+                            hook_state.active_macro_folder_scope,
+                        )
                     };
-                    if folder_id.is_some() {
-                        for preset_id in preset_ids_to_stop {
-                            STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
-                            deactivate_hold_macro(preset_id);
-                        }
+                    for preset_id in preset_ids_to_stop {
+                        STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
+                        deactivate_hold_macro(preset_id);
                     }
                 }
 
@@ -18006,7 +18027,10 @@ mod windows_overlay {
             .collect()
     }
 
-    pub(super) fn macro_presets_outside_scope(groups: &[MacroGroup], active_scope: Option<u32>) -> Vec<u32> {
+    pub(super) fn macro_presets_outside_scope(
+        groups: &[MacroGroup],
+        active_scope: MacroFolderScope,
+    ) -> Vec<u32> {
         groups
             .iter()
             .filter(|group| !macro_group_scope_matches(group, active_scope))
@@ -18347,15 +18371,11 @@ mod windows_overlay {
         }
 
         if preset.target_window_title.is_some() || !preset.extra_target_window_titles.is_empty() {
-            let foreground = unsafe { GetForegroundWindow() };
-            let matches = unsafe {
-                window_matches_any_selector(
-                    foreground,
-                    preset.target_window_title.as_deref(),
-                    &preset.extra_target_window_titles,
-                    preset.match_duplicate_window_titles,
-                )
-            };
+            let matches = foreground_matches_any_window_target(
+                preset.target_window_title.as_deref(),
+                &preset.extra_target_window_titles,
+                preset.match_duplicate_window_titles,
+            );
             if !matches {
                 return Ok(());
             }
@@ -18400,15 +18420,11 @@ mod windows_overlay {
 
             if preset.target_window_title.is_some() || !preset.extra_target_window_titles.is_empty()
             {
-                let foreground = unsafe { GetForegroundWindow() };
-                let matches = unsafe {
-                    window_matches_any_selector(
-                        foreground,
-                        preset.target_window_title.as_deref(),
-                        &preset.extra_target_window_titles,
-                        preset.match_duplicate_window_titles,
-                    )
-                };
+                let matches = foreground_matches_any_window_target(
+                    preset.target_window_title.as_deref(),
+                    &preset.extra_target_window_titles,
+                    preset.match_duplicate_window_titles,
+                );
                 if !matches {
                     return Ok(());
                 }
@@ -25001,6 +25017,7 @@ mod windows_overlay {
         let current_hwnd = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
         if hwnd.0 as isize != current_hwnd {
             FOREGROUND_WINDOW_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
+            invalidate_runtime_open_window_snapshot();
             let title = if hwnd.0.is_null() {
                 None
             } else {
@@ -25430,6 +25447,69 @@ mod windows_overlay {
         }
     }
 
+    fn title_matches_window_target(
+        title: &str,
+        hwnd: HWND,
+        target: &str,
+        match_duplicate_window_titles: bool,
+    ) -> bool {
+        if title == target || format!("{title} (0x{:X})", hwnd.0 as usize) == target {
+            return true;
+        }
+
+        let base_title = selector_base_title(target);
+        if base_title != target && title == base_title {
+            return true;
+        }
+
+        if match_duplicate_window_titles && title == selector_base_title(target) {
+            return true;
+        }
+
+        matches_browser_suffix(target, title)
+    }
+
+    fn title_matches_any_window_target(
+        title: &str,
+        hwnd: HWND,
+        target_title: Option<&str>,
+        extra_target_titles: &[String],
+        match_duplicate_window_titles: bool,
+    ) -> bool {
+        if let Some(target) = target_title
+            && title_matches_window_target(title, hwnd, target, match_duplicate_window_titles)
+        {
+            return true;
+        }
+
+        extra_target_titles.iter().any(|target| {
+            title_matches_window_target(title, hwnd, target, match_duplicate_window_titles)
+        })
+    }
+
+    fn foreground_matches_any_window_target(
+        target_title: Option<&str>,
+        extra_target_titles: &[String],
+        match_duplicate_window_titles: bool,
+    ) -> bool {
+        let foreground =
+            HWND(FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void);
+        if foreground.0.is_null() {
+            return false;
+        }
+        let title_guard = FOREGROUND_WINDOW_TITLE.lock();
+        let Some(ref title) = *title_guard else {
+            return false;
+        };
+        title_matches_any_window_target(
+            title,
+            foreground,
+            target_title,
+            extra_target_titles,
+            match_duplicate_window_titles,
+        )
+    }
+
     fn macro_target_matches(group: &MacroGroup) -> bool {
         if group.target_window_title.is_none() && group.extra_target_window_titles.is_empty() {
             return true;
@@ -25445,50 +25525,13 @@ mod windows_overlay {
         let Some(ref title) = *title_guard else {
             return false;
         };
-        if let Some(target) = group.target_window_title.as_deref() {
-            if title == target || format!("{title} (0x{:X})", foreground.0 as usize) == target {
-                return true;
-            }
-
-            let base_title = selector_base_title(target);
-            if base_title != target && title == base_title {
-                return true;
-            }
-
-            if group.match_duplicate_window_titles && title == selector_base_title(target) {
-                return true;
-            }
-
-            if matches_browser_suffix(target, title) {
-                return true;
-            }
-        }
-
-        group.extra_target_window_titles.iter().any(|target| {
-            let target_str = target.as_str();
-            if title.as_str() == target_str
-                || format!("{title} (0x{:X})", foreground.0 as usize) == target_str
-            {
-                return true;
-            }
-
-            let base_title = selector_base_title(target_str);
-            if base_title != target_str && title.as_str() == base_title {
-                return true;
-            }
-
-            if group.match_duplicate_window_titles
-                && title.as_str() == selector_base_title(target_str)
-            {
-                return true;
-            }
-
-            if matches_browser_suffix(target_str, title) {
-                return true;
-            }
-
-            false
-        })
+        title_matches_any_window_target(
+            title,
+            foreground,
+            group.target_window_title.as_deref(),
+            &group.extra_target_window_titles,
+            group.match_duplicate_window_titles,
+        )
     }
 
     fn activate_geometry_preset_owner(
@@ -25874,48 +25917,13 @@ mod windows_overlay {
         let Some(ref title) = *title_guard else {
             return false;
         };
-        if let Some(target) = target_title {
-            if title == target || format!("{title} (0x{:X})", foreground.0 as usize) == target {
-                return true;
-            }
-
-            let base_title = selector_base_title(target);
-            if base_title != target && title == base_title {
-                return true;
-            }
-
-            if match_duplicate_window_titles && title == selector_base_title(target) {
-                return true;
-            }
-
-            if matches_browser_suffix(target, title) {
-                return true;
-            }
-        }
-
-        extra_target_titles.iter().any(|target| {
-            let target_str = target.as_str();
-            if title.as_str() == target_str
-                || format!("{title} (0x{:X})", foreground.0 as usize) == target_str
-            {
-                return true;
-            }
-
-            let base_title = selector_base_title(target_str);
-            if base_title != target_str && title.as_str() == base_title {
-                return true;
-            }
-
-            if match_duplicate_window_titles && title.as_str() == selector_base_title(target_str) {
-                return true;
-            }
-
-            if matches_browser_suffix(target_str, title) {
-                return true;
-            }
-
-            false
-        })
+        title_matches_any_window_target(
+            title,
+            foreground,
+            target_title,
+            extra_target_titles,
+            match_duplicate_window_titles,
+        )
     }
 
     fn is_focus_trigger_candidate_window(hwnd: HWND) -> bool {
@@ -25949,187 +25957,121 @@ mod windows_overlay {
         pub static MACRO_TARGETED_WINDOWS: std::cell::RefCell<HashSet<isize>> = std::cell::RefCell::new(HashSet::new());
     }
 
+    unsafe fn collect_runtime_open_windows_uncached() -> Vec<RuntimeWindowEntry> {
+        let mut entries = Vec::new();
+
+        unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+            let entries = &mut *(lparam.0 as *mut Vec<RuntimeWindowEntry>);
+            if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() {
+                return true.into();
+            }
+            let Some(title) = window_title(hwnd) else {
+                return true.into();
+            };
+            if title.trim().is_empty() {
+                return true.into();
+            }
+            entries.push(RuntimeWindowEntry {
+                hwnd: hwnd.0 as isize,
+                selector: format!("{title} (0x{:X})", hwnd.0 as usize),
+                title,
+            });
+            true.into()
+        }
+
+        let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
+            Some(enum_proc),
+            LPARAM((&mut entries) as *mut _ as isize),
+        );
+        entries
+    }
+
+    unsafe fn runtime_open_windows_snapshot() -> Vec<RuntimeWindowEntry> {
+        let mut snapshot = OPEN_WINDOW_SNAPSHOT.lock();
+        let snapshot_stale = snapshot
+            .as_ref()
+            .is_none_or(|cached| cached.captured_at.elapsed() >= OPEN_WINDOW_SNAPSHOT_TTL);
+        if snapshot_stale {
+            *snapshot = Some(RuntimeWindowSnapshot {
+                captured_at: Instant::now(),
+                entries: collect_runtime_open_windows_uncached(),
+            });
+        }
+        snapshot
+            .as_ref()
+            .map(|cached| cached.entries.clone())
+            .unwrap_or_default()
+    }
+
+    fn invalidate_runtime_open_window_snapshot() {
+        *OPEN_WINDOW_SNAPSHOT.lock() = None;
+    }
+
+    unsafe fn collect_selector_match_candidates(
+        target: &str,
+        match_duplicate_window_titles: bool,
+        exclude: Option<HWND>,
+        targeted: Option<&HashSet<isize>>,
+    ) -> Vec<HWND> {
+        let clean_target = strip_rule_suffix(target);
+        runtime_open_windows_snapshot()
+            .into_iter()
+            .filter(|entry| exclude.is_none_or(|excluded| excluded.0 as isize != entry.hwnd))
+            .filter(|entry| {
+                targeted.is_none_or(|targeted_set| !targeted_set.contains(&entry.hwnd))
+            })
+            .filter(|entry| {
+                let hwnd = HWND(entry.hwnd as *mut std::ffi::c_void);
+                window_matches_selector_title(
+                    &entry.title,
+                    hwnd,
+                    clean_target,
+                    match_duplicate_window_titles,
+                )
+            })
+            .map(|entry| HWND(entry.hwnd as *mut std::ffi::c_void))
+            .collect()
+    }
+
     unsafe fn resolve_duplicate_by_rule(
         base_title: &str,
         match_duplicate_window_titles: bool,
         exclude: Option<HWND>,
         targeted: Option<&HashSet<isize>>,
-        rule: &str,
+        rule: WindowMatchRule,
     ) -> Option<HWND> {
-        let mut candidates = Vec::new();
-        struct EnumPayload<'a> {
-            base_title: &'a str,
-            match_duplicate_window_titles: bool,
-            exclude: Option<HWND>,
-            targeted: Option<&'a HashSet<isize>>,
-            candidates: &'a mut Vec<HWND>,
-        }
-
-        unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
-            let payload = &mut *(lparam.0 as *mut EnumPayload);
-            if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() {
-                return true.into();
-            }
-            if payload.exclude.is_some_and(|ex| ex == hwnd) {
-                return true.into();
-            }
-            if let Some(targeted_set) = payload.targeted {
-                if targeted_set.contains(&(hwnd.0 as isize)) {
-                    return true.into();
-                }
-            }
-
-            if window_matches_selector_with_duplicate_titles(
-                hwnd,
-                payload.base_title,
-                payload.match_duplicate_window_titles,
-            ) {
-                payload.candidates.push(hwnd);
-            }
-            true.into()
-        }
-
-        {
-            let mut payload = EnumPayload {
-                base_title,
-                match_duplicate_window_titles,
-                exclude,
-                targeted,
-                candidates: &mut candidates,
-            };
-
-            let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
-                Some(enum_proc),
-                LPARAM((&mut payload) as *mut _ as isize),
-            );
-        }
-
+        let candidates = collect_selector_match_candidates(
+            base_title,
+            match_duplicate_window_titles,
+            exclude,
+            targeted,
+        );
         if candidates.is_empty() {
             return None;
         }
 
-        let mut best_hwnd = None;
-        let mut best_val = match rule {
-            "Lowest" | "Rightmost" => i32::MIN,
-            "Highest" | "Leftmost" => i32::MAX,
-            _ => 0,
-        };
-
-        for hwnd in &candidates {
-            let mut rect = windows::Win32::Foundation::RECT::default();
-            if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut rect).is_ok() {
-                match rule {
-                    "Lowest" => {
-                        let y = rect.top;
-                        if y > best_val {
-                            best_val = y;
-                            best_hwnd = Some(*hwnd);
-                        }
-                    }
-                    "Highest" => {
-                        let y = rect.top;
-                        if y < best_val {
-                            best_val = y;
-                            best_hwnd = Some(*hwnd);
-                        }
-                    }
-                    "Leftmost" => {
-                        let x = rect.left;
-                        if x < best_val {
-                            best_val = x;
-                            best_hwnd = Some(*hwnd);
-                        }
-                    }
-                    "Rightmost" => {
-                        let x = rect.left;
-                        if x > best_val {
-                            best_val = x;
-                            best_hwnd = Some(*hwnd);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        best_hwnd.or_else(|| candidates.first().cloned())
+        select_window_by_match_rule(&candidates, rule)
     }
 
-    unsafe fn find_window_by_selector_excluding_targeted(
+    unsafe fn find_window_by_selector_cached(
         title: &str,
         match_duplicate_window_titles: bool,
         exclude: Option<HWND>,
-        targeted: &HashSet<isize>,
+        targeted: Option<&HashSet<isize>>,
     ) -> Option<HWND> {
-        let (base_title, rule) = if title.ends_with(" [Lowest]") {
-            (title.strip_suffix(" [Lowest]").unwrap(), Some("Lowest"))
-        } else if title.ends_with(" [Highest]") {
-            (title.strip_suffix(" [Highest]").unwrap(), Some("Highest"))
-        } else if title.ends_with(" [Leftmost]") {
-            (title.strip_suffix(" [Leftmost]").unwrap(), Some("Leftmost"))
-        } else if title.ends_with(" [Rightmost]") {
-            (
-                title.strip_suffix(" [Rightmost]").unwrap(),
-                Some("Rightmost"),
-            )
-        } else {
-            (title, None)
-        };
-
+        let (base_title, rule) = parse_window_match_rule(title);
         if let Some(rule) = rule {
             return resolve_duplicate_by_rule(
                 base_title,
                 match_duplicate_window_titles,
                 exclude,
-                Some(targeted),
+                targeted,
                 rule,
             );
         }
-
-        let mut found = None;
-        let mut payload = (
-            title,
-            match_duplicate_window_titles,
-            exclude,
-            targeted,
-            &mut found,
-        );
-        let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
-            Some(find_window_by_selector_excluding_targeted_proc),
-            LPARAM((&mut payload) as *mut _ as isize),
-        );
-        found
-    }
-
-    unsafe extern "system" fn find_window_by_selector_excluding_targeted_proc(
-        hwnd: HWND,
-        lparam: LPARAM,
-    ) -> windows::core::BOOL {
-        let (target, match_duplicate_window_titles, exclude, targeted, found) =
-            &mut *(lparam.0 as *mut (&str, bool, Option<HWND>, &HashSet<isize>, &mut Option<HWND>));
-        let clean_target = strip_rule_suffix(*target);
-        if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() {
-            return true.into();
-        }
-
-        if exclude.is_some_and(|excluded| excluded == hwnd) {
-            return true.into();
-        }
-
-        if targeted.contains(&(hwnd.0 as isize)) {
-            return true.into();
-        }
-
-        if window_matches_selector_with_duplicate_titles(
-            hwnd,
-            clean_target,
-            *match_duplicate_window_titles,
-        ) {
-            **found = Some(hwnd);
-            return false.into();
-        }
-
-        true.into()
+        collect_selector_match_candidates(title, match_duplicate_window_titles, exclude, targeted)
+            .into_iter()
+            .next()
     }
 
     fn resolve_window_target(
@@ -26150,8 +26092,7 @@ mod windows_overlay {
             if !target_uses_position_rule
                 && !foreground.0.is_null()
                 && !targeted.contains(&(foreground.0 as isize))
-                && window_matches_any_selector(
-                    foreground,
+                && foreground_matches_any_window_target(
                     target_title,
                     extra_target_titles,
                     match_duplicate_window_titles,
@@ -26159,11 +26100,11 @@ mod windows_overlay {
             {
                 if prefer_other_if_foreground_matches {
                     if let Some(target) = target_title
-                        && let Some(hwnd) = find_window_by_selector_excluding_targeted(
+                        && let Some(hwnd) = find_window_by_selector_cached(
                             target,
                             match_duplicate_window_titles,
                             Some(foreground),
-                            &targeted,
+                            Some(&targeted),
                         )
                     {
                         MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
@@ -26171,74 +26112,11 @@ mod windows_overlay {
                     }
 
                     for title in extra_target_titles {
-                        if let Some(hwnd) = find_window_by_selector_excluding_targeted(
+                        if let Some(hwnd) = find_window_by_selector_cached(
                             title,
                             match_duplicate_window_titles,
                             Some(foreground),
-                            &targeted,
-                        ) {
-                            MACRO_TARGETED_WINDOWS
-                                .with(|set| set.borrow_mut().insert(hwnd.0 as isize));
-                            return hwnd;
-                        }
-                    }
-                }
-
-                MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(foreground.0 as isize));
-                return foreground;
-            }
-
-            if let Some(title) = target_title
-                && let Some(hwnd) = find_window_by_selector_excluding_targeted(
-                    title,
-                    match_duplicate_window_titles,
-                    None,
-                    &targeted,
-                )
-            {
-                MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
-                return hwnd;
-            }
-
-            for title in extra_target_titles {
-                if let Some(hwnd) = find_window_by_selector_excluding_targeted(
-                    title,
-                    match_duplicate_window_titles,
-                    None,
-                    &targeted,
-                ) {
-                    MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
-                    return hwnd;
-                }
-            }
-
-            // 2. Fallback: If no untargeted matching window is found, search using the original logic
-            if !target_uses_position_rule
-                && !foreground.0.is_null()
-                && window_matches_any_selector(
-                    foreground,
-                    target_title,
-                    extra_target_titles,
-                    match_duplicate_window_titles,
-                )
-            {
-                if prefer_other_if_foreground_matches {
-                    if let Some(target) = target_title
-                        && let Some(hwnd) = find_window_by_selector_excluding(
-                            target,
-                            match_duplicate_window_titles,
-                            Some(foreground),
-                        )
-                    {
-                        MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
-                        return hwnd;
-                    }
-
-                    for title in extra_target_titles {
-                        if let Some(hwnd) = find_window_by_selector_excluding(
-                            title,
-                            match_duplicate_window_titles,
-                            Some(foreground),
+                            Some(&targeted),
                         ) {
                             MACRO_TARGETED_WINDOWS
                                 .with(|set| set.borrow_mut().insert(hwnd.0 as isize));
@@ -26253,7 +26131,7 @@ mod windows_overlay {
 
             if let Some(title) = target_title
                 && let Some(hwnd) =
-                    find_window_by_selector_excluding(title, match_duplicate_window_titles, None)
+                    find_window_by_selector_cached(title, match_duplicate_window_titles, None, Some(&targeted))
             {
                 MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
                 return hwnd;
@@ -26261,7 +26139,64 @@ mod windows_overlay {
 
             for title in extra_target_titles {
                 if let Some(hwnd) =
-                    find_window_by_selector_excluding(title, match_duplicate_window_titles, None)
+                    find_window_by_selector_cached(title, match_duplicate_window_titles, None, Some(&targeted))
+                {
+                    MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
+                    return hwnd;
+                }
+            }
+
+            // 2. Fallback: If no untargeted matching window is found, search using the original logic
+            if !target_uses_position_rule
+                && !foreground.0.is_null()
+                && foreground_matches_any_window_target(
+                    target_title,
+                    extra_target_titles,
+                    match_duplicate_window_titles,
+                )
+            {
+                if prefer_other_if_foreground_matches {
+                    if let Some(target) = target_title
+                        && let Some(hwnd) = find_window_by_selector_cached(
+                            target,
+                            match_duplicate_window_titles,
+                            Some(foreground),
+                            None,
+                        )
+                    {
+                        MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
+                        return hwnd;
+                    }
+
+                    for title in extra_target_titles {
+                        if let Some(hwnd) = find_window_by_selector_cached(
+                            title,
+                            match_duplicate_window_titles,
+                            Some(foreground),
+                            None,
+                        ) {
+                            MACRO_TARGETED_WINDOWS
+                                .with(|set| set.borrow_mut().insert(hwnd.0 as isize));
+                            return hwnd;
+                        }
+                    }
+                }
+
+                MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(foreground.0 as isize));
+                return foreground;
+            }
+
+            if let Some(title) = target_title
+                && let Some(hwnd) =
+                    find_window_by_selector_cached(title, match_duplicate_window_titles, None, None)
+            {
+                MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
+                return hwnd;
+            }
+
+            for title in extra_target_titles {
+                if let Some(hwnd) =
+                    find_window_by_selector_cached(title, match_duplicate_window_titles, None, None)
                 {
                     MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
                     return hwnd;
@@ -26331,155 +26266,87 @@ mod windows_overlay {
         std::process::exit(0);
     }
 
-    unsafe fn find_window_by_selector_excluding(
-        title: &str,
-        match_duplicate_window_titles: bool,
-        exclude: Option<HWND>,
-    ) -> Option<HWND> {
-        let (base_title, rule) = if title.ends_with(" [Lowest]") {
-            (title.strip_suffix(" [Lowest]").unwrap(), Some("Lowest"))
-        } else if title.ends_with(" [Highest]") {
-            (title.strip_suffix(" [Highest]").unwrap(), Some("Highest"))
-        } else if title.ends_with(" [Leftmost]") {
-            (title.strip_suffix(" [Leftmost]").unwrap(), Some("Leftmost"))
-        } else if title.ends_with(" [Rightmost]") {
-            (
-                title.strip_suffix(" [Rightmost]").unwrap(),
-                Some("Rightmost"),
-            )
-        } else {
-            (title, None)
-        };
-
-        if let Some(rule) = rule {
-            return resolve_duplicate_by_rule(
-                base_title,
-                match_duplicate_window_titles,
-                exclude,
-                None,
-                rule,
-            );
-        }
-
-        let mut found = None;
-        let mut payload = (title, match_duplicate_window_titles, exclude, &mut found);
-        let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
-            Some(find_window_by_selector_excluding_proc),
-            LPARAM((&mut payload) as *mut _ as isize),
-        );
-        found
-    }
-
-    unsafe extern "system" fn find_window_by_selector_excluding_proc(
-        hwnd: HWND,
-        lparam: LPARAM,
-    ) -> windows::core::BOOL {
-        let (target, match_duplicate_window_titles, exclude, found) =
-            &mut *(lparam.0 as *mut (&str, bool, Option<HWND>, &mut Option<HWND>));
-        let clean_target = strip_rule_suffix(*target);
-        if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() {
-            return true.into();
-        }
-
-        if exclude.is_some_and(|excluded| excluded == hwnd) {
-            return true.into();
-        }
-
-        if window_matches_selector_with_duplicate_titles(
-            hwnd,
-            clean_target,
-            *match_duplicate_window_titles,
-        ) {
-            **found = Some(hwnd);
-            return false.into();
-        }
-
-        true.into()
-    }
-
     fn selector_base_title(target: &str) -> &str {
-        if let Some(prefix) = target.strip_suffix(')')
-            && let Some((base, _)) = prefix.rsplit_once(" (0x")
-        {
-            return base;
-        }
-
-        target
+        crate::window_list::selector_base_title(target)
     }
 
-    fn clean_invisible_chars(s: &str) -> String {
-        s.chars()
-            .filter(|&c| c != '\u{200B}' && c != '\u{200C}' && c != '\u{200D}' && c != '\u{FEFF}')
-            .collect()
-    }
-
-    const BROWSER_SUFFIXES: &[&str] = &[
-        " - Microsoft Edge",
-        " - Google Chrome",
-        " - Brave",
-        " - Firefox",
-        " - Opera GX",
-        " - Opera",
-        " - Vivaldi",
-        " - Chromium",
-        " - Tor Browser",
-        " - Arc",
-        " - Visual Studio Code",
-        " - VS Code",
-        " - Discord",
-        " - Slack",
-        " - Spotify",
-    ];
     fn matches_browser_suffix(target: &str, candidate: &str) -> bool {
-        let clean_target = clean_invisible_chars(target);
-        let clean_candidate = clean_invisible_chars(candidate);
-        let target_base = selector_base_title(&clean_target);
-        let candidate_base = selector_base_title(&clean_candidate);
+        crate::window_list::matches_browser_suffix(target, candidate)
+    }
 
-        let is_target_anti = target_base.contains(" - Antigravity IDE - ")
-            || target_base.ends_with(" - Antigravity IDE");
-        let is_cand_anti = candidate_base.contains(" - Antigravity IDE - ")
-            || candidate_base.ends_with(" - Antigravity IDE");
-        if is_target_anti && is_cand_anti {
-            return true;
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum WindowMatchRule {
+        Lowest,
+        Highest,
+        Leftmost,
+        Rightmost,
+    }
+
+    fn parse_window_match_rule(target: &str) -> (&str, Option<WindowMatchRule>) {
+        if let Some(s) = target.strip_suffix(" [Lowest]") {
+            (s, Some(WindowMatchRule::Lowest))
+        } else if let Some(s) = target.strip_suffix(" [Highest]") {
+            (s, Some(WindowMatchRule::Highest))
+        } else if let Some(s) = target.strip_suffix(" [Leftmost]") {
+            (s, Some(WindowMatchRule::Leftmost))
+        } else if let Some(s) = target.strip_suffix(" [Rightmost]") {
+            (s, Some(WindowMatchRule::Rightmost))
+        } else {
+            (target, None)
         }
-
-        for suffix in BROWSER_SUFFIXES {
-            if target_base.ends_with(suffix) && candidate_base.ends_with(suffix) {
-                return true;
-            }
-        }
-
-        false
     }
 
     fn strip_rule_suffix(target: &str) -> &str {
-        if let Some(s) = target.strip_suffix(" [Lowest]") {
-            s
-        } else if let Some(s) = target.strip_suffix(" [Highest]") {
-            s
-        } else if let Some(s) = target.strip_suffix(" [Leftmost]") {
-            s
-        } else if let Some(s) = target.strip_suffix(" [Rightmost]") {
-            s
-        } else {
-            target
-        }
+        parse_window_match_rule(target).0
     }
 
     fn has_position_rule_suffix(target: &str) -> bool {
-        target.ends_with(" [Lowest]")
-            || target.ends_with(" [Highest]")
-            || target.ends_with(" [Leftmost]")
-            || target.ends_with(" [Rightmost]")
+        parse_window_match_rule(target).1.is_some()
     }
 
-    unsafe fn window_matches_selector(hwnd: HWND, target: &str) -> bool {
-        let target = strip_rule_suffix(target);
-        let Some(title) = window_title(hwnd) else {
-            return false;
+    unsafe fn select_window_by_match_rule(
+        candidates: &[HWND],
+        rule: WindowMatchRule,
+    ) -> Option<HWND> {
+        let mut best_hwnd = None;
+        let mut best_val = match rule {
+            WindowMatchRule::Lowest | WindowMatchRule::Rightmost => i32::MIN,
+            WindowMatchRule::Highest | WindowMatchRule::Leftmost => i32::MAX,
         };
-        title == target || format!("{title} (0x{:X})", hwnd.0 as usize) == target
+
+        for hwnd in candidates {
+            let mut rect = windows::Win32::Foundation::RECT::default();
+            if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut rect).is_ok() {
+                let axis = match rule {
+                    WindowMatchRule::Lowest | WindowMatchRule::Highest => rect.top,
+                    WindowMatchRule::Leftmost | WindowMatchRule::Rightmost => rect.left,
+                };
+                let better = match rule {
+                    WindowMatchRule::Lowest | WindowMatchRule::Rightmost => axis > best_val,
+                    WindowMatchRule::Highest | WindowMatchRule::Leftmost => axis < best_val,
+                };
+                if better {
+                    best_val = axis;
+                    best_hwnd = Some(*hwnd);
+                }
+            }
+        }
+
+        best_hwnd.or_else(|| candidates.first().copied())
+    }
+
+    fn window_matches_selector_title(
+        title: &str,
+        hwnd: HWND,
+        target: &str,
+        match_duplicate_window_titles: bool,
+    ) -> bool {
+        title_matches_window_target(
+            title,
+            hwnd,
+            strip_rule_suffix(target),
+            match_duplicate_window_titles,
+        )
     }
 
     unsafe fn window_matches_selector_with_duplicate_titles(
@@ -26487,57 +26354,10 @@ mod windows_overlay {
         target: &str,
         match_duplicate_window_titles: bool,
     ) -> bool {
-        let target = strip_rule_suffix(target);
-        let base_title = selector_base_title(target);
-        if base_title != target {
-            return window_matches_selector(hwnd, target);
-        }
-
-        if window_matches_selector(hwnd, target) {
-            return true;
-        }
-
-        if match_duplicate_window_titles {
-            let Some(title) = window_title(hwnd) else {
-                return false;
-            };
-            if title == base_title {
-                return true;
-            }
-        }
-
-        if let Some(title) = window_title(hwnd) {
-            if matches_browser_suffix(target, &title) {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    unsafe fn window_matches_any_selector(
-        hwnd: HWND,
-        target_title: Option<&str>,
-        extra_target_titles: &[String],
-        match_duplicate_window_titles: bool,
-    ) -> bool {
-        if let Some(target) = target_title
-            && window_matches_selector_with_duplicate_titles(
-                hwnd,
-                target,
-                match_duplicate_window_titles,
-            )
-        {
-            return true;
-        }
-
-        extra_target_titles.iter().any(|target| {
-            window_matches_selector_with_duplicate_titles(
-                hwnd,
-                target,
-                match_duplicate_window_titles,
-            )
-        })
+        let Some(title) = window_title(hwnd) else {
+            return false;
+        };
+        window_matches_selector_title(&title, hwnd, target, match_duplicate_window_titles)
     }
 
     unsafe fn window_title(hwnd: HWND) -> Option<String> {
@@ -28250,6 +28070,12 @@ mod fallback {
         },
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum MacroFolderScope {
+        Root,
+        Folder(u32),
+    }
+
     #[derive(Debug, Clone)]
     pub enum OverlayCommand {
         Update(CrosshairStyle),
@@ -28264,7 +28090,7 @@ mod fallback {
         ApplyWindowLayout(WindowLayout),
         UpdateWindowExpandControls(WindowExpandControls),
         UpdateMacroPresets(Vec<MacroGroup>),
-        SetActiveMacroFolderScope(Option<u32>),
+        SetActiveMacroFolderScope(MacroFolderScope),
         UpdateAudioSettings(AudioSettings),
         UpdateKeyboardArrowMouseSettings {
             enabled: bool,
