@@ -69,10 +69,9 @@ impl CrosshairApp {
 
     pub(crate) fn sync_profiles(&mut self) {
         let profiles = self.state.profiles.clone();
-        if self.last_synced_profiles.as_ref() == Some(&profiles) {
+        if !Self::update_synced_state(profiles.clone(), &mut self.last_synced_profiles) {
             return;
         }
-        self.last_synced_profiles = Some(profiles.clone());
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateProfiles(profiles));
@@ -115,10 +114,9 @@ impl CrosshairApp {
 
     pub(crate) fn sync_macro_presets(&mut self) {
         let macro_groups = build_runtime_macro_groups(&self.state);
-        if self.last_synced_macro_groups.as_ref() == Some(&macro_groups) {
+        if !Self::update_synced_state(macro_groups.clone(), &mut self.last_synced_macro_groups) {
             return;
         }
-        self.last_synced_macro_groups = Some(macro_groups.clone());
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateMacroPresets(macro_groups));
@@ -149,10 +147,12 @@ impl CrosshairApp {
             .resolved_active_macro_folder_view()
             .map(MacroFolderScope::Folder)
             .unwrap_or(MacroFolderScope::Root);
-        if self.last_synced_active_macro_folder_scope == Some(active_folder_scope) {
+        if !Self::update_synced_state(
+            active_folder_scope,
+            &mut self.last_synced_active_macro_folder_scope,
+        ) {
             return;
         }
-        self.last_synced_active_macro_folder_scope = Some(active_folder_scope);
         let _ = self
             .overlay_tx
             .send(OverlayCommand::SetActiveMacroFolderScope(active_folder_scope));
@@ -160,10 +160,9 @@ impl CrosshairApp {
 
     pub(crate) fn sync_macro_master_enabled(&mut self) {
         let enabled = self.state.macros_master_enabled;
-        if self.last_synced_macros_master_enabled == Some(enabled) {
+        if !Self::update_synced_state(enabled, &mut self.last_synced_macros_master_enabled) {
             return;
         }
-        self.last_synced_macros_master_enabled = Some(enabled);
         let _ = self
             .overlay_tx
             .send(OverlayCommand::SetMacrosMasterEnabled(enabled));
@@ -171,10 +170,9 @@ impl CrosshairApp {
 
     pub(crate) fn sync_windows_key_locked(&mut self) {
         let locked = self.state.windows_key_locked;
-        if self.last_synced_windows_key_locked == Some(locked) {
+        if !Self::update_synced_state(locked, &mut self.last_synced_windows_key_locked) {
             return;
         }
-        self.last_synced_windows_key_locked = Some(locked);
         let _ = self
             .overlay_tx
             .send(OverlayCommand::SetWindowsKeyLocked(locked));
@@ -182,10 +180,12 @@ impl CrosshairApp {
 
     pub(crate) fn sync_native_focus_highlight_enabled(&mut self) {
         let enabled = self.state.native_focus_highlight_enabled;
-        if self.last_synced_native_focus_highlight_enabled == Some(enabled) {
+        if !Self::update_synced_state(
+            enabled,
+            &mut self.last_synced_native_focus_highlight_enabled,
+        ) {
             return;
         }
-        self.last_synced_native_focus_highlight_enabled = Some(enabled);
         let _ = self
             .overlay_tx
             .send(OverlayCommand::SetNativeFocusHighlightEnabled(enabled));
@@ -196,10 +196,9 @@ impl CrosshairApp {
             self.state.focus_highlight_color,
             self.state.focus_highlight_decoration,
         );
-        if self.last_synced_focus_highlight_config == Some(config) {
+        if !Self::update_synced_state(config, &mut self.last_synced_focus_highlight_config) {
             return;
         }
-        self.last_synced_focus_highlight_config = Some(config);
         let _ = self
             .overlay_tx
             .send(OverlayCommand::SetFocusHighlightConfig {
@@ -253,10 +252,9 @@ impl CrosshairApp {
             self.state.quick_key_display_mode,
             self.state.quick_key_display_mascot_style,
         );
-        if self.last_synced_quick_key_display_config == Some(config) {
+        if !Self::update_synced_state(config, &mut self.last_synced_quick_key_display_config) {
             return;
         }
-        self.last_synced_quick_key_display_config = Some(config);
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateQuickKeyDisplayConfig {
