@@ -1157,22 +1157,14 @@ impl CrosshairApp {
 
     fn export_macro_step(&mut self, preset_id: u32, step_index: usize, step: &MacroStep) {
         match crate::macro_code::encode_step(step) {
-            Ok(code) => {
-                self.status = Self::tr_lang(
-                    self.state.ui_language,
-                    "Step code copied to clipboard.",
-                    "Step code copied to clipboard.",
-                )
-                .to_owned();
-                self.macro_step_export_feedback_until =
-                    Some(Instant::now() + Duration::from_millis(1200));
-                self.macro_step_export_feedback_target = Some((preset_id, step_index));
-                self.macro_share_clipboard_kind = MacroShareCodeKind::Step;
-                self.macro_share_clipboard_checked_at = Some(Instant::now());
-                if let Ok(mut clipboard) = Clipboard::new() {
-                    let _ = clipboard.set_text(code);
-                }
-            }
+            Ok(code) => self.write_macro_share_code(
+                code,
+                "Step code copied to clipboard.",
+                MacroShareCodeKind::Step,
+                Some((preset_id, step_index)),
+                None,
+                None,
+            ),
             Err(error) => self.status = format!("Failed to export step: {error}"),
         }
     }
@@ -1183,19 +1175,8 @@ impl CrosshairApp {
         preset_id: u32,
         insert_after_index: Option<usize>,
     ) {
-        let mut clipboard = match Clipboard::new() {
-            Ok(cb) => cb,
-            Err(e) => {
-                self.status = format!("Clipboard error: {e}");
-                return;
-            }
-        };
-        let code = match clipboard.get_text() {
-            Ok(text) => text,
-            Err(e) => {
-                self.status = format!("Failed to read clipboard: {e}");
-                return;
-            }
+        let Some(code) = self.read_clipboard_text() else {
+            return;
         };
         match crate::macro_code::decode_step(&code) {
             Ok(mut step) => {
@@ -1232,22 +1213,14 @@ impl CrosshairApp {
 
     fn export_macro_preset(&mut self, preset_id: u32, preset: &MacroPreset) {
         match crate::macro_code::encode_preset(preset) {
-            Ok(code) => {
-                self.status = Self::tr_lang(
-                    self.state.ui_language,
-                    "Preset code copied to clipboard.",
-                    "Preset code copied to clipboard.",
-                )
-                .to_owned();
-                self.macro_preset_export_feedback_until =
-                    Some(Instant::now() + Duration::from_millis(1200));
-                self.macro_preset_export_feedback_target = Some(preset_id);
-                self.macro_share_clipboard_kind = MacroShareCodeKind::Preset;
-                self.macro_share_clipboard_checked_at = Some(Instant::now());
-                if let Ok(mut clipboard) = Clipboard::new() {
-                    let _ = clipboard.set_text(code);
-                }
-            }
+            Ok(code) => self.write_macro_share_code(
+                code,
+                "Preset code copied to clipboard.",
+                MacroShareCodeKind::Preset,
+                None,
+                Some(preset_id),
+                None,
+            ),
             Err(error) => self.status = format!("Failed to export preset: {error}"),
         }
     }
@@ -1257,19 +1230,8 @@ impl CrosshairApp {
         group_id: u32,
         insert_after_preset_id: Option<u32>,
     ) {
-        let mut clipboard = match Clipboard::new() {
-            Ok(cb) => cb,
-            Err(e) => {
-                self.status = format!("Clipboard error: {e}");
-                return;
-            }
-        };
-        let code = match clipboard.get_text() {
-            Ok(text) => text,
-            Err(e) => {
-                self.status = format!("Failed to read clipboard: {e}");
-                return;
-            }
+        let Some(code) = self.read_clipboard_text() else {
+            return;
         };
         match crate::macro_code::decode_preset(&code) {
             Ok(mut preset) => {
@@ -1315,22 +1277,14 @@ impl CrosshairApp {
 
     fn export_macro_group(&mut self, group_id: u32, group: &MacroGroup) {
         match crate::macro_code::encode_group(group) {
-            Ok(code) => {
-                self.status = Self::tr_lang(
-                    self.state.ui_language,
-                    "Group code copied to clipboard.",
-                    "Group code copied to clipboard.",
-                )
-                .to_owned();
-                self.macro_group_export_feedback_until =
-                    Some(Instant::now() + Duration::from_millis(1200));
-                self.macro_group_export_feedback_target = Some(group_id);
-                self.macro_share_clipboard_kind = MacroShareCodeKind::Group;
-                self.macro_share_clipboard_checked_at = Some(Instant::now());
-                if let Ok(mut clipboard) = Clipboard::new() {
-                    let _ = clipboard.set_text(code);
-                }
-            }
+            Ok(code) => self.write_macro_share_code(
+                code,
+                "Group code copied to clipboard.",
+                MacroShareCodeKind::Group,
+                None,
+                None,
+                Some(group_id),
+            ),
             Err(error) => self.status = format!("Failed to export group: {error}"),
         }
     }
@@ -1340,19 +1294,8 @@ impl CrosshairApp {
         folder_id: Option<u32>,
         insert_after_group_id: Option<u32>,
     ) {
-        let mut clipboard = match Clipboard::new() {
-            Ok(cb) => cb,
-            Err(e) => {
-                self.status = format!("Clipboard error: {e}");
-                return;
-            }
-        };
-        let code = match clipboard.get_text() {
-            Ok(text) => text,
-            Err(e) => {
-                self.status = format!("Failed to read clipboard: {e}");
-                return;
-            }
+        let Some(code) = self.read_clipboard_text() else {
+            return;
         };
         match crate::macro_code::decode_group(&code) {
             Ok(mut group) => {
@@ -6445,6 +6388,49 @@ impl CrosshairApp {
 
         self.macro_share_clipboard_kind = kind;
         self.macro_share_clipboard_checked_at = Some(Instant::now());
+    }
+
+    fn read_clipboard_text(&mut self) -> Option<String> {
+        let mut clipboard = match Clipboard::new() {
+            Ok(cb) => cb,
+            Err(e) => {
+                self.status = format!("Clipboard error: {e}");
+                return None;
+            }
+        };
+        match clipboard.get_text() {
+            Ok(text) => Some(text),
+            Err(e) => {
+                self.status = format!("Failed to read clipboard: {e}");
+                None
+            }
+        }
+    }
+
+    fn write_macro_share_code(
+        &mut self,
+        code: String,
+        status_message: &'static str,
+        kind: MacroShareCodeKind,
+        feedback_target: Option<(u32, usize)>,
+        preset_target: Option<u32>,
+        group_target: Option<u32>,
+    ) {
+        self.status = Self::tr_lang(self.state.ui_language, status_message, status_message).to_owned();
+        self.macro_step_export_feedback_until = feedback_target
+            .map(|_| Instant::now() + Duration::from_millis(1200));
+        self.macro_step_export_feedback_target = feedback_target;
+        self.macro_preset_export_feedback_until = preset_target
+            .map(|_| Instant::now() + Duration::from_millis(1200));
+        self.macro_preset_export_feedback_target = preset_target;
+        self.macro_group_export_feedback_until = group_target
+            .map(|_| Instant::now() + Duration::from_millis(1200));
+        self.macro_group_export_feedback_target = group_target;
+        self.macro_share_clipboard_kind = kind;
+        self.macro_share_clipboard_checked_at = Some(Instant::now());
+        if let Ok(mut clipboard) = Clipboard::new() {
+            let _ = clipboard.set_text(code);
+        }
     }
 
     fn window_anchor_label(anchor: WindowAnchor) -> &'static str {
