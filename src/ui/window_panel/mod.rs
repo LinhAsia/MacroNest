@@ -3053,36 +3053,36 @@ impl CrosshairApp {
 
     pub(crate) fn sync_window_presets(&mut self) {
         let window_presets = self.state.window_presets.clone();
-        if self.last_synced_window_presets.as_ref() != Some(&window_presets) {
-            self.last_synced_window_presets = Some(window_presets.clone());
-            let _ = self
-                .overlay_tx
-                .send(OverlayCommand::UpdateWindowPresets(window_presets));
-        }
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            window_presets,
+            &mut self.last_synced_window_presets,
+            OverlayCommand::UpdateWindowPresets,
+        );
 
         let focus_presets = self.state.window_focus_presets.clone();
-        if self.last_synced_window_focus_presets.as_ref() != Some(&focus_presets) {
-            self.last_synced_window_focus_presets = Some(focus_presets.clone());
-            let _ = self
-                .overlay_tx
-                .send(OverlayCommand::UpdateWindowFocusPresets(focus_presets));
-        }
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            focus_presets,
+            &mut self.last_synced_window_focus_presets,
+            OverlayCommand::UpdateWindowFocusPresets,
+        );
 
         let pin_presets = self.state.pin_presets.clone();
-        if self.last_synced_pin_presets.as_ref() != Some(&pin_presets) {
-            self.last_synced_pin_presets = Some(pin_presets.clone());
-            let _ = self
-                .overlay_tx
-                .send(OverlayCommand::UpdatePinPresets(pin_presets));
-        }
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            pin_presets,
+            &mut self.last_synced_pin_presets,
+            OverlayCommand::UpdatePinPresets,
+        );
 
         let mouse_path_presets = self.state.mouse_path_presets.clone();
-        if self.last_synced_mouse_path_presets.as_ref() != Some(&mouse_path_presets) {
-            self.last_synced_mouse_path_presets = Some(mouse_path_presets.clone());
-            let _ = self
-                .overlay_tx
-                .send(OverlayCommand::UpdateMousePathPresets(mouse_path_presets));
-        }
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            mouse_path_presets,
+            &mut self.last_synced_mouse_path_presets,
+            OverlayCommand::UpdateMousePathPresets,
+        );
     }
 
     pub(crate) fn persist_window_layouts(&mut self) {
