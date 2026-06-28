@@ -405,24 +405,22 @@ impl CrosshairApp {
 
     pub(crate) fn sync_timer_presets(&mut self) {
         let presets = self.state.timer_presets.clone();
-        if self.last_synced_timer_presets.as_ref() == Some(&presets) {
-            return;
-        }
-        self.last_synced_timer_presets = Some(presets.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateTimerPresets(presets));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            presets,
+            &mut self.last_synced_timer_presets,
+            OverlayCommand::UpdateTimerPresets,
+        );
     }
 
     pub(crate) fn sync_geometry_presets(&mut self) {
         let presets = self.state.geometry_presets.clone();
-        if self.last_synced_geometry_presets.as_ref() == Some(&presets) {
-            return;
-        }
-        self.last_synced_geometry_presets = Some(presets.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateGeometryPresets(presets));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            presets,
+            &mut self.last_synced_geometry_presets,
+            OverlayCommand::UpdateGeometryPresets,
+        );
     }
 
     pub(crate) fn persist_geometry_presets(&mut self) {

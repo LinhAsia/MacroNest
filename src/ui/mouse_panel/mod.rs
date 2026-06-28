@@ -2062,13 +2062,12 @@ impl CrosshairApp {
 
     pub(crate) fn sync_mouse_path_presets(&mut self) {
         let presets = self.state.mouse_path_presets.clone();
-        if self.last_synced_mouse_path_presets.as_ref() == Some(&presets) {
-            return;
-        }
-        self.last_synced_mouse_path_presets = Some(presets.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateMousePathPresets(presets));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            presets,
+            &mut self.last_synced_mouse_path_presets,
+            OverlayCommand::UpdateMousePathPresets,
+        );
     }
 
     pub(crate) fn add_mouse_sensitivity_preset(&mut self) {
@@ -2099,13 +2098,12 @@ impl CrosshairApp {
 
     pub(crate) fn sync_mouse_sensitivity_presets(&mut self) {
         let presets = self.state.mouse_sensitivity_presets.clone();
-        if self.last_synced_mouse_sensitivity_presets.as_ref() == Some(&presets) {
-            return;
-        }
-        self.last_synced_mouse_sensitivity_presets = Some(presets.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateMouseSensitivityPresets(presets));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            presets,
+            &mut self.last_synced_mouse_sensitivity_presets,
+            OverlayCommand::UpdateMouseSensitivityPresets,
+        );
     }
 
     pub(crate) fn sync_mouse_sensitivity_settings(&self) {

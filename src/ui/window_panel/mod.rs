@@ -3095,13 +3095,12 @@ impl CrosshairApp {
 
     pub(crate) fn sync_window_layouts(&mut self) {
         let layouts = self.state.window_layouts.clone();
-        if self.last_synced_window_layouts.as_ref() == Some(&layouts) {
-            return;
-        }
-        self.last_synced_window_layouts = Some(layouts.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateWindowLayouts(layouts));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            layouts,
+            &mut self.last_synced_window_layouts,
+            OverlayCommand::UpdateWindowLayouts,
+        );
     }
 
     pub(crate) fn add_window_layout(&mut self) {
