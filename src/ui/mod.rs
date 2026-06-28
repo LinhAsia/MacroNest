@@ -1504,6 +1504,13 @@ impl CrosshairApp {
             .and_then(|group| group.presets.get(preset_index))
     }
 
+    fn pin_preset(&self, preset_id: u32) -> Option<&crate::model::PinPreset> {
+        self.state
+            .pin_presets
+            .iter()
+            .find(|preset| preset.id == preset_id)
+    }
+
     fn allocate_next_sound_library_item_id(&mut self) -> u32 {
         Self::allocate_next_id(
             &self.state.audio_settings.library,
@@ -7827,33 +7834,21 @@ impl CrosshairApp {
             if let Some(target) = self.command_ai_step_target.take() {
                 let (group_id, preset_id, step_index) = target;
                 let mut temp_preset = CommandPreset::new(999999);
-                if let Some(group) = self
-                    .state
-                    .macro_groups
-                    .iter()
-                    .find(|group| group.id == group_id)
-                {
-                    if let Some(preset) = group.presets.iter().find(|preset| preset.id == preset_id)
-                    {
-                        if let Some(step_index) = step_index {
-                            if let Some(step) = preset.steps.get(step_index) {
-                                temp_preset.command = step.command_preset_command.clone();
-                                temp_preset.use_powershell = step.command_preset_use_powershell;
-                            }
-                        } else {
-                            if preset.trigger_mode == crate::model::MacroTriggerMode::Hold {
-                                temp_preset.command =
-                                    preset.hold_stop_step.command_preset_command.clone();
-                                temp_preset.use_powershell =
-                                    preset.hold_stop_step.command_preset_use_powershell;
-                            } else {
-                                temp_preset.command =
-                                    preset.press_stop_step.command_preset_command.clone();
-                                temp_preset.use_powershell =
-                                    preset.press_stop_step.command_preset_use_powershell;
-                            }
+                if let Some(preset) = self.macro_preset(group_id, preset_id) {
+                    if let Some(step_index) = step_index {
+                        if let Some(step) = preset.steps.get(step_index) {
+                            temp_preset.command = step.command_preset_command.clone();
+                            temp_preset.use_powershell = step.command_preset_use_powershell;
                         }
-                    }
+                    } else if preset.trigger_mode == crate::model::MacroTriggerMode::Hold {
+                        temp_preset.command = preset.hold_stop_step.command_preset_command.clone();
+                        temp_preset.use_powershell =
+                            preset.hold_stop_step.command_preset_use_powershell;
+                    } else {
+                        temp_preset.command = preset.press_stop_step.command_preset_command.clone();
+                        temp_preset.use_powershell =
+                            preset.press_stop_step.command_preset_use_powershell;
+                        }
                 }
                 let old_name = temp_preset.name.clone();
                 let old_use_powershell = temp_preset.use_powershell;
@@ -10911,9 +10906,7 @@ impl eframe::App for CrosshairApp {
                     let Some(frame) = frame else { continue; };
                     let filtered_image = if cache_id >= 100_000 {
                         let preset_id = cache_id - 100_000;
-                        if let Some(preset) =
-                            self.state.pin_presets.iter().find(|p| p.id == preset_id)
-                        {
+                        if let Some(preset) = self.pin_preset(preset_id) {
                             if preset.binary_filter {
                                 let mut filtered_rgba = frame.rgba.clone();
                                 let threshold = preset.binary_threshold;
