@@ -1183,6 +1183,7 @@ impl CrosshairApp {
         match target {
             AudioEditorTarget::Preset(preset_id) => {
                 let mut choose_file_for = None;
+                let mut pending_outcome = None;
                 let waveform_path = self
                     .state
                     .audio_settings
@@ -1204,11 +1205,12 @@ impl CrosshairApp {
                     .iter_mut()
                     .find(|preset| preset.id == preset_id)
                 {
+                    let preset_id = preset.id;
                     let outcome = Self::render_audio_media_editor(
                         ui,
                         language,
-                        AudioEditorTarget::Preset(preset.id),
-                        ("preset", preset.id),
+                        AudioEditorTarget::Preset(preset_id),
+                        ("preset", preset_id),
                         &format!(
                             "{}: {}",
                             Self::tr_lang(language, "Sound Preset", "Sound Preset"),
@@ -1220,20 +1222,13 @@ impl CrosshairApp {
                         &mut preview_cursor,
                         &mut trim_timeline_zoom,
                     );
-                    self.sound_preset_clip_duration_ms
-                        .insert(preset.id, duration);
-                    if outcome.choose_file {
-                        choose_file_for = Some(preset.id);
-                    }
-                    if let Some(status) = outcome.status {
-                        self.status = status;
-                    }
-                    if outcome.changed {
-                        self.sync_audio_settings();
-                        self.persist();
-                    }
+                    pending_outcome = Some((preset_id, outcome));
                 } else {
                     self.close_audio_editor();
+                }
+                if let Some((preset_id, outcome)) = pending_outcome {
+                    choose_file_for =
+                        self.finish_audio_media_editor_outcome(outcome, preset_id, duration);
                 }
                 if let Some(preset_id) = choose_file_for {
                     self.choose_audio_file_for_target(AudioEditorTarget::Preset(preset_id));
@@ -1241,6 +1236,7 @@ impl CrosshairApp {
             }
             AudioEditorTarget::Library(item_id) => {
                 let mut choose_file_for = None;
+                let mut pending_outcome = None;
                 let waveform_path = self
                     .state
                     .audio_settings
@@ -1258,11 +1254,12 @@ impl CrosshairApp {
                     .iter_mut()
                     .find(|item| item.id == item_id)
                 {
+                    let item_id = item.id;
                     let outcome = Self::render_audio_media_editor(
                         ui,
                         language,
-                        AudioEditorTarget::Library(item.id),
-                        ("library", item.id),
+                        AudioEditorTarget::Library(item_id),
+                        ("library", item_id),
                         &format!(
                             "{}: {}",
                             Self::tr_lang(language, "Library Sound", "Library Sound"),
@@ -1274,19 +1271,14 @@ impl CrosshairApp {
                         &mut preview_cursor,
                         &mut trim_timeline_zoom,
                     );
-                    self.library_clip_duration_ms.insert(item.id, duration);
-                    if outcome.choose_file {
-                        choose_file_for = Some(item.id);
-                    }
-                    if let Some(status) = outcome.status {
-                        self.status = status;
-                    }
-                    if outcome.changed {
-                        self.sync_audio_settings();
-                        self.persist();
-                    }
+                    pending_outcome = Some((item_id, outcome));
                 } else {
                     self.close_audio_editor();
+                }
+                if let Some((item_id, outcome)) = pending_outcome {
+                    choose_file_for = self.finish_audio_media_editor_library_outcome(
+                        outcome, item_id, duration,
+                    );
                 }
                 if let Some(item_id) = choose_file_for {
                     self.choose_audio_file_for_target(AudioEditorTarget::Library(item_id));
@@ -1308,16 +1300,9 @@ impl CrosshairApp {
                     &mut preview_cursor,
                     &mut trim_timeline_zoom,
                 );
-                self.startup_clip_duration_ms = duration;
-                if outcome.choose_file {
+                let choose_file = self.finish_audio_media_editor_startup_outcome(outcome, duration);
+                if choose_file {
                     self.choose_audio_file_for_target(AudioEditorTarget::Startup);
-                }
-                if let Some(status) = outcome.status {
-                    self.status = status;
-                }
-                if outcome.changed {
-                    self.sync_audio_settings();
-                    self.persist();
                 }
             }
             AudioEditorTarget::Exit => {
@@ -1336,16 +1321,9 @@ impl CrosshairApp {
                     &mut preview_cursor,
                     &mut trim_timeline_zoom,
                 );
-                self.exit_clip_duration_ms = duration;
-                if outcome.choose_file {
+                let choose_file = self.finish_audio_media_editor_exit_outcome(outcome, duration);
+                if choose_file {
                     self.choose_audio_file_for_target(AudioEditorTarget::Exit);
-                }
-                if let Some(status) = outcome.status {
-                    self.status = status;
-                }
-                if outcome.changed {
-                    self.sync_audio_settings();
-                    self.persist();
                 }
             }
         }
@@ -1357,5 +1335,56 @@ impl CrosshairApp {
         let waveform_path = file_path.trim().to_owned();
         self.refresh_audio_waveform_for_path(&waveform_path);
         self.audio_waveforms.get(&waveform_path).cloned()
+    }
+
+    fn finish_audio_media_editor_outcome(
+        &mut self,
+        outcome: AudioCardOutcome,
+        preset_id: u32,
+        duration: Option<u64>,
+    ) -> Option<u32> {
+        self.sound_preset_clip_duration_ms.insert(preset_id, duration);
+        self.apply_audio_media_editor_outcome_shared(outcome)
+            .then_some(preset_id)
+    }
+
+    fn finish_audio_media_editor_library_outcome(
+        &mut self,
+        outcome: AudioCardOutcome,
+        item_id: u32,
+        duration: Option<u64>,
+    ) -> Option<u32> {
+        self.library_clip_duration_ms.insert(item_id, duration);
+        self.apply_audio_media_editor_outcome_shared(outcome)
+            .then_some(item_id)
+    }
+
+    fn finish_audio_media_editor_startup_outcome(
+        &mut self,
+        outcome: AudioCardOutcome,
+        duration: Option<u64>,
+    ) -> bool {
+        self.startup_clip_duration_ms = duration;
+        self.apply_audio_media_editor_outcome_shared(outcome)
+    }
+
+    fn finish_audio_media_editor_exit_outcome(
+        &mut self,
+        outcome: AudioCardOutcome,
+        duration: Option<u64>,
+    ) -> bool {
+        self.exit_clip_duration_ms = duration;
+        self.apply_audio_media_editor_outcome_shared(outcome)
+    }
+
+    fn apply_audio_media_editor_outcome_shared(&mut self, outcome: AudioCardOutcome) -> bool {
+        if let Some(status) = outcome.status {
+            self.status = status;
+        }
+        if outcome.changed {
+            self.sync_audio_settings();
+            self.persist();
+        }
+        outcome.choose_file
     }
 }
