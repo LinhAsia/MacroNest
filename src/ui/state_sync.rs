@@ -57,10 +57,9 @@ impl CrosshairApp {
             self.state.macro_mouse_click_delay_ms,
             self.state.macro_keyboard_key_press_delay_ms,
         );
-        if self.last_synced_macro_delays == Some(delays) {
+        if !Self::update_synced_state(delays, &mut self.last_synced_macro_delays) {
             return;
         }
-        self.last_synced_macro_delays = Some(delays);
         let _ = self.overlay_tx.send(OverlayCommand::UpdateMacroDelays {
             mouse_click_delay_ms: delays.0,
             keyboard_key_press_delay_ms: delays.1,
@@ -225,10 +224,9 @@ impl CrosshairApp {
             self.protractor_picking_active,
             self.state.ui_language,
         );
-        if self.last_synced_protractor_config == Some(config) {
+        if !Self::update_synced_state(config, &mut self.last_synced_protractor_config) {
             return;
         }
-        self.last_synced_protractor_config = Some(config);
         let _ = self
             .overlay_tx
             .send(OverlayCommand::UpdateProtractorConfig {
