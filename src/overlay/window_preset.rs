@@ -17,28 +17,10 @@ use windows::Win32::{
 
 use super::{
     HOOK_STATE, WindowFocusPreset, WindowPreset, calculate_window_bounds, ensure_window_restored,
-    find_target_window_hwnd, is_internal_app_window, remove_window_title_bar,
-    resolve_window_target, restore_window_title_bar, window_belongs_to_current_process,
+    find_preset_by_spec, find_target_window_hwnd, is_internal_app_window,
+    remove_window_title_bar, resolve_window_target, restore_window_title_bar,
+    window_belongs_to_current_process,
 };
-
-fn find_preset_by_spec<'a, T, IdOf, NameOf>(
-    items: &'a [T],
-    spec: &str,
-    id_of: IdOf,
-    name_of: NameOf,
-) -> Option<&'a T>
-where
-    IdOf: Fn(&T) -> u32,
-    NameOf: Fn(&T) -> &str,
-{
-    items
-        .iter()
-        .find(|item| id_of(item).to_string() == spec)
-        .or_else(|| {
-            items.iter()
-                .find(|item| name_of(item).trim().eq_ignore_ascii_case(spec))
-        })
-}
 
 pub(super) fn apply_window_preset_by_id(spec: &str) -> Result<()> {
     let spec = spec.trim();
