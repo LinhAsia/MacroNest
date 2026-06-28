@@ -921,12 +921,11 @@ impl CrosshairApp {
 
     pub(crate) fn sync_hud_presets(&mut self) {
         let presets = self.state.hud_presets.clone();
-        if self.last_synced_hud_presets.as_ref() == Some(&presets) {
-            return;
-        }
-        self.last_synced_hud_presets = Some(presets.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateHudPresets(presets));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            presets,
+            &mut self.last_synced_hud_presets,
+            OverlayCommand::UpdateHudPresets,
+        );
     }
 }

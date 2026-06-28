@@ -456,13 +456,12 @@ impl CrosshairApp {
 
     pub(crate) fn sync_ocr_presets(&mut self) {
         let presets = self.state.ocr_presets.clone();
-        if self.last_synced_ocr_presets.as_ref() == Some(&presets) {
-            return;
-        }
-        self.last_synced_ocr_presets = Some(presets.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateOcrPresets(presets));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            presets,
+            &mut self.last_synced_ocr_presets,
+            OverlayCommand::UpdateOcrPresets,
+        );
     }
 
     pub(crate) fn persist_ocr_presets(&mut self) {
