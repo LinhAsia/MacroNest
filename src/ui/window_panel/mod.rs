@@ -345,7 +345,7 @@ impl CrosshairApp {
                                 &mut preset.target_window_title,
                                 &mut preset.extra_target_window_titles,
                                 &mut preset.match_duplicate_window_titles,
-                                &self.open_windows,
+                                &self.open_window_infos,
                             );
                             ui.end_row();
 
@@ -540,7 +540,7 @@ impl CrosshairApp {
                             Self::tr_lang(language, "Any focused window", "Any focused window"),
                             &mut preset.target_window_title,
                             &mut preset.extra_target_window_titles,
-                            &self.open_windows,
+                            &self.open_window_infos,
                         );
                         ui.end_row();
 
@@ -871,7 +871,7 @@ impl CrosshairApp {
                             &mut preset.target_window_title,
                             &mut preset.extra_target_window_titles,
                             &mut preset.match_duplicate_window_titles,
-                            &self.open_windows,
+                            &self.open_window_infos,
                         );
                         live_sync |= target_changed;
                         ui.end_row();
@@ -1398,25 +1398,13 @@ impl CrosshairApp {
                 }
             });
             if let Some(pid) = begin_color_picker_preset_id {
-                self.begin_image_search_capture(
-                    ui.ctx(),
-                    VisionCaptureTarget::PinPresetColor(pid),
-                    crate::ui::VisionCaptureMode::ColorSample,
-                );
+                self.begin_color_pick_capture(ui.ctx(), VisionCaptureTarget::PinPresetColor(pid));
             }
             if let Some(pid) = begin_region_picker_preset_id {
-                self.begin_image_search_capture(
-                    ui.ctx(),
-                    VisionCaptureTarget::PinPresetRegion(pid),
-                    crate::ui::VisionCaptureMode::SearchRegion,
-                );
+                self.begin_region_capture(ui.ctx(), VisionCaptureTarget::PinPresetRegion(pid));
             }
             if let Some(pid) = begin_source_crop_picker_preset_id {
-                self.begin_image_search_capture(
-                    ui.ctx(),
-                    VisionCaptureTarget::PinPresetSourceCrop(pid),
-                    crate::ui::VisionCaptureMode::SearchRegion,
-                );
+                self.begin_region_capture(ui.ctx(), VisionCaptureTarget::PinPresetSourceCrop(pid));
             }
             if let Some((target, status)) = next_capture_target.take() {
                 self.begin_capture(target, status);
@@ -2994,19 +2982,11 @@ impl CrosshairApp {
     }
 
     pub(crate) fn add_window_preset(&mut self) {
-        let mut id = 1;
-        while self.state.window_presets.iter().any(|p| p.id == id) {
-            id += 1;
-        }
-        self.state.next_preset_id = (self
-            .state
-            .window_presets
-            .iter()
-            .map(|p| p.id)
-            .max()
-            .unwrap_or(0)
-            + 1)
-        .max(id + 1);
+        let id = Self::allocate_next_id(
+            &self.state.window_presets,
+            &mut self.state.next_preset_id,
+            |preset| preset.id,
+        );
         self.state.window_presets.push(WindowPreset::new(id));
         self.reconcile_master_presets();
         self.sync_window_presets();
@@ -3014,19 +2994,11 @@ impl CrosshairApp {
     }
 
     pub(crate) fn add_window_focus_preset(&mut self) {
-        let mut id = 1;
-        while self.state.window_focus_presets.iter().any(|p| p.id == id) {
-            id += 1;
-        }
-        self.state.next_window_focus_preset_id = (self
-            .state
-            .window_focus_presets
-            .iter()
-            .map(|p| p.id)
-            .max()
-            .unwrap_or(0)
-            + 1)
-        .max(id + 1);
+        let id = Self::allocate_next_id(
+            &self.state.window_focus_presets,
+            &mut self.state.next_window_focus_preset_id,
+            |preset| preset.id,
+        );
         self.state
             .window_focus_presets
             .push(WindowFocusPreset::new(id));
@@ -3036,19 +3008,11 @@ impl CrosshairApp {
     }
 
     pub(crate) fn add_zoom_preset(&mut self) {
-        let mut id = 1;
-        while self.state.zoom_presets.iter().any(|p| p.id == id) {
-            id += 1;
-        }
-        self.state.next_zoom_preset_id = (self
-            .state
-            .zoom_presets
-            .iter()
-            .map(|p| p.id)
-            .max()
-            .unwrap_or(0)
-            + 1)
-        .max(id + 1);
+        let id = Self::allocate_next_id(
+            &self.state.zoom_presets,
+            &mut self.state.next_zoom_preset_id,
+            |preset| preset.id,
+        );
         self.state.zoom_presets.push(ZoomPreset::new(id));
         self.reconcile_master_presets();
         self.sync_window_presets();
@@ -3056,65 +3020,75 @@ impl CrosshairApp {
     }
 
     pub(crate) fn add_pin_preset(&mut self) {
-        let mut id = 1;
-        while self.state.pin_presets.iter().any(|p| p.id == id) {
-            id += 1;
-        }
-        self.state.next_pin_preset_id = (self
-            .state
-            .pin_presets
-            .iter()
-            .map(|p| p.id)
-            .max()
-            .unwrap_or(0)
-            + 1)
-        .max(id + 1);
+        let id = Self::allocate_next_id(
+            &self.state.pin_presets,
+            &mut self.state.next_pin_preset_id,
+            |preset| preset.id,
+        );
         self.state.pin_presets.push(PinPreset::new(id));
         self.sync_window_presets();
         self.status = format!("Added pin preset {id}.");
     }
 
     pub(crate) fn persist_window_presets(&mut self) {
-        self.sync_window_presets();
-        self.persist();
+        self.persist_after_sync(Self::sync_window_presets);
     }
 
     pub(crate) fn persist_window_presets_deferred(&mut self, ctx: &egui::Context) {
-        self.sync_window_presets();
-        self.persist_deferred(ctx);
+        self.persist_deferred_after_sync(ctx, Self::sync_window_presets);
     }
 
-    pub(crate) fn sync_window_presets(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateWindowPresets(
-            self.state.window_presets.clone(),
-        ));
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateWindowFocusPresets(
-                self.state.window_focus_presets.clone(),
-            ));
-        let _ = self.overlay_tx.send(OverlayCommand::UpdatePinPresets(
-            self.state.pin_presets.clone(),
-        ));
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateMousePathPresets(
-            self.state.mouse_path_presets.clone(),
-        ));
+    pub(crate) fn sync_window_presets(&mut self) {
+        let window_presets = self.state.window_presets.clone();
+        if self.last_synced_window_presets.as_ref() != Some(&window_presets) {
+            self.last_synced_window_presets = Some(window_presets.clone());
+            let _ = self
+                .overlay_tx
+                .send(OverlayCommand::UpdateWindowPresets(window_presets));
+        }
+
+        let focus_presets = self.state.window_focus_presets.clone();
+        if self.last_synced_window_focus_presets.as_ref() != Some(&focus_presets) {
+            self.last_synced_window_focus_presets = Some(focus_presets.clone());
+            let _ = self
+                .overlay_tx
+                .send(OverlayCommand::UpdateWindowFocusPresets(focus_presets));
+        }
+
+        let pin_presets = self.state.pin_presets.clone();
+        if self.last_synced_pin_presets.as_ref() != Some(&pin_presets) {
+            self.last_synced_pin_presets = Some(pin_presets.clone());
+            let _ = self
+                .overlay_tx
+                .send(OverlayCommand::UpdatePinPresets(pin_presets));
+        }
+
+        let mouse_path_presets = self.state.mouse_path_presets.clone();
+        if self.last_synced_mouse_path_presets.as_ref() != Some(&mouse_path_presets) {
+            self.last_synced_mouse_path_presets = Some(mouse_path_presets.clone());
+            let _ = self
+                .overlay_tx
+                .send(OverlayCommand::UpdateMousePathPresets(mouse_path_presets));
+        }
     }
 
     pub(crate) fn persist_window_layouts(&mut self) {
-        self.sync_window_layouts();
-        self.persist();
+        self.persist_after_sync(Self::sync_window_layouts);
     }
 
     pub(crate) fn persist_window_layouts_deferred(&mut self, ctx: &egui::Context) {
-        self.sync_window_layouts();
-        self.persist_deferred(ctx);
+        self.persist_deferred_after_sync(ctx, Self::sync_window_layouts);
     }
 
-    pub(crate) fn sync_window_layouts(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateWindowLayouts(
-            self.state.window_layouts.clone(),
-        ));
+    pub(crate) fn sync_window_layouts(&mut self) {
+        let layouts = self.state.window_layouts.clone();
+        if self.last_synced_window_layouts.as_ref() == Some(&layouts) {
+            return;
+        }
+        self.last_synced_window_layouts = Some(layouts.clone());
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateWindowLayouts(layouts));
     }
 
     pub(crate) fn add_window_layout(&mut self) {
@@ -4396,7 +4370,7 @@ impl CrosshairApp {
                                             &mut target_window_title,
                                             &mut extra_target_window_titles,
                                             &mut match_duplicate_window_titles,
-                                            &self.open_windows,
+                                            &self.open_window_infos,
                                         );
                                     if dropdown_changed {
                                         cell_modified = true;
@@ -4491,43 +4465,38 @@ impl CrosshairApp {
         }
     }
 
+    pub(crate) fn sync_hud_preview_presets(&mut self, presets: Vec<HudPreset>) {
+        self.active_hud_preview_preset_id = presets.first().map(|preset| preset.id);
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::PreviewHudPreset(presets));
+    }
+
     pub(crate) fn sync_hud_preview(&mut self, preset: Option<&HudPreset>) {
         let next_id = preset.map(|preset| preset.id);
         if self.active_hud_preview_preset_id == next_id {
             if let Some(preset) = preset {
-                let _ = self
-                    .overlay_tx
-                    .send(OverlayCommand::PreviewHudPreset(vec![preset.clone()]));
+                self.sync_hud_preview_presets(vec![preset.clone()]);
             }
             return;
         }
-        self.active_hud_preview_preset_id = next_id;
-        let _ = self.overlay_tx.send(OverlayCommand::PreviewHudPreset(
-            preset.cloned().into_iter().collect(),
-        ));
+        self.sync_hud_preview_presets(preset.cloned().into_iter().collect());
     }
 
     pub(crate) fn clear_hud_preview(&mut self) {
         if self.active_hud_preview_preset_id.take().is_some() {
-            let _ = self
-                .overlay_tx
-                .send(OverlayCommand::PreviewHudPreset(Vec::new()));
+            self.sync_hud_preview_presets(Vec::new());
         }
     }
 
     pub(crate) fn clear_macro_visual_overlays(&mut self) {
         self.geometry_preview_target = None;
-        self.geometry_preset_preview_target = None;
         self.geometry_preview_sent = None;
         self.draw_geometry_step_preview_target = None;
         self.draw_geometry_step_preview_sent = None;
         self.show_geometry_preset_preview_target = None;
-        let _ = self
-            .overlay_tx
-            .send(crate::overlay::OverlayCommand::PreviewGeometrySpec(None));
-        let _ = self
-            .overlay_tx
-            .send(crate::overlay::OverlayCommand::PreviewGeometryPreset(None));
+        self.clear_geometry_spec_preview();
+        self.clear_geometry_preset_preview();
 
         self.disable_hud_preview_modes();
         crate::overlay::hide_hud_now();

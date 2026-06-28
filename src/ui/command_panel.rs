@@ -25,7 +25,6 @@ impl CrosshairApp {
         let mut remove_id = None;
         let mut changed = false;
         let mut open_ai_dialog: Option<u32> = None;
-        let open_windows = self.open_windows.clone();
         for index in 0..self.state.command_presets.len() {
             ui.add_space(6.0);
             let preset = &mut self.state.command_presets[index];
@@ -199,33 +198,29 @@ impl CrosshairApp {
     }
 
     pub(crate) fn add_custom_preset(&mut self) {
-        let mut id = 1;
-        while self.state.command_presets.iter().any(|p| p.id == id) {
-            id += 1;
-        }
-        self.state.next_command_preset_id = (self
-            .state
-            .command_presets
-            .iter()
-            .map(|p| p.id)
-            .max()
-            .unwrap_or(0)
-            + 1)
-        .max(id + 1);
+        let id = Self::allocate_next_id(
+            &self.state.command_presets,
+            &mut self.state.next_command_preset_id,
+            |preset| preset.id,
+        );
         self.state.command_presets.push(CommandPreset::new(id));
         self.sync_command_presets();
         self.status = format!("Added custom preset {id}.");
     }
 
     pub(crate) fn persist_command_presets(&mut self) {
-        self.sync_command_presets();
-        self.persist();
+        self.persist_after_sync(Self::sync_command_presets);
     }
 
-    pub(crate) fn sync_command_presets(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateCommandPresets(
-            self.state.command_presets.clone(),
-        ));
+    pub(crate) fn sync_command_presets(&mut self) {
+        let presets = self.state.command_presets.clone();
+        if self.last_synced_command_presets.as_ref() == Some(&presets) {
+            return;
+        }
+        self.last_synced_command_presets = Some(presets.clone());
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateCommandPresets(presets));
     }
 
     fn show_command_preset_card<R>(

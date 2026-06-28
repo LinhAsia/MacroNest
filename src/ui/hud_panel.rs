@@ -23,20 +23,11 @@ impl CrosshairApp {
                 .button(self.tr("+ Add timer preset", "+ Add timer preset"))
                 .clicked()
             {
-                let mut id = 1;
-                while self.state.timer_presets.iter().any(|p| p.id == id) {
-                    id += 1;
-                }
-                self.state.next_timer_preset_id = (self
-                    .state
-                    .timer_presets
-                    .iter()
-                    .map(|p| p.id)
-                    .max()
-                    .unwrap_or(0)
-                    + 1)
-                .max(id + 1);
-
+                let id = Self::allocate_next_id(
+                    &self.state.timer_presets,
+                    &mut self.state.next_timer_preset_id,
+                    |preset| preset.id,
+                );
                 let mut new_preset = TimerPreset::new(id);
                 new_preset.name = format!("Timer {id}");
                 self.state.timer_presets.push(new_preset);
@@ -228,11 +219,7 @@ impl CrosshairApp {
             });
         }
         if let Some(pid) = begin_hud_picker_preset_id {
-            self.begin_image_search_capture(
-                ui.ctx(),
-                crate::ui::VisionCaptureTarget::HudPresetRegion(pid),
-                crate::ui::VisionCaptureMode::SearchRegion,
-            );
+            self.begin_region_capture(ui.ctx(), crate::ui::VisionCaptureTarget::HudPresetRegion(pid));
         }
 
         if let Some(id) = remove_id {
@@ -925,18 +912,21 @@ impl CrosshairApp {
     }
 
     pub(crate) fn persist_hud_presets(&mut self) {
-        self.sync_hud_presets();
-        self.persist();
+        self.persist_after_sync(Self::sync_hud_presets);
     }
 
     pub(crate) fn persist_hud_presets_deferred(&mut self, ctx: &egui::Context) {
-        self.sync_hud_presets();
-        self.persist_deferred(ctx);
+        self.persist_deferred_after_sync(ctx, Self::sync_hud_presets);
     }
 
-    pub(crate) fn sync_hud_presets(&self) {
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateHudPresets(
-            self.state.hud_presets.clone(),
-        ));
+    pub(crate) fn sync_hud_presets(&mut self) {
+        let presets = self.state.hud_presets.clone();
+        if self.last_synced_hud_presets.as_ref() == Some(&presets) {
+            return;
+        }
+        self.last_synced_hud_presets = Some(presets.clone());
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::UpdateHudPresets(presets));
     }
 }
