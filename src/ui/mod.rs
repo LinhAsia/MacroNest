@@ -1257,8 +1257,7 @@ impl CrosshairApp {
                     } else {
                         group.presets.push(preset);
                     }
-                    self.reconcile_master_presets();
-                    self.persist_macro_presets();
+                    self.persist_reconciled_macro_presets();
                     self.status = Self::tr_lang(
                         self.state.ui_language,
                         "Preset imported successfully.",
@@ -1351,8 +1350,7 @@ impl CrosshairApp {
                     self.state.macro_groups.push(group);
                 }
                 self.pending_macro_group_scroll_target = Some(id);
-                self.reconcile_master_presets();
-                self.persist_macro_presets();
+                self.persist_reconciled_macro_presets();
                 self.status = Self::tr_lang(
                     self.state.ui_language,
                     "Group imported successfully.",
@@ -7638,8 +7636,7 @@ impl CrosshairApp {
         group.presets = vec![MacroPreset::new(preset_id)];
         self.state.macro_groups.push(group);
         self.pending_macro_group_scroll_target = Some(id);
-        self.reconcile_master_presets();
-        self.sync_macro_presets();
+        self.sync_reconciled_macro_presets();
         self.status = format!("Added macro group {id}.");
     }
 
@@ -7652,8 +7649,7 @@ impl CrosshairApp {
             .find(|group| group.id == group_id)
         {
             group.presets.push(MacroPreset::new(id));
-            self.reconcile_master_presets();
-            self.sync_macro_presets();
+            self.sync_reconciled_macro_presets();
             self.status = format!("Added macro preset {id}.");
         }
     }
@@ -8206,8 +8202,7 @@ impl CrosshairApp {
         group.presets = vec![MacroPreset::new(preset_id)];
         self.state.macro_groups.push(group);
         self.pending_macro_group_scroll_target = Some(id);
-        self.reconcile_master_presets();
-        self.sync_macro_presets();
+        self.sync_reconciled_macro_presets();
         self.status = format!("Added macro group {id} to folder.");
     }
 
@@ -8639,9 +8634,7 @@ impl CrosshairApp {
             self.status = format!("Pasted {} macro group copy(s).", sources.len());
         }
 
-        self.reconcile_master_presets();
-        self.sync_macro_presets();
-        self.persist_macro_presets();
+        self.persist_reconciled_macro_presets();
     }
 
     fn remove_selected_macro_groups(&mut self) {
@@ -8656,9 +8649,7 @@ impl CrosshairApp {
         self.selected_macro_groups.clear();
         self.macro_group_clipboard
             .retain(|group_id| !selected.contains(group_id));
-        self.reconcile_master_presets();
-        self.sync_macro_presets();
-        self.persist_macro_presets();
+        self.persist_reconciled_macro_presets();
         self.status = "Removed selected macro groups.".to_owned();
     }
 
@@ -9731,6 +9722,16 @@ impl CrosshairApp {
         self.sync_macro_presets();
         self.sync_macro_master_enabled();
         self.persist();
+    }
+
+    fn sync_reconciled_macro_presets(&mut self) {
+        self.reconcile_master_presets();
+        self.sync_macro_presets();
+    }
+
+    fn persist_reconciled_macro_presets(&mut self) {
+        self.reconcile_master_presets();
+        self.persist_macro_presets();
     }
 
     fn persist_timer_presets(&mut self) {
