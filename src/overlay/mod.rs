@@ -26073,7 +26073,7 @@ mod windows_overlay {
         exclude: Option<HWND>,
         targeted: Option<&HashSet<isize>>,
     ) -> Vec<HWND> {
-        let clean_target = strip_rule_suffix(target);
+        let clean_target = crate::window_list::strip_rule_suffix(target);
         runtime_open_windows_snapshot()
             .into_iter()
             .filter(|entry| exclude.is_none_or(|excluded| excluded.0 as isize != entry.hwnd))
@@ -26141,10 +26141,11 @@ mod windows_overlay {
         prefer_other_if_foreground_matches: bool,
     ) -> HWND {
         unsafe {
-            let target_uses_position_rule = target_title.is_some_and(has_position_rule_suffix)
+            let target_uses_position_rule = target_title
+                .is_some_and(crate::window_list::has_position_rule_suffix)
                 || extra_target_titles
                     .iter()
-                    .any(|title| has_position_rule_suffix(title));
+                    .any(|title| crate::window_list::has_position_rule_suffix(title));
             let foreground = GetForegroundWindow();
             let targeted = MACRO_TARGETED_WINDOWS.with(|set| set.borrow().clone());
 
@@ -26348,14 +26349,6 @@ mod windows_overlay {
         }
     }
 
-    fn strip_rule_suffix(target: &str) -> &str {
-        parse_window_match_rule(target).0
-    }
-
-    fn has_position_rule_suffix(target: &str) -> bool {
-        parse_window_match_rule(target).1.is_some()
-    }
-
     unsafe fn select_window_by_match_rule(
         candidates: &[HWND],
         rule: WindowMatchRule,
@@ -26396,7 +26389,7 @@ mod windows_overlay {
         title_matches_window_target(
             title,
             hwnd,
-            strip_rule_suffix(target),
+            crate::window_list::strip_rule_suffix(target),
             match_duplicate_window_titles,
         )
     }
