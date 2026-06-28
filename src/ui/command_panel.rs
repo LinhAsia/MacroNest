@@ -214,13 +214,12 @@ impl CrosshairApp {
 
     pub(crate) fn sync_command_presets(&mut self) {
         let presets = self.state.command_presets.clone();
-        if self.last_synced_command_presets.as_ref() == Some(&presets) {
-            return;
-        }
-        self.last_synced_command_presets = Some(presets.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateCommandPresets(presets));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            presets,
+            &mut self.last_synced_command_presets,
+            OverlayCommand::UpdateCommandPresets,
+        );
     }
 
     fn show_command_preset_card<R>(

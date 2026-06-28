@@ -87,6 +87,21 @@ impl CrosshairApp {
             });
     }
 
+    pub(crate) fn sync_overlay_state_if_changed<T>(
+        overlay_tx: &crossbeam_channel::Sender<OverlayCommand>,
+        state: T,
+        last_synced: &mut Option<T>,
+        command: impl FnOnce(T) -> OverlayCommand,
+    ) where
+        T: Clone + PartialEq,
+    {
+        if last_synced.as_ref() == Some(&state) {
+            return;
+        }
+        *last_synced = Some(state.clone());
+        let _ = overlay_tx.send(command(state));
+    }
+
     pub(crate) fn sync_macro_presets(&mut self) {
         let macro_groups = build_runtime_macro_groups(&self.state);
         if self.last_synced_macro_groups.as_ref() == Some(&macro_groups) {
