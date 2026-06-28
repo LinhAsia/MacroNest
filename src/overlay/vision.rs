@@ -105,12 +105,7 @@ pub(crate) fn bump_image_search_wait_generation(preset_id: u32) {
     *entry = entry.wrapping_add(1);
 }
 
-pub(crate) fn vision_preset_by_id(spec: &str) -> Result<VisionPreset> {
-    let spec = spec.trim();
-    if spec.is_empty() {
-        bail!("Vision preset id is invalid");
-    }
-
+fn find_vision_preset_by_spec(spec: &str) -> Option<VisionPreset> {
     let hook_state = HOOK_STATE.lock();
     let by_id = spec.parse::<u32>().ok().and_then(|preset_id| {
         hook_state
@@ -120,15 +115,22 @@ pub(crate) fn vision_preset_by_id(spec: &str) -> Result<VisionPreset> {
             .cloned()
     });
 
-    by_id
-        .or_else(|| {
-            hook_state
-                .vision_presets
-                .iter()
-                .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
-                .cloned()
-        })
-        .context("Vision preset was not found")
+    by_id.or_else(|| {
+        hook_state
+            .vision_presets
+            .iter()
+            .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
+            .cloned()
+    })
+}
+
+pub(crate) fn vision_preset_by_id(spec: &str) -> Result<VisionPreset> {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        bail!("Vision preset id is invalid");
+    }
+
+    find_vision_preset_by_spec(spec).context("Vision preset was not found")
 }
 
 pub(crate) fn start_vision_following(spec: &str, variable_override: Option<&str>) -> Result<()> {
