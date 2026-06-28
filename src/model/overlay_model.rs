@@ -90,7 +90,7 @@ impl Default for CrosshairStyle {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ProfileRecord {
     pub name: String,
