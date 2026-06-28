@@ -19649,7 +19649,9 @@ mod windows_overlay {
 
             match step.action {
                 MacroAction::LoopStart => {
-                    let Some(loop_end) = find_matching_loop_end(steps, index) else {
+                    let Some(loop_end) =
+                        find_matching_loop_end_for_runtime(preset_id, steps, step_indices, index)
+                    else {
                         index += 1;
                         continue;
                     };
@@ -20354,7 +20356,9 @@ mod windows_overlay {
 
             match step.action {
                 MacroAction::LoopStart => {
-                    let Some(loop_end) = find_matching_loop_end(steps, index) else {
+                    let Some(loop_end) =
+                        find_matching_loop_end_for_runtime(preset_id, steps, step_indices, index)
+                    else {
                         index += 1;
                         continue;
                     };
@@ -21017,9 +21021,18 @@ mod windows_overlay {
             || macro_stop_requested(preset_id, stop_immediately_on_retrigger)
     }
 
-    fn find_matching_loop_end(steps: &[MacroStep], start_index: usize) -> Option<usize> {
+    fn find_matching_loop_end_for_runtime(
+        preset_id: u32,
+        steps: &[MacroStep],
+        step_indices: &[usize],
+        start_index: usize,
+    ) -> Option<usize> {
         let mut depth = 0usize;
         for (index, step) in steps.iter().enumerate().skip(start_index) {
+            let absolute_index = step_indices.get(index).copied().unwrap_or(index);
+            if !is_macro_step_enabled(preset_id, absolute_index, step.enabled) {
+                continue;
+            }
             match step.action {
                 MacroAction::LoopStart => depth += 1,
                 MacroAction::LoopEnd => {
@@ -22212,6 +22225,61 @@ mod windows_overlay {
             // Count should be 2, because step 0 executed twice.
             let val = RUNTIME_VARIABLES.lock().get("count").copied();
             assert_eq!(val, Some(2.0));
+
+            RUNTIME_VARIABLES.lock().clear();
+        }
+
+        #[test]
+        fn test_disabled_loop_markers_do_not_break_enabled_loop_pairing() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+
+            let steps = vec![
+                MacroStep {
+                    action: MacroAction::LoopStart,
+                    key: "1".to_string(),
+                    enabled: false,
+                    ..Default::default()
+                },
+                MacroStep {
+                    action: MacroAction::LoopStart,
+                    key: "1".to_string(),
+                    ..Default::default()
+                },
+                MacroStep {
+                    action: MacroAction::SetVariable,
+                    if_variable_name: "count".to_string(),
+                    set_variable_source: crate::model::SetVariableSource::Expression,
+                    key: "{count + 1}".to_string(),
+                    ..Default::default()
+                },
+                MacroStep {
+                    action: MacroAction::LoopEnd,
+                    ..Default::default()
+                },
+            ];
+            let step_indices = vec![0, 1, 2, 3];
+            let mut locked_keys = vec![];
+            let mut locked_mouse = vec![];
+
+            RUNTIME_VARIABLES.lock().clear();
+            RUNTIME_VARIABLES.lock().insert("count".to_string(), 0.0);
+
+            let result = execute_macro_sequence(
+                1,
+                &steps,
+                &step_indices,
+                &mut locked_keys,
+                &mut locked_mouse,
+                false,
+                None,
+                &[],
+                false,
+                true,
+            );
+
+            assert_eq!(result, MacroRunFlow::Continue);
+            let val = RUNTIME_VARIABLES.lock().get("count").copied();
+            assert_eq!(val, Some(1.0));
 
             RUNTIME_VARIABLES.lock().clear();
         }
