@@ -960,8 +960,7 @@ impl CrosshairApp {
         }
 
         if changed {
-            self.sync_audio_settings();
-            self.persist();
+            self.sync_and_persist_audio_settings();
         }
         ui.spacing_mut().item_spacing = previous_item_spacing;
     }
@@ -1391,8 +1390,7 @@ impl CrosshairApp {
             self.status = status;
         }
         if changed {
-            self.sync_audio_settings();
-            self.persist();
+            self.sync_and_persist_audio_settings();
         }
         choose_file
     }
