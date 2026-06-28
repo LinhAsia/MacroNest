@@ -29,7 +29,7 @@ impl CrosshairApp {
                 .clicked()
             {
                 self.add_window_preset();
-                self.persist();
+                self.persist_window_presets();
             }
             if ui
                 .button(self.tr("+ Add layout preset", "+ Add layout preset"))
@@ -3110,8 +3110,7 @@ impl CrosshairApp {
             |layout| layout.id,
         );
         self.state.window_layouts.push(WindowLayout::new(id));
-        self.sync_window_layouts();
-        self.persist();
+        self.persist_window_layouts();
         self.status = format!("Added layout {id}.");
     }
 
