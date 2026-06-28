@@ -1675,28 +1675,17 @@ impl CrosshairApp {
     }
 
     fn choose_audio_file(&mut self, startup: bool) {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("Audio", &["mp3", "wav", "flac", "ogg", "m4a"])
-            .pick_file()
+        let Some((path_str, duration)) =
+            self.pick_and_import_audio_file(if startup { "startup" } else { "exit" })
         else {
             return;
         };
-        let path_str = match self.import_audio_file_to_app_data(&path, if startup { "startup" } else { "exit" }) {
-            Ok(path_str) => path_str,
-            Err(error) => {
-                self.status = format!("Failed to import audio file: {error}");
-                return;
-            }
-        };
-        let duration = audio::load_duration_ms(&path_str).ok();
         let clip = if startup {
             &mut self.state.audio_settings.startup
         } else {
             &mut self.state.audio_settings.exit
         };
-        clip.file_path = path_str;
-        clip.start_ms = 0;
-        clip.end_ms = duration.unwrap_or(0);
+        Self::apply_audio_clip_file(clip, &path_str, duration);
         if startup {
             self.startup_clip_duration_ms = duration;
             self.show_startup_audio_editor = true;
@@ -1710,20 +1699,9 @@ impl CrosshairApp {
     }
 
     fn choose_audio_file_for_sound_preset(&mut self, preset_id: u32) {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("Audio", &["mp3", "wav", "flac", "ogg", "m4a"])
-            .pick_file()
-        else {
+        let Some((path_str, duration)) = self.pick_and_import_audio_file(&format!("preset-{preset_id}")) else {
             return;
         };
-        let path_str = match self.import_audio_file_to_app_data(&path, &format!("preset-{preset_id}")) {
-            Ok(path_str) => path_str,
-            Err(error) => {
-                self.status = format!("Failed to import audio file: {error}");
-                return;
-            }
-        };
-        let duration = audio::load_duration_ms(&path_str).ok();
         if let Some(preset) = self
             .state
             .audio_settings
@@ -1731,18 +1709,8 @@ impl CrosshairApp {
             .iter_mut()
             .find(|preset| preset.id == preset_id)
         {
-            preset.clip.file_path = path_str.clone();
-            preset.clip.start_ms = 0;
-            preset.clip.end_ms = duration.unwrap_or(0);
-            preset.clip.enabled = true;
-            self.sound_preset_clip_duration_ms
-                .insert(preset_id, duration);
-            self.show_sound_preset_audio_editor.insert(preset_id);
-            self.refresh_audio_waveform_for_path(&path_str);
-            self.preview_cursor = None;
-            self.trim_timeline_zoom = 1.0;
-            self.sync_audio_settings();
-            self.persist();
+            Self::apply_audio_clip_file(&mut preset.clip, &path_str, duration);
+            self.finish_audio_file_assignment(AudioEditorTarget::Preset(preset_id), &path_str, duration);
         }
     }
 
@@ -1762,36 +1730,15 @@ impl CrosshairApp {
             .iter_mut()
             .find(|preset| preset.id == preset_id)
         {
-            preset.clip.file_path = path_str.clone();
-            preset.clip.start_ms = 0;
-            preset.clip.end_ms = duration.unwrap_or(0);
-            preset.clip.enabled = true;
-            self.sound_preset_clip_duration_ms
-                .insert(preset_id, duration);
-            self.show_sound_preset_audio_editor.insert(preset_id);
-            self.refresh_audio_waveform_for_path(&path_str);
-            self.preview_cursor = None;
-            self.trim_timeline_zoom = 1.0;
-            self.sync_audio_settings();
-            self.persist();
+            Self::apply_audio_clip_file(&mut preset.clip, &path_str, duration);
+            self.finish_audio_file_assignment(AudioEditorTarget::Preset(preset_id), &path_str, duration);
         }
     }
 
     fn choose_audio_file_for_library_item(&mut self, item_id: u32) {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("Audio", &["mp3", "wav", "flac", "ogg", "m4a"])
-            .pick_file()
-        else {
+        let Some((path_str, duration)) = self.pick_and_import_audio_file(&format!("library-{item_id}")) else {
             return;
         };
-        let path_str = match self.import_audio_file_to_app_data(&path, &format!("library-{item_id}")) {
-            Ok(path_str) => path_str,
-            Err(error) => {
-                self.status = format!("Failed to import audio file: {error}");
-                return;
-            }
-        };
-        let duration = audio::load_duration_ms(&path_str).ok();
         if let Some(item) = self
             .state
             .audio_settings
@@ -1799,18 +1746,66 @@ impl CrosshairApp {
             .iter_mut()
             .find(|item| item.id == item_id)
         {
-            item.clip.file_path = path_str.clone();
-            item.clip.start_ms = 0;
-            item.clip.end_ms = duration.unwrap_or(0);
-            item.clip.enabled = true;
-            self.library_clip_duration_ms.insert(item_id, duration);
-            self.show_library_audio_editor.insert(item_id);
-            self.refresh_audio_waveform_for_path(&path_str);
-            self.preview_cursor = None;
-            self.trim_timeline_zoom = 1.0;
-            self.sync_audio_settings();
-            self.persist();
+            Self::apply_audio_clip_file(&mut item.clip, &path_str, duration);
+            self.finish_audio_file_assignment(AudioEditorTarget::Library(item_id), &path_str, duration);
         }
+    }
+
+    fn pick_and_import_audio_file(&mut self, prefix: &str) -> Option<(String, Option<u64>)> {
+        let path = rfd::FileDialog::new()
+            .add_filter("Audio", &["mp3", "wav", "flac", "ogg", "m4a"])
+            .pick_file()?;
+        let path_str = match self.import_audio_file_to_app_data(&path, prefix) {
+            Ok(path_str) => path_str,
+            Err(error) => {
+                self.status = format!("Failed to import audio file: {error}");
+                return None;
+            }
+        };
+        let duration = audio::load_duration_ms(&path_str).ok();
+        Some((path_str, duration))
+    }
+
+    fn apply_audio_clip_file(
+        clip: &mut AudioClipSettings,
+        path: &str,
+        duration: Option<u64>,
+    ) {
+        clip.file_path = path.to_owned();
+        clip.start_ms = 0;
+        clip.end_ms = duration.unwrap_or(0);
+        clip.enabled = true;
+    }
+
+    fn finish_audio_file_assignment(
+        &mut self,
+        target: AudioEditorTarget,
+        path: &str,
+        duration: Option<u64>,
+    ) {
+        match target {
+            AudioEditorTarget::Preset(preset_id) => {
+                self.sound_preset_clip_duration_ms.insert(preset_id, duration);
+                self.show_sound_preset_audio_editor.insert(preset_id);
+            }
+            AudioEditorTarget::Library(item_id) => {
+                self.library_clip_duration_ms.insert(item_id, duration);
+                self.show_library_audio_editor.insert(item_id);
+            }
+            AudioEditorTarget::Startup => {
+                self.startup_clip_duration_ms = duration;
+                self.show_startup_audio_editor = true;
+            }
+            AudioEditorTarget::Exit => {
+                self.exit_clip_duration_ms = duration;
+                self.show_exit_audio_editor = true;
+            }
+        }
+        self.refresh_audio_waveform_for_path(path);
+        self.preview_cursor = None;
+        self.trim_timeline_zoom = 1.0;
+        self.sync_audio_settings();
+        self.persist();
     }
 
     fn audio_storage_dir(&self) -> PathBuf {
