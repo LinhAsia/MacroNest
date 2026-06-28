@@ -21,24 +21,38 @@ use super::{
     resolve_window_target, restore_window_title_bar, window_belongs_to_current_process,
 };
 
+fn find_preset_by_spec<'a, T, IdOf, NameOf>(
+    items: &'a [T],
+    spec: &str,
+    id_of: IdOf,
+    name_of: NameOf,
+) -> Option<&'a T>
+where
+    IdOf: Fn(&T) -> u32,
+    NameOf: Fn(&T) -> &str,
+{
+    items
+        .iter()
+        .find(|item| id_of(item).to_string() == spec)
+        .or_else(|| {
+            items.iter()
+                .find(|item| name_of(item).trim().eq_ignore_ascii_case(spec))
+        })
+}
+
 pub(super) fn apply_window_preset_by_id(spec: &str) -> Result<()> {
     let spec = spec.trim();
     if let Some(layout_spec) = spec.strip_prefix("layout:") {
         let layout_spec = layout_spec.trim();
         let layout = {
             let hook_state = HOOK_STATE.lock();
-            hook_state
-                .window_layouts
-                .iter()
-                .find(|l| l.id.to_string() == layout_spec)
-                .cloned()
-                .or_else(|| {
-                    hook_state
-                        .window_layouts
-                        .iter()
-                        .find(|l| l.name.trim().eq_ignore_ascii_case(layout_spec))
-                        .cloned()
-                })
+            find_preset_by_spec(
+                &hook_state.window_layouts,
+                layout_spec,
+                |layout| layout.id,
+                |layout| &layout.name,
+            )
+            .cloned()
         }
         .context("Window layout was not found")?;
         return apply_window_layout(&layout);
@@ -46,18 +60,13 @@ pub(super) fn apply_window_preset_by_id(spec: &str) -> Result<()> {
 
     let preset = {
         let hook_state = HOOK_STATE.lock();
-        hook_state
-            .window_presets
-            .iter()
-            .find(|preset| preset.id.to_string() == spec)
-            .cloned()
-            .or_else(|| {
-                hook_state
-                    .window_presets
-                    .iter()
-                    .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
-                    .cloned()
-            })
+        find_preset_by_spec(
+            &hook_state.window_presets,
+            spec,
+            |preset| preset.id,
+            |preset| &preset.name,
+        )
+        .cloned()
     }
     .context("Window preset was not found")?;
     apply_window_preset_for_macro(&preset)
@@ -67,18 +76,13 @@ pub(super) fn focus_window_by_preset_id(spec: &str) -> Result<()> {
     let spec = spec.trim();
     let preset = {
         let hook_state = HOOK_STATE.lock();
-        hook_state
-            .window_focus_presets
-            .iter()
-            .find(|preset| preset.id.to_string() == spec)
-            .cloned()
-            .or_else(|| {
-                hook_state
-                    .window_focus_presets
-                    .iter()
-                    .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
-                    .cloned()
-            })
+        find_preset_by_spec(
+            &hook_state.window_focus_presets,
+            spec,
+            |preset| preset.id,
+            |preset| &preset.name,
+        )
+        .cloned()
     };
     if let Some(preset) = preset {
         focus_window_for_preset(&preset)
