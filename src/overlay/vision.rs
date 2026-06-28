@@ -14,7 +14,8 @@ use opencv::{
 };
 
 use super::{
-    HOOK_STATE, UiCommand, resolve_text_variable_value, send_mouse_left_click_backend,
+    HOOK_STATE, UiCommand, find_preset_by_spec, resolve_text_variable_value,
+    send_mouse_left_click_backend,
     set_text_variable_value, set_variable_value, settle_image_search_mouse_move,
 };
 use crate::model::{RgbaColor, VisionPreset};
@@ -107,21 +108,13 @@ pub(crate) fn bump_image_search_wait_generation(preset_id: u32) {
 
 fn find_vision_preset_by_spec(spec: &str) -> Option<VisionPreset> {
     let hook_state = HOOK_STATE.lock();
-    let by_id = spec.parse::<u32>().ok().and_then(|preset_id| {
-        hook_state
-            .vision_presets
-            .iter()
-            .find(|preset| preset.id == preset_id)
-            .cloned()
-    });
-
-    by_id.or_else(|| {
-        hook_state
-            .vision_presets
-            .iter()
-            .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
-            .cloned()
-    })
+    find_preset_by_spec(
+        &hook_state.vision_presets,
+        spec,
+        |preset| preset.id,
+        |preset| &preset.name,
+    )
+    .cloned()
 }
 
 pub(crate) fn vision_preset_by_id(spec: &str) -> Result<VisionPreset> {

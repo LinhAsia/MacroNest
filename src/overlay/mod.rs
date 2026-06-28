@@ -188,6 +188,25 @@ mod windows_overlay {
         storage::AppPaths,
         window_list,
     };
+
+    fn find_preset_by_spec<'a, T, IdOf, NameOf>(
+        items: &'a [T],
+        spec: &str,
+        id_of: IdOf,
+        name_of: NameOf,
+    ) -> Option<&'a T>
+    where
+        IdOf: Fn(&T) -> u32,
+        NameOf: Fn(&T) -> &str,
+    {
+        items
+            .iter()
+            .find(|item| id_of(item).to_string() == spec)
+            .or_else(|| {
+                items.iter()
+                    .find(|item| name_of(item).trim().eq_ignore_ascii_case(spec))
+            })
+    }
     use image::{RgbaImage, imageops::FilterType};
     #[path = "../window_preset.rs"]
     mod window_preset;
@@ -18348,20 +18367,13 @@ mod windows_overlay {
 
     fn find_command_preset_by_spec(spec: &str) -> Option<CommandPreset> {
         let hook_state = HOOK_STATE.lock();
-        let by_id = spec.parse::<u32>().ok().and_then(|preset_id| {
-            hook_state
-                .command_presets
-                .iter()
-                .find(|preset| preset.id == preset_id)
-                .cloned()
-        });
-        by_id.or_else(|| {
-            hook_state
-                .command_presets
-                .iter()
-                .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
-                .cloned()
-        })
+        find_preset_by_spec(
+            &hook_state.command_presets,
+            spec,
+            |preset| preset.id,
+            |preset| &preset.name,
+        )
+        .cloned()
     }
 
     fn trigger_custom_preset_by_id(spec: &str) -> Result<()> {
