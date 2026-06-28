@@ -26098,7 +26098,7 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         exclude: Option<HWND>,
         targeted: Option<&HashSet<isize>>,
-        rule: WindowMatchRule,
+        rule: crate::window_list::WindowMatchRule,
     ) -> Option<HWND> {
         let candidates = collect_selector_match_candidates(
             base_title,
@@ -26110,7 +26110,7 @@ mod windows_overlay {
             return None;
         }
 
-        select_window_by_match_rule(&candidates, rule)
+        crate::window_list::select_window_by_match_rule(&candidates, rule)
     }
 
     unsafe fn find_window_by_selector_cached(
@@ -26119,7 +26119,7 @@ mod windows_overlay {
         exclude: Option<HWND>,
         targeted: Option<&HashSet<isize>>,
     ) -> Option<HWND> {
-        let (base_title, rule) = parse_window_match_rule(title);
+        let (base_title, rule) = crate::window_list::parse_window_match_rule(title);
         if let Some(rule) = rule {
             return resolve_duplicate_by_rule(
                 base_title,
@@ -26325,59 +26325,6 @@ mod windows_overlay {
         }
 
         std::process::exit(0);
-    }
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum WindowMatchRule {
-        Lowest,
-        Highest,
-        Leftmost,
-        Rightmost,
-    }
-
-    fn parse_window_match_rule(target: &str) -> (&str, Option<WindowMatchRule>) {
-        if let Some(s) = target.strip_suffix(" [Lowest]") {
-            (s, Some(WindowMatchRule::Lowest))
-        } else if let Some(s) = target.strip_suffix(" [Highest]") {
-            (s, Some(WindowMatchRule::Highest))
-        } else if let Some(s) = target.strip_suffix(" [Leftmost]") {
-            (s, Some(WindowMatchRule::Leftmost))
-        } else if let Some(s) = target.strip_suffix(" [Rightmost]") {
-            (s, Some(WindowMatchRule::Rightmost))
-        } else {
-            (target, None)
-        }
-    }
-
-    unsafe fn select_window_by_match_rule(
-        candidates: &[HWND],
-        rule: WindowMatchRule,
-    ) -> Option<HWND> {
-        let mut best_hwnd = None;
-        let mut best_val = match rule {
-            WindowMatchRule::Lowest | WindowMatchRule::Rightmost => i32::MIN,
-            WindowMatchRule::Highest | WindowMatchRule::Leftmost => i32::MAX,
-        };
-
-        for hwnd in candidates {
-            let mut rect = windows::Win32::Foundation::RECT::default();
-            if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut rect).is_ok() {
-                let axis = match rule {
-                    WindowMatchRule::Lowest | WindowMatchRule::Highest => rect.top,
-                    WindowMatchRule::Leftmost | WindowMatchRule::Rightmost => rect.left,
-                };
-                let better = match rule {
-                    WindowMatchRule::Lowest | WindowMatchRule::Rightmost => axis > best_val,
-                    WindowMatchRule::Highest | WindowMatchRule::Leftmost => axis < best_val,
-                };
-                if better {
-                    best_val = axis;
-                    best_hwnd = Some(*hwnd);
-                }
-            }
-        }
-
-        best_hwnd.or_else(|| candidates.first().copied())
     }
 
     fn window_matches_selector_title(

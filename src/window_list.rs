@@ -78,7 +78,7 @@ mod windows_impl {
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum WindowMatchRule {
+    pub enum WindowMatchRule {
         Lowest,
         Highest,
         Leftmost,
@@ -265,7 +265,7 @@ mod windows_impl {
         if hwnd.0.is_null() { None } else { Some(hwnd) }
     }
 
-    fn parse_window_match_rule(target: &str) -> (&str, Option<WindowMatchRule>) {
+    pub fn parse_window_match_rule(target: &str) -> (&str, Option<WindowMatchRule>) {
         if let Some(s) = target.strip_suffix(" [Lowest]") {
             (s, Some(WindowMatchRule::Lowest))
         } else if let Some(s) = target.strip_suffix(" [Highest]") {
@@ -287,7 +287,7 @@ mod windows_impl {
         parse_window_match_rule(target).1.is_some()
     }
 
-    fn select_window_by_match_rule(
+    pub fn select_window_by_match_rule(
         candidates: &[HWND],
         rule: WindowMatchRule,
     ) -> Option<HWND> {
