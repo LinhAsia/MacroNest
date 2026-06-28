@@ -623,8 +623,7 @@ impl CrosshairApp {
             self.paste_crosshair_profile_after(index);
         }
         if refresh_crosshair_profiles {
-            self.sync_crosshair();
-            self.persist();
+            self.persist_after_sync(Self::sync_crosshair);
         }
         if let Some(index) = remove_index {
             self.flush_crosshair_profile_dirty(true);
@@ -642,8 +641,7 @@ impl CrosshairApp {
                 self.state.active_style = next.style;
                 self.save_name = next.name;
             }
-            self.sync_profiles();
-            self.persist();
+            self.persist_after_sync(Self::sync_profiles);
             self.crosshair_editor_dirty = true;
         }
 
