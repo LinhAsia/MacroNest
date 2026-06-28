@@ -25818,26 +25818,20 @@ mod windows_overlay {
         }
 
         let hook_state = HOOK_STATE.lock();
-        if let Some(preset_id) = spec.parse::<u32>().ok().filter(|preset_id| {
-            hook_state
-                .geometry_presets
-                .iter()
-                .any(|preset| preset.id == *preset_id)
-        }) {
-            return Some(preset_id);
+        if let Some(preset) = find_preset_by_spec(
+            &hook_state.geometry_presets,
+            spec,
+            |preset| preset.id,
+            |preset| &preset.name,
+        ) {
+            return Some(preset.id);
         }
 
+        let normalized = normalize_geometry_preset_name(spec);
         hook_state
             .geometry_presets
             .iter()
-            .find(|preset| preset.name.trim().eq_ignore_ascii_case(spec))
-            .or_else(|| {
-                let normalized = normalize_geometry_preset_name(spec);
-                hook_state
-                    .geometry_presets
-                    .iter()
-                    .find(|preset| normalize_geometry_preset_name(&preset.name) == normalized)
-            })
+            .find(|preset| normalize_geometry_preset_name(&preset.name) == normalized)
             .map(|preset| preset.id)
             .or(step.geometry_preset_id)
     }
