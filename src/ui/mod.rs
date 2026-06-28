@@ -1507,6 +1507,30 @@ impl CrosshairApp {
         id
     }
 
+    fn allocate_next_macro_preset_id(&mut self) -> u32 {
+        let mut id = self.state.next_macro_preset_id.max(1);
+        while self
+            .state
+            .macro_groups
+            .iter()
+            .flat_map(|group| group.presets.iter())
+            .any(|preset| preset.id == id)
+        {
+            id += 1;
+        }
+        self.state.next_macro_preset_id = (self
+            .state
+            .macro_groups
+            .iter()
+            .flat_map(|group| group.presets.iter())
+            .map(|preset| preset.id)
+            .max()
+            .unwrap_or(0)
+            + 1)
+        .max(id + 1);
+        id
+    }
+
     #[cfg(windows)]
     fn current_mouse_speed() -> Option<u32> {
         let mut speed = 10u32;
@@ -7580,12 +7604,14 @@ impl CrosshairApp {
     }
 
     fn add_macro_group(&mut self) {
-        let id = self.state.next_macro_group_id.max(1);
-        self.state.next_macro_group_id = id + 1;
+        let id = Self::allocate_next_id(
+            &self.state.macro_groups,
+            &mut self.state.next_macro_group_id,
+            |group| group.id,
+        );
         let mut group = MacroGroup::new(id);
         group.name = self.unique_macro_group_name(&group.name);
-        let preset_id = self.state.next_macro_preset_id.max(1);
-        self.state.next_macro_preset_id = preset_id + 1;
+        let preset_id = self.allocate_next_macro_preset_id();
         group.presets = vec![MacroPreset::new(preset_id)];
         self.state.macro_groups.push(group);
         self.pending_macro_group_scroll_target = Some(id);
@@ -7595,8 +7621,7 @@ impl CrosshairApp {
     }
 
     fn add_macro_preset_to_group(&mut self, group_id: u32) {
-        let id = self.state.next_macro_preset_id.max(1);
-        self.state.next_macro_preset_id = id + 1;
+        let id = self.allocate_next_macro_preset_id();
         if let Some(group) = self
             .state
             .macro_groups
@@ -8136,20 +8161,25 @@ impl CrosshairApp {
     }
 
     fn add_macro_folder(&mut self) {
-        let id = self.state.next_macro_folder_id.max(1);
-        self.state.next_macro_folder_id = id + 1;
+        let id = Self::allocate_next_id(
+            &self.state.macro_folders,
+            &mut self.state.next_macro_folder_id,
+            |folder| folder.id,
+        );
         self.state.macro_folders.push(MacroFolder::new(id));
         self.status = format!("Added macro folder {id}.");
     }
 
     fn add_macro_group_to_folder(&mut self, folder_id: u32) {
-        let id = self.state.next_macro_group_id.max(1);
-        self.state.next_macro_group_id = id + 1;
+        let id = Self::allocate_next_id(
+            &self.state.macro_groups,
+            &mut self.state.next_macro_group_id,
+            |group| group.id,
+        );
         let mut group = MacroGroup::new(id);
         group.name = self.unique_macro_group_name(&group.name);
         group.folder_id = Some(folder_id);
-        let preset_id = self.state.next_macro_preset_id.max(1);
-        self.state.next_macro_preset_id = preset_id + 1;
+        let preset_id = self.allocate_next_macro_preset_id();
         group.presets = vec![MacroPreset::new(preset_id)];
         self.state.macro_groups.push(group);
         self.pending_macro_group_scroll_target = Some(id);
@@ -8159,8 +8189,7 @@ impl CrosshairApp {
     }
 
     fn clone_macro_preset_with_new_id(&mut self, source: &MacroPreset) -> MacroPreset {
-        let new_preset_id = self.state.next_macro_preset_id.max(1);
-        self.state.next_macro_preset_id = new_preset_id + 1;
+        let new_preset_id = self.allocate_next_macro_preset_id();
         let mut preset = source.clone();
         let old_preset_id = preset.id;
         preset.id = new_preset_id;
