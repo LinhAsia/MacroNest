@@ -10505,8 +10505,15 @@ impl eframe::App for CrosshairApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 UiCommand::MascotDragged { style, x, y } => {
-                    self.state.quick_key_display_x = x;
-                    self.state.quick_key_display_y = y;
+                    let active_mascot_count = if self.state.quick_key_display_mascot_styles.is_empty() {
+                        1
+                    } else {
+                        self.state.quick_key_display_mascot_styles.len()
+                    };
+                    if active_mascot_count <= 1 {
+                        self.state.quick_key_display_x = x;
+                        self.state.quick_key_display_y = y;
+                    }
                     if let Some((_, pos_x, pos_y)) = self
                         .state
                         .quick_key_display_mascot_positions
