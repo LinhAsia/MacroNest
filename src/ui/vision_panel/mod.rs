@@ -3068,49 +3068,8 @@ impl CrosshairApp {
             return;
         };
 
-        match target {
-            VisionCaptureTarget::Preset(preset_id) => {
-                if let Some(preset) = self
-                    .state
-                    .vision_presets
-                    .iter_mut()
-                    .find(|preset| preset.id == preset_id)
-                {
-                    preset.color_priority_from_anchor = true;
-                    preset.color_priority_anchor_screen_x = Some(screen_x);
-                    preset.color_priority_anchor_screen_y = Some(screen_y);
-                    preset.collapsed = false;
-                }
-                self.persist_vision_presets();
-                self.status = format!(
-                    "Saved priority point at {}, {} for preset #{}.",
-                    screen_x, screen_y, preset_id
-                );
-            }
-            VisionCaptureTarget::OcrPreset(_) => {
-                self.status = "OCR presets do not support priority anchors.".to_owned();
-            }
-            VisionCaptureTarget::OcrStepRegion { .. } => {
-                self.status = "OCR steps do not support priority anchors.".to_owned();
-            }
-            VisionCaptureTarget::GeometryColor => {
-                self.status =
-                    "Geometry color picking does not support priority anchors.".to_owned();
-            }
-            VisionCaptureTarget::MacroStepGeometryColor { .. } => {
-                self.status =
-                    "Geometry color picking does not support priority anchors.".to_owned();
-            }
-            VisionCaptureTarget::QuickActionsCoordinates
-            | VisionCaptureTarget::QuickActionsColor
-            | VisionCaptureTarget::QuickActionsKeyDisplayPosition
-            | VisionCaptureTarget::PinPresetColor(_)
-            | VisionCaptureTarget::PinPresetRegion(_)
-            | VisionCaptureTarget::PinPresetSourceCrop(_)
-            | VisionCaptureTarget::HudPresetRegion(_) => {
-                self.status = "This target does not support priority anchors.".to_owned();
-            }
-        }
+        self.status = self.apply_image_search_priority_anchor(target, screen_x, screen_y);
+        self.persist();
         ctx.request_repaint();
     }
 }
