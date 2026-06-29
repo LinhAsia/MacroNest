@@ -361,8 +361,9 @@ impl CrosshairApp {
                                     {
                                         preset.search_region_is_single_pixel = is_single;
                                         if is_single {
-                                            preset.search_region_width = Some(1);
-                                            preset.search_region_height = Some(1);
+                                            Self::set_vision_preset_single_pixel_region(
+                                                preset, None, None,
+                                            );
                                         } else {
                                             preset.search_region_width = None;
                                             preset.search_region_height = None;
@@ -1331,6 +1332,17 @@ impl CrosshairApp {
 
     pub(crate) fn vision_template_file_for_preset(&self, preset_id: u32) -> PathBuf {
         self.paths.vision_template_file_for(preset_id)
+    }
+
+    fn set_vision_preset_single_pixel_region(
+        preset: &mut VisionPreset,
+        screen_x: Option<i32>,
+        screen_y: Option<i32>,
+    ) {
+        preset.search_region_screen_x = screen_x;
+        preset.search_region_screen_y = screen_y;
+        preset.search_region_width = Some(1);
+        preset.search_region_height = Some(1);
     }
 
     pub(crate) fn begin_image_search_capture(
@@ -2741,10 +2753,7 @@ impl CrosshairApp {
             .iter_mut()
             .find(|p| p.id == preset_id)
         {
-            preset.search_region_screen_x = Some(screen_x);
-            preset.search_region_screen_y = Some(screen_y);
-            preset.search_region_width = Some(1);
-            preset.search_region_height = Some(1);
+            Self::set_vision_preset_single_pixel_region(preset, Some(screen_x), Some(screen_y));
             self.status = format!("Selected pixel at {screen_x}, {screen_y}.");
         }
         self.persist();
