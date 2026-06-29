@@ -224,34 +224,43 @@ mod windows_impl {
         find_window_handle_with_candidates(title, &[], false)
     }
 
+    fn current_foreground_window() -> Option<HWND> {
+        let hwnd = unsafe { GetForegroundWindow() };
+        (!hwnd.0.is_null()).then_some(hwnd)
+    }
+
+    fn find_window_by_candidate_chain(
+        title_or_selector: &str,
+        match_duplicate_window_titles: bool,
+    ) -> Option<HWND> {
+        find_window_by_candidate_exact(title_or_selector)
+            .or_else(|| find_window_by_candidate(title_or_selector, match_duplicate_window_titles))
+    }
+
     fn find_window_handle_with_candidates(
         primary_title: Option<&str>,
         extra_titles: &[String],
         match_duplicate_window_titles: bool,
     ) -> Option<HWND> {
         if primary_title.is_none() && extra_titles.is_empty() {
-            let hwnd = unsafe { GetForegroundWindow() };
-            return if hwnd.0.is_null() { None } else { Some(hwnd) };
+            return current_foreground_window();
         }
 
         if let Some(title_or_selector) = primary_title
-            && let Some(hwnd) = find_window_by_candidate_exact(title_or_selector).or_else(|| {
-                find_window_by_candidate(title_or_selector, match_duplicate_window_titles)
-            })
+            && let Some(hwnd) =
+                find_window_by_candidate_chain(title_or_selector, match_duplicate_window_titles)
         {
             return Some(hwnd);
         }
 
         for title in extra_titles {
-            if let Some(hwnd) = find_window_by_candidate_exact(title)
-                .or_else(|| find_window_by_candidate(title, match_duplicate_window_titles))
+            if let Some(hwnd) = find_window_by_candidate_chain(title, match_duplicate_window_titles)
             {
                 return Some(hwnd);
             }
         }
 
-        let hwnd = unsafe { GetForegroundWindow() };
-        if hwnd.0.is_null() { None } else { Some(hwnd) }
+        current_foreground_window()
     }
 
     pub fn parse_window_match_rule(target: &str) -> (&str, Option<WindowMatchRule>) {
