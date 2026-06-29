@@ -1335,7 +1335,7 @@ impl CrosshairApp {
         preset_id: u32,
         duration: Option<u64>,
     ) -> Option<u32> {
-        self.sound_preset_clip_duration_ms.insert(preset_id, duration);
+        self.set_audio_editor_target_duration(AudioEditorTarget::Preset(preset_id), duration);
         self.apply_audio_media_editor_outcome_shared(outcome)
             .then_some(preset_id)
     }
@@ -1346,7 +1346,7 @@ impl CrosshairApp {
         item_id: u32,
         duration: Option<u64>,
     ) -> Option<u32> {
-        self.library_clip_duration_ms.insert(item_id, duration);
+        self.set_audio_editor_target_duration(AudioEditorTarget::Library(item_id), duration);
         self.apply_audio_media_editor_outcome_shared(outcome)
             .then_some(item_id)
     }
@@ -1356,7 +1356,7 @@ impl CrosshairApp {
         outcome: AudioCardOutcome,
         duration: Option<u64>,
     ) -> bool {
-        self.startup_clip_duration_ms = duration;
+        self.set_audio_editor_target_duration(AudioEditorTarget::Startup, duration);
         self.apply_audio_media_editor_outcome_shared(outcome)
     }
 
@@ -1365,7 +1365,7 @@ impl CrosshairApp {
         outcome: AudioCardOutcome,
         duration: Option<u64>,
     ) -> bool {
-        self.exit_clip_duration_ms = duration;
+        self.set_audio_editor_target_duration(AudioEditorTarget::Exit, duration);
         self.apply_audio_media_editor_outcome_shared(outcome)
     }
 
