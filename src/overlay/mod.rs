@@ -19028,13 +19028,7 @@ mod windows_overlay {
                 let _ = send_key_event(&step);
             }
 
-            if !press_locked_keys.is_empty() {
-                apply_unlock_keys(&press_locked_keys, None);
-            }
-
-            for mask in press_locked_mouse_masks {
-                apply_unlock_mouse(None, mask);
-            }
+            cleanup_press_macro_locks(&press_locked_keys, &press_locked_mouse_masks);
 
             let image_search_preset_ids = collect_macro_image_search_start_ids(&preset.steps);
             stop_vision_following_ids(&image_search_preset_ids);
@@ -19158,6 +19152,19 @@ mod windows_overlay {
         hide_toolbox_for_owner(preset_id);
         HOOK_STATE.lock().stop_ignore_keys.remove(&preset_id);
         FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
+    }
+
+    fn cleanup_press_macro_locks(
+        press_locked_keys: &[String],
+        press_locked_mouse_masks: &[MouseMoveLockMask],
+    ) {
+        if !press_locked_keys.is_empty() {
+            apply_unlock_keys(press_locked_keys, None);
+        }
+
+        for &mask in press_locked_mouse_masks {
+            apply_unlock_mouse(None, mask);
+        }
     }
 
     fn current_hold_run_matches(preset_id: u32, run_token: u64) -> bool {
@@ -22828,6 +22835,34 @@ mod windows_overlay {
                 now,
             )
             .is_none());
+        }
+
+        #[test]
+        fn test_cleanup_press_macro_locks_releases_spawned_macro_state() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let mouse_mask = MouseMoveLockMask {
+                left: true,
+                right: false,
+                up: false,
+                down: false,
+            };
+
+            {
+                let mut hook_state = HOOK_STATE.lock();
+                hook_state.locked_inputs.clear();
+                hook_state.mouse_move_locks = MouseMoveLockCounts::default();
+                hook_state.mouse_move_lock_anchor = Some(POINT { x: 10, y: 20 });
+                hook_state.held_inputs.clear();
+                hook_state.locked_inputs.insert("A".to_string(), 1);
+                hook_state.mouse_move_locks.add(mouse_mask);
+            }
+
+            cleanup_press_macro_locks(&["A".to_string()], &[mouse_mask]);
+
+            let hook_state = HOOK_STATE.lock();
+            assert!(!hook_state.locked_inputs.contains_key("A"));
+            assert!(!hook_state.mouse_move_locks.any());
+            assert!(hook_state.mouse_move_lock_anchor.is_none());
         }
 
         #[test]
@@ -28907,6 +28942,7 @@ mod windows_overlay {
                 for step in cleanup_steps {
                     let _ = send_key_event(&step);
                 }
+                cleanup_press_macro_locks(&press_locked_keys, &press_locked_mouse_masks);
                 STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
                 FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
                 SUPPRESSED_MACRO_HOTKEYS.lock().remove(&hotkey_id);
