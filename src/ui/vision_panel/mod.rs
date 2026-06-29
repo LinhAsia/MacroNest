@@ -1639,14 +1639,16 @@ impl CrosshairApp {
                             );
                         }
                         VisionCaptureTarget::GeometryColor => {
-                            self.cancel_image_search_capture(ctx);
-                            self.status =
-                                "Geometry color picking does not support area captures.".to_owned();
+                            self.cancel_image_search_capture_with_status(
+                                ctx,
+                                "Geometry color picking does not support area captures.",
+                            );
                         }
                         VisionCaptureTarget::MacroStepGeometryColor { .. } => {
-                            self.cancel_image_search_capture(ctx);
-                            self.status =
-                                "Geometry color picking does not support area captures.".to_owned();
+                            self.cancel_image_search_capture_with_status(
+                                ctx,
+                                "Geometry color picking does not support area captures.",
+                            );
                         }
                         VisionCaptureTarget::QuickActionsCoordinates
                         | VisionCaptureTarget::QuickActionsColor
@@ -1659,16 +1661,14 @@ impl CrosshairApp {
                         }
                     }
                 } else {
-                    self.cancel_image_search_capture(ctx);
-                    self.status = "Image area capture cancelled.".to_owned();
+                    self.cancel_image_search_capture_with_status(ctx, "Image area capture cancelled.");
                 }
             }
             VisionCaptureMode::ColorSample
             | VisionCaptureMode::ColorPriorityAnchor
             | VisionCaptureMode::SinglePixel => {
                 let Some(target) = self.vision_capture_target else {
-                    self.cancel_image_search_capture(ctx);
-                    self.status = "No image search preset is active.".to_owned();
+                    self.cancel_image_search_capture_with_status(ctx, "No image search preset is active.");
                     return;
                 };
                 match target {
@@ -1695,12 +1695,16 @@ impl CrosshairApp {
                         }
                     }
                     VisionCaptureTarget::OcrPreset(_) => {
-                        self.cancel_image_search_capture(ctx);
-                        self.status = "OCR presets do not support color picking.".to_owned();
+                        self.cancel_image_search_capture_with_status(
+                            ctx,
+                            "OCR presets do not support color picking.",
+                        );
                     }
                     VisionCaptureTarget::OcrStepRegion { .. } => {
-                        self.cancel_image_search_capture(ctx);
-                        self.status = "OCR steps do not support color picking.".to_owned();
+                        self.cancel_image_search_capture_with_status(
+                            ctx,
+                            "OCR steps do not support color picking.",
+                        );
                     }
                     VisionCaptureTarget::GeometryColor => {
                         self.finish_image_search_color_pick_from_screen(ctx, screen_x, screen_y);
@@ -1766,8 +1770,10 @@ impl CrosshairApp {
                     VisionCaptureTarget::PinPresetRegion(_)
                     | VisionCaptureTarget::PinPresetSourceCrop(_)
                     | VisionCaptureTarget::HudPresetRegion(_) => {
-                        self.cancel_image_search_capture(ctx);
-                        self.status = "This target does not support point captures.".to_owned();
+                        self.cancel_image_search_capture_with_status(
+                            ctx,
+                            "This target does not support point captures.",
+                        );
                     }
                 }
             }
@@ -2227,6 +2233,15 @@ impl CrosshairApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
         crate::overlay::wake_command_queue();
+    }
+
+    pub(crate) fn cancel_image_search_capture_with_status(
+        &mut self,
+        ctx: &egui::Context,
+        status: impl Into<String>,
+    ) {
+        self.cancel_image_search_capture(ctx);
+        self.status = status.into();
     }
 
     pub(crate) fn finish_vision_template_capture(
