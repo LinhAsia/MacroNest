@@ -7119,7 +7119,7 @@ mod windows_overlay {
     ) -> f32 {
         let base = (font_size / 36.0).clamp(0.72, 2.4);
         match mascot_style {
-            crate::model::MascotStyle::ChiikawaClassic => base * 1.25,
+            crate::model::MascotStyle::ChiikawaClassic => base * 0.80,
             crate::model::MascotStyle::Hachiware => base * 0.80,
             crate::model::MascotStyle::Gugugaga => base * 0.90,
         }
@@ -7131,6 +7131,7 @@ mod windows_overlay {
     ) -> (i32, i32) {
         let scale = quick_key_display_mascot_scale(font_size, mascot_style);
         let (base_w, base_h) = if mascot_style == crate::model::MascotStyle::Hachiware
+            || mascot_style == crate::model::MascotStyle::ChiikawaClassic
             || mascot_style == crate::model::MascotStyle::Gugugaga
         {
             (448.0, 310.0)
@@ -15728,8 +15729,14 @@ mod windows_overlay {
 
         let time_s = unsafe { GetTickCount() } as f32 * 0.001;
         let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
+        let texture_center_x = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            23.0 * scale
+        } else {
+            0.0
+        };
         let map_point = |svg_x: f32, svg_y: f32| -> (f32, f32) {
-            quick_key_display_chiikawa_map_point(svg_x, svg_y, scale, perspective)
+            let (px, py) = quick_key_display_chiikawa_map_point(svg_x, svg_y, scale, perspective);
+            (px + texture_center_x, py)
         };
         let face_wobble_fast_x = (time_s * 1.65).sin() * 0.16 * scale;
         let face_wobble_fast_y = (time_s * 1.2 + 0.7).sin() * 0.1 * scale;
@@ -16624,11 +16631,7 @@ mod windows_overlay {
         };
         let stroke_color = [59, 41, 38, 255];
         let stroke_w = 2.2 * scale;
-        let arm_size = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            0.64
-        } else {
-            1.0
-        };
+        let arm_size = 1.0;
 
         let draw_detached_arm = |pixmap: &mut tiny_skia::Pixmap,
                                  root_x: f32,
@@ -16774,11 +16777,7 @@ mod windows_overlay {
 
         let y_shift = 30.0;
         // 3D Perspective mapping helper (takes FLAT coordinates, returns SCALED & PROJECTED coordinates)
-        let prop_scale = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            0.64
-        } else {
-            1.0
-        };
+        let prop_scale = 1.0;
         let project_point = |x: f32, y: f32| -> (f32, f32) {
             let x = 199.0 + (x - 199.0) * prop_scale;
             let y = 190.0 + (y - 190.0) * prop_scale;
@@ -16927,7 +16926,9 @@ mod windows_overlay {
 
         // Animate Mascot closer to the desk
         let mut body_cx = 167.0 * scale;
-        if mascot_style == crate::model::MascotStyle::Hachiware {
+        if mascot_style == crate::model::MascotStyle::Hachiware
+            || mascot_style == crate::model::MascotStyle::ChiikawaClassic
+        {
             body_cx = 190.0 * scale;
         }
         body_cx += idle_head_drift_x * 0.25;
@@ -16936,7 +16937,9 @@ mod windows_overlay {
         let body_radius = 36.0 * scale;
 
         let mut head_cx = 168.0 * scale;
-        if mascot_style == crate::model::MascotStyle::Hachiware {
+        if mascot_style == crate::model::MascotStyle::Hachiware
+            || mascot_style == crate::model::MascotStyle::ChiikawaClassic
+        {
             head_cx = 191.0 * scale;
         }
         let mut head_cy = (77.0 + y_shift) * scale;
