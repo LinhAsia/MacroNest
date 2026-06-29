@@ -2049,9 +2049,7 @@ impl CrosshairApp {
         self.clear_image_search_capture_state();
         match mode {
             VisionCaptureMode::Template => {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
-                std::thread::sleep(Duration::from_millis(70));
+                self.hide_image_search_capture_window(ctx, 70);
                 let capture =
                     self.capture_screen_region_from_rect(ctx, rect, ctx.pixels_per_point());
                 self.restore_image_search_viewport(ctx);
@@ -2241,6 +2239,12 @@ impl CrosshairApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
         crate::overlay::wake_command_queue();
+    }
+
+    fn hide_image_search_capture_window(&mut self, ctx: &egui::Context, delay_ms: u64) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
+        std::thread::sleep(Duration::from_millis(delay_ms));
     }
 
     pub(crate) fn finish_image_search_capture_cleanup(&mut self, ctx: &egui::Context) {
@@ -2805,9 +2809,7 @@ impl CrosshairApp {
                     rgba: cropped_rgba,
                 })
             } else {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
-                std::thread::sleep(Duration::from_millis(35));
+                self.hide_image_search_capture_window(ctx, 35);
                 let capture =
                     window_list::capture_virtual_screen_region(screen_x, screen_y, width, height);
                 self.restore_image_search_capture_window(ctx);
@@ -2848,9 +2850,7 @@ impl CrosshairApp {
 
         self.clear_image_search_capture_state();
         let screen_point = self.screen_point_from_pos(ctx, pos, ctx.pixels_per_point());
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
-        std::thread::sleep(Duration::from_millis(70));
+        self.hide_image_search_capture_window(ctx, 70);
         let capture = screen_point.and_then(|(screen_x, screen_y)| {
             window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1)
         });
