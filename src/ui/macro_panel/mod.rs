@@ -13085,18 +13085,18 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     } else {
                                                         step.key.clone()
                                                     };
-                                                                          let response = if step_capture_active {
+                                                    let response = if step_capture_active {
                                                         let text_edit = TextEdit::singleline(&mut display_key).hint_text(Self::tr_lang(language, "Capturing...", "Capturing..."));
                                                         ui.add_sized([146.0, 21.0], text_edit)
                                                     } else {
                                                         let key_id = ui.id().with((step_index, "regular-default-key"));
-                                                        Self::render_expandable_text_edit(
+                                                        Self::render_interpolated_text_edit(
                                                             ui,
                                                             &mut display_key,
                                                             key_id,
                                                             146.0,
                                                             240.0,
-                                                              21.0, 21.0,
+                                                            21.0, 21.0,
                                                             "...",
                                                             false,
                                                         )
@@ -13112,6 +13112,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             step.key = display_key;
                                                             live_sync = true;
                                                         }
+                                                        Self::render_variable_suggestions_braced(ui, &response, &mut step.key, &timer_names, language);
                                                     }
                                                 }
                                             } else if matches!(
