@@ -376,15 +376,8 @@ mod windows_impl {
         let (base_title, rule) = parse_window_match_rule(title_or_selector);
 
         if let Some(rule) = rule {
-            let mut candidates = Vec::new();
-            unsafe {
-                let mut payload = (base_title, match_duplicate_window_titles, &mut candidates);
-                let _ = EnumWindows(
-                    Some(find_all_windows_by_candidate_proc),
-                    LPARAM((&mut payload) as *mut _ as isize),
-                );
-            }
-
+            let candidates =
+                find_all_windows_by_candidate(base_title, match_duplicate_window_titles);
             if candidates.is_empty() {
                 return None;
             }
@@ -401,6 +394,21 @@ mod windows_impl {
             );
         }
         found
+    }
+
+    fn find_all_windows_by_candidate(
+        title_or_selector: &str,
+        match_duplicate_window_titles: bool,
+    ) -> Vec<HWND> {
+        let mut candidates = Vec::new();
+        unsafe {
+            let mut payload = (title_or_selector, match_duplicate_window_titles, &mut candidates);
+            let _ = EnumWindows(
+                Some(find_all_windows_by_candidate_proc),
+                LPARAM((&mut payload) as *mut _ as isize),
+            );
+        }
+        candidates
     }
 
     unsafe extern "system" fn find_window_by_exact_selector_proc(
