@@ -338,15 +338,7 @@ mod windows_impl {
             return None;
         }
 
-        let mut found = None;
-        unsafe {
-            let mut payload = (title_or_selector, &mut found);
-            let _ = EnumWindows(
-                Some(find_window_by_exact_selector_proc),
-                LPARAM((&mut payload) as *mut _ as isize),
-            );
-        }
-        found
+        find_first_window_by_exact_selector(title_or_selector)
     }
 
     pub fn window_matches_candidate_title(
@@ -385,15 +377,7 @@ mod windows_impl {
             return select_window_by_match_rule(&candidates, rule);
         }
 
-        let mut found = None;
-        unsafe {
-            let mut payload = (title_or_selector, match_duplicate_window_titles, &mut found);
-            let _ = EnumWindows(
-                Some(find_window_by_candidate_proc),
-                LPARAM((&mut payload) as *mut _ as isize),
-            );
-        }
-        found
+        find_first_window_by_candidate(title_or_selector, match_duplicate_window_titles)
     }
 
     fn find_all_windows_by_candidate(
@@ -409,6 +393,33 @@ mod windows_impl {
             );
         }
         candidates
+    }
+
+    fn find_first_window_by_exact_selector(title_or_selector: &str) -> Option<HWND> {
+        let mut found = None;
+        unsafe {
+            let mut payload = (title_or_selector, &mut found);
+            let _ = EnumWindows(
+                Some(find_window_by_exact_selector_proc),
+                LPARAM((&mut payload) as *mut _ as isize),
+            );
+        }
+        found
+    }
+
+    fn find_first_window_by_candidate(
+        title_or_selector: &str,
+        match_duplicate_window_titles: bool,
+    ) -> Option<HWND> {
+        let mut found = None;
+        unsafe {
+            let mut payload = (title_or_selector, match_duplicate_window_titles, &mut found);
+            let _ = EnumWindows(
+                Some(find_window_by_candidate_proc),
+                LPARAM((&mut payload) as *mut _ as isize),
+            );
+        }
+        found
     }
 
     unsafe extern "system" fn find_window_by_exact_selector_proc(
