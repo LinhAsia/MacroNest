@@ -7180,6 +7180,24 @@ mod windows_overlay {
         )
     }
 
+    fn quick_key_display_mascot_visible_insets(
+        font_size: f32,
+        mascot_style: crate::model::MascotStyle,
+    ) -> (i32, i32, i32, i32) {
+        let scale = quick_key_display_mascot_scale(font_size, mascot_style);
+        let (left, top, right, bottom) = match mascot_style {
+            crate::model::MascotStyle::Hachiware => (36.0, 16.0, 88.0, 36.0),
+            crate::model::MascotStyle::ChiikawaClassic => (38.0, 6.0, 82.0, 36.0),
+            crate::model::MascotStyle::Chiikawa => (38.0, 10.0, 84.0, 36.0),
+        };
+        (
+            (left * scale).round() as i32,
+            (top * scale).round() as i32,
+            (right * scale).round() as i32,
+            (bottom * scale).round() as i32,
+        )
+    }
+
     fn push_quick_key_display_mascot_row(
         keys: &mut Vec<QuickKeyDisplayMascotKey>,
         base_x: f32,
@@ -7561,6 +7579,38 @@ mod windows_overlay {
         (total_width.max(1), max_height.max(1), items)
     }
 
+    fn quick_key_display_mascot_group_visible_insets(
+        font_size: f32,
+        styles: &[crate::model::MascotStyle],
+    ) -> (i32, i32, i32, i32) {
+        let (group_width, group_height, items) =
+            quick_key_display_mascot_group_layout(font_size, styles);
+        let gap = (font_size * 0.25).round() as i32;
+        let mut x = 0;
+        let mut min_left = group_width;
+        let mut min_top = group_height;
+        let mut max_right = 0;
+        let mut max_bottom = 0;
+
+        for (style, width, height) in items {
+            let y = (group_height - height) / 2;
+            let (left, top, right, bottom) =
+                quick_key_display_mascot_visible_insets(font_size, style);
+            min_left = min_left.min(x + left);
+            min_top = min_top.min(y + top);
+            max_right = max_right.max(x + width - right);
+            max_bottom = max_bottom.max(y + height - bottom);
+            x += width + gap;
+        }
+
+        (
+            min_left.max(0),
+            min_top.max(0),
+            (group_width - max_right).max(0),
+            (group_height - max_bottom).max(0),
+        )
+    }
+
     fn quick_key_display_default_mascot_centers(
         center_x: i32,
         center_y: i32,
@@ -7659,6 +7709,7 @@ mod windows_overlay {
         center_y: i32,
         width: i32,
         height: i32,
+        insets: (i32, i32, i32, i32),
     ) -> (i32, i32) {
         let virtual_left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
         let virtual_top = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
@@ -7666,10 +7717,11 @@ mod windows_overlay {
         let virtual_bottom = virtual_top + unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) }.max(1);
         let half_width = width / 2;
         let half_height = height / 2;
-        let min_x = virtual_left + half_width;
-        let max_x = virtual_right - (width - half_width);
-        let min_y = virtual_top + half_height;
-        let max_y = virtual_bottom - (height - half_height);
+        let (left_inset, top_inset, right_inset, bottom_inset) = insets;
+        let min_x = virtual_left + half_width - left_inset;
+        let max_x = virtual_right - (width - half_width) + right_inset;
+        let min_y = virtual_top + half_height - top_inset;
+        let max_y = virtual_bottom - (height - half_height) + bottom_inset;
 
         (
             center_x.clamp(min_x, max_x.max(min_x)),
@@ -7767,10 +7819,11 @@ mod windows_overlay {
                 };
                 let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
                 let (width, height) = quick_key_display_mascot_layout_size(font_size, style);
+                let insets = quick_key_display_mascot_visible_insets(font_size, style);
                 let center_x = start_center_x + (cursor.x - start_mouse_x);
                 let center_y = start_center_y + (cursor.y - start_mouse_y);
                 let (center_x, center_y) =
-                    clamp_mascot_center_to_screen(center_x, center_y, width, height);
+                    clamp_mascot_center_to_screen(center_x, center_y, width, height, insets);
                 runtime
                     .quick_key_display_mascot_positions
                     .insert(style, (center_x, center_y));
@@ -9087,11 +9140,13 @@ mod windows_overlay {
             }
         };
         if runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot {
+            let insets = quick_key_display_mascot_group_visible_insets(font_size, &mascot_styles);
             let (center_x, center_y) = clamp_mascot_center_to_screen(
                 runtime.quick_key_display_center_x,
                 runtime.quick_key_display_center_y,
                 width,
                 height,
+                insets,
             );
             runtime.quick_key_display_center_x = center_x;
             runtime.quick_key_display_center_y = center_y;
