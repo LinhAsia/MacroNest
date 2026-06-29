@@ -1565,6 +1565,41 @@ impl CrosshairApp {
             .unwrap_or_else(|| Self::tr_lang(language, fallback, fallback).to_owned())
     }
 
+    fn option_label_by_id_or_any(
+        options: &[(u32, String)],
+        selected_id: Option<u32>,
+        fallback: &'static str,
+        any_id: u32,
+        any_label: &'static str,
+        language: UiLanguage,
+    ) -> String {
+        selected_id
+            .and_then(|id| {
+                if id == any_id {
+                    Some(Self::tr_lang(language, any_label, any_label).to_owned())
+                } else {
+                    options
+                        .iter()
+                        .find(|(option_id, _)| *option_id == id)
+                        .map(|(_, label)| label.clone())
+                }
+            })
+            .unwrap_or_else(|| Self::tr_lang(language, fallback, fallback).to_owned())
+    }
+
+    fn ocr_step_selected_label(
+        ocr_preset_options: &[(u32, String)],
+        is_custom: bool,
+        selected_id: Option<u32>,
+        language: UiLanguage,
+    ) -> String {
+        if is_custom {
+            Self::tr_lang(language, "Custom OCR", "Custom OCR").to_owned()
+        } else {
+            Self::option_label_by_id(ocr_preset_options, selected_id, "Select OCR", language)
+        }
+    }
+
     fn vision_preset_selected_label(
         vision_presets: &[crate::model::VisionPreset],
         selected_id: Option<u32>,

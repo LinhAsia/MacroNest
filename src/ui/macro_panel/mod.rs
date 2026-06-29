@@ -2538,23 +2538,14 @@ impl CrosshairApp {
                             &[]
                         };
                         let selected_id = cond.running_preset_id;
-                        let selected_label = selected_id
-                            .and_then(|id| {
-                                if id == 0 {
-                                    Some(
-                                        Self::tr_lang(language, "Any Preset", "Any Preset")
-                                            .to_owned(),
-                                    )
-                                } else {
-                                    group_presets
-                                        .iter()
-                                        .find(|(pid, _)| *pid == id)
-                                        .map(|(_, name)| name.clone())
-                                }
-                            })
-                            .unwrap_or_else(|| {
-                                Self::tr_lang(language, "Preset", "Preset").to_owned()
-                            });
+                        let selected_label = Self::option_label_by_id_or_any(
+                            group_presets,
+                            selected_id,
+                            "Preset",
+                            0,
+                            "Any Preset",
+                            language,
+                        );
                         egui::ComboBox::from_id_salt((
                             group_id,
                             preset_id,
@@ -11752,18 +11743,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 } else if step.action == MacroAction::OcrSearch {
                                                     let is_custom = step.key.trim().is_empty() || step.key.trim() == "0";
                                                     let selected_id = if is_custom { None } else { step.key.trim().parse::<u32>().ok() };
-                                                    let selected_label = if is_custom {
-                                                        Self::tr_lang(language, "Custom OCR", "Custom OCR").to_owned()
-                                                    } else {
-                                                        selected_id
-                                                            .and_then(|id| {
-                                                                ocr_preset_options
-                                                                    .iter()
-                                                                    .find(|(preset_id, _)| *preset_id == id)
-                                                                    .map(|(_, label)| label.clone())
-                                                            })
-                                                            .unwrap_or_else(|| Self::tr_lang(language, "Select OCR", "Select OCR").to_owned())
-                                                    };
+                                                    let selected_label = Self::ocr_step_selected_label(
+                                                        &ocr_preset_options,
+                                                        is_custom,
+                                                        selected_id,
+                                                        language,
+                                                    );
                                                     live_sync |= Self::sanitize_legacy_ocr_target_text(&mut step.ocr_target_text);
                                                     // 1. OCR Preset ComboBox (Width 110.0)
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "ocr-preset-step"))
@@ -12746,15 +12731,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                             &[]
                                                                         };
                                                                         let selected_id = step.if_running_preset_id;
-                                                                        let selected_label = selected_id
-                                                                            .and_then(|id| {
-                                                                                if id == 0 {
-                                                                                    Some(Self::tr_lang(language, "Any Preset", "Any Preset").to_owned())
-                                                                                } else {
-                                                                                    group_presets.iter().find(|(pid, _)| *pid == id).map(|(_, name)| name.clone())
-                                                                                }
-                                                                            })
-                                                                            .unwrap_or_else(|| Self::tr_lang(language, "Preset", "Preset").to_owned());
+                                                                        let selected_label = Self::option_label_by_id_or_any(
+                                                                            group_presets,
+                                                                            selected_id,
+                                                                            "Preset",
+                                                                            0,
+                                                                            "Any Preset",
+                                                                            language,
+                                                                        );
                                                                         egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "if-running-preset"))
                                                                             .width(120.0)
                                                                             .selected_text(selected_label)
