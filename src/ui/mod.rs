@@ -1806,21 +1806,18 @@ impl CrosshairApp {
         path: &str,
         duration: Option<u64>,
     ) {
+        self.set_audio_editor_target_duration(target, duration);
         match target {
             AudioEditorTarget::Preset(preset_id) => {
-                self.sound_preset_clip_duration_ms.insert(preset_id, duration);
                 self.show_sound_preset_audio_editor.insert(preset_id);
             }
             AudioEditorTarget::Library(item_id) => {
-                self.library_clip_duration_ms.insert(item_id, duration);
                 self.show_library_audio_editor.insert(item_id);
             }
             AudioEditorTarget::Startup => {
-                self.startup_clip_duration_ms = duration;
                 self.show_startup_audio_editor = true;
             }
             AudioEditorTarget::Exit => {
-                self.exit_clip_duration_ms = duration;
                 self.show_exit_audio_editor = true;
             }
         }
@@ -1956,6 +1953,27 @@ impl CrosshairApp {
         }
         if self.state.audio_settings.exit.file_path.trim() == path {
             self.exit_clip_duration_ms = duration_ms;
+        }
+    }
+
+    fn set_audio_editor_target_duration(
+        &mut self,
+        target: AudioEditorTarget,
+        duration: Option<u64>,
+    ) {
+        match target {
+            AudioEditorTarget::Preset(preset_id) => {
+                self.sound_preset_clip_duration_ms.insert(preset_id, duration);
+            }
+            AudioEditorTarget::Library(item_id) => {
+                self.library_clip_duration_ms.insert(item_id, duration);
+            }
+            AudioEditorTarget::Startup => {
+                self.startup_clip_duration_ms = duration;
+            }
+            AudioEditorTarget::Exit => {
+                self.exit_clip_duration_ms = duration;
+            }
         }
     }
 
