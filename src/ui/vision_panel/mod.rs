@@ -365,10 +365,7 @@ impl CrosshairApp {
                                                 preset, None, None,
                                             );
                                         } else {
-                                            preset.search_region_width = None;
-                                            preset.search_region_height = None;
-                                            preset.search_region_screen_x = None;
-                                            preset.search_region_screen_y = None;
+                                            Self::clear_vision_preset_search_region(preset);
                                         }
                                         live_sync = true;
                                     }
@@ -410,10 +407,7 @@ impl CrosshairApp {
                                     .button(Self::tr_lang(language, "Clear area", "Clear area"))
                                     .clicked()
                                 {
-                                    preset.search_region_screen_x = None;
-                                    preset.search_region_screen_y = None;
-                                    preset.search_region_width = None;
-                                    preset.search_region_height = None;
+                                    Self::clear_vision_preset_search_region(preset);
                                     live_sync = true;
                                 }
 
@@ -1343,6 +1337,13 @@ impl CrosshairApp {
         preset.search_region_screen_y = screen_y;
         preset.search_region_width = Some(1);
         preset.search_region_height = Some(1);
+    }
+
+    fn clear_vision_preset_search_region(preset: &mut VisionPreset) {
+        preset.search_region_screen_x = None;
+        preset.search_region_screen_y = None;
+        preset.search_region_width = None;
+        preset.search_region_height = None;
     }
 
     pub(crate) fn begin_image_search_capture(
