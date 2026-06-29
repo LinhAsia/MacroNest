@@ -57,13 +57,15 @@ impl CrosshairApp {
             self.state.macro_mouse_click_delay_ms,
             self.state.macro_keyboard_key_press_delay_ms,
         );
-        if !Self::update_synced_state(delays, &mut self.last_synced_macro_delays) {
-            return;
-        }
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateMacroDelays {
-            mouse_click_delay_ms: delays.0,
-            keyboard_key_press_delay_ms: delays.1,
-        });
+        Self::sync_overlay_command_if_changed(
+            &self.overlay_tx,
+            delays,
+            &mut self.last_synced_macro_delays,
+            OverlayCommand::UpdateMacroDelays {
+                mouse_click_delay_ms: delays.0,
+                keyboard_key_press_delay_ms: delays.1,
+            },
+        );
     }
 
     pub(crate) fn sync_profiles(&mut self) {
@@ -109,6 +111,20 @@ impl CrosshairApp {
         }
         *last_synced = Some(state);
         true
+    }
+
+    pub(crate) fn sync_overlay_command_if_changed<T>(
+        overlay_tx: &crossbeam_channel::Sender<OverlayCommand>,
+        state: T,
+        last_synced: &mut Option<T>,
+        command: OverlayCommand,
+    ) where
+        T: Clone + PartialEq,
+    {
+        if !Self::update_synced_state(state, last_synced) {
+            return;
+        }
+        let _ = overlay_tx.send(command);
     }
 
     pub(crate) fn sync_macro_presets(&mut self) {
@@ -159,35 +175,32 @@ impl CrosshairApp {
 
     pub(crate) fn sync_macro_master_enabled(&mut self) {
         let enabled = self.state.macros_master_enabled;
-        if !Self::update_synced_state(enabled, &mut self.last_synced_macros_master_enabled) {
-            return;
-        }
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::SetMacrosMasterEnabled(enabled));
+        Self::sync_overlay_command_if_changed(
+            &self.overlay_tx,
+            enabled,
+            &mut self.last_synced_macros_master_enabled,
+            OverlayCommand::SetMacrosMasterEnabled(enabled),
+        );
     }
 
     pub(crate) fn sync_windows_key_locked(&mut self) {
         let locked = self.state.windows_key_locked;
-        if !Self::update_synced_state(locked, &mut self.last_synced_windows_key_locked) {
-            return;
-        }
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::SetWindowsKeyLocked(locked));
+        Self::sync_overlay_command_if_changed(
+            &self.overlay_tx,
+            locked,
+            &mut self.last_synced_windows_key_locked,
+            OverlayCommand::SetWindowsKeyLocked(locked),
+        );
     }
 
     pub(crate) fn sync_native_focus_highlight_enabled(&mut self) {
         let enabled = self.state.native_focus_highlight_enabled;
-        if !Self::update_synced_state(
+        Self::sync_overlay_command_if_changed(
+            &self.overlay_tx,
             enabled,
             &mut self.last_synced_native_focus_highlight_enabled,
-        ) {
-            return;
-        }
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::SetNativeFocusHighlightEnabled(enabled));
+            OverlayCommand::SetNativeFocusHighlightEnabled(enabled),
+        );
     }
 
     pub(crate) fn sync_focus_highlight_config(&mut self) {
@@ -300,27 +313,26 @@ impl CrosshairApp {
             self.state.quick_key_sound_style,
             self.state.quick_key_sound_volume,
         );
-        if !Self::update_synced_state(config, &mut self.last_synced_quick_key_sound_config) {
-            return;
-        }
-        let _ = self.overlay_tx.send(OverlayCommand::UpdateKeySoundConfig {
-            enabled: config.0,
-            style: config.1,
-            volume: config.2,
-        });
+        Self::sync_overlay_command_if_changed(
+            &self.overlay_tx,
+            config,
+            &mut self.last_synced_quick_key_sound_config,
+            OverlayCommand::UpdateKeySoundConfig {
+                enabled: config.0,
+                style: config.1,
+                volume: config.2,
+            },
+        );
     }
 
     pub(crate) fn sync_vietnamese_input_enabled(&mut self) {
         let enabled = self.state.vietnamese_input_enabled;
-        if !Self::update_synced_state(
+        Self::sync_overlay_command_if_changed(
+            &self.overlay_tx,
             enabled,
             &mut self.last_synced_vietnamese_input_enabled,
-        ) {
-            return;
-        }
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::SetVietnameseInputEnabled(enabled));
+            OverlayCommand::SetVietnameseInputEnabled(enabled),
+        );
     }
 
     pub(crate) fn sync_macro_master_hotkey(&mut self) {
