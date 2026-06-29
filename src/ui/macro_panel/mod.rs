@@ -6034,9 +6034,12 @@ impl CrosshairApp {
                                                         .map(|(_, _, gpresets)| gpresets.clone())
                                                         .unwrap_or_default();
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| trig_presets.iter().find(|(pid, _)| *pid == id).map(|(_, lbl)| lbl.clone()))
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select macro", "Select macro").to_owned());
+                                                    let selected_label = Self::option_label_by_id(
+                                                        &trig_presets,
+                                                        selected_id,
+                                                        "Select macro",
+                                                        language,
+                                                    );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-enable-disable-macro-preset"))
                                                         .width(146.0)
                                                         .selected_text(selected_label)
@@ -6069,10 +6072,12 @@ impl CrosshairApp {
                                                         ui.spacing_mut().interact_size.y = 18.0;
                                                         ui.spacing_mut().button_padding.y = 0.0;
                                                         ui.spacing_mut().item_spacing.x = 2.0;
-                                                        let preset_label = group_preset_options.iter()
-                                                            .find(|(id, _)| *id == current_preset_id)
-                                                            .map(|(_, label)| label.clone())
-                                                            .unwrap_or_else(|| Self::tr_lang(language, "Select preset", "Select preset").to_owned());
+                                                        let preset_label = Self::option_label_by_id(
+                                                            &group_preset_options,
+                                                            Some(current_preset_id),
+                                                            "Select preset",
+                                                            language,
+                                                        );
                                                         egui::ComboBox::from_id_salt((group.id, preset.id, 0, "step-preset-select"))
                                                             .width(100.0)
                                                             .selected_text(preset_label)
@@ -7204,11 +7209,11 @@ impl CrosshairApp {
                                                                        }
                                                                    } else if step.if_condition_type == IfConditionType::VisionMatch {
                                                                        let selected_id = step.if_vision_preset_id;
-                                                                       let selected_label = selected_id
-                                                                           .and_then(|id| {
-                                                                               self.state.vision_presets.iter().find(|p| p.id == id).map(|p| p.name.clone())
-                                                                           })
-                                                                           .unwrap_or_else(|| Self::tr_lang(language, "Select preset", "Select preset").to_owned());
+                                                                       let selected_label = Self::vision_preset_selected_label(
+                                                                           &self.state.vision_presets,
+                                                                           selected_id,
+                                                                           language,
+                                                                       );
                                                                        egui::ComboBox::from_id_salt((group.id, preset.id, 0, "hold-stop-if-vision-preset"))
     .width(146.0)
 
@@ -7364,9 +7369,12 @@ impl CrosshairApp {
                                                                            &[]
                                                                        };
                                                                        let selected_id = step.if_running_preset_id;
-                                                                       let selected_label = selected_id
-                                                                           .and_then(|id| group_presets.iter().find(|(pid, _)| *pid == id).map(|(_, name)| name.clone()))
-                                                                           .unwrap_or_else(|| Self::tr_lang(language, "Preset", "Preset").to_owned());
+                                                                       let selected_label = Self::option_label_by_id(
+                                                                           group_presets,
+                                                                           selected_id,
+                                                                           "Preset",
+                                                                           language,
+                                                                       );
                                                                        egui::ComboBox::from_id_salt((group.id, preset.id, 0, "hold-stop-if-running-preset"))
                                                                            .width(120.0)
                                                                            .selected_text(selected_label)
@@ -7380,14 +7388,12 @@ impl CrosshairApp {
                                                                            });
                                                                    } else if step.if_condition_type == IfConditionType::OcrMatch {
                                                                         let selected_id = step.if_ocr_preset_id;
-                                                                        let selected_label = selected_id
-                                                                            .and_then(|id| {
-                                                                                ocr_preset_options
-                                                                                    .iter()
-                                                                                    .find(|(preset_id, _)| *preset_id == id)
-                                                                                    .map(|(_, label)| label.clone())
-                                                                            })
-                                                                            .unwrap_or_else(|| Self::tr_lang(language, "Select OCR", "Select OCR").to_owned());
+                                                                        let selected_label = Self::option_label_by_id(
+                                                                            &ocr_preset_options,
+                                                                            selected_id,
+                                                                            "Select OCR",
+                                                                            language,
+                                                                        );
                                                                         egui::ComboBox::from_id_salt((group.id, preset.id, 0, "hold-stop-if-ocr-preset"))
                                                                             .width(146.0)
                                                                             .selected_text(selected_label)
@@ -8194,9 +8200,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         .map(|(_, _, gpresets)| gpresets.clone())
                                                         .unwrap_or_default();
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| trig_presets.iter().find(|(pid, _)| *pid == id).map(|(_, lbl)| lbl.clone()))
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select macro", "Select macro").to_owned());
+                                                    let selected_label = Self::option_label_by_id(
+                                                        &trig_presets,
+                                                        selected_id,
+                                                        "Select macro",
+                                                        language,
+                                                    );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, "press-stop-enable-disable-macro-preset"))
                                                         .width(146.0)
                                                         .selected_text(selected_label)
@@ -8229,10 +8238,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         ui.spacing_mut().interact_size.y = 18.0;
                                                         ui.spacing_mut().button_padding.y = 0.0;
                                                         ui.spacing_mut().item_spacing.x = 2.0;
-                                                        let preset_label = group_preset_options.iter()
-                                                            .find(|(id, _)| *id == current_preset_id)
-                                                            .map(|(_, label)| label.clone())
-                                                            .unwrap_or_else(|| Self::tr_lang(language, "Select preset", "Select preset").to_owned());
+                                                        let preset_label = Self::option_label_by_id(
+                                                            &group_preset_options,
+                                                            Some(current_preset_id),
+                                                            "Select preset",
+                                                            language,
+                                                        );
                                                         egui::ComboBox::from_id_salt((group.id, preset.id, 0, "step-preset-select"))
                                                             .width(100.0)
                                                             .selected_text(preset_label)
@@ -9364,11 +9375,11 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                        }
                                                                    } else if step.if_condition_type == IfConditionType::VisionMatch {
                                                                        let selected_id = step.if_vision_preset_id;
-                                                                       let selected_label = selected_id
-                                                                           .and_then(|id| {
-                                                                               self.state.vision_presets.iter().find(|p| p.id == id).map(|p| p.name.clone())
-                                                                           })
-                                                                           .unwrap_or_else(|| Self::tr_lang(language, "Select preset", "Select preset").to_owned());
+                                                                       let selected_label = Self::vision_preset_selected_label(
+                                                                           &self.state.vision_presets,
+                                                                           selected_id,
+                                                                           language,
+                                                                       );
                                                                        egui::ComboBox::from_id_salt((group.id, preset.id, 0, "press-stop-if-vision-preset"))
     .width(146.0)
 
@@ -9524,9 +9535,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                            &[]
                                                                        };
                                                                        let selected_id = step.if_running_preset_id;
-                                                                       let selected_label = selected_id
-                                                                           .and_then(|id| group_presets.iter().find(|(pid, _)| *pid == id).map(|(_, name)| name.clone()))
-                                                                           .unwrap_or_else(|| Self::tr_lang(language, "Preset", "Preset").to_owned());
+                                                                       let selected_label = Self::option_label_by_id(
+                                                                           group_presets,
+                                                                           selected_id,
+                                                                           "Preset",
+                                                                           language,
+                                                                       );
                                                                        egui::ComboBox::from_id_salt((group.id, preset.id, 0, "press-stop-if-running-preset"))
                                                                            .width(120.0)
                                                                            .selected_text(selected_label)
@@ -11197,9 +11211,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         .map(|(_, _, gpresets)| gpresets.clone())
                                                         .unwrap_or_default();
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| trig_presets.iter().find(|(pid, _)| *pid == id).map(|(_, lbl)| lbl.clone()))
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select macro", "Select macro").to_owned());
+                                                    let selected_label = Self::option_label_by_id(
+                                                        &trig_presets,
+                                                        selected_id,
+                                                        "Select macro",
+                                                        language,
+                                                    );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "enable-disable-macro-preset-step"))
                                                         .width(146.0)
                                                         .selected_text(selected_label)
@@ -12588,11 +12605,11 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                         }
                                                                     } else if step.if_condition_type == IfConditionType::VisionMatch {
                                                                         let selected_id = step.if_vision_preset_id;
-                                                                        let selected_label = selected_id
-                                                                            .and_then(|id| {
-                                                                                self.state.vision_presets.iter().find(|p| p.id == id).map(|p| p.name.clone())
-                                                                            })
-                                                                            .unwrap_or_else(|| Self::tr_lang(language, "Select preset", "Select preset").to_owned());
+                                                                        let selected_label = Self::vision_preset_selected_label(
+                                                                            &self.state.vision_presets,
+                                                                            selected_id,
+                                                                            language,
+                                                                        );
                                                                         egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "if-vision-preset"))
     .width(146.0)
 
