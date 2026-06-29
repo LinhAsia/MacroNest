@@ -7589,31 +7589,30 @@ mod windows_overlay {
         }
     }
 
-    fn move_quick_key_display_window(runtime: &Runtime) {
+    fn move_quick_key_display_window_for_style(
+        runtime: &Runtime,
+        style: crate::model::MascotStyle,
+        center_x: i32,
+        center_y: i32,
+    ) {
         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
         let styles = quick_key_display_active_mascot_styles(runtime);
+        let Some(index) = styles.iter().position(|entry| *entry == style) else {
+            return;
+        };
         let hwnds = quick_key_display_hwnds(runtime);
-        let items = quick_key_display_default_mascot_centers(
-            runtime.quick_key_display_center_x,
-            runtime.quick_key_display_center_y,
-            font_size,
-            &styles,
-        );
-        for (index, (style, default_x, default_y, width, height)) in items.into_iter().enumerate() {
-            let (center_x, center_y) =
-                quick_key_display_mascot_center(runtime, style, default_x, default_y);
-            let _ = unsafe {
-                SetWindowPos(
-                    hwnds[index],
-                    None,
-                    center_x - width / 2,
-                    center_y - height / 2,
-                    width,
-                    height,
-                    SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE,
-                )
-            };
-        }
+        let (width, height) = quick_key_display_mascot_layout_size(font_size, style);
+        let _ = unsafe {
+            SetWindowPos(
+                hwnds[index],
+                Some(HWND_TOPMOST),
+                center_x - width / 2,
+                center_y - height / 2,
+                width,
+                height,
+                SWP_NOACTIVATE | SWP_NOSIZE,
+            )
+        };
     }
 
     fn clamp_mascot_center_to_screen(
@@ -7706,6 +7705,7 @@ mod windows_overlay {
                 *MASCOT_DRAG_START_MOUSE.lock() = Some((cursor.x, cursor.y));
                 *MASCOT_DRAG_START_CENTER.lock() = Some((center_x, center_y));
                 *MASCOT_DRAG_STYLE.lock() = Some(style);
+                move_quick_key_display_window_for_style(runtime, style, center_x, center_y);
                 MASCOT_WINDOW_MOVING.store(true, Ordering::Relaxed);
                 true
             }
@@ -7730,7 +7730,7 @@ mod windows_overlay {
                 runtime
                     .quick_key_display_mascot_positions
                     .insert(style, (center_x, center_y));
-                move_quick_key_display_window(runtime);
+                move_quick_key_display_window_for_style(runtime, style, center_x, center_y);
                 true
             }
             WM_LBUTTONUP => {
@@ -9060,7 +9060,7 @@ mod windows_overlay {
             let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
             let current_ms = unsafe { GetTickCount() };
             // Retain the hand on the mouse long enough to avoid one-frame key target flicker.
-            let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 1200
+            let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 220
                 || runtime.quick_key_display_mouse_offset.0.abs() > 0.5
                 || runtime.quick_key_display_mouse_offset.1.abs() > 0.5;
 
@@ -15709,6 +15709,86 @@ mod windows_overlay {
         }
     }
 
+    fn mascot_blink_amount(time_s: f32, phase: f32) -> f32 {
+        let cycle = (time_s + phase).rem_euclid(4.7);
+        if cycle > 0.18 {
+            0.0
+        } else {
+            (std::f32::consts::PI * cycle / 0.18).sin()
+        }
+    }
+
+    fn draw_mascot_sweat_drop(
+        pixmap: &mut tiny_skia::Pixmap,
+        sx: f32,
+        sy: f32,
+        size: f32,
+        fill: [u8; 4],
+        stroke: [u8; 4],
+        stroke_width: f32,
+    ) {
+        let mut drop = tiny_skia::PathBuilder::new();
+        drop.move_to(sx, sy - 12.0 * size);
+        drop.cubic_to(
+            sx + 8.8 * size,
+            sy - 4.7 * size,
+            sx + 10.8 * size,
+            sy + 5.8 * size,
+            sx + 2.4 * size,
+            sy + 12.4 * size,
+        );
+        drop.cubic_to(
+            sx - 6.8 * size,
+            sy + 10.3 * size,
+            sx - 10.3 * size,
+            sy + 1.7 * size,
+            sx - 4.4 * size,
+            sy - 5.4 * size,
+        );
+        drop.cubic_to(
+            sx - 2.0 * size,
+            sy - 8.1 * size,
+            sx - 0.7 * size,
+            sy - 10.1 * size,
+            sx,
+            sy - 12.0 * size,
+        );
+        drop.close();
+        if let Some(path) = drop.finish() {
+            fill_skia_path(pixmap, &path, fill);
+            stroke_skia_path(pixmap, &path, stroke, stroke_width);
+        }
+        fill_skia_ellipse(
+            pixmap,
+            sx - 2.0 * size,
+            sy - 2.2 * size,
+            2.1 * size,
+            4.8 * size,
+            [255, 255, 255, 90],
+        );
+    }
+
+    fn draw_mascot_blink(
+        pixmap: &mut tiny_skia::Pixmap,
+        cx: f32,
+        cy: f32,
+        rx: f32,
+        face_fill: [u8; 4],
+        stroke: [u8; 4],
+        amount: f32,
+    ) {
+        if amount <= 0.02 {
+            return;
+        }
+        fill_skia_ellipse(pixmap, cx, cy, rx * 1.25, rx * 0.92, face_fill);
+        let mut lid = tiny_skia::PathBuilder::new();
+        lid.move_to(cx - rx * 0.82, cy);
+        lid.quad_to(cx, cy + rx * 0.34 * amount, cx + rx * 0.82, cy);
+        if let Some(path) = lid.finish() {
+            stroke_skia_path(pixmap, &path, stroke, rx * 0.34);
+        }
+    }
+
     /// Draws the character's head, hair and all face features into `pixmap`.
     /// Called twice: once in pass 1 (before desk) and once in pass 3 (on top of arms).
     fn mascot_draw_head_and_face(
@@ -15752,7 +15832,7 @@ mod windows_overlay {
                 200.0
             };
 
-            let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
+            let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.14, 0.14);
 
             let screen_y_at_ch0 = 27.4_f32 * scale;
             let dest_y =
@@ -15780,13 +15860,12 @@ mod windows_overlay {
                         };
 
                     let (look_mul_x, look_mul_y, wobble_x, wobble_y) = match path_index_for_wobble {
-                        4..=13 => {
+                        4..=14 => {
                             (0.38, 0.46, face_wobble_slow_x, face_wobble_slow_y)
                         }
-                        14 | 15 | 16 => (0.8, 0.78, face_wobble_mid_x, face_wobble_fast_y),
-                        17 | 18 | 19 => (0.8, 0.78, face_wobble_mid_x, face_wobble_fast_y),
-                        20 | 21 => (0.6, 0.65, face_wobble_mid_x * 0.75, face_wobble_mid_y),
-                        22 => (0.48, 0.46, face_wobble_fast_x, face_wobble_fast_y),
+                        15..=18 => (0.8, 0.78, face_wobble_mid_x, face_wobble_fast_y),
+                        19..=21 => (0.6, 0.65, face_wobble_mid_x * 0.75, face_wobble_mid_y),
+                        22 | 23 => (0.48, 0.46, face_wobble_fast_x, face_wobble_fast_y),
                         _ => (0.1, 0.1, 0.0, 0.0),
                     };
 
@@ -15795,7 +15874,7 @@ mod windows_overlay {
 
                     px += look_x * look_mul_x + wobble_x;
                     py += look_y * look_mul_y + wobble_y + vertical_offset;
-                    if matches!(path_index_for_wobble, 14..=22) {
+                    if matches!(path_index_for_wobble, 15..=23) {
                         px += face_pulse_x;
                         py += face_pulse_y;
                     }
@@ -15930,23 +16009,45 @@ mod windows_overlay {
                     let sx = head_cx + 34.0 * scale + look_x * 0.25;
                     let sy = head_cy - 17.0 * scale + look_y * 0.2;
                     let s = (0.85 + sweat * 0.55) * scale;
-                    let mut drop = tiny_skia::PathBuilder::new();
-                    drop.move_to(sx, sy - 8.0 * s);
-                    drop.quad_to(sx + 8.0 * s, sy + 1.0 * s, sx, sy + 8.5 * s);
-                    drop.quad_to(sx - 7.0 * s, sy + 1.0 * s, sx, sy - 8.0 * s);
-                    drop.close();
-                    if let Some(p) = drop.finish() {
-                        fill_skia_path(pixmap, &p, [176, 228, 255, 235]);
-                        stroke_skia_path(pixmap, &p, [59, 41, 38, 235], 1.3 * scale);
-                    }
+                    draw_mascot_sweat_drop(
+                        pixmap,
+                        sx,
+                        sy,
+                        s,
+                        [176, 228, 255, 235],
+                        [59, 41, 38, 235],
+                        1.3 * scale,
+                    );
                 }
+            }
+
+            let blink = mascot_blink_amount(time_s, 0.0);
+            if blink > 0.0 {
+                draw_mascot_blink(
+                    pixmap,
+                    head_cx - 28.0 * scale + look_x * 0.52,
+                    head_cy + 9.0 * scale + look_y * 0.44,
+                    9.2 * scale,
+                    [255, 255, 255, 255],
+                    [55, 27, 17, 255],
+                    blink,
+                );
+                draw_mascot_blink(
+                    pixmap,
+                    head_cx + 27.0 * scale + look_x * 0.52,
+                    head_cy + 9.0 * scale + look_y * 0.44,
+                    9.2 * scale,
+                    [255, 255, 255, 255],
+                    [55, 27, 17, 255],
+                    blink,
+                );
             }
 
             return;
         }
 
         let time_s = unsafe { GetTickCount() } as f32 * 0.001;
-        let perspective = 0.32 + (look_x / (11.0 * scale)).clamp(-0.16, 0.22);
+        let perspective = 0.32 + (look_x / (11.0 * scale)).clamp(-0.16, 0.16);
         let texture_center_x = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             23.0 * scale
         } else {
@@ -16672,6 +16773,27 @@ mod windows_overlay {
             let (h2x, h2y) = map_face_eye(246.0, 190.0);
             fill_skia_circle(&mut tmp_pixmap, h2x, h2y, 4.0 * 0.53 * scale, eye_highlight);
         }
+        let blink = mascot_blink_amount(time_s, 0.38);
+        if blink > 0.0 {
+            draw_mascot_blink(
+                &mut tmp_pixmap,
+                ex1,
+                ey1,
+                r_eye,
+                fill_color,
+                stroke_color,
+                blink,
+            );
+            draw_mascot_blink(
+                &mut tmp_pixmap,
+                ex2,
+                ey2,
+                r_eye,
+                fill_color,
+                stroke_color,
+                blink,
+            );
+        }
 
         // 10. Left cheek
         let cheek_fill =
@@ -16785,29 +16907,15 @@ mod windows_overlay {
             let s_scale = (0.78 + 0.5 * sweat_size) * scale;
 
             let (sx, sy) = map_face_brow(284.0, 154.0);
-            let mut drop = tiny_skia::PathBuilder::new();
-            drop.move_to(sx, sy - 8.0 * s_scale);
-            drop.cubic_to(
-                sx + 7.0 * s_scale,
-                sy - 4.0 * s_scale,
-                sx + 6.0 * s_scale,
-                sy + 5.0 * s_scale,
+            draw_mascot_sweat_drop(
+                &mut tmp_pixmap,
                 sx,
-                sy + 9.5 * s_scale,
+                sy,
+                s_scale,
+                [180, 230, 255, 235],
+                stroke_color,
+                1.35 * scale,
             );
-            drop.cubic_to(
-                sx - 6.0 * s_scale,
-                sy + 5.0 * s_scale,
-                sx - 7.0 * s_scale,
-                sy - 4.0 * s_scale,
-                sx,
-                sy - 8.0 * s_scale,
-            );
-            drop.close();
-            if let Some(p) = drop.finish() {
-                fill_skia_path(&mut tmp_pixmap, &p, [180, 230, 255, 235]);
-                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 1.35 * scale);
-            }
         }
 
         // Cut off the head below the desk top (desk top surface starts at 146.0 * scale, projected with y_shift 30.0 to 176.0 * scale)
@@ -16868,8 +16976,12 @@ mod windows_overlay {
             [255, 241, 189, 255]
         };
         let stroke_color = [59, 41, 38, 255];
-        let stroke_w = 2.45 * scale;
-        let arm_size = 1.18;
+        let arm_size = if mascot_style == crate::model::MascotStyle::Hachiware {
+            1.46
+        } else {
+            1.18
+        };
+        let stroke_w = 2.45 * scale * (arm_size / 1.18);
 
         let draw_detached_arm = |pixmap: &mut tiny_skia::Pixmap,
                                  root_x: f32,
@@ -17034,7 +17146,7 @@ mod windows_overlay {
             0.0
         };
         let prop_yaw = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            idle_turn_x / scale * 0.004 + mouse_offset.0 * 0.0015
+            (idle_turn_x / scale * 0.004 + mouse_offset.0 * 0.0015).clamp(-0.055, 0.055)
         } else {
             0.0
         };
@@ -17643,7 +17755,7 @@ mod windows_overlay {
         // Mouse active state tracking
         let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
         // Retain the hand on the mouse long enough to avoid one-frame key target flicker.
-        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 1200;
+        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 220;
         let mouse_active = is_mouse_moving
             || !held_mouse_buttons.is_empty()
             || mouse_offset.0.abs() > 0.5
