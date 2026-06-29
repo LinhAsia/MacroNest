@@ -8892,7 +8892,7 @@ mod windows_overlay {
                 font_size,
                 window_rect: (x, y, width, height),
                 spam_heat_discrete: (runtime.quick_key_display_spam_heat * 50.0).round() as i32,
-                animation_frame: current_ms / 16,
+                animation_frame: current_ms / 8,
             };
 
             if runtime.quick_key_display_last_mascot_state.as_ref() == Some(&current_state)
@@ -11138,9 +11138,12 @@ mod windows_overlay {
         }
 
         if runtime.quick_key_display_enabled
-            && (runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
-                || !runtime.quick_key_display_entries.is_empty())
+            && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
         {
+            return 8;
+        }
+
+        if runtime.quick_key_display_enabled && !runtime.quick_key_display_entries.is_empty() {
             return 16;
         }
 
@@ -15734,9 +15737,19 @@ mod windows_overlay {
         } else {
             0.0
         };
+        let texture_scale = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            1.12
+        } else {
+            1.0
+        };
+        let texture_anchor = (191.0 * scale, (77.0 + 30.0) * scale);
         let map_point = |svg_x: f32, svg_y: f32| -> (f32, f32) {
             let (px, py) = quick_key_display_chiikawa_map_point(svg_x, svg_y, scale, perspective);
-            (px + texture_center_x, py)
+            let px = px + texture_center_x;
+            (
+                texture_anchor.0 + (px - texture_anchor.0) * texture_scale,
+                texture_anchor.1 + (py - texture_anchor.1) * texture_scale,
+            )
         };
         let face_wobble_fast_x = (time_s * 1.65).sin() * 0.16 * scale;
         let face_wobble_fast_y = (time_s * 1.2 + 0.7).sin() * 0.1 * scale;
@@ -16630,8 +16643,8 @@ mod windows_overlay {
             [255, 241, 189, 255]
         };
         let stroke_color = [59, 41, 38, 255];
-        let stroke_w = 2.2 * scale;
-        let arm_size = 1.0;
+        let stroke_w = 2.45 * scale;
+        let arm_size = 1.18;
 
         let draw_detached_arm = |pixmap: &mut tiny_skia::Pixmap,
                                  root_x: f32,
@@ -16945,11 +16958,13 @@ mod windows_overlay {
         let mut head_cy = (77.0 + y_shift) * scale;
         head_cx += idle_head_drift_x;
         head_cy += idle_body_bob * 0.7 + type_bounce * 0.45;
-        let head_radius = if mascot_style == crate::model::MascotStyle::Hachiware {
-            56.0 * scale
-        } else {
-            56.0 * scale
-        };
+        let head_radius = 56.0
+            * scale
+            * if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+                1.12
+            } else {
+                1.0
+            };
 
         let paw_press = if held_keys.is_empty() && held_mouse_buttons.is_empty() {
             recent_pulse * 2.4 * scale
