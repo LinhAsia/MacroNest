@@ -6976,7 +6976,7 @@ mod windows_overlay {
             .quick_key_display_slot_labels
             .insert((lane, slot), text.clone());
         runtime.quick_key_display_spam_heat =
-            (runtime.quick_key_display_spam_heat + 0.045).min(1.0);
+            (runtime.quick_key_display_spam_heat + 0.055).min(1.0);
         runtime
             .quick_key_display_entries
             .push(QuickKeyDisplayEntry {
@@ -7570,6 +7570,23 @@ mod windows_overlay {
             .get(&style)
             .copied()
             .unwrap_or((default_x, default_y))
+    }
+
+    fn ensure_quick_key_display_mascot_positions(runtime: &mut Runtime) {
+        let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+        let styles = quick_key_display_active_mascot_styles(runtime);
+        let items = quick_key_display_default_mascot_centers(
+            runtime.quick_key_display_center_x,
+            runtime.quick_key_display_center_y,
+            font_size,
+            &styles,
+        );
+        for (style, default_x, default_y, _, _) in items {
+            runtime
+                .quick_key_display_mascot_positions
+                .entry(style)
+                .or_insert((default_x, default_y));
+        }
     }
 
     fn move_quick_key_display_window(runtime: &Runtime) {
@@ -8446,6 +8463,7 @@ mod windows_overlay {
                         .into_iter()
                         .map(|(style, x, y)| (style, (x, y)))
                         .collect();
+                    ensure_quick_key_display_mascot_positions(runtime);
                     {
                         let mut hook_state = HOOK_STATE.lock();
                         hook_state.quick_key_mascot_active =
@@ -8959,8 +8977,8 @@ mod windows_overlay {
             .min(0.1);
         runtime.quick_key_display_last_update = now;
 
-        // Decay spam heat towards 0 with a half-life of 1.2 seconds.
-        let decay = (-0.57762265 * dt).exp();
+        // Decay spam heat towards 0 with a half-life of 2.4 seconds.
+        let decay = (-0.28881133 * dt).exp();
         runtime.quick_key_display_spam_heat *= decay;
         if runtime.quick_key_display_spam_heat < 0.001 {
             runtime.quick_key_display_spam_heat = 0.0;
@@ -16581,9 +16599,9 @@ mod windows_overlay {
         quick_key_display_apply_heat_tint_ellipse(
             &mut tmp_pixmap,
             head_cx + look_x * 0.2,
-            head_cy + 10.0 * scale + look_y * 0.35,
-            45.0 * scale,
-            40.0 * scale,
+            head_cy + 18.0 * scale + look_y * 0.35,
+            38.0 * scale,
+            31.0 * scale,
             red_factor,
             [255, 90, 105, 255],
         );
@@ -16615,7 +16633,8 @@ mod windows_overlay {
         // 8. Left eye
         let (ex1, ey1) = map_face_eye(159.0, 184.0);
         let r_eye = 15.0 * 0.53 * scale;
-        let eye_heat = ((red_factor - 0.55) / 0.3).clamp(0.0, 1.0);
+        let eye_heat_t = ((red_factor - 0.34) / 0.48).clamp(0.0, 1.0);
+        let eye_heat = eye_heat_t * eye_heat_t * (3.0 - 2.0 * eye_heat_t);
         let eye_fill =
             quick_key_display_mix_rgba([74, 45, 42, 255], [255, 255, 255, 255], eye_heat);
         let eye_highlight =
@@ -16659,7 +16678,7 @@ mod windows_overlay {
             quick_key_display_mix_rgba([255, 196, 202, 112], [255, 122, 146, 228], red_factor);
         let cheek_line =
             quick_key_display_mix_rgba(stroke_color, [255, 92, 120, 255], red_factor * 0.85);
-        let (cx1, cy1) = map_face_cheek(126.0, 215.0);
+        let (cx1, cy1) = map_face_cheek(132.0, 214.0);
         fill_skia_ellipse(
             &mut tmp_pixmap,
             cx1,
@@ -16669,9 +16688,9 @@ mod windows_overlay {
             cheek_fill,
         );
         for &(x1, y1, x2, y2) in &[
-            (112.0, 207.0, 106.0, 222.0),
-            (123.0, 205.0, 117.0, 222.0),
-            (134.0, 207.0, 128.0, 222.0),
+            (118.0, 207.0, 112.0, 221.0),
+            (129.0, 205.0, 123.0, 221.0),
+            (140.0, 207.0, 134.0, 221.0),
         ] {
             let mut path = tiny_skia::PathBuilder::new();
             let start = map_face_cheek(x1, y1);
@@ -16684,7 +16703,7 @@ mod windows_overlay {
         }
 
         // 11. Right cheek
-        let (cx2, cy2) = map_face_cheek(274.0, 215.0);
+        let (cx2, cy2) = map_face_cheek(268.0, 214.0);
         fill_skia_ellipse(
             &mut tmp_pixmap,
             cx2,
@@ -16694,9 +16713,9 @@ mod windows_overlay {
             cheek_fill,
         );
         for &(x1, y1, x2, y2) in &[
-            (262.0, 207.0, 256.0, 222.0),
-            (273.0, 205.0, 267.0, 222.0),
-            (284.0, 207.0, 278.0, 222.0),
+            (256.0, 207.0, 250.0, 221.0),
+            (267.0, 205.0, 261.0, 221.0),
+            (278.0, 207.0, 272.0, 221.0),
         ] {
             let mut path = tiny_skia::PathBuilder::new();
             let start = map_face_cheek(x1, y1);
@@ -17230,10 +17249,10 @@ mod windows_overlay {
 
         let visual_red_factor = match mascot_style {
             crate::model::MascotStyle::ChiikawaClassic => {
-                ((red_factor - 0.34) / 0.66).clamp(0.0, 1.0).powf(1.35)
+                ((red_factor - 0.18) / 0.82).clamp(0.0, 1.0).powf(1.12)
             }
             crate::model::MascotStyle::Hachiware => {
-                ((red_factor - 0.24) / 0.76).clamp(0.0, 1.0).powf(1.15)
+                ((red_factor - 0.16) / 0.84).clamp(0.0, 1.0).powf(1.08)
             }
             crate::model::MascotStyle::Gugugaga => red_factor,
         };
