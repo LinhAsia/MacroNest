@@ -1580,6 +1580,14 @@ impl CrosshairApp {
             .unwrap_or_else(|| Self::tr_lang(language, "Select preset", "Select preset").to_owned())
     }
 
+    fn vision_preset_by_id<'a>(
+        vision_presets: &'a [crate::model::VisionPreset],
+        selected_id: Option<u32>,
+    ) -> Option<&'a crate::model::VisionPreset> {
+        let id = selected_id?;
+        vision_presets.iter().find(|preset| preset.id == id)
+    }
+
     fn item_selected_label<T>(
         items: &[T],
         selected_id: Option<u32>,

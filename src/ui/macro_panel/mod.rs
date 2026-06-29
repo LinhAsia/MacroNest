@@ -6376,12 +6376,17 @@ impl CrosshairApp {
                     }
     });
 
-                                                 let is_pixel = selected_id.and_then(|id| {
-                                                        self.state.vision_presets.iter().find(|p| p.id == id)
-                                                    }).map(|p| p.is_pixel_counter).unwrap_or(false);
-                                                 let is_single_pixel = selected_id.and_then(|id| {
-                                                        self.state.vision_presets.iter().find(|p| p.id == id)
-                                                    }).map(|p| p.use_color_matching && p.search_region_is_single_pixel && !p.is_pixel_counter).unwrap_or(false);
+                                                 let selected_vision_preset = Self::vision_preset_by_id(
+                                                        &self.state.vision_presets,
+                                                        selected_id,
+                                                    );
+                                                 let is_pixel = selected_vision_preset
+                                                        .is_some_and(|preset| preset.is_pixel_counter);
+                                                 let is_single_pixel = selected_vision_preset.is_some_and(|preset| {
+                                                        preset.use_color_matching
+                                                            && preset.search_region_is_single_pixel
+                                                            && !preset.is_pixel_counter
+                                                    });
                                                  let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
                                                     if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
                                                         ui.add_space(4.0);
@@ -8531,12 +8536,17 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                     }
     });
 
-                                                 let is_pixel = selected_id.and_then(|id| {
-                                                        self.state.vision_presets.iter().find(|p| p.id == id)
-                                                    }).map(|p| p.is_pixel_counter).unwrap_or(false);
-                                                 let is_single_pixel = selected_id.and_then(|id| {
-                                                        self.state.vision_presets.iter().find(|p| p.id == id)
-                                                    }).map(|p| p.use_color_matching && p.search_region_is_single_pixel && !p.is_pixel_counter).unwrap_or(false);
+                                                 let selected_vision_preset = Self::vision_preset_by_id(
+                                                        &self.state.vision_presets,
+                                                        selected_id,
+                                                    );
+                                                 let is_pixel = selected_vision_preset
+                                                        .is_some_and(|preset| preset.is_pixel_counter);
+                                                 let is_single_pixel = selected_vision_preset.is_some_and(|preset| {
+                                                        preset.use_color_matching
+                                                            && preset.search_region_is_single_pixel
+                                                            && !preset.is_pixel_counter
+                                                    });
                                                  let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
                                                     if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
                                                         ui.add_space(4.0);
@@ -11618,12 +11628,17 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                     }
     });
 
-                                                     let is_pixel = selected_id.and_then(|id| {
-                                                        self.state.vision_presets.iter().find(|p| p.id == id)
-                                                    }).map(|p| p.is_pixel_counter).unwrap_or(false);
-                                                     let is_single_pixel = selected_id.and_then(|id| {
-                                                        self.state.vision_presets.iter().find(|p| p.id == id)
-                                                    }).map(|p| p.use_color_matching && p.search_region_is_single_pixel && !p.is_pixel_counter).unwrap_or(false);
+                                                     let selected_vision_preset = Self::vision_preset_by_id(
+                                                        &self.state.vision_presets,
+                                                        selected_id,
+                                                    );
+                                                     let is_pixel = selected_vision_preset
+                                                        .is_some_and(|preset| preset.is_pixel_counter);
+                                                     let is_single_pixel = selected_vision_preset.is_some_and(|preset| {
+                                                        preset.use_color_matching
+                                                            && preset.search_region_is_single_pixel
+                                                            && !preset.is_pixel_counter
+                                                    });
                                                      let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
                                                     if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
                                                         ui.add_space(4.0);
