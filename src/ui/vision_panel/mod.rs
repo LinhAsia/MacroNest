@@ -2285,6 +2285,16 @@ impl CrosshairApp {
         self.status = status;
     }
 
+    fn finish_image_search_priority_anchor_result(
+        &mut self,
+        target: VisionCaptureTarget,
+        screen_x: i32,
+        screen_y: i32,
+    ) {
+        self.status = self.apply_image_search_priority_anchor(target, screen_x, screen_y);
+        self.persist();
+    }
+
     fn sample_image_search_color(&self, screen_x: i32, screen_y: i32) -> Option<RgbaColor> {
         if let Some(ref frame) = self.captured_freeze_frame {
             let rx = screen_x - frame.screen_x;
@@ -2712,9 +2722,7 @@ impl CrosshairApp {
         };
 
         self.finish_image_search_capture_cleanup(ctx);
-
-        self.status = self.apply_image_search_priority_anchor(target, screen_x, screen_y);
-        self.persist();
+        self.finish_image_search_priority_anchor_result(target, screen_x, screen_y);
         ctx.request_repaint();
     }
 
@@ -2878,8 +2886,7 @@ impl CrosshairApp {
             return;
         };
 
-        self.status = self.apply_image_search_priority_anchor(target, screen_x, screen_y);
-        self.persist();
+        self.finish_image_search_priority_anchor_result(target, screen_x, screen_y);
         ctx.request_repaint();
     }
 }
