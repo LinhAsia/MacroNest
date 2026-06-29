@@ -2672,8 +2672,7 @@ impl CrosshairApp {
         screen_y: i32,
     ) {
         let Some(target) = self.vision_capture_target else {
-            self.cancel_image_search_capture(ctx);
-            self.status = "No image search preset is active.".to_owned();
+            self.cancel_image_search_capture_with_status(ctx, "No image search preset is active.");
             return;
         };
 
@@ -2700,8 +2699,7 @@ impl CrosshairApp {
         screen_y: i32,
     ) {
         let Some(target) = self.vision_capture_target else {
-            self.cancel_image_search_capture(ctx);
-            self.status = "No image search preset is active.".to_owned();
+            self.cancel_image_search_capture_with_status(ctx, "No image search preset is active.");
             return;
         };
 
