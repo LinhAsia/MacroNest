@@ -8989,11 +8989,20 @@ mod windows_overlay {
     }
 
     fn screen_draw_toolbar_rect(state: &ScreenDrawState) -> ScreenDrawDirtyRect {
-        ScreenDrawDirtyRect {
-            left: state.toolbar_x.max(0) as usize,
-            top: state.toolbar_y.max(0) as usize,
-            right: (state.toolbar_x + SCREEN_DRAW_TOOLBAR_WIDTH).max(0) as usize,
-            bottom: (state.toolbar_y + SCREEN_DRAW_TOOLBAR_HEIGHT).max(0) as usize,
+        if state.active_control == ScreenDrawControl::BrushSize {
+            ScreenDrawDirtyRect {
+                left: (state.toolbar_x - 40).max(0) as usize,
+                top: (state.toolbar_y - 80).max(0) as usize,
+                right: (state.toolbar_x + SCREEN_DRAW_TOOLBAR_WIDTH + 40).max(0) as usize,
+                bottom: (state.toolbar_y + SCREEN_DRAW_TOOLBAR_HEIGHT).max(0) as usize,
+            }
+        } else {
+            ScreenDrawDirtyRect {
+                left: state.toolbar_x.max(0) as usize,
+                top: state.toolbar_y.max(0) as usize,
+                right: (state.toolbar_x + SCREEN_DRAW_TOOLBAR_WIDTH).max(0) as usize,
+                bottom: (state.toolbar_y + SCREEN_DRAW_TOOLBAR_HEIGHT).max(0) as usize,
+            }
         }
     }
 
@@ -9169,13 +9178,42 @@ mod windows_overlay {
                 deactivate_screen_draw(&mut state);
             }
             ScreenDrawHit::Color => {
-                let hwnd = windows::Win32::Foundation::HWND(SCREEN_DRAW_HWND.load(std::sync::atomic::Ordering::Relaxed) as _);
-                if let Some(new_color) = show_color_picker_dialog(hwnd, state.color) {
-                    state.color = new_color;
-                    let toolbar_rect = screen_draw_toolbar_rect(&state);
-                    mark_screen_draw_dirty(&mut state, toolbar_rect);
-                    should_sync_config = true;
-                }
+                let current_color = state.color;
+                std::thread::spawn(move || {
+                    use windows::Win32::UI::Controls::Dialogs::{ChooseColorW, CHOOSECOLORW, CC_FULLOPEN, CC_RGBINIT};
+                    use windows::Win32::Foundation::COLORREF;
+
+                    let mut custom_colors = [COLORREF(0xFFFFFF); 16];
+                    let rgb_val = (current_color.r as u32) | ((current_color.g as u32) << 8) | ((current_color.b as u32) << 16);
+                    
+                    let mut cc = CHOOSECOLORW::default();
+                    cc.lStructSize = std::mem::size_of::<CHOOSECOLORW>() as u32;
+                    cc.hwndOwner = windows::Win32::Foundation::HWND::default();
+                    cc.rgbResult = COLORREF(rgb_val);
+                    cc.lpCustColors = custom_colors.as_mut_ptr();
+                    cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+
+                    unsafe {
+                        if ChooseColorW(&mut cc).as_bool() {
+                            let res = cc.rgbResult.0;
+                            let r = (res & 0xFF) as u8;
+                            let g = ((res >> 8) & 0xFF) as u8;
+                            let b = ((res >> 16) & 0xFF) as u8;
+                            let new_color = RgbaColor { r, g, b, a: 255 };
+
+                            {
+                                let mut state = SCREEN_DRAW_STATE.lock();
+                                state.color = new_color;
+                                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                                state.committed_dirty = true;
+                                state.pending_repaint = true;
+                            }
+                            send_screen_draw_config_to_ui();
+                            request_screen_draw_overlay_sync();
+                        }
+                    }
+                });
             }
             ScreenDrawHit::BrushSize => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
@@ -9218,11 +9256,6 @@ mod windows_overlay {
                 }
             }
             ScreenDrawHit::ToolbarBody => {
-                state.active_control = ScreenDrawControl::MoveToolbar;
-                state.drag_offset_x = point.x - state.toolbar_x;
-                state.drag_offset_y = point.y - state.toolbar_y;
-            }
-            ScreenDrawHit::DragHandle => {
                 state.active_control = ScreenDrawControl::MoveToolbar;
                 state.drag_offset_x = point.x - state.toolbar_x;
                 state.drag_offset_y = point.y - state.toolbar_y;
@@ -9864,7 +9897,12 @@ mod windows_overlay {
             _ => (false, false),
         };
         if handled || repaint {
-            if message != WM_MOUSEMOVE || screen_draw_should_present_immediately() {
+            let is_brush_drag = if message == WM_MOUSEMOVE {
+                SCREEN_DRAW_STATE.lock().active_control == ScreenDrawControl::BrushSize
+            } else {
+                false
+            };
+            if message != WM_MOUSEMOVE || is_brush_drag || screen_draw_should_present_immediately() {
                 request_screen_draw_overlay_sync();
             }
         }

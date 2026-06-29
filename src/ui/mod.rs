@@ -4672,7 +4672,7 @@ impl CrosshairApp {
                             &button_response,
                             TitlebarQuickActionKind::ScreenDraw,
                             &mut |ui| {
-                                ui.vertical_centered(|ui| {
+                                ui.vertical(|ui| {
                                     let pass_changed = ui
                                         .checkbox(
                                             &mut self.state.quick_screen_draw_pass_trigger_through,
@@ -4687,6 +4687,55 @@ impl CrosshairApp {
                                     if pass_changed {
                                         self.sync_quick_screen_draw_config();
                                         self.persist();
+                                    }
+
+                                    ui.add_space(4.0);
+                                    let is_pass_through = self.state.quick_screen_draw_pass_trigger_through;
+                                    if is_pass_through && self.state.quick_screen_draw_freeze {
+                                        self.state.quick_screen_draw_freeze = false;
+                                        self.sync_quick_screen_draw_config();
+                                    }
+                                    let freeze_changed = ui
+                                        .add_enabled(
+                                            !is_pass_through,
+                                            egui::Checkbox::new(
+                                                &mut self.state.quick_screen_draw_freeze,
+                                                RichText::new("Freeze screen").size(10.0),
+                                            ),
+                                        )
+                                        .changed();
+                                    if freeze_changed {
+                                        self.sync_quick_screen_draw_config();
+                                        self.persist();
+                                    }
+
+                                    ui.add_space(4.0);
+                                    let smooth_changed = ui
+                                        .checkbox(
+                                            &mut self.state.quick_screen_draw_smoothing,
+                                            RichText::new("Smooth line").size(10.0),
+                                        )
+                                        .changed();
+                                    if smooth_changed {
+                                        self.sync_quick_screen_draw_config();
+                                        self.persist();
+                                    }
+
+                                    if self.state.quick_screen_draw_smoothing {
+                                        ui.add_space(2.0);
+                                        let amount_changed = ui
+                                            .add(
+                                                egui::Slider::new(
+                                                    &mut self.state.quick_screen_draw_smoothing_amount,
+                                                    0.0..=1.0,
+                                                )
+                                                .show_value(true)
+                                            )
+                                            .changed();
+                                        if amount_changed {
+                                            self.sync_quick_screen_draw_config();
+                                            self.persist();
+                                        }
                                     }
 
                                     ui.add_space(4.0);
