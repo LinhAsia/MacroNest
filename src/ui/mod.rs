@@ -1512,6 +1512,28 @@ impl CrosshairApp {
         })
     }
 
+    fn command_preset_selected_label(
+        command_presets: &[CommandPreset],
+        selected_id: Option<u32>,
+        key: &str,
+        language: UiLanguage,
+    ) -> String {
+        selected_id
+            .and_then(|id| {
+                command_presets
+                    .iter()
+                    .find(|preset| preset.id == id)
+                    .map(|preset| preset.name.clone())
+            })
+            .unwrap_or_else(|| {
+                if key.trim().is_empty() {
+                    Self::tr_lang(language, "Select command", "Select command").to_owned()
+                } else {
+                    key.to_owned()
+                }
+            })
+    }
+
     fn ordered_id_index<T, F>(items: &[T], id: u32, id_of: F) -> usize
     where
         F: Fn(&T) -> u32,

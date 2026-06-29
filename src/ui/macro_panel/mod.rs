@@ -5924,22 +5924,12 @@ impl CrosshairApp {
                                                         &self.state.command_presets,
                                                         &step.key,
                                                     );
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .command_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            if step.key.trim().is_empty() {
-                                                                Self::tr_lang(language, "Select command", "Select command")
-                                                                .to_owned()
-                                                            } else {
-                                                                step.key.clone()
-                                                            }
-                                                        });
+                                                    let selected_label = Self::command_preset_selected_label(
+                                                        &self.state.command_presets,
+                                                        selected_id,
+                                                        &step.key,
+                                                        language,
+                                                    );
                                                     let custom_preset_combo = egui::ComboBox::from_id_salt((group.id, preset.id, "trigger-custom-preset-step"))
                                                         .width(160.0)
                                                         .selected_text(selected_label)
@@ -8096,22 +8086,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         &self.state.command_presets,
                                                         &step.key,
                                                     );
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .command_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            if step.key.trim().is_empty() {
-                                                                Self::tr_lang(language, "Select command", "Select command")
-                                                                .to_owned()
-                                                            } else {
-                                                                step.key.clone()
-                                                            }
-                                                        });
+                                                    let selected_label = Self::command_preset_selected_label(
+                                                        &self.state.command_presets,
+                                                        selected_id,
+                                                        &step.key,
+                                                        language,
+                                                    );
                                                     let custom_preset_combo = egui::ComboBox::from_id_salt((group.id, preset.id, "trigger-custom-preset-step"))
                                                         .width(160.0)
                                                         .selected_text(selected_label)
@@ -11111,22 +11091,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         &self.state.command_presets,
                                                         &step.key,
                                                     );
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .command_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            if step.key.trim().is_empty() {
-                                                                Self::tr_lang(language, "Select command", "Select command")
-                                                                .to_owned()
-                                                            } else {
-                                                                step.key.clone()
-                                                            }
-                                                        });
+                                                    let selected_label = Self::command_preset_selected_label(
+                                                        &self.state.command_presets,
+                                                        selected_id,
+                                                        &step.key,
+                                                        language,
+                                                    );
                                                     let custom_preset_combo = egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "trigger-custom-preset-step"))
                                                         .width(146.0)
                                                         .selected_text(selected_label)
