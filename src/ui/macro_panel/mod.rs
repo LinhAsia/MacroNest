@@ -4509,6 +4509,11 @@ impl CrosshairApp {
                                         && preset.steps.iter().any(|s| s.action == MacroAction::StartVisionSearch && s.enabled)
                                         && !preset.steps.iter().any(|s| s.action == MacroAction::StopVision && s.enabled)
                                 });
+                            let has_group_hidden_running_timer = group.collapsed
+                                && group
+                                    .presets
+                                    .iter()
+                                    .any(Self::preset_has_hidden_running_timer);
                             if has_group_inf_loop || has_group_vision_leak {
                                 ui.add_space(2.0);
                                 let response = ui.add_sized([24.0, 21.0], egui::Button::new(
@@ -4525,6 +4530,39 @@ impl CrosshairApp {
                                         if has_group_vision_leak {
                                             ui.label(Self::tr_lang(language, "This group contains one or more macros that start image search (Press/Release trigger) but never stop it! This could cause background CPU thread leaks.", "This group contains one or more macros that start image search (Press/Release trigger) but never stop it! This could cause background CPU thread leaks."));
                                         }
+                                });
+                                ui.add_space(2.0);
+                            }
+                            if has_group_hidden_running_timer {
+                                let response = ui.add_sized(
+                                    [24.0, 21.0],
+                                    egui::Button::new(
+                                        Self::material_icon_text(0xe8b5, 18.0)
+                                            .color(Color32::from_rgb(255, 196, 0)),
+                                    )
+                                    .frame(false),
+                                );
+                                response.on_hover_ui(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            Self::material_icon_text(0xe8b5, 14.0)
+                                                .color(Color32::from_rgb(255, 196, 0)),
+                                        );
+                                        ui.label(
+                                            RichText::new(Self::tr_lang(
+                                                language,
+                                                "RUNNING TIMER",
+                                                "RUNNING TIMER",
+                                            ))
+                                            .strong()
+                                            .color(Color32::from_rgb(255, 196, 0)),
+                                        );
+                                    });
+                                    ui.label(Self::tr_lang(
+                                        language,
+                                        "This collapsed group contains a timer step that is still running.",
+                                        "This collapsed group contains a timer step that is still running.",
+                                    ));
                                 });
                                 ui.add_space(2.0);
                             }
@@ -5542,6 +5580,9 @@ impl CrosshairApp {
                                                      s.action,
                                                      MacroAction::StopAudioSense
                                                  ) && s.enabled);
+                                             let has_preset_hidden_running_timer =
+                                                 preset.collapsed
+                                                     && Self::preset_has_hidden_running_timer(preset);
                                              if has_preset_inf_loop || has_preset_vision_leak || has_preset_audio_leak {
                                                  ui.add_space(4.0);
                                                  let response = ui.add_sized([24.0, 21.0], egui::Button::new(
@@ -5561,6 +5602,23 @@ impl CrosshairApp {
                                                          if has_preset_audio_leak {
                                                              ui.label(Self::tr_lang(language, "This macro starts AudioSense under Press/Release trigger, but does not contain a stop-audio action! This could leave a background audio monitor running. Add a 'StopAudio' step or change trigger to 'Hold'.", "This macro starts AudioSense under Press/Release trigger, but does not contain a stop-audio action! This could leave a background audio monitor running. Add a 'StopAudio' step or change trigger to 'Hold'."));
                                                          }
+                                                 });
+                                             }
+                                             if has_preset_hidden_running_timer {
+                                                 ui.add_space(4.0);
+                                                 let response = ui.add_sized([24.0, 21.0], egui::Button::new(
+                                                     Self::material_icon_text(0xe8b5, 18.0).color(Color32::from_rgb(255, 196, 0))
+                                                 ).frame(false));
+                                                 response.on_hover_ui(|ui| {
+                                                     ui.horizontal(|ui| {
+                                                         ui.label(Self::material_icon_text(0xe8b5, 14.0).color(Color32::from_rgb(255, 196, 0)));
+                                                         ui.label(RichText::new(Self::tr_lang(language, "RUNNING TIMER", "RUNNING TIMER")).strong().color(Color32::from_rgb(255, 196, 0)));
+                                                     });
+                                                     ui.label(Self::tr_lang(
+                                                         language,
+                                                         "This collapsed preset contains a timer step that is still running.",
+                                                         "This collapsed preset contains a timer step that is still running.",
+                                                     ));
                                                  });
                                              }
                                             },
@@ -6169,6 +6227,15 @@ impl CrosshairApp {
                                                                 }
                                                             }
                                                         });
+                                                    if step.action == MacroAction::StartTimerPreset
+                                                        && crate::overlay::is_timer_preset_active(selected_id)
+                                                        && ui
+                                                            .small_button(Self::tr_lang(language, "Stop now", "Stop now"))
+                                                            .on_hover_text(Self::tr_lang(language, "Stop this running timer immediately.", "Stop this running timer immediately."))
+                                                            .clicked()
+                                                    {
+                                                        crate::overlay::stop_timer_preset(selected_id);
+                                                    }
                                                     if step.action == MacroAction::ReadTimerPreset {
                                                         let selected_prop = Self::normalize_timer_value_property(&step.key);
                                                         egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-timer-prop"))
@@ -8371,6 +8438,15 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                 }
                                                             }
                                                         });
+                                                    if step.action == MacroAction::StartTimerPreset
+                                                        && crate::overlay::is_timer_preset_active(selected_id)
+                                                        && ui
+                                                            .small_button(Self::tr_lang(language, "Stop now", "Stop now"))
+                                                            .on_hover_text(Self::tr_lang(language, "Stop this running timer immediately.", "Stop this running timer immediately."))
+                                                            .clicked()
+                                                    {
+                                                        crate::overlay::stop_timer_preset(selected_id);
+                                                    }
                                                     if step.action == MacroAction::ReadTimerPreset {
                                                         let selected_prop = Self::normalize_timer_value_property(&step.key);
                                                         egui::ComboBox::from_id_salt((group.id, preset.id, "press-stop-timer-prop"))
@@ -10478,10 +10554,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                 let is_vision_active = step_ref.action == MacroAction::StartVisionSearch && {
                                     crate::overlay::is_vision_following_active_by_spec(&step_ref.key)
                                 };
-                                let is_timer_active = step_ref.action == MacroAction::StartTimerPreset && {
-                                    let t_id = step_ref.timer_preset_id.or_else(|| step_ref.key.trim().parse::<u32>().ok());
-                                    crate::overlay::is_timer_preset_active(t_id)
-                                };
+                                let is_timer_active = Self::step_has_running_timer(step_ref);
                                 let is_loop_end_active = step_ref.action == MacroAction::LoopEnd && {
                                     let mut matching_start_idx = None;
                                     let mut depth = 0usize;
@@ -10759,7 +10832,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     .on_hover_cursor(egui::CursorIcon::Grab);
                                                 drag_handle.dnd_set_drag_payload(row_drag_payload.clone());
                                             });
-                                            let (rect, _) = ui.allocate_exact_size(egui::vec2(32.0, 20.0), egui::Sense::hover());
+                                            let (rect, _) = ui.allocate_exact_size(egui::vec2(54.0, 20.0), egui::Sense::hover());
                                             let mut child_ui = ui.new_child(
                                                 egui::UiBuilder::new()
                                                     .max_rect(rect)
@@ -10803,6 +10876,21 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 .on_hover_text(Self::tr_lang(language, "Step is running/active", "Step is running/active"));
                                             } else {
                                                 child_ui.add_sized([18.0, 18.0], egui::Label::new(""));
+                                            }
+                                            if is_timer_active {
+                                                child_ui
+                                                    .add_sized(
+                                                        [18.0, 18.0],
+                                                        egui::Label::new(
+                                                            Self::material_icon_text(0xe8b5, 13.0)
+                                                            .color(Color32::from_rgb(255, 196, 0)),
+                                                        ),
+                                                    )
+                                                    .on_hover_text(Self::tr_lang(
+                                                        language,
+                                                        "This timer is currently running.",
+                                                        "This timer is currently running.",
+                                                    ));
                                             }
                                             let step_num_text = format!("{}", display_index + 1);
                                             let label_width = if has_infinite_loop_warning || has_step_vision_leak || has_step_audio_leak || has_step_break_loop_warning { 20.0 } else { 20.0 };
@@ -11425,6 +11513,15 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                 }
                                                             }
                                                         });
+                                                    if step.action == MacroAction::StartTimerPreset
+                                                        && crate::overlay::is_timer_preset_active(selected_id)
+                                                        && ui
+                                                            .small_button(Self::tr_lang(language, "Stop now", "Stop now"))
+                                                            .on_hover_text(Self::tr_lang(language, "Stop this running timer immediately.", "Stop this running timer immediately."))
+                                                            .clicked()
+                                                    {
+                                                        crate::overlay::stop_timer_preset(selected_id);
+                                                    }
                                                     if step.action == MacroAction::ReadTimerPreset {
                                                         let selected_prop = Self::normalize_timer_value_property(&step.key);
                                                         egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "step-timer-prop-select"))
@@ -15288,8 +15385,34 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
         *value = crate::overlay::evaluate_math_expression(&interpolated);
     }
 
+    fn timer_preset_id_from_step(step: &MacroStep) -> Option<u32> {
+        step.timer_preset_id
+            .or_else(|| step.key.trim().parse::<u32>().ok())
+    }
+
+    fn step_has_running_timer(step: &MacroStep) -> bool {
+        step.action == MacroAction::StartTimerPreset
+            && crate::overlay::is_timer_preset_active(Self::timer_preset_id_from_step(step))
+    }
+
+    fn preset_has_hidden_running_timer(preset: &MacroPreset) -> bool {
+        preset.steps.iter().any(Self::step_has_running_timer)
+    }
+
     fn builtin_variable_suggestions() -> &'static [&'static str] {
-        &["System", "Screen", "Mouse", "Window", "Volume", "Clipboard"]
+        &[
+            "System",
+            "Screen",
+            "Mouse",
+            "Window",
+            "Volume",
+            "Clipboard",
+            "RulerDistance",
+            "RulerStartX",
+            "RulerStartY",
+            "RulerEndX",
+            "RulerEndY",
+        ]
     }
 
     fn builtin_expression_function_suggestions() -> &'static [&'static str] {

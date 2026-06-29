@@ -1568,6 +1568,15 @@ mod windows_overlay {
         }
     }
 
+    pub fn stop_timer_preset(t_id: Option<u32>) {
+        let Some(id) = t_id else {
+            return;
+        };
+        HOOK_STATE.lock().active_timers.remove(&id);
+        wake_command_queue();
+        request_ui_repaint();
+    }
+
     static OVERLAY_COMMAND_TX: Lazy<Mutex<Option<Sender<OverlayCommand>>>> =
         Lazy::new(|| Mutex::new(None));
     static RANDOM_STATE: Lazy<std::sync::atomic::AtomicU64> = Lazy::new(|| {
@@ -2087,6 +2096,10 @@ mod windows_overlay {
             capture_frame: Option<crate::window_list::ScreenCaptureFrame>,
         },
         NativeProtractorCalibrationFinished {
+            result: NativeCaptureResult,
+            was_minimized: bool,
+        },
+        NativeDistanceMeasurementFinished {
             result: NativeCaptureResult,
             was_minimized: bool,
         },
@@ -29154,6 +29167,8 @@ mod fallback {
     pub fn is_timer_preset_active(_t_id: Option<u32>) -> bool {
         false
     }
+
+    pub fn stop_timer_preset(_t_id: Option<u32>) {}
 
     pub(crate) fn is_geometry_active(_preset_id: u32, _step_index: usize) -> bool {
         false

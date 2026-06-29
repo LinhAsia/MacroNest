@@ -36,6 +36,9 @@ pub enum NativeCaptureMode {
     ProtractorCalibration {
         ui_language: crate::model::UiLanguage,
     },
+    DistanceMeasure {
+        ui_language: crate::model::UiLanguage,
+    },
     RegionSelect {
         is_template: bool,
         vietnamese: bool,
@@ -58,6 +61,7 @@ pub enum NativeCaptureMode {
 pub enum NativeCaptureResult {
     Cancelled,
     ProtractorPoints(Vec<(i32, i32)>),
+    DistancePoints(Vec<(i32, i32)>),
     SelectedRegion {
         x: i32,
         y: i32,
@@ -438,6 +442,20 @@ unsafe extern "system" fn capture_wnd_proc(
                             state.start_point = None;
                             if state.protractor_points.len() == 3 {
                                 state.result = NativeCaptureResult::ProtractorPoints(
+                                    state.protractor_points.clone(),
+                                );
+                                DestroyWindow(hwnd);
+                            } else {
+                                InvalidateRect(hwnd, None, false);
+                            }
+                        }
+                        NativeCaptureMode::DistanceMeasure { .. } => {
+                            state
+                                .protractor_points
+                                .push((rx + state.left, ry + state.top));
+                            state.start_point = None;
+                            if state.protractor_points.len() == 2 {
+                                state.result = NativeCaptureResult::DistancePoints(
                                     state.protractor_points.clone(),
                                 );
                                 DestroyWindow(hwnd);
@@ -902,6 +920,22 @@ fn protractor_cursor_warning_text(
     })
 }
 
+fn distance_measure_status_text(
+    ui_language: crate::model::UiLanguage,
+    count: usize,
+) -> &'static str {
+    match ui_language {
+        crate::model::UiLanguage::Vietnamese => match count {
+            0 => "Thuoc do: Click diem A tren man hinh. Nhan Esc de huy.",
+            _ => "Thuoc do: Click diem B tren man hinh. Nhan Esc de huy.",
+        },
+        crate::model::UiLanguage::English | crate::model::UiLanguage::Icon => match count {
+            0 => "Ruler: Click point A on screen. Press Esc to cancel.",
+            _ => "Ruler: Click point B on screen. Press Esc to cancel.",
+        },
+    }
+}
+
 fn draw_rounded_rect(
     pixmap: &mut Pixmap,
     x: f32,
@@ -1120,6 +1154,67 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
                         );
                     }
                 }
+            }
+        }
+        NativeCaptureMode::DistanceMeasure { .. } => {
+            let mut pt_paint = Paint::default();
+            pt_paint.set_color_rgba8(255, 196, 0, 255);
+            let mut stroke = Stroke::default();
+            stroke.width = 2.0;
+
+            let mut white_paint = Paint::default();
+            white_paint.set_color_rgba8(255, 255, 255, 255);
+
+            for pt in &state.protractor_points {
+                let rx = pt.0 - state.left;
+                let ry = pt.1 - state.top;
+
+                let mut pb = PathBuilder::new();
+                pb.push_circle(rx as f32, ry as f32, 6.0);
+                let path = pb.finish().unwrap();
+                pixmap.fill_path(
+                    &path,
+                    &pt_paint,
+                    tiny_skia::FillRule::Winding,
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
+
+                let mut pb = PathBuilder::new();
+                pb.push_circle(rx as f32, ry as f32, 10.0);
+                let path = pb.finish().unwrap();
+                pixmap.stroke_path(
+                    &path,
+                    &white_paint,
+                    &stroke,
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
+            }
+
+            if let Some(curr) = state.current_point
+                && let Some(pt1) = state.protractor_points.first()
+            {
+                let r1x = pt1.0 - state.left;
+                let r1y = pt1.1 - state.top;
+
+                let mut line_paint = Paint::default();
+                line_paint.set_color_rgba8(255, 196, 0, 220);
+                let mut dashed_stroke = Stroke::default();
+                dashed_stroke.width = 1.8;
+                dashed_stroke.dash = tiny_skia::StrokeDash::new(vec![6.0, 4.0], 0.0);
+
+                let mut pb = PathBuilder::new();
+                pb.move_to(r1x as f32, r1y as f32);
+                pb.line_to(curr.0 as f32, curr.1 as f32);
+                let path = pb.finish().unwrap();
+                pixmap.stroke_path(
+                    &path,
+                    &line_paint,
+                    &dashed_stroke,
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
             }
         }
         NativeCaptureMode::PointClick { .. } => {
@@ -1398,6 +1493,9 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
         NativeCaptureMode::ProtractorCalibration { ui_language } => {
             protractor_calibration_status_text(state, ui_language)
         }
+        NativeCaptureMode::DistanceMeasure { ui_language } => {
+            distance_measure_status_text(ui_language, state.protractor_points.len())
+        }
         NativeCaptureMode::RegionSelect {
             is_template,
             vietnamese,
@@ -1622,6 +1720,9 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
     if preview_panel_visible {
         let vietnamese = match state.mode {
             NativeCaptureMode::ProtractorCalibration { ui_language } => {
+                ui_language == crate::model::UiLanguage::Vietnamese
+            }
+            NativeCaptureMode::DistanceMeasure { ui_language } => {
                 ui_language == crate::model::UiLanguage::Vietnamese
             }
             NativeCaptureMode::RegionSelect { vietnamese, .. } => vietnamese,

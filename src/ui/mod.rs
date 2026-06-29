@@ -116,6 +116,7 @@ enum TitlebarQuickActionKind {
     WindowPin,
     FocusHighlight,
     Protractor,
+    Ruler,
     GetCoordinates,
     GetColor,
     KeyDisplay,
@@ -764,6 +765,7 @@ pub struct CrosshairApp {
     drag_start_layout_cell: Option<(u32, usize, usize)>,
     protractor_picking_active: bool,
     protractor_calibration_points: Option<Vec<(i32, i32)>>,
+    distance_measurement_active: bool,
     native_capture_in_progress: bool,
 }
 
@@ -895,6 +897,7 @@ impl CrosshairApp {
             vision_capture_mode: None,
             protractor_picking_active: false,
             protractor_calibration_points: None,
+            distance_measurement_active: false,
             native_capture_in_progress: false,
             vision_capture_anchor: None,
             vision_capture_current: None,
@@ -3215,6 +3218,20 @@ impl CrosshairApp {
                     egui::Stroke::new(1.8, icon_color),
                 );
             }
+            TitlebarQuickActionKind::Ruler => {
+                let start = pos2(rect.left() + 18.0, rect.bottom() - 20.0);
+                let end = pos2(rect.right() - 18.0, rect.top() + 20.0);
+                painter.line_segment([start, end], egui::Stroke::new(2.2, icon_color));
+                painter.circle_filled(start, 3.5, icon_color);
+                painter.circle_filled(end, 3.5, icon_color);
+                let tick_dir = vec2(-0.6, -0.8);
+                for offset in [0.22_f32, 0.42, 0.62, 0.82] {
+                    let point = start.lerp(end, offset);
+                    let tick_start = point + tick_dir * 4.0;
+                    let tick_end = point - tick_dir * 4.0;
+                    painter.line_segment([tick_start, tick_end], egui::Stroke::new(1.5, icon_color));
+                }
+            }
             TitlebarQuickActionKind::GetCoordinates => {
                 let center = rect.center();
                 let radius = 10.0;
@@ -3658,7 +3675,7 @@ impl CrosshairApp {
             };
 
         Grid::new("titlebar-quick-actions-grid")
-            .num_columns(5)
+            .num_columns(6)
             .spacing([16.0, 12.0])
             .show(ui, |ui| {
                 // Taskbar Action
@@ -4227,6 +4244,41 @@ impl CrosshairApp {
                             |ui| {
                                 ui.add(egui::Label::new(
                                     RichText::new(proto_label).size(11.0).color(
+                                        if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        },
+                                    ),
+                                ));
+                            },
+                        );
+                    },
+                );
+
+                // Ruler Action
+                ui.allocate_ui_with_layout(
+                    vec2(action_width, action_height),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::Ruler,
+                            self.distance_measurement_active,
+                        );
+                        if button_response.clicked() {
+                            self.begin_distance_measurement(ui.ctx(), false);
+                        }
+
+                        ui.add_space(6.0);
+                        let ruler_label =
+                            Self::tr_lang(self.state.ui_language, "Ruler", "Ruler");
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(ruler_label).size(11.0).color(
                                         if button_response.hovered() {
                                             ui.visuals().strong_text_color()
                                         } else {
@@ -10376,6 +10428,75 @@ impl CrosshairApp {
         });
     }
 
+    fn begin_distance_measurement(&mut self, ctx: &egui::Context, was_minimized: bool) {
+        if self.distance_measurement_active || self.native_capture_in_progress {
+            return;
+        }
+
+        self.distance_measurement_active = true;
+        self.native_capture_in_progress = true;
+
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
+                let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+            }
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
+        crate::overlay::wake_command_queue();
+
+        let ui_tx = self.ui_tx.clone();
+        let egui_ctx = ctx.clone();
+        let ui_lang = self.state.ui_language;
+
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+            let result = if let Some(capture) =
+                crate::window_list::capture_virtual_screen_region(left, top, width, height)
+            {
+                let mode = crate::overlay::native_capture::NativeCaptureMode::DistanceMeasure {
+                    ui_language: ui_lang,
+                };
+                crate::overlay::native_capture::run_capture_overlay(
+                    capture, left, top, width, height, mode,
+                )
+            } else {
+                crate::overlay::native_capture::NativeCaptureResult::Cancelled
+            };
+
+            #[cfg(windows)]
+            unsafe {
+                if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                    if was_minimized {
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SW_SHOWMINNOACTIVE, ShowWindow,
+                        };
+                        let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+                    } else {
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SW_SHOWNORMAL, SetForegroundWindow, ShowWindow,
+                        };
+                        let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                        let _ = SetForegroundWindow(hwnd);
+                    }
+                }
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            let _ = ui_tx.send(UiCommand::NativeDistanceMeasurementFinished {
+                result,
+                was_minimized,
+            });
+            egui_ctx.request_repaint();
+        });
+    }
+
     fn cancel_protractor_calibration(&mut self) {
         self.protractor_picking_active = false;
         self.protractor_calibration_points = None;
@@ -11133,6 +11254,59 @@ impl eframe::App for CrosshairApp {
                     }
 
                     // Restore overlay visibility (was hidden before capture)
+                    let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
+                    crate::overlay::wake_command_queue();
+                    ctx.request_repaint();
+                }
+                UiCommand::NativeDistanceMeasurementFinished {
+                    result,
+                    was_minimized,
+                } => {
+                    self.distance_measurement_active = false;
+                    self.native_capture_in_progress = false;
+
+                    match result {
+                        crate::overlay::NativeCaptureResult::DistancePoints(points)
+                            if points.len() >= 2 =>
+                        {
+                            let (ax, ay) = points[0];
+                            let (bx, by) = points[1];
+                            let dx = (bx - ax) as f64;
+                            let dy = (by - ay) as f64;
+                            let distance = dx.hypot(dy);
+                            crate::overlay::set_variable_value("RulerDistance", distance);
+                            crate::overlay::set_variable_value("RulerStartX", ax as f64);
+                            crate::overlay::set_variable_value("RulerStartY", ay as f64);
+                            crate::overlay::set_variable_value("RulerEndX", bx as f64);
+                            crate::overlay::set_variable_value("RulerEndY", by as f64);
+                            self.status = match self.state.ui_language {
+                                crate::model::UiLanguage::Vietnamese => format!(
+                                    "Da do khoang cach A->B: {:.2}px. Bien: RulerDistance",
+                                    distance
+                                ),
+                                _ => format!(
+                                    "Measured A->B distance: {:.2}px. Variable: RulerDistance",
+                                    distance
+                                ),
+                            };
+                        }
+                        _ => {
+                            self.status = Self::tr_lang(
+                                self.state.ui_language,
+                                "Ruler capture cancelled.",
+                                "Ruler capture cancelled.",
+                            )
+                            .to_owned();
+                        }
+                    }
+
+                    self.state.show_window = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(was_minimized));
+                    if !was_minimized {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    }
+
                     let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
                     crate::overlay::wake_command_queue();
                     ctx.request_repaint();
