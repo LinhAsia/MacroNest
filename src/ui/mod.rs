@@ -1939,6 +1939,26 @@ impl CrosshairApp {
         });
     }
 
+    fn update_audio_clip_duration_for_path(&mut self, path: &str, duration_ms: Option<u64>) {
+        for preset in &mut self.state.audio_settings.presets {
+            if preset.clip.file_path.trim() == path {
+                self.sound_preset_clip_duration_ms
+                    .insert(preset.id, duration_ms);
+            }
+        }
+        for item in &mut self.state.audio_settings.library {
+            if item.clip.file_path.trim() == path {
+                self.library_clip_duration_ms.insert(item.id, duration_ms);
+            }
+        }
+        if self.state.audio_settings.startup.file_path.trim() == path {
+            self.startup_clip_duration_ms = duration_ms;
+        }
+        if self.state.audio_settings.exit.file_path.trim() == path {
+            self.exit_clip_duration_ms = duration_ms;
+        }
+    }
+
     fn audio_path_is_referenced(&self, path: &str) -> bool {
         let trimmed = path.trim();
         if trimmed.is_empty() {
@@ -11054,23 +11074,7 @@ impl eframe::App for CrosshairApp {
                         continue;
                     }
                     self.audio_waveforms.insert(path.clone(), waveform);
-                    for preset in &mut self.state.audio_settings.presets {
-                        if preset.clip.file_path.trim() == path {
-                            self.sound_preset_clip_duration_ms
-                                .insert(preset.id, duration_ms);
-                        }
-                    }
-                    for item in &mut self.state.audio_settings.library {
-                        if item.clip.file_path.trim() == path {
-                            self.library_clip_duration_ms.insert(item.id, duration_ms);
-                        }
-                    }
-                    if self.state.audio_settings.startup.file_path.trim() == path {
-                        self.startup_clip_duration_ms = duration_ms;
-                    }
-                    if self.state.audio_settings.exit.file_path.trim() == path {
-                        self.exit_clip_duration_ms = duration_ms;
-                    }
+                    self.update_audio_clip_duration_for_path(&path, duration_ms);
                     ctx.request_repaint();
                 }
                 UiCommand::OpenWindowsLoaded { windows, status } => {
