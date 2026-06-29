@@ -2430,6 +2430,7 @@ mod windows_overlay {
         font_size: f32,
         window_rect: (i32, i32, i32, i32),
         spam_heat_discrete: i32,
+        animation_frame: u32,
     }
 
     struct Runtime {
@@ -8890,6 +8891,7 @@ mod windows_overlay {
                 font_size,
                 window_rect: (x, y, width, height),
                 spam_heat_discrete: (runtime.quick_key_display_spam_heat * 50.0).round() as i32,
+                animation_frame: current_ms / 16,
             };
 
             if runtime.quick_key_display_last_mascot_state.as_ref() == Some(&current_state)
@@ -15555,8 +15557,7 @@ mod windows_overlay {
                         };
 
                     let (look_mul_x, look_mul_y, wobble_x, wobble_y) = match path_index_for_wobble {
-                        4 | 10 => (0.38, 0.46, face_wobble_slow_x, face_wobble_slow_y),
-                        5 | 6 | 7 | 11 | 12 | 13 => {
+                        4..=13 => {
                             (0.38, 0.46, face_wobble_slow_x, face_wobble_slow_y)
                         }
                         14 | 15 | 16 => (0.8, 0.78, face_wobble_mid_x, face_wobble_fast_y),
@@ -15694,24 +15695,12 @@ mod windows_overlay {
                 quick_key_display_apply_heat_tint_ellipse(
                     pixmap,
                     head_cx + look_x * 0.18,
-                    head_cy + 13.0 * scale + look_y * 0.3,
-                    47.0 * scale,
-                    35.0 * scale,
+                    head_cy + 8.0 * scale + look_y * 0.3,
+                    head_radius * 0.86,
+                    head_radius * 0.72,
                     red_factor,
                     [255, 95, 120, 255],
                 );
-
-                let cheek_alpha = (70.0 + 150.0 * red_factor).round() as u8;
-                for side in [-1.0_f32, 1.0] {
-                    fill_skia_ellipse(
-                        pixmap,
-                        head_cx + side * 26.0 * scale + look_x * 0.35,
-                        head_cy + 18.0 * scale + look_y * 0.35,
-                        10.5 * scale,
-                        6.8 * scale,
-                        [255, 130, 155, cheek_alpha],
-                    );
-                }
 
                 if red_factor > 0.55 {
                     let eye_heat = ((red_factor - 0.55) / 0.45).clamp(0.0, 1.0);
@@ -16693,23 +16682,6 @@ mod windows_overlay {
                 bottom_center_x - px * 4.8 * scale * straight_sign,
                 bottom_center_y + bottom_h * 0.98,
             );
-            let fingertip = (bottom_center_x, bottom_center_y + bottom_h * 1.28);
-            let finger_a = (
-                bottom_center_x + px * 7.2 * scale * straight_sign,
-                bottom_center_y + bottom_h * 0.78,
-            );
-            let finger_b = (
-                bottom_center_x + px * 2.6 * scale * straight_sign,
-                bottom_center_y + bottom_h * 1.18,
-            );
-            let finger_c = (
-                bottom_center_x - px * 2.6 * scale * straight_sign,
-                bottom_center_y + bottom_h * 1.18,
-            );
-            let finger_d = (
-                bottom_center_x - px * 7.2 * scale * straight_sign,
-                bottom_center_y + bottom_h * 0.78,
-            );
             let curve_ctrl = (
                 root_x + dx * 0.32 - px * 6.8 * scale * straight_sign,
                 root_y + dy * 0.56 - py * 2.4 * scale * straight_sign,
@@ -16724,9 +16696,12 @@ mod windows_overlay {
                 bottom_arc_mid_outer.0,
                 bottom_arc_mid_outer.1,
             );
-            arm.quad_to(finger_a.0, finger_a.1, finger_b.0, finger_b.1);
-            arm.quad_to(fingertip.0, fingertip.1, finger_c.0, finger_c.1);
-            arm.quad_to(finger_d.0, finger_d.1, bottom_arc_mid_inner.0, bottom_arc_mid_inner.1);
+            arm.quad_to(
+                bottom_center_x,
+                bottom_center_y + bottom_h * 1.22,
+                bottom_arc_mid_inner.0,
+                bottom_arc_mid_inner.1,
+            );
             arm.quad_to(
                 bottom_center_x - px * 10.6 * scale * straight_sign,
                 bottom_center_y + bottom_h * 0.42,
@@ -16739,24 +16714,6 @@ mod windows_overlay {
             if let Some(p) = arm.finish() {
                 fill_skia_path(pixmap, &p, arm_fill);
                 stroke_skia_path(pixmap, &p, stroke_color, stroke_w);
-            }
-
-            for notch in [-3.8_f32, 3.8] {
-                let base_x = bottom_center_x + px * notch * scale * straight_sign;
-                let base_y = bottom_center_y + bottom_h * 0.88;
-                let tip_x = bottom_center_x + px * (notch * 0.45) * scale * straight_sign;
-                let tip_y = bottom_center_y + bottom_h * 1.16;
-                let mut crease = tiny_skia::PathBuilder::new();
-                crease.move_to(base_x, base_y);
-                crease.quad_to(
-                    (base_x + tip_x) * 0.5,
-                    bottom_center_y + bottom_h * 1.03,
-                    tip_x,
-                    tip_y,
-                );
-                if let Some(p) = crease.finish() {
-                    stroke_skia_path(pixmap, &p, [59, 41, 38, 185], 0.9 * scale);
-                }
             }
         };
 
