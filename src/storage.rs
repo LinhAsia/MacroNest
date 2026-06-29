@@ -180,10 +180,7 @@ impl AppPaths {
             let Ok(state) = Self::read_state_file(&source) else {
                 continue;
             };
-            let temp_file = self.state_temp_file();
-            let content = serde_json::to_string_pretty(&state)?;
-            write_text_file(&temp_file, &content)
-                .with_context(|| format!("Failed to restore backup into {}", temp_file.display()))?;
+            let temp_file = self.write_state_temp_file(&state)?;
             if self.state_file.exists() {
                 let _ = fs::remove_file(&self.state_file);
             }
@@ -626,10 +623,8 @@ impl AppPaths {
         for preset in &mut state.master_presets {
             preset.window_focus_presets.clear();
         }
-        let content = serde_json::to_string_pretty(&state)?;
-        let temp_file = self.state_temp_file();
+        let temp_file = self.write_state_temp_file(&state)?;
         let backup_file = self.state_backup_file();
-        write_text_file(&temp_file, &content)?;
         if self.state_file.exists() {
             for (_, path) in self.state_recovery_files() {
                 let _ = fs::remove_file(path);
@@ -707,6 +702,13 @@ impl AppPaths {
             }
         }
         Ok(paths)
+    }
+
+    fn write_state_temp_file(&self, state: &AppState) -> Result<PathBuf> {
+        let temp_file = self.state_temp_file();
+        let content = serde_json::to_string_pretty(state)?;
+        write_text_file(&temp_file, &content)?;
+        Ok(temp_file)
     }
 
     fn state_recovery_files(&self) -> Vec<(SystemTime, PathBuf)> {
