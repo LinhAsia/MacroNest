@@ -664,12 +664,7 @@ impl AppPaths {
 
     pub fn load_profiles(&self) -> Result<Vec<ProfileRecord>> {
         let mut profiles = Vec::new();
-        for entry in fs::read_dir(&self.profiles_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if !is_json_file_path(&path) {
-                continue;
-            }
+        for path in self.profile_json_paths()? {
             let content = fs::read_to_string(&path)
                 .with_context(|| format!("Failed to read profile {}", path.display()))?;
             let profile: ProfileRecord = serde_json::from_str(&content)
@@ -682,12 +677,8 @@ impl AppPaths {
 
     pub fn save_profiles(&self, profiles: &[ProfileRecord]) -> Result<()> {
         fs::create_dir_all(&self.profiles_dir)?;
-        for entry in fs::read_dir(&self.profiles_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if is_json_file_path(&path) {
-                let _ = fs::remove_file(path);
-            }
+        for path in self.profile_json_paths()? {
+            let _ = fs::remove_file(path);
         }
         for profile in profiles {
             let file = self.profile_record_path(&profile.name);
@@ -704,6 +695,18 @@ impl AppPaths {
     fn profile_record_path(&self, profile_name: &str) -> PathBuf {
         self.profiles_dir
             .join(format!("{}.json", sanitize_name(profile_name)))
+    }
+
+    fn profile_json_paths(&self) -> Result<Vec<PathBuf>> {
+        let mut paths = Vec::new();
+        for entry in fs::read_dir(&self.profiles_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if is_json_file_path(&path) {
+                paths.push(path);
+            }
+        }
+        Ok(paths)
     }
 
     fn state_recovery_files(&self) -> Vec<(SystemTime, PathBuf)> {
