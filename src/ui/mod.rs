@@ -4288,6 +4288,32 @@ impl CrosshairApp {
                                 ));
                             },
                         );
+
+                        render_popup(
+                            ui,
+                            &button_response,
+                            TitlebarQuickActionKind::Ruler,
+                            &mut |ui| {
+                                ui.vertical_centered(|ui| {
+                                    let changed = ui
+                                        .checkbox(
+                                            &mut self.state.quick_actions_copy_ruler,
+                                            RichText::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Copy result",
+                                                "Copy result",
+                                            ))
+                                            .size(10.0),
+                                        )
+                                        .changed();
+                                    if changed {
+                                        self.persist();
+                                    }
+                                    false
+                                })
+                                .inner
+                            },
+                        );
                     },
                 );
                 ui.end_row();
@@ -11279,15 +11305,39 @@ impl eframe::App for CrosshairApp {
                             crate::overlay::set_variable_value("RulerStartY", ay as f64);
                             crate::overlay::set_variable_value("RulerEndX", bx as f64);
                             crate::overlay::set_variable_value("RulerEndY", by as f64);
+                            let formatted = format!("{distance:.2}");
+                            if self.state.quick_actions_copy_ruler {
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    let _ = clipboard.set_text(formatted.clone());
+                                }
+                            }
                             self.status = match self.state.ui_language {
-                                crate::model::UiLanguage::Vietnamese => format!(
-                                    "Da do khoang cach A->B: {:.2}px. Bien: RulerDistance",
-                                    distance
-                                ),
-                                _ => format!(
-                                    "Measured A->B distance: {:.2}px. Variable: RulerDistance",
-                                    distance
-                                ),
+                                crate::model::UiLanguage::Vietnamese => {
+                                    if self.state.quick_actions_copy_ruler {
+                                        format!(
+                                            "Da do khoang cach A->B: {:.2}px. Da copy vao clipboard. Bien: RulerDistance",
+                                            distance
+                                        )
+                                    } else {
+                                        format!(
+                                            "Da do khoang cach A->B: {:.2}px. Bien: RulerDistance",
+                                            distance
+                                        )
+                                    }
+                                }
+                                _ => {
+                                    if self.state.quick_actions_copy_ruler {
+                                        format!(
+                                            "Measured A->B distance: {:.2}px. Copied to clipboard. Variable: RulerDistance",
+                                            distance
+                                        )
+                                    } else {
+                                        format!(
+                                            "Measured A->B distance: {:.2}px. Variable: RulerDistance",
+                                            distance
+                                        )
+                                    }
+                                }
                             };
                         }
                         _ => {

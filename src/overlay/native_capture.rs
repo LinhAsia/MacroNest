@@ -920,19 +920,23 @@ fn protractor_cursor_warning_text(
     })
 }
 
+fn distance_measure_preview(state: &CaptureState) -> Option<(f64, (i32, i32), (i32, i32))> {
+    let pt1 = *state.protractor_points.first()?;
+    let curr = state.current_point?;
+    let pt2 = (curr.0 + state.left, curr.1 + state.top);
+    let dx = (pt2.0 - pt1.0) as f64;
+    let dy = (pt2.1 - pt1.1) as f64;
+    Some((dx.hypot(dy), pt1, pt2))
+}
+
 fn distance_measure_status_text(
+    _state: &CaptureState,
     ui_language: crate::model::UiLanguage,
-    count: usize,
 ) -> &'static str {
     match ui_language {
-        crate::model::UiLanguage::Vietnamese => match count {
-            0 => "Thuoc do: Click diem A tren man hinh. Nhan Esc de huy.",
-            _ => "Thuoc do: Click diem B tren man hinh. Nhan Esc de huy.",
-        },
-        crate::model::UiLanguage::English | crate::model::UiLanguage::Icon => match count {
-            0 => "Ruler: Click point A on screen. Press Esc to cancel.",
-            _ => "Ruler: Click point B on screen. Press Esc to cancel.",
-        },
+        crate::model::UiLanguage::Vietnamese => "Thuoc do: Click diem A, re chuot de do, click diem B de chot. Nhan Esc de huy.",
+        crate::model::UiLanguage::English | crate::model::UiLanguage::Icon =>
+            "Ruler: Click point A, move the mouse to measure, click point B to confirm. Press Esc to cancel.",
     }
 }
 
@@ -1494,7 +1498,7 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
             protractor_calibration_status_text(state, ui_language)
         }
         NativeCaptureMode::DistanceMeasure { ui_language } => {
-            distance_measure_status_text(ui_language, state.protractor_points.len())
+            distance_measure_status_text(state, ui_language)
         }
         NativeCaptureMode::RegionSelect {
             is_template,
@@ -1617,7 +1621,19 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
     if show_cursor_tooltip && let Some(curr) = state.current_point {
         let abs_x = curr.0 + state.left;
         let abs_y = curr.1 + state.top;
-        let coords_str = format!("X: {}, Y: {}", abs_x, abs_y);
+        let coords_str = match state.mode {
+            NativeCaptureMode::DistanceMeasure { .. } => {
+                if let Some((distance, point_a, _)) = distance_measure_preview(state) {
+                    format!(
+                        "A({}, {}) -> B({}, {}) = {:.2}px",
+                        point_a.0, point_a.1, abs_x, abs_y, distance
+                    )
+                } else {
+                    format!("X: {}, Y: {}", abs_x, abs_y)
+                }
+            }
+            _ => format!("X: {}, Y: {}", abs_x, abs_y),
+        };
         let tooltip_warning = match state.mode {
             NativeCaptureMode::ProtractorCalibration { ui_language } => {
                 protractor_cursor_warning_text(state, ui_language)

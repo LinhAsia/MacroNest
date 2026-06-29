@@ -471,6 +471,8 @@ pub struct AppState {
     #[serde(default = "default_true")]
     pub quick_actions_copy_color: bool,
     #[serde(default)]
+    pub quick_actions_copy_ruler: bool,
+    #[serde(default)]
     pub quick_key_display_enabled: bool,
     #[serde(default = "default_quick_key_display_x")]
     pub quick_key_display_x: i32,
@@ -600,6 +602,7 @@ impl Default for AppState {
             quick_actions_copy_x: true,
             quick_actions_copy_y: true,
             quick_actions_copy_color: true,
+            quick_actions_copy_ruler: false,
             quick_key_display_enabled: false,
             quick_key_display_x: default_quick_key_display_x(),
             quick_key_display_y: default_quick_key_display_y(),
