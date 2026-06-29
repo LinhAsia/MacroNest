@@ -266,6 +266,11 @@ impl CrosshairApp {
     }
 
     pub(crate) fn sync_quick_key_display_config(&mut self) {
+        if self.state.quick_key_display_mascot_styles.is_empty() {
+            self.state
+                .quick_key_display_mascot_styles
+                .push(self.state.quick_key_display_mascot_style);
+        }
         let config = (
             self.state.quick_key_display_enabled,
             self.state.quick_key_display_x,
@@ -273,6 +278,7 @@ impl CrosshairApp {
             self.state.quick_key_display_size,
             self.state.quick_key_display_mode,
             self.state.quick_key_display_mascot_style,
+            self.state.quick_key_display_mascot_styles.clone(),
         );
         Self::sync_overlay_command_with_state_if_changed(
             &self.overlay_tx,
@@ -285,6 +291,7 @@ impl CrosshairApp {
                 size: config.3,
                 mode: config.4,
                 mascot_style: config.5,
+                mascot_styles: config.6.clone(),
             },
         );
     }

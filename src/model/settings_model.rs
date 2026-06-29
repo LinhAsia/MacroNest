@@ -479,6 +479,8 @@ pub struct AppState {
     #[serde(default)]
     pub quick_key_display_mascot_style: MascotStyle,
     #[serde(default)]
+    pub quick_key_display_mascot_styles: Vec<MascotStyle>,
+    #[serde(default)]
     pub quick_screen_draw_enabled: bool,
     #[serde(default)]
     pub quick_screen_draw_hotkey: Option<HotkeyBinding>,
@@ -598,6 +600,7 @@ impl Default for AppState {
             quick_key_display_size: default_quick_key_display_size(),
             quick_key_display_mode: QuickKeyDisplayMode::Normal,
             quick_key_display_mascot_style: MascotStyle::Hachiware,
+            quick_key_display_mascot_styles: vec![MascotStyle::Hachiware],
             quick_screen_draw_enabled: false,
             quick_screen_draw_hotkey: None,
             quick_screen_draw_pass_trigger_through: false,
