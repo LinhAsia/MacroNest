@@ -1971,6 +1971,7 @@ mod windows_overlay {
             smoothing_amount: f32,
             freeze: bool,
         },
+        OpenScreenDrawColorPicker,
         VisionFinished(String),
         MacroStepInlineFeedback {
             preset_id: u32,
@@ -9178,42 +9179,10 @@ mod windows_overlay {
                 deactivate_screen_draw(&mut state);
             }
             ScreenDrawHit::Color => {
-                let current_color = state.color;
-                std::thread::spawn(move || {
-                    use windows::Win32::UI::Controls::Dialogs::{ChooseColorW, CHOOSECOLORW, CC_FULLOPEN, CC_RGBINIT};
-                    use windows::Win32::Foundation::COLORREF;
-
-                    let mut custom_colors = [COLORREF(0xFFFFFF); 16];
-                    let rgb_val = (current_color.r as u32) | ((current_color.g as u32) << 8) | ((current_color.b as u32) << 16);
-                    
-                    let mut cc = CHOOSECOLORW::default();
-                    cc.lStructSize = std::mem::size_of::<CHOOSECOLORW>() as u32;
-                    cc.hwndOwner = windows::Win32::Foundation::HWND::default();
-                    cc.rgbResult = COLORREF(rgb_val);
-                    cc.lpCustColors = custom_colors.as_mut_ptr();
-                    cc.Flags = CC_FULLOPEN | CC_RGBINIT;
-
-                    unsafe {
-                        if ChooseColorW(&mut cc).as_bool() {
-                            let res = cc.rgbResult.0;
-                            let r = (res & 0xFF) as u8;
-                            let g = ((res >> 8) & 0xFF) as u8;
-                            let b = ((res >> 16) & 0xFF) as u8;
-                            let new_color = RgbaColor { r, g, b, a: 255 };
-
-                            {
-                                let mut state = SCREEN_DRAW_STATE.lock();
-                                state.color = new_color;
-                                let toolbar_rect = screen_draw_toolbar_rect(&state);
-                                mark_screen_draw_dirty(&mut state, toolbar_rect);
-                                state.committed_dirty = true;
-                                state.pending_repaint = true;
-                            }
-                            send_screen_draw_config_to_ui();
-                            request_screen_draw_overlay_sync();
-                        }
-                    }
-                });
+                // Ask the egui UI to open its built-in color picker popup
+                if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
+                    let _ = ui_tx.send(UiCommand::OpenScreenDrawColorPicker);
+                }
             }
             ScreenDrawHit::BrushSize => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
@@ -10323,10 +10292,10 @@ mod windows_overlay {
                 width as u32,
                 height as u32,
             ) {
-                let val_ratio = ((toolbar_brush_size - 2.0) / 78.0).clamp(0.0, 1.0);
-                let preview_x = toolbar_x as f32 + 74.0 + val_ratio * 64.0;
-                let preview_y = toolbar_y as f32 - 25.0;
                 let radius = toolbar_brush_size / 2.0;
+                // Center preview at toolbar center (toolbar width = 230, center = 115)
+                let preview_x = toolbar_x as f32 + (SCREEN_DRAW_TOOLBAR_WIDTH as f32 / 2.0);
+                let preview_y = toolbar_y as f32 - (radius + 10.0).max(25.0);
 
                 // Draw white outline circle
                 let mut pb_out = tiny_skia::PathBuilder::new();

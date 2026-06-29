@@ -570,6 +570,7 @@ pub struct CrosshairApp {
     last_synced_windows_key_locked: Option<bool>,
     last_synced_native_focus_highlight_enabled: Option<bool>,
     last_synced_vietnamese_input_enabled: Option<bool>,
+    screen_draw_color_picker_open: bool,
     last_synced_active_macro_folder_scope: Option<crate::overlay::MacroFolderScope>,
     last_synced_protractor_enabled: Option<bool>,
     last_synced_protractor_config: Option<(f32, f32, f32, i32, i32, f32, bool, UiLanguage)>,
@@ -842,6 +843,7 @@ impl CrosshairApp {
             last_synced_windows_key_locked: None,
             last_synced_native_focus_highlight_enabled: None,
             last_synced_vietnamese_input_enabled: None,
+            screen_draw_color_picker_open: false,
             last_synced_active_macro_folder_scope: None,
             last_synced_protractor_enabled: None,
             last_synced_protractor_config: None,
@@ -10744,6 +10746,10 @@ impl eframe::App for CrosshairApp {
                     self.state.quick_screen_draw_freeze = freeze;
                     self.persist();
                 }
+                UiCommand::OpenScreenDrawColorPicker => {
+                    self.screen_draw_color_picker_open = true;
+                    ctx.request_repaint();
+                }
                 UiCommand::MouseMoveAbsolutePointCaptured { .. } => {}
                 UiCommand::MouseMoveAbsoluteCaptureCancelled => {}
                 UiCommand::NativeVisionCaptureFinished {
@@ -12279,7 +12285,43 @@ impl eframe::App for CrosshairApp {
         }
 
         self.poll_capture_input(ctx);
+
+        // Screen draw color picker popup (triggered by overlay toolbar color button)
+        if self.screen_draw_color_picker_open {
+            let mut still_open = true;
+            let mut color32 = egui::Color32::from_rgba_unmultiplied(
+                self.state.quick_screen_draw_color.r,
+                self.state.quick_screen_draw_color.g,
+                self.state.quick_screen_draw_color.b,
+                255,
+            );
+            egui::Window::new("Draw Color")
+                .collapsible(false)
+                .resizable(false)
+                .open(&mut still_open)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.set_min_width(220.0);
+                    let changed = egui::color_picker::color_picker_color32(
+                        ui,
+                        &mut color32,
+                        egui::color_picker::Alpha::Opaque,
+                    );
+                    if changed {
+                        self.state.quick_screen_draw_color = crate::model::RgbaColor {
+                            r: color32.r(),
+                            g: color32.g(),
+                            b: color32.b(),
+                            a: 255,
+                        };
+                        self.sync_quick_screen_draw_config();
+                        self.persist();
+                    }
+                });
+            self.screen_draw_color_picker_open = still_open;
+        }
     }
+
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         let _ = crate::platform::show_taskbar();
