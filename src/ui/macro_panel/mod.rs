@@ -275,16 +275,15 @@ impl CrosshairApp {
                 // Layout preset
                 let layout_id_str = step_key.trim().strip_prefix("layout:").unwrap_or("").trim();
                 let selected_id = layout_id_str.parse::<u32>().ok();
-                let selected_label = selected_id
-                    .and_then(|id| {
-                        window_layouts
-                            .iter()
-                            .find(|l| l.id == id)
-                            .map(|l| l.name.clone())
-                    })
-                    .unwrap_or_else(|| {
-                        Self::tr_lang(language, "Select layout", "Select layout").to_owned()
-                    });
+                let selected_label = Self::named_item_name_by_id(
+                    window_layouts,
+                    selected_id,
+                    |layout| layout.id,
+                    |layout| &layout.name,
+                )
+                .unwrap_or_else(|| {
+                    Self::tr_lang(language, "Select layout", "Select layout").to_owned()
+                });
 
                 egui::ComboBox::from_id_salt(preset_id_salt)
                     .width(width * 0.55)
@@ -306,16 +305,15 @@ impl CrosshairApp {
             } else {
                 // Resize (Window preset)
                 let selected_id = step_key.trim().parse::<u32>().ok();
-                let selected_label = selected_id
-                    .and_then(|id| {
-                        window_presets
-                            .iter()
-                            .find(|preset| preset.id == id)
-                            .map(|preset| preset.name.clone())
-                    })
-                    .unwrap_or_else(|| {
-                        Self::tr_lang(language, "Select window", "Select window").to_owned()
-                    });
+                let selected_label = Self::named_item_name_by_id(
+                    window_presets,
+                    selected_id,
+                    |preset| preset.id,
+                    |preset| &preset.name,
+                )
+                .unwrap_or_else(|| {
+                    Self::tr_lang(language, "Select window", "Select window").to_owned()
+                });
 
                 egui::ComboBox::from_id_salt(preset_id_salt)
                     .width(width * 0.55)

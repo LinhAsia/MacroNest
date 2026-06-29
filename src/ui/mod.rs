@@ -1539,14 +1539,23 @@ impl CrosshairApp {
         selected_id: Option<u32>,
         language: UiLanguage,
     ) -> String {
-        selected_id
-            .and_then(|id| {
-                timer_presets
-                    .iter()
-                    .find(|preset| preset.id == id)
-                    .map(|preset| preset.name.clone())
-            })
+        Self::named_item_name_by_id(timer_presets, selected_id, |preset| preset.id, |preset| {
+            &preset.name
+        })
             .unwrap_or_else(|| Self::tr_lang(language, "Select timer", "Select timer").to_owned())
+    }
+
+    fn named_item_name_by_id<T>(
+        items: &[T],
+        selected_id: Option<u32>,
+        id_of: impl Fn(&T) -> u32,
+        name_of: impl Fn(&T) -> &str,
+    ) -> Option<String> {
+        let id = selected_id?;
+        items
+            .iter()
+            .find(|item| id_of(item) == id)
+            .map(|item| name_of(item).to_owned())
     }
 
     fn option_label_by_id(
@@ -1605,13 +1614,9 @@ impl CrosshairApp {
         selected_id: Option<u32>,
         language: UiLanguage,
     ) -> String {
-        selected_id
-            .and_then(|id| {
-                vision_presets
-                    .iter()
-                    .find(|preset| preset.id == id)
-                    .map(|preset| preset.name.clone())
-            })
+        Self::named_item_name_by_id(vision_presets, selected_id, |preset| preset.id, |preset| {
+            &preset.name
+        })
             .unwrap_or_else(|| Self::tr_lang(language, "Select preset", "Select preset").to_owned())
     }
 
