@@ -6125,13 +6125,11 @@ impl CrosshairApp {
                                                     });
                                                 } else if matches!(step.action, MacroAction::StartTimerPreset | MacroAction::PauseTimerPreset | MacroAction::StopTimerPreset) {
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state.timer_presets.iter()
-                                                                .find(|p| p.id == id)
-                                                                .map(|p| p.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select timer", "Select timer").to_owned());
+                                                    let selected_label = Self::timer_preset_selected_label(
+                                                        &self.state.timer_presets,
+                                                        selected_id,
+                                                        language,
+                                                    );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-timer-preset"))
                                                         .width(160.0)
                                                         .selected_text(selected_label)
@@ -8287,13 +8285,11 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     });
                                                 } else if matches!(step.action, MacroAction::StartTimerPreset | MacroAction::PauseTimerPreset | MacroAction::StopTimerPreset) {
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state.timer_presets.iter()
-                                                                .find(|p| p.id == id)
-                                                                .map(|p| p.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select timer", "Select timer").to_owned());
+                                                    let selected_label = Self::timer_preset_selected_label(
+                                                        &self.state.timer_presets,
+                                                        selected_id,
+                                                        language,
+                                                    );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, "press-stop-timer-preset"))
                                                         .width(160.0)
                                                         .selected_text(selected_label)
@@ -11292,13 +11288,11 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     });
                                                 } else if matches!(step.action, MacroAction::StartTimerPreset | MacroAction::PauseTimerPreset | MacroAction::StopTimerPreset) {
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state.timer_presets.iter()
-                                                                .find(|p| p.id == id)
-                                                                .map(|p| p.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select timer", "Select timer").to_owned());
+                                                    let selected_label = Self::timer_preset_selected_label(
+                                                        &self.state.timer_presets,
+                                                        selected_id,
+                                                        language,
+                                                    );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "step-timer-preset-select"))
                                                         .width(146.0)
                                                         .selected_text(selected_label)

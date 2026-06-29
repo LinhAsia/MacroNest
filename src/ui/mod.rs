@@ -1534,6 +1534,21 @@ impl CrosshairApp {
             })
     }
 
+    fn timer_preset_selected_label(
+        timer_presets: &[TimerPreset],
+        selected_id: Option<u32>,
+        language: UiLanguage,
+    ) -> String {
+        selected_id
+            .and_then(|id| {
+                timer_presets
+                    .iter()
+                    .find(|preset| preset.id == id)
+                    .map(|preset| preset.name.clone())
+            })
+            .unwrap_or_else(|| Self::tr_lang(language, "Select timer", "Select timer").to_owned())
+    }
+
     fn ordered_id_index<T, F>(items: &[T], id: u32, id_of: F) -> usize
     where
         F: Fn(&T) -> u32,
