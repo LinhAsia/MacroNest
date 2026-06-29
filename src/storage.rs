@@ -199,22 +199,9 @@ impl AppPaths {
                 continue;
             };
             let temp_file = self.state_temp_file();
-            {
-                let mut file = fs::File::create(&temp_file).with_context(|| {
-                    format!(
-                        "Failed to create temporary state file {}",
-                        temp_file.display()
-                    )
-                })?;
-                let content = serde_json::to_string_pretty(&state)?;
-                file.write_all(content.as_bytes()).with_context(|| {
-                    format!(
-                        "Failed to write temporary state file {}",
-                        temp_file.display()
-                    )
-                })?;
-                file.sync_all().ok();
-            }
+            let content = serde_json::to_string_pretty(&state)?;
+            write_text_file(&temp_file, &content)
+                .with_context(|| format!("Failed to restore backup into {}", temp_file.display()))?;
             if self.state_file.exists() {
                 let _ = fs::remove_file(&self.state_file);
             }
@@ -677,13 +664,7 @@ impl AppPaths {
         let content = serde_json::to_string_pretty(&state)?;
         let temp_file = self.state_temp_file();
         let backup_file = self.state_backup_file();
-        {
-            let mut file = fs::File::create(&temp_file)
-                .with_context(|| format!("Failed to create {}", temp_file.display()))?;
-            file.write_all(content.as_bytes())
-                .with_context(|| format!("Failed to write {}", temp_file.display()))?;
-            file.sync_all().ok();
-        }
+        write_text_file(&temp_file, &content)?;
         if self.state_file.exists() {
             if let Ok(entries) = fs::read_dir(&self.root) {
                 for entry in entries.flatten() {
@@ -767,6 +748,15 @@ impl AppPaths {
     pub fn asset_path(&self, asset_name: &str) -> PathBuf {
         self.asset_dir.join(asset_name)
     }
+}
+
+fn write_text_file(path: &Path, content: &str) -> Result<()> {
+    let mut file = fs::File::create(path)
+        .with_context(|| format!("Failed to create {}", path.display()))?;
+    file.write_all(content.as_bytes())
+        .with_context(|| format!("Failed to write {}", path.display()))?;
+    file.sync_all().ok();
+    Ok(())
 }
 
 fn sanitize_name(name: &str) -> String {
