@@ -1500,6 +1500,18 @@ impl CrosshairApp {
             .find(|preset| preset.id == preset_id)
     }
 
+    fn command_preset_id_from_key(
+        command_presets: &[CommandPreset],
+        key: &str,
+    ) -> Option<u32> {
+        key.trim().parse::<u32>().ok().or_else(|| {
+            command_presets
+                .iter()
+                .find(|preset| Self::trimmed_eq_ignore_ascii_case(&preset.name, key))
+                .map(|preset| preset.id)
+        })
+    }
+
     fn ordered_id_index<T, F>(items: &[T], id: u32, id_of: F) -> usize
     where
         F: Fn(&T) -> u32,
