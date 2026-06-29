@@ -4513,7 +4513,7 @@ impl CrosshairApp {
                                         let mascot_options = [
                                             (crate::model::MascotStyle::Hachiware, "Hachiware"),
                                             (crate::model::MascotStyle::ChiikawaClassic, "Usagi"),
-                                            (crate::model::MascotStyle::Gugugaga, "Gugugaga"),
+                                            (crate::model::MascotStyle::Chiikawa, "Chiikawa"),
                                         ];
                                         let selected_text = mascot_options
                                             .iter()
