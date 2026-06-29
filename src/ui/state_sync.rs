@@ -279,6 +279,7 @@ impl CrosshairApp {
             self.state.quick_key_display_mode,
             self.state.quick_key_display_mascot_style,
             self.state.quick_key_display_mascot_styles.clone(),
+            self.state.quick_key_display_mascot_positions.clone(),
         );
         Self::sync_overlay_command_with_state_if_changed(
             &self.overlay_tx,
@@ -292,6 +293,7 @@ impl CrosshairApp {
                 mode: config.4,
                 mascot_style: config.5,
                 mascot_styles: config.6.clone(),
+                mascot_positions: config.7.clone(),
             },
         );
     }

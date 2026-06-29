@@ -24,7 +24,7 @@ pub enum QuickKeyDisplayMode {
     Mascot,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum MascotStyle {
     #[default]
     #[serde(alias = "Custom")]
@@ -481,6 +481,8 @@ pub struct AppState {
     #[serde(default)]
     pub quick_key_display_mascot_styles: Vec<MascotStyle>,
     #[serde(default)]
+    pub quick_key_display_mascot_positions: Vec<(MascotStyle, i32, i32)>,
+    #[serde(default)]
     pub quick_screen_draw_enabled: bool,
     #[serde(default)]
     pub quick_screen_draw_hotkey: Option<HotkeyBinding>,
@@ -601,6 +603,7 @@ impl Default for AppState {
             quick_key_display_mode: QuickKeyDisplayMode::Normal,
             quick_key_display_mascot_style: MascotStyle::Hachiware,
             quick_key_display_mascot_styles: vec![MascotStyle::Hachiware],
+            quick_key_display_mascot_positions: Vec::new(),
             quick_screen_draw_enabled: false,
             quick_screen_draw_hotkey: None,
             quick_screen_draw_pass_trigger_through: false,

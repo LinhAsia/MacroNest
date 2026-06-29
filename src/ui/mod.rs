@@ -561,7 +561,16 @@ pub struct CrosshairApp {
     last_synced_macro_delays: Option<(u32, u32)>,
     last_synced_focus_highlight_config: Option<(RgbaColor, FocusHighlightDecoration)>,
     last_synced_quick_key_display_config:
-        Option<(bool, i32, i32, f32, QuickKeyDisplayMode, MascotStyle, Vec<MascotStyle>)>,
+        Option<(
+            bool,
+            i32,
+            i32,
+            f32,
+            QuickKeyDisplayMode,
+            MascotStyle,
+            Vec<MascotStyle>,
+            Vec<(MascotStyle, i32, i32)>,
+        )>,
     last_synced_quick_screen_draw_config:
         Option<(bool, Option<HotkeyBinding>, bool, RgbaColor, f32, bool, f32, bool)>,
     last_synced_quick_key_sound_config: Option<(bool, u32, f32)>,
@@ -10495,9 +10504,22 @@ impl eframe::App for CrosshairApp {
                     self.quit_requested = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
-                UiCommand::MascotDragged { x, y } => {
+                UiCommand::MascotDragged { style, x, y } => {
                     self.state.quick_key_display_x = x;
                     self.state.quick_key_display_y = y;
+                    if let Some((_, pos_x, pos_y)) = self
+                        .state
+                        .quick_key_display_mascot_positions
+                        .iter_mut()
+                        .find(|(entry_style, _, _)| *entry_style == style)
+                    {
+                        *pos_x = x;
+                        *pos_y = y;
+                    } else {
+                        self.state
+                            .quick_key_display_mascot_positions
+                            .push((style, x, y));
+                    }
                     self.persist();
                     ctx.request_repaint();
                 }

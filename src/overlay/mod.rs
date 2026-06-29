@@ -264,6 +264,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static MASCOT_DRAG_START_CENTER: Lazy<Mutex<Option<(i32, i32)>>> =
         Lazy::new(|| Mutex::new(None));
+    static MASCOT_DRAG_STYLE: Lazy<Mutex<Option<crate::model::MascotStyle>>> =
+        Lazy::new(|| Mutex::new(None));
     static HOOKS_THREAD: Lazy<Mutex<Option<(u32, thread::JoinHandle<()>)>>> =
         Lazy::new(|| Mutex::new(None));
     const OPEN_WINDOW_SNAPSHOT_TTL: Duration = Duration::from_millis(400);
@@ -1741,6 +1743,7 @@ mod windows_overlay {
             mode: QuickKeyDisplayMode,
             mascot_style: crate::model::MascotStyle,
             mascot_styles: Vec<crate::model::MascotStyle>,
+            mascot_positions: Vec<(crate::model::MascotStyle, i32, i32)>,
         },
         ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
@@ -2092,6 +2095,7 @@ mod windows_overlay {
             capture_frame: Option<crate::window_list::ScreenCaptureFrame>,
         },
         MascotDragged {
+            style: crate::model::MascotStyle,
             x: i32,
             y: i32,
         },
@@ -2467,6 +2471,7 @@ mod windows_overlay {
         quick_key_display_mode: QuickKeyDisplayMode,
         quick_key_display_mascot_style: crate::model::MascotStyle,
         quick_key_display_mascot_styles: Vec<crate::model::MascotStyle>,
+        quick_key_display_mascot_positions: HashMap<crate::model::MascotStyle, (i32, i32)>,
         quick_key_display_entries: Vec<QuickKeyDisplayEntry>,
         quick_key_display_slot_memory: HashMap<String, usize>,
         quick_key_display_slot_labels: HashMap<(QuickKeyDisplayLane, usize), String>,
@@ -3253,6 +3258,7 @@ mod windows_overlay {
                 quick_key_display_mode: QuickKeyDisplayMode::Normal,
                 quick_key_display_mascot_style: crate::model::MascotStyle::Hachiware,
                 quick_key_display_mascot_styles: vec![crate::model::MascotStyle::Hachiware],
+                quick_key_display_mascot_positions: HashMap::new(),
                 quick_key_display_entries: Vec::new(),
                 quick_key_display_slot_memory: HashMap::new(),
                 quick_key_display_slot_labels: HashMap::new(),
@@ -7146,7 +7152,7 @@ mod windows_overlay {
     ) -> f32 {
         let base = (font_size / 36.0).clamp(0.72, 2.4);
         match mascot_style {
-            crate::model::MascotStyle::ChiikawaClassic => base * 0.88,
+            crate::model::MascotStyle::ChiikawaClassic => base * 1.04,
             crate::model::MascotStyle::Hachiware => base * 0.80,
             crate::model::MascotStyle::Gugugaga => base * 0.90,
         }
@@ -7533,23 +7539,64 @@ mod windows_overlay {
         (total_width.max(1), max_height.max(1), items)
     }
 
+    fn quick_key_display_default_mascot_centers(
+        center_x: i32,
+        center_y: i32,
+        font_size: f32,
+        styles: &[crate::model::MascotStyle],
+    ) -> Vec<(crate::model::MascotStyle, i32, i32, i32, i32)> {
+        let (group_width, group_height, items) =
+            quick_key_display_mascot_group_layout(font_size, styles);
+        let gap = (font_size * 0.25).round() as i32;
+        let mut x = center_x - group_width / 2;
+        let group_top = center_y - group_height / 2;
+        let mut out = Vec::with_capacity(items.len());
+        for (style, width, height) in items {
+            let y = group_top + (group_height - height) / 2;
+            out.push((style, x + width / 2, y + height / 2, width, height));
+            x += width + gap;
+        }
+        out
+    }
+
+    fn quick_key_display_mascot_center(
+        runtime: &Runtime,
+        style: crate::model::MascotStyle,
+        default_x: i32,
+        default_y: i32,
+    ) -> (i32, i32) {
+        runtime
+            .quick_key_display_mascot_positions
+            .get(&style)
+            .copied()
+            .unwrap_or((default_x, default_y))
+    }
+
     fn move_quick_key_display_window(runtime: &Runtime) {
         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
         let styles = quick_key_display_active_mascot_styles(runtime);
-        let (width, height, _) = quick_key_display_mascot_group_layout(font_size, &styles);
-        let x = runtime.quick_key_display_center_x - (width / 2);
-        let y = runtime.quick_key_display_center_y - (height / 2);
-        let _ = unsafe {
-            SetWindowPos(
-                runtime.key_display_hwnd,
-                None,
-                x,
-                y,
-                width,
-                height,
-                SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE,
-            )
-        };
+        let hwnds = quick_key_display_hwnds(runtime);
+        let items = quick_key_display_default_mascot_centers(
+            runtime.quick_key_display_center_x,
+            runtime.quick_key_display_center_y,
+            font_size,
+            &styles,
+        );
+        for (index, (style, default_x, default_y, width, height)) in items.into_iter().enumerate() {
+            let (center_x, center_y) =
+                quick_key_display_mascot_center(runtime, style, default_x, default_y);
+            let _ = unsafe {
+                SetWindowPos(
+                    hwnds[index],
+                    None,
+                    center_x - width / 2,
+                    center_y - height / 2,
+                    width,
+                    height,
+                    SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE,
+                )
+            };
+        }
     }
 
     fn clamp_mascot_center_to_screen(
@@ -7595,6 +7642,7 @@ mod windows_overlay {
             if matches!(message, WM_LBUTTONUP) && MASCOT_DRAG_START_MOUSE.lock().is_some() {
                 *MASCOT_DRAG_START_MOUSE.lock() = None;
                 *MASCOT_DRAG_START_CENTER.lock() = None;
+                *MASCOT_DRAG_STYLE.lock() = None;
                 MASCOT_WINDOW_MOVING.store(false, Ordering::Relaxed);
             }
             return false;
@@ -7602,62 +7650,69 @@ mod windows_overlay {
 
         match message {
             WM_LBUTTONDOWN => {
-                let mut rect = RECT::default();
-                if unsafe { GetWindowRect(runtime.key_display_hwnd, &mut rect) }.is_err() {
-                    return false;
-                }
-                if cursor.x < rect.left
-                    || cursor.x >= rect.right
-                    || cursor.y < rect.top
-                    || cursor.y >= rect.bottom
-                {
-                    return false;
-                }
                 let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
-                let mascot_style = runtime.quick_key_display_mascot_style;
-                let scale = quick_key_display_mascot_scale(font_size, mascot_style);
-                let y_shift = 30.0;
-                let head_cx = 168.0 * scale;
-                let head_cy = (77.0 + y_shift) * scale;
-                let head_radius = if mascot_style == crate::model::MascotStyle::Hachiware {
-                    56.0 * scale
-                } else {
-                    54.0 * scale
-                };
-                let local_x = (cursor.x - rect.left) as f32;
-                let local_y = (cursor.y - rect.top) as f32;
-                let dx = local_x - head_cx;
-                let dy = local_y - head_cy;
-                let dist_sq = dx * dx + dy * dy;
-                if dist_sq > head_radius * head_radius {
-                    return false;
-                }
-                *MASCOT_DRAG_START_MOUSE.lock() = Some((cursor.x, cursor.y));
-                *MASCOT_DRAG_START_CENTER.lock() = Some((
+                let styles = quick_key_display_active_mascot_styles(runtime);
+                let hwnds = quick_key_display_hwnds(runtime);
+                let items = quick_key_display_default_mascot_centers(
                     runtime.quick_key_display_center_x,
                     runtime.quick_key_display_center_y,
-                ));
+                    font_size,
+                    &styles,
+                );
+                let mut hit = None;
+                for (index, (style, default_x, default_y, _, _)) in items.iter().copied().enumerate()
+                {
+                    let hwnd = hwnds[index];
+                    if unsafe {
+                        !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool()
+                    } {
+                        continue;
+                    }
+                    let mut rect = RECT::default();
+                    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
+                        continue;
+                    }
+                    if cursor.x >= rect.left
+                        && cursor.x < rect.right
+                        && cursor.y >= rect.top
+                        && cursor.y < rect.bottom
+                    {
+                        let (center_x, center_y) =
+                            quick_key_display_mascot_center(runtime, style, default_x, default_y);
+                        hit = Some((style, center_x, center_y));
+                        break;
+                    }
+                }
+                let Some((style, center_x, center_y)) = hit else {
+                    return false;
+                };
+                *MASCOT_DRAG_START_MOUSE.lock() = Some((cursor.x, cursor.y));
+                *MASCOT_DRAG_START_CENTER.lock() = Some((center_x, center_y));
+                *MASCOT_DRAG_STYLE.lock() = Some(style);
                 MASCOT_WINDOW_MOVING.store(true, Ordering::Relaxed);
                 true
             }
             WM_MOUSEMOVE => {
-                let (Some((start_mouse_x, start_mouse_y)), Some((start_center_x, start_center_y))) = (
+                let (
+                    Some((start_mouse_x, start_mouse_y)),
+                    Some((start_center_x, start_center_y)),
+                    Some(style),
+                ) = (
                     *MASCOT_DRAG_START_MOUSE.lock(),
                     *MASCOT_DRAG_START_CENTER.lock(),
+                    *MASCOT_DRAG_STYLE.lock(),
                 ) else {
                     return false;
                 };
                 let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
-                let (width, height) = quick_key_display_mascot_layout_size(
-                    font_size,
-                    runtime.quick_key_display_mascot_style,
-                );
+                let (width, height) = quick_key_display_mascot_layout_size(font_size, style);
                 let center_x = start_center_x + (cursor.x - start_mouse_x);
                 let center_y = start_center_y + (cursor.y - start_mouse_y);
                 let (center_x, center_y) =
                     clamp_mascot_center_to_screen(center_x, center_y, width, height);
-                runtime.quick_key_display_center_x = center_x;
-                runtime.quick_key_display_center_y = center_y;
+                runtime
+                    .quick_key_display_mascot_positions
+                    .insert(style, (center_x, center_y));
                 move_quick_key_display_window(runtime);
                 true
             }
@@ -7665,12 +7720,22 @@ mod windows_overlay {
                 if MASCOT_DRAG_START_MOUSE.lock().is_none() {
                     return false;
                 }
+                let style = MASCOT_DRAG_STYLE
+                    .lock()
+                    .unwrap_or(runtime.quick_key_display_mascot_style);
+                let (x, y) = runtime
+                    .quick_key_display_mascot_positions
+                    .get(&style)
+                    .copied()
+                    .unwrap_or((runtime.quick_key_display_center_x, runtime.quick_key_display_center_y));
                 *MASCOT_DRAG_START_MOUSE.lock() = None;
                 *MASCOT_DRAG_START_CENTER.lock() = None;
+                *MASCOT_DRAG_STYLE.lock() = None;
                 MASCOT_WINDOW_MOVING.store(false, Ordering::Relaxed);
                 let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
-                    x: runtime.quick_key_display_center_x,
-                    y: runtime.quick_key_display_center_y,
+                    style,
+                    x,
+                    y,
                 });
                 true
             }
@@ -8364,6 +8429,7 @@ mod windows_overlay {
                     mode,
                     mascot_style,
                     mascot_styles,
+                    mascot_positions,
                 } => {
                     runtime.quick_key_display_enabled = enabled;
                     runtime.quick_key_display_center_x = center_x;
@@ -8376,6 +8442,10 @@ mod windows_overlay {
                     } else {
                         mascot_styles
                     };
+                    runtime.quick_key_display_mascot_positions = mascot_positions
+                        .into_iter()
+                        .map(|(style, x, y)| (style, (x, y)))
+                        .collect();
                     {
                         let mut hook_state = HOOK_STATE.lock();
                         hook_state.quick_key_mascot_active =
@@ -9025,27 +9095,30 @@ mod windows_overlay {
                     )
                 }
                 QuickKeyDisplayMode::Mascot => {
-                    let (_, group_height, items) =
-                        quick_key_display_mascot_group_layout(font_size, &mascot_styles);
                     let hwnds = quick_key_display_hwnds(runtime);
-                    let gap = (font_size * 0.25).round() as i32;
-                    let mut item_x = x;
-                    for (index, (style, item_width, item_height)) in items.iter().copied().enumerate()
+                    let items = quick_key_display_default_mascot_centers(
+                        runtime.quick_key_display_center_x,
+                        runtime.quick_key_display_center_y,
+                        font_size,
+                        &mascot_styles,
+                    );
+                    for (index, (style, default_x, default_y, item_width, item_height)) in
+                        items.iter().copied().enumerate()
                     {
-                        let item_y = y + (group_height - item_height) / 2;
+                        let (center_x, center_y) =
+                            quick_key_display_mascot_center(runtime, style, default_x, default_y);
                         paint_mascot_quick_key_display(
                             hwnds[index],
                             &entries,
                             font_size,
                             runtime.quick_key_display_mouse_offset,
                             style,
-                            item_x,
-                            item_y,
+                            center_x - item_width / 2,
+                            center_y - item_height / 2,
                             item_width,
                             item_height,
                             runtime.quick_key_display_spam_heat,
                         )?;
-                        item_x += item_width + gap;
                     }
                     for hwnd in hwnds.iter().skip(items.len()) {
                         let _ = ShowWindow(*hwnd, SW_HIDE);
@@ -28466,6 +28539,7 @@ mod fallback {
             mode: QuickKeyDisplayMode,
             mascot_style: MascotStyle,
             mascot_styles: Vec<MascotStyle>,
+            mascot_positions: Vec<(MascotStyle, i32, i32)>,
         },
         ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
@@ -28521,6 +28595,7 @@ mod fallback {
             smoothing_amount: f32,
         },
         MascotDragged {
+            style: MascotStyle,
             x: i32,
             y: i32,
         },
