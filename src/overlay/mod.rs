@@ -14948,6 +14948,7 @@ mod windows_overlay {
     ) {
         if mascot_style == crate::model::MascotStyle::Hachiware
             || mascot_style == crate::model::MascotStyle::Gugugaga
+            || mascot_style == crate::model::MascotStyle::ChiikawaClassic
         {
             return;
         }
@@ -16623,6 +16624,11 @@ mod windows_overlay {
         };
         let stroke_color = [59, 41, 38, 255];
         let stroke_w = 2.2 * scale;
+        let arm_size = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            0.64
+        } else {
+            1.0
+        };
 
         let draw_detached_arm = |pixmap: &mut tiny_skia::Pixmap,
                                  root_x: f32,
@@ -16640,16 +16646,13 @@ mod windows_overlay {
 
             let top_center_x = root_x + side * 0.5 * scale;
             let top_center_y = root_y;
-            let paw_center_x = paw_x;
-            let paw_center_y = paw_y + 4.4 * scale;
-            let wrist_center_x = paw_x - ux * 7.0 * scale;
-            let wrist_center_y = paw_y - uy * 7.0 * scale;
+            let end_center_x = paw_x;
+            let end_center_y = paw_y + 3.0 * scale * arm_size;
             let straight_sign = -side;
 
-            let top_w = 4.8 * scale;
-            let wrist_w = 5.2 * scale;
-            let paw_rx = 9.2 * scale;
-            let paw_ry = 9.8 * scale;
+            let top_w = 4.8 * scale * arm_size;
+            let end_w = 7.8 * scale * arm_size;
+            let cap_len = 9.2 * scale * arm_size;
 
             let top_straight = (
                 top_center_x + px * top_w * straight_sign,
@@ -16659,23 +16662,24 @@ mod windows_overlay {
                 top_center_x - px * top_w * straight_sign,
                 top_center_y - py * top_w * straight_sign,
             );
-            let wrist_straight = (
-                wrist_center_x + px * wrist_w * straight_sign,
-                wrist_center_y + py * wrist_w * straight_sign,
+            let end_outer = (
+                end_center_x + px * end_w * straight_sign,
+                end_center_y + py * end_w * straight_sign,
             );
-            let wrist_curve = (
-                wrist_center_x - px * wrist_w * straight_sign,
-                wrist_center_y - py * wrist_w * straight_sign,
+            let end_inner = (
+                end_center_x - px * end_w * straight_sign,
+                end_center_y - py * end_w * straight_sign,
             );
+            let cap_tip = (end_center_x + ux * cap_len, end_center_y + uy * cap_len);
             let curve_ctrl = (
-                root_x + dx * 0.32 - px * 6.8 * scale * straight_sign,
-                root_y + dy * 0.56 - py * 2.4 * scale * straight_sign,
+                root_x + dx * 0.38 - px * 5.2 * scale * arm_size * straight_sign,
+                root_y + dy * 0.55 - py * 2.0 * scale * arm_size * straight_sign,
             );
 
             let mut arm = tiny_skia::PathBuilder::new();
             arm.move_to(top_straight.0, top_straight.1);
-            arm.line_to(wrist_straight.0, wrist_straight.1);
-            arm.quad_to(paw_center_x, paw_center_y + paw_ry * 0.48, wrist_curve.0, wrist_curve.1);
+            arm.line_to(end_outer.0, end_outer.1);
+            arm.quad_to(cap_tip.0, cap_tip.1, end_inner.0, end_inner.1);
             arm.quad_to(curve_ctrl.0, curve_ctrl.1, top_curve.0, top_curve.1);
             arm.close();
 
@@ -16683,9 +16687,6 @@ mod windows_overlay {
                 fill_skia_path(pixmap, &p, arm_fill);
                 stroke_skia_path(pixmap, &p, stroke_color, stroke_w);
             }
-
-            fill_skia_ellipse(pixmap, paw_center_x, paw_center_y, paw_rx, paw_ry, arm_fill);
-            stroke_skia_ellipse(pixmap, paw_center_x, paw_center_y, paw_rx, paw_ry, stroke_w, stroke_color);
         };
 
         draw_detached_arm(
@@ -16774,7 +16775,7 @@ mod windows_overlay {
         let y_shift = 30.0;
         // 3D Perspective mapping helper (takes FLAT coordinates, returns SCALED & PROJECTED coordinates)
         let prop_scale = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            0.84
+            0.64
         } else {
             1.0
         };
