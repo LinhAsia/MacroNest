@@ -1492,7 +1492,8 @@ impl CrosshairApp {
                 if key.is_empty() {
                     return false;
                 }
-                preset.id.to_string() == key || preset.name.trim().eq_ignore_ascii_case(key)
+                preset.id.to_string() == key
+                    || Self::trimmed_eq_ignore_ascii_case(&preset.name, key)
             })
             .cloned();
         if step.command_preset_command.trim().is_empty() {
@@ -5928,7 +5929,7 @@ impl CrosshairApp {
                                                             self.state
                                                                 .command_presets
                                                                 .iter()
-                                                                .find(|preset| preset.name.trim().eq_ignore_ascii_case(step.key.trim()))
+                                                                .find(|preset| Self::trimmed_eq_ignore_ascii_case(&preset.name, &step.key))
                                                                 .map(|preset| preset.id)
                                                         });
                                                     let selected_label = selected_id
@@ -8108,7 +8109,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             self.state
                                                                 .command_presets
                                                                 .iter()
-                                                                .find(|preset| preset.name.trim().eq_ignore_ascii_case(step.key.trim()))
+                                                                .find(|preset| Self::trimmed_eq_ignore_ascii_case(&preset.name, &step.key))
                                                                 .map(|preset| preset.id)
                                                         });
                                                     let selected_label = selected_id
@@ -11131,7 +11132,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             self.state
                                                                 .command_presets
                                                                 .iter()
-                                                                .find(|preset| preset.name.trim().eq_ignore_ascii_case(step.key.trim()))
+                                                                .find(|preset| Self::trimmed_eq_ignore_ascii_case(&preset.name, &step.key))
                                                                 .map(|preset| preset.id)
                                                         });
                                                     let selected_label = selected_id
@@ -16161,7 +16162,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                 Some(selected_id) => preset_options
                     .iter()
                     .find(|(id, _)| *id == selected_id)
-                    .is_none_or(|(_, name)| !name.trim().eq_ignore_ascii_case(step.key.trim())),
+                    .is_none_or(|(_, name)| !Self::trimmed_eq_ignore_ascii_case(name, &step.key)),
                 None => true,
             };
         if inferred_custom {
@@ -16267,7 +16268,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
         trimmed.parse::<u32>().ok().or_else(|| {
             items
                 .iter()
-                .find(|item| name_of(item).trim().eq_ignore_ascii_case(trimmed))
+                .find(|item| Self::trimmed_eq_ignore_ascii_case(name_of(item), trimmed))
                 .map(id_of)
         })
     }

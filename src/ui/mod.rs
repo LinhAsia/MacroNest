@@ -2095,6 +2095,10 @@ impl CrosshairApp {
         haystack.to_lowercase().contains(&needle.to_lowercase())
     }
 
+    fn trimmed_eq_ignore_ascii_case(left: &str, right: &str) -> bool {
+        left.trim().eq_ignore_ascii_case(right.trim())
+    }
+
     fn sort_macro_groups(groups: &mut [MacroGroup]) {
         groups.sort_by_key(|group| group.id);
     }
@@ -7996,7 +8000,7 @@ impl CrosshairApp {
             preset.collapsed = false;
 
             // Robust Fallback: If the name wasn't renamed by AI, but the command changed, let's auto-generate a descriptive name!
-            if preset.name.trim().eq_ignore_ascii_case(old_name.trim())
+            if Self::trimmed_eq_ignore_ascii_case(&preset.name, &old_name)
                 && preset.command.trim() != old_name.trim()
             {
                 let cmd_lower = preset.command.to_ascii_lowercase();
@@ -8185,7 +8189,7 @@ impl CrosshairApp {
             .state
             .command_presets
             .iter()
-            .position(|preset| preset.name.trim().eq_ignore_ascii_case(&name))
+            .position(|preset| Self::trimmed_eq_ignore_ascii_case(&preset.name, &name))
         {
             let preset = &mut self.state.command_presets[existing_index];
             preset.name = name.clone();
