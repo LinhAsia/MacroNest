@@ -2065,28 +2065,13 @@ impl CrosshairApp {
                             image::ColorType::Rgba8,
                         );
 
-                        if let Some(preset) = self
-                            .state
-                            .vision_presets
-                            .iter_mut()
-                            .find(|preset| preset.id == preset_id)
-                        {
-                            preset.collapsed = false;
-                            preset.last_capture_screen_x = Some(capture.screen_x);
-                            preset.last_capture_screen_y = Some(capture.screen_y);
-                        }
-                        self.vision_preview_cache.remove(&preset_id);
                         (
-                            match save_result {
-                                Ok(()) => format!(
-                                    "Saved template {}x{} for preset #{}.",
-                                    capture.width, capture.height, preset_id
-                                ),
-                                Err(error) => {
-                                    format!("Captured template but could not save it: {error}")
-                                }
-                            },
-                            true,
+                            self.finish_vision_template_capture(
+                                preset_id,
+                                &capture,
+                                save_result,
+                            ),
+                            false,
                         )
                     }
                     VisionCaptureTarget::GeometryColor => (
@@ -2308,6 +2293,33 @@ impl CrosshairApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
         crate::overlay::wake_command_queue();
+    }
+
+    pub(crate) fn finish_vision_template_capture(
+        &mut self,
+        preset_id: u32,
+        capture: &window_list::ScreenCaptureFrame,
+        save_result: image::ImageResult<()>,
+    ) -> String {
+        if let Some(preset) = self
+            .state
+            .vision_presets
+            .iter_mut()
+            .find(|preset| preset.id == preset_id)
+        {
+            preset.collapsed = false;
+            preset.last_capture_screen_x = Some(capture.screen_x);
+            preset.last_capture_screen_y = Some(capture.screen_y);
+        }
+        self.vision_preview_cache.remove(&preset_id);
+        self.persist_vision_presets();
+        match save_result {
+            Ok(()) => format!(
+                "Saved template {}x{} for preset #{}.",
+                capture.width, capture.height, preset_id
+            ),
+            Err(error) => format!("Captured template but could not save it: {error}"),
+        }
     }
 
     pub(crate) fn apply_image_search_color_pick(
@@ -2798,25 +2810,7 @@ impl CrosshairApp {
                 capture.height as u32,
                 image::ColorType::Rgba8,
             );
-            if let Some(preset) = self
-                .state
-                .vision_presets
-                .iter_mut()
-                .find(|preset| preset.id == preset_id)
-            {
-                preset.collapsed = false;
-                preset.last_capture_screen_x = Some(capture.screen_x);
-                preset.last_capture_screen_y = Some(capture.screen_y);
-            }
-            self.vision_preview_cache.remove(&preset_id);
-            self.persist_vision_presets();
-            self.status = match save_result {
-                Ok(()) => format!(
-                    "Saved template {}x{} for preset #{}.",
-                    capture.width, capture.height, preset_id
-                ),
-                Err(error) => format!("Captured template but could not save it: {error}"),
-            };
+            self.status = self.finish_vision_template_capture(preset_id, &capture, save_result);
             ctx.request_repaint();
             return;
         }
