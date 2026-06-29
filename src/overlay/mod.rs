@@ -6847,18 +6847,21 @@ mod windows_overlay {
         let mouse_wiggle_x = (time_s * 22.0 + side * 2.5).sin() * 5.8 * scale * mouse_move_strength;
         let mouse_wiggle_y =
             (time_s * 22.0 + side * 2.5 + 1.5).sin() * 2.2 * scale * mouse_move_strength;
+        let type_wiggle = recent_pulse * (time_s * 28.0 + side * 1.8).sin();
 
         let wind_dir_x = look_x * -0.28
             + sway * 3.8 * scale
             + sway_fast * 2.2 * scale
             + recoil * 1.35 * scale
             + gust * 1.9 * scale
-            + mouse_wiggle_x;
+            + mouse_wiggle_x
+            + type_wiggle * 5.2 * scale;
         let wind_dir_y = look_y * -0.05
             + sway.abs() * -0.7 * scale
             + sway_fast * 0.22 * scale
             + recoil * 0.16 * scale
-            + mouse_wiggle_y;
+            + mouse_wiggle_y
+            + type_wiggle.abs() * -1.4 * scale;
         let pulse = recent_pulse * 2.4 * scale;
         let x = (wind_dir_x + side * pulse * 0.36) * bend_tip;
         let y = wind_dir_y * bend_mid + (-x.abs() * 0.38 + recoil * 0.18 * scale) * bend_tip;
@@ -15501,6 +15504,8 @@ mod windows_overlay {
             || mascot_style == crate::model::MascotStyle::Gugugaga
         {
             let time_s = unsafe { GetTickCount() } as f32 * 0.001;
+            let face_pulse_x = recent_pulse * (time_s * 24.0).sin() * 1.6 * scale;
+            let face_pulse_y = recent_pulse * (time_s * 26.0 + 0.8).sin() * 0.9 * scale;
 
             let face_wobble_fast_x = (time_s * 1.65).sin() * 0.16 * scale;
             let face_wobble_fast_y = (time_s * 1.2 + 0.7).sin() * 0.1 * scale;
@@ -15566,6 +15571,10 @@ mod windows_overlay {
 
                     px += look_x * look_mul_x + wobble_x;
                     py += look_y * look_mul_y + wobble_y + vertical_offset;
+                    if matches!(path_index_for_wobble, 14..=22) {
+                        px += face_pulse_x;
+                        py += face_pulse_y;
+                    }
 
                     if mascot_style == crate::model::MascotStyle::Hachiware {
                         let side = ((xc - cx_val) / 60.0).clamp(-1.0, 1.0);
@@ -15677,6 +15686,59 @@ mod windows_overlay {
                     {
                         dest_data[row_start..row_end]
                             .copy_from_slice(&src_data[row_start..row_end]);
+                    }
+                }
+            }
+
+            if red_factor > 0.08 {
+                quick_key_display_apply_heat_tint_ellipse(
+                    pixmap,
+                    head_cx + look_x * 0.18,
+                    head_cy + 13.0 * scale + look_y * 0.3,
+                    47.0 * scale,
+                    35.0 * scale,
+                    red_factor,
+                    [255, 95, 120, 255],
+                );
+
+                let cheek_alpha = (70.0 + 150.0 * red_factor).round() as u8;
+                for side in [-1.0_f32, 1.0] {
+                    fill_skia_ellipse(
+                        pixmap,
+                        head_cx + side * 26.0 * scale + look_x * 0.35,
+                        head_cy + 18.0 * scale + look_y * 0.35,
+                        10.5 * scale,
+                        6.8 * scale,
+                        [255, 130, 155, cheek_alpha],
+                    );
+                }
+
+                if red_factor > 0.55 {
+                    let eye_heat = ((red_factor - 0.55) / 0.45).clamp(0.0, 1.0);
+                    for side in [-1.0_f32, 1.0] {
+                        fill_skia_circle(
+                            pixmap,
+                            head_cx + side * 18.0 * scale + look_x * 0.55 + face_pulse_x,
+                            head_cy + 1.0 * scale + look_y * 0.5 + face_pulse_y,
+                            6.0 * scale * eye_heat,
+                            [255, 255, 255, (240.0 * eye_heat).round() as u8],
+                        );
+                    }
+                }
+
+                let sweat = ((red_factor - 0.2) / 0.8).clamp(0.0, 1.0);
+                if sweat > 0.0 {
+                    let sx = head_cx + 34.0 * scale + look_x * 0.25;
+                    let sy = head_cy - 17.0 * scale + look_y * 0.2;
+                    let s = (0.85 + sweat * 0.55) * scale;
+                    let mut drop = tiny_skia::PathBuilder::new();
+                    drop.move_to(sx, sy - 8.0 * s);
+                    drop.quad_to(sx + 8.0 * s, sy + 1.0 * s, sx, sy + 8.5 * s);
+                    drop.quad_to(sx - 7.0 * s, sy + 1.0 * s, sx, sy - 8.0 * s);
+                    drop.close();
+                    if let Some(p) = drop.finish() {
+                        fill_skia_path(pixmap, &p, [176, 228, 255, 235]);
+                        stroke_skia_path(pixmap, &p, [59, 41, 38, 235], 1.3 * scale);
                     }
                 }
             }
@@ -16501,75 +16563,30 @@ mod windows_overlay {
             stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 5.0 * scale);
         }
 
-        // Sweat drops when typing too much
+        // Sweat drop when typing too much
         if red_factor > 0.15 {
             let sweat_size = (red_factor - 0.15) / 0.85; // 0.0 to 1.0
-            let s_scale = (0.5 + 0.5 * sweat_size) * scale;
+            let s_scale = (0.85 + 0.65 * sweat_size) * scale;
 
-            // Left sweat drop
-            let (sx, sy) = map_face_brow(122.0, 158.0);
-            let mut trail1 = tiny_skia::PathBuilder::new();
-            trail1.move_to(sx - 2.0 * s_scale, sy - 14.0 * s_scale);
-            trail1.quad_to(
-                sx - 3.0 * s_scale,
-                sy - 8.0 * s_scale,
-                sx - 2.0 * s_scale,
-                sy - 2.0 * s_scale,
-            );
-            if let Some(p) = trail1.finish() {
-                stroke_skia_path(&mut tmp_pixmap, &p, [59, 41, 38, 100], 1.0 * scale);
-            }
-            let mut drop1 = tiny_skia::PathBuilder::new();
-            drop1.move_to(sx - 2.0 * s_scale, sy - 2.0 * s_scale);
-            drop1.quad_to(
+            let (sx, sy) = map_face_brow(278.0, 166.0);
+            let mut drop = tiny_skia::PathBuilder::new();
+            drop.move_to(sx + 2.0 * s_scale, sy - 12.0 * s_scale);
+            drop.quad_to(
+                sx + 11.0 * s_scale,
+                sy - 1.0 * s_scale,
                 sx + 2.0 * s_scale,
-                sy + 3.0 * s_scale,
-                sx - 2.0 * s_scale,
-                sy + 5.0 * s_scale,
+                sy + 9.0 * s_scale,
             );
-            drop1.quad_to(
-                sx - 6.0 * s_scale,
-                sy + 3.0 * s_scale,
-                sx - 2.0 * s_scale,
-                sy - 2.0 * s_scale,
+            drop.quad_to(
+                sx - 7.0 * s_scale,
+                sy - 1.0 * s_scale,
+                sx + 2.0 * s_scale,
+                sy - 12.0 * s_scale,
             );
-            drop1.close();
-            if let Some(p) = drop1.finish() {
-                fill_skia_path(&mut tmp_pixmap, &p, [180, 230, 255, 230]);
-                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 1.2 * scale);
-            }
-
-            // Right sweat drop
-            let (sx2, sy2) = map_face_brow(278.0, 168.0);
-            let mut trail2 = tiny_skia::PathBuilder::new();
-            trail2.move_to(sx2 + 2.0 * s_scale, sy2 - 14.0 * s_scale);
-            trail2.quad_to(
-                sx2 + 3.0 * s_scale,
-                sy2 - 8.0 * s_scale,
-                sx2 + 2.0 * s_scale,
-                sy2 - 2.0 * s_scale,
-            );
-            if let Some(p) = trail2.finish() {
-                stroke_skia_path(&mut tmp_pixmap, &p, [59, 41, 38, 100], 1.0 * scale);
-            }
-            let mut drop2 = tiny_skia::PathBuilder::new();
-            drop2.move_to(sx2 + 2.0 * s_scale, sy2 - 2.0 * s_scale);
-            drop2.quad_to(
-                sx2 + 6.0 * s_scale,
-                sy2 + 3.0 * s_scale,
-                sx2 + 2.0 * s_scale,
-                sy2 + 5.0 * s_scale,
-            );
-            drop2.quad_to(
-                sx2 - 2.0 * s_scale,
-                sy2 + 3.0 * s_scale,
-                sx2 + 2.0 * s_scale,
-                sy2 - 2.0 * s_scale,
-            );
-            drop2.close();
-            if let Some(p) = drop2.finish() {
-                fill_skia_path(&mut tmp_pixmap, &p, [180, 230, 255, 230]);
-                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 1.2 * scale);
+            drop.close();
+            if let Some(p) = drop.finish() {
+                fill_skia_path(&mut tmp_pixmap, &p, [180, 230, 255, 235]);
+                stroke_skia_path(&mut tmp_pixmap, &p, stroke_color, 1.35 * scale);
             }
         }
 
@@ -16676,6 +16693,23 @@ mod windows_overlay {
                 bottom_center_x - px * 4.8 * scale * straight_sign,
                 bottom_center_y + bottom_h * 0.98,
             );
+            let fingertip = (bottom_center_x, bottom_center_y + bottom_h * 1.28);
+            let finger_a = (
+                bottom_center_x + px * 7.2 * scale * straight_sign,
+                bottom_center_y + bottom_h * 0.78,
+            );
+            let finger_b = (
+                bottom_center_x + px * 2.6 * scale * straight_sign,
+                bottom_center_y + bottom_h * 1.18,
+            );
+            let finger_c = (
+                bottom_center_x - px * 2.6 * scale * straight_sign,
+                bottom_center_y + bottom_h * 1.18,
+            );
+            let finger_d = (
+                bottom_center_x - px * 7.2 * scale * straight_sign,
+                bottom_center_y + bottom_h * 0.78,
+            );
             let curve_ctrl = (
                 root_x + dx * 0.32 - px * 6.8 * scale * straight_sign,
                 root_y + dy * 0.56 - py * 2.4 * scale * straight_sign,
@@ -16690,12 +16724,9 @@ mod windows_overlay {
                 bottom_arc_mid_outer.0,
                 bottom_arc_mid_outer.1,
             );
-            arm.quad_to(
-                bottom_center_x,
-                bottom_center_y + bottom_h * 1.22,
-                bottom_arc_mid_inner.0,
-                bottom_arc_mid_inner.1,
-            );
+            arm.quad_to(finger_a.0, finger_a.1, finger_b.0, finger_b.1);
+            arm.quad_to(fingertip.0, fingertip.1, finger_c.0, finger_c.1);
+            arm.quad_to(finger_d.0, finger_d.1, bottom_arc_mid_inner.0, bottom_arc_mid_inner.1);
             arm.quad_to(
                 bottom_center_x - px * 10.6 * scale * straight_sign,
                 bottom_center_y + bottom_h * 0.42,
@@ -16708,6 +16739,24 @@ mod windows_overlay {
             if let Some(p) = arm.finish() {
                 fill_skia_path(pixmap, &p, arm_fill);
                 stroke_skia_path(pixmap, &p, stroke_color, stroke_w);
+            }
+
+            for notch in [-3.8_f32, 3.8] {
+                let base_x = bottom_center_x + px * notch * scale * straight_sign;
+                let base_y = bottom_center_y + bottom_h * 0.88;
+                let tip_x = bottom_center_x + px * (notch * 0.45) * scale * straight_sign;
+                let tip_y = bottom_center_y + bottom_h * 1.16;
+                let mut crease = tiny_skia::PathBuilder::new();
+                crease.move_to(base_x, base_y);
+                crease.quad_to(
+                    (base_x + tip_x) * 0.5,
+                    bottom_center_y + bottom_h * 1.03,
+                    tip_x,
+                    tip_y,
+                );
+                if let Some(p) = crease.finish() {
+                    stroke_skia_path(pixmap, &p, [59, 41, 38, 185], 0.9 * scale);
+                }
             }
         };
 
@@ -16934,35 +16983,33 @@ mod windows_overlay {
 
         let current_ms = unsafe { GetTickCount() };
         let time_s = current_ms as f32 * 0.001;
-        let chiikawa_idle_turn_x = (time_s * 0.82).sin() * 4.8 * scale;
-        let chiikawa_idle_turn_y = (time_s * 0.47 + 0.9).sin() * 1.6 * scale;
-        let chiikawa_idle_body_bob = (time_s * 0.63 + 0.4).sin() * 1.5 * scale;
-        let chiikawa_idle_head_drift_x = (time_s * 0.37 + 0.2).sin() * 1.4 * scale;
+        let idle_turn_x = (time_s * 0.72).sin() * 3.2 * scale;
+        let idle_turn_y = (time_s * 0.47 + 0.9).sin() * 1.35 * scale;
+        let idle_body_bob = (time_s * 0.63 + 0.4).sin() * 1.25 * scale;
+        let idle_head_drift_x = (time_s * 0.37 + 0.2).sin() * 0.95 * scale;
+        let type_bounce = recent_pulse * (time_s * 24.0).sin() * 1.5 * scale;
 
         // Animate Mascot closer to the desk
         let mut body_cx = 167.0 * scale;
         if mascot_style == crate::model::MascotStyle::Hachiware {
-            body_cx = 198.0 * scale;
+            body_cx = 190.0 * scale;
         }
+        body_cx += idle_head_drift_x * 0.25;
         let mut body_cy = (123.0 + y_shift) * scale;
-        if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            body_cy += chiikawa_idle_body_bob;
-        }
+        body_cy += idle_body_bob + type_bounce * 0.35;
         let body_radius = 36.0 * scale;
 
         let mut head_cx = 168.0 * scale;
         if mascot_style == crate::model::MascotStyle::Hachiware {
-            head_cx = 199.0 * scale;
+            head_cx = 191.0 * scale;
         }
         let mut head_cy = (77.0 + y_shift) * scale;
-        if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            head_cx += chiikawa_idle_head_drift_x;
-            head_cy += chiikawa_idle_body_bob * 0.7;
-        }
+        head_cx += idle_head_drift_x;
+        head_cy += idle_body_bob * 0.7 + type_bounce * 0.45;
         let head_radius = if mascot_style == crate::model::MascotStyle::Hachiware {
             56.0 * scale
         } else {
-            54.0 * scale
+            56.0 * scale
         };
 
         let paw_press = if held_keys.is_empty() && held_mouse_buttons.is_empty() {
@@ -16976,27 +17023,35 @@ mod windows_overlay {
             !held_keys.is_empty() || !held_mouse_buttons.is_empty() || paw_press > 0.05 * scale;
         let (look_x, look_y) = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             if is_interacting || mouse_offset.0.abs() > 0.1 || mouse_offset.1.abs() > 0.1 {
-                let lx = mouse_offset.0 * 0.45 * scale + chiikawa_idle_turn_x * 0.35;
-                let ly = (mouse_offset.1 * 0.35 + 3.0) * scale + chiikawa_idle_turn_y * 0.45;
+                let type_face = recent_pulse * (time_s * 28.0).sin() * 1.9 * scale;
+                let lx = mouse_offset.0 * 0.45 * scale + idle_turn_x * 0.35 + type_face;
+                let ly = (mouse_offset.1 * 0.35 + 3.0) * scale
+                    + idle_turn_y * 0.45
+                    + type_face.abs() * 0.35;
                 (lx, ly)
             } else {
-                (chiikawa_idle_turn_x, chiikawa_idle_turn_y)
+                (idle_turn_x, idle_turn_y)
             }
         } else {
-            let focus_x = mouse_offset.0 * 0.92 * scale;
+            let focus_x = mouse_offset.0 * 0.92 * scale + idle_turn_x * 0.35;
             let focus_y = mouse_offset.1 * 0.72 * scale
                 + if is_interacting {
                     2.2 * scale
                 } else {
                     0.4 * scale
-                };
+                }
+                + idle_turn_y * 0.55;
             (focus_x, focus_y)
         };
 
-        let visual_red_factor = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            ((red_factor - 0.34) / 0.66).clamp(0.0, 1.0).powf(1.35)
-        } else {
-            red_factor
+        let visual_red_factor = match mascot_style {
+            crate::model::MascotStyle::ChiikawaClassic => {
+                ((red_factor - 0.34) / 0.66).clamp(0.0, 1.0).powf(1.35)
+            }
+            crate::model::MascotStyle::Hachiware => {
+                ((red_factor - 0.24) / 0.76).clamp(0.0, 1.0).powf(1.15)
+            }
+            crate::model::MascotStyle::Gugugaga => red_factor,
         };
 
         // Define dynamic styles depending on preset

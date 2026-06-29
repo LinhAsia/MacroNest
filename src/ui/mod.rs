@@ -4505,7 +4505,7 @@ impl CrosshairApp {
                                             match self.state.quick_key_display_mascot_style {
                                                 crate::model::MascotStyle::Hachiware => "Hachiware",
                                                 crate::model::MascotStyle::ChiikawaClassic => {
-                                                    "Chiikawa Classic"
+                                                    "Usagi"
                                                 }
                                                 crate::model::MascotStyle::Gugugaga => "Gugugaga",
                                             },
@@ -4521,7 +4521,7 @@ impl CrosshairApp {
                                                 ui.selectable_value(
                                                     &mut self.state.quick_key_display_mascot_style,
                                                     crate::model::MascotStyle::ChiikawaClassic,
-                                                    "Chiikawa Classic",
+                                                    "Usagi",
                                                 );
                                                 ui.selectable_value(
                                                     &mut self.state.quick_key_display_mascot_style,
