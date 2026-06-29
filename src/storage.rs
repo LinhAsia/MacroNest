@@ -814,38 +814,19 @@ fn find_local_opencv_videoio_ffmpeg_plugin() -> Option<PathBuf> {
     let mut candidates = Vec::new();
 
     if let Ok(current_dir) = env::current_dir() {
-        candidates.push(
-            current_dir
-                .join("target")
-                .join("tmp")
-                .join("python_pkgs")
-                .join("cv2")
-                .join("opencv_videoio_ffmpeg4100_64.dll"),
-        );
-        candidates.push(
-            current_dir
-                .join("target")
-                .join("tmp")
-                .join("python_pkgs")
-                .join("cv2")
-                .join("opencv_videoio_ffmpeg4130_64.dll"),
+        push_opencv_videoio_ffmpeg_candidates(
+            &mut candidates,
+            current_dir.join("target").join("tmp").join("python_pkgs").join("cv2"),
         );
     }
 
     if let Ok(virtual_env) = env::var("VIRTUAL_ENV") {
-        candidates.push(
-            PathBuf::from(&virtual_env)
-                .join("Lib")
-                .join("site-packages")
-                .join("cv2")
-                .join("opencv_videoio_ffmpeg4100_64.dll"),
-        );
-        candidates.push(
+        push_opencv_videoio_ffmpeg_candidates(
+            &mut candidates,
             PathBuf::from(virtual_env)
                 .join("Lib")
                 .join("site-packages")
-                .join("cv2")
-                .join("opencv_videoio_ffmpeg4130_64.dll"),
+                .join("cv2"),
         );
     }
 
@@ -855,12 +836,18 @@ fn find_local_opencv_videoio_ffmpeg_plugin() -> Option<PathBuf> {
             .join("Python");
         if let Ok(entries) = fs::read_dir(&python_root) {
             for entry in entries.flatten() {
-                let base = entry.path().join("Lib").join("site-packages").join("cv2");
-                candidates.push(base.join("opencv_videoio_ffmpeg4100_64.dll"));
-                candidates.push(base.join("opencv_videoio_ffmpeg4130_64.dll"));
+                push_opencv_videoio_ffmpeg_candidates(
+                    &mut candidates,
+                    entry.path().join("Lib").join("site-packages").join("cv2"),
+                );
             }
         }
     }
 
     candidates.into_iter().find(|path| path.exists())
+}
+
+fn push_opencv_videoio_ffmpeg_candidates(candidates: &mut Vec<PathBuf>, base: PathBuf) {
+    candidates.push(base.join("opencv_videoio_ffmpeg4100_64.dll"));
+    candidates.push(base.join("opencv_videoio_ffmpeg4130_64.dll"));
 }
