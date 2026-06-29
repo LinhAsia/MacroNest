@@ -2659,8 +2659,7 @@ impl CrosshairApp {
         color: Option<RgbaColor>,
     ) {
         let target = VisionCaptureTarget::Preset(preset_id);
-        self.clear_image_search_capture_state();
-        self.restore_image_search_capture_window(ctx);
+        self.finish_image_search_capture_cleanup(ctx);
         self.status = if priority_anchor {
             self.apply_image_search_priority_anchor(target, screen_x, screen_y)
         } else if let Some(color) = color {
@@ -2685,8 +2684,6 @@ impl CrosshairApp {
         } else {
             self.sample_image_search_color(screen_x, screen_y)
         };
-
-        self.finish_image_search_capture_cleanup(ctx);
 
         self.finish_image_search_point_capture_command(
             ctx,
