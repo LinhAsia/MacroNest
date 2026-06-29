@@ -7119,7 +7119,7 @@ mod windows_overlay {
     ) -> f32 {
         let base = (font_size / 36.0).clamp(0.72, 2.4);
         match mascot_style {
-            crate::model::MascotStyle::ChiikawaClassic => base * 0.80,
+            crate::model::MascotStyle::ChiikawaClassic => base * 0.88,
             crate::model::MascotStyle::Hachiware => base * 0.80,
             crate::model::MascotStyle::Gugugaga => base * 0.90,
         }
