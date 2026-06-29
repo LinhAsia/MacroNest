@@ -1511,6 +1511,15 @@ impl CrosshairApp {
             .find(|preset| preset.id == preset_id)
     }
 
+    fn ordered_id_index<T, F>(items: &[T], id: u32, id_of: F) -> usize
+    where
+        F: Fn(&T) -> u32,
+    {
+        items.iter()
+            .position(|item| id_of(item) == id)
+            .unwrap_or(usize::MAX)
+    }
+
     fn allocate_next_sound_library_item_id(&mut self) -> u32 {
         Self::allocate_next_id(
             &self.state.audio_settings.library,
@@ -7461,11 +7470,7 @@ impl CrosshairApp {
                 }
             }
             preset.window_presets.sort_by_key(|item| {
-                self.state
-                    .window_presets
-                    .iter()
-                    .position(|preset| preset.id == item.id)
-                    .unwrap_or(usize::MAX)
+                Self::ordered_id_index(&self.state.window_presets, item.id, |preset| preset.id)
             });
 
             preset
@@ -7482,11 +7487,9 @@ impl CrosshairApp {
                 }
             }
             preset.window_focus_presets.sort_by_key(|item| {
-                self.state
-                    .window_focus_presets
-                    .iter()
-                    .position(|preset| preset.id == item.id)
-                    .unwrap_or(usize::MAX)
+                Self::ordered_id_index(&self.state.window_focus_presets, item.id, |preset| {
+                    preset.id
+                })
             });
 
             preset
@@ -7503,11 +7506,7 @@ impl CrosshairApp {
                 }
             }
             preset.zoom_presets.sort_by_key(|item| {
-                self.state
-                    .zoom_presets
-                    .iter()
-                    .position(|preset| preset.id == item.id)
-                    .unwrap_or(usize::MAX)
+                Self::ordered_id_index(&self.state.zoom_presets, item.id, |preset| preset.id)
             });
 
             preset
@@ -7546,20 +7545,12 @@ impl CrosshairApp {
                         }
                     }
                     group_state.presets.sort_by_key(|item| {
-                        group
-                            .presets
-                            .iter()
-                            .position(|preset| preset.id == item.id)
-                            .unwrap_or(usize::MAX)
+                        Self::ordered_id_index(&group.presets, item.id, |preset| preset.id)
                     });
                 }
             }
             preset.macro_groups.sort_by_key(|item| {
-                self.state
-                    .macro_groups
-                    .iter()
-                    .position(|group| group.id == item.id)
-                    .unwrap_or(usize::MAX)
+                Self::ordered_id_index(&self.state.macro_groups, item.id, |group| group.id)
             });
         }
     }
