@@ -162,6 +162,8 @@ pub struct TimerPreset {
     pub name: String,
     pub collapsed: bool,
     pub preview_enabled: bool,
+    #[serde(default = "default_true")]
+    pub show_overlay: bool,
     pub show_minutes: bool,
     pub show_seconds: bool,
     pub show_ms: bool,
@@ -197,6 +199,7 @@ impl TimerPreset {
             name: format!("Timer {id}"),
             collapsed: true,
             preview_enabled: false,
+            show_overlay: false,
             show_minutes: true,
             show_seconds: true,
             show_ms: true,

@@ -294,27 +294,34 @@ pub(crate) fn format_stopwatch_time(
     let ms = elapsed_ms % 1000;
     let minutes = total_secs / 60;
     let seconds = total_secs % 60;
-    let mut parts = Vec::new();
-    if show_minutes {
-        parts.push(format!("{:02}", minutes));
+    match (show_minutes, show_seconds, show_ms) {
+        (false, false, false) => "00".to_string(),
+        (false, false, true) => elapsed_ms.to_string(),
+        (false, true, false) => total_secs.to_string(),
+        (false, true, true) => format!("{total_secs}.{ms:03}"),
+        (true, false, false) => minutes.to_string(),
+        (true, false, true) => format!("{minutes}.{ms:03}"),
+        (true, true, false) => format!("{minutes:02}:{seconds:02}"),
+        (true, true, true) => format!("{minutes:02}:{seconds:02}.{ms:03}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_stopwatch_time;
+
+    #[test]
+    fn stopwatch_ms_only_keeps_total_value() {
+        assert_eq!(format_stopwatch_time(678_888, false, false, true), "678888");
     }
 
-    if show_seconds {
-        parts.push(format!("{:02}", seconds));
+    #[test]
+    fn stopwatch_sec_only_keeps_total_value() {
+        assert_eq!(format_stopwatch_time(125_432, false, true, false), "125");
     }
 
-    let mut time_str = parts.join(":");
-    if show_ms {
-        if time_str.is_empty() {
-            time_str = format!("{:03}", ms);
-        } else {
-            time_str = format!("{}.{:03}", time_str, ms);
-        }
-    }
-
-    if time_str.is_empty() {
-        "00".to_string()
-    } else {
-        time_str
+    #[test]
+    fn stopwatch_min_sec_ms_keeps_classic_format() {
+        assert_eq!(format_stopwatch_time(125_432, true, true, true), "02:05.432");
     }
 }

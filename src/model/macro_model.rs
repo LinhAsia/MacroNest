@@ -93,6 +93,7 @@ pub enum MacroAction {
     StartTimerPreset,
     PauseTimerPreset,
     StopTimerPreset,
+    ReadTimerPreset,
     EnableStep,
     DisableStep,
     OcrSearch,
