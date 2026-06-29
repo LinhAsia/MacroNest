@@ -21229,17 +21229,13 @@ mod windows_overlay {
     }
 
     fn find_matching_loop_end_for_runtime(
-        preset_id: u32,
+        _preset_id: u32,
         steps: &[MacroStep],
-        step_indices: &[usize],
+        _step_indices: &[usize],
         start_index: usize,
     ) -> Option<usize> {
         let mut depth = 0usize;
         for (index, step) in steps.iter().enumerate().skip(start_index) {
-            let absolute_index = step_indices.get(index).copied().unwrap_or(index);
-            if !is_macro_step_enabled(preset_id, absolute_index, step.enabled) {
-                continue;
-            }
             match step.action {
                 MacroAction::LoopStart => depth += 1,
                 MacroAction::LoopEnd => {

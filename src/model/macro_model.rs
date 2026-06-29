@@ -218,7 +218,7 @@ pub struct MacroStep {
     #[serde(default)]
     pub mouse_speed_expr: String,
     pub mouse_speed_percent: u32,
-    #[serde(default = "default_true", alias = "image_search_move_cursor_on_match")]
+    #[serde(default = "default_false", alias = "image_search_move_cursor_on_match")]
     pub vision_move_cursor_on_match: bool,
     #[serde(default, alias = "image_search_wait_until_found")]
     pub vision_wait_until_found: bool,
@@ -364,7 +364,7 @@ impl Default for MacroStep {
             smooth_mouse_path: false,
             mouse_speed_expr: String::new(),
             mouse_speed_percent: 100,
-            vision_move_cursor_on_match: true,
+            vision_move_cursor_on_match: false,
             vision_wait_until_found: false,
             vision_trigger_macro_enabled: false,
             vision_trigger_macro_preset_id: None,
