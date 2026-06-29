@@ -25086,7 +25086,7 @@ mod windows_overlay {
             let title = if hwnd.0.is_null() {
                 None
             } else {
-                unsafe { window_title(hwnd) }
+                crate::window_list::window_title(hwnd)
             };
             let mut guard = FOREGROUND_WINDOW_TITLE.lock();
             *guard = title;
@@ -26002,7 +26002,7 @@ mod windows_overlay {
                 return false;
             }
 
-            window_title(hwnd)
+            crate::window_list::window_title(hwnd)
                 .map(|title| !title.trim().is_empty())
                 .unwrap_or(false)
         }
@@ -26020,7 +26020,7 @@ mod windows_overlay {
             if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool() {
                 return true.into();
             }
-            let Some(title) = window_title(hwnd) else {
+            let Some(title) = crate::window_list::window_title(hwnd) else {
                 return true.into();
             };
             if title.trim().is_empty() {
@@ -26341,25 +26341,10 @@ mod windows_overlay {
         target: &str,
         match_duplicate_window_titles: bool,
     ) -> bool {
-        let Some(title) = window_title(hwnd) else {
+        let Some(title) = crate::window_list::window_title(hwnd) else {
             return false;
         };
         window_matches_selector_title(&title, hwnd, target, match_duplicate_window_titles)
-    }
-
-    unsafe fn window_title(hwnd: HWND) -> Option<String> {
-        let length = windows::Win32::UI::WindowsAndMessaging::GetWindowTextLengthW(hwnd);
-        if length <= 0 {
-            return None;
-        }
-
-        let mut buffer = vec![0u16; length as usize + 1];
-        let copied = windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(hwnd, &mut buffer);
-        if copied <= 0 {
-            None
-        } else {
-            Some(String::from_utf16_lossy(&buffer[..copied as usize]))
-        }
     }
 
     unsafe fn paint_mouse_trail(hwnd: HWND, points: &[POINT], marker: Option<POINT>) -> Result<()> {

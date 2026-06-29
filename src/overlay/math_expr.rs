@@ -7,8 +7,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use super::{
     ActiveTimerState, HOOK_STATE, RANDOM_STATE, RUNTIME_VARIABLES, TEXT_VARIABLES,
     current_mouse_speed, current_system_volume_percent, request_ui_repaint, wake_command_queue,
-    window_title,
 };
+use crate::window_list::window_title;
 use crate::model::TimerPreset;
 
 pub fn interpolate_variables(text: &str) -> String {

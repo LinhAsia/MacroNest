@@ -532,7 +532,7 @@ mod windows_impl {
         base.to_owned()
     }
 
-    fn window_title(hwnd: HWND) -> Option<String> {
+    pub fn window_title(hwnd: HWND) -> Option<String> {
         let length = unsafe { GetWindowTextLengthW(hwnd) };
         if length <= 0 {
             return None;
