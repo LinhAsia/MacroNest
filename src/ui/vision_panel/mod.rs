@@ -2275,6 +2275,16 @@ impl CrosshairApp {
         }
     }
 
+    fn finish_image_search_color_pick_result(
+        &mut self,
+        target: VisionCaptureTarget,
+        color: RgbaColor,
+    ) {
+        let status = self.apply_image_search_color_pick(target, color);
+        self.persist();
+        self.status = status;
+    }
+
     fn sample_image_search_color(&self, screen_x: i32, screen_y: i32) -> Option<RgbaColor> {
         if let Some(ref frame) = self.captured_freeze_frame {
             let rx = screen_x - frame.screen_x;
@@ -2686,9 +2696,7 @@ impl CrosshairApp {
             return;
         };
 
-        let status = self.apply_image_search_color_pick(target, color);
-        self.persist();
-        self.status = status;
+        self.finish_image_search_color_pick_result(target, color);
         ctx.request_repaint();
     }
 
@@ -2846,9 +2854,7 @@ impl CrosshairApp {
             b: capture.rgba[2],
             a: 255,
         };
-        let status = self.apply_image_search_color_pick(target, color);
-        self.persist();
-        self.status = status;
+        self.finish_image_search_color_pick_result(target, color);
         ctx.request_repaint();
     }
 
