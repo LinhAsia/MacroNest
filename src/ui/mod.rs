@@ -10746,10 +10746,7 @@ impl eframe::App for CrosshairApp {
                     self.state.quick_screen_draw_freeze = freeze;
                     self.persist();
                 }
-                UiCommand::OpenScreenDrawColorPicker => {
-                    self.screen_draw_color_picker_open = true;
-                    ctx.request_repaint();
-                }
+
                 UiCommand::MouseMoveAbsolutePointCaptured { .. } => {}
                 UiCommand::MouseMoveAbsoluteCaptureCancelled => {}
                 UiCommand::NativeVisionCaptureFinished {
@@ -12286,40 +12283,7 @@ impl eframe::App for CrosshairApp {
 
         self.poll_capture_input(ctx);
 
-        // Screen draw color picker popup (triggered by overlay toolbar color button)
-        if self.screen_draw_color_picker_open {
-            let mut still_open = true;
-            let mut color32 = egui::Color32::from_rgba_unmultiplied(
-                self.state.quick_screen_draw_color.r,
-                self.state.quick_screen_draw_color.g,
-                self.state.quick_screen_draw_color.b,
-                255,
-            );
-            egui::Window::new("Draw Color")
-                .collapsible(false)
-                .resizable(false)
-                .open(&mut still_open)
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                .show(ctx, |ui| {
-                    ui.set_min_width(220.0);
-                    let changed = egui::color_picker::color_picker_color32(
-                        ui,
-                        &mut color32,
-                        egui::color_picker::Alpha::Opaque,
-                    );
-                    if changed {
-                        self.state.quick_screen_draw_color = crate::model::RgbaColor {
-                            r: color32.r(),
-                            g: color32.g(),
-                            b: color32.b(),
-                            a: 255,
-                        };
-                        self.sync_quick_screen_draw_config();
-                        self.persist();
-                    }
-                });
-            self.screen_draw_color_picker_open = still_open;
-        }
+
     }
 
 
