@@ -14957,7 +14957,7 @@ mod windows_overlay {
             return;
         }
         let time_s = unsafe { GetTickCount() } as f32 * 0.001;
-        let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
+        let perspective = 0.32 + (look_x / (11.0 * scale)).clamp(-0.16, 0.22);
         let head_bias_x = look_x * 0.1;
         let head_bias_y = look_y * 0.1;
         let map_point = |svg_x: f32, svg_y: f32| -> (f32, f32) {
@@ -15731,7 +15731,7 @@ mod windows_overlay {
         }
 
         let time_s = unsafe { GetTickCount() } as f32 * 0.001;
-        let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
+        let perspective = 0.32 + (look_x / (11.0 * scale)).clamp(-0.16, 0.22);
         let texture_center_x = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             23.0 * scale
         } else {
@@ -16381,6 +16381,24 @@ mod windows_overlay {
             stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
         }
 
+        if !is_redraw {
+            for &(x1, y1, x2, y2) in &[(158.0, 112.0, 198.0, 135.0), (202.0, 112.0, 247.0, 136.0)] {
+                let p1 = map(x1, y1);
+                let p2 = map(x2, y1);
+                let p3 = map(x2 - 2.0, y2);
+                let p4 = map(x1 + 2.0, y2);
+                let mut connector = tiny_skia::PathBuilder::new();
+                connector.move_to(p1.0, p1.1);
+                connector.line_to(p2.0, p2.1);
+                connector.line_to(p3.0, p3.1);
+                connector.line_to(p4.0, p4.1);
+                connector.close();
+                if let Some(path) = connector.finish() {
+                    fill_skia_path(&mut tmp_pixmap, &path, fill_color);
+                }
+            }
+        }
+
         quick_key_display_apply_heat_tint_ellipse(
             &mut tmp_pixmap,
             head_cx + look_x * 0.2,
@@ -16591,7 +16609,12 @@ mod windows_overlay {
         }
 
         // Cut off the head below the desk top (desk top surface starts at 146.0 * scale, projected with y_shift 30.0 to 176.0 * scale)
-        let threshold_y = (146.0 + 30.0) * scale;
+        let desk_clip_top = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            190.0 + (146.0 - 190.0) * 0.82 - 18.0
+        } else {
+            146.0
+        };
+        let threshold_y = (desk_clip_top + 30.0) * scale;
         let w = pixmap.width();
         let h = pixmap.height();
         let dest_data = pixmap.data_mut();
@@ -16789,15 +16812,33 @@ mod windows_overlay {
         };
 
         let y_shift = 30.0;
+        let current_ms = unsafe { GetTickCount() };
+        let time_s = current_ms as f32 * 0.001;
+        let idle_turn_x = (time_s * 0.92).sin() * 7.0 * scale;
+        let idle_turn_y = (time_s * 0.58 + 0.9).sin() * 2.2 * scale;
+        let idle_body_bob = (time_s * 0.72 + 0.4).sin() * 1.8 * scale;
+        let idle_head_drift_x = (time_s * 0.48 + 0.2).sin() * 1.45 * scale;
+        let type_bounce = recent_pulse * (time_s * 24.0).sin() * 1.5 * scale;
+
         // 3D Perspective mapping helper (takes FLAT coordinates, returns SCALED & PROJECTED coordinates)
         let prop_scale = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             0.82
         } else {
             1.0
         };
+        let prop_offset_y = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            -18.0 + idle_body_bob / scale * 0.25
+        } else {
+            0.0
+        };
+        let prop_yaw = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            idle_turn_x / scale * 0.004 + mouse_offset.0 * 0.0015
+        } else {
+            0.0
+        };
         let project_point = |x: f32, y: f32| -> (f32, f32) {
-            let x = 199.0 + (x - 199.0) * prop_scale;
-            let y = 190.0 + (y - 190.0) * prop_scale;
+            let x = 199.0 + (x - 199.0) * prop_scale + (y - 190.0) * prop_yaw;
+            let y = 190.0 + (y - 190.0) * prop_scale + prop_offset_y;
             let scaled_x = x * scale;
             let scaled_y = (y + y_shift) * scale;
             let vanish_y = (50.0 + y_shift) * scale;
@@ -16932,14 +16973,6 @@ mod windows_overlay {
         let keyboard_top = 153.0;
         let keyboard_width = 232.0;
         let keyboard_height = 71.0;
-
-        let current_ms = unsafe { GetTickCount() };
-        let time_s = current_ms as f32 * 0.001;
-        let idle_turn_x = (time_s * 0.92).sin() * 7.0 * scale;
-        let idle_turn_y = (time_s * 0.58 + 0.9).sin() * 2.2 * scale;
-        let idle_body_bob = (time_s * 0.72 + 0.4).sin() * 1.8 * scale;
-        let idle_head_drift_x = (time_s * 0.48 + 0.2).sin() * 1.45 * scale;
-        let type_bounce = recent_pulse * (time_s * 24.0).sin() * 1.5 * scale;
 
         // Animate Mascot closer to the desk
         let mut body_cx = 167.0 * scale;
@@ -17397,7 +17430,6 @@ mod windows_overlay {
 
         // Mouse active state tracking
         let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
-        let current_ms = unsafe { GetTickCount() };
         // Retain the hand on the mouse for an additional 300ms (380ms total) before retracting
         let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 380;
         let mouse_active = is_mouse_moving || !held_mouse_buttons.is_empty();
