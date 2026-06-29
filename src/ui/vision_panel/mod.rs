@@ -2704,9 +2704,6 @@ impl CrosshairApp {
 
         self.clear_image_search_capture_state();
         self.restore_image_search_capture_window(ctx);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
 
         self.status = self.apply_image_search_priority_anchor(target, screen_x, screen_y);
         self.persist();
@@ -2722,9 +2719,6 @@ impl CrosshairApp {
     ) {
         self.clear_image_search_capture_state();
         self.restore_image_search_capture_window(ctx);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
 
         if let Some(preset) = self
             .state
@@ -2894,12 +2888,7 @@ impl CrosshairApp {
             return;
         };
 
-        self.vision_capture_active = false;
-        self.vision_capture_target = None;
-        self.vision_capture_mode = None;
-        self.vision_capture_anchor = None;
-        self.vision_capture_current = None;
-        self.vision_color_pick_preview_color = None;
+        self.clear_image_search_capture_state();
         let screen_point = self.screen_point_from_pos(ctx, pos, ctx.pixels_per_point());
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
@@ -2907,10 +2896,7 @@ impl CrosshairApp {
         let capture = screen_point.and_then(|(screen_x, screen_y)| {
             window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1)
         });
-        self.restore_image_search_viewport(ctx);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
+        self.restore_image_search_capture_window(ctx);
 
         let Some(capture) = capture else {
             self.status = "Failed to sample the selected screen color.".to_owned();
@@ -3126,17 +3112,9 @@ impl CrosshairApp {
             return;
         };
 
-        self.vision_capture_active = false;
-        self.vision_capture_target = None;
-        self.vision_capture_mode = None;
-        self.vision_capture_anchor = None;
-        self.vision_capture_current = None;
-        self.vision_color_pick_preview_color = None;
+        self.clear_image_search_capture_state();
         let screen_point = self.screen_point_from_pos(ctx, pos, ctx.pixels_per_point());
-        self.restore_image_search_viewport(ctx);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
+        self.restore_image_search_capture_window(ctx);
 
         let Some((screen_x, screen_y)) = screen_point else {
             self.status = "Failed to read the selected priority point.".to_owned();
