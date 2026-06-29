@@ -2111,74 +2111,8 @@ impl CrosshairApp {
                 let region = self.screen_region_from_rect(ctx, rect, ctx.pixels_per_point());
                 self.restore_image_search_viewport(ctx);
                 if let Some((screen_x, screen_y, width, height)) = region {
-                    match target {
-                        VisionCaptureTarget::Preset(preset_id) => {
-                            if let Some(preset) = self
-                                .state
-                                .vision_presets
-                                .iter_mut()
-                                .find(|preset| preset.id == preset_id)
-                            {
-                                preset.collapsed = false;
-                                preset.search_region_screen_x = Some(screen_x);
-                                preset.search_region_screen_y = Some(screen_y);
-                                preset.search_region_width = Some(width);
-                                preset.search_region_height = Some(height);
-                            }
-                            self.persist_vision_presets();
-                            self.status = format!(
-                                "Saved search area {}x{} at {}, {} for preset #{}.",
-                                width, height, screen_x, screen_y, preset_id
-                            );
-                        }
-                        VisionCaptureTarget::GeometryColor => {
-                            self.status = "Geometry color picking does not support search regions."
-                                .to_owned();
-                        }
-                        VisionCaptureTarget::OcrPreset(preset_id) => {
-                            if let Some(preset) = self
-                                .state
-                                .ocr_presets
-                                .iter_mut()
-                                .find(|preset| preset.id == preset_id)
-                            {
-                                preset.collapsed = false;
-                                preset.x = screen_x;
-                                preset.y = screen_y;
-                                preset.width = width;
-                                preset.height = height;
-                            }
-                            self.persist_ocr_presets();
-                            self.status = format!(
-                                "Saved OCR area {}x{} at {}, {} for preset #{}.",
-                                width, height, screen_x, screen_y, preset_id
-                            );
-                        }
-                        VisionCaptureTarget::OcrStepRegion {
-                            group_id,
-                            preset_id,
-                            step_index,
-                        } => {
-                            self.finish_ocr_step_region_capture_command(
-                                ctx, group_id, preset_id, step_index, screen_x, screen_y, width,
-                                height,
-                            );
-                        }
-                        VisionCaptureTarget::MacroStepGeometryColor { .. } => {
-                            self.status = "Geometry color picking does not support search regions."
-                                .to_owned();
-                        }
-                        VisionCaptureTarget::QuickActionsCoordinates
-                        | VisionCaptureTarget::QuickActionsColor
-                        | VisionCaptureTarget::QuickActionsKeyDisplayPosition
-                        | VisionCaptureTarget::PinPresetColor(_)
-                        | VisionCaptureTarget::PinPresetRegion(_)
-                        | VisionCaptureTarget::PinPresetSourceCrop(_)
-                        | VisionCaptureTarget::HudPresetRegion(_) => {
-                            self.status =
-                                "Pin/HUD presets do not support search regions.".to_owned();
-                        }
-                    }
+                    self.status =
+                        self.apply_image_search_region(ctx, target, screen_x, screen_y, width, height);
                 } else {
                     self.status = "Failed to save the selected search area.".to_owned();
                 }
@@ -2319,6 +2253,85 @@ impl CrosshairApp {
                 capture.width, capture.height, preset_id
             ),
             Err(error) => format!("Captured template but could not save it: {error}"),
+        }
+    }
+
+    pub(crate) fn apply_image_search_region(
+        &mut self,
+        ctx: &egui::Context,
+        target: VisionCaptureTarget,
+        screen_x: i32,
+        screen_y: i32,
+        width: i32,
+        height: i32,
+    ) -> String {
+        match target {
+            VisionCaptureTarget::Preset(preset_id) => {
+                if let Some(preset) = self
+                    .state
+                    .vision_presets
+                    .iter_mut()
+                    .find(|preset| preset.id == preset_id)
+                {
+                    preset.collapsed = false;
+                    preset.search_region_screen_x = Some(screen_x);
+                    preset.search_region_screen_y = Some(screen_y);
+                    preset.search_region_width = Some(width);
+                    preset.search_region_height = Some(height);
+                }
+                self.persist_vision_presets();
+                format!(
+                    "Saved search area {}x{} at {}, {} for preset #{}.",
+                    width, height, screen_x, screen_y, preset_id
+                )
+            }
+            VisionCaptureTarget::OcrPreset(preset_id) => {
+                if let Some(preset) = self
+                    .state
+                    .ocr_presets
+                    .iter_mut()
+                    .find(|preset| preset.id == preset_id)
+                {
+                    preset.collapsed = false;
+                    preset.x = screen_x;
+                    preset.y = screen_y;
+                    preset.width = width;
+                    preset.height = height;
+                }
+                self.persist_ocr_presets();
+                format!(
+                    "Saved OCR area {}x{} at {}, {} for preset #{}.",
+                    width, height, screen_x, screen_y, preset_id
+                )
+            }
+            VisionCaptureTarget::OcrStepRegion {
+                group_id,
+                preset_id,
+                step_index,
+            } => {
+                self.finish_ocr_step_region_capture_command(
+                    ctx, group_id, preset_id, step_index, screen_x, screen_y, width, height,
+                );
+                format!(
+                    "Saved Custom OCR area {}x{} at {}, {} for step.",
+                    width, height, screen_x, screen_y
+                )
+            }
+            VisionCaptureTarget::GeometryColor => {
+                "Geometry color picking does not support search regions.".to_owned()
+            }
+            VisionCaptureTarget::MacroStepGeometryColor { .. } => {
+                "Geometry color picking does not support search regions.".to_owned()
+            }
+            VisionCaptureTarget::QuickActionsCoordinates
+            | VisionCaptureTarget::QuickActionsColor
+            | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+            | VisionCaptureTarget::PinPresetColor(_)
+            | VisionCaptureTarget::PinPresetRegion(_)
+            | VisionCaptureTarget::PinPresetSourceCrop(_)
+            | VisionCaptureTarget::HudPresetRegion(_) => {
+                "This target does not support search regions.".to_owned()
+            }
         }
     }
 
@@ -2810,74 +2823,7 @@ impl CrosshairApp {
         }
 
         self.restore_image_search_capture_window(ctx);
-        match target {
-            VisionCaptureTarget::Preset(preset_id) => {
-                if let Some(preset) = self
-                    .state
-                    .vision_presets
-                    .iter_mut()
-                    .find(|preset| preset.id == preset_id)
-                {
-                    preset.collapsed = false;
-                    preset.search_region_screen_x = Some(screen_x);
-                    preset.search_region_screen_y = Some(screen_y);
-                    preset.search_region_width = Some(width);
-                    preset.search_region_height = Some(height);
-                }
-                self.persist_vision_presets();
-                self.status = format!(
-                    "Saved search area {}x{} at {}, {} for preset #{}.",
-                    width, height, screen_x, screen_y, preset_id
-                );
-            }
-            VisionCaptureTarget::OcrPreset(preset_id) => {
-                if let Some(preset) = self
-                    .state
-                    .ocr_presets
-                    .iter_mut()
-                    .find(|preset| preset.id == preset_id)
-                {
-                    preset.collapsed = false;
-                    preset.x = screen_x;
-                    preset.y = screen_y;
-                    preset.width = width;
-                    preset.height = height;
-                }
-                self.persist_ocr_presets();
-                self.status = format!(
-                    "Saved OCR area {}x{} at {}, {} for preset #{}.",
-                    width, height, screen_x, screen_y, preset_id
-                );
-            }
-            VisionCaptureTarget::OcrStepRegion {
-                group_id,
-                preset_id,
-                step_index,
-            } => {
-                self.finish_ocr_step_region_capture_command(
-                    ctx, group_id, preset_id, step_index, screen_x, screen_y, width, height,
-                );
-                self.status = format!(
-                    "Saved Custom OCR area {}x{} at {}, {} for step.",
-                    width, height, screen_x, screen_y
-                );
-            }
-            VisionCaptureTarget::GeometryColor => {
-                self.status = "Geometry color picking does not support search regions.".to_owned();
-            }
-            VisionCaptureTarget::MacroStepGeometryColor { .. } => {
-                self.status = "Geometry color picking does not support search regions.".to_owned();
-            }
-            VisionCaptureTarget::QuickActionsCoordinates
-            | VisionCaptureTarget::QuickActionsColor
-            | VisionCaptureTarget::QuickActionsKeyDisplayPosition
-            | VisionCaptureTarget::PinPresetColor(_)
-            | VisionCaptureTarget::PinPresetRegion(_)
-            | VisionCaptureTarget::PinPresetSourceCrop(_)
-            | VisionCaptureTarget::HudPresetRegion(_) => {
-                self.status = "This target does not support search regions.".to_owned();
-            }
-        }
+        self.status = self.apply_image_search_region(ctx, target, screen_x, screen_y, width, height);
         ctx.request_repaint();
     }
 
