@@ -227,10 +227,10 @@ mod windows_overlay {
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 6;
     const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 110;
     const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
-    const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 408;
-    const SCREEN_DRAW_TOOLBAR_HEIGHT: i32 = 78;
-    const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 370;
-    const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 326;
+    const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 230;
+    const SCREEN_DRAW_TOOLBAR_HEIGHT: i32 = 56;
+    const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 190;
+    const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 148;
     #[derive(Debug, Clone)]
     struct VisionRunOutcome {
         matched: bool,
@@ -1750,6 +1750,7 @@ mod windows_overlay {
             brush_size: f32,
             smoothing: bool,
             smoothing_amount: f32,
+            freeze: bool,
         },
         UpdateKeySoundConfig {
             enabled: bool,
@@ -1770,6 +1771,7 @@ mod windows_overlay {
     enum ScreenDrawHit {
         Canvas,
         ToolbarBody,
+        DragHandle,
         Close,
         Color,
         BrushSize,
@@ -1886,6 +1888,8 @@ mod windows_overlay {
         surface_bits_len: usize,
         surface_width: usize,
         surface_height: usize,
+        freeze_screen: bool,
+        freeze_frame: Option<Vec<u8>>,
     }
 
     impl Default for ScreenDrawState {
@@ -1935,6 +1939,8 @@ mod windows_overlay {
                 surface_bits_len: 0,
                 surface_width: 0,
                 surface_height: 0,
+                freeze_screen: false,
+                freeze_frame: None,
             }
         }
     }
@@ -1963,6 +1969,7 @@ mod windows_overlay {
             brush_size: f32,
             smoothing: bool,
             smoothing_amount: f32,
+            freeze: bool,
         },
         VisionFinished(String),
         MacroStepInlineFeedback {
@@ -7778,6 +7785,18 @@ mod windows_overlay {
         let press_started_at = Instant::now();
         let hold_trigger = trigger.unwrap_or_else(|| binding.clone());
         let started_from_inactive = !active;
+        let mut captured_frame = None;
+        if started_from_inactive {
+            let freeze = SCREEN_DRAW_STATE.lock().freeze_screen;
+            if freeze {
+                let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+                if screen_w > 0 && screen_h > 0 {
+                    captured_frame = window_list::capture_virtual_screen_region(screen_x, screen_y, screen_w, screen_h)
+                        .map(|frame| frame.rgba);
+                }
+            }
+        }
+
         {
             let mut state = SCREEN_DRAW_STATE.lock();
             state.trigger_latched = true;
@@ -7788,6 +7807,7 @@ mod windows_overlay {
                 }
             } else {
                 state.active = true;
+                state.freeze_frame = captured_frame;
                 state.capturing_region = false;
                 state.capture_trigger = None;
                 state.trigger_pressed_at = Some(press_started_at);
@@ -8351,6 +8371,7 @@ mod windows_overlay {
                     brush_size,
                     smoothing,
                     smoothing_amount,
+                    freeze,
                 } => {
                     {
                         let mut state = SCREEN_DRAW_STATE.lock();
@@ -8361,6 +8382,7 @@ mod windows_overlay {
                         state.brush_size = brush_size.clamp(2.0, 80.0);
                         state.smoothing = smoothing;
                         state.smoothing_amount = smoothing_amount.clamp(0.0, 1.0);
+                        state.freeze_screen = freeze;
                         if !enabled && state.active {
                             deactivate_screen_draw(&mut state);
                         }
@@ -9053,6 +9075,7 @@ mod windows_overlay {
         state.last_present_at = None;
         state.dirty_rect = None;
         state.live_stroke_rect = None;
+        state.freeze_frame = None;
     }
 
     fn release_screen_draw_surface(state: &mut ScreenDrawState) {
@@ -9146,8 +9169,13 @@ mod windows_overlay {
                 deactivate_screen_draw(&mut state);
             }
             ScreenDrawHit::Color => {
-                state.color = next_screen_draw_color(state.color);
-                should_sync_config = true;
+                let hwnd = windows::Win32::Foundation::HWND(SCREEN_DRAW_HWND.load(std::sync::atomic::Ordering::Relaxed) as _);
+                if let Some(new_color) = show_color_picker_dialog(hwnd, state.color) {
+                    state.color = new_color;
+                    let toolbar_rect = screen_draw_toolbar_rect(&state);
+                    mark_screen_draw_dirty(&mut state, toolbar_rect);
+                    should_sync_config = true;
+                }
             }
             ScreenDrawHit::BrushSize => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
@@ -9190,6 +9218,16 @@ mod windows_overlay {
                 }
             }
             ScreenDrawHit::ToolbarBody => {
+                state.active_control = ScreenDrawControl::MoveToolbar;
+                state.drag_offset_x = point.x - state.toolbar_x;
+                state.drag_offset_y = point.y - state.toolbar_y;
+            }
+            ScreenDrawHit::DragHandle => {
+                state.active_control = ScreenDrawControl::MoveToolbar;
+                state.drag_offset_x = point.x - state.toolbar_x;
+                state.drag_offset_y = point.y - state.toolbar_y;
+            }
+            ScreenDrawHit::DragHandle => {
                 state.active_control = ScreenDrawControl::MoveToolbar;
                 state.drag_offset_x = point.x - state.toolbar_x;
                 state.drag_offset_y = point.y - state.toolbar_y;
@@ -9758,13 +9796,14 @@ mod windows_overlay {
     }
 
     fn send_screen_draw_config_to_ui() {
-        let (color, brush_size, smoothing, smoothing_amount) = {
+        let (color, brush_size, smoothing, smoothing_amount, freeze) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
                 state.color,
                 state.brush_size,
                 state.smoothing,
                 state.smoothing_amount,
+                state.freeze_screen,
             )
         };
         if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
@@ -9773,6 +9812,7 @@ mod windows_overlay {
                 brush_size,
                 smoothing,
                 smoothing_amount,
+                freeze,
             });
         }
     }
@@ -9845,46 +9885,40 @@ mod windows_overlay {
             return ScreenDrawHit::Canvas;
         }
         if x >= SCREEN_DRAW_TOOLBAR_CLOSE_X
-            && x <= SCREEN_DRAW_TOOLBAR_CLOSE_X + 26
-            && y >= 10
-            && y <= 30
+            && x <= SCREEN_DRAW_TOOLBAR_CLOSE_X + 32
+            && y >= 12
+            && y <= 44
         {
             return ScreenDrawHit::Close;
         }
-        if x >= 14 && x <= 50 && y >= 20 && y <= 56 {
+        if x >= 32 && x <= 64 && y >= 12 && y <= 44 {
             return ScreenDrawHit::Color;
         }
-        if x >= 68 && x <= 158 && y >= 22 && y <= 54 {
+        if x >= 74 && x <= 138 && y >= 12 && y <= 44 {
             return ScreenDrawHit::BrushSize;
         }
-        if x >= 172 && x <= 208 && y >= 20 && y <= 56 {
-            return ScreenDrawHit::Eraser;
-        }
-        if x >= 224 && x <= 252 && y >= 24 && y <= 52 {
-            return ScreenDrawHit::Smoothing;
-        }
-        if x >= 264 && x <= 318 && y >= 22 && y <= 54 {
-            return ScreenDrawHit::SmoothingAmount;
-        }
         if x >= SCREEN_DRAW_TOOLBAR_CAPTURE_X
-            && x <= SCREEN_DRAW_TOOLBAR_CAPTURE_X + 36
-            && y >= 20
-            && y <= 56
+            && x <= SCREEN_DRAW_TOOLBAR_CAPTURE_X + 32
+            && y >= 12
+            && y <= 44
         {
             return ScreenDrawHit::CaptureRegion;
+        }
+        if x >= 0 && x <= 28 {
+            return ScreenDrawHit::DragHandle;
         }
         ScreenDrawHit::ToolbarBody
     }
 
     fn update_screen_draw_brush_slider(state: &mut ScreenDrawState, x: i32) {
-        let left = state.toolbar_x + 68;
-        let t = ((x - left) as f32 / 90.0).clamp(0.0, 1.0);
-        state.brush_size = 2.0 + t * 78.0;
+        let left = state.toolbar_x + 74;
+        let t = ((x - left) as f32 / 64.0).clamp(0.0, 1.0);
+        state.brush_size = (2.0 + t * 78.0).clamp(2.0, 80.0);
     }
 
     fn update_screen_draw_smoothing_slider(state: &mut ScreenDrawState, x: i32) {
-        let left = state.toolbar_x + 264;
-        state.smoothing_amount = ((x - left) as f32 / 54.0).clamp(0.0, 1.0);
+        let left = state.toolbar_x + 148;
+        state.smoothing_amount = ((x - left) as f32 / 64.0).clamp(0.0, 1.0);
     }
 
     fn start_screen_draw_stroke(state: &mut ScreenDrawState, point: POINT, force_eraser: bool) {
@@ -9968,7 +10002,13 @@ mod windows_overlay {
         state.canvas_width = width;
         state.canvas_height = height;
         state.committed_rgba.clear();
-        state.committed_rgba.resize(byte_len, 0);
+        if (state.freeze_screen && state.freeze_frame.is_some()) {
+            if let Some(ref bg) = state.freeze_frame {
+                state.committed_rgba.extend_from_slice(bg);
+            }
+        } else {
+            state.committed_rgba.resize(byte_len, 0);
+        }
         state.frame_rgba.clear();
         state.frame_rgba.resize(byte_len, 0);
         state.committed_dirty = true;
@@ -10066,7 +10106,13 @@ mod windows_overlay {
         if state.canvas_width == 0 || state.canvas_height == 0 || state.committed_rgba.is_empty() {
             return;
         }
-        state.committed_rgba.fill(0);
+        if (state.freeze_screen && state.freeze_frame.is_some()) {
+            if let Some(ref bg) = state.freeze_frame {
+                state.committed_rgba.copy_from_slice(bg);
+            }
+        } else {
+            state.committed_rgba.fill(0);
+        }
         if let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
             state.committed_rgba.as_mut_slice(),
             state.canvas_width as u32,
@@ -10233,6 +10279,73 @@ mod windows_overlay {
                 toolbar_smoothing_amount,
             );
         }
+        if state_guard.active_control == ScreenDrawControl::BrushSize && !capturing_region {
+            if let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
+                state_guard.frame_rgba.as_mut_slice(),
+                width as u32,
+                height as u32,
+            ) {
+                let val_ratio = ((toolbar_brush_size - 2.0) / 78.0).clamp(0.0, 1.0);
+                let preview_x = toolbar_x as f32 + 74.0 + val_ratio * 64.0;
+                let preview_y = toolbar_y as f32 - 25.0;
+                let radius = toolbar_brush_size / 2.0;
+
+                // Draw white outline circle
+                let mut pb_out = tiny_skia::PathBuilder::new();
+                let steps = 60;
+                for i in 0..steps {
+                    let angle = (i as f32 / steps as f32) * std::f32::consts::TAU;
+                    let px = preview_x + (radius + 1.0) * angle.cos();
+                    let py = preview_y + (radius + 1.0) * angle.sin();
+                    if i == 0 {
+                        pb_out.move_to(px, py);
+                    } else {
+                        pb_out.line_to(px, py);
+                    }
+                }
+                if let Some(path) = pb_out.finish() {
+                    let mut paint = tiny_skia::Paint::default();
+                    paint.set_color(tiny_skia::Color::from_rgba8(255, 255, 255, 200));
+                    paint.anti_alias = true;
+                    let stroke = tiny_skia::Stroke {
+                        width: 1.5,
+                        ..Default::default()
+                    };
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
+
+                // Draw filled circle with actual color
+                let mut pb = tiny_skia::PathBuilder::new();
+                for i in 0..steps {
+                    let angle = (i as f32 / steps as f32) * std::f32::consts::TAU;
+                    let px = preview_x + radius * angle.cos();
+                    let py = preview_y + radius * angle.sin();
+                    if i == 0 {
+                        pb.move_to(px, py);
+                    } else {
+                        pb.line_to(px, py);
+                    }
+                }
+                if let Some(path) = pb.finish() {
+                    let mut paint = tiny_skia::Paint::default();
+                    paint.set_color(tiny_skia::Color::from_rgba8(toolbar_color.r, toolbar_color.g, toolbar_color.b, toolbar_color.a));
+                    paint.anti_alias = true;
+                    pixmap.fill_path(
+                        &path,
+                        &paint,
+                        tiny_skia::FillRule::Winding,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
+            }
+        }
 
         let _ = SetWindowPos(
             hwnd,
@@ -10361,6 +10474,33 @@ mod windows_overlay {
         draw_skia_circle_fill(pixmap, knob_x, y, 4.0, [64, 84, 108, 140]);
     }
 
+    fn show_color_picker_dialog(hwnd: windows::Win32::Foundation::HWND, initial_color: RgbaColor) -> Option<RgbaColor> {
+        use windows::Win32::UI::Controls::Dialogs::{ChooseColorW, CHOOSECOLORW, CC_FULLOPEN, CC_RGBINIT};
+        use windows::Win32::Foundation::COLORREF;
+
+        let mut custom_colors = [COLORREF(0xFFFFFF); 16];
+        let rgb_val = (initial_color.r as u32) | ((initial_color.g as u32) << 8) | ((initial_color.b as u32) << 16);
+        
+        let mut cc = CHOOSECOLORW::default();
+        cc.lStructSize = std::mem::size_of::<CHOOSECOLORW>() as u32;
+        cc.hwndOwner = hwnd;
+        cc.rgbResult = COLORREF(rgb_val);
+        cc.lpCustColors = custom_colors.as_mut_ptr();
+        cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+
+        unsafe {
+            if ChooseColorW(&mut cc).as_bool() {
+                let res = cc.rgbResult.0;
+                let r = (res & 0xFF) as u8;
+                let g = ((res >> 8) & 0xFF) as u8;
+                let b = ((res >> 16) & 0xFF) as u8;
+                Some(RgbaColor { r, g, b, a: 255 })
+            } else {
+                None
+            }
+        }
+    }
+
     fn draw_screen_draw_toolbar_rgba(
         pixels: &mut [u8],
         width: usize,
@@ -10369,12 +10509,12 @@ mod windows_overlay {
         toolbar_y: i32,
         color: RgbaColor,
         brush_size: f32,
-        eraser: bool,
-        smoothing: bool,
-        smoothing_amount: f32,
+        _eraser: bool,
+        _smoothing: bool,
+        _smoothing_amount: f32,
     ) {
         let toolbar_w = SCREEN_DRAW_TOOLBAR_WIDTH as usize;
-        let toolbar_h = 72usize;
+        let toolbar_h = SCREEN_DRAW_TOOLBAR_HEIGHT as usize;
         let mut pixmap = match tiny_skia::Pixmap::new(toolbar_w as u32, toolbar_h as u32) {
             Some(pixmap) => pixmap,
             None => return,
@@ -10383,10 +10523,10 @@ mod windows_overlay {
         fill_skia_rounded_rect(
             &mut pixmap,
             2.0,
-            4.0,
+            3.0,
             (toolbar_w as f32 - 4.0).max(1.0),
-            68.0,
-            16.0,
+            (toolbar_h as f32 - 4.0).max(1.0),
+            12.0,
             [0, 0, 0, 72],
         );
         fill_skia_rounded_rect(
@@ -10394,8 +10534,8 @@ mod windows_overlay {
             0.0,
             0.0,
             toolbar_w as f32,
-            72.0,
-            16.0,
+            toolbar_h as f32,
+            12.0,
             [28, 36, 48, 232],
         );
         fill_skia_rounded_rect(
@@ -10403,8 +10543,8 @@ mod windows_overlay {
             1.0,
             1.0,
             (toolbar_w as f32 - 2.0).max(1.0),
-            26.0,
-            15.0,
+            20.0,
+            11.0,
             [255, 255, 255, 12],
         );
         stroke_skia_rounded_rect(
@@ -10412,248 +10552,187 @@ mod windows_overlay {
             0.5,
             0.5,
             (toolbar_w as f32 - 1.0).max(1.0),
-            71.0,
-            16.0,
+            (toolbar_h as f32 - 1.0).max(1.0),
+            12.0,
             1.0,
             [220, 232, 248, 32],
         );
 
-        let close_x = SCREEN_DRAW_TOOLBAR_CLOSE_X as f32;
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            close_x,
-            10.0,
-            26.0,
-            20.0,
-            8.0,
-            [82, 96, 120, 214],
-        );
-        draw_skia_line(
-            &mut pixmap,
-            close_x + 7.0,
-            16.0,
-            close_x + 19.0,
-            24.0,
-            [255, 255, 255, 255],
-            2.0,
-        );
-        draw_skia_line(
-            &mut pixmap,
-            close_x + 19.0,
-            16.0,
-            close_x + 7.0,
-            24.0,
-            [255, 255, 255, 255],
-            2.0,
-        );
+        // 1. Drag Handle dots (2 columns, 4 rows of small dots)
+        let dot_color = [200, 210, 225, 180];
+        let dots_y = [16.0, 24.0, 32.0, 40.0];
+        for dy in &dots_y {
+            draw_skia_circle_fill(&mut pixmap, 11.0, *dy, 1.5, dot_color);
+            draw_skia_circle_fill(&mut pixmap, 16.0, *dy, 1.5, dot_color);
+        }
 
+        // 2. Color Circle (32x32 button bounds)
+        let color_btn_x = 32.0;
+        let color_btn_y = 12.0;
         fill_skia_rounded_rect(
             &mut pixmap,
-            13.0,
-            19.0,
-            38.0,
-            38.0,
-            11.0,
+            color_btn_x,
+            color_btn_y,
+            32.0,
+            32.0,
+            8.0,
             [236, 244, 255, 84],
         );
         fill_skia_rounded_rect(
             &mut pixmap,
-            15.0,
-            21.0,
-            34.0,
-            34.0,
-            10.0,
+            color_btn_x + 3.0,
+            color_btn_y + 3.0,
+            26.0,
+            26.0,
+            7.0,
             [color.r, color.g, color.b, color.a],
         );
         stroke_skia_rounded_rect(
             &mut pixmap,
-            14.5,
-            20.5,
-            35.0,
-            35.0,
-            10.0,
+            color_btn_x + 2.5,
+            color_btn_y + 2.5,
+            27.0,
+            27.0,
+            7.0,
             1.0,
             [255, 255, 255, 48],
         );
 
-        draw_screen_draw_slider_skia(
-            &mut pixmap,
-            68.0,
-            38.0,
-            90.0,
-            ((brush_size - 2.0) / 78.0).clamp(0.0, 1.0),
-        );
-
-        let eraser_fill = if eraser {
-            [100, 188, 156, 255]
-        } else {
-            [76, 90, 112, 220]
-        };
-        fill_skia_rounded_rect(&mut pixmap, 172.0, 20.0, 36.0, 36.0, 10.0, eraser_fill);
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            172.5,
-            20.5,
-            35.0,
-            35.0,
-            10.0,
-            1.0,
-            [255, 255, 255, 34],
-        );
-        {
-            let mut pb = tiny_skia::PathBuilder::new();
-            pb.move_to(182.0, 42.0);
-            pb.line_to(194.0, 30.0);
-            pb.line_to(201.0, 37.0);
-            pb.line_to(189.0, 49.0);
-            pb.close();
-            if let Some(path) = pb.finish() {
-                let mut paint = tiny_skia::Paint::default();
-                paint.set_color(tiny_skia::Color::from_rgba8(255, 255, 255, 248));
-                paint.anti_alias = true;
-                pixmap.fill_path(
-                    &path,
-                    &paint,
-                    tiny_skia::FillRule::Winding,
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
-            }
-        }
-        draw_skia_line(
-            &mut pixmap,
-            186.0,
-            45.0,
-            196.0,
-            45.0,
-            [62, 74, 92, 255],
-            2.0,
-        );
-
-        let smooth_fill = if smoothing {
-            [100, 188, 156, 255]
-        } else {
-            [76, 90, 112, 220]
-        };
-        fill_skia_rounded_rect(&mut pixmap, 224.0, 24.0, 28.0, 28.0, 8.0, smooth_fill);
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            224.5,
-            24.5,
-            27.0,
-            27.0,
-            8.0,
-            1.0,
-            [255, 255, 255, 34],
-        );
-        if smoothing {
-            draw_skia_line(
-                &mut pixmap,
-                230.0,
-                38.0,
-                237.0,
-                45.0,
-                [255, 255, 255, 255],
-                2.0,
-            );
-            draw_skia_line(
-                &mut pixmap,
-                237.0,
-                45.0,
-                247.0,
-                31.0,
-                [255, 255, 255, 255],
-                2.0,
-            );
-        } else {
-            draw_skia_line(
-                &mut pixmap,
-                230.0,
-                40.0,
-                246.0,
-                34.0,
-                [255, 255, 255, 210],
-                2.0,
-            );
-            draw_skia_line(
-                &mut pixmap,
-                230.0,
-                36.0,
-                246.0,
-                40.0,
-                [255, 255, 255, 160],
-                1.4,
-            );
-        }
-
-        draw_screen_draw_slider_skia(
-            &mut pixmap,
-            264.0,
-            38.0,
-            54.0,
-            smoothing_amount.clamp(0.0, 1.0),
-        );
-
+        // 3. Brush Size Slider (Starts at 74.0, width 64.0)
+        // Draw track
+        let slider_x = 74.0;
+        let slider_y = 28.0;
+        let slider_w = 64.0;
         fill_skia_rounded_rect(
             &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32,
-            20.0,
-            36.0,
-            36.0,
-            10.0,
+            slider_x,
+            slider_y - 3.0,
+            slider_w,
+            6.0,
+            3.0,
+            [90, 108, 132, 224],
+        );
+        let val_ratio = ((brush_size - 2.0) / 78.0).clamp(0.0, 1.0);
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            slider_x,
+            slider_y - 3.0,
+            val_ratio * slider_w,
+            6.0,
+            3.0,
+            [120, 214, 176, 224],
+        );
+        // Draw smaller knob (radius 6.0 and 2.0)
+        let knob_x = slider_x + val_ratio * slider_w;
+        draw_skia_circle_fill(&mut pixmap, knob_x, slider_y, 6.0, [244, 248, 255, 255]);
+        draw_skia_circle_outline(&mut pixmap, knob_x, slider_y, 6.0, [255, 255, 255, 66], 1.0);
+        draw_skia_circle_fill(&mut pixmap, knob_x, slider_y, 2.0, [64, 84, 108, 140]);
+
+        // 4. Capture (Camera - 32x32 button bounds)
+        let capture_x = SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32;
+        let capture_y = 12.0;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            capture_x,
+            capture_y,
+            32.0,
+            32.0,
+            8.0,
             [86, 106, 132, 224],
         );
         stroke_skia_rounded_rect(
             &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 0.5,
-            20.5,
-            35.0,
-            35.0,
-            10.0,
+            capture_x + 0.5,
+            capture_y + 0.5,
+            31.0,
+            31.0,
+            8.0,
             1.0,
             [255, 255, 255, 34],
         );
+        // Draw camera body inside 32x32 (centered)
         fill_skia_rounded_rect(
             &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 7.0,
-            29.0,
-            22.0,
+            capture_x + 6.0,
+            capture_y + 11.0,
+            20.0,
             14.0,
-            4.0,
+            3.0,
             [240, 246, 255, 246],
         );
         draw_skia_line(
             &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 11.5,
-            29.0,
-            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 15.5,
-            25.0,
+            capture_x + 11.5,
+            capture_y + 11.0,
+            capture_x + 14.5,
+            capture_y + 7.0,
             [240, 246, 255, 246],
             2.0,
         );
         draw_skia_line(
             &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 15.5,
-            25.0,
-            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 22.5,
-            25.0,
+            capture_x + 14.5,
+            capture_y + 7.0,
+            capture_x + 18.5,
+            capture_y + 7.0,
             [240, 246, 255, 246],
             2.0,
         );
         draw_skia_circle_fill(
             &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 18.0,
-            36.0,
-            4.6,
+            capture_x + 16.0,
+            capture_y + 18.0,
+            4.0,
             [74, 98, 128, 255],
         );
         draw_skia_circle_outline(
             &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32 + 18.0,
-            36.0,
-            4.6,
+            capture_x + 16.0,
+            capture_y + 18.0,
+            4.0,
             [255, 255, 255, 196],
             1.0,
+        );
+
+        // 5. Close (X - 32x32 button bounds)
+        let close_x = SCREEN_DRAW_TOOLBAR_CLOSE_X as f32;
+        let close_y = 12.0;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            close_x,
+            close_y,
+            32.0,
+            32.0,
+            8.0,
+            [82, 96, 120, 214],
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            close_x + 0.5,
+            close_y + 0.5,
+            31.0,
+            31.0,
+            8.0,
+            1.0,
+            [255, 255, 255, 34],
+        );
+        draw_skia_line(
+            &mut pixmap,
+            close_x + 9.0,
+            close_y + 9.0,
+            close_x + 23.0,
+            close_y + 23.0,
+            [255, 255, 255, 255],
+            2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            close_x + 23.0,
+            close_y + 9.0,
+            close_x + 9.0,
+            close_y + 23.0,
+            [255, 255, 255, 255],
+            2.0,
         );
 
         let data = pixmap.data();

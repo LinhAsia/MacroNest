@@ -177,6 +177,10 @@ fn default_screen_draw_smoothing_amount() -> f32 {
     0.45
 }
 
+pub(crate) fn default_screen_draw_freeze() -> bool {
+    true
+}
+
 fn default_key_sound_volume() -> f32 {
     1.0
 }
