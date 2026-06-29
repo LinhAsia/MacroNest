@@ -1326,7 +1326,7 @@ impl CrosshairApp {
             ("total_sec", "Total sec"),
             ("minute", "Minute"),
             ("second", "Second"),
-            ("millisecond", "Ms"),
+            ("millisecond", "Ms/Ticks"),
         ]
     }
 
