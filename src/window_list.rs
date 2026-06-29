@@ -441,16 +441,7 @@ mod windows_impl {
     unsafe extern "system" fn find_window_by_candidate_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let (target_title, match_duplicate_window_titles, found) =
             &mut *(lparam.0 as *mut (&str, bool, &mut Option<HWND>));
-        let clean_title = strip_rule_suffix(*target_title);
-        let Some((title, selector)) = visible_window_title_and_selector(hwnd) else {
-            return true.into();
-        };
-        if window_matches_candidate_title(
-            &title,
-            &selector,
-            clean_title,
-            *match_duplicate_window_titles,
-        ) {
+        if candidate_window_matches(hwnd, target_title, *match_duplicate_window_titles) {
             **found = Some(hwnd);
             return false.into();
         }
@@ -463,16 +454,7 @@ mod windows_impl {
     ) -> BOOL {
         let (target_title, match_duplicate_window_titles, candidates) =
             &mut *(lparam.0 as *mut (&str, bool, &mut Vec<HWND>));
-        let clean_title = strip_rule_suffix(*target_title);
-        let Some((title, selector)) = visible_window_title_and_selector(hwnd) else {
-            return true.into();
-        };
-        if window_matches_candidate_title(
-            &title,
-            &selector,
-            clean_title,
-            *match_duplicate_window_titles,
-        ) {
+        if candidate_window_matches(hwnd, target_title, *match_duplicate_window_titles) {
             candidates.push(hwnd);
         }
         true.into()
@@ -489,6 +471,23 @@ mod windows_impl {
         let title = unsafe { window_title(hwnd) }?;
         let selector = window_selector(hwnd, &title);
         Some((title, selector))
+    }
+
+    fn candidate_window_matches(
+        hwnd: HWND,
+        target_title: &str,
+        match_duplicate_window_titles: bool,
+    ) -> bool {
+        let clean_title = strip_rule_suffix(target_title);
+        let Some((title, selector)) = visible_window_title_and_selector(hwnd) else {
+            return false;
+        };
+        window_matches_candidate_title(
+            &title,
+            &selector,
+            clean_title,
+            match_duplicate_window_titles,
+        )
     }
 
     fn looks_like_window_selector(target: &str) -> bool {
