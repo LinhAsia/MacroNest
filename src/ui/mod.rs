@@ -1988,8 +1988,7 @@ impl CrosshairApp {
     }
 
     fn sync_and_persist_audio_settings(&mut self) {
-        self.sync_audio_settings();
-        self.persist();
+        self.persist_after_sync(Self::sync_audio_settings);
     }
 
     fn audio_storage_dir(&self) -> PathBuf {
@@ -9898,9 +9897,10 @@ impl CrosshairApp {
     }
 
     fn persist_macro_presets(&mut self) {
-        self.sync_macro_presets();
-        self.sync_macro_master_enabled();
-        self.persist();
+        self.persist_after_syncs([
+            Self::sync_macro_presets,
+            Self::sync_macro_master_enabled,
+        ]);
     }
 
     fn sync_reconciled_macro_presets(&mut self) {
@@ -9914,8 +9914,7 @@ impl CrosshairApp {
     }
 
     fn persist_timer_presets(&mut self) {
-        self.sync_timer_presets();
-        self.persist();
+        self.persist_after_sync(Self::sync_timer_presets);
     }
 
     #[allow(unreachable_code)]

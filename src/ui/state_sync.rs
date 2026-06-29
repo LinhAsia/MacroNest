@@ -514,8 +514,7 @@ impl CrosshairApp {
     }
 
     pub(crate) fn persist_audio_sense_presets(&mut self) {
-        self.sync_audio_sense_presets();
-        self.persist();
+        self.persist_after_sync(Self::sync_audio_sense_presets);
     }
 
     pub(crate) fn sync_timer_preview_preset(&mut self, preset: Option<TimerPreset>) {
@@ -579,6 +578,16 @@ impl CrosshairApp {
 
     pub(crate) fn persist_after_sync(&mut self, sync: impl FnOnce(&mut Self)) {
         sync(self);
+        self.persist();
+    }
+
+    pub(crate) fn persist_after_syncs(
+        &mut self,
+        syncs: impl IntoIterator<Item = fn(&mut Self)>,
+    ) {
+        for sync in syncs {
+            sync(self);
+        }
         self.persist();
     }
 
