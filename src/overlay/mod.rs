@@ -28792,7 +28792,10 @@ mod windows_overlay {
                         on_complete_macro_preset_id: None,
                     });
                 state.on_complete_macro_preset_id = on_complete_macro_preset_id;
-                if !state.running {
+                if state.running {
+                    state.elapsed_ms = 0;
+                    state.start_time = Some(Instant::now());
+                } else {
                     state.running = true;
                     state.start_time = Some(Instant::now());
                 }
@@ -28846,14 +28849,8 @@ mod windows_overlay {
             "total_sec" => total_secs as f64,
             "minute" | "m" => (total_secs / 60) as f64,
             "second" | "s" => (total_secs % 60) as f64,
-            "millisecond" | "ms" => {
-                if property.trim().eq_ignore_ascii_case("millisecond") {
-                    (current_ms % 1000) as f64
-                } else {
-                    current_ms as f64
-                }
-            }
-            "raw" | "total_ms" | _ => current_ms as f64,
+            "millisecond" | "ms" | "raw" | "total_ms" => current_ms as f64,
+            _ => current_ms as f64,
         };
         Some(value)
     }
