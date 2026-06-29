@@ -210,23 +210,12 @@ mod windows_impl {
         if !IsWindowVisible(hwnd).as_bool() {
             return true.into();
         }
-        let length = GetWindowTextLengthW(hwnd);
-        if length <= 0 {
-            return true.into();
-        }
-        let mut buffer = vec![0u16; length as usize + 1];
-        let copied = GetWindowTextW(hwnd, &mut buffer);
-        if copied > 0 {
-            let title = String::from_utf16_lossy(&buffer[..copied as usize])
-                .trim()
-                .to_owned();
-            if !title.is_empty() {
-                let windows = &mut *(lparam.0 as *mut Vec<WindowInfo>);
-                windows.push(WindowInfo {
-                    selector: window_selector(hwnd, &title),
-                    title,
-                });
-            }
+        if let Some(title) = window_title(hwnd) {
+            let windows = &mut *(lparam.0 as *mut Vec<WindowInfo>);
+            windows.push(WindowInfo {
+                selector: window_selector(hwnd, &title),
+                title,
+            });
         }
         true.into()
     }
