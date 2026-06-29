@@ -2212,16 +2212,12 @@ impl CrosshairApp {
                     }
                     IfConditionType::OcrMatch => {
                         let selected_id = cond.ocr_preset_id;
-                        let selected_label = selected_id
-                            .and_then(|id| {
-                                ocr_preset_options
-                                    .iter()
-                                    .find(|(preset_id, _)| *preset_id == id)
-                                    .map(|(_, label)| label.clone())
-                            })
-                            .unwrap_or_else(|| {
-                                Self::tr_lang(language, "Select OCR", "Select OCR").to_owned()
-                            });
+                        let selected_label = Self::option_label_by_id(
+                            ocr_preset_options,
+                            selected_id,
+                            "Select OCR",
+                            language,
+                        );
                         egui::ComboBox::from_id_salt((
                             group_id,
                             preset_id,
@@ -2324,16 +2320,12 @@ impl CrosshairApp {
                     }
                     IfConditionType::VisionMatch => {
                         let selected_id = cond.vision_preset_id;
-                        let selected_label = selected_id
-                            .and_then(|id| {
-                                image_search_preset_options
-                                    .iter()
-                                    .find(|(pid, _)| *pid == id)
-                                    .map(|(_, name)| name.clone())
-                            })
-                            .unwrap_or_else(|| {
-                                Self::tr_lang(language, "Select Image", "Select Image").to_owned()
-                            });
+                        let selected_label = Self::option_label_by_id(
+                            image_search_preset_options,
+                            selected_id,
+                            "Select Image",
+                            language,
+                        );
                         egui::ComboBox::from_id_salt((
                             group_id,
                             preset_id,
@@ -6297,17 +6289,12 @@ impl CrosshairApp {
                                                          | MacroAction::StopVision
                                                 ) {
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            image_search_preset_options
-                                                                .iter()
-                                                                .find(|(preset_id, _)| *preset_id == id)
-                                                                .map(|(_, label)| label.clone())
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            Self::tr_lang(language, "Select image search preset", "Select image search preset")
-                                                            .to_owned()
-                                                        });
+                                                    let selected_label = Self::option_label_by_id(
+                                                        &image_search_preset_options,
+                                                        selected_id,
+                                                        "Select image search preset",
+                                                        language,
+                                                    );
                                                 egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-image-search"))
     .width(160.0)
 
@@ -11552,14 +11539,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                          | MacroAction::StopVision
                                                 ) {
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            image_search_preset_options
-                                                                .iter()
-                                                                .find(|(preset_id, _)| *preset_id == id)
-                                                                .map(|(_, label)| label.clone())
-                                                        })
-                                                        .unwrap_or_else(|| "Select image".to_owned());
+                                                    let selected_label = Self::option_label_by_id(
+                                                        &image_search_preset_options,
+                                                        selected_id,
+                                                        "Select image",
+                                                        language,
+                                                    );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "image-search-preset-step"))
     .width(146.0)
 
