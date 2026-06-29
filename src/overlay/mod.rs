@@ -259,7 +259,7 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(ScreenDrawState::default()));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
     static LAST_MOUSE_MOVE_TIME_MS: AtomicU64 = AtomicU64::new(0);
-    const QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS: u32 = 650;
+    const QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS: u32 = 1200;
     static MASCOT_WINDOW_MOVING: AtomicBool = AtomicBool::new(false);
     static MASCOT_DRAG_START_MOUSE: Lazy<Mutex<Option<(i32, i32)>>> =
         Lazy::new(|| Mutex::new(None));
@@ -2479,6 +2479,7 @@ mod windows_overlay {
         quick_key_display_mouse_offset: (f32, f32),
         quick_key_display_mouse_velocity: (f32, f32),
         quick_key_display_last_cursor_pos: Option<POINT>,
+        quick_key_display_mouse_hand_active_until_ms: u32,
         quick_key_display_last_mascot_state: Option<MascotVisualState>,
         quick_key_display_spam_heat: f32,
         quick_key_display_last_update: Instant,
@@ -3266,6 +3267,7 @@ mod windows_overlay {
                 quick_key_display_mouse_offset: (0.0, 0.0),
                 quick_key_display_mouse_velocity: (0.0, 0.0),
                 quick_key_display_last_cursor_pos: None,
+                quick_key_display_mouse_hand_active_until_ms: 0,
                 quick_key_display_last_mascot_state: None,
                 quick_key_display_spam_heat: 0.0,
                 quick_key_display_last_update: Instant::now(),
@@ -7422,6 +7424,7 @@ mod windows_overlay {
             runtime.quick_key_display_last_cursor_pos = None;
             return;
         }
+        let current_ms = unsafe { GetTickCount() };
 
         let (mut offset_x, mut offset_y) = runtime.quick_key_display_mouse_offset;
         let (mut velocity_x, mut velocity_y) = runtime.quick_key_display_mouse_velocity;
@@ -7452,7 +7455,9 @@ mod windows_overlay {
             let delta_x = (cursor.x - last.x) as f32;
             let delta_y = (cursor.y - last.y) as f32;
             if delta_x != 0.0 || delta_y != 0.0 {
-                LAST_MOUSE_MOVE_TIME_MS.store(unsafe { GetTickCount() } as u64, Ordering::Relaxed);
+                LAST_MOUSE_MOVE_TIME_MS.store(current_ms as u64, Ordering::Relaxed);
+                runtime.quick_key_display_mouse_hand_active_until_ms =
+                    current_ms.wrapping_add(QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS);
             }
             velocity_x += delta_x.clamp(-30.0, 30.0) * 0.025;
             velocity_y += delta_y.clamp(-30.0, 30.0) * 0.02;
@@ -7497,9 +7502,13 @@ mod windows_overlay {
         runtime.quick_key_display_last_cursor_pos = Some(cursor);
     }
 
-    fn quick_key_display_mouse_active(current_ms: u32) -> bool {
-        let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
-        current_ms.wrapping_sub(last_move_ms) < QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS
+    fn quick_key_display_mouse_hand_active(runtime: &Runtime, current_ms: u32) -> bool {
+        let hook_last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
+        current_ms.wrapping_sub(hook_last_move_ms) < QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS
+            || runtime
+                .quick_key_display_mouse_hand_active_until_ms
+                .wrapping_sub(current_ms)
+                < QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS
     }
 
     fn quick_key_display_active_mascot_styles(
@@ -9089,6 +9098,7 @@ mod windows_overlay {
         }
         let x = runtime.quick_key_display_center_x - (width / 2);
         let y = runtime.quick_key_display_center_y - (height / 2);
+        let mut mouse_hand_active = false;
 
         if runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot {
             // Re-query visual state dependencies to check if we can skip repainting
@@ -9101,7 +9111,8 @@ mod windows_overlay {
             };
             let current_ms = unsafe { GetTickCount() };
             // Retain the hand on the mouse long enough to avoid one-frame key target flicker.
-            let is_mouse_moving = quick_key_display_mouse_active(current_ms)
+            mouse_hand_active = quick_key_display_mouse_hand_active(runtime, current_ms);
+            let is_mouse_moving = mouse_hand_active
                 || runtime.quick_key_display_mouse_offset.0.abs() > 0.5
                 || runtime.quick_key_display_mouse_offset.1.abs() > 0.5;
 
@@ -9171,6 +9182,7 @@ mod windows_overlay {
                             &entries,
                             font_size,
                             runtime.quick_key_display_mouse_offset,
+                            mouse_hand_active,
                             style,
                             center_x - item_width / 2,
                             center_y - item_height / 2,
@@ -17330,6 +17342,7 @@ mod windows_overlay {
         entries: &[QuickKeyDisplayEntry],
         font_size: f32,
         mouse_offset: (f32, f32),
+        mouse_hand_active: bool,
         mascot_style: crate::model::MascotStyle,
         window_x: i32,
         window_y: i32,
@@ -18013,9 +18026,7 @@ mod windows_overlay {
         // 4. Mouse and Keyboard keys logic
         let keys = quick_key_display_mascot_keys();
 
-        // Mouse active state tracking
-        let is_mouse_moving = quick_key_display_mouse_active(current_ms);
-        let mouse_active = is_mouse_moving || !held_mouse_buttons.is_empty();
+        let mouse_active = mouse_hand_active || !held_mouse_buttons.is_empty();
 
         let mouse_flat_x = mouse_pad_left + 19.0 + mouse_offset.0 * 0.7;
         let mouse_flat_y = keyboard_top + 23.0 + mouse_offset.1 * 0.56;
