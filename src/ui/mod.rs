@@ -563,7 +563,7 @@ pub struct CrosshairApp {
     last_synced_quick_key_display_config:
         Option<(bool, i32, i32, f32, QuickKeyDisplayMode, MascotStyle)>,
     last_synced_quick_screen_draw_config:
-        Option<(bool, Option<HotkeyBinding>, bool, RgbaColor, f32, bool, f32)>,
+        Option<(bool, Option<HotkeyBinding>, bool, RgbaColor, f32, bool, f32, bool)>,
     last_synced_quick_key_sound_config: Option<(bool, u32, f32)>,
     last_synced_macro_master_hotkey: Option<Option<HotkeyBinding>>,
     last_synced_macros_master_enabled: Option<bool>,
@@ -10686,11 +10686,13 @@ impl eframe::App for CrosshairApp {
                     brush_size,
                     smoothing,
                     smoothing_amount,
+                    freeze,
                 } => {
                     self.state.quick_screen_draw_color = color;
                     self.state.quick_screen_draw_brush_size = brush_size;
                     self.state.quick_screen_draw_smoothing = smoothing;
                     self.state.quick_screen_draw_smoothing_amount = smoothing_amount;
+                    self.state.quick_screen_draw_freeze = freeze;
                     self.persist();
                 }
                 UiCommand::MouseMoveAbsolutePointCaptured { .. } => {}

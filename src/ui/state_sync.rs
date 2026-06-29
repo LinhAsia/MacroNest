@@ -298,6 +298,7 @@ impl CrosshairApp {
             self.state.quick_screen_draw_brush_size,
             self.state.quick_screen_draw_smoothing,
             self.state.quick_screen_draw_smoothing_amount,
+            self.state.quick_screen_draw_freeze,
         );
         Self::sync_overlay_command_with_state_if_changed(
             &self.overlay_tx,
@@ -311,6 +312,7 @@ impl CrosshairApp {
                 brush_size: config.4,
                 smoothing: config.5,
                 smoothing_amount: config.6,
+                freeze: config.7,
             },
         );
     }

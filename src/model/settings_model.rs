@@ -13,7 +13,7 @@ use super::{
     default_protractor_needle1_angle, default_protractor_needle2_angle, default_protractor_scale,
     default_protractor_thickness, default_quick_key_display_size, default_quick_key_display_x,
     default_quick_key_display_y, default_screen_draw_brush_size, default_screen_draw_color,
-    default_screen_draw_smoothing_amount, default_timer_progress_border_color,
+    default_screen_draw_smoothing_amount, default_screen_draw_freeze, default_timer_progress_border_color,
     default_timer_progress_border_thickness, default_timer_progress_smoothness_fps, default_true,
 };
 
@@ -492,6 +492,8 @@ pub struct AppState {
     pub quick_screen_draw_smoothing: bool,
     #[serde(default = "default_screen_draw_smoothing_amount")]
     pub quick_screen_draw_smoothing_amount: f32,
+    #[serde(default = "default_screen_draw_freeze")]
+    pub quick_screen_draw_freeze: bool,
     #[serde(default)]
     pub quick_key_sound_enabled: bool,
     #[serde(default)]
@@ -603,6 +605,7 @@ impl Default for AppState {
             quick_screen_draw_brush_size: default_screen_draw_brush_size(),
             quick_screen_draw_smoothing: false,
             quick_screen_draw_smoothing_amount: default_screen_draw_smoothing_amount(),
+            quick_screen_draw_freeze: default_screen_draw_freeze(),
             quick_key_sound_enabled: false,
             quick_key_sound_style: 2,
             quick_key_sound_volume: default_key_sound_volume(),
