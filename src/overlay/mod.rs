@@ -6835,10 +6835,10 @@ mod windows_overlay {
         let bend = t * t;
         let bend_mid = bend * (0.45 + 0.55 * t);
         let bend_tip = bend_mid * (0.4 + 0.6 * t);
-        let sway = (time_s * 0.82 + side * 0.25).sin();
-        let sway_fast = (time_s * 1.67 + side * 0.7).sin();
-        let recoil = (time_s * 2.45 + side * 1.05).sin();
-        let gust = (time_s * 0.41 + 0.8).sin();
+        let sway = (time_s * 1.15 + side * 0.25).sin();
+        let sway_fast = (time_s * 2.15 + side * 0.7).sin();
+        let recoil = (time_s * 3.05 + side * 1.05).sin();
+        let gust = (time_s * 0.58 + 0.8).sin();
 
         // Mouse moving wiggle animation
         let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
@@ -6851,19 +6851,19 @@ mod windows_overlay {
         let type_wiggle = recent_pulse * (time_s * 28.0 + side * 1.8).sin();
 
         let wind_dir_x = look_x * -0.28
-            + sway * 3.8 * scale
-            + sway_fast * 2.2 * scale
-            + recoil * 1.35 * scale
-            + gust * 1.9 * scale
+            + sway * 6.1 * scale
+            + sway_fast * 3.2 * scale
+            + recoil * 1.9 * scale
+            + gust * 2.5 * scale
             + mouse_wiggle_x
-            + type_wiggle * 5.2 * scale;
+            + type_wiggle * 7.2 * scale;
         let wind_dir_y = look_y * -0.05
-            + sway.abs() * -0.7 * scale
-            + sway_fast * 0.22 * scale
-            + recoil * 0.16 * scale
+            + sway.abs() * -1.05 * scale
+            + sway_fast * 0.34 * scale
+            + recoil * 0.24 * scale
             + mouse_wiggle_y
-            + type_wiggle.abs() * -1.4 * scale;
-        let pulse = recent_pulse * 2.4 * scale;
+            + type_wiggle.abs() * -1.9 * scale;
+        let pulse = recent_pulse * 3.4 * scale;
         let x = (wind_dir_x + side * pulse * 0.36) * bend_tip;
         let y = wind_dir_y * bend_mid + (-x.abs() * 0.38 + recoil * 0.18 * scale) * bend_tip;
         (x, y)
@@ -14953,8 +14953,11 @@ mod windows_overlay {
         }
         let time_s = unsafe { GetTickCount() } as f32 * 0.001;
         let perspective = 0.28 + (look_x / (14.0 * scale)).clamp(-0.12, 0.18);
+        let head_bias_x = look_x * 0.1;
+        let head_bias_y = look_y * 0.1;
         let map_point = |svg_x: f32, svg_y: f32| -> (f32, f32) {
-            quick_key_display_chiikawa_map_point(svg_x, svg_y, scale, perspective)
+            let (px, py) = quick_key_display_chiikawa_map_point(svg_x, svg_y, scale, perspective);
+            (px + head_bias_x, py + head_bias_y)
         };
 
         let fill_color = [255, 241, 189, 255]; // #fff1bd
@@ -15416,8 +15419,8 @@ mod windows_overlay {
         }
 
         // 5. Body + Head
-        let bx = look_x * 0.1;
-        let by = look_y * 0.1;
+        let bx = 0.0;
+        let by = 0.0;
         let map = |x: f32, y: f32| -> (f32, f32) {
             let (px, py) = map_point(x, y);
             (px + bx, py + by)
@@ -15701,19 +15704,6 @@ mod windows_overlay {
                     red_factor,
                     [255, 95, 120, 255],
                 );
-
-                if red_factor > 0.55 {
-                    let eye_heat = ((red_factor - 0.55) / 0.45).clamp(0.0, 1.0);
-                    for side in [-1.0_f32, 1.0] {
-                        fill_skia_circle(
-                            pixmap,
-                            head_cx + side * 18.0 * scale + look_x * 0.55 + face_pulse_x,
-                            head_cy + 1.0 * scale + look_y * 0.5 + face_pulse_y,
-                            6.0 * scale * eye_heat,
-                            [255, 255, 255, (240.0 * eye_heat).round() as u8],
-                        );
-                    }
-                }
 
                 let sweat = ((red_factor - 0.2) / 0.8).clamp(0.0, 1.0);
                 if sweat > 0.0 {
@@ -16650,13 +16640,16 @@ mod windows_overlay {
 
             let top_center_x = root_x + side * 0.5 * scale;
             let top_center_y = root_y;
-            let bottom_center_x = paw_x - side * 0.2 * scale;
-            let bottom_center_y = paw_y + 2.0 * scale;
+            let paw_center_x = paw_x;
+            let paw_center_y = paw_y + 4.4 * scale;
+            let wrist_center_x = paw_x - ux * 7.0 * scale;
+            let wrist_center_y = paw_y - uy * 7.0 * scale;
             let straight_sign = -side;
 
             let top_w = 4.8 * scale;
-            let bottom_w = 13.4 * scale;
-            let bottom_h = 10.8 * scale;
+            let wrist_w = 5.2 * scale;
+            let paw_rx = 9.2 * scale;
+            let paw_ry = 9.8 * scale;
 
             let top_straight = (
                 top_center_x + px * top_w * straight_sign,
@@ -16666,21 +16659,13 @@ mod windows_overlay {
                 top_center_x - px * top_w * straight_sign,
                 top_center_y - py * top_w * straight_sign,
             );
-            let bottom_straight = (
-                bottom_center_x + px * bottom_w * straight_sign,
-                bottom_center_y + py * bottom_w * straight_sign,
+            let wrist_straight = (
+                wrist_center_x + px * wrist_w * straight_sign,
+                wrist_center_y + py * wrist_w * straight_sign,
             );
-            let bottom_curve = (
-                bottom_center_x - px * bottom_w * straight_sign,
-                bottom_center_y - py * bottom_w * straight_sign,
-            );
-            let bottom_arc_mid_outer = (
-                bottom_center_x + px * 4.8 * scale * straight_sign,
-                bottom_center_y + bottom_h * 0.98,
-            );
-            let bottom_arc_mid_inner = (
-                bottom_center_x - px * 4.8 * scale * straight_sign,
-                bottom_center_y + bottom_h * 0.98,
+            let wrist_curve = (
+                wrist_center_x - px * wrist_w * straight_sign,
+                wrist_center_y - py * wrist_w * straight_sign,
             );
             let curve_ctrl = (
                 root_x + dx * 0.32 - px * 6.8 * scale * straight_sign,
@@ -16689,25 +16674,8 @@ mod windows_overlay {
 
             let mut arm = tiny_skia::PathBuilder::new();
             arm.move_to(top_straight.0, top_straight.1);
-            arm.line_to(bottom_straight.0, bottom_straight.1);
-            arm.quad_to(
-                bottom_center_x + px * 10.6 * scale * straight_sign,
-                bottom_center_y + bottom_h * 0.42,
-                bottom_arc_mid_outer.0,
-                bottom_arc_mid_outer.1,
-            );
-            arm.quad_to(
-                bottom_center_x,
-                bottom_center_y + bottom_h * 1.22,
-                bottom_arc_mid_inner.0,
-                bottom_arc_mid_inner.1,
-            );
-            arm.quad_to(
-                bottom_center_x - px * 10.6 * scale * straight_sign,
-                bottom_center_y + bottom_h * 0.42,
-                bottom_curve.0,
-                bottom_curve.1,
-            );
+            arm.line_to(wrist_straight.0, wrist_straight.1);
+            arm.quad_to(paw_center_x, paw_center_y + paw_ry * 0.48, wrist_curve.0, wrist_curve.1);
             arm.quad_to(curve_ctrl.0, curve_ctrl.1, top_curve.0, top_curve.1);
             arm.close();
 
@@ -16715,6 +16683,9 @@ mod windows_overlay {
                 fill_skia_path(pixmap, &p, arm_fill);
                 stroke_skia_path(pixmap, &p, stroke_color, stroke_w);
             }
+
+            fill_skia_ellipse(pixmap, paw_center_x, paw_center_y, paw_rx, paw_ry, arm_fill);
+            stroke_skia_ellipse(pixmap, paw_center_x, paw_center_y, paw_rx, paw_ry, stroke_w, stroke_color);
         };
 
         draw_detached_arm(
@@ -16802,7 +16773,14 @@ mod windows_overlay {
 
         let y_shift = 30.0;
         // 3D Perspective mapping helper (takes FLAT coordinates, returns SCALED & PROJECTED coordinates)
+        let prop_scale = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            0.84
+        } else {
+            1.0
+        };
         let project_point = |x: f32, y: f32| -> (f32, f32) {
+            let x = 199.0 + (x - 199.0) * prop_scale;
+            let y = 190.0 + (y - 190.0) * prop_scale;
             let scaled_x = x * scale;
             let scaled_y = (y + y_shift) * scale;
             let vanish_y = (50.0 + y_shift) * scale;
@@ -16940,10 +16918,10 @@ mod windows_overlay {
 
         let current_ms = unsafe { GetTickCount() };
         let time_s = current_ms as f32 * 0.001;
-        let idle_turn_x = (time_s * 0.72).sin() * 3.2 * scale;
-        let idle_turn_y = (time_s * 0.47 + 0.9).sin() * 1.35 * scale;
-        let idle_body_bob = (time_s * 0.63 + 0.4).sin() * 1.25 * scale;
-        let idle_head_drift_x = (time_s * 0.37 + 0.2).sin() * 0.95 * scale;
+        let idle_turn_x = (time_s * 0.92).sin() * 7.0 * scale;
+        let idle_turn_y = (time_s * 0.58 + 0.9).sin() * 2.2 * scale;
+        let idle_body_bob = (time_s * 0.72 + 0.4).sin() * 1.8 * scale;
+        let idle_head_drift_x = (time_s * 0.48 + 0.2).sin() * 1.45 * scale;
         let type_bounce = recent_pulse * (time_s * 24.0).sin() * 1.5 * scale;
 
         // Animate Mascot closer to the desk
@@ -16981,7 +16959,7 @@ mod windows_overlay {
         let (look_x, look_y) = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             if is_interacting || mouse_offset.0.abs() > 0.1 || mouse_offset.1.abs() > 0.1 {
                 let type_face = recent_pulse * (time_s * 28.0).sin() * 1.9 * scale;
-                let lx = mouse_offset.0 * 0.45 * scale + idle_turn_x * 0.35 + type_face;
+                let lx = mouse_offset.0 * 0.45 * scale + idle_turn_x * 0.55 + type_face;
                 let ly = (mouse_offset.1 * 0.35 + 3.0) * scale
                     + idle_turn_y * 0.45
                     + type_face.abs() * 0.35;
@@ -16990,7 +16968,7 @@ mod windows_overlay {
                 (idle_turn_x, idle_turn_y)
             }
         } else {
-            let focus_x = mouse_offset.0 * 0.92 * scale + idle_turn_x * 0.35;
+            let focus_x = mouse_offset.0 * 0.92 * scale + idle_turn_x * 0.75;
             let focus_y = mouse_offset.1 * 0.72 * scale
                 + if is_interacting {
                     2.2 * scale
