@@ -7594,6 +7594,7 @@ mod windows_overlay {
         style: crate::model::MascotStyle,
         center_x: i32,
         center_y: i32,
+        raise: bool,
     ) {
         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
         let styles = quick_key_display_active_mascot_styles(runtime);
@@ -7605,12 +7606,12 @@ mod windows_overlay {
         let _ = unsafe {
             SetWindowPos(
                 hwnds[index],
-                Some(HWND_TOPMOST),
+                if raise { Some(HWND_TOPMOST) } else { None },
                 center_x - width / 2,
                 center_y - height / 2,
                 width,
                 height,
-                SWP_NOACTIVATE | SWP_NOSIZE,
+                SWP_NOACTIVATE | SWP_NOSIZE | if raise { Default::default() } else { SWP_NOZORDER },
             )
         };
     }
@@ -7705,7 +7706,7 @@ mod windows_overlay {
                 *MASCOT_DRAG_START_MOUSE.lock() = Some((cursor.x, cursor.y));
                 *MASCOT_DRAG_START_CENTER.lock() = Some((center_x, center_y));
                 *MASCOT_DRAG_STYLE.lock() = Some(style);
-                move_quick_key_display_window_for_style(runtime, style, center_x, center_y);
+                move_quick_key_display_window_for_style(runtime, style, center_x, center_y, true);
                 MASCOT_WINDOW_MOVING.store(true, Ordering::Relaxed);
                 true
             }
@@ -7730,7 +7731,7 @@ mod windows_overlay {
                 runtime
                     .quick_key_display_mascot_positions
                     .insert(style, (center_x, center_y));
-                move_quick_key_display_window_for_style(runtime, style, center_x, center_y);
+                move_quick_key_display_window_for_style(runtime, style, center_x, center_y, false);
                 true
             }
             WM_LBUTTONUP => {
@@ -15728,30 +15729,30 @@ mod windows_overlay {
         stroke_width: f32,
     ) {
         let mut drop = tiny_skia::PathBuilder::new();
-        drop.move_to(sx, sy - 12.0 * size);
+        drop.move_to(sx, sy - 15.5 * size);
         drop.cubic_to(
-            sx + 8.8 * size,
-            sy - 4.7 * size,
-            sx + 10.8 * size,
-            sy + 5.8 * size,
-            sx + 2.4 * size,
-            sy + 12.4 * size,
+            sx + 4.8 * size,
+            sy - 3.0 * size,
+            sx + 10.6 * size,
+            sy + 6.2 * size,
+            sx + 5.0 * size,
+            sy + 12.8 * size,
         );
         drop.cubic_to(
-            sx - 6.8 * size,
-            sy + 10.3 * size,
-            sx - 10.3 * size,
-            sy + 1.7 * size,
-            sx - 4.4 * size,
-            sy - 5.4 * size,
+            sx - 1.8 * size,
+            sy + 20.1 * size,
+            sx - 13.2 * size,
+            sy + 12.8 * size,
+            sx - 10.2 * size,
+            sy + 3.0 * size,
         );
         drop.cubic_to(
-            sx - 2.0 * size,
-            sy - 8.1 * size,
-            sx - 0.7 * size,
-            sy - 10.1 * size,
+            sx - 6.2 * size,
+            sy - 3.3 * size,
+            sx - 2.1 * size,
+            sy - 10.7 * size,
             sx,
-            sy - 12.0 * size,
+            sy - 15.5 * size,
         );
         drop.close();
         if let Some(path) = drop.finish() {
@@ -15760,12 +15761,21 @@ mod windows_overlay {
         }
         fill_skia_ellipse(
             pixmap,
-            sx - 2.0 * size,
-            sy - 2.2 * size,
-            2.1 * size,
-            4.8 * size,
-            [255, 255, 255, 90],
+            sx - 3.2 * size,
+            sy + 5.1 * size,
+            3.0 * size,
+            6.1 * size,
+            [255, 255, 255, 125],
         );
+        fill_skia_ellipse(
+            pixmap,
+            sx + 4.8 * size,
+            sy + 2.1 * size,
+            4.5 * size,
+            4.5 * size,
+            [75, 132, 207, 42],
+        );
+        fill_skia_circle(pixmap, sx + 1.0 * size, sy + 9.0 * size, 6.8 * size, [75, 132, 207, 36]);
     }
 
     fn draw_mascot_blink(
@@ -16003,16 +16013,14 @@ mod windows_overlay {
                     [255, 95, 120, 255],
                 );
 
-                let sweat = ((red_factor - 0.2) / 0.8).clamp(0.0, 1.0);
-                if sweat > 0.0 {
+                if red_factor > 0.34 {
                     let sx = head_cx + 34.0 * scale + look_x * 0.25;
                     let sy = head_cy - 17.0 * scale + look_y * 0.2;
-                    let s = (0.85 + sweat * 0.55) * scale;
                     draw_mascot_sweat_drop(
                         pixmap,
                         sx,
                         sy,
-                        s,
+                        1.08 * scale,
                         [176, 228, 255, 235],
                         [59, 41, 38, 235],
                         1.3 * scale,
@@ -16022,20 +16030,45 @@ mod windows_overlay {
 
             let blink = mascot_blink_amount(time_s, 0.0);
             if blink > 0.0 {
+                let map_blink_eye = |sx: f32, sy: f32| -> (f32, f32) {
+                    let xc = cx_val + (sx - svg_cx) * (mapping_ch / svg_h);
+                    let yc = (sy - svg_top) * (mapping_ch / svg_h);
+                    let (mut px, mut py) =
+                        quick_key_display_chiikawa_map_point(xc, yc, scale, perspective);
+                    px += look_x * 0.8 + face_wobble_mid_x + face_pulse_x;
+                    py += look_y * 0.78
+                        + face_wobble_fast_y
+                        + face_pulse_y
+                        + vertical_offset
+                        - screen_y_at_ch0;
+                    let side = ((xc - cx_val) / 60.0).clamp(-1.0, 1.0);
+                    let ear_off = quick_key_display_chiikawa_ear_offset(
+                        yc,
+                        scale,
+                        time_s,
+                        look_x,
+                        look_y,
+                        recent_pulse,
+                        side,
+                    );
+                    (px + ear_off.0, py + ear_off.1)
+                };
+                let (left_blink_x, left_blink_y) = map_blink_eye(814.0, 845.0);
+                let (right_blink_x, right_blink_y) = map_blink_eye(1226.0, 847.0);
                 draw_mascot_blink(
                     pixmap,
-                    head_cx - 28.0 * scale + look_x * 0.52,
-                    head_cy + 9.0 * scale + look_y * 0.44,
-                    9.2 * scale,
+                    left_blink_x,
+                    left_blink_y,
+                    12.8 * scale,
                     [255, 255, 255, 255],
                     [55, 27, 17, 255],
                     blink,
                 );
                 draw_mascot_blink(
                     pixmap,
-                    head_cx + 27.0 * scale + look_x * 0.52,
-                    head_cy + 9.0 * scale + look_y * 0.44,
-                    9.2 * scale,
+                    right_blink_x,
+                    right_blink_y,
+                    12.8 * scale,
                     [255, 255, 255, 255],
                     [55, 27, 17, 255],
                     blink,
@@ -16088,85 +16121,38 @@ mod windows_overlay {
 
             let cx = head_cx + bx;
             let cy = head_cy + by;
-            let mut head = tiny_skia::PathBuilder::new();
-            head.move_to(cx - 72.0 * scale, cy + 22.0 * scale);
-            head.cubic_to(
-                cx - 73.0 * scale,
-                cy - 17.0 * scale,
-                cx - 51.0 * scale,
-                cy - 53.0 * scale,
-                cx - 18.0 * scale,
-                cy - 61.0 * scale,
-            );
-            head.cubic_to(
-                cx - 27.0 * scale,
-                cy - 70.0 * scale,
-                cx - 21.0 * scale,
-                cy - 83.0 * scale,
-                cx - 9.0 * scale,
-                cy - 82.0 * scale,
-            );
-            head.cubic_to(
-                cx + 0.0 * scale,
-                cy - 81.0 * scale,
-                cx + 4.0 * scale,
-                cy - 72.0 * scale,
-                cx + 0.0 * scale,
-                cy - 64.0 * scale,
-            );
-            head.cubic_to(
-                cx + 20.0 * scale,
-                cy - 67.0 * scale,
-                cx + 43.0 * scale,
-                cy - 61.0 * scale,
-                cx + 57.0 * scale,
-                cy - 49.0 * scale,
-            );
-            head.cubic_to(
-                cx + 58.0 * scale,
-                cy - 60.0 * scale,
-                cx + 69.0 * scale,
-                cy - 66.0 * scale,
-                cx + 77.0 * scale,
-                cy - 59.0 * scale,
-            );
-            head.cubic_to(
-                cx + 86.0 * scale,
-                cy - 51.0 * scale,
-                cx + 79.0 * scale,
-                cy - 37.0 * scale,
-                cx + 66.0 * scale,
-                cy - 38.0 * scale,
-            );
-            head.cubic_to(
-                cx + 85.0 * scale,
-                cy - 14.0 * scale,
-                cx + 82.0 * scale,
-                cy + 28.0 * scale,
-                cx + 57.0 * scale,
-                cy + 51.0 * scale,
-            );
-            head.cubic_to(
-                cx + 29.0 * scale,
-                cy + 78.0 * scale,
-                cx - 34.0 * scale,
-                cy + 73.0 * scale,
-                cx - 58.0 * scale,
-                cy + 45.0 * scale,
-            );
-            head.cubic_to(
-                cx - 68.0 * scale,
-                cy + 34.0 * scale,
-                cx - 72.0 * scale,
-                cy + 25.0 * scale,
-                cx - 72.0 * scale,
-                cy + 22.0 * scale,
-            );
-            head.close();
-            if let Some(path) = head.finish() {
-                fill_skia_path(&mut tmp_pixmap, &path, face_fill);
-                stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 3.3 * scale);
+            for &(ear_x, ear_y, ear_rx, ear_ry) in &[
+                (cx - 37.0 * scale, cy - 57.0 * scale, 11.0 * scale, 12.0 * scale),
+                (cx + 47.0 * scale, cy - 52.0 * scale, 10.5 * scale, 11.0 * scale),
+            ] {
+                fill_skia_ellipse(&mut tmp_pixmap, ear_x, ear_y, ear_rx, ear_ry, face_fill);
+                stroke_skia_ellipse(
+                    &mut tmp_pixmap,
+                    ear_x,
+                    ear_y,
+                    ear_rx,
+                    ear_ry,
+                    3.2 * scale,
+                    stroke_color,
+                );
             }
+            fill_skia_ellipse(
+                &mut tmp_pixmap,
+                cx,
+                cy + 3.0 * scale,
+                76.0 * scale,
+                65.0 * scale,
+                face_fill,
+            );
+            stroke_skia_ellipse(
+                &mut tmp_pixmap,
+                cx,
+                cy + 3.0 * scale,
+                76.0 * scale,
+                65.0 * scale,
+                3.4 * scale,
+                stroke_color,
+            );
 
             if red_factor > 0.08 {
                 quick_key_display_apply_heat_tint_ellipse(
@@ -16250,13 +16236,12 @@ mod windows_overlay {
                 stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 1.7 * scale);
             }
 
-            if red_factor > 0.18 {
-                let sweat = ((red_factor - 0.18) / 0.82).clamp(0.0, 1.0);
+            if red_factor > 0.34 {
                 draw_mascot_sweat_drop(
                     &mut tmp_pixmap,
                     cx + 50.0 * scale + look_x * 0.18,
                     cy - 28.0 * scale + look_y * 0.18,
-                    (0.84 + sweat * 0.5) * scale,
+                    1.08 * scale,
                     [176, 228, 255, 235],
                     [59, 41, 38, 235],
                     1.25 * scale,
@@ -17016,7 +17001,7 @@ mod windows_overlay {
             fill_skia_circle(&mut tmp_pixmap, h2x, h2y, 4.0 * 0.53 * scale, eye_highlight);
         }
         let blink = mascot_blink_amount(time_s, 0.38);
-        if blink > 0.0 {
+        if blink > 0.0 && eye_heat < 0.08 {
             draw_mascot_blink(
                 &mut tmp_pixmap,
                 ex1,
@@ -17144,16 +17129,13 @@ mod windows_overlay {
         }
 
         // Sweat drop when typing too much
-        if red_factor > 0.15 {
-            let sweat_size = (red_factor - 0.15) / 0.85; // 0.0 to 1.0
-            let s_scale = (0.78 + 0.5 * sweat_size) * scale;
-
+        if red_factor > 0.34 {
             let (sx, sy) = map_face_brow(284.0, 154.0);
             draw_mascot_sweat_drop(
                 &mut tmp_pixmap,
                 sx,
                 sy,
-                s_scale,
+                1.08 * scale,
                 [180, 230, 255, 235],
                 stroke_color,
                 1.35 * scale,
@@ -18032,12 +18014,8 @@ mod windows_overlay {
 
         // Mouse active state tracking
         let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
-        // Retain the hand on the mouse long enough to avoid one-frame key target flicker.
-        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 220;
-        let mouse_active = is_mouse_moving
-            || !held_mouse_buttons.is_empty()
-            || mouse_offset.0.abs() > 0.5
-            || mouse_offset.1.abs() > 0.5;
+        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 180;
+        let mouse_active = is_mouse_moving || !held_mouse_buttons.is_empty();
 
         let mouse_flat_x = mouse_pad_left + 19.0 + mouse_offset.0 * 0.7;
         let mouse_flat_y = keyboard_top + 23.0 + mouse_offset.1 * 0.56;
