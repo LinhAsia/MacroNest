@@ -7451,6 +7451,9 @@ mod windows_overlay {
         if let Some(last) = runtime.quick_key_display_last_cursor_pos {
             let delta_x = (cursor.x - last.x) as f32;
             let delta_y = (cursor.y - last.y) as f32;
+            if delta_x != 0.0 || delta_y != 0.0 {
+                LAST_MOUSE_MOVE_TIME_MS.store(unsafe { GetTickCount() } as u64, Ordering::Relaxed);
+            }
             velocity_x += delta_x.clamp(-30.0, 30.0) * 0.025;
             velocity_y += delta_y.clamp(-30.0, 30.0) * 0.02;
         }
