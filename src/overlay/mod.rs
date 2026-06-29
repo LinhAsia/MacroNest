@@ -7186,9 +7186,9 @@ mod windows_overlay {
     ) -> (i32, i32, i32, i32) {
         let scale = quick_key_display_mascot_scale(font_size, mascot_style);
         let (left, top, right, bottom) = match mascot_style {
-            crate::model::MascotStyle::Hachiware => (36.0, 16.0, 88.0, 36.0),
-            crate::model::MascotStyle::ChiikawaClassic => (38.0, 6.0, 82.0, 36.0),
-            crate::model::MascotStyle::Chiikawa => (38.0, 10.0, 84.0, 36.0),
+            crate::model::MascotStyle::Hachiware => (38.0, 16.0, 88.0, 62.0),
+            crate::model::MascotStyle::ChiikawaClassic => (40.0, 6.0, 88.0, 62.0),
+            crate::model::MascotStyle::Chiikawa => (40.0, 10.0, 88.0, 62.0),
         };
         (
             (left * scale).round() as i32,
@@ -7687,23 +7687,6 @@ mod windows_overlay {
         };
     }
 
-    fn arrange_quick_key_display_mascot_z_order(runtime: &Runtime, count: usize) {
-        let hwnds = quick_key_display_hwnds(runtime);
-        for hwnd in hwnds.into_iter().take(count) {
-            let _ = unsafe {
-                SetWindowPos(
-                    hwnd,
-                    Some(HWND_TOPMOST),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
-                )
-            };
-        }
-    }
-
     fn clamp_mascot_center_to_screen(
         center_x: i32,
         center_y: i32,
@@ -7800,9 +7783,8 @@ mod windows_overlay {
                 *MASCOT_DRAG_START_MOUSE.lock() = Some((cursor.x, cursor.y));
                 *MASCOT_DRAG_START_CENTER.lock() = Some((center_x, center_y));
                 *MASCOT_DRAG_STYLE.lock() = Some(style);
-                move_quick_key_display_window_for_style(runtime, style, center_x, center_y);
-                arrange_quick_key_display_mascot_z_order(runtime, items.len());
                 MASCOT_WINDOW_MOVING.store(true, Ordering::Relaxed);
+                move_quick_key_display_window_for_style(runtime, style, center_x, center_y);
                 true
             }
             WM_MOUSEMOVE => {
@@ -9246,7 +9228,6 @@ mod windows_overlay {
                             runtime.quick_key_display_spam_heat,
                         )?;
                     }
-                    arrange_quick_key_display_mascot_z_order(runtime, items.len());
                     for hwnd in hwnds.iter().skip(items.len()) {
                         let _ = ShowWindow(*hwnd, SW_HIDE);
                     }
@@ -17405,8 +17386,8 @@ mod windows_overlay {
         height: i32,
         red_factor: f32,
     ) -> Result<()> {
-        let window_x = window_x.max(0);
-        let window_y = window_y.max(0);
+        let window_x = window_x;
+        let window_y = window_y;
         let width = width.max(1);
         let height = height.max(1);
         let screen_dc = GetDC(None);
