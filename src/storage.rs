@@ -164,19 +164,22 @@ impl AppPaths {
         candidates.into_iter().map(|(_, path)| path).next()
     }
 
-    fn restore_state_from_backup(&self) -> Result<Option<AppState>> {
+    fn state_restore_sources(&self) -> Vec<PathBuf> {
         let mut restore_sources = Vec::new();
         let backup_file = self.state_backup_file();
         if backup_file.exists() {
             restore_sources.push(backup_file);
         }
-        if let Some(recovery_file) = self.latest_state_recovery_file() {
-            if !restore_sources.iter().any(|path| path == &recovery_file) {
-                restore_sources.push(recovery_file);
-            }
+        if let Some(recovery_file) = self.latest_state_recovery_file()
+            && !restore_sources.iter().any(|path| path == &recovery_file)
+        {
+            restore_sources.push(recovery_file);
         }
+        restore_sources
+    }
 
-        for source in restore_sources {
+    fn restore_state_from_backup(&self) -> Result<Option<AppState>> {
+        for source in self.state_restore_sources() {
             let Ok(state) = Self::read_state_file(&source) else {
                 continue;
             };
