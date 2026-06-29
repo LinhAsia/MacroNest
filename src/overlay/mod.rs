@@ -25520,7 +25520,7 @@ mod windows_overlay {
     ) -> bool {
         crate::window_list::window_matches_candidate_title(
             title,
-            &format!("{title} (0x{:X})", hwnd.0 as usize),
+            &crate::window_list::window_selector(hwnd, title),
             target,
             match_duplicate_window_titles,
         )
