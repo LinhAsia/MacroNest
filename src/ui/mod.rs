@@ -4510,10 +4510,14 @@ impl CrosshairApp {
                                         }
                                         let styles_before =
                                             self.state.quick_key_display_mascot_styles.clone();
+                                        self.state
+                                            .quick_key_display_mascot_styles
+                                            .retain(|style| {
+                                                *style != crate::model::MascotStyle::Chiikawa
+                                            });
                                         let mascot_options = [
                                             (crate::model::MascotStyle::Hachiware, "Hachiware"),
                                             (crate::model::MascotStyle::ChiikawaClassic, "Usagi"),
-                                            (crate::model::MascotStyle::Chiikawa, "Chiikawa"),
                                         ];
                                         let selected_text = mascot_options
                                             .iter()
