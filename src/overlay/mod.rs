@@ -6844,7 +6844,7 @@ mod windows_overlay {
         let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
         let current_ms = unsafe { GetTickCount() };
         let elapsed_ms = current_ms.wrapping_sub(last_move_ms);
-        let mouse_move_strength = (1.0 - (elapsed_ms as f32 / 380.0)).clamp(0.0, 1.0);
+        let mouse_move_strength = (1.0 - (elapsed_ms as f32 / 700.0)).clamp(0.0, 1.0);
         let mouse_wiggle_x = (time_s * 22.0 + side * 2.5).sin() * 5.8 * scale * mouse_move_strength;
         let mouse_wiggle_y =
             (time_s * 22.0 + side * 2.5 + 1.5).sin() * 2.2 * scale * mouse_move_strength;
@@ -8871,8 +8871,8 @@ mod windows_overlay {
             };
             let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
             let current_ms = unsafe { GetTickCount() };
-            // Retain the hand on the mouse for an additional 300ms (380ms total) before retracting
-            let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 380;
+            // Retain the hand on the mouse long enough to avoid one-frame key target flicker.
+            let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 700;
 
             let recent_pulse = entries.iter().fold(0.0f32, |acc, entry| {
                 let age = now
@@ -15858,7 +15858,7 @@ mod windows_overlay {
 
             // 1. Left Ear
             let mut left_ear = tiny_skia::PathBuilder::new();
-            let start = map_point(165.0, 123.0);
+            let start = map_point(165.0, 136.0);
             let off = quick_key_display_chiikawa_ear_offset(
                 123.0,
                 scale,
@@ -15947,7 +15947,7 @@ mod windows_overlay {
             );
             let c1 = map_point(199.0, 70.0);
             let c2 = map_point(196.0, 101.0);
-            let t = map_point(190.0, 124.0);
+            let t = map_point(190.0, 137.0);
             let c1_off = quick_key_display_chiikawa_ear_offset(
                 70.0,
                 scale,
@@ -16085,7 +16085,7 @@ mod windows_overlay {
 
             // 3. Right Ear
             let mut right_ear = tiny_skia::PathBuilder::new();
-            let start = map_point(211.0, 123.0);
+            let start = map_point(211.0, 136.0);
             let off = quick_key_display_chiikawa_ear_offset(
                 123.0,
                 scale,
@@ -16174,7 +16174,7 @@ mod windows_overlay {
             );
             let c1 = map_point(260.0, 75.0);
             let c2 = map_point(253.0, 106.0);
-            let t = map_point(244.0, 127.0);
+            let t = map_point(244.0, 139.0);
             let c1_off = quick_key_display_chiikawa_ear_offset(
                 75.0,
                 scale,
@@ -16381,24 +16381,6 @@ mod windows_overlay {
             stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 7.0 * 0.53 * scale);
         }
 
-        if !is_redraw {
-            for &(x1, y1, x2, y2) in &[(158.0, 112.0, 198.0, 135.0), (202.0, 112.0, 247.0, 136.0)] {
-                let p1 = map(x1, y1);
-                let p2 = map(x2, y1);
-                let p3 = map(x2 - 2.0, y2);
-                let p4 = map(x1 + 2.0, y2);
-                let mut connector = tiny_skia::PathBuilder::new();
-                connector.move_to(p1.0, p1.1);
-                connector.line_to(p2.0, p2.1);
-                connector.line_to(p3.0, p3.1);
-                connector.line_to(p4.0, p4.1);
-                connector.close();
-                if let Some(path) = connector.finish() {
-                    fill_skia_path(&mut tmp_pixmap, &path, fill_color);
-                }
-            }
-        }
-
         quick_key_display_apply_heat_tint_ellipse(
             &mut tmp_pixmap,
             head_cx + look_x * 0.2,
@@ -16584,22 +16566,26 @@ mod windows_overlay {
         // Sweat drop when typing too much
         if red_factor > 0.15 {
             let sweat_size = (red_factor - 0.15) / 0.85; // 0.0 to 1.0
-            let s_scale = (0.85 + 0.65 * sweat_size) * scale;
+            let s_scale = (0.78 + 0.5 * sweat_size) * scale;
 
-            let (sx, sy) = map_face_brow(278.0, 166.0);
+            let (sx, sy) = map_face_brow(284.0, 154.0);
             let mut drop = tiny_skia::PathBuilder::new();
-            drop.move_to(sx + 2.0 * s_scale, sy - 12.0 * s_scale);
-            drop.quad_to(
-                sx + 11.0 * s_scale,
-                sy - 1.0 * s_scale,
-                sx + 2.0 * s_scale,
-                sy + 9.0 * s_scale,
+            drop.move_to(sx, sy - 8.0 * s_scale);
+            drop.cubic_to(
+                sx + 7.0 * s_scale,
+                sy - 4.0 * s_scale,
+                sx + 6.0 * s_scale,
+                sy + 5.0 * s_scale,
+                sx,
+                sy + 9.5 * s_scale,
             );
-            drop.quad_to(
+            drop.cubic_to(
+                sx - 6.0 * s_scale,
+                sy + 5.0 * s_scale,
                 sx - 7.0 * s_scale,
-                sy - 1.0 * s_scale,
-                sx + 2.0 * s_scale,
-                sy - 12.0 * s_scale,
+                sy - 4.0 * s_scale,
+                sx,
+                sy - 8.0 * s_scale,
             );
             drop.close();
             if let Some(p) = drop.finish() {
@@ -16967,7 +16953,11 @@ mod windows_overlay {
         let desk_width = 322.0;
         let desk_height = 96.0;
 
-        let mouse_pad_left = 46.0;
+        let mouse_pad_left = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            58.0
+        } else {
+            46.0
+        };
 
         let keyboard_left = 90.0;
         let keyboard_top = 153.0;
@@ -16984,6 +16974,9 @@ mod windows_overlay {
         body_cx += idle_head_drift_x * 0.25;
         let mut body_cy = (123.0 + y_shift) * scale;
         body_cy += idle_body_bob + type_bounce * 0.35;
+        if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            body_cy -= 8.0 * scale;
+        }
         let body_radius = 36.0 * scale;
 
         let mut head_cx = 168.0 * scale;
@@ -16995,6 +16988,9 @@ mod windows_overlay {
         let mut head_cy = (77.0 + y_shift) * scale;
         head_cx += idle_head_drift_x;
         head_cy += idle_body_bob * 0.7 + type_bounce * 0.45;
+        if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            head_cy -= 8.0 * scale;
+        }
         let head_radius = 56.0
             * scale
             * if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
@@ -17430,8 +17426,8 @@ mod windows_overlay {
 
         // Mouse active state tracking
         let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
-        // Retain the hand on the mouse for an additional 300ms (380ms total) before retracting
-        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 380;
+        // Retain the hand on the mouse long enough to avoid one-frame key target flicker.
+        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 700;
         let mouse_active = is_mouse_moving || !held_mouse_buttons.is_empty();
 
         let mouse_flat_x = mouse_pad_left + 19.0 + mouse_offset.0 * 0.7;
@@ -17448,6 +17444,13 @@ mod windows_overlay {
             default_l_x = 161.0;
             default_r_x = 245.0;
         }
+        let default_y = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            default_l_x = 145.0;
+            default_r_x = 226.0;
+            164.0
+        } else {
+            default_y
+        };
 
         let l_target = if mouse_active {
             mouse_projected
