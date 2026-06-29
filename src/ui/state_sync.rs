@@ -68,12 +68,12 @@ impl CrosshairApp {
 
     pub(crate) fn sync_profiles(&mut self) {
         let profiles = self.state.profiles.clone();
-        if !Self::update_synced_state(profiles.clone(), &mut self.last_synced_profiles) {
-            return;
-        }
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateProfiles(profiles));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            profiles,
+            &mut self.last_synced_profiles,
+            OverlayCommand::UpdateProfiles,
+        );
     }
 
     pub(crate) fn sync_crosshair_profile(&self, index: usize, profile: &ProfileRecord) {
@@ -113,12 +113,12 @@ impl CrosshairApp {
 
     pub(crate) fn sync_macro_presets(&mut self) {
         let macro_groups = build_runtime_macro_groups(&self.state);
-        if !Self::update_synced_state(macro_groups.clone(), &mut self.last_synced_macro_groups) {
-            return;
-        }
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateMacroPresets(macro_groups));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            macro_groups,
+            &mut self.last_synced_macro_groups,
+            OverlayCommand::UpdateMacroPresets,
+        );
     }
 
     pub(crate) fn resolved_active_macro_folder_view(&self) -> Option<u32> {
@@ -335,33 +335,23 @@ impl CrosshairApp {
 
     pub(crate) fn sync_audio_settings(&mut self) {
         self.retain_referenced_audio_waveforms();
-        if self
-            .last_synced_audio_settings
-            .as_ref()
-            .is_some_and(|last| last == &self.state.audio_settings)
-        {
-            return;
-        }
         let settings = self.state.audio_settings.clone();
-        self.last_synced_audio_settings = Some(settings.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateAudioSettings(settings));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            settings,
+            &mut self.last_synced_audio_settings,
+            OverlayCommand::UpdateAudioSettings,
+        );
     }
 
     pub(crate) fn sync_groq_settings(&mut self) {
-        if self
-            .last_synced_groq_settings
-            .as_ref()
-            .is_some_and(|last| last == &self.state.groq_settings)
-        {
-            return;
-        }
         let settings = self.state.groq_settings.clone();
-        self.last_synced_groq_settings = Some(settings.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateGroqSettings(settings));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            settings,
+            &mut self.last_synced_groq_settings,
+            OverlayCommand::UpdateGroqSettings,
+        );
     }
 
     pub(crate) fn apply_loaded_startup_state(
@@ -398,18 +388,13 @@ impl CrosshairApp {
     }
 
     pub(crate) fn sync_vision_settings(&mut self) {
-        if self
-            .last_synced_vision_settings
-            .as_ref()
-            .is_some_and(|last| last == &self.state.vision_settings)
-        {
-            return;
-        }
         let settings = self.state.vision_settings.clone();
-        self.last_synced_vision_settings = Some(settings.clone());
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateVisionSettings(settings));
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            settings,
+            &mut self.last_synced_vision_settings,
+            OverlayCommand::UpdateVisionSettings,
+        );
     }
 
     pub(crate) fn sync_timer_presets(&mut self) {
@@ -506,11 +491,12 @@ impl CrosshairApp {
 
     pub(crate) fn sync_audio_sense_presets(&mut self) {
         let presets = self.state.audio_sense_presets.clone();
-        if Self::update_synced_state(presets.clone(), &mut self.last_synced_audio_sense_presets) {
-            let _ = self
-                .overlay_tx
-                .send(OverlayCommand::UpdateAudioSensePresets(presets));
-        }
+        Self::sync_overlay_state_if_changed(
+            &self.overlay_tx,
+            presets,
+            &mut self.last_synced_audio_sense_presets,
+            OverlayCommand::UpdateAudioSensePresets,
+        );
     }
 
     pub(crate) fn persist_audio_sense_presets(&mut self) {
