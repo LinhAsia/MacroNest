@@ -7501,6 +7501,10 @@ mod windows_overlay {
         } else {
             runtime.quick_key_display_mascot_styles.clone()
         };
+        styles.retain(|style| *style != crate::model::MascotStyle::Chiikawa);
+        if styles.is_empty() {
+            styles.push(crate::model::MascotStyle::Hachiware);
+        }
         styles.dedup();
         styles.truncate(1 + runtime.key_display_extra_hwnds.len());
         styles
@@ -7594,7 +7598,6 @@ mod windows_overlay {
         style: crate::model::MascotStyle,
         center_x: i32,
         center_y: i32,
-        raise: bool,
     ) {
         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
         let styles = quick_key_display_active_mascot_styles(runtime);
@@ -7606,14 +7609,31 @@ mod windows_overlay {
         let _ = unsafe {
             SetWindowPos(
                 hwnds[index],
-                if raise { Some(HWND_TOPMOST) } else { None },
+                None,
                 center_x - width / 2,
                 center_y - height / 2,
                 width,
                 height,
-                SWP_NOACTIVATE | SWP_NOSIZE | if raise { Default::default() } else { SWP_NOZORDER },
+                SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER,
             )
         };
+    }
+
+    fn arrange_quick_key_display_mascot_z_order(runtime: &Runtime, count: usize) {
+        let hwnds = quick_key_display_hwnds(runtime);
+        for hwnd in hwnds.into_iter().take(count) {
+            let _ = unsafe {
+                SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                )
+            };
+        }
     }
 
     fn clamp_mascot_center_to_screen(
@@ -7677,7 +7697,11 @@ mod windows_overlay {
                     &styles,
                 );
                 let mut hit = None;
-                for (index, (style, default_x, default_y, _, _)) in items.iter().copied().enumerate()
+                for (index, (style, default_x, default_y, _, _)) in items
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .rev()
                 {
                     let hwnd = hwnds[index];
                     if unsafe {
@@ -7706,7 +7730,8 @@ mod windows_overlay {
                 *MASCOT_DRAG_START_MOUSE.lock() = Some((cursor.x, cursor.y));
                 *MASCOT_DRAG_START_CENTER.lock() = Some((center_x, center_y));
                 *MASCOT_DRAG_STYLE.lock() = Some(style);
-                move_quick_key_display_window_for_style(runtime, style, center_x, center_y, true);
+                move_quick_key_display_window_for_style(runtime, style, center_x, center_y);
+                arrange_quick_key_display_mascot_z_order(runtime, items.len());
                 MASCOT_WINDOW_MOVING.store(true, Ordering::Relaxed);
                 true
             }
@@ -7731,7 +7756,7 @@ mod windows_overlay {
                 runtime
                     .quick_key_display_mascot_positions
                     .insert(style, (center_x, center_y));
-                move_quick_key_display_window_for_style(runtime, style, center_x, center_y, false);
+                move_quick_key_display_window_for_style(runtime, style, center_x, center_y);
                 true
             }
             WM_LBUTTONUP => {
@@ -9139,6 +9164,7 @@ mod windows_overlay {
                             runtime.quick_key_display_spam_heat,
                         )?;
                     }
+                    arrange_quick_key_display_mascot_z_order(runtime, items.len());
                     for hwnd in hwnds.iter().skip(items.len()) {
                         let _ = ShowWindow(*hwnd, SW_HIDE);
                     }
@@ -17510,7 +17536,7 @@ mod windows_overlay {
         let desk_height = 96.0;
 
         let mouse_pad_left = match mascot_style {
-            crate::model::MascotStyle::ChiikawaClassic => 58.0,
+            crate::model::MascotStyle::ChiikawaClassic => 52.0,
             crate::model::MascotStyle::Chiikawa => 52.0,
             _ => 46.0,
         };
@@ -18001,7 +18027,9 @@ mod windows_overlay {
                 shadow_pb.line_to(pt.0, pt.1);
             }
             shadow_pb.close();
-            if let Some(s_path) = shadow_pb.finish() {
+            if let Some(s_path) = shadow_pb.finish()
+                && mascot_style != crate::model::MascotStyle::ChiikawaClassic
+            {
                 fill_skia_path(&mut pixmap, &s_path, [0, 0, 0, 32]);
             }
 
@@ -18014,7 +18042,7 @@ mod windows_overlay {
 
         // Mouse active state tracking
         let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
-        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 180;
+        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 420;
         let mouse_active = is_mouse_moving || !held_mouse_buttons.is_empty();
 
         let mouse_flat_x = mouse_pad_left + 19.0 + mouse_offset.0 * 0.7;
