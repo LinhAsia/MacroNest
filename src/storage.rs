@@ -352,24 +352,7 @@ impl AppPaths {
         }
         state.active_panel = crate::model::AppPanel::Macros;
 
-        let legacy_vision_dir = self.root.join("image-search");
-        if legacy_vision_dir.exists() {
-            let _ = fs::create_dir_all(&self.vision_dir);
-            if let Ok(entries) = fs::read_dir(&legacy_vision_dir) {
-                for entry in entries.flatten() {
-                    let old_path = entry.path();
-                    if old_path.is_file() {
-                        if let Some(file_name) = old_path.file_name() {
-                            let new_path = self.vision_dir.join(file_name);
-                            if !new_path.exists() {
-                                let _ = fs::rename(&old_path, &new_path);
-                            }
-                        }
-                    }
-                }
-            }
-            let _ = fs::remove_dir_all(&legacy_vision_dir);
-        }
+        self.migrate_legacy_vision_assets();
 
         let legacy_vision_template = self.vision_template_file.exists();
         if legacy_vision_template {
@@ -734,9 +717,7 @@ impl AppPaths {
             }
         }
         for profile in profiles {
-            let file = self
-                .profiles_dir
-                .join(format!("{}.json", sanitize_name(&profile.name)));
+            let file = self.profile_record_path(&profile.name);
             let content = serde_json::to_string_pretty(profile)?;
             fs::write(file, content)?;
         }
@@ -745,6 +726,34 @@ impl AppPaths {
 
     pub fn asset_path(&self, asset_name: &str) -> PathBuf {
         self.asset_dir.join(asset_name)
+    }
+
+    fn profile_record_path(&self, profile_name: &str) -> PathBuf {
+        self.profiles_dir
+            .join(format!("{}.json", sanitize_name(profile_name)))
+    }
+
+    fn migrate_legacy_vision_assets(&self) {
+        let legacy_vision_dir = self.root.join("image-search");
+        if !legacy_vision_dir.exists() {
+            return;
+        }
+
+        let _ = fs::create_dir_all(&self.vision_dir);
+        if let Ok(entries) = fs::read_dir(&legacy_vision_dir) {
+            for entry in entries.flatten() {
+                let old_path = entry.path();
+                if old_path.is_file()
+                    && let Some(file_name) = old_path.file_name()
+                {
+                    let new_path = self.vision_dir.join(file_name);
+                    if !new_path.exists() {
+                        let _ = fs::rename(&old_path, &new_path);
+                    }
+                }
+            }
+        }
+        let _ = fs::remove_dir_all(&legacy_vision_dir);
     }
 }
 
