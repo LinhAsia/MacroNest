@@ -1779,6 +1779,7 @@ mod windows_overlay {
         Smoothing,
         SmoothingAmount,
         CaptureRegion,
+        ColorPaletteItem(usize),
     }
 
     #[derive(Clone)]
@@ -1890,6 +1891,7 @@ mod windows_overlay {
         surface_height: usize,
         freeze_screen: bool,
         freeze_frame: Option<Vec<u8>>,
+        color_palette_open: bool,
     }
 
     impl Default for ScreenDrawState {
@@ -1941,6 +1943,7 @@ mod windows_overlay {
                 surface_height: 0,
                 freeze_screen: false,
                 freeze_frame: None,
+                color_palette_open: false,
             }
         }
     }
@@ -1971,7 +1974,6 @@ mod windows_overlay {
             smoothing_amount: f32,
             freeze: bool,
         },
-        OpenScreenDrawColorPicker,
         VisionFinished(String),
         MacroStepInlineFeedback {
             preset_id: u32,
@@ -8990,20 +8992,28 @@ mod windows_overlay {
     }
 
     fn screen_draw_toolbar_rect(state: &ScreenDrawState) -> ScreenDrawDirtyRect {
+        let mut base_rect = ScreenDrawDirtyRect {
+            left: state.toolbar_x.max(0) as usize,
+            top: state.toolbar_y.max(0) as usize,
+            right: (state.toolbar_x + SCREEN_DRAW_TOOLBAR_WIDTH).max(0) as usize,
+            bottom: (state.toolbar_y + SCREEN_DRAW_TOOLBAR_HEIGHT).max(0) as usize,
+        };
+        if state.color_palette_open {
+            base_rect.bottom = (state.toolbar_y + SCREEN_DRAW_TOOLBAR_HEIGHT + 40).max(0) as usize;
+        }
+
         if state.active_control == ScreenDrawControl::BrushSize {
-            ScreenDrawDirtyRect {
-                left: (state.toolbar_x - 40).max(0) as usize,
-                top: (state.toolbar_y - 80).max(0) as usize,
-                right: (state.toolbar_x + SCREEN_DRAW_TOOLBAR_WIDTH + 40).max(0) as usize,
-                bottom: (state.toolbar_y + SCREEN_DRAW_TOOLBAR_HEIGHT).max(0) as usize,
-            }
+            let center_x = state.canvas_width / 2;
+            let center_y = state.canvas_height / 2;
+            let preview_rect = ScreenDrawDirtyRect {
+                left: center_x.saturating_sub(60),
+                top: center_y.saturating_sub(60),
+                right: (center_x + 60).min(state.canvas_width),
+                bottom: (center_y + 60).min(state.canvas_height),
+            };
+            base_rect.union(preview_rect)
         } else {
-            ScreenDrawDirtyRect {
-                left: state.toolbar_x.max(0) as usize,
-                top: state.toolbar_y.max(0) as usize,
-                right: (state.toolbar_x + SCREEN_DRAW_TOOLBAR_WIDTH).max(0) as usize,
-                bottom: (state.toolbar_y + SCREEN_DRAW_TOOLBAR_HEIGHT).max(0) as usize,
-            }
+            base_rect
         }
     }
 
@@ -9179,9 +9189,42 @@ mod windows_overlay {
                 deactivate_screen_draw(&mut state);
             }
             ScreenDrawHit::Color => {
-                // Ask the egui UI to open its built-in color picker popup
-                if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
-                    let _ = ui_tx.send(UiCommand::OpenScreenDrawColorPicker);
+                // Toggle the inline color palette on the overlay
+                state.color_palette_open = !state.color_palette_open;
+                let full_rect = ScreenDrawDirtyRect {
+                    left: 0,
+                    top: 0,
+                    right: state.canvas_width,
+                    bottom: state.canvas_height,
+                };
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.committed_dirty = true;
+                state.pending_repaint = true;
+            }
+            ScreenDrawHit::ColorPaletteItem(i) => {
+                let colors = [
+                    RgbaColor { r: 0, g: 255, b: 170, a: 255 },   // Cyan/Mint
+                    RgbaColor { r: 255, g: 96, b: 96, a: 255 },   // Red
+                    RgbaColor { r: 255, g: 224, b: 96, a: 255 },  // Yellow
+                    RgbaColor { r: 96, g: 176, b: 255, a: 255 },  // Blue
+                    RgbaColor { r: 255, g: 128, b: 224, a: 255 }, // Pink
+                    RgbaColor { r: 255, g: 255, b: 255, a: 255 }, // White
+                    RgbaColor { r: 40, g: 40, b: 40, a: 255 },    // Dark Grey / Black
+                    RgbaColor { r: 255, g: 140, b: 0, a: 255 },   // Orange
+                ];
+                if i < colors.len() {
+                    state.color = colors[i];
+                    state.color_palette_open = false;
+                    let full_rect = ScreenDrawDirtyRect {
+                        left: 0,
+                        top: 0,
+                        right: state.canvas_width,
+                        bottom: state.canvas_height,
+                    };
+                    mark_screen_draw_dirty(&mut state, full_rect);
+                    state.committed_dirty = true;
+                    state.pending_repaint = true;
+                    should_sync_config = true;
                 }
             }
             ScreenDrawHit::BrushSize => {
@@ -9888,6 +9931,24 @@ mod windows_overlay {
     fn screen_draw_hit(state: &ScreenDrawState, point: POINT) -> ScreenDrawHit {
         let x = point.x - state.toolbar_x;
         let y = point.y - state.toolbar_y;
+
+        // Check palette hits first if open
+        if state.color_palette_open {
+            let palette_y_min = SCREEN_DRAW_TOOLBAR_HEIGHT + 4; // 60
+            let palette_y_max = SCREEN_DRAW_TOOLBAR_HEIGHT + 36; // 92
+            if x >= 19 && x <= 211 && y >= palette_y_min && y <= palette_y_max {
+                for i in 0..8 {
+                    let cx = 31 + i * 24;
+                    let dx = x - cx;
+                    let dy = y - 76;
+                    if dx * dx + dy * dy <= 12 * 12 {
+                        return ScreenDrawHit::ColorPaletteItem(i as usize);
+                    }
+                }
+                return ScreenDrawHit::ToolbarBody;
+            }
+        }
+
         if x < 0 || y < 0 || x > SCREEN_DRAW_TOOLBAR_WIDTH || y > SCREEN_DRAW_TOOLBAR_HEIGHT {
             return ScreenDrawHit::Canvas;
         }
@@ -10271,6 +10332,7 @@ mod windows_overlay {
         let toolbar_eraser = state_guard.eraser;
         let toolbar_smoothing = state_guard.smoothing;
         let toolbar_smoothing_amount = state_guard.smoothing_amount;
+        let toolbar_color_palette_open = state_guard.color_palette_open;
         let capturing_region = state_guard.capturing_region;
         if !capturing_region {
             draw_screen_draw_toolbar_rgba(
@@ -10284,6 +10346,7 @@ mod windows_overlay {
                 toolbar_eraser,
                 toolbar_smoothing,
                 toolbar_smoothing_amount,
+                toolbar_color_palette_open,
             );
         }
         if state_guard.active_control == ScreenDrawControl::BrushSize && !capturing_region {
@@ -10293,9 +10356,9 @@ mod windows_overlay {
                 height as u32,
             ) {
                 let radius = toolbar_brush_size / 2.0;
-                // Center preview at toolbar center (toolbar width = 230, center = 115)
-                let preview_x = toolbar_x as f32 + (SCREEN_DRAW_TOOLBAR_WIDTH as f32 / 2.0);
-                let preview_y = toolbar_y as f32 - (radius + 10.0).max(25.0);
+                // Center preview at the center of the screen
+                let preview_x = width as f32 / 2.0;
+                let preview_y = height as f32 / 2.0;
 
                 // Draw white outline circle
                 let mut pb_out = tiny_skia::PathBuilder::new();
@@ -10519,20 +10582,26 @@ mod windows_overlay {
         _eraser: bool,
         _smoothing: bool,
         _smoothing_amount: f32,
+        color_palette_open: bool,
     ) {
         let toolbar_w = SCREEN_DRAW_TOOLBAR_WIDTH as usize;
-        let toolbar_h = SCREEN_DRAW_TOOLBAR_HEIGHT as usize;
+        let mut toolbar_h = SCREEN_DRAW_TOOLBAR_HEIGHT as usize;
+        if color_palette_open {
+            toolbar_h += 40;
+        }
         let mut pixmap = match tiny_skia::Pixmap::new(toolbar_w as u32, toolbar_h as u32) {
             Some(pixmap) => pixmap,
             None => return,
         };
+
+        let base_toolbar_h = SCREEN_DRAW_TOOLBAR_HEIGHT as f32;
 
         fill_skia_rounded_rect(
             &mut pixmap,
             2.0,
             3.0,
             (toolbar_w as f32 - 4.0).max(1.0),
-            (toolbar_h as f32 - 4.0).max(1.0),
+            (base_toolbar_h - 4.0).max(1.0),
             12.0,
             [0, 0, 0, 72],
         );
@@ -10541,7 +10610,7 @@ mod windows_overlay {
             0.0,
             0.0,
             toolbar_w as f32,
-            toolbar_h as f32,
+            base_toolbar_h,
             12.0,
             [28, 36, 48, 232],
         );
@@ -10559,7 +10628,7 @@ mod windows_overlay {
             0.5,
             0.5,
             (toolbar_w as f32 - 1.0).max(1.0),
-            (toolbar_h as f32 - 1.0).max(1.0),
+            (base_toolbar_h - 1.0).max(1.0),
             12.0,
             1.0,
             [220, 232, 248, 32],
@@ -10741,6 +10810,61 @@ mod windows_overlay {
             [255, 255, 255, 255],
             2.0,
         );
+        if color_palette_open {
+            let palette_x = 19.0;
+            let palette_y = base_toolbar_h + 4.0;
+            let palette_w = 192.0;
+            let palette_h = 32.0;
+
+            // Background
+            fill_skia_rounded_rect(
+                &mut pixmap,
+                palette_x,
+                palette_y,
+                palette_w,
+                palette_h,
+                8.0,
+                [28, 36, 48, 232],
+            );
+            stroke_skia_rounded_rect(
+                &mut pixmap,
+                palette_x + 0.5,
+                palette_y + 0.5,
+                palette_w - 1.0,
+                palette_h - 1.0,
+                8.0,
+                1.0,
+                [220, 232, 248, 32],
+            );
+
+            // 8 basic colors
+            let colors_raw: [[u8; 4]; 8] = [
+                [0, 255, 170, 255],   // Cyan/Mint
+                [255, 96, 96, 255],   // Red
+                [255, 224, 96, 255],  // Yellow
+                [96, 176, 255, 255],  // Blue
+                [255, 128, 224, 255], // Pink
+                [255, 255, 255, 255], // White
+                [40, 40, 40, 255],    // Dark Gray/Black
+                [255, 140, 0, 255],   // Orange
+            ];
+
+            for i in 0..8 {
+                let cx = 31.0 + i as f32 * 24.0;
+                let cy = palette_y + 16.0;
+
+                let col = colors_raw[i];
+                // Filled circle
+                draw_skia_circle_fill(&mut pixmap, cx, cy, 9.0, col);
+                // Subtle outline
+                draw_skia_circle_outline(&mut pixmap, cx, cy, 9.0, [255, 255, 255, 48], 1.0);
+
+                // If this is the active color, draw a selection ring around it
+                if col[0] == color.r && col[1] == color.g && col[2] == color.b {
+                    draw_skia_circle_outline(&mut pixmap, cx, cy, 11.0, [255, 255, 255, 180], 1.5);
+                }
+            }
+        }
 
         let data = pixmap.data();
         let base_x = toolbar_x.max(0) as usize;
@@ -11491,11 +11615,11 @@ mod windows_overlay {
         let _ = SetWindowPos(
             runtime.protractor_hwnd,
             Some(HWND_TOPMOST),
-            win_x,
-            win_y,
-            width as i32,
-            height as i32,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
 
         let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
