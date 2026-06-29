@@ -159,25 +159,7 @@ impl AppPaths {
     }
 
     fn latest_state_recovery_file(&self) -> Option<PathBuf> {
-        let mut candidates = Vec::new();
-        let entries = fs::read_dir(&self.root).ok()?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-            let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            if !is_state_recovery_file_name(file_name) {
-                continue;
-            }
-            let modified = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .unwrap_or(UNIX_EPOCH);
-            candidates.push((modified, path));
-        }
+        let mut candidates = self.state_recovery_files();
         candidates.sort_by(|a, b| b.0.cmp(&a.0));
         candidates.into_iter().map(|(_, path)| path).next()
     }
@@ -649,17 +631,8 @@ impl AppPaths {
         let backup_file = self.state_backup_file();
         write_text_file(&temp_file, &content)?;
         if self.state_file.exists() {
-            if let Ok(entries) = fs::read_dir(&self.root) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file() {
-                        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                            if is_state_recovery_file_name(file_name) {
-                                let _ = fs::remove_file(path);
-                            }
-                        }
-                    }
-                }
+            for (_, path) in self.state_recovery_files() {
+                let _ = fs::remove_file(path);
             }
             let _ = fs::copy(&self.state_file, self.state_recovery_file());
             if backup_file.exists() {
@@ -731,6 +704,31 @@ impl AppPaths {
     fn profile_record_path(&self, profile_name: &str) -> PathBuf {
         self.profiles_dir
             .join(format!("{}.json", sanitize_name(profile_name)))
+    }
+
+    fn state_recovery_files(&self) -> Vec<(SystemTime, PathBuf)> {
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return Vec::new();
+        };
+
+        entries
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                if !path.is_file() {
+                    return None;
+                }
+                let file_name = path.file_name().and_then(|n| n.to_str())?;
+                if !is_state_recovery_file_name(file_name) {
+                    return None;
+                }
+                let modified = entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(UNIX_EPOCH);
+                Some((modified, path))
+            })
+            .collect()
     }
 
     fn migrate_legacy_vision_assets(&self) {
