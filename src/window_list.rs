@@ -383,13 +383,10 @@ mod windows_impl {
     ) -> BOOL {
         let (target_selector, found) = &mut *(lparam.0 as *mut (&str, &mut Option<HWND>));
         let clean_selector = strip_rule_suffix(*target_selector);
-        if !IsWindowVisible(hwnd).as_bool() {
-            return true.into();
-        }
-        let Some(title) = window_title(hwnd) else {
+        let Some((title, selector)) = visible_window_title_and_selector(hwnd) else {
             return true.into();
         };
-        if window_selector(hwnd, &title) == clean_selector {
+        if selector == clean_selector {
             **found = Some(hwnd);
             return false.into();
         }
@@ -400,13 +397,9 @@ mod windows_impl {
         let (target_title, match_duplicate_window_titles, found) =
             &mut *(lparam.0 as *mut (&str, bool, &mut Option<HWND>));
         let clean_title = strip_rule_suffix(*target_title);
-        if !IsWindowVisible(hwnd).as_bool() {
-            return true.into();
-        }
-        let Some(title) = window_title(hwnd) else {
+        let Some((title, selector)) = visible_window_title_and_selector(hwnd) else {
             return true.into();
         };
-        let selector = window_selector(hwnd, &title);
         if window_matches_candidate_title(
             &title,
             &selector,
@@ -426,13 +419,9 @@ mod windows_impl {
         let (target_title, match_duplicate_window_titles, candidates) =
             &mut *(lparam.0 as *mut (&str, bool, &mut Vec<HWND>));
         let clean_title = strip_rule_suffix(*target_title);
-        if !IsWindowVisible(hwnd).as_bool() {
-            return true.into();
-        }
-        let Some(title) = window_title(hwnd) else {
+        let Some((title, selector)) = visible_window_title_and_selector(hwnd) else {
             return true.into();
         };
-        let selector = window_selector(hwnd, &title);
         if window_matches_candidate_title(
             &title,
             &selector,
@@ -446,6 +435,15 @@ mod windows_impl {
 
     pub fn window_selector(hwnd: HWND, title: &str) -> String {
         format!("{title} (0x{:X})", hwnd.0 as usize)
+    }
+
+    fn visible_window_title_and_selector(hwnd: HWND) -> Option<(String, String)> {
+        if !unsafe { IsWindowVisible(hwnd).as_bool() } {
+            return None;
+        }
+        let title = unsafe { window_title(hwnd) }?;
+        let selector = window_selector(hwnd, &title);
+        Some((title, selector))
     }
 
     fn looks_like_window_selector(target: &str) -> bool {
