@@ -103,12 +103,13 @@ mod windows_impl {
         match_duplicate_window_titles: bool,
         max_dimension: u32,
     ) -> Option<WindowPreviewFrame> {
-        let hwnd = find_window_handle_with_candidates(
+        capture_window_preview_with_candidates_impl(
             primary_title,
             extra_titles,
             match_duplicate_window_titles,
-        )?;
-        unsafe { capture_window_preview_from_hwnd(hwnd, max_dimension.max(64), false) }
+            max_dimension,
+            false,
+        )
     }
 
     pub fn capture_window_client_preview_with_candidates(
@@ -117,12 +118,13 @@ mod windows_impl {
         match_duplicate_window_titles: bool,
         max_dimension: u32,
     ) -> Option<WindowPreviewFrame> {
-        let hwnd = find_window_handle_with_candidates(
+        capture_window_preview_with_candidates_impl(
             primary_title,
             extra_titles,
             match_duplicate_window_titles,
-        )?;
-        unsafe { capture_window_preview_from_hwnd(hwnd, max_dimension.max(64), true) }
+            max_dimension,
+            true,
+        )
     }
 
     pub fn capture_window_region_with_candidates(
@@ -235,6 +237,21 @@ mod windows_impl {
     ) -> Option<HWND> {
         find_window_by_candidate_exact(title_or_selector)
             .or_else(|| find_window_by_candidate(title_or_selector, match_duplicate_window_titles))
+    }
+
+    fn capture_window_preview_with_candidates_impl(
+        primary_title: Option<&str>,
+        extra_titles: &[String],
+        match_duplicate_window_titles: bool,
+        max_dimension: u32,
+        client_only: bool,
+    ) -> Option<WindowPreviewFrame> {
+        let hwnd = find_window_handle_with_candidates(
+            primary_title,
+            extra_titles,
+            match_duplicate_window_titles,
+        )?;
+        unsafe { capture_window_preview_from_hwnd(hwnd, max_dimension.max(64), client_only) }
     }
 
     fn find_window_handle_with_candidates(
