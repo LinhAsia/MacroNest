@@ -619,13 +619,7 @@ impl AppPaths {
     }
 
     pub fn save_state(&self, state: &AppState) -> Result<()> {
-        let mut state = state.clone();
-        state.macro_presets.clear();
-        state.profiles.clear();
-        state.window_focus_presets.clear();
-        for preset in &mut state.master_presets {
-            preset.window_focus_presets.clear();
-        }
+        let state = state_snapshot_for_save(state);
         let temp_file = self.write_state_temp_file(&state)?;
         let backup_file = self.state_backup_file();
         if self.state_file.exists() {
@@ -763,6 +757,16 @@ impl AppPaths {
     }
 }
 
+fn state_snapshot_for_save(state: &AppState) -> AppState {
+    let mut state = state.clone();
+    state.macro_presets.clear();
+    state.window_focus_presets.clear();
+    for preset in &mut state.master_presets {
+        preset.window_focus_presets.clear();
+    }
+    state
+}
+
 fn write_text_file(path: &Path, content: &str) -> Result<()> {
     let mut file = fs::File::create(path)
         .with_context(|| format!("Failed to create {}", path.display()))?;
@@ -868,4 +872,23 @@ fn find_local_opencv_videoio_ffmpeg_plugin() -> Option<PathBuf> {
 fn push_opencv_videoio_ffmpeg_candidates(candidates: &mut Vec<PathBuf>, base: PathBuf) {
     candidates.push(base.join("opencv_videoio_ffmpeg4100_64.dll"));
     candidates.push(base.join("opencv_videoio_ffmpeg4130_64.dll"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::state_snapshot_for_save;
+    use crate::model::{AppState, ProfileRecord, WindowFocusPreset};
+
+    #[test]
+    fn save_snapshot_keeps_crosshair_profiles() {
+        let mut state = AppState::default();
+        state.profiles.push(ProfileRecord::default());
+        state.window_focus_presets.push(WindowFocusPreset::default());
+
+        let snapshot = state_snapshot_for_save(&state);
+
+        assert_eq!(snapshot.profiles.len(), 1);
+        assert!(snapshot.window_focus_presets.is_empty());
+        assert!(snapshot.macro_presets.is_empty());
+    }
 }
