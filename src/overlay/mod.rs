@@ -16790,7 +16790,11 @@ mod windows_overlay {
 
         let y_shift = 30.0;
         // 3D Perspective mapping helper (takes FLAT coordinates, returns SCALED & PROJECTED coordinates)
-        let prop_scale = 1.0;
+        let prop_scale = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
+            0.82
+        } else {
+            1.0
+        };
         let project_point = |x: f32, y: f32| -> (f32, f32) {
             let x = 199.0 + (x - 199.0) * prop_scale;
             let y = 190.0 + (y - 190.0) * prop_scale;
