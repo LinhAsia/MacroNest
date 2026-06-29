@@ -127,6 +127,20 @@ impl CrosshairApp {
         let _ = overlay_tx.send(command);
     }
 
+    pub(crate) fn sync_overlay_command_with_state_if_changed<T>(
+        overlay_tx: &crossbeam_channel::Sender<OverlayCommand>,
+        state: T,
+        last_synced: &mut Option<T>,
+        command: impl FnOnce(&T) -> OverlayCommand,
+    ) where
+        T: Clone + PartialEq,
+    {
+        if !Self::update_synced_state(state.clone(), last_synced) {
+            return;
+        }
+        let _ = overlay_tx.send(command(&state));
+    }
+
     pub(crate) fn sync_macro_presets(&mut self) {
         let macro_groups = build_runtime_macro_groups(&self.state);
         Self::sync_overlay_state_if_changed(
@@ -162,15 +176,12 @@ impl CrosshairApp {
             .resolved_active_macro_folder_view()
             .map(MacroFolderScope::Folder)
             .unwrap_or(MacroFolderScope::Root);
-        if !Self::update_synced_state(
+        Self::sync_overlay_command_if_changed(
+            &self.overlay_tx,
             active_folder_scope,
             &mut self.last_synced_active_macro_folder_scope,
-        ) {
-            return;
-        }
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::SetActiveMacroFolderScope(active_folder_scope));
+            OverlayCommand::SetActiveMacroFolderScope(active_folder_scope),
+        );
     }
 
     pub(crate) fn sync_macro_master_enabled(&mut self) {
@@ -208,15 +219,15 @@ impl CrosshairApp {
             self.state.focus_highlight_color,
             self.state.focus_highlight_decoration,
         );
-        if !Self::update_synced_state(config, &mut self.last_synced_focus_highlight_config) {
-            return;
-        }
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::SetFocusHighlightConfig {
+        Self::sync_overlay_command_with_state_if_changed(
+            &self.overlay_tx,
+            config,
+            &mut self.last_synced_focus_highlight_config,
+            |config| OverlayCommand::SetFocusHighlightConfig {
                 color: config.0,
                 decoration: config.1,
-            });
+            },
+        );
     }
 
     pub(crate) fn sync_protractor_state(&mut self) {
@@ -263,19 +274,19 @@ impl CrosshairApp {
             self.state.quick_key_display_mode,
             self.state.quick_key_display_mascot_style,
         );
-        if !Self::update_synced_state(config, &mut self.last_synced_quick_key_display_config) {
-            return;
-        }
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateQuickKeyDisplayConfig {
+        Self::sync_overlay_command_with_state_if_changed(
+            &self.overlay_tx,
+            config,
+            &mut self.last_synced_quick_key_display_config,
+            |config| OverlayCommand::UpdateQuickKeyDisplayConfig {
                 enabled: config.0,
                 center_x: config.1,
                 center_y: config.2,
                 size: config.3,
                 mode: config.4,
                 mascot_style: config.5,
-            });
+            },
+        );
     }
 
     pub(crate) fn sync_quick_screen_draw_config(&mut self) {
@@ -288,23 +299,20 @@ impl CrosshairApp {
             self.state.quick_screen_draw_smoothing,
             self.state.quick_screen_draw_smoothing_amount,
         );
-        if !Self::update_synced_state(
-            config.clone(),
+        Self::sync_overlay_command_with_state_if_changed(
+            &self.overlay_tx,
+            config,
             &mut self.last_synced_quick_screen_draw_config,
-        ) {
-            return;
-        }
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateScreenDrawConfig {
+            |config| OverlayCommand::UpdateScreenDrawConfig {
                 enabled: config.0,
-                trigger: config.1,
+                trigger: config.1.clone(),
                 pass_trigger_through: config.2,
                 color: config.3,
                 brush_size: config.4,
                 smoothing: config.5,
                 smoothing_amount: config.6,
-            });
+            },
+        );
     }
 
     pub(crate) fn sync_quick_key_sound_config(&mut self) {
@@ -337,12 +345,12 @@ impl CrosshairApp {
 
     pub(crate) fn sync_macro_master_hotkey(&mut self) {
         let binding = self.state.macros_master_hotkey.clone();
-        if !Self::update_synced_state(binding.clone(), &mut self.last_synced_macro_master_hotkey) {
-            return;
-        }
-        let _ = self
-            .overlay_tx
-            .send(OverlayCommand::UpdateMacrosMasterHotkey(binding));
+        Self::sync_overlay_command_with_state_if_changed(
+            &self.overlay_tx,
+            binding,
+            &mut self.last_synced_macro_master_hotkey,
+            |binding| OverlayCommand::UpdateMacrosMasterHotkey(binding.clone()),
+        );
     }
 
     pub(crate) fn sync_audio_settings(&mut self) {
