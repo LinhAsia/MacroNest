@@ -7397,7 +7397,6 @@ impl CrosshairApp {
                                                                             });
                                                                         let var_target_id = ui.id().with("hold-stop-ocr-target-text-if");
                                                                         live_sync |= Self::sanitize_legacy_ocr_target_text(&mut step.ocr_target_text);
-                                                                        live_sync |= Self::sanitize_legacy_ocr_target_text(&mut step.ocr_target_text);
                                                                         let response_target = Self::render_variable_text_edit(
                                                                             ui,
                                                                             &mut step.ocr_target_text,
@@ -9534,14 +9533,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                            });
                                                                    } else if step.if_condition_type == IfConditionType::OcrMatch {
                                                                         let selected_id = step.if_ocr_preset_id;
-                                                                        let selected_label = selected_id
-                                                                            .and_then(|id| {
-                                                                                ocr_preset_options
-                                                                                    .iter()
-                                                                                    .find(|(preset_id, _)| *preset_id == id)
-                                                                                    .map(|(_, label)| label.clone())
-                                                                            })
-                                                                            .unwrap_or_else(|| Self::tr_lang(language, "Select OCR", "Select OCR").to_owned());
+                                                                        let selected_label = Self::option_label_by_id(
+                                                                            &ocr_preset_options,
+                                                                            selected_id,
+                                                                            "Select OCR",
+                                                                            language,
+                                                                        );
                                                                         egui::ComboBox::from_id_salt((group.id, preset.id, 0, "press-stop-if-ocr-preset"))
                                                                             .width(146.0)
                                                                             .selected_text(selected_label)
@@ -9557,7 +9554,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                                 }
                                                                             });
                                                                         let var_target_id = ui.id().with("press-stop-ocr-target-text-if");
-                                                                        live_sync |= Self::sanitize_legacy_ocr_target_text(&mut step.ocr_target_text);
                                                                         live_sync |= Self::sanitize_legacy_ocr_target_text(&mut step.ocr_target_text);
                                                                         let response_target = Self::render_variable_text_edit(
                                                                             ui,
@@ -12761,14 +12757,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                             });
                                                                     } else if step.if_condition_type == IfConditionType::OcrMatch {
                                                                         let selected_id = step.if_ocr_preset_id;
-                                                                        let selected_label = selected_id
-                                                                            .and_then(|id| {
-                                                                                ocr_preset_options
-                                                                                    .iter()
-                                                                                    .find(|(preset_id, _)| *preset_id == id)
-                                                                                    .map(|(_, label)| label.clone())
-                                                                            })
-                                                                            .unwrap_or_else(|| Self::tr_lang(language, "Select OCR", "Select OCR").to_owned());
+                                                                        let selected_label = Self::option_label_by_id(
+                                                                            &ocr_preset_options,
+                                                                            selected_id,
+                                                                            "Select OCR",
+                                                                            language,
+                                                                        );
                                                                         egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "ocr-preset-cb-if"))
                                                                             .width(146.0)
                                                                             .selected_text(selected_label)
