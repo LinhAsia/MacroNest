@@ -7154,7 +7154,7 @@ mod windows_overlay {
         match mascot_style {
             crate::model::MascotStyle::ChiikawaClassic => base * 1.04,
             crate::model::MascotStyle::Hachiware => base * 0.80,
-            crate::model::MascotStyle::Gugugaga => base * 0.90,
+            crate::model::MascotStyle::Chiikawa => base * 0.92,
         }
     }
 
@@ -7165,7 +7165,7 @@ mod windows_overlay {
         let scale = quick_key_display_mascot_scale(font_size, mascot_style);
         let (base_w, base_h) = if mascot_style == crate::model::MascotStyle::Hachiware
             || mascot_style == crate::model::MascotStyle::ChiikawaClassic
-            || mascot_style == crate::model::MascotStyle::Gugugaga
+            || mascot_style == crate::model::MascotStyle::Chiikawa
         {
             (448.0, 310.0)
         } else {
@@ -15166,8 +15166,8 @@ mod windows_overlay {
         red_factor: f32,
     ) {
         if mascot_style == crate::model::MascotStyle::Hachiware
-            || mascot_style == crate::model::MascotStyle::Gugugaga
             || mascot_style == crate::model::MascotStyle::ChiikawaClassic
+            || mascot_style == crate::model::MascotStyle::Chiikawa
         {
             return;
         }
@@ -15806,7 +15806,6 @@ mod windows_overlay {
         is_redraw: bool,
     ) {
         if mascot_style == crate::model::MascotStyle::Hachiware
-            || mascot_style == crate::model::MascotStyle::Gugugaga
         {
             let time_s = unsafe { GetTickCount() } as f32 * 0.001;
             let face_pulse_x = recent_pulse * (time_s * 24.0).sin() * 1.6 * scale;
@@ -16043,6 +16042,249 @@ mod windows_overlay {
                 );
             }
 
+            return;
+        }
+
+        if mascot_style == crate::model::MascotStyle::Chiikawa {
+            let time_s = unsafe { GetTickCount() } as f32 * 0.001;
+            let mut tmp_pixmap = tiny_skia::Pixmap::new(pixmap.width(), pixmap.height()).unwrap();
+            let face_fill = [255, 255, 252, 255];
+            let stroke_color = [40, 35, 33, 255];
+            let blush_fill =
+                quick_key_display_mix_rgba([255, 197, 205, 150], [255, 125, 148, 230], red_factor);
+            let line_color =
+                quick_key_display_mix_rgba(stroke_color, [255, 93, 122, 255], red_factor * 0.78);
+            let bx = look_x * 0.1;
+            let by = look_y * 0.1;
+
+            if !is_redraw {
+                let body_cx = head_cx + bx * 0.25;
+                let body_cy = head_cy + 53.0 * scale + by * 0.15;
+                let mut body = tiny_skia::PathBuilder::new();
+                body.move_to(body_cx - 61.0 * scale, body_cy + 36.0 * scale);
+                body.cubic_to(
+                    body_cx - 70.0 * scale,
+                    body_cy - 2.0 * scale,
+                    body_cx - 44.0 * scale,
+                    body_cy - 34.0 * scale,
+                    body_cx - 6.0 * scale,
+                    body_cy - 37.0 * scale,
+                );
+                body.cubic_to(
+                    body_cx + 39.0 * scale,
+                    body_cy - 40.0 * scale,
+                    body_cx + 66.0 * scale,
+                    body_cy - 4.0 * scale,
+                    body_cx + 58.0 * scale,
+                    body_cy + 42.0 * scale,
+                );
+                body.line_to(body_cx - 61.0 * scale, body_cy + 42.0 * scale);
+                body.close();
+                if let Some(path) = body.finish() {
+                    fill_skia_path(&mut tmp_pixmap, &path, face_fill);
+                    stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 2.9 * scale);
+                }
+            }
+
+            let cx = head_cx + bx;
+            let cy = head_cy + by;
+            let mut head = tiny_skia::PathBuilder::new();
+            head.move_to(cx - 72.0 * scale, cy + 22.0 * scale);
+            head.cubic_to(
+                cx - 73.0 * scale,
+                cy - 17.0 * scale,
+                cx - 51.0 * scale,
+                cy - 53.0 * scale,
+                cx - 18.0 * scale,
+                cy - 61.0 * scale,
+            );
+            head.cubic_to(
+                cx - 27.0 * scale,
+                cy - 70.0 * scale,
+                cx - 21.0 * scale,
+                cy - 83.0 * scale,
+                cx - 9.0 * scale,
+                cy - 82.0 * scale,
+            );
+            head.cubic_to(
+                cx + 0.0 * scale,
+                cy - 81.0 * scale,
+                cx + 4.0 * scale,
+                cy - 72.0 * scale,
+                cx + 0.0 * scale,
+                cy - 64.0 * scale,
+            );
+            head.cubic_to(
+                cx + 20.0 * scale,
+                cy - 67.0 * scale,
+                cx + 43.0 * scale,
+                cy - 61.0 * scale,
+                cx + 57.0 * scale,
+                cy - 49.0 * scale,
+            );
+            head.cubic_to(
+                cx + 58.0 * scale,
+                cy - 60.0 * scale,
+                cx + 69.0 * scale,
+                cy - 66.0 * scale,
+                cx + 77.0 * scale,
+                cy - 59.0 * scale,
+            );
+            head.cubic_to(
+                cx + 86.0 * scale,
+                cy - 51.0 * scale,
+                cx + 79.0 * scale,
+                cy - 37.0 * scale,
+                cx + 66.0 * scale,
+                cy - 38.0 * scale,
+            );
+            head.cubic_to(
+                cx + 85.0 * scale,
+                cy - 14.0 * scale,
+                cx + 82.0 * scale,
+                cy + 28.0 * scale,
+                cx + 57.0 * scale,
+                cy + 51.0 * scale,
+            );
+            head.cubic_to(
+                cx + 29.0 * scale,
+                cy + 78.0 * scale,
+                cx - 34.0 * scale,
+                cy + 73.0 * scale,
+                cx - 58.0 * scale,
+                cy + 45.0 * scale,
+            );
+            head.cubic_to(
+                cx - 68.0 * scale,
+                cy + 34.0 * scale,
+                cx - 72.0 * scale,
+                cy + 25.0 * scale,
+                cx - 72.0 * scale,
+                cy + 22.0 * scale,
+            );
+            head.close();
+            if let Some(path) = head.finish() {
+                fill_skia_path(&mut tmp_pixmap, &path, face_fill);
+                stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 3.3 * scale);
+            }
+
+            if red_factor > 0.08 {
+                quick_key_display_apply_heat_tint_ellipse(
+                    &mut tmp_pixmap,
+                    cx + look_x * 0.18,
+                    cy + 18.0 * scale + look_y * 0.25,
+                    46.0 * scale,
+                    34.0 * scale,
+                    red_factor,
+                    [255, 98, 123, 255],
+                );
+            }
+
+            let blink = mascot_blink_amount(time_s, 0.22);
+            let eye_y = cy - 6.0 * scale + look_y * 0.28;
+            for &(eye_x, side) in &[(cx - 30.0 * scale, -1.0), (cx + 27.0 * scale, 1.0)] {
+                let mut eye = tiny_skia::PathBuilder::new();
+                eye.move_to(eye_x - 8.5 * scale, eye_y);
+                eye.quad_to(
+                    eye_x,
+                    eye_y - (6.0 - blink * 9.0) * scale,
+                    eye_x + 8.5 * scale,
+                    eye_y,
+                );
+                if let Some(path) = eye.finish() {
+                    stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 2.4 * scale);
+                }
+                let mut brow = tiny_skia::PathBuilder::new();
+                brow.move_to(eye_x - 6.0 * scale, eye_y - 21.0 * scale);
+                brow.quad_to(
+                    eye_x,
+                    eye_y - 23.5 * scale,
+                    eye_x + 6.0 * scale,
+                    eye_y - 21.0 * scale + side * 0.4 * scale,
+                );
+                if let Some(path) = brow.finish() {
+                    stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 2.0 * scale);
+                }
+            }
+
+            fill_skia_ellipse(
+                &mut tmp_pixmap,
+                cx - 49.0 * scale,
+                cy + 18.0 * scale,
+                14.0 * scale,
+                10.0 * scale,
+                blush_fill,
+            );
+            fill_skia_ellipse(
+                &mut tmp_pixmap,
+                cx + 50.0 * scale,
+                cy + 17.0 * scale,
+                15.0 * scale,
+                10.5 * scale,
+                blush_fill,
+            );
+            for &(base_x, base_y) in &[(cx - 49.0 * scale, cy + 18.0 * scale), (cx + 50.0 * scale, cy + 17.0 * scale)] {
+                for offset in [-7.0_f32, 0.0, 7.0] {
+                    let mut cheek = tiny_skia::PathBuilder::new();
+                    cheek.move_to(base_x + offset * scale - 2.0 * scale, base_y + 4.5 * scale);
+                    cheek.line_to(base_x + offset * scale + 1.5 * scale, base_y - 4.5 * scale);
+                    if let Some(path) = cheek.finish() {
+                        stroke_skia_path(&mut tmp_pixmap, &path, line_color, 1.8 * scale);
+                    }
+                }
+            }
+
+            let mouth_y = cy + 31.0 * scale + look_y * 0.22;
+            let mut mouth = tiny_skia::PathBuilder::new();
+            mouth.move_to(cx - 12.0 * scale, mouth_y - 3.0 * scale);
+            mouth.quad_to(cx - 6.0 * scale, mouth_y + 7.5 * scale, cx, mouth_y);
+            mouth.quad_to(cx + 6.0 * scale, mouth_y + 7.5 * scale, cx + 12.0 * scale, mouth_y - 3.0 * scale);
+            if let Some(path) = mouth.finish() {
+                stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 2.8 * scale);
+            }
+            fill_skia_circle(&mut tmp_pixmap, cx, cy + 21.0 * scale, 2.1 * scale, stroke_color);
+            let mut tiny_mouth = tiny_skia::PathBuilder::new();
+            tiny_mouth.move_to(cx - 2.8 * scale, cy + 43.0 * scale);
+            tiny_mouth.quad_to(cx, cy + 45.0 * scale, cx + 2.8 * scale, cy + 43.0 * scale);
+            if let Some(path) = tiny_mouth.finish() {
+                stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 1.7 * scale);
+            }
+
+            if red_factor > 0.18 {
+                let sweat = ((red_factor - 0.18) / 0.82).clamp(0.0, 1.0);
+                draw_mascot_sweat_drop(
+                    &mut tmp_pixmap,
+                    cx + 50.0 * scale + look_x * 0.18,
+                    cy - 28.0 * scale + look_y * 0.18,
+                    (0.84 + sweat * 0.5) * scale,
+                    [176, 228, 255, 235],
+                    [59, 41, 38, 235],
+                    1.25 * scale,
+                );
+            }
+
+            let threshold_y = if is_redraw {
+                pixmap.height() as f32
+            } else {
+                (176.0 * scale).max(0.0)
+            };
+            let w = pixmap.width();
+            let h = pixmap.height();
+            let dest_data = pixmap.data_mut();
+            let src_data = tmp_pixmap.data();
+            for y in 0..h {
+                if is_redraw || (y as f32) < threshold_y {
+                    let row_start = (y * w * 4) as usize;
+                    let row_end = ((y + 1) * w * 4) as usize;
+                    if row_start < dest_data.len()
+                        && row_end <= dest_data.len()
+                        && row_end <= src_data.len()
+                    {
+                        dest_data[row_start..row_end]
+                            .copy_from_slice(&src_data[row_start..row_end]);
+                    }
+                }
+            }
             return;
         }
 
@@ -16958,7 +17200,7 @@ mod windows_overlay {
         mascot_style: crate::model::MascotStyle,
     ) {
         let is_white_arms = mascot_style == crate::model::MascotStyle::Hachiware
-            || mascot_style == crate::model::MascotStyle::Gugugaga;
+            || mascot_style == crate::model::MascotStyle::Chiikawa;
         let shoulder_offset = 52.0 * scale;
         let left_shoulder_cx = body_cx - shoulder_offset;
         let left_shoulder_cy = body_cy + 30.0 * scale;
@@ -17135,20 +17377,24 @@ mod windows_overlay {
         let type_bounce = recent_pulse * (time_s * 24.0).sin() * 1.5 * scale;
 
         // 3D Perspective mapping helper (takes FLAT coordinates, returns SCALED & PROJECTED coordinates)
-        let prop_scale = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            0.82
-        } else {
-            1.0
+        let prop_scale = match mascot_style {
+            crate::model::MascotStyle::ChiikawaClassic => 0.82,
+            crate::model::MascotStyle::Chiikawa => 0.90,
+            _ => 1.0,
         };
-        let prop_offset_y = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            -18.0 + idle_body_bob / scale * 0.25
-        } else {
-            0.0
+        let prop_offset_y = match mascot_style {
+            crate::model::MascotStyle::ChiikawaClassic => -18.0 + idle_body_bob / scale * 0.25,
+            crate::model::MascotStyle::Chiikawa => -9.0 + idle_body_bob / scale * 0.18,
+            _ => 0.0,
         };
-        let prop_yaw = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            (idle_turn_x / scale * 0.004 + mouse_offset.0 * 0.0015).clamp(-0.055, 0.055)
-        } else {
-            0.0
+        let prop_yaw = match mascot_style {
+            crate::model::MascotStyle::ChiikawaClassic => {
+                (idle_turn_x / scale * 0.004 + mouse_offset.0 * 0.0015).clamp(-0.055, 0.055)
+            }
+            crate::model::MascotStyle::Chiikawa => {
+                (idle_turn_x / scale * 0.003 + mouse_offset.0 * 0.0011).clamp(-0.044, 0.044)
+            }
+            _ => 0.0,
         };
         let project_point = |x: f32, y: f32| -> (f32, f32) {
             let x = 199.0 + (x - 199.0) * prop_scale + (y - 190.0) * prop_yaw;
@@ -17281,10 +17527,10 @@ mod windows_overlay {
         let desk_width = 322.0;
         let desk_height = 96.0;
 
-        let mouse_pad_left = if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
-            58.0
-        } else {
-            46.0
+        let mouse_pad_left = match mascot_style {
+            crate::model::MascotStyle::ChiikawaClassic => 58.0,
+            crate::model::MascotStyle::Chiikawa => 52.0,
+            _ => 46.0,
         };
 
         let keyboard_left = 90.0;
@@ -17296,6 +17542,7 @@ mod windows_overlay {
         let mut body_cx = 167.0 * scale;
         if mascot_style == crate::model::MascotStyle::Hachiware
             || mascot_style == crate::model::MascotStyle::ChiikawaClassic
+            || mascot_style == crate::model::MascotStyle::Chiikawa
         {
             body_cx = 190.0 * scale;
         }
@@ -17304,12 +17551,15 @@ mod windows_overlay {
         body_cy += idle_body_bob + type_bounce * 0.35;
         if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             body_cy -= 8.0 * scale;
+        } else if mascot_style == crate::model::MascotStyle::Chiikawa {
+            body_cy -= 3.0 * scale;
         }
         let body_radius = 36.0 * scale;
 
         let mut head_cx = 168.0 * scale;
         if mascot_style == crate::model::MascotStyle::Hachiware
             || mascot_style == crate::model::MascotStyle::ChiikawaClassic
+            || mascot_style == crate::model::MascotStyle::Chiikawa
         {
             head_cx = 191.0 * scale;
         }
@@ -17318,11 +17568,15 @@ mod windows_overlay {
         head_cy += idle_body_bob * 0.7 + type_bounce * 0.45;
         if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
             head_cy -= 8.0 * scale;
+        } else if mascot_style == crate::model::MascotStyle::Chiikawa {
+            head_cy -= 5.0 * scale;
         }
         let head_radius = 56.0
             * scale
             * if mascot_style == crate::model::MascotStyle::ChiikawaClassic {
                 1.12
+            } else if mascot_style == crate::model::MascotStyle::Chiikawa {
+                1.08
             } else {
                 1.0
             };
@@ -17366,7 +17620,9 @@ mod windows_overlay {
             crate::model::MascotStyle::Hachiware => {
                 ((red_factor - 0.16) / 0.84).clamp(0.0, 1.0).powf(1.08)
             }
-            crate::model::MascotStyle::Gugugaga => red_factor,
+            crate::model::MascotStyle::Chiikawa => {
+                ((red_factor - 0.14) / 0.86).clamp(0.0, 1.0).powf(1.08)
+            }
         };
 
         // Define dynamic styles depending on preset
@@ -17412,19 +17668,19 @@ mod windows_overlay {
                 [255, 225, 225, 255],
                 [255, 245, 245, 255],
             ),
-            crate::model::MascotStyle::Gugugaga => (
-                [220, 185, 150, 255], // Oak wood
-                [150, 115, 80, 255],
+            crate::model::MascotStyle::Chiikawa => (
+                [198, 215, 202, 255], // soft mint desk
+                [122, 147, 130, 255],
                 true,
-                [110, 80, 50, 70],
-                [255, 248, 235, 255], // Milk cream
-                [210, 195, 180, 255],
-                [255, 253, 248, 245],
-                [255, 200, 200, 235], // Sakura pink
-                [255, 215, 225, 255], // Light cherry pink
+                [84, 112, 95, 68],
+                [245, 250, 247, 255],
+                [178, 198, 184, 255],
+                [255, 255, 250, 245],
+                [184, 218, 198, 235],
+                [205, 232, 214, 255],
                 0,
-                [255, 225, 225, 255],
-                [255, 245, 245, 255],
+                [248, 255, 250, 255],
+                [224, 236, 228, 255],
             ),
         };
 
@@ -17634,7 +17890,29 @@ mod windows_overlay {
                     fill_skia_path(&mut pixmap, &path, [255, 180, 195, 255]);
                 }
             }
-            crate::model::MascotStyle::Gugugaga => {}
+            crate::model::MascotStyle::Chiikawa => {
+                let clover_x = desk_left + 22.0;
+                let clover_y = desk_top + 27.0;
+                for (dx, dy) in [(-4.5, -3.5), (4.5, -3.5), (-4.5, 4.2), (4.5, 4.2)] {
+                    let p = project_point(clover_x + dx, clover_y + dy);
+                    fill_skia_ellipse(
+                        &mut pixmap,
+                        p.0,
+                        p.1,
+                        5.0 * scale,
+                        4.0 * scale,
+                        [119, 183, 142, 210],
+                    );
+                }
+                let mut stem = tiny_skia::PathBuilder::new();
+                let s1 = project_point(clover_x + 2.0, clover_y + 8.0);
+                let s2 = project_point(clover_x + 8.0, clover_y + 16.0);
+                stem.move_to(s1.0, s1.1);
+                stem.quad_to(s1.0 + 5.0 * scale, s1.1 + 2.0 * scale, s2.0, s2.1);
+                if let Some(path) = stem.finish() {
+                    stroke_skia_path(&mut pixmap, &path, [64, 112, 78, 210], 1.5 * scale);
+                }
+            }
         }
 
         // 3. Draw 3D Keyboard Frame & Mouse Pad
@@ -17765,11 +18043,11 @@ mod windows_overlay {
         let mouse_flat_y = keyboard_top + 23.0 + mouse_offset.1 * 0.56;
         let mouse_projected = project_point(mouse_flat_x, mouse_flat_y);
 
-        let is_custom_or_gugugaga = mascot_style == crate::model::MascotStyle::Hachiware
-            || mascot_style == crate::model::MascotStyle::Gugugaga;
-        let mut default_l_x = if is_custom_or_gugugaga { 130.0 } else { 112.0 };
-        let mut default_r_x = if is_custom_or_gugugaga { 214.0 } else { 236.0 };
-        let default_y = if is_custom_or_gugugaga { 164.0 } else { 172.0 };
+        let is_custom_or_chiikawa = mascot_style == crate::model::MascotStyle::Hachiware
+            || mascot_style == crate::model::MascotStyle::Chiikawa;
+        let mut default_l_x = if is_custom_or_chiikawa { 130.0 } else { 112.0 };
+        let mut default_r_x = if is_custom_or_chiikawa { 214.0 } else { 236.0 };
+        let default_y = if is_custom_or_chiikawa { 164.0 } else { 172.0 };
 
         if mascot_style == crate::model::MascotStyle::Hachiware {
             default_l_x = 161.0;

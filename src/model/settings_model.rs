@@ -30,7 +30,8 @@ pub enum MascotStyle {
     #[serde(alias = "Custom")]
     Hachiware,
     ChiikawaClassic,
-    Gugugaga,
+    #[serde(alias = "Gugugaga")]
+    Chiikawa,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
