@@ -1580,6 +1580,23 @@ impl CrosshairApp {
             .unwrap_or_else(|| Self::tr_lang(language, "Select preset", "Select preset").to_owned())
     }
 
+    fn item_selected_label<T>(
+        items: &[T],
+        selected_id: Option<u32>,
+        fallback: &'static str,
+        language: UiLanguage,
+        id_of: impl Fn(&T) -> u32,
+        name_of: impl Fn(&T) -> &str,
+    ) -> String {
+        selected_id
+            .and_then(|id| {
+                items.iter()
+                    .find(|item| id_of(item) == id)
+                    .map(|item| name_of(item).to_owned())
+            })
+            .unwrap_or_else(|| Self::tr_lang(language, fallback, fallback).to_owned())
+    }
+
     fn ordered_id_index<T, F>(items: &[T], id: u32, id_of: F) -> usize
     where
         F: Fn(&T) -> u32,
