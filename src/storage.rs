@@ -795,9 +795,7 @@ fn ensure_opencv_videoio_ffmpeg_plugin(target_path: &Path) {
     let Some(source_path) = find_local_opencv_videoio_ffmpeg_plugin() else {
         return;
     };
-    if let Some(parent) = target_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
+    let _ = ensure_parent_dir(target_path);
     let _ = fs::copy(source_path, target_path);
 }
 
@@ -808,12 +806,17 @@ fn ensure_bundled_file(target_path: &Path, bytes: &[u8]) -> Result<()> {
     };
 
     if needs_write {
-        if let Some(parent) = target_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        ensure_parent_dir(target_path)?;
         fs::write(target_path, bytes)?;
     }
 
+    Ok(())
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     Ok(())
 }
 
