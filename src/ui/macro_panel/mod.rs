@@ -6501,18 +6501,14 @@ impl CrosshairApp {
                                                         });
                                                     } else {
                                                         let selected_id = step.key.trim().parse::<u32>().ok();
-                                                        let selected_label = selected_id
-                                                            .and_then(|id| {
-                                                                self.state
-                                                                    .mouse_sensitivity_presets
-                                                                    .iter()
-                                                                    .find(|preset| preset.id == id)
-                                                                    .map(|preset| preset.name.clone())
-                                                            })
-                                                            .unwrap_or_else(|| {
-                                                                Self::tr_lang(language, "Select sens", "Select sens")
-                                                                .to_owned()
-                                                            });
+                                                        let selected_label = Self::item_selected_label(
+                                                            &self.state.mouse_sensitivity_presets,
+                                                            selected_id,
+                                                            "Select sens",
+                                                            language,
+                                                            |preset| preset.id,
+                                                            |preset| &preset.name,
+                                                        );
                                                         ui.push_id((group.id, preset.id, "mouse-sensitivity-preset-step"), |ui| {
                                                             egui::ComboBox::from_id_salt("mouse-sensitivity-preset-step-combo")
                                                                 .width(110.0)
@@ -7007,17 +7003,14 @@ impl CrosshairApp {
                                                             live_sync |= response.changed();
                                                             if !step.lock_mouse_left {
                                                                 let selected_id = step.key.trim().parse::<u32>().ok();
-                                                                let selected_label = selected_id
-                                                                    .and_then(|id| {
-                                                                        self.state
-                                                                            .pin_presets
-                                                                            .iter()
-                                                                            .find(|p| p.id == id)
-                                                                            .map(|p| p.name.clone())
-                                                                    })
-                                                                    .unwrap_or_else(|| {
-                                                                        Self::tr_lang(language, "Select pin", "Select pin").to_owned()
-                                                                    });
+                                                                let selected_label = Self::item_selected_label(
+                                                                    &self.state.pin_presets,
+                                                                    selected_id,
+                                                                    "Select pin",
+                                                                    language,
+                                                                    |preset| preset.id,
+                                                                    |preset| &preset.name,
+                                                                );
                                                                 egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-disable-pin"))
                                                                     .width(110.0)
                                                                     .selected_text(selected_label)
@@ -8664,18 +8657,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         });
                                                     } else {
                                                         let selected_id = step.key.trim().parse::<u32>().ok();
-                                                        let selected_label = selected_id
-                                                            .and_then(|id| {
-                                                                self.state
-                                                                    .mouse_sensitivity_presets
-                                                                    .iter()
-                                                                    .find(|preset| preset.id == id)
-                                                                    .map(|preset| preset.name.clone())
-                                                            })
-                                                            .unwrap_or_else(|| {
-                                                                Self::tr_lang(language, "Select sens", "Select sens")
-                                                                .to_owned()
-                                                            });
+                                                        let selected_label = Self::item_selected_label(
+                                                            &self.state.mouse_sensitivity_presets,
+                                                            selected_id,
+                                                            "Select sens",
+                                                            language,
+                                                            |preset| preset.id,
+                                                            |preset| &preset.name,
+                                                        );
                                                         ui.push_id((group.id, preset.id, "mouse-sensitivity-preset-step"), |ui| {
                                                             egui::ComboBox::from_id_salt("mouse-sensitivity-preset-step-combo")
                                                                 .width(110.0)
@@ -11406,15 +11395,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         step.key.clear();
                                                         live_sync = true;
                                                     }
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .mouse_path_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| Self::tr_lang(language, "Select path", "Select path").to_owned());
+                                                    let selected_label = Self::item_selected_label(
+                                                        &self.state.mouse_path_presets,
+                                                        selected_id,
+                                                        "Select path",
+                                                        language,
+                                                        |preset| preset.id,
+                                                        |preset| &preset.name,
+                                                    );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "mouse-path-preset-step"))
                                                         .width(146.0)
                                                         .selected_text(selected_label)
@@ -11882,18 +11870,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         });
                                                     } else {
                                                         let selected_id = step.key.trim().parse::<u32>().ok();
-                                                        let selected_label = selected_id
-                                                            .and_then(|id| {
-                                                                self.state
-                                                                    .mouse_sensitivity_presets
-                                                                    .iter()
-                                                                    .find(|preset| preset.id == id)
-                                                                    .map(|preset| preset.name.clone())
-                                                            })
-                                                            .unwrap_or_else(|| {
-                                                                Self::tr_lang(language, "Select sens", "Select sens")
-                                                                .to_owned()
-                                                            });
+                                                        let selected_label = Self::item_selected_label(
+                                                            &self.state.mouse_sensitivity_presets,
+                                                            selected_id,
+                                                            "Select sens",
+                                                            language,
+                                                            |preset| preset.id,
+                                                            |preset| &preset.name,
+                                                        );
                                                         egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "mouse-sensitivity-preset-step"))
                                                             .width(96.0)
                                                             .selected_text(selected_label)
