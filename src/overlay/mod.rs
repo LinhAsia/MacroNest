@@ -23146,12 +23146,13 @@ mod windows_overlay {
             _ => return Ok(()),
         }
 
-        let Some(vk) = hotkey::key_name_to_vk(&step.key) else {
-            bail!("Unsupported macro key: {}", step.key);
+        let key_str = interpolate_variables(&step.key);
+        let Some(vk) = hotkey::key_name_to_vk(&key_str) else {
+            bail!("Unsupported macro key: {}", key_str);
         };
         let scan = unsafe { MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) };
         if scan == 0 {
-            bail!("Unsupported macro key scan code: {}", step.key);
+            bail!("Unsupported macro key scan code: {}", key_str);
         }
 
         let base_flags = KEYEVENTF_SCANCODE
