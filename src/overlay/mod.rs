@@ -259,6 +259,7 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(ScreenDrawState::default()));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
     static LAST_MOUSE_MOVE_TIME_MS: AtomicU64 = AtomicU64::new(0);
+    const QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS: u32 = 650;
     static MASCOT_WINDOW_MOVING: AtomicBool = AtomicBool::new(false);
     static MASCOT_DRAG_START_MOUSE: Lazy<Mutex<Option<(i32, i32)>>> =
         Lazy::new(|| Mutex::new(None));
@@ -7493,6 +7494,11 @@ mod windows_overlay {
         runtime.quick_key_display_last_cursor_pos = Some(cursor);
     }
 
+    fn quick_key_display_mouse_active(current_ms: u32) -> bool {
+        let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
+        current_ms.wrapping_sub(last_move_ms) < QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS
+    }
+
     fn quick_key_display_active_mascot_styles(
         runtime: &Runtime,
     ) -> Vec<crate::model::MascotStyle> {
@@ -7775,6 +7781,7 @@ mod windows_overlay {
                 *MASCOT_DRAG_START_CENTER.lock() = None;
                 *MASCOT_DRAG_STYLE.lock() = None;
                 MASCOT_WINDOW_MOVING.store(false, Ordering::Relaxed);
+                let _ = refresh_quick_key_display(runtime);
                 let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
                     style,
                     x,
@@ -9003,6 +9010,12 @@ mod windows_overlay {
             .min(0.1);
         runtime.quick_key_display_last_update = now;
 
+        if runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
+            && MASCOT_WINDOW_MOVING.load(Ordering::Relaxed)
+        {
+            return Ok(());
+        }
+
         // Decay spam heat towards 0 with a half-life of 2.4 seconds.
         let decay = (-0.28881133 * dt).exp();
         runtime.quick_key_display_spam_heat *= decay;
@@ -9083,10 +9096,9 @@ mod windows_overlay {
                     hook_state.held_mouse_buttons.clone(),
                 )
             };
-            let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
             let current_ms = unsafe { GetTickCount() };
             // Retain the hand on the mouse long enough to avoid one-frame key target flicker.
-            let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 220
+            let is_mouse_moving = quick_key_display_mouse_active(current_ms)
                 || runtime.quick_key_display_mouse_offset.0.abs() > 0.5
                 || runtime.quick_key_display_mouse_offset.1.abs() > 0.5;
 
@@ -15895,10 +15907,10 @@ mod windows_overlay {
                         };
 
                     let (look_mul_x, look_mul_y, wobble_x, wobble_y) = match path_index_for_wobble {
-                        4..=14 => {
+                        4..=13 => {
                             (0.38, 0.46, face_wobble_slow_x, face_wobble_slow_y)
                         }
-                        15..=18 => (0.8, 0.78, face_wobble_mid_x, face_wobble_fast_y),
+                        14..=18 => (0.8, 0.78, face_wobble_mid_x, face_wobble_fast_y),
                         19..=21 => (0.6, 0.65, face_wobble_mid_x * 0.75, face_wobble_mid_y),
                         22 | 23 => (0.48, 0.46, face_wobble_fast_x, face_wobble_fast_y),
                         _ => (0.1, 0.1, 0.0, 0.0),
@@ -15909,7 +15921,7 @@ mod windows_overlay {
 
                     px += look_x * look_mul_x + wobble_x;
                     py += look_y * look_mul_y + wobble_y + vertical_offset;
-                    if matches!(path_index_for_wobble, 15..=23) {
+                    if matches!(path_index_for_wobble, 14..=23) {
                         px += face_pulse_x;
                         py += face_pulse_y;
                     }
@@ -16066,6 +16078,7 @@ mod windows_overlay {
                         + face_wobble_fast_y
                         + face_pulse_y
                         + vertical_offset
+                        + dest_y as f32
                         - screen_y_at_ch0;
                     let side = ((xc - cx_val) / 60.0).clamp(-1.0, 1.0);
                     let ear_off = quick_key_display_chiikawa_ear_offset(
@@ -16079,13 +16092,13 @@ mod windows_overlay {
                     );
                     (px + ear_off.0, py + ear_off.1)
                 };
-                let (left_blink_x, left_blink_y) = map_blink_eye(814.0, 845.0);
-                let (right_blink_x, right_blink_y) = map_blink_eye(1226.0, 847.0);
+                let (left_blink_x, left_blink_y) = map_blink_eye(814.0, 846.0);
+                let (right_blink_x, right_blink_y) = map_blink_eye(1236.0, 854.0);
                 draw_mascot_blink(
                     pixmap,
                     left_blink_x,
                     left_blink_y,
-                    12.8 * scale,
+                    14.0 * scale,
                     [255, 255, 255, 255],
                     [55, 27, 17, 255],
                     blink,
@@ -16094,7 +16107,7 @@ mod windows_overlay {
                     pixmap,
                     right_blink_x,
                     right_blink_y,
-                    12.8 * scale,
+                    14.0 * scale,
                     [255, 255, 255, 255],
                     [55, 27, 17, 255],
                     blink,
@@ -17817,49 +17830,6 @@ mod windows_overlay {
         match mascot_style {
             crate::model::MascotStyle::Hachiware => {}
             crate::model::MascotStyle::ChiikawaClassic => {
-                // Hot cup of milk
-                let c_x = desk_left + 24.0;
-                let c_y = desk_top + 20.0;
-                fill_projected_rounded_quad(
-                    &mut pixmap,
-                    c_x - 7.0,
-                    c_y - 10.0,
-                    14.0,
-                    15.0,
-                    3.0,
-                    [255, 230, 235, 255],
-                );
-                stroke_projected_rounded_quad(
-                    &mut pixmap,
-                    c_x - 7.0,
-                    c_y - 10.0,
-                    14.0,
-                    15.0,
-                    3.0,
-                    [45, 40, 42, 255],
-                    1.5 * scale,
-                );
-                // Handle
-                let mut handle = tiny_skia::PathBuilder::new();
-                let hp1 = project_point(c_x - 7.0, c_y - 5.0);
-                let hp2 = project_point(c_x - 12.0, c_y);
-                let hp3 = project_point(c_x - 7.0, c_y + 3.0);
-                handle.move_to(hp1.0, hp1.1);
-                handle.quad_to(hp2.0, hp2.1, hp3.0, hp3.1);
-                if let Some(path) = handle.finish() {
-                    stroke_skia_path(&mut pixmap, &path, [45, 40, 42, 255], 1.5 * scale);
-                }
-                // Steam rising
-                let mut steam = tiny_skia::PathBuilder::new();
-                let sp1 = project_point(c_x - 2.0, c_y - 12.0);
-                let sp2 = project_point(c_x + 1.0, c_y - 17.0);
-                let sp3 = project_point(c_x - 1.0, c_y - 22.0);
-                steam.move_to(sp1.0, sp1.1);
-                steam.quad_to(sp2.0, sp2.1, sp3.0, sp3.1);
-                if let Some(path) = steam.finish() {
-                    stroke_skia_path(&mut pixmap, &path, [255, 255, 255, 120], 1.2 * scale);
-                }
-
                 // Strawberry Star Biscuit Cookie
                 let s_x = desk_left + desk_width - 24.0;
                 let s_y = desk_top + 28.0;
@@ -18041,8 +18011,7 @@ mod windows_overlay {
         let keys = quick_key_display_mascot_keys();
 
         // Mouse active state tracking
-        let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
-        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 420;
+        let is_mouse_moving = quick_key_display_mouse_active(current_ms);
         let mouse_active = is_mouse_moving || !held_mouse_buttons.is_empty();
 
         let mouse_flat_x = mouse_pad_left + 19.0 + mouse_offset.0 * 0.7;
@@ -18253,15 +18222,17 @@ mod windows_overlay {
 
         // Draw Mouse (Extruded 3D mouse drawing)
         // Mouse drop shadow on pad
-        fill_projected_rounded_quad(
-            &mut pixmap,
-            mouse_flat_x - 7.0 + 1.5,
-            mouse_flat_y - 9.0 + 3.0,
-            14.0,
-            18.0,
-            6.0,
-            [0, 0, 0, 40],
-        );
+        if mascot_style != crate::model::MascotStyle::ChiikawaClassic {
+            fill_projected_rounded_quad(
+                &mut pixmap,
+                mouse_flat_x - 7.0 + 1.5,
+                mouse_flat_y - 9.0 + 3.0,
+                14.0,
+                18.0,
+                6.0,
+                [0, 0, 0, 40],
+            );
+        }
         // Mouse 3D base
         fill_projected_rounded_quad(
             &mut pixmap,
