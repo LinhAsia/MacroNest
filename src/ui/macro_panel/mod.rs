@@ -1312,11 +1312,42 @@ impl CrosshairApp {
             MacroAction::StartTimerPreset,
             MacroAction::PauseTimerPreset,
             MacroAction::StopTimerPreset,
+            MacroAction::ReadTimerPreset,
         ]
     }
 
     fn macro_action_is_timer(action: MacroAction) -> bool {
         Self::timer_macro_actions().contains(&action)
+    }
+
+    fn timer_value_property_options() -> &'static [(&'static str, &'static str)] {
+        &[
+            ("total_ms", "Total ms"),
+            ("total_sec", "Total sec"),
+            ("minute", "Minute"),
+            ("second", "Second"),
+            ("millisecond", "Ms"),
+        ]
+    }
+
+    fn normalize_timer_value_property(value: &str) -> &'static str {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "raw" | "total_ms" | "" => "total_ms",
+            "total_sec" => "total_sec",
+            "hour" | "minute" | "m" => "minute",
+            "second" | "s" => "second",
+            "millisecond" | "ms" => "millisecond",
+            _ => "total_ms",
+        }
+    }
+
+    fn timer_value_property_label(value: &str) -> &'static str {
+        let normalized = Self::normalize_timer_value_property(value);
+        Self::timer_value_property_options()
+            .iter()
+            .find(|(prop, _)| *prop == normalized)
+            .map(|(_, label)| *label)
+            .unwrap_or("Total ms")
     }
 
     fn render_timer_action_group_option(
@@ -1441,13 +1472,13 @@ impl CrosshairApp {
         );
         let response = inner.inner;
         if !open {
-            Self::show_instant_hover_tooltip(
-                ui,
-                &response,
-                Self::tr_lang(
-                    language,
-                    "Timer\nOpen start, pause, and stop timer actions.",
-                    "Timer\nOpen start, pause, and stop timer actions.",
+                Self::show_instant_hover_tooltip(
+                    ui,
+                    &response,
+                    Self::tr_lang(
+                        language,
+                    "Timer\nOpen start, pause, stop, and read timer actions.",
+                    "Timer\nOpen start, pause, stop, and read timer actions.",
                 ),
             );
         }
@@ -6109,8 +6140,16 @@ impl CrosshairApp {
                                                                 }
                                                             });
                                                     });
-                                                } else if matches!(step.action, MacroAction::StartTimerPreset | MacroAction::PauseTimerPreset | MacroAction::StopTimerPreset) {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::StartTimerPreset
+                                                        | MacroAction::PauseTimerPreset
+                                                        | MacroAction::StopTimerPreset
+                                                        | MacroAction::ReadTimerPreset
+                                                ) {
+                                                    let selected_id = step
+                                                        .timer_preset_id
+                                                        .or_else(|| step.key.trim().parse::<u32>().ok());
                                                     let selected_label = Self::timer_preset_selected_label(
                                                         &self.state.timer_presets,
                                                         selected_id,
@@ -6122,12 +6161,54 @@ impl CrosshairApp {
                                                         .show_ui(ui, |ui| {
                                                             for timer in &self.state.timer_presets {
                                                                 if ui.selectable_label(selected_id == Some(timer.id), &timer.name).clicked() {
-                                                                    step.key = timer.id.to_string();
                                                                     step.timer_preset_id = Some(timer.id);
+                                                                    if step.action != MacroAction::ReadTimerPreset {
+                                                                        step.key = timer.id.to_string();
+                                                                    }
                                                                     live_sync = true;
                                                                 }
                                                             }
                                                         });
+                                                    if step.action == MacroAction::ReadTimerPreset {
+                                                        let selected_prop = Self::normalize_timer_value_property(&step.key);
+                                                        egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-timer-prop"))
+                                                            .width(96.0)
+                                                            .selected_text(Self::timer_value_property_label(selected_prop))
+                                                            .show_ui(ui, |ui| {
+                                                                for (prop, label) in Self::timer_value_property_options() {
+                                                                    if ui.selectable_label(selected_prop == *prop, *label).clicked() {
+                                                                        step.key = (*prop).to_owned();
+                                                                        live_sync = true;
+                                                                    }
+                                                                }
+                                                            });
+                                                        let target_id = ui.id().with("hold-stop-timer-var");
+                                                        let response = Self::render_variable_text_edit(
+                                                            ui,
+                                                            &mut step.if_variable_name,
+                                                            target_id,
+                                                            76.0,
+                                                            132.0,
+                                                            21.0,
+                                                            21.0,
+                                                            Self::tr_lang(language, "variable", "variable"),
+                                                            false,
+                                                        );
+                                                        Self::apply_vietnamese_input_if_changed(
+                                                            &response,
+                                                            self.state.vietnamese_input_enabled,
+                                                            self.state.vietnamese_input_mode,
+                                                            &mut step.if_variable_name,
+                                                        );
+                                                        live_sync |= response.changed();
+                                                        Self::render_variable_suggestions_raw(
+                                                            ui,
+                                                            &response,
+                                                            &mut step.if_variable_name,
+                                                            &timer_names,
+                                                            language,
+                                                        );
+                                                    }
                                                 } else if step.action == MacroAction::EnableCrosshairProfile {
                                                     let selected_label = if step.key.trim().is_empty() {
                                                         Self::tr_lang(language, "Select crosshair", "Select crosshair").to_owned()
@@ -8261,8 +8342,16 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                 }
                                                             });
                                                     });
-                                                } else if matches!(step.action, MacroAction::StartTimerPreset | MacroAction::PauseTimerPreset | MacroAction::StopTimerPreset) {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::StartTimerPreset
+                                                        | MacroAction::PauseTimerPreset
+                                                        | MacroAction::StopTimerPreset
+                                                        | MacroAction::ReadTimerPreset
+                                                ) {
+                                                    let selected_id = step
+                                                        .timer_preset_id
+                                                        .or_else(|| step.key.trim().parse::<u32>().ok());
                                                     let selected_label = Self::timer_preset_selected_label(
                                                         &self.state.timer_presets,
                                                         selected_id,
@@ -8274,12 +8363,54 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         .show_ui(ui, |ui| {
                                                             for timer in &self.state.timer_presets {
                                                                 if ui.selectable_label(selected_id == Some(timer.id), &timer.name).clicked() {
-                                                                    step.key = timer.id.to_string();
                                                                     step.timer_preset_id = Some(timer.id);
+                                                                    if step.action != MacroAction::ReadTimerPreset {
+                                                                        step.key = timer.id.to_string();
+                                                                    }
                                                                     live_sync = true;
                                                                 }
                                                             }
                                                         });
+                                                    if step.action == MacroAction::ReadTimerPreset {
+                                                        let selected_prop = Self::normalize_timer_value_property(&step.key);
+                                                        egui::ComboBox::from_id_salt((group.id, preset.id, "press-stop-timer-prop"))
+                                                            .width(96.0)
+                                                            .selected_text(Self::timer_value_property_label(selected_prop))
+                                                            .show_ui(ui, |ui| {
+                                                                for (prop, label) in Self::timer_value_property_options() {
+                                                                    if ui.selectable_label(selected_prop == *prop, *label).clicked() {
+                                                                        step.key = (*prop).to_owned();
+                                                                        live_sync = true;
+                                                                    }
+                                                                }
+                                                            });
+                                                        let target_id = ui.id().with("press-stop-timer-var");
+                                                        let response = Self::render_variable_text_edit(
+                                                            ui,
+                                                            &mut step.if_variable_name,
+                                                            target_id,
+                                                            76.0,
+                                                            132.0,
+                                                            21.0,
+                                                            21.0,
+                                                            Self::tr_lang(language, "variable", "variable"),
+                                                            false,
+                                                        );
+                                                        Self::apply_vietnamese_input_if_changed(
+                                                            &response,
+                                                            self.state.vietnamese_input_enabled,
+                                                            self.state.vietnamese_input_mode,
+                                                            &mut step.if_variable_name,
+                                                        );
+                                                        live_sync |= response.changed();
+                                                        Self::render_variable_suggestions_raw(
+                                                            ui,
+                                                            &response,
+                                                            &mut step.if_variable_name,
+                                                            &timer_names,
+                                                            language,
+                                                        );
+                                                    }
                                                 } else if step.action == MacroAction::EnableCrosshairProfile {
                                                     let selected_label = if step.key.trim().is_empty() {
                                                         Self::tr_lang(language, "Select crosshair", "Select crosshair").to_owned()
@@ -11265,8 +11396,16 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                 }
                                                             });
                                                     });
-                                                } else if matches!(step.action, MacroAction::StartTimerPreset | MacroAction::PauseTimerPreset | MacroAction::StopTimerPreset) {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::StartTimerPreset
+                                                        | MacroAction::PauseTimerPreset
+                                                        | MacroAction::StopTimerPreset
+                                                        | MacroAction::ReadTimerPreset
+                                                ) {
+                                                    let selected_id = step
+                                                        .timer_preset_id
+                                                        .or_else(|| step.key.trim().parse::<u32>().ok());
                                                     let selected_label = Self::timer_preset_selected_label(
                                                         &self.state.timer_presets,
                                                         selected_id,
@@ -11278,12 +11417,54 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         .show_ui(ui, |ui| {
                                                             for timer in &self.state.timer_presets {
                                                                 if ui.selectable_label(selected_id == Some(timer.id), &timer.name).clicked() {
-                                                                    step.key = timer.id.to_string();
                                                                     step.timer_preset_id = Some(timer.id);
+                                                                    if step.action != MacroAction::ReadTimerPreset {
+                                                                        step.key = timer.id.to_string();
+                                                                    }
                                                                     live_sync = true;
                                                                 }
                                                             }
                                                         });
+                                                    if step.action == MacroAction::ReadTimerPreset {
+                                                        let selected_prop = Self::normalize_timer_value_property(&step.key);
+                                                        egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "step-timer-prop-select"))
+                                                            .width(96.0)
+                                                            .selected_text(Self::timer_value_property_label(selected_prop))
+                                                            .show_ui(ui, |ui| {
+                                                                for (prop, label) in Self::timer_value_property_options() {
+                                                                    if ui.selectable_label(selected_prop == *prop, *label).clicked() {
+                                                                        step.key = (*prop).to_owned();
+                                                                        live_sync = true;
+                                                                    }
+                                                                }
+                                                            });
+                                                        let target_id = ui.id().with("step-timer-var");
+                                                        let response = Self::render_variable_text_edit(
+                                                            ui,
+                                                            &mut step.if_variable_name,
+                                                            target_id,
+                                                            76.0,
+                                                            132.0,
+                                                            21.0,
+                                                            21.0,
+                                                            Self::tr_lang(language, "variable", "variable"),
+                                                            false,
+                                                        );
+                                                        Self::apply_vietnamese_input_if_changed(
+                                                            &response,
+                                                            self.state.vietnamese_input_enabled,
+                                                            self.state.vietnamese_input_mode,
+                                                            &mut step.if_variable_name,
+                                                        );
+                                                        live_sync |= response.changed();
+                                                        Self::render_variable_suggestions_raw(
+                                                            ui,
+                                                            &response,
+                                                            &mut step.if_variable_name,
+                                                            &timer_names,
+                                                            language,
+                                                        );
+                                                    }
                                                 } else if step.action == MacroAction::EnableCrosshairProfile {
                                                     let selected_label = if step.key.trim().is_empty() {
                                                         Self::tr_lang(language, "Select crosshair", "Select crosshair").to_owned()

@@ -5663,6 +5663,7 @@ impl CrosshairApp {
             MacroAction::StartTimerPreset => "StartTimer",
             MacroAction::PauseTimerPreset => "PauseTimer",
             MacroAction::StopTimerPreset => "StopTimer",
+            MacroAction::ReadTimerPreset => "ReadTimer",
             MacroAction::EnableStep => "EnableStep",
             MacroAction::DisableStep => "DisableStep",
             MacroAction::MouseLeftClick => "LeftClick",
@@ -5957,6 +5958,10 @@ impl CrosshairApp {
                 "macro_action_tooltip.set_variable",
                 "Set a variable to a numeric value or copy from another variable.",
             ),
+            MacroAction::ReadTimerPreset => (
+                "macro_action_tooltip.read_timer_preset",
+                "Read one running timer value and store it into a variable.",
+            ),
             MacroAction::OcrSearch => (
                 "macro_action_tooltip.ocr_search",
                 "Scan a screen region with fast local PaddleOCR to extract text and numbers.",
@@ -6037,6 +6042,7 @@ impl CrosshairApp {
             MacroAction::StartTimerPreset => 0xe037,
             MacroAction::PauseTimerPreset => 0xe034,
             MacroAction::StopTimerPreset => 0xe047,
+            MacroAction::ReadTimerPreset => 0xe150,
             MacroAction::EnableStep => 0xe86c,
             MacroAction::DisableStep => 0xe14b,
             MacroAction::MouseLeftClick => 0xe323,
@@ -6165,6 +6171,9 @@ impl CrosshairApp {
             }
             MacroAction::StopTimerPreset => {
                 ("macro_action_short_label.stop_timer_preset", "TimerOff")
+            }
+            MacroAction::ReadTimerPreset => {
+                ("macro_action_short_label.read_timer_preset", "TimerVar")
             }
             MacroAction::EnableStep => ("macro_action_short_label.enable_step", "StepOn"),
             MacroAction::DisableStep => ("macro_action_short_label.disable_step", "StepOff"),
@@ -6354,6 +6363,7 @@ impl CrosshairApp {
                 | MacroAction::StartTimerPreset
                 | MacroAction::PauseTimerPreset
                 | MacroAction::StopTimerPreset
+                | MacroAction::ReadTimerPreset
                 | MacroAction::EnableStep
                 | MacroAction::DisableStep
                 | MacroAction::LoopStart
@@ -7489,10 +7499,16 @@ impl CrosshairApp {
             egui::StrokeKind::Outside,
         );
         if preset.show_text {
+            let preview_text = crate::overlay::format_stopwatch_time(
+                125_432,
+                preset.show_minutes,
+                preset.show_seconds,
+                preset.show_ms,
+            );
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "00:00.000",
+                preview_text,
                 egui::FontId::proportional((preset.font_size * scale).clamp(2.0, 200.0)),
                 text_color,
             );

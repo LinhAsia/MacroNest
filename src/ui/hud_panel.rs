@@ -254,6 +254,10 @@ impl CrosshairApp {
                 preset.show_text = true;
                 timer_changed = true;
             }
+            if !preset.show_overlay && preset.preview_enabled {
+                preset.preview_enabled = false;
+                timer_changed = true;
+            }
             Self::show_preset_card(ui, false, |ui| {
                 ui.horizontal(|ui| {
                     let name_width = Self::preset_header_name_width(ui);
@@ -344,7 +348,20 @@ impl CrosshairApp {
                             ui.end_row();
                         }
 
-                        if preset.show_text {
+                        ui.label(Self::tr_lang(language, "Overlay", "Overlay"));
+                        let overlay_changed = ui
+                            .checkbox(
+                                &mut preset.show_overlay,
+                                Self::tr_lang(language, "Show overlay", "Show overlay"),
+                            )
+                            .changed();
+                        if overlay_changed && !preset.show_overlay {
+                            preset.preview_enabled = false;
+                        }
+                        timer_changed |= overlay_changed;
+                        ui.end_row();
+
+                        if preset.show_overlay && preset.show_text {
                             ui.label(Self::tr_lang(language, "Format", "Format"));
                             ui.horizontal(|ui| {
                                 timer_changed |= ui
@@ -369,7 +386,7 @@ impl CrosshairApp {
                             ui.end_row();
                         }
 
-                        if preset.show_text {
+                        if preset.show_overlay && preset.show_text {
                             ui.label(Self::tr_lang(language, "Font Size", "Font Size"));
                             timer_changed |= ui
                                 .add(
@@ -386,87 +403,91 @@ impl CrosshairApp {
                             ui.end_row();
                         }
 
-                        ui.label(Self::tr_lang(
-                            language,
-                            "Background Color",
-                            "Background Color",
-                        ));
-                        timer_changed |=
-                            Self::edit_rgba_color(ui, &mut preset.background_color).changed();
-                        ui.end_row();
+                        if preset.show_overlay {
+                            ui.label(Self::tr_lang(
+                                language,
+                                "Background Color",
+                                "Background Color",
+                            ));
+                            timer_changed |=
+                                Self::edit_rgba_color(ui, &mut preset.background_color).changed();
+                            ui.end_row();
 
-                        ui.label(Self::tr_lang(
-                            language,
-                            "Background Opacity",
-                            "Background Opacity",
-                        ));
-                        timer_changed |= ui
-                            .add(
-                                Slider::new(&mut preset.background_opacity, 0.0..=1.0)
-                                    .text("")
-                                    .clamping(egui::SliderClamping::Always),
-                            )
-                            .changed();
-                        ui.end_row();
+                            ui.label(Self::tr_lang(
+                                language,
+                                "Background Opacity",
+                                "Background Opacity",
+                            ));
+                            timer_changed |= ui
+                                .add(
+                                    Slider::new(&mut preset.background_opacity, 0.0..=1.0)
+                                        .text("")
+                                        .clamping(egui::SliderClamping::Always),
+                                )
+                                .changed();
+                            ui.end_row();
 
-                        ui.label(Self::tr_lang(
-                            language,
-                            "Rounded Background",
-                            "Rounded Background",
-                        ));
-                        timer_changed |= ui
-                            .checkbox(
-                                &mut preset.rounded_background,
-                                Self::tr_lang(language, "Rounded corners", "Rounded corners"),
-                            )
-                            .changed();
-                        ui.end_row();
+                            ui.label(Self::tr_lang(
+                                language,
+                                "Rounded Background",
+                                "Rounded Background",
+                            ));
+                            timer_changed |= ui
+                                .checkbox(
+                                    &mut preset.rounded_background,
+                                    Self::tr_lang(language, "Rounded corners", "Rounded corners"),
+                                )
+                                .changed();
+                            ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Preview", "Preview"));
-                        timer_changed |= ui
-                            .checkbox(
-                                &mut preset.preview_enabled,
-                                Self::tr_lang(
-                                    language,
-                                    "Stream preview in editor",
-                                    "Stream preview in editor",
-                                ),
-                            )
-                            .changed();
-                        ui.end_row();
+                            ui.label(Self::tr_lang(language, "Preview", "Preview"));
+                            timer_changed |= ui
+                                .checkbox(
+                                    &mut preset.preview_enabled,
+                                    Self::tr_lang(
+                                        language,
+                                        "Stream preview in editor",
+                                        "Stream preview in editor",
+                                    ),
+                                )
+                                .changed();
+                            ui.end_row();
+                        }
                     });
 
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(Self::tr_lang(
-                        language,
-                        "Position Preview",
-                        "Position Preview",
-                    ))
-                    .strong(),
-                );
-                timer_changed |=
-                    Self::render_timer_rect_editor(ui, (preset.id, "timer-editor"), preset);
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .button(Self::tr_lang(language, "Center X", "Center X"))
-                        .clicked()
-                    {
-                        preset.x =
-                            ((Self::screen_size().x as i32 - preset.width.max(1)) / 2).max(0);
-                        timer_changed = true;
-                    }
-                    if ui
-                        .button(Self::tr_lang(language, "Center Y", "Center Y"))
-                        .clicked()
-                    {
-                        preset.y =
-                            ((Self::screen_size().y as i32 - preset.height.max(1)) / 2).max(0);
-                        timer_changed = true;
-                    }
-                });
+                if preset.show_overlay {
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(Self::tr_lang(
+                            language,
+                            "Position Preview",
+                            "Position Preview",
+                        ))
+                        .strong(),
+                    );
+                    timer_changed |=
+                        Self::render_timer_rect_editor(ui, (preset.id, "timer-editor"), preset);
+                    ui.horizontal_wrapped(|ui| {
+                        if ui
+                            .button(Self::tr_lang(language, "Center X", "Center X"))
+                            .clicked()
+                        {
+                            preset.x =
+                                ((Self::screen_size().x as i32 - preset.width.max(1)) / 2).max(0);
+                            timer_changed = true;
+                        }
+                        if ui
+                            .button(Self::tr_lang(language, "Center Y", "Center Y"))
+                            .clicked()
+                        {
+                            preset.y =
+                                ((Self::screen_size().y as i32 - preset.height.max(1)) / 2).max(0);
+                            timer_changed = true;
+                        }
+                    });
+                }
 
-                if preset.preview_enabled {
+                if preset.show_overlay && preset.preview_enabled {
                     active_timer_preview = Some(preset.clone());
                 }
             });

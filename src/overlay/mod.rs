@@ -20316,6 +20316,18 @@ mod windows_overlay {
                 );
             }
 
+            MacroAction::ReadTimerPreset => {
+                let target_var = step.if_variable_name.trim().to_string();
+                if !target_var.is_empty() {
+                    let t_id = step
+                        .timer_preset_id
+                        .or_else(|| step.key.trim().parse::<u32>().ok());
+                    if let Some(value) = read_timer_preset_value(t_id, &step.key) {
+                        set_variable_value(&target_var, value);
+                    }
+                }
+            }
+
             MacroAction::LockKeys => {
                 apply_lock_keys(
                     &parse_locked_keys(&step.key),
@@ -21071,6 +21083,18 @@ mod windows_overlay {
                         t_id,
                         step.timer_on_complete_macro_preset_id,
                     );
+                }
+
+                MacroAction::ReadTimerPreset => {
+                    let target_var = step.if_variable_name.trim().to_string();
+                    if !target_var.is_empty() {
+                        let t_id = step
+                            .timer_preset_id
+                            .or_else(|| step.key.trim().parse::<u32>().ok());
+                        if let Some(value) = read_timer_preset_value(t_id, &step.key) {
+                            set_variable_value(&target_var, value);
+                        }
+                    }
                 }
 
                 MacroAction::LockKeys => {
@@ -23666,7 +23690,8 @@ mod windows_overlay {
                 | MacroAction::DisableStep
                 | MacroAction::StartTimerPreset
                 | MacroAction::PauseTimerPreset
-                | MacroAction::StopTimerPreset => {}
+                | MacroAction::StopTimerPreset
+                | MacroAction::ReadTimerPreset => {}
 
                 MacroAction::MouseLeftDown => {
                     held_mouse.insert(MacroAction::MouseLeftUp);
@@ -23820,7 +23845,8 @@ mod windows_overlay {
             | MacroAction::DisableStep
             | MacroAction::StartTimerPreset
             | MacroAction::PauseTimerPreset
-            | MacroAction::StopTimerPreset => return Ok(()),
+            | MacroAction::StopTimerPreset
+            | MacroAction::ReadTimerPreset => return Ok(()),
             MacroAction::KeyPress | MacroAction::KeyDown | MacroAction::KeyUp => {}
 
             _ => return Ok(()),
@@ -28589,10 +28615,37 @@ mod windows_overlay {
         for preset in &timer_presets {
             if let Some(state) = active_timers.get(&preset.id) {
                 if state.running || state.elapsed_ms > 0 {
-                    if !presets_to_render.iter().any(|p| p.id == preset.id) {
+                    if preset.show_overlay && !presets_to_render.iter().any(|p| p.id == preset.id) {
                         presets_to_render.push(preset.clone());
                     }
                 }
+            }
+        }
+
+        let mut hidden_timer_ids = HashSet::new();
+        for preset in &timer_presets {
+            if !preset.show_overlay {
+                hidden_timer_ids.insert(preset.id);
+                let _ = if let Some(state) = active_timers.get(&preset.id) {
+                    let elapsed = state.get_elapsed_ms();
+                    if preset.is_countdown {
+                        let total_ms = (preset.duration_secs as u64) * 1000;
+                        if elapsed >= total_ms && state.running {
+                            let mut lock = HOOK_STATE.lock();
+                            let removed_state = lock.active_timers.remove(&preset.id);
+                            drop(lock);
+                            request_ui_repaint();
+                            if let Some(t_state) = removed_state {
+                                if let Some(macro_id) = t_state.on_complete_macro_preset_id {
+                                    spawn_macro_by_preset_id(macro_id, true);
+                                }
+                            }
+                        }
+                    }
+                    Some(())
+                } else {
+                    None
+                };
             }
         }
 
@@ -28701,7 +28754,7 @@ mod windows_overlay {
 
         let mut keys_to_remove = Vec::new();
         for (&preset_id, &hwnd) in &runtime.timer_hwnds {
-            if !active_timer_ids.contains(&preset_id) {
+            if !active_timer_ids.contains(&preset_id) || hidden_timer_ids.contains(&preset_id) {
                 unsafe {
                     let _ = ShowWindow(hwnd, SW_HIDE);
                     let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(hwnd);
@@ -28768,6 +28821,41 @@ mod windows_overlay {
         drop(hook_state);
         wake_command_queue();
         request_ui_repaint();
+    }
+
+    fn read_timer_preset_value(timer_preset_id: Option<u32>, property: &str) -> Option<f64> {
+        let preset_id = timer_preset_id?;
+        let hook_state = HOOK_STATE.lock();
+        let preset = hook_state
+            .timer_presets
+            .iter()
+            .find(|preset| preset.id == preset_id)?;
+        let elapsed = hook_state
+            .active_timers
+            .get(&preset.id)
+            .map(|state| state.get_elapsed_ms())
+            .unwrap_or_default();
+        let current_ms = if preset.is_countdown {
+            let total_ms = (preset.duration_secs as u64) * 1000;
+            total_ms.saturating_sub(elapsed)
+        } else {
+            elapsed
+        };
+        let total_secs = current_ms / 1000;
+        let value = match property.trim().to_ascii_lowercase().as_str() {
+            "total_sec" => total_secs as f64,
+            "minute" | "m" => (total_secs / 60) as f64,
+            "second" | "s" => (total_secs % 60) as f64,
+            "millisecond" | "ms" => {
+                if property.trim().eq_ignore_ascii_case("millisecond") {
+                    (current_ms % 1000) as f64
+                } else {
+                    current_ms as f64
+                }
+            }
+            "raw" | "total_ms" | _ => current_ms as f64,
+        };
+        Some(value)
     }
 
     fn spawn_macro_by_preset_id(preset_id: u32, bypass_enabled: bool) {
@@ -29148,7 +29236,10 @@ mod tests {
         group_b.folder_id = Some(8);
         group_b.presets = vec![MacroPreset::new(20)];
 
-        let outside = macro_presets_outside_scope(&[group_a, group_b], Some(7));
+        let outside = macro_presets_outside_scope(
+            &[group_a, group_b],
+            crate::overlay::MacroFolderScope::Folder(7),
+        );
         assert_eq!(outside, vec![20]);
     }
 }
