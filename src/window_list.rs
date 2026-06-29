@@ -427,11 +427,7 @@ mod windows_impl {
         lparam: LPARAM,
     ) -> BOOL {
         let (target_selector, found) = &mut *(lparam.0 as *mut (&str, &mut Option<HWND>));
-        let clean_selector = strip_rule_suffix(*target_selector);
-        let Some((title, selector)) = visible_window_title_and_selector(hwnd) else {
-            return true.into();
-        };
-        if selector == clean_selector {
+        if exact_selector_window_matches(hwnd, target_selector) {
             **found = Some(hwnd);
             return false.into();
         }
@@ -471,6 +467,14 @@ mod windows_impl {
         let title = unsafe { window_title(hwnd) }?;
         let selector = window_selector(hwnd, &title);
         Some((title, selector))
+    }
+
+    fn exact_selector_window_matches(hwnd: HWND, target_selector: &str) -> bool {
+        let clean_selector = strip_rule_suffix(target_selector);
+        let Some((_, selector)) = visible_window_title_and_selector(hwnd) else {
+            return false;
+        };
+        selector == clean_selector
     }
 
     fn candidate_window_matches(
