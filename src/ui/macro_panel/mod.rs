@@ -5920,18 +5920,10 @@ impl CrosshairApp {
                                                         &mut live_sync,
                                                     );
                                                 } else if step.action == MacroAction::TriggerCommandPreset {
-                                                    let selected_id = step
-                                                        .key
-                                                        .trim()
-                                                        .parse::<u32>()
-                                                        .ok()
-                                                        .or_else(|| {
-                                                            self.state
-                                                                .command_presets
-                                                                .iter()
-                                                                .find(|preset| Self::trimmed_eq_ignore_ascii_case(&preset.name, &step.key))
-                                                                .map(|preset| preset.id)
-                                                        });
+                                                    let selected_id = Self::command_preset_id_from_key(
+                                                        &self.state.command_presets,
+                                                        &step.key,
+                                                    );
                                                     let selected_label = selected_id
                                                         .and_then(|id| {
                                                             self.state
@@ -8100,18 +8092,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         &mut live_sync,
                                                     );
                                                 } else if step.action == MacroAction::TriggerCommandPreset {
-                                                    let selected_id = step
-                                                        .key
-                                                        .trim()
-                                                        .parse::<u32>()
-                                                        .ok()
-                                                        .or_else(|| {
-                                                            self.state
-                                                                .command_presets
-                                                                .iter()
-                                                                .find(|preset| Self::trimmed_eq_ignore_ascii_case(&preset.name, &step.key))
-                                                                .map(|preset| preset.id)
-                                                        });
+                                                    let selected_id = Self::command_preset_id_from_key(
+                                                        &self.state.command_presets,
+                                                        &step.key,
+                                                    );
                                                     let selected_label = selected_id
                                                         .and_then(|id| {
                                                             self.state
@@ -11123,18 +11107,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         &mut live_sync,
                                                     );
                                                 } else if step.action == MacroAction::TriggerCommandPreset {
-                                                    let selected_id = step
-                                                        .key
-                                                        .trim()
-                                                        .parse::<u32>()
-                                                        .ok()
-                                                        .or_else(|| {
-                                                            self.state
-                                                                .command_presets
-                                                                .iter()
-                                                                .find(|preset| Self::trimmed_eq_ignore_ascii_case(&preset.name, &step.key))
-                                                                .map(|preset| preset.id)
-                                                        });
+                                                    let selected_id = Self::command_preset_id_from_key(
+                                                        &self.state.command_presets,
+                                                        &step.key,
+                                                    );
                                                     let selected_label = selected_id
                                                         .and_then(|id| {
                                                             self.state
