@@ -1248,15 +1248,12 @@ impl CrosshairApp {
                     .iter_mut()
                     .find(|g| g.id == group_id)
                 {
-                    if let Some(target_id) = insert_after_preset_id {
-                        if let Some(idx) = group.presets.iter().position(|p| p.id == target_id) {
-                            group.presets.insert(idx + 1, preset);
-                        } else {
-                            group.presets.push(preset);
-                        }
-                    } else {
-                        group.presets.push(preset);
-                    }
+                    Self::insert_after_id_or_push(
+                        &mut group.presets,
+                        insert_after_preset_id,
+                        preset,
+                        |preset| preset.id,
+                    );
                     self.persist_reconciled_macro_presets();
                     self.status = Self::tr_lang(
                         self.state.ui_language,
@@ -1335,20 +1332,12 @@ impl CrosshairApp {
                     }
                 }
 
-                if let Some(target_id) = insert_after_group_id {
-                    if let Some(idx) = self
-                        .state
-                        .macro_groups
-                        .iter()
-                        .position(|g| g.id == target_id)
-                    {
-                        self.state.macro_groups.insert(idx + 1, group);
-                    } else {
-                        self.state.macro_groups.push(group);
-                    }
-                } else {
-                    self.state.macro_groups.push(group);
-                }
+                Self::insert_after_id_or_push(
+                    &mut self.state.macro_groups,
+                    insert_after_group_id,
+                    group,
+                    |group| group.id,
+                );
                 self.pending_macro_group_scroll_target = Some(id);
                 self.persist_reconciled_macro_presets();
                 self.status = Self::tr_lang(
@@ -1518,6 +1507,23 @@ impl CrosshairApp {
         items.iter()
             .position(|item| id_of(item) == id)
             .unwrap_or(usize::MAX)
+    }
+
+    fn insert_after_id_or_push<T, F>(
+        items: &mut Vec<T>,
+        insert_after_id: Option<u32>,
+        item: T,
+        id_of: F,
+    ) where
+        F: Fn(&T) -> u32,
+    {
+        if let Some(target_id) = insert_after_id
+            && let Some(idx) = items.iter().position(|existing| id_of(existing) == target_id)
+        {
+            items.insert(idx + 1, item);
+        } else {
+            items.push(item);
+        }
     }
 
     fn allocate_next_sound_library_item_id(&mut self) -> u32 {
