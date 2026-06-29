@@ -1549,6 +1549,37 @@ impl CrosshairApp {
             .unwrap_or_else(|| Self::tr_lang(language, "Select timer", "Select timer").to_owned())
     }
 
+    fn option_label_by_id(
+        options: &[(u32, String)],
+        selected_id: Option<u32>,
+        fallback: &'static str,
+        language: UiLanguage,
+    ) -> String {
+        selected_id
+            .and_then(|id| {
+                options
+                    .iter()
+                    .find(|(option_id, _)| *option_id == id)
+                    .map(|(_, label)| label.clone())
+            })
+            .unwrap_or_else(|| Self::tr_lang(language, fallback, fallback).to_owned())
+    }
+
+    fn vision_preset_selected_label(
+        vision_presets: &[crate::model::VisionPreset],
+        selected_id: Option<u32>,
+        language: UiLanguage,
+    ) -> String {
+        selected_id
+            .and_then(|id| {
+                vision_presets
+                    .iter()
+                    .find(|preset| preset.id == id)
+                    .map(|preset| preset.name.clone())
+            })
+            .unwrap_or_else(|| Self::tr_lang(language, "Select preset", "Select preset").to_owned())
+    }
+
     fn ordered_id_index<T, F>(items: &[T], id: u32, id_of: F) -> usize
     where
         F: Fn(&T) -> u32,
