@@ -2234,6 +2234,11 @@ impl CrosshairApp {
         crate::overlay::wake_command_queue();
     }
 
+    pub(crate) fn finish_image_search_capture_cleanup(&mut self, ctx: &egui::Context) {
+        self.clear_image_search_capture_state();
+        self.restore_image_search_capture_window(ctx);
+    }
+
     pub(crate) fn cancel_image_search_capture_with_status(
         &mut self,
         ctx: &egui::Context,
@@ -2268,6 +2273,34 @@ impl CrosshairApp {
             ),
             Err(error) => format!("Captured template but could not save it: {error}"),
         }
+    }
+
+    fn sample_image_search_color(&self, screen_x: i32, screen_y: i32) -> Option<RgbaColor> {
+        if let Some(ref frame) = self.captured_freeze_frame {
+            let rx = screen_x - frame.screen_x;
+            let ry = screen_y - frame.screen_y;
+            if rx >= 0 && rx < frame.width as i32 && ry >= 0 && ry < frame.height as i32 {
+                let index = ((ry as usize * frame.width) + rx as usize) * 4;
+                if index + 3 < frame.rgba.len() {
+                    return Some(RgbaColor {
+                        r: frame.rgba[index],
+                        g: frame.rgba[index + 1],
+                        b: frame.rgba[index + 2],
+                        a: 255,
+                    });
+                }
+            }
+            return None;
+        }
+
+        window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1).and_then(|f| {
+            (f.rgba.len() >= 4).then(|| RgbaColor {
+                r: f.rgba[0],
+                g: f.rgba[1],
+                b: f.rgba[2],
+                a: 255,
+            })
+        })
     }
 
     pub(crate) fn apply_image_search_region(
@@ -2617,38 +2650,10 @@ impl CrosshairApp {
         let color = if priority_anchor {
             None
         } else {
-            if let Some(ref frame) = self.captured_freeze_frame {
-                let rx = screen_x - frame.screen_x;
-                let ry = screen_y - frame.screen_y;
-                if rx >= 0 && rx < frame.width as i32 && ry >= 0 && ry < frame.height as i32 {
-                    let index = ((ry as usize * frame.width) + rx as usize) * 4;
-                    if index + 3 < frame.rgba.len() {
-                        Some(RgbaColor {
-                            r: frame.rgba[index],
-                            g: frame.rgba[index + 1],
-                            b: frame.rgba[index + 2],
-                            a: 255,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1).and_then(|f| {
-                    (f.rgba.len() >= 4).then(|| RgbaColor {
-                        r: f.rgba[0],
-                        g: f.rgba[1],
-                        b: f.rgba[2],
-                        a: 255,
-                    })
-                })
-            }
+            self.sample_image_search_color(screen_x, screen_y)
         };
 
-        self.clear_image_search_capture_state();
-        self.restore_image_search_capture_window(ctx);
+        self.finish_image_search_capture_cleanup(ctx);
 
         self.finish_image_search_point_capture_command(
             ctx,
@@ -2672,38 +2677,9 @@ impl CrosshairApp {
             return;
         };
 
-        let color = if let Some(ref frame) = self.captured_freeze_frame {
-            let rx = screen_x - frame.screen_x;
-            let ry = screen_y - frame.screen_y;
-            if rx >= 0 && rx < frame.width as i32 && ry >= 0 && ry < frame.height as i32 {
-                let index = ((ry as usize * frame.width) + rx as usize) * 4;
-                if index + 3 < frame.rgba.len() {
-                    Some(RgbaColor {
-                        r: frame.rgba[index],
-                        g: frame.rgba[index + 1],
-                        b: frame.rgba[index + 2],
-                        a: 255,
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            let capture = window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1);
-            capture.and_then(|f| {
-                (f.rgba.len() >= 4).then(|| RgbaColor {
-                    r: f.rgba[0],
-                    g: f.rgba[1],
-                    b: f.rgba[2],
-                    a: 255,
-                })
-            })
-        };
+        let color = self.sample_image_search_color(screen_x, screen_y);
 
-        self.clear_image_search_capture_state();
-        self.restore_image_search_capture_window(ctx);
+        self.finish_image_search_capture_cleanup(ctx);
 
         let Some(color) = color else {
             self.status = "Failed to sample the selected screen color.".to_owned();
@@ -2729,8 +2705,7 @@ impl CrosshairApp {
             return;
         };
 
-        self.clear_image_search_capture_state();
-        self.restore_image_search_capture_window(ctx);
+        self.finish_image_search_capture_cleanup(ctx);
 
         self.status = self.apply_image_search_priority_anchor(target, screen_x, screen_y);
         self.persist();
@@ -2744,8 +2719,7 @@ impl CrosshairApp {
         screen_x: i32,
         screen_y: i32,
     ) {
-        self.clear_image_search_capture_state();
-        self.restore_image_search_capture_window(ctx);
+        self.finish_image_search_capture_cleanup(ctx);
 
         if let Some(preset) = self
             .state
