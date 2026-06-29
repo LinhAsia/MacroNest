@@ -169,7 +169,7 @@ impl AppPaths {
             let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
                 continue;
             };
-            if !file_name.starts_with("state-recovery-") || !file_name.ends_with(".json") {
+            if !is_state_recovery_file_name(file_name) {
                 continue;
             }
             let modified = entry
@@ -671,9 +671,7 @@ impl AppPaths {
                     let path = entry.path();
                     if path.is_file() {
                         if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                            if file_name.starts_with("state-recovery-")
-                                && file_name.ends_with(".json")
-                            {
+                            if is_state_recovery_file_name(file_name) {
                                 let _ = fs::remove_file(path);
                             }
                         }
@@ -713,7 +711,7 @@ impl AppPaths {
         for entry in fs::read_dir(&self.profiles_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            if !is_json_file_path(&path) {
                 continue;
             }
             let content = fs::read_to_string(&path)
@@ -731,7 +729,7 @@ impl AppPaths {
         for entry in fs::read_dir(&self.profiles_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            if is_json_file_path(&path) {
                 let _ = fs::remove_file(path);
             }
         }
@@ -757,6 +755,14 @@ fn write_text_file(path: &Path, content: &str) -> Result<()> {
         .with_context(|| format!("Failed to write {}", path.display()))?;
     file.sync_all().ok();
     Ok(())
+}
+
+fn is_json_file_path(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("json")
+}
+
+fn is_state_recovery_file_name(file_name: &str) -> bool {
+    file_name.starts_with("state-recovery-") && file_name.ends_with(".json")
 }
 
 fn sanitize_name(name: &str) -> String {
