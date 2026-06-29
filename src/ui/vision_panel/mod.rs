@@ -1616,9 +1616,7 @@ impl CrosshairApp {
                 let width = (start_x - screen_x).abs();
                 let height = (start_y - screen_y).abs();
                 if width >= 2 && height >= 2 {
-                    let Some(target) = self.vision_capture_target else {
-                        self.cancel_image_search_capture(ctx);
-                        self.status = "No image search preset is active.".to_owned();
+                    let Some(target) = self.vision_capture_target_or_cancel(ctx) else {
                         return;
                     };
                     match target {
@@ -1680,8 +1678,7 @@ impl CrosshairApp {
             VisionCaptureMode::ColorSample
             | VisionCaptureMode::ColorPriorityAnchor
             | VisionCaptureMode::SinglePixel => {
-                let Some(target) = self.vision_capture_target else {
-                    self.cancel_image_search_capture_with_status(ctx, "No image search preset is active.");
+                let Some(target) = self.vision_capture_target_or_cancel(ctx) else {
                     return;
                 };
                 match target {
@@ -2042,8 +2039,7 @@ impl CrosshairApp {
     }
 
     pub(crate) fn finish_image_search_capture(&mut self, ctx: &egui::Context, rect: egui::Rect) {
-        let Some(target) = self.vision_capture_target else {
-            self.cancel_image_search_capture_with_status(ctx, "No image search preset is active.");
+        let Some(target) = self.vision_capture_target_or_cancel(ctx) else {
             return;
         };
         let mode = self
@@ -2250,6 +2246,17 @@ impl CrosshairApp {
     pub(crate) fn finish_image_search_capture_cleanup(&mut self, ctx: &egui::Context) {
         self.clear_image_search_capture_state();
         self.restore_image_search_capture_window(ctx);
+    }
+
+    fn vision_capture_target_or_cancel(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> Option<VisionCaptureTarget> {
+        let Some(target) = self.vision_capture_target else {
+            self.cancel_image_search_capture_with_status(ctx, "No image search preset is active.");
+            return None;
+        };
+        Some(target)
     }
 
     pub(crate) fn cancel_image_search_capture_with_status(
@@ -2701,8 +2708,7 @@ impl CrosshairApp {
         screen_x: i32,
         screen_y: i32,
     ) {
-        let Some(target) = self.vision_capture_target else {
-            self.cancel_image_search_capture_with_status(ctx, "No image search preset is active.");
+        let Some(target) = self.vision_capture_target_or_cancel(ctx) else {
             return;
         };
 
@@ -2726,8 +2732,7 @@ impl CrosshairApp {
         screen_x: i32,
         screen_y: i32,
     ) {
-        let Some(target) = self.vision_capture_target else {
-            self.cancel_image_search_capture_with_status(ctx, "No image search preset is active.");
+        let Some(target) = self.vision_capture_target_or_cancel(ctx) else {
             return;
         };
 
@@ -2837,8 +2842,7 @@ impl CrosshairApp {
     }
 
     pub(crate) fn finish_image_search_color_pick(&mut self, ctx: &egui::Context, pos: egui::Pos2) {
-        let Some(target) = self.vision_capture_target else {
-            self.cancel_image_search_capture_with_status(ctx, "No image search preset is active.");
+        let Some(target) = self.vision_capture_target_or_cancel(ctx) else {
             return;
         };
 
@@ -2878,8 +2882,7 @@ impl CrosshairApp {
         ctx: &egui::Context,
         pos: egui::Pos2,
     ) {
-        let Some(target) = self.vision_capture_target else {
-            self.cancel_image_search_capture_with_status(ctx, "No image search preset is active.");
+        let Some(target) = self.vision_capture_target_or_cancel(ctx) else {
             return;
         };
 
