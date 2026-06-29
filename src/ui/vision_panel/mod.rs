@@ -2033,12 +2033,7 @@ impl CrosshairApp {
             .vision_capture_mode
             .unwrap_or(VisionCaptureMode::Template);
 
-        self.vision_capture_active = false;
-        self.vision_capture_target = None;
-        self.vision_capture_mode = None;
-        self.vision_capture_anchor = None;
-        self.vision_capture_current = None;
-        self.vision_capture_screen_region_preview = None;
+        self.clear_image_search_capture_state();
         match mode {
             VisionCaptureMode::Template => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
