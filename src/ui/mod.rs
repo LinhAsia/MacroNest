@@ -561,7 +561,7 @@ pub struct CrosshairApp {
     last_synced_macro_delays: Option<(u32, u32)>,
     last_synced_focus_highlight_config: Option<(RgbaColor, FocusHighlightDecoration)>,
     last_synced_quick_key_display_config:
-        Option<(bool, i32, i32, f32, QuickKeyDisplayMode, MascotStyle)>,
+        Option<(bool, i32, i32, f32, QuickKeyDisplayMode, MascotStyle, Vec<MascotStyle>)>,
     last_synced_quick_screen_draw_config:
         Option<(bool, Option<HotkeyBinding>, bool, RgbaColor, f32, bool, f32, bool)>,
     last_synced_quick_key_sound_config: Option<(bool, u32, f32)>,
@@ -4494,43 +4494,70 @@ impl CrosshairApp {
                                             ))
                                             .size(10.0),
                                         );
-                                        let style_before =
-                                            self.state.quick_key_display_mascot_style;
+                                        if self.state.quick_key_display_mascot_styles.is_empty() {
+                                            self.state
+                                                .quick_key_display_mascot_styles
+                                                .push(self.state.quick_key_display_mascot_style);
+                                        }
+                                        let styles_before =
+                                            self.state.quick_key_display_mascot_styles.clone();
+                                        let mascot_options = [
+                                            (crate::model::MascotStyle::Hachiware, "Hachiware"),
+                                            (crate::model::MascotStyle::ChiikawaClassic, "Usagi"),
+                                            (crate::model::MascotStyle::Gugugaga, "Gugugaga"),
+                                        ];
+                                        let selected_text = mascot_options
+                                            .iter()
+                                            .filter(|(style, _)| {
+                                                self.state
+                                                    .quick_key_display_mascot_styles
+                                                    .contains(style)
+                                            })
+                                            .map(|(_, label)| *label)
+                                            .collect::<Vec<_>>()
+                                            .join(", ");
 
                                         egui::ComboBox::from_id_salt(
                                             "quick-key-display-mascot-style",
                                         )
                                         .width(164.0)
-                                        .selected_text(
-                                            match self.state.quick_key_display_mascot_style {
-                                                crate::model::MascotStyle::Hachiware => "Hachiware",
-                                                crate::model::MascotStyle::ChiikawaClassic => {
-                                                    "Usagi"
+                                        .selected_text(if selected_text.is_empty() {
+                                            "Select presets"
+                                        } else {
+                                            selected_text.as_str()
+                                        })
+                                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                        .show_ui(ui, |ui| {
+                                            for (style, label) in mascot_options {
+                                                let mut selected = self
+                                                    .state
+                                                    .quick_key_display_mascot_styles
+                                                    .contains(&style);
+                                                if ui.checkbox(&mut selected, label).changed() {
+                                                    if selected {
+                                                        self.state
+                                                            .quick_key_display_mascot_styles
+                                                            .push(style);
+                                                    } else {
+                                                        self.state
+                                                            .quick_key_display_mascot_styles
+                                                            .retain(|entry| *entry != style);
+                                                    }
                                                 }
-                                                crate::model::MascotStyle::Gugugaga => "Gugugaga",
-                                            },
-                                        )
-                                        .show_ui(
-                                            ui,
-                                            |ui| {
-                                                ui.selectable_value(
-                                                    &mut self.state.quick_key_display_mascot_style,
-                                                    crate::model::MascotStyle::Hachiware,
-                                                    "Hachiware",
-                                                );
-                                                ui.selectable_value(
-                                                    &mut self.state.quick_key_display_mascot_style,
-                                                    crate::model::MascotStyle::ChiikawaClassic,
-                                                    "Usagi",
-                                                );
-                                                ui.selectable_value(
-                                                    &mut self.state.quick_key_display_mascot_style,
-                                                    crate::model::MascotStyle::Gugugaga,
-                                                    "Gugugaga",
-                                                );
-                                            },
-                                        );
-                                        if self.state.quick_key_display_mascot_style != style_before
+                                            }
+                                        });
+                                        if self.state.quick_key_display_mascot_styles.is_empty() {
+                                            self.state
+                                                .quick_key_display_mascot_styles
+                                                .push(self.state.quick_key_display_mascot_style);
+                                        }
+                                        if let Some(first_style) =
+                                            self.state.quick_key_display_mascot_styles.first().copied()
+                                        {
+                                            self.state.quick_key_display_mascot_style = first_style;
+                                        }
+                                        if self.state.quick_key_display_mascot_styles
+                                            != styles_before
                                         {
                                             self.sync_quick_key_display_config();
                                             self.persist();

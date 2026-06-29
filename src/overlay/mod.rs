@@ -1740,6 +1740,7 @@ mod windows_overlay {
             size: f32,
             mode: QuickKeyDisplayMode,
             mascot_style: crate::model::MascotStyle,
+            mascot_styles: Vec<crate::model::MascotStyle>,
         },
         ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
@@ -2427,6 +2428,7 @@ mod windows_overlay {
         is_mouse_moving: bool,
         recent_pulse_active: bool,
         mascot_style: crate::model::MascotStyle,
+        mascot_styles: Vec<crate::model::MascotStyle>,
         font_size: f32,
         window_rect: (i32, i32, i32, i32),
         spam_heat_discrete: i32,
@@ -2453,6 +2455,7 @@ mod windows_overlay {
         focus_highlight_hwnd: HWND,
         hud_hwnd: HWND,
         key_display_hwnd: HWND,
+        key_display_extra_hwnds: Vec<HWND>,
         screen_draw_hwnd: HWND,
         pin_hwnd: HWND,
         last_pin_update: Instant,
@@ -2463,6 +2466,7 @@ mod windows_overlay {
         quick_key_display_size: f32,
         quick_key_display_mode: QuickKeyDisplayMode,
         quick_key_display_mascot_style: crate::model::MascotStyle,
+        quick_key_display_mascot_styles: Vec<crate::model::MascotStyle>,
         quick_key_display_entries: Vec<QuickKeyDisplayEntry>,
         quick_key_display_slot_memory: HashMap<String, usize>,
         quick_key_display_slot_labels: HashMap<(QuickKeyDisplayLane, usize), String>,
@@ -3135,6 +3139,27 @@ mod windows_overlay {
                 Some(instance),
                 None,
             )?;
+            let mut key_display_extra_hwnds = Vec::new();
+            for title in [w!("CrosshairKeyDisplayExtra1"), w!("CrosshairKeyDisplayExtra2")] {
+                key_display_extra_hwnds.push(CreateWindowExW(
+                    WS_EX_LAYERED
+                        | WS_EX_TOOLWINDOW
+                        | WS_EX_TOPMOST
+                        | WS_EX_NOACTIVATE
+                        | WS_EX_TRANSPARENT,
+                    w!("CrosshairToolbox"),
+                    title,
+                    WS_POPUP,
+                    0,
+                    0,
+                    160,
+                    64,
+                    None,
+                    None,
+                    Some(instance),
+                    None,
+                )?);
+            }
             let screen_draw_hwnd = CreateWindowExW(
                 WS_EX_LAYERED
                     | WS_EX_TOOLWINDOW
@@ -3216,6 +3241,7 @@ mod windows_overlay {
                 focus_highlight_hwnd,
                 hud_hwnd,
                 key_display_hwnd,
+                key_display_extra_hwnds,
                 screen_draw_hwnd,
                 pin_hwnd,
                 last_pin_update: Instant::now() - Duration::from_secs(1),
@@ -3226,6 +3252,7 @@ mod windows_overlay {
                 quick_key_display_size: 36.0,
                 quick_key_display_mode: QuickKeyDisplayMode::Normal,
                 quick_key_display_mascot_style: crate::model::MascotStyle::Hachiware,
+                quick_key_display_mascot_styles: vec![crate::model::MascotStyle::Hachiware],
                 quick_key_display_entries: Vec::new(),
                 quick_key_display_slot_memory: HashMap::new(),
                 quick_key_display_slot_labels: HashMap::new(),
@@ -4064,7 +4091,7 @@ mod windows_overlay {
                     let _ = DestroyMenu(runtime.tray_menu);
                     let _ = ShowWindow(runtime.overlay_hwnd, SW_HIDE);
                     let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
-                    let _ = ShowWindow(runtime.key_display_hwnd, SW_HIDE);
+                    hide_quick_key_display_windows(runtime);
                     let _ = ShowWindow(runtime.screen_draw_hwnd, SW_HIDE);
                     let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
                     let _ = set_window_focus_event_hook_enabled(runtime, false);
@@ -6844,7 +6871,7 @@ mod windows_overlay {
         let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
         let current_ms = unsafe { GetTickCount() };
         let elapsed_ms = current_ms.wrapping_sub(last_move_ms);
-        let mouse_move_strength = (1.0 - (elapsed_ms as f32 / 700.0)).clamp(0.0, 1.0);
+        let mouse_move_strength = (1.0 - (elapsed_ms as f32 / 1200.0)).clamp(0.0, 1.0);
         let mouse_wiggle_x = (time_s * 22.0 + side * 2.5).sin() * 5.8 * scale * mouse_move_strength;
         let mouse_wiggle_y =
             (time_s * 22.0 + side * 2.5 + 1.5).sin() * 2.2 * scale * mouse_move_strength;
@@ -7460,10 +7487,56 @@ mod windows_overlay {
         runtime.quick_key_display_last_cursor_pos = Some(cursor);
     }
 
+    fn quick_key_display_active_mascot_styles(
+        runtime: &Runtime,
+    ) -> Vec<crate::model::MascotStyle> {
+        let mut styles = if runtime.quick_key_display_mascot_styles.is_empty() {
+            vec![runtime.quick_key_display_mascot_style]
+        } else {
+            runtime.quick_key_display_mascot_styles.clone()
+        };
+        styles.dedup();
+        styles.truncate(1 + runtime.key_display_extra_hwnds.len());
+        styles
+    }
+
+    fn quick_key_display_hwnds(runtime: &Runtime) -> Vec<HWND> {
+        let mut hwnds = Vec::with_capacity(1 + runtime.key_display_extra_hwnds.len());
+        hwnds.push(runtime.key_display_hwnd);
+        hwnds.extend(runtime.key_display_extra_hwnds.iter().copied());
+        hwnds
+    }
+
+    unsafe fn hide_quick_key_display_windows(runtime: &Runtime) {
+        for hwnd in quick_key_display_hwnds(runtime) {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+
+    fn quick_key_display_mascot_group_layout(
+        font_size: f32,
+        styles: &[crate::model::MascotStyle],
+    ) -> (i32, i32, Vec<(crate::model::MascotStyle, i32, i32)>) {
+        let gap = (font_size * 0.25).round() as i32;
+        let mut total_width = 0;
+        let mut max_height = 0;
+        let mut items = Vec::new();
+        for &style in styles {
+            let (width, height) = quick_key_display_mascot_layout_size(font_size, style);
+            if !items.is_empty() {
+                total_width += gap;
+            }
+            total_width += width;
+            max_height = max_height.max(height);
+            items.push((style, width, height));
+        }
+        (total_width.max(1), max_height.max(1), items)
+    }
+
     fn move_quick_key_display_window(runtime: &Runtime) {
         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
-        let (width, height) =
-            quick_key_display_mascot_layout_size(font_size, runtime.quick_key_display_mascot_style);
+        let styles = quick_key_display_active_mascot_styles(runtime);
+        let (width, height, _) = quick_key_display_mascot_group_layout(font_size, &styles);
         let x = runtime.quick_key_display_center_x - (width / 2);
         let y = runtime.quick_key_display_center_y - (height / 2);
         let _ = unsafe {
@@ -8290,6 +8363,7 @@ mod windows_overlay {
                     size,
                     mode,
                     mascot_style,
+                    mascot_styles,
                 } => {
                     runtime.quick_key_display_enabled = enabled;
                     runtime.quick_key_display_center_x = center_x;
@@ -8297,6 +8371,11 @@ mod windows_overlay {
                     runtime.quick_key_display_size = size.clamp(18.0, 96.0);
                     runtime.quick_key_display_mode = mode;
                     runtime.quick_key_display_mascot_style = mascot_style;
+                    runtime.quick_key_display_mascot_styles = if mascot_styles.is_empty() {
+                        vec![mascot_style]
+                    } else {
+                        mascot_styles
+                    };
                     {
                         let mut hook_state = HOOK_STATE.lock();
                         hook_state.quick_key_mascot_active =
@@ -8309,6 +8388,7 @@ mod windows_overlay {
                         runtime.quick_key_display_mouse_offset = (0.0, 0.0);
                         runtime.quick_key_display_mouse_velocity = (0.0, 0.0);
                         runtime.quick_key_display_last_cursor_pos = None;
+                        hide_quick_key_display_windows(runtime);
                     }
                     let mut ex_style = GetWindowLongW(runtime.key_display_hwnd, GWL_EXSTYLE) as u32;
                     if enabled && mode == QuickKeyDisplayMode::Mascot {
@@ -8317,6 +8397,9 @@ mod windows_overlay {
                         ex_style |= WS_EX_TRANSPARENT.0;
                     }
                     let _ = SetWindowLongW(runtime.key_display_hwnd, GWL_EXSTYLE, ex_style as i32);
+                    for hwnd in &runtime.key_display_extra_hwnds {
+                        let _ = SetWindowLongW(*hwnd, GWL_EXSTYLE, ex_style as i32);
+                    }
                     let _ = SetWindowPos(
                         runtime.key_display_hwnd,
                         None,
@@ -8326,6 +8409,21 @@ mod windows_overlay {
                         0,
                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
                     );
+                    for hwnd in &runtime.key_display_extra_hwnds {
+                        let _ = SetWindowPos(
+                            *hwnd,
+                            None,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE
+                                | SWP_NOSIZE
+                                | SWP_NOZORDER
+                                | SWP_FRAMECHANGED
+                                | SWP_NOACTIVATE,
+                        );
+                    }
                     let _ = refresh_quick_key_display(runtime);
                     unsafe {
                         refresh_overlay_timer(runtime.overlay_hwnd, runtime);
@@ -8523,7 +8621,7 @@ mod windows_overlay {
                         runtime.quick_key_display_entries.clear();
                         runtime.quick_key_display_slot_memory.clear();
                         runtime.quick_key_display_slot_labels.clear();
-                        let _ = ShowWindow(runtime.key_display_hwnd, SW_HIDE);
+                        hide_quick_key_display_windows(runtime);
                         let _ = ShowWindow(runtime.mouse_trail_hwnd, SW_HIDE);
                         apply_ui_foreground_state(runtime, ui_foreground);
                     } else {
@@ -8591,7 +8689,7 @@ mod windows_overlay {
             runtime.quick_key_display_entries.clear();
             runtime.quick_key_display_slot_memory.clear();
             runtime.quick_key_display_slot_labels.clear();
-            let _ = ShowWindow(runtime.key_display_hwnd, SW_HIDE);
+            hide_quick_key_display_windows(runtime);
             let _ = ShowWindow(runtime.mouse_trail_hwnd, SW_HIDE);
         } else {
             clear_transient_input_state();
@@ -8805,7 +8903,7 @@ mod windows_overlay {
 
         if screen_draw_active {
             runtime.quick_key_display_last_mascot_state = None;
-            let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
+            unsafe { hide_quick_key_display_windows(runtime) };
             return Ok(());
         }
 
@@ -8814,7 +8912,7 @@ mod windows_overlay {
             runtime.quick_key_display_slot_memory.clear();
             runtime.quick_key_display_slot_labels.clear();
             runtime.quick_key_display_last_mascot_state = None;
-            let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
+            unsafe { hide_quick_key_display_windows(runtime) };
             return Ok(());
         }
 
@@ -8827,7 +8925,7 @@ mod windows_overlay {
             runtime.quick_key_display_slot_memory.clear();
             runtime.quick_key_display_slot_labels.clear();
             runtime.quick_key_display_last_mascot_state = None;
-            let _ = unsafe { ShowWindow(runtime.key_display_hwnd, SW_HIDE) };
+            unsafe { hide_quick_key_display_windows(runtime) };
             return Ok(());
         }
 
@@ -8838,14 +8936,16 @@ mod windows_overlay {
         let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
         let entries = runtime.quick_key_display_entries.clone();
         let slot_labels = runtime.quick_key_display_slot_labels.clone();
+        let mascot_styles = quick_key_display_active_mascot_styles(runtime);
         let (width, height) = match runtime.quick_key_display_mode {
             QuickKeyDisplayMode::Normal => {
                 quick_key_display_layout_size(&entries, &slot_labels, font_size)
             }
-            QuickKeyDisplayMode::Mascot => quick_key_display_mascot_layout_size(
-                font_size,
-                runtime.quick_key_display_mascot_style,
-            ),
+            QuickKeyDisplayMode::Mascot => {
+                let (width, height, _) =
+                    quick_key_display_mascot_group_layout(font_size, &mascot_styles);
+                (width, height)
+            }
         };
         if runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot {
             let (center_x, center_y) = clamp_mascot_center_to_screen(
@@ -8872,7 +8972,9 @@ mod windows_overlay {
             let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
             let current_ms = unsafe { GetTickCount() };
             // Retain the hand on the mouse long enough to avoid one-frame key target flicker.
-            let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 700;
+            let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 1200
+                || runtime.quick_key_display_mouse_offset.0.abs() > 0.5
+                || runtime.quick_key_display_mouse_offset.1.abs() > 0.5;
 
             let recent_pulse = entries.iter().fold(0.0f32, |acc, entry| {
                 let age = now
@@ -8889,6 +8991,7 @@ mod windows_overlay {
                 is_mouse_moving,
                 recent_pulse_active: recent_pulse > 0.0,
                 mascot_style: runtime.quick_key_display_mascot_style,
+                mascot_styles: mascot_styles.clone(),
                 font_size,
                 window_rect: (x, y, width, height),
                 spam_heat_discrete: (runtime.quick_key_display_spam_heat * 50.0).round() as i32,
@@ -8906,28 +9009,49 @@ mod windows_overlay {
 
         unsafe {
             match runtime.quick_key_display_mode {
-                QuickKeyDisplayMode::Normal => paint_quick_key_display(
-                    runtime.key_display_hwnd,
-                    &entries,
-                    &slot_labels,
-                    font_size,
-                    x,
-                    y,
-                    width,
-                    height,
-                ),
-                QuickKeyDisplayMode::Mascot => paint_mascot_quick_key_display(
-                    runtime.key_display_hwnd,
-                    &entries,
-                    font_size,
-                    runtime.quick_key_display_mouse_offset,
-                    runtime.quick_key_display_mascot_style,
-                    x,
-                    y,
-                    width,
-                    height,
-                    runtime.quick_key_display_spam_heat,
-                ),
+                QuickKeyDisplayMode::Normal => {
+                    for hwnd in &runtime.key_display_extra_hwnds {
+                        let _ = ShowWindow(*hwnd, SW_HIDE);
+                    }
+                    paint_quick_key_display(
+                        runtime.key_display_hwnd,
+                        &entries,
+                        &slot_labels,
+                        font_size,
+                        x,
+                        y,
+                        width,
+                        height,
+                    )
+                }
+                QuickKeyDisplayMode::Mascot => {
+                    let (_, group_height, items) =
+                        quick_key_display_mascot_group_layout(font_size, &mascot_styles);
+                    let hwnds = quick_key_display_hwnds(runtime);
+                    let gap = (font_size * 0.25).round() as i32;
+                    let mut item_x = x;
+                    for (index, (style, item_width, item_height)) in items.iter().copied().enumerate()
+                    {
+                        let item_y = y + (group_height - item_height) / 2;
+                        paint_mascot_quick_key_display(
+                            hwnds[index],
+                            &entries,
+                            font_size,
+                            runtime.quick_key_display_mouse_offset,
+                            style,
+                            item_x,
+                            item_y,
+                            item_width,
+                            item_height,
+                            runtime.quick_key_display_spam_heat,
+                        )?;
+                        item_x += item_width + gap;
+                    }
+                    for hwnd in hwnds.iter().skip(items.len()) {
+                        let _ = ShowWindow(*hwnd, SW_HIDE);
+                    }
+                    Ok(())
+                }
             }
         }
     }
@@ -17427,8 +17551,11 @@ mod windows_overlay {
         // Mouse active state tracking
         let last_move_ms = LAST_MOUSE_MOVE_TIME_MS.load(Ordering::Relaxed) as u32;
         // Retain the hand on the mouse long enough to avoid one-frame key target flicker.
-        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 700;
-        let mouse_active = is_mouse_moving || !held_mouse_buttons.is_empty();
+        let is_mouse_moving = current_ms.wrapping_sub(last_move_ms) < 1200;
+        let mouse_active = is_mouse_moving
+            || !held_mouse_buttons.is_empty()
+            || mouse_offset.0.abs() > 0.5
+            || mouse_offset.1.abs() > 0.5;
 
         let mouse_flat_x = mouse_pad_left + 19.0 + mouse_offset.0 * 0.7;
         let mouse_flat_y = keyboard_top + 23.0 + mouse_offset.1 * 0.56;
@@ -28338,6 +28465,7 @@ mod fallback {
             size: f32,
             mode: QuickKeyDisplayMode,
             mascot_style: MascotStyle,
+            mascot_styles: Vec<MascotStyle>,
         },
         ShowQuickKeyDisplay(QuickKeyDisplayUpdate),
         UpdateScreenDrawConfig {
