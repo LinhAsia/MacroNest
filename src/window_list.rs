@@ -444,7 +444,7 @@ mod windows_impl {
         true.into()
     }
 
-    fn window_selector(hwnd: HWND, title: &str) -> String {
+    pub fn window_selector(hwnd: HWND, title: &str) -> String {
         format!("{title} (0x{:X})", hwnd.0 as usize)
     }
 
