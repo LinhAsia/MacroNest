@@ -1953,18 +1953,18 @@ impl CrosshairApp {
 
     pub(crate) fn vision_capture_target_name(&self, target: VisionCaptureTarget) -> Option<String> {
         match target {
-            VisionCaptureTarget::Preset(preset_id) => self
-                .state
-                .vision_presets
-                .iter()
-                .find(|preset| preset.id == preset_id)
-                .map(|preset| preset.name.clone()),
-            VisionCaptureTarget::OcrPreset(preset_id) => self
-                .state
-                .ocr_presets
-                .iter()
-                .find(|preset| preset.id == preset_id)
-                .map(|preset| preset.name.clone()),
+            VisionCaptureTarget::Preset(preset_id) => Self::named_item_name_by_id(
+                &self.state.vision_presets,
+                Some(preset_id),
+                |preset| preset.id,
+                |preset| &preset.name,
+            ),
+            VisionCaptureTarget::OcrPreset(preset_id) => Self::named_item_name_by_id(
+                &self.state.ocr_presets,
+                Some(preset_id),
+                |preset| preset.id,
+                |preset| &preset.name,
+            ),
             VisionCaptureTarget::GeometryColor => Some("Geometry Color".to_owned()),
             VisionCaptureTarget::OcrStepRegion { .. } => Some("Custom OCR".to_owned()),
             VisionCaptureTarget::MacroStepGeometryColor { .. } => {
@@ -1994,12 +1994,11 @@ impl CrosshairApp {
 
     pub(crate) fn vision_capture_target_is_circle(&self, target: VisionCaptureTarget) -> bool {
         match target {
-            VisionCaptureTarget::Preset(preset_id) => self
-                .state
-                .vision_presets
-                .iter()
-                .find(|preset| preset.id == preset_id)
-                .is_some_and(|preset| preset.search_region_is_circle),
+            VisionCaptureTarget::Preset(preset_id) => Self::vision_preset_by_id(
+                &self.state.vision_presets,
+                Some(preset_id),
+            )
+            .is_some_and(|preset| preset.search_region_is_circle),
             VisionCaptureTarget::GeometryColor => false,
             VisionCaptureTarget::OcrPreset(_) => false,
             VisionCaptureTarget::OcrStepRegion { .. } => false,
