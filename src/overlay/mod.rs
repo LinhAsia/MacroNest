@@ -1880,6 +1880,14 @@ mod windows_overlay {
         stroke: ScreenDrawStroke,
     }
 
+    #[derive(Clone, PartialEq)]
+    struct ScreenDrawColorPickPreview {
+        color: RgbaColor,
+        rgba: Vec<u8>,
+        width: usize,
+        height: usize,
+    }
+
     #[derive(Clone, Copy)]
     struct ScreenDrawDirtyRect {
         left: usize,
@@ -1972,6 +1980,7 @@ mod windows_overlay {
         color_palette_open: bool,
         text_session: Option<ScreenDrawTextSession>,
         screen_color_pick_mode: bool,
+        color_pick_preview: Option<ScreenDrawColorPickPreview>,
     }
 
     impl Default for ScreenDrawState {
@@ -2028,6 +2037,7 @@ mod windows_overlay {
                 color_palette_open: false,
                 text_session: None,
                 screen_color_pick_mode: false,
+                color_pick_preview: None,
             }
         }
     }
@@ -9660,6 +9670,7 @@ mod windows_overlay {
         state.freeze_frame = None;
         state.text_session = None;
         state.screen_color_pick_mode = false;
+        state.color_pick_preview = None;
     }
 
     fn release_screen_draw_surface(state: &mut ScreenDrawState) {
@@ -9897,8 +9908,15 @@ mod windows_overlay {
             }
             ScreenDrawHit::PickScreenColor => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
+                let preview_rect = screen_draw_color_pick_panel_rect(&state);
                 state.screen_color_pick_mode = !state.screen_color_pick_mode;
+                state.color_pick_preview = None;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
+                if let Some(rect) =
+                    preview_rect.or_else(|| screen_draw_color_pick_panel_rect(&state))
+                {
+                    mark_screen_draw_dirty(&mut state, rect);
+                }
             }
             ScreenDrawHit::Eraser => {
                 state.eraser = !state.eraser;
@@ -9948,6 +9966,10 @@ mod windows_overlay {
                     if let Some(sampled) = sample_screen_draw_color_at_local_point(point) {
                         state.color = sampled;
                         state.screen_color_pick_mode = false;
+                        if let Some(preview_rect) = screen_draw_color_pick_panel_rect(&state) {
+                            mark_screen_draw_dirty(&mut state, preview_rect);
+                        }
+                        state.color_pick_preview = None;
                         should_sync_config = true;
                     }
                     let toolbar_rect = screen_draw_toolbar_rect(&state);
@@ -10455,6 +10477,20 @@ mod windows_overlay {
                 true
             }
             ScreenDrawControl::None => {
+                if state.screen_color_pick_mode {
+                    let preview_rect = screen_draw_color_pick_panel_rect(&state);
+                    let next_preview =
+                        sample_screen_draw_color_preview_at_local_point(&state, point);
+                    let changed = next_preview != state.color_pick_preview;
+                    if changed {
+                        state.color_pick_preview = next_preview;
+                        if let Some(rect) = preview_rect {
+                            mark_screen_draw_dirty(&mut state, rect);
+                        }
+                        mark_screen_draw_repaint_pending(&mut state);
+                    }
+                    return changed;
+                }
                 if let Some(stroke) = state.current_stroke.as_mut() {
                     let changed = append_screen_draw_point(stroke, point);
                     if changed {
@@ -10952,6 +10988,67 @@ mod windows_overlay {
         })
     }
 
+    fn sample_screen_draw_color_preview_at_local_point(
+        state: &ScreenDrawState,
+        point: POINT,
+    ) -> Option<ScreenDrawColorPickPreview> {
+        const SAMPLE_SIZE: usize = 17;
+        let sample_radius = (SAMPLE_SIZE / 2) as i32;
+        let (screen_x, screen_y, _, _) = window_list::virtual_screen_bounds();
+        let sample_left = screen_x + point.x - sample_radius;
+        let sample_top = screen_y + point.y - sample_radius;
+
+        let (width, height, rgba) =
+            if state.freeze_screen && state.freeze_frame.is_some() && state.canvas_width > 0 {
+                let mut buf = vec![0u8; SAMPLE_SIZE * SAMPLE_SIZE * 4];
+                let freeze = state.freeze_frame.as_ref()?;
+                for dy in 0..SAMPLE_SIZE {
+                    let src_y = point.y - sample_radius + dy as i32;
+                    if !(0..state.canvas_height as i32).contains(&src_y) {
+                        continue;
+                    }
+                    for dx in 0..SAMPLE_SIZE {
+                        let src_x = point.x - sample_radius + dx as i32;
+                        if !(0..state.canvas_width as i32).contains(&src_x) {
+                            continue;
+                        }
+                        let src_offset =
+                            ((src_y as usize * state.canvas_width) + src_x as usize) * 4;
+                        let dst_offset = (dy * SAMPLE_SIZE + dx) * 4;
+                        buf[dst_offset..dst_offset + 4]
+                            .copy_from_slice(&freeze[src_offset..src_offset + 4]);
+                    }
+                }
+                (SAMPLE_SIZE, SAMPLE_SIZE, buf)
+            } else {
+                let capture = window_list::capture_virtual_screen_region(
+                    sample_left,
+                    sample_top,
+                    SAMPLE_SIZE as i32,
+                    SAMPLE_SIZE as i32,
+                )?;
+                (capture.width, capture.height, capture.rgba)
+            };
+        if rgba.len() < 4 || width == 0 || height == 0 {
+            return None;
+        }
+        let center_index = (((height / 2) * width) + (width / 2)) * 4;
+        if center_index + 3 >= rgba.len() {
+            return None;
+        }
+        Some(ScreenDrawColorPickPreview {
+            color: RgbaColor {
+                r: rgba[center_index],
+                g: rgba[center_index + 1],
+                b: rgba[center_index + 2],
+                a: 255,
+            },
+            rgba,
+            width,
+            height,
+        })
+    }
+
     fn commit_screen_draw_text_session(state: &mut ScreenDrawState) -> bool {
         let Some(session) = state.text_session.take() else {
             return false;
@@ -10966,6 +11063,20 @@ mod windows_overlay {
 
     fn cancel_screen_draw_text_session(state: &mut ScreenDrawState) -> bool {
         state.text_session.take().is_some()
+    }
+
+    fn screen_draw_color_pick_panel_rect(state: &ScreenDrawState) -> Option<ScreenDrawDirtyRect> {
+        if !state.screen_color_pick_mode {
+            return None;
+        }
+        let left = (state.toolbar_x + SCREEN_DRAW_TOOLBAR_WIDTH + 12).max(12) as usize;
+        let top = state.toolbar_y.max(12) as usize;
+        Some(ScreenDrawDirtyRect {
+            left,
+            top,
+            right: left + 200,
+            bottom: top + 232,
+        })
     }
 
     fn draw_screen_draw_text_into_rgba(
@@ -10983,19 +11094,25 @@ mod windows_overlay {
         if text.trim().is_empty() || width == 0 || height == 0 {
             return;
         }
-        let pixel_count = (width as usize).saturating_mul(height as usize);
-        if pixels.len() < pixel_count.saturating_mul(4) {
+        let max_right = (left + box_width).min(width as i32);
+        let max_bottom = (top + box_height).min(height as i32);
+        let clamped_left = left.max(0);
+        let clamped_top = top.max(0);
+        if clamped_left >= max_right || clamped_top >= max_bottom {
+            return;
+        }
+        let region_width = (max_right - clamped_left) as usize;
+        let region_height = (max_bottom - clamped_top) as usize;
+        let pixel_count = region_width.saturating_mul(region_height);
+        if pixels.len()
+            < (width as usize)
+                .saturating_mul(height as usize)
+                .saturating_mul(4)
+        {
             return;
         }
 
         let mut bgra = vec![0u8; pixel_count * 4];
-        for (src, dst) in pixels.chunks_exact(4).zip(bgra.chunks_exact_mut(4)) {
-            dst[0] = src[2];
-            dst[1] = src[1];
-            dst[2] = src[0];
-            dst[3] = src[3];
-        }
-        let before = bgra.clone();
 
         unsafe {
             let screen_dc = GetDC(None);
@@ -11004,8 +11121,8 @@ mod windows_overlay {
             let bitmap_info = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
                     biSize: size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: width as i32,
-                    biHeight: -(height as i32),
+                    biWidth: region_width as i32,
+                    biHeight: -(region_height as i32),
                     biPlanes: 1,
                     biBitCount: 32,
                     biCompression: BI_RGB.0,
@@ -11062,10 +11179,10 @@ mod windows_overlay {
             );
 
             let mut rect = RECT {
-                left: left.max(0),
-                top: top.max(0),
-                right: (left + box_width).min(width as i32),
-                bottom: (top + box_height).min(height as i32),
+                left: 0,
+                top: 0,
+                right: region_width as i32,
+                bottom: region_height as i32,
             };
             if rect.left < rect.right && rect.top < rect.bottom {
                 let mut wide = text
@@ -11085,16 +11202,30 @@ mod windows_overlay {
             let _ = DeleteDC(mem_dc);
         }
 
-        for ((before_px, after_px), out_px) in before
-            .chunks_exact(4)
-            .zip(bgra.chunks_exact(4))
-            .zip(pixels.chunks_exact_mut(4))
-        {
-            if before_px != after_px {
-                out_px[0] = after_px[2];
-                out_px[1] = after_px[1];
-                out_px[2] = after_px[0];
-                out_px[3] = out_px[3].max(color.a.max(1));
+        for py in 0..region_height {
+            for px in 0..region_width {
+                let src_offset = (py * region_width + px) * 4;
+                let src_b = bgra[src_offset];
+                let src_g = bgra[src_offset + 1];
+                let src_r = bgra[src_offset + 2];
+                let src_a = if src_r == 0 && src_g == 0 && src_b == 0 {
+                    0
+                } else {
+                    color.a.max(1)
+                };
+                if src_a == 0 {
+                    continue;
+                }
+                let dst_offset =
+                    (((clamped_top as usize + py) * width as usize) + clamped_left as usize + px)
+                        * 4;
+                blend_premultiplied_rgba(
+                    &mut pixels[dst_offset..dst_offset + 4],
+                    src_r,
+                    src_g,
+                    src_b,
+                    src_a,
+                );
             }
         }
     }
@@ -11641,6 +11772,7 @@ mod windows_overlay {
         let toolbar_tool = state_guard.tool;
         let toolbar_color_palette_open = state_guard.color_palette_open;
         let toolbar_color_pick_mode = state_guard.screen_color_pick_mode;
+        let color_pick_preview = state_guard.color_pick_preview.clone();
         let capturing_region = state_guard.capturing_region;
         if !capturing_region {
             draw_screen_draw_toolbar_rgba(
@@ -11658,6 +11790,18 @@ mod windows_overlay {
                 toolbar_color_palette_open,
                 toolbar_color_pick_mode,
             );
+            if toolbar_color_pick_mode
+                && let Some(preview) = color_pick_preview.as_ref()
+                && let Some(panel_rect) = screen_draw_color_pick_panel_rect(&state_guard)
+            {
+                draw_screen_draw_color_pick_panel_rgba(
+                    state_guard.frame_rgba.as_mut_slice(),
+                    width,
+                    height,
+                    panel_rect,
+                    preview,
+                );
+            }
         }
         if state_guard.active_control == ScreenDrawControl::BrushSize && !capturing_region {
             if let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
@@ -11857,6 +12001,180 @@ mod windows_overlay {
         draw_skia_circle_fill(pixmap, knob_x, y, 11.0, [244, 248, 255, 255]);
         draw_skia_circle_outline(pixmap, knob_x, y, 11.0, [255, 255, 255, 66], 1.0);
         draw_skia_circle_fill(pixmap, knob_x, y, 4.0, [64, 84, 108, 140]);
+    }
+
+    fn draw_screen_draw_color_pick_panel_rgba(
+        pixels: &mut [u8],
+        width: usize,
+        height: usize,
+        rect: ScreenDrawDirtyRect,
+        preview: &ScreenDrawColorPickPreview,
+    ) {
+        let panel_w = rect.right.saturating_sub(rect.left);
+        let panel_h = rect.bottom.saturating_sub(rect.top);
+        if panel_w == 0 || panel_h == 0 {
+            return;
+        }
+
+        let mut pixmap = match tiny_skia::Pixmap::new(panel_w as u32, panel_h as u32) {
+            Some(pixmap) => pixmap,
+            None => return,
+        };
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            0.0,
+            0.0,
+            panel_w as f32,
+            panel_h as f32,
+            10.0,
+            [12, 18, 28, 242],
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            0.5,
+            0.5,
+            panel_w as f32 - 1.0,
+            panel_h as f32 - 1.0,
+            10.0,
+            1.0,
+            [110, 156, 210, 255],
+        );
+
+        let preview_left = 28usize;
+        let preview_top = 12usize;
+        let preview_size = 144usize;
+        let cell_w = (preview_size / preview.width.max(1)).max(1);
+        let cell_h = (preview_size / preview.height.max(1)).max(1);
+        for sy in 0..preview.height {
+            for sx in 0..preview.width {
+                let src_offset = (sy * preview.width + sx) * 4;
+                let color = [
+                    preview.rgba[src_offset],
+                    preview.rgba[src_offset + 1],
+                    preview.rgba[src_offset + 2],
+                    255,
+                ];
+                let x = preview_left + sx * cell_w;
+                let y = preview_top + sy * cell_h;
+                fill_skia_rounded_rect(
+                    &mut pixmap,
+                    x as f32,
+                    y as f32,
+                    cell_w as f32,
+                    cell_h as f32,
+                    0.0,
+                    color,
+                );
+            }
+        }
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            preview_left as f32,
+            preview_top as f32,
+            preview_size as f32,
+            preview_size as f32,
+            6.0,
+            1.0,
+            [146, 192, 248, 255],
+        );
+
+        let center_left = preview_left + (preview.width / 2) * cell_w;
+        let center_top = preview_top + (preview.height / 2) * cell_h;
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            center_left as f32,
+            center_top as f32,
+            cell_w as f32,
+            cell_h as f32,
+            0.0,
+            2.0,
+            [120, 220, 255, 255],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            28.0,
+            168.0,
+            24.0,
+            24.0,
+            6.0,
+            [preview.color.r, preview.color.g, preview.color.b, 255],
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            28.5,
+            168.5,
+            23.0,
+            23.0,
+            6.0,
+            1.0,
+            [255, 255, 255, 255],
+        );
+
+        let data = pixmap.data();
+        for py in 0..panel_h {
+            let dst_y = rect.top + py;
+            if dst_y >= height {
+                break;
+            }
+            for px in 0..panel_w {
+                let dst_x = rect.left + px;
+                if dst_x >= width {
+                    break;
+                }
+                let src_offset = (py * panel_w + px) * 4;
+                let src_a = data[src_offset + 3];
+                if src_a == 0 {
+                    continue;
+                }
+                let dst_offset = (dst_y * width + dst_x) * 4;
+                blend_premultiplied_rgba(
+                    &mut pixels[dst_offset..dst_offset + 4],
+                    data[src_offset],
+                    data[src_offset + 1],
+                    data[src_offset + 2],
+                    src_a,
+                );
+            }
+        }
+
+        let color = preview.color;
+        let swatch_left = rect.left as i32 + 28;
+        let swatch_top = rect.top as i32 + 168;
+        let hex = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
+        draw_screen_draw_text_into_rgba(
+            pixels,
+            width as u32,
+            height as u32,
+            swatch_left + 34,
+            swatch_top - 8,
+            120,
+            24,
+            &hex,
+            RgbaColor {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
+            15.0,
+        );
+        draw_screen_draw_text_into_rgba(
+            pixels,
+            width as u32,
+            height as u32,
+            swatch_left + 34,
+            swatch_top + 12,
+            120,
+            24,
+            "Pick color",
+            RgbaColor {
+                r: 208,
+                g: 222,
+                b: 244,
+                a: 220,
+            },
+            12.0,
+        );
     }
 
     fn show_color_picker_dialog(
