@@ -406,4 +406,283 @@ impl CrosshairApp {
             .corner_radius(14.0)
             .inner_margin(egui::Margin::same(16))
     }
+
+    pub(crate) fn render_premium_color_picker(
+        ui: &mut egui::Ui,
+        color: &mut crate::model::RgbaColor,
+        alpha_mode: egui::color_picker::Alpha,
+    ) -> bool {
+        let mut color32 = egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, color.a);
+        let mut hsva = egui::epaint::Hsva::from(color32);
+        let mut changed = false;
+
+        ui.vertical(|ui| {
+            // 1. SV Grid (Saturation & Value)
+            let mut s = hsva.s;
+            let mut v = hsva.v;
+            if Self::premium_color_slider_2d(ui, hsva.h, &mut s, &mut v) {
+                hsva.s = s;
+                hsva.v = v;
+                changed = true;
+            }
+
+            ui.add_space(8.0);
+
+            // 2. Hue Slider (Rainbow)
+            let mut h = hsva.h;
+            if Self::premium_hue_slider(ui, &mut h) {
+                hsva.h = h;
+                changed = true;
+            }
+
+            // 3. Alpha Slider (Opacity)
+            match alpha_mode {
+                egui::color_picker::Alpha::BlendOrAdditive | egui::color_picker::Alpha::OnlyBlend => {
+                    ui.add_space(8.0);
+                    let mut a = hsva.a;
+                    if Self::premium_alpha_slider(ui, &mut a, hsva.h, hsva.s, hsva.v) {
+                        hsva.a = a;
+                        changed = true;
+                    }
+                }
+                egui::color_picker::Alpha::Opaque => {}
+            }
+
+            if changed {
+                color32 = egui::Color32::from(hsva);
+                color.r = color32.r();
+                color.g = color32.g();
+                color.b = color32.b();
+                color.a = color32.a();
+            }
+
+            // 4. Hex input at the bottom
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("#").strong().color(ui.visuals().weak_text_color()));
+                let mut hex_string = match alpha_mode {
+                    egui::color_picker::Alpha::Opaque => {
+                        format!("{:02X}{:02X}{:02X}", color.r, color.g, color.b)
+                    }
+                    _ => {
+                        format!("{:02X}{:02X}{:02X}{:02X}", color.r, color.g, color.b, color.a)
+                    }
+                };
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut hex_string)
+                        .font(egui::TextStyle::Monospace.resolve(ui.style()))
+                        .desired_width(120.0)
+                );
+                if response.changed() {
+                    let cleaned: String = hex_string.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+                    if cleaned.len() == 6 && alpha_mode == egui::color_picker::Alpha::Opaque {
+                        if let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
+                            && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
+                            && let Ok(b) = u8::from_str_radix(&cleaned[4..6], 16)
+                        {
+                            color.r = r;
+                            color.g = g;
+                            color.b = b;
+                            changed = true;
+                        }
+                    } else if cleaned.len() == 8 {
+                        if let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
+                            && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
+                            && let Ok(b) = u8::from_str_radix(&cleaned[4..6], 16)
+                            && let Ok(a) = u8::from_str_radix(&cleaned[6..8], 16)
+                        {
+                            color.r = r;
+                            color.g = g;
+                            color.b = b;
+                            color.a = a;
+                            changed = true;
+                        }
+                    } else if cleaned.len() == 6 && alpha_mode != egui::color_picker::Alpha::Opaque {
+                        if let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
+                            && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
+                            && let Ok(b) = u8::from_str_radix(&cleaned[4..6], 16)
+                        {
+                            color.r = r;
+                            color.g = g;
+                            color.b = b;
+                            changed = true;
+                        }
+                    }
+                }
+            });
+        });
+
+        changed
+    }
+
+    fn premium_color_slider_2d(
+        ui: &mut egui::Ui,
+        h: f32,
+        s: &mut f32,
+        v: &mut f32,
+    ) -> bool {
+        let mut changed = false;
+        let desired_size = egui::vec2(ui.available_width().max(200.0), 160.0);
+        let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click_and_drag());
+
+        if let Some(mpos) = response.interact_pointer_pos() {
+            *s = ((mpos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+            *v = (1.0 - (mpos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
+            changed = true;
+        }
+
+        if ui.is_rect_visible(rect) {
+            let mut mesh = egui::epaint::Mesh::default();
+            let steps = 12;
+            for xi in 0..=steps {
+                for yi in 0..=steps {
+                    let st = xi as f32 / steps as f32;
+                    let vt = 1.0 - (yi as f32 / steps as f32);
+                    let color = egui::Color32::from(egui::epaint::Hsva::new(h, st, vt, 1.0));
+                    
+                    let x = rect.left() + st * rect.width();
+                    let y = rect.top() + (1.0 - vt) * rect.height();
+                    mesh.colored_vertex(egui::pos2(x, y), color);
+
+                    if xi < steps && yi < steps {
+                        let row_len = steps + 1;
+                        let tl = yi * row_len + xi;
+                        mesh.add_triangle(tl, tl + 1, tl + row_len);
+                        mesh.add_triangle(tl + 1, tl + row_len, tl + row_len + 1);
+                    }
+                }
+            }
+            ui.painter().add(egui::epaint::Shape::mesh(mesh));
+
+            // Draw border
+            ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
+
+            // Draw selector dot
+            let dot_x = rect.left() + (*s) * rect.width();
+            let dot_y = rect.top() + (1.0 - *v) * rect.height();
+            let picked_color = egui::Color32::from(egui::epaint::Hsva::new(h, *s, *v, 1.0));
+            let contrast = if picked_color.intensity() < 128.0 { egui::Color32::WHITE } else { egui::Color32::BLACK };
+            
+            ui.painter().circle(
+                egui::pos2(dot_x, dot_y),
+                6.0,
+                picked_color,
+                egui::Stroke::new(2.0, contrast),
+            );
+        }
+
+        changed
+    }
+
+    fn premium_hue_slider(ui: &mut egui::Ui, h: &mut f32) -> bool {
+        let mut changed = false;
+        let desired_size = egui::vec2(ui.available_width().max(200.0), 12.0);
+        let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click_and_drag());
+
+        if let Some(mpos) = response.interact_pointer_pos() {
+            *h = ((mpos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+            changed = true;
+        }
+
+        if ui.is_rect_visible(rect) {
+            let mut mesh = egui::epaint::Mesh::default();
+            let steps = 24;
+            for i in 0..=steps {
+                let ht = i as f32 / steps as f32;
+                let color = egui::Color32::from(egui::epaint::Hsva::new(ht, 1.0, 1.0, 1.0));
+                let x = rect.left() + ht * rect.width();
+                mesh.colored_vertex(egui::pos2(x, rect.top()), color);
+                mesh.colored_vertex(egui::pos2(x, rect.bottom()), color);
+
+                if i < steps {
+                    let idx = i * 2;
+                    mesh.add_triangle(idx, idx + 1, idx + 2);
+                    mesh.add_triangle(idx + 1, idx + 2, idx + 3);
+                }
+            }
+            ui.painter().add(egui::epaint::Shape::mesh(mesh));
+
+            // Draw border
+            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
+
+            // Draw cursor indicator
+            let cursor_x = rect.left() + (*h) * rect.width();
+            ui.painter().line_segment(
+                [egui::pos2(cursor_x, rect.top() - 2.0), egui::pos2(cursor_x, rect.bottom() + 2.0)],
+                egui::Stroke::new(2.0, egui::Color32::WHITE),
+            );
+            ui.painter().line_segment(
+                [egui::pos2(cursor_x, rect.top() - 2.0), egui::pos2(cursor_x, rect.bottom() + 2.0)],
+                egui::Stroke::new(1.0, egui::Color32::BLACK),
+            );
+        }
+
+        changed
+    }
+
+    fn premium_alpha_slider(ui: &mut egui::Ui, a: &mut f32, h: f32, s: f32, v: f32) -> bool {
+        let mut changed = false;
+        let desired_size = egui::vec2(ui.available_width().max(200.0), 12.0);
+        let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click_and_drag());
+
+        if let Some(mpos) = response.interact_pointer_pos() {
+            *a = ((mpos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+            changed = true;
+        }
+
+        if ui.is_rect_visible(rect) {
+            // Draw checkers background
+            let cell_size = rect.height() / 2.0;
+            let checkers_count = (rect.width() / cell_size).ceil() as i32;
+            for i in 0..checkers_count {
+                let x = rect.left() + i as f32 * cell_size;
+                let color1 = egui::Color32::from_gray(60);
+                let color2 = egui::Color32::from_gray(120);
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(cell_size, cell_size)),
+                    0.0,
+                    if i % 2 == 0 { color1 } else { color2 },
+                );
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_size(egui::pos2(x, rect.top() + cell_size), egui::vec2(cell_size, cell_size)),
+                    0.0,
+                    if i % 2 == 0 { color2 } else { color1 },
+                );
+            }
+
+            // Draw alpha gradient overlay
+            let mut mesh = egui::epaint::Mesh::default();
+            let steps = 10;
+            for i in 0..=steps {
+                let at = i as f32 / steps as f32;
+                let color = egui::Color32::from(egui::epaint::Hsva::new(h, s, v, at));
+                let x = rect.left() + at * rect.width();
+                mesh.colored_vertex(egui::pos2(x, rect.top()), color);
+                mesh.colored_vertex(egui::pos2(x, rect.bottom()), color);
+
+                if i < steps {
+                    let idx = i * 2;
+                    mesh.add_triangle(idx, idx + 1, idx + 2);
+                    mesh.add_triangle(idx + 1, idx + 2, idx + 3);
+                }
+            }
+            ui.painter().add(egui::epaint::Shape::mesh(mesh));
+
+            // Draw border
+            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
+
+            // Draw cursor indicator
+            let cursor_x = rect.left() + (*a) * rect.width();
+            ui.painter().line_segment(
+                [egui::pos2(cursor_x, rect.top() - 2.0), egui::pos2(cursor_x, rect.bottom() + 2.0)],
+                egui::Stroke::new(2.0, egui::Color32::WHITE),
+            );
+            ui.painter().line_segment(
+                [egui::pos2(cursor_x, rect.top() - 2.0), egui::pos2(cursor_x, rect.bottom() + 2.0)],
+                egui::Stroke::new(1.0, egui::Color32::BLACK),
+            );
+        }
+
+        changed
+    }
 }

@@ -1681,25 +1681,15 @@ impl CrosshairApp {
                 .open_bool(&mut popup_open)
                 .align(egui::RectAlign::BOTTOM_START)
                 .layout(egui::Layout::top_down_justified(egui::Align::Min))
-                .width(220.0)
+                .width(260.0)
                 .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
                 .show(|ui| {
-                    ui.set_min_width(220.0);
-                    let mut color32 = egui::Color32::from_rgba_unmultiplied(
-                        manual_color.r,
-                        manual_color.g,
-                        manual_color.b,
-                        manual_color.a,
-                    );
-                    if egui::color_picker::color_picker_color32(
+                    ui.set_min_width(260.0);
+                    if Self::render_premium_color_picker(
                         ui,
-                        &mut color32,
+                        manual_color,
                         egui::color_picker::Alpha::BlendOrAdditive,
                     ) {
-                        manual_color.r = color32.r();
-                        manual_color.g = color32.g();
-                        manual_color.b = color32.b();
-                        manual_color.a = color32.a();
                         *manual_color_hex = format!(
                             "{:02X}{:02X}{:02X}{:02X}",
                             manual_color.r, manual_color.g, manual_color.b, manual_color.a
@@ -1708,41 +1698,6 @@ impl CrosshairApp {
                         *expr = Self::geometry_color_expr_literal(*manual_color);
                         changed = true;
                     }
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label("#");
-                        let hex_response = ui.add(
-                            TextEdit::singleline(manual_color_hex)
-                                .hint_text("RRGGBB or RRGGBBAA")
-                                .desired_width(132.0),
-                        );
-                        if hex_response.changed() {
-                            let hex = manual_color_hex.trim().trim_start_matches('#');
-                            if (hex.len() == 6 || hex.len() == 8)
-                                && let Ok(color_value) = u32::from_str_radix(hex, 16)
-                            {
-                                let (r, g, b, a) = if hex.len() == 6 {
-                                    (
-                                        ((color_value >> 16) & 0xFF) as u8,
-                                        ((color_value >> 8) & 0xFF) as u8,
-                                        (color_value & 0xFF) as u8,
-                                        255,
-                                    )
-                                } else {
-                                    (
-                                        ((color_value >> 24) & 0xFF) as u8,
-                                        ((color_value >> 16) & 0xFF) as u8,
-                                        ((color_value >> 8) & 0xFF) as u8,
-                                        (color_value & 0xFF) as u8,
-                                    )
-                                };
-                                *manual_color = crate::model::RgbaColor { r, g, b, a };
-                                *color = *manual_color;
-                                *expr = Self::geometry_color_expr_literal(*manual_color);
-                                changed = true;
-                            }
-                        }
-                    });
                 });
 
             if popup_open && let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
