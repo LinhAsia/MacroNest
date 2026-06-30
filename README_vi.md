@@ -9,11 +9,7 @@
 
 > **MacroNest là một công cụ tự động hóa và macro trên nền tảng Windows hoàn toàn miễn phí và mã nguồn mở.**
 >
-> Được xây dựng chú trọng vào bảo mật, sự minh bạch và hiệu năng cao, MacroNest cho phép bạn kết hợp các phím nhấn bàn phím, hành động chuột, OCR (nhận diện chữ viết), tìm kiếm hình ảnh (image search), phát hiện màu sắc (color detect), vẽ hình học (geometry drawing), ghim/phóng to một phần của cửa sổ (window pin/zoom), lớp phủ hồng tâm (crosshair overlay), lệnh hệ thống (script command), phát âm thanh, hiển thị HUD thông tin và nhiều tính năng khác trong cùng một luồng macro tự động linh hoạt có sử dụng biến số.
->
-> > [!IMPORTANT]
-> > **Lưu ý về Bảo mật & Độ tin cậy**
-> > Vì MacroNest quản lý các hook bàn phím/chuột cấp thấp và chụp các vùng màn hình để tìm kiếm hình ảnh/OCR, nên phần mềm được xây dựng **mã nguồn mở 100%** để đảm bảo tính minh bạch hoàn toàn. Ứng dụng chạy hoàn toàn cục bộ trên máy tính của bạn với **không có telemetry (thu thập dữ liệu ẩn), không thu thập thông tin và không kết nối Internet** (trừ khi bạn chủ động tải xuống các mô hình OCR tùy chọn hoặc kiểm tra phiên bản mới). Bạn có thể kiểm tra từng dòng mã nguồn để xác thực độ an toàn của nó.
+> Kết hợp bàn phím, chuột, OCR, tìm kiếm hình ảnh, phát hiện màu sắc, vẽ hình học, ghim một phần cửa sổ, lớp phủ hồng tâm, lệnh hệ thống, phát âm thanh, hiển thị HUD và nhiều tính năng khác trong cùng một luồng macro tự động với các biến số để xây dựng kịch bản linh hoạt.
 
 ## Tính năng chính
 
