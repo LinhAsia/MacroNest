@@ -12042,18 +12042,45 @@ mod windows_overlay {
             }
         };
 
+        let src_w = rendered.width as usize;
+        let src_h = rendered.height as usize;
+        let mut min_x = src_w;
+        let mut min_y = src_h;
+        let mut max_x = 0usize;
+        let mut max_y = 0usize;
+        let mut found = false;
+        for py in 0..src_h {
+            for px in 0..src_w {
+                let src_offset = (py * src_w + px) * 4;
+                if rendered.rgba[src_offset + 3] == 0 {
+                    continue;
+                }
+                found = true;
+                min_x = min_x.min(px);
+                min_y = min_y.min(py);
+                max_x = max_x.max(px);
+                max_y = max_y.max(py);
+            }
+        }
+        if !found {
+            return;
+        }
+
+        let content_w = (max_x - min_x + 1) as i32;
+        let content_h = (max_y - min_y + 1) as i32;
+        let dst_origin_x = x + ((target_width as i32 - content_w) / 2);
+        let dst_origin_y = y + ((target_height as i32 - content_h) / 2);
+
         let dst_w = pixmap.width() as usize;
         let dst_h = pixmap.height() as usize;
         let dst = pixmap.data_mut();
-        let src_w = rendered.width as usize;
-        let src_h = rendered.height as usize;
         for py in 0..src_h {
-            let dst_y = y + py as i32;
+            let dst_y = dst_origin_y + (py as i32 - min_y as i32);
             if dst_y < 0 || dst_y >= dst_h as i32 {
                 continue;
             }
             for px in 0..src_w {
-                let dst_x = x + px as i32;
+                let dst_x = dst_origin_x + (px as i32 - min_x as i32);
                 if dst_x < 0 || dst_x >= dst_w as i32 {
                     continue;
                 }
