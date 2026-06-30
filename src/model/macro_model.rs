@@ -291,6 +291,8 @@ pub struct MacroStep {
     pub set_variable_source: SetVariableSource,
     #[serde(default = "default_false")]
     pub wait_for_completion: bool,
+    #[serde(default)]
+    pub auto_key_up_on_macro_end: bool,
     #[serde(default = "default_ocr_width")]
     pub ocr_width: i32,
     #[serde(default = "default_ocr_height")]
@@ -401,6 +403,7 @@ impl Default for MacroStep {
             unlock_on_exit: true,
             set_variable_source: SetVariableSource::Expression,
             wait_for_completion: false,
+            auto_key_up_on_macro_end: false,
             ocr_width: 320,
             ocr_height: 180,
             ocr_target_text: String::new(),

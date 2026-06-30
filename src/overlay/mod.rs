@@ -203,7 +203,8 @@ mod windows_overlay {
             .iter()
             .find(|item| id_of(item).to_string() == spec)
             .or_else(|| {
-                items.iter()
+                items
+                    .iter()
                     .find(|item| name_of(item).trim().eq_ignore_ascii_case(spec))
             })
     }
@@ -227,10 +228,14 @@ mod windows_overlay {
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 6;
     const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 110;
     const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
-    const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 230;
+    const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 374;
     const SCREEN_DRAW_TOOLBAR_HEIGHT: i32 = 56;
-    const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 190;
-    const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 148;
+    const SCREEN_DRAW_TOOLBAR_BRUSH_X: i32 = 148;
+    const SCREEN_DRAW_TOOLBAR_LINE_X: i32 = 184;
+    const SCREEN_DRAW_TOOLBAR_RECT_X: i32 = 220;
+    const SCREEN_DRAW_TOOLBAR_CIRCLE_X: i32 = 256;
+    const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 294;
+    const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 332;
     #[derive(Debug, Clone)]
     struct VisionRunOutcome {
         matched: bool,
@@ -1789,6 +1794,10 @@ mod windows_overlay {
         Close,
         Color,
         BrushSize,
+        ToolBrush,
+        ToolLine,
+        ToolRectangle,
+        ToolCircle,
         Eraser,
         Smoothing,
         SmoothingAmount,
@@ -1808,8 +1817,23 @@ mod windows_overlay {
         }
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ScreenDrawTool {
+        Brush,
+        Line,
+        Rectangle,
+        Circle,
+    }
+
+    impl Default for ScreenDrawTool {
+        fn default() -> Self {
+            Self::Brush
+        }
+    }
+
     #[derive(Clone)]
     struct ScreenDrawStroke {
+        tool: ScreenDrawTool,
         points: Vec<POINT>,
         color: RgbaColor,
         brush_size: f32,
@@ -1873,6 +1897,7 @@ mod windows_overlay {
         eraser: bool,
         smoothing: bool,
         smoothing_amount: f32,
+        tool: ScreenDrawTool,
         toolbar_x: i32,
         toolbar_y: i32,
         active_control: ScreenDrawControl,
@@ -1925,6 +1950,7 @@ mod windows_overlay {
                 eraser: false,
                 smoothing: false,
                 smoothing_amount: 0.45,
+                tool: ScreenDrawTool::Brush,
                 toolbar_x: 24,
                 toolbar_y: 24,
                 active_control: ScreenDrawControl::None,
@@ -3160,7 +3186,10 @@ mod windows_overlay {
                 None,
             )?;
             let mut key_display_extra_hwnds = Vec::new();
-            for title in [w!("CrosshairKeyDisplayExtra1"), w!("CrosshairKeyDisplayExtra2")] {
+            for title in [
+                w!("CrosshairKeyDisplayExtra1"),
+                w!("CrosshairKeyDisplayExtra2"),
+            ] {
                 key_display_extra_hwnds.push(CreateWindowExW(
                     WS_EX_LAYERED
                         | WS_EX_TOOLWINDOW
@@ -5505,7 +5534,10 @@ mod windows_overlay {
         active.trigger.key.eq_ignore_ascii_case(&binding.key)
     }
 
-    fn macro_group_scope_matches(group: &MacroGroup, active_folder_scope: MacroFolderScope) -> bool {
+    fn macro_group_scope_matches(
+        group: &MacroGroup,
+        active_folder_scope: MacroFolderScope,
+    ) -> bool {
         match active_folder_scope {
             MacroFolderScope::Root => group.folder_id.is_none(),
             MacroFolderScope::Folder(folder_id) => group.folder_id == Some(folder_id),
@@ -7200,7 +7232,7 @@ mod windows_overlay {
         let scale = quick_key_display_mascot_scale(font_size, mascot_style);
         let (left, top, right, bottom) = match mascot_style {
             crate::model::MascotStyle::Hachiware => (38.0, 16.0, 88.0, 62.0),
-            crate::model::MascotStyle::ChiikawaClassic => (40.0, 6.0, 88.0, 62.0),
+            crate::model::MascotStyle::ChiikawaClassic => (18.0, 6.0, 56.0, 62.0),
             crate::model::MascotStyle::Chiikawa => (40.0, 10.0, 88.0, 62.0),
         };
         (
@@ -7398,7 +7430,11 @@ mod windows_overlay {
         let mut latest_activity: Option<(Instant, f32)> = None;
 
         for entry in entries {
-            if !entry.combo_keys.iter().any(|key_name| matches_aliases(key_name)) {
+            if !entry
+                .combo_keys
+                .iter()
+                .any(|key_name| matches_aliases(key_name))
+            {
                 continue;
             }
 
@@ -7444,7 +7480,8 @@ mod windows_overlay {
         current_last_active
             .map(|current_at| {
                 candidate_last_active > current_at
-                    || (candidate_last_active == current_at && candidate_strength > current_strength)
+                    || (candidate_last_active == current_at
+                        && candidate_strength > current_strength)
             })
             .unwrap_or(true)
     }
@@ -7542,9 +7579,7 @@ mod windows_overlay {
                 < QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS
     }
 
-    fn quick_key_display_active_mascot_styles(
-        runtime: &Runtime,
-    ) -> Vec<crate::model::MascotStyle> {
+    fn quick_key_display_active_mascot_styles(runtime: &Runtime) -> Vec<crate::model::MascotStyle> {
         let mut styles = if runtime.quick_key_display_mascot_styles.is_empty() {
             vec![runtime.quick_key_display_mascot_style]
         } else {
@@ -7763,11 +7798,8 @@ mod windows_overlay {
                     &styles,
                 );
                 let mut hit = None;
-                for (index, (style, default_x, default_y, _, _)) in items
-                    .iter()
-                    .copied()
-                    .enumerate()
-                    .rev()
+                for (index, (style, default_x, default_y, _, _)) in
+                    items.iter().copied().enumerate().rev()
                 {
                     let hwnd = hwnds[index];
                     if unsafe {
@@ -7809,7 +7841,8 @@ mod windows_overlay {
                     *MASCOT_DRAG_START_MOUSE.lock(),
                     *MASCOT_DRAG_START_CENTER.lock(),
                     *MASCOT_DRAG_STYLE.lock(),
-                ) else {
+                )
+                else {
                     return false;
                 };
                 let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
@@ -7836,17 +7869,16 @@ mod windows_overlay {
                     .quick_key_display_mascot_positions
                     .get(&style)
                     .copied()
-                    .unwrap_or((runtime.quick_key_display_center_x, runtime.quick_key_display_center_y));
+                    .unwrap_or((
+                        runtime.quick_key_display_center_x,
+                        runtime.quick_key_display_center_y,
+                    ));
                 *MASCOT_DRAG_START_MOUSE.lock() = None;
                 *MASCOT_DRAG_START_CENTER.lock() = None;
                 *MASCOT_DRAG_STYLE.lock() = None;
                 MASCOT_WINDOW_MOVING.store(false, Ordering::Relaxed);
                 let _ = refresh_quick_key_display(runtime);
-                let _ = runtime.ui_tx.send(UiCommand::MascotDragged {
-                    style,
-                    x,
-                    y,
-                });
+                let _ = runtime.ui_tx.send(UiCommand::MascotDragged { style, x, y });
                 true
             }
             _ => false,
@@ -8047,8 +8079,10 @@ mod windows_overlay {
             if freeze {
                 let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
                 if screen_w > 0 && screen_h > 0 {
-                    captured_frame = window_list::capture_virtual_screen_region(screen_x, screen_y, screen_w, screen_h)
-                        .map(|frame| frame.rgba);
+                    captured_frame = window_list::capture_virtual_screen_region(
+                        screen_x, screen_y, screen_w, screen_h,
+                    )
+                    .map(|frame| frame.rgba);
                 }
             }
         }
@@ -9527,14 +9561,54 @@ mod windows_overlay {
             }
             ScreenDrawHit::ColorPaletteItem(i) => {
                 let colors = [
-                    RgbaColor { r: 0, g: 255, b: 170, a: 255 },   // Cyan/Mint
-                    RgbaColor { r: 255, g: 96, b: 96, a: 255 },   // Red
-                    RgbaColor { r: 255, g: 224, b: 96, a: 255 },  // Yellow
-                    RgbaColor { r: 96, g: 176, b: 255, a: 255 },  // Blue
-                    RgbaColor { r: 255, g: 128, b: 224, a: 255 }, // Pink
-                    RgbaColor { r: 255, g: 255, b: 255, a: 255 }, // White
-                    RgbaColor { r: 40, g: 40, b: 40, a: 255 },    // Dark Grey / Black
-                    RgbaColor { r: 255, g: 140, b: 0, a: 255 },   // Orange
+                    RgbaColor {
+                        r: 0,
+                        g: 255,
+                        b: 170,
+                        a: 255,
+                    }, // Cyan/Mint
+                    RgbaColor {
+                        r: 255,
+                        g: 96,
+                        b: 96,
+                        a: 255,
+                    }, // Red
+                    RgbaColor {
+                        r: 255,
+                        g: 224,
+                        b: 96,
+                        a: 255,
+                    }, // Yellow
+                    RgbaColor {
+                        r: 96,
+                        g: 176,
+                        b: 255,
+                        a: 255,
+                    }, // Blue
+                    RgbaColor {
+                        r: 255,
+                        g: 128,
+                        b: 224,
+                        a: 255,
+                    }, // Pink
+                    RgbaColor {
+                        r: 255,
+                        g: 255,
+                        b: 255,
+                        a: 255,
+                    }, // White
+                    RgbaColor {
+                        r: 40,
+                        g: 40,
+                        b: 40,
+                        a: 255,
+                    }, // Dark Grey / Black
+                    RgbaColor {
+                        r: 255,
+                        g: 140,
+                        b: 0,
+                        a: 255,
+                    }, // Orange
                 ];
                 if i < colors.len() {
                     state.color = colors[i];
@@ -9557,6 +9631,26 @@ mod windows_overlay {
                 update_screen_draw_brush_slider(&mut state, point.x);
                 mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
                 should_sync_config = true;
+            }
+            ScreenDrawHit::ToolBrush => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                state.tool = ScreenDrawTool::Brush;
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
+            }
+            ScreenDrawHit::ToolLine => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                state.tool = ScreenDrawTool::Line;
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
+            }
+            ScreenDrawHit::ToolRectangle => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                state.tool = ScreenDrawTool::Rectangle;
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
+            }
+            ScreenDrawHit::ToolCircle => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                state.tool = ScreenDrawTool::Circle;
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
             }
             ScreenDrawHit::Eraser => {
                 state.eraser = !state.eraser;
@@ -10187,6 +10281,18 @@ mod windows_overlay {
     }
 
     fn append_screen_draw_point(stroke: &mut ScreenDrawStroke, point: POINT) -> bool {
+        if stroke.tool != ScreenDrawTool::Brush {
+            if stroke.points.len() == 1 {
+                stroke.points.push(point);
+                return true;
+            }
+            let changed = stroke.points.last().copied() != Some(point);
+            if changed && let Some(last) = stroke.points.last_mut() {
+                *last = point;
+            }
+            return changed;
+        }
+
         let Some(last) = stroke.points.last().copied() else {
             stroke.points.push(point);
             return true;
@@ -10238,7 +10344,8 @@ mod windows_overlay {
             } else {
                 false
             };
-            if message != WM_MOUSEMOVE || is_brush_drag || screen_draw_should_present_immediately() {
+            if message != WM_MOUSEMOVE || is_brush_drag || screen_draw_should_present_immediately()
+            {
                 request_screen_draw_overlay_sync();
             }
         }
@@ -10289,6 +10396,34 @@ mod windows_overlay {
         if x >= 74 && x <= 138 && y >= 12 && y <= 44 {
             return ScreenDrawHit::BrushSize;
         }
+        if x >= SCREEN_DRAW_TOOLBAR_BRUSH_X
+            && x <= SCREEN_DRAW_TOOLBAR_BRUSH_X + 28
+            && y >= 12
+            && y <= 44
+        {
+            return ScreenDrawHit::ToolBrush;
+        }
+        if x >= SCREEN_DRAW_TOOLBAR_LINE_X
+            && x <= SCREEN_DRAW_TOOLBAR_LINE_X + 28
+            && y >= 12
+            && y <= 44
+        {
+            return ScreenDrawHit::ToolLine;
+        }
+        if x >= SCREEN_DRAW_TOOLBAR_RECT_X
+            && x <= SCREEN_DRAW_TOOLBAR_RECT_X + 28
+            && y >= 12
+            && y <= 44
+        {
+            return ScreenDrawHit::ToolRectangle;
+        }
+        if x >= SCREEN_DRAW_TOOLBAR_CIRCLE_X
+            && x <= SCREEN_DRAW_TOOLBAR_CIRCLE_X + 28
+            && y >= 12
+            && y <= 44
+        {
+            return ScreenDrawHit::ToolCircle;
+        }
         if x >= SCREEN_DRAW_TOOLBAR_CAPTURE_X
             && x <= SCREEN_DRAW_TOOLBAR_CAPTURE_X + 32
             && y >= 12
@@ -10315,6 +10450,7 @@ mod windows_overlay {
 
     fn start_screen_draw_stroke(state: &mut ScreenDrawState, point: POINT, force_eraser: bool) {
         state.current_stroke = Some(ScreenDrawStroke {
+            tool: state.tool,
             points: vec![point],
             color: state.color,
             brush_size: state.brush_size,
@@ -10457,40 +10593,99 @@ mod windows_overlay {
             return;
         }
 
-        let mut pb = tiny_skia::PathBuilder::new();
-        pb.move_to(points[0].x as f32, points[0].y as f32);
-        if stroke.smoothing && points.len() >= 3 {
-            for index in 1..points.len() - 1 {
-                let current = points[index];
-                let next = points[index + 1];
-                pb.quad_to(
-                    current.x as f32,
-                    current.y as f32,
-                    (current.x + next.x) as f32 * 0.5,
-                    (current.y + next.y) as f32 * 0.5,
-                );
+        let first = points[0];
+        let last = *points.last().unwrap_or(&first);
+        let stroke_style = tiny_skia::Stroke {
+            width: stroke.brush_size.max(1.0),
+            line_cap: tiny_skia::LineCap::Round,
+            line_join: tiny_skia::LineJoin::Round,
+            ..Default::default()
+        };
+
+        match stroke.tool {
+            ScreenDrawTool::Brush => {
+                let mut pb = tiny_skia::PathBuilder::new();
+                pb.move_to(first.x as f32, first.y as f32);
+                if stroke.smoothing && points.len() >= 3 {
+                    for index in 1..points.len() - 1 {
+                        let current = points[index];
+                        let next = points[index + 1];
+                        pb.quad_to(
+                            current.x as f32,
+                            current.y as f32,
+                            (current.x + next.x) as f32 * 0.5,
+                            (current.y + next.y) as f32 * 0.5,
+                        );
+                    }
+                    pb.line_to(last.x as f32, last.y as f32);
+                } else {
+                    for point in points.iter().skip(1) {
+                        pb.line_to(point.x as f32, point.y as f32);
+                    }
+                }
+                if let Some(path) = pb.finish() {
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke_style,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
             }
-            let last = *points.last().unwrap_or(&points[0]);
-            pb.line_to(last.x as f32, last.y as f32);
-        } else {
-            for point in points.iter().skip(1) {
-                pb.line_to(point.x as f32, point.y as f32);
+            ScreenDrawTool::Line => {
+                let mut pb = tiny_skia::PathBuilder::new();
+                pb.move_to(first.x as f32, first.y as f32);
+                pb.line_to(last.x as f32, last.y as f32);
+                if let Some(path) = pb.finish() {
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke_style,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
             }
-        }
-        if let Some(path) = pb.finish() {
-            let stroke_style = tiny_skia::Stroke {
-                width: stroke.brush_size.max(1.0),
-                line_cap: tiny_skia::LineCap::Round,
-                line_join: tiny_skia::LineJoin::Round,
-                ..Default::default()
-            };
-            pixmap.stroke_path(
-                &path,
-                &paint,
-                &stroke_style,
-                tiny_skia::Transform::identity(),
-                None,
-            );
+            ScreenDrawTool::Rectangle => {
+                let left = first.x.min(last.x) as f32;
+                let top = first.y.min(last.y) as f32;
+                let width = (first.x - last.x).unsigned_abs() as f32;
+                let height = (first.y - last.y).unsigned_abs() as f32;
+                if width > 0.0 && height > 0.0 {
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    pb.move_to(left, top);
+                    pb.line_to(left + width, top);
+                    pb.line_to(left + width, top + height);
+                    pb.line_to(left, top + height);
+                    pb.close();
+                    if let Some(path) = pb.finish() {
+                        pixmap.stroke_path(
+                            &path,
+                            &paint,
+                            &stroke_style,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
+                    }
+                }
+            }
+            ScreenDrawTool::Circle => {
+                let dx = (last.x - first.x) as f32;
+                let dy = (last.y - first.y) as f32;
+                let radius = dx.hypot(dy).max(0.5);
+                let mut pb = tiny_skia::PathBuilder::new();
+                pb.push_circle(first.x as f32, first.y as f32, radius);
+                if let Some(path) = pb.finish() {
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke_style,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
+            }
         }
     }
 
@@ -10656,6 +10851,7 @@ mod windows_overlay {
         let toolbar_eraser = state_guard.eraser;
         let toolbar_smoothing = state_guard.smoothing;
         let toolbar_smoothing_amount = state_guard.smoothing_amount;
+        let toolbar_tool = state_guard.tool;
         let toolbar_color_palette_open = state_guard.color_palette_open;
         let capturing_region = state_guard.capturing_region;
         if !capturing_region {
@@ -10670,6 +10866,7 @@ mod windows_overlay {
                 toolbar_eraser,
                 toolbar_smoothing,
                 toolbar_smoothing_amount,
+                toolbar_tool,
                 toolbar_color_palette_open,
             );
         }
@@ -10728,7 +10925,12 @@ mod windows_overlay {
                 }
                 if let Some(path) = pb.finish() {
                     let mut paint = tiny_skia::Paint::default();
-                    paint.set_color(tiny_skia::Color::from_rgba8(toolbar_color.r, toolbar_color.g, toolbar_color.b, toolbar_color.a));
+                    paint.set_color(tiny_skia::Color::from_rgba8(
+                        toolbar_color.r,
+                        toolbar_color.g,
+                        toolbar_color.b,
+                        toolbar_color.a,
+                    ));
                     paint.anti_alias = true;
                     pixmap.fill_path(
                         &path,
@@ -10868,13 +11070,20 @@ mod windows_overlay {
         draw_skia_circle_fill(pixmap, knob_x, y, 4.0, [64, 84, 108, 140]);
     }
 
-    fn show_color_picker_dialog(hwnd: windows::Win32::Foundation::HWND, initial_color: RgbaColor) -> Option<RgbaColor> {
-        use windows::Win32::UI::Controls::Dialogs::{ChooseColorW, CHOOSECOLORW, CC_FULLOPEN, CC_RGBINIT};
+    fn show_color_picker_dialog(
+        hwnd: windows::Win32::Foundation::HWND,
+        initial_color: RgbaColor,
+    ) -> Option<RgbaColor> {
         use windows::Win32::Foundation::COLORREF;
+        use windows::Win32::UI::Controls::Dialogs::{
+            CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW, ChooseColorW,
+        };
 
         let mut custom_colors = [COLORREF(0xFFFFFF); 16];
-        let rgb_val = (initial_color.r as u32) | ((initial_color.g as u32) << 8) | ((initial_color.b as u32) << 16);
-        
+        let rgb_val = (initial_color.r as u32)
+            | ((initial_color.g as u32) << 8)
+            | ((initial_color.b as u32) << 16);
+
         let mut cc = CHOOSECOLORW::default();
         cc.lStructSize = std::mem::size_of::<CHOOSECOLORW>() as u32;
         cc.hwndOwner = hwnd;
@@ -10906,6 +11115,7 @@ mod windows_overlay {
         _eraser: bool,
         _smoothing: bool,
         _smoothing_amount: f32,
+        tool: ScreenDrawTool,
         color_palette_open: bool,
     ) {
         let toolbar_w = SCREEN_DRAW_TOOLBAR_WIDTH as usize;
@@ -11027,6 +11237,153 @@ mod windows_overlay {
         draw_skia_circle_fill(&mut pixmap, knob_x, slider_y, 6.0, [244, 248, 255, 255]);
         draw_skia_circle_outline(&mut pixmap, knob_x, slider_y, 6.0, [255, 255, 255, 66], 1.0);
         draw_skia_circle_fill(&mut pixmap, knob_x, slider_y, 2.0, [64, 84, 108, 140]);
+
+        let brush_button_x = SCREEN_DRAW_TOOLBAR_BRUSH_X as f32;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            brush_button_x,
+            12.0,
+            28.0,
+            32.0,
+            8.0,
+            if tool == ScreenDrawTool::Brush {
+                [86, 150, 122, 232]
+            } else {
+                [82, 96, 120, 214]
+            },
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            brush_button_x + 0.5,
+            12.5,
+            27.0,
+            31.0,
+            8.0,
+            1.0,
+            if tool == ScreenDrawTool::Brush {
+                [196, 255, 226, 110]
+            } else {
+                [255, 255, 255, 34]
+            },
+        );
+        let brush_center_x = SCREEN_DRAW_TOOLBAR_BRUSH_X as f32 + 14.0;
+        draw_skia_circle_fill(&mut pixmap, brush_center_x, 28.0, 4.5, [240, 246, 255, 246]);
+        draw_skia_circle_fill(&mut pixmap, brush_center_x, 22.0, 2.4, [240, 246, 255, 246]);
+        draw_skia_circle_fill(&mut pixmap, brush_center_x, 34.0, 2.4, [240, 246, 255, 246]);
+
+        let line_button_x = SCREEN_DRAW_TOOLBAR_LINE_X as f32;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            line_button_x,
+            12.0,
+            28.0,
+            32.0,
+            8.0,
+            if tool == ScreenDrawTool::Line {
+                [86, 150, 122, 232]
+            } else {
+                [82, 96, 120, 214]
+            },
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            line_button_x + 0.5,
+            12.5,
+            27.0,
+            31.0,
+            8.0,
+            1.0,
+            if tool == ScreenDrawTool::Line {
+                [196, 255, 226, 110]
+            } else {
+                [255, 255, 255, 34]
+            },
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_LINE_X as f32 + 6.0,
+            38.0,
+            SCREEN_DRAW_TOOLBAR_LINE_X as f32 + 22.0,
+            18.0,
+            [240, 246, 255, 246],
+            2.4,
+        );
+
+        let rect_button_x = SCREEN_DRAW_TOOLBAR_RECT_X as f32;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            rect_button_x,
+            12.0,
+            28.0,
+            32.0,
+            8.0,
+            if tool == ScreenDrawTool::Rectangle {
+                [86, 150, 122, 232]
+            } else {
+                [82, 96, 120, 214]
+            },
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            rect_button_x + 0.5,
+            12.5,
+            27.0,
+            31.0,
+            8.0,
+            1.0,
+            if tool == ScreenDrawTool::Rectangle {
+                [196, 255, 226, 110]
+            } else {
+                [255, 255, 255, 34]
+            },
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_RECT_X as f32 + 6.0,
+            18.0,
+            16.0,
+            18.0,
+            4.0,
+            2.0,
+            [240, 246, 255, 246],
+        );
+
+        let circle_button_x = SCREEN_DRAW_TOOLBAR_CIRCLE_X as f32;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            circle_button_x,
+            12.0,
+            28.0,
+            32.0,
+            8.0,
+            if tool == ScreenDrawTool::Circle {
+                [86, 150, 122, 232]
+            } else {
+                [82, 96, 120, 214]
+            },
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            circle_button_x + 0.5,
+            12.5,
+            27.0,
+            31.0,
+            8.0,
+            1.0,
+            if tool == ScreenDrawTool::Circle {
+                [196, 255, 226, 110]
+            } else {
+                [255, 255, 255, 34]
+            },
+        );
+        draw_skia_circle_outline(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_CIRCLE_X as f32 + 14.0,
+            28.0,
+            8.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
 
         // 4. Capture (Camera - 32x32 button bounds)
         let capture_x = SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32;
@@ -15877,7 +16234,13 @@ mod windows_overlay {
             4.5 * size,
             [75, 132, 207, 42],
         );
-        fill_skia_circle(pixmap, sx + 1.0 * size, sy + 9.0 * size, 6.8 * size, [75, 132, 207, 36]);
+        fill_skia_circle(
+            pixmap,
+            sx + 1.0 * size,
+            sy + 9.0 * size,
+            6.8 * size,
+            [75, 132, 207, 36],
+        );
     }
 
     fn draw_mascot_blink(
@@ -15917,8 +16280,7 @@ mod windows_overlay {
         recent_pulse: f32,
         is_redraw: bool,
     ) {
-        if mascot_style == crate::model::MascotStyle::Hachiware
-        {
+        if mascot_style == crate::model::MascotStyle::Hachiware {
             let time_s = unsafe { GetTickCount() } as f32 * 0.001;
             let face_pulse_x = recent_pulse * (time_s * 24.0).sin() * 1.6 * scale;
             let face_pulse_y = recent_pulse * (time_s * 26.0 + 0.8).sin() * 0.9 * scale;
@@ -15971,9 +16333,7 @@ mod windows_overlay {
                         };
 
                     let (look_mul_x, look_mul_y, wobble_x, wobble_y) = match path_index_for_wobble {
-                        4..=13 => {
-                            (0.38, 0.46, face_wobble_slow_x, face_wobble_slow_y)
-                        }
+                        4..=13 => (0.38, 0.46, face_wobble_slow_x, face_wobble_slow_y),
                         14..=18 => (0.8, 0.78, face_wobble_mid_x, face_wobble_fast_y),
                         19..=21 => (0.6, 0.65, face_wobble_mid_x * 0.75, face_wobble_mid_y),
                         22 | 23 => (0.48, 0.46, face_wobble_fast_x, face_wobble_fast_y),
@@ -16225,8 +16585,18 @@ mod windows_overlay {
             let cx = head_cx + bx;
             let cy = head_cy + by;
             for &(ear_x, ear_y, ear_rx, ear_ry) in &[
-                (cx - 37.0 * scale, cy - 57.0 * scale, 11.0 * scale, 12.0 * scale),
-                (cx + 47.0 * scale, cy - 52.0 * scale, 10.5 * scale, 11.0 * scale),
+                (
+                    cx - 37.0 * scale,
+                    cy - 57.0 * scale,
+                    11.0 * scale,
+                    12.0 * scale,
+                ),
+                (
+                    cx + 47.0 * scale,
+                    cy - 52.0 * scale,
+                    10.5 * scale,
+                    11.0 * scale,
+                ),
             ] {
                 fill_skia_ellipse(&mut tmp_pixmap, ear_x, ear_y, ear_rx, ear_ry, face_fill);
                 stroke_skia_ellipse(
@@ -16312,7 +16682,10 @@ mod windows_overlay {
                 10.5 * scale,
                 blush_fill,
             );
-            for &(base_x, base_y) in &[(cx - 49.0 * scale, cy + 18.0 * scale), (cx + 50.0 * scale, cy + 17.0 * scale)] {
+            for &(base_x, base_y) in &[
+                (cx - 49.0 * scale, cy + 18.0 * scale),
+                (cx + 50.0 * scale, cy + 17.0 * scale),
+            ] {
                 for offset in [-7.0_f32, 0.0, 7.0] {
                     let mut cheek = tiny_skia::PathBuilder::new();
                     cheek.move_to(base_x + offset * scale - 2.0 * scale, base_y + 4.5 * scale);
@@ -16327,11 +16700,22 @@ mod windows_overlay {
             let mut mouth = tiny_skia::PathBuilder::new();
             mouth.move_to(cx - 12.0 * scale, mouth_y - 3.0 * scale);
             mouth.quad_to(cx - 6.0 * scale, mouth_y + 7.5 * scale, cx, mouth_y);
-            mouth.quad_to(cx + 6.0 * scale, mouth_y + 7.5 * scale, cx + 12.0 * scale, mouth_y - 3.0 * scale);
+            mouth.quad_to(
+                cx + 6.0 * scale,
+                mouth_y + 7.5 * scale,
+                cx + 12.0 * scale,
+                mouth_y - 3.0 * scale,
+            );
             if let Some(path) = mouth.finish() {
                 stroke_skia_path(&mut tmp_pixmap, &path, stroke_color, 2.8 * scale);
             }
-            fill_skia_circle(&mut tmp_pixmap, cx, cy + 21.0 * scale, 2.1 * scale, stroke_color);
+            fill_skia_circle(
+                &mut tmp_pixmap,
+                cx,
+                cy + 21.0 * scale,
+                2.1 * scale,
+                stroke_color,
+            );
             let mut tiny_mouth = tiny_skia::PathBuilder::new();
             tiny_mouth.move_to(cx - 2.8 * scale, cy + 43.0 * scale);
             tiny_mouth.quad_to(cx, cy + 45.0 * scale, cx + 2.8 * scale, cy + 43.0 * scale);
@@ -19981,9 +20365,14 @@ mod windows_overlay {
     }
 
     fn set_macro_preset_enabled(spec: &str, enabled: bool) -> Result<()> {
-        let preset_id = parse_macro_preset_id(spec)?;
         let mut changes = HashMap::new();
-        changes.insert(preset_id, enabled);
+        for preset_id in parse_macro_trigger_preset_ids(spec) {
+            changes.insert(preset_id, enabled);
+        }
+        if changes.is_empty() {
+            let preset_id = parse_macro_preset_id(spec)?;
+            changes.insert(preset_id, enabled);
+        }
         set_macro_preset_enabled_batch(&changes)
     }
 
@@ -19992,8 +20381,15 @@ mod windows_overlay {
         spec: &str,
         enabled: bool,
     ) -> Result<()> {
-        let preset_id = parse_macro_preset_id(spec)?;
-        pending_changes.insert(preset_id, enabled);
+        let target_ids = parse_macro_trigger_preset_ids(spec);
+        if target_ids.is_empty() {
+            let preset_id = parse_macro_preset_id(spec)?;
+            pending_changes.insert(preset_id, enabled);
+        } else {
+            for preset_id in target_ids {
+                pending_changes.insert(preset_id, enabled);
+            }
+        }
         Ok(())
     }
 
@@ -22821,20 +23217,12 @@ mod windows_overlay {
             held_keys.insert("Shift".to_owned());
             held_keys.insert("LShift".to_owned());
 
-            assert!(quick_key_display_mascot_key_activity(
-                &["LShift"],
-                &held_keys,
-                &[],
-                now,
-            )
-            .is_some());
-            assert!(quick_key_display_mascot_key_activity(
-                &["RShift"],
-                &held_keys,
-                &[],
-                now,
-            )
-            .is_none());
+            assert!(
+                quick_key_display_mascot_key_activity(&["LShift"], &held_keys, &[], now,).is_some()
+            );
+            assert!(
+                quick_key_display_mascot_key_activity(&["RShift"], &held_keys, &[], now,).is_none()
+            );
         }
 
         #[test]
@@ -22863,6 +23251,40 @@ mod windows_overlay {
             assert!(!hook_state.locked_inputs.contains_key("A"));
             assert!(!hook_state.mouse_move_locks.any());
             assert!(hook_state.mouse_move_lock_anchor.is_none());
+        }
+
+        #[test]
+        fn test_collect_macro_release_steps_only_releases_opted_in_keydowns() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let steps = vec![
+                MacroStep {
+                    action: MacroAction::KeyDown,
+                    key: "A".to_string(),
+                    auto_key_up_on_macro_end: false,
+                    ..MacroStep::default()
+                },
+                MacroStep {
+                    action: MacroAction::KeyDown,
+                    key: "B".to_string(),
+                    auto_key_up_on_macro_end: true,
+                    ..MacroStep::default()
+                },
+            ];
+
+            let cleanup = collect_macro_release_steps(&steps);
+            assert_eq!(cleanup.len(), 1);
+            assert_eq!(cleanup[0].action, MacroAction::KeyUp);
+            assert_eq!(cleanup[0].key, "B");
+        }
+
+        #[test]
+        fn test_queue_macro_preset_enabled_change_accepts_multiple_ids() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let mut pending = HashMap::new();
+            queue_macro_preset_enabled_change(&mut pending, "11,22,33", true).unwrap();
+            assert_eq!(pending.get(&11), Some(&true));
+            assert_eq!(pending.get(&22), Some(&true));
+            assert_eq!(pending.get(&33), Some(&true));
         }
 
         #[test]
@@ -23691,7 +24113,9 @@ mod windows_overlay {
 
             match step.action {
                 MacroAction::KeyDown => {
-                    held_keys.insert(step.key.clone());
+                    if step.auto_key_up_on_macro_end {
+                        held_keys.insert(step.key.clone());
+                    }
                 }
 
                 MacroAction::KeyUp | MacroAction::KeyPress => {
@@ -27037,9 +27461,7 @@ mod windows_overlay {
         runtime_open_windows_snapshot()
             .into_iter()
             .filter(|entry| exclude.is_none_or(|excluded| excluded.0 as isize != entry.hwnd))
-            .filter(|entry| {
-                targeted.is_none_or(|targeted_set| !targeted_set.contains(&entry.hwnd))
-            })
+            .filter(|entry| targeted.is_none_or(|targeted_set| !targeted_set.contains(&entry.hwnd)))
             .filter(|entry| {
                 let hwnd = HWND(entry.hwnd as *mut std::ffi::c_void);
                 window_matches_selector_title(
@@ -27151,17 +27573,24 @@ mod windows_overlay {
             }
 
             if let Some(title) = target_title
-                && let Some(hwnd) =
-                    find_window_by_selector_cached(title, match_duplicate_window_titles, None, Some(&targeted))
+                && let Some(hwnd) = find_window_by_selector_cached(
+                    title,
+                    match_duplicate_window_titles,
+                    None,
+                    Some(&targeted),
+                )
             {
                 MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
                 return hwnd;
             }
 
             for title in extra_target_titles {
-                if let Some(hwnd) =
-                    find_window_by_selector_cached(title, match_duplicate_window_titles, None, Some(&targeted))
-                {
+                if let Some(hwnd) = find_window_by_selector_cached(
+                    title,
+                    match_duplicate_window_titles,
+                    None,
+                    Some(&targeted),
+                ) {
                     MACRO_TARGETED_WINDOWS.with(|set| set.borrow_mut().insert(hwnd.0 as isize));
                     return hwnd;
                 }

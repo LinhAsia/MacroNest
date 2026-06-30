@@ -33,7 +33,11 @@ enum TextHighlightMode {
 }
 
 impl CrosshairApp {
-    fn should_persist_delay_drag(response_dragged: bool, pointer_any_down: bool, has_dragged: bool) -> bool {
+    fn should_persist_delay_drag(
+        response_dragged: bool,
+        pointer_any_down: bool,
+        has_dragged: bool,
+    ) -> bool {
         !response_dragged && !pointer_any_down && has_dragged
     }
 
@@ -48,7 +52,9 @@ impl CrosshairApp {
         overlay_tx: &crossbeam_channel::Sender<crate::overlay::OverlayCommand>,
         preset_id: Option<u32>,
     ) {
-        let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometryPreset(preset_id));
+        let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewGeometryPreset(
+            preset_id,
+        ));
     }
 
     fn ensure_draw_geometry_color_literals(spec: &mut crate::model::GeometrySpec) {
@@ -80,6 +86,40 @@ impl CrosshairApp {
                     spec.fill_color.r, spec.fill_color.g, spec.fill_color.b, spec.fill_color.a
                 );
             }
+        }
+    }
+
+    fn parse_macro_preset_toggle_ids(spec: &str) -> Vec<u32> {
+        spec.split(',')
+            .filter_map(|part| part.trim().parse::<u32>().ok())
+            .collect()
+    }
+
+    fn serialize_macro_preset_toggle_ids(ids: &[u32]) -> String {
+        ids.iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    fn macro_preset_toggle_summary(
+        presets: &[(u32, String)],
+        selected_ids: &[u32],
+        language: UiLanguage,
+    ) -> String {
+        let selected_labels = presets
+            .iter()
+            .filter(|(id, _)| selected_ids.contains(id))
+            .map(|(_, label)| label.clone())
+            .collect::<Vec<_>>();
+        match selected_labels.len() {
+            0 => Self::tr_lang(language, "Select preset", "Select preset").to_owned(),
+            1 | 2 => selected_labels.join(", "),
+            count => format!(
+                "{} {}",
+                count,
+                Self::tr_lang(language, "presets", "presets")
+            ),
         }
     }
 
@@ -1472,11 +1512,11 @@ impl CrosshairApp {
         );
         let response = inner.inner;
         if !open {
-                Self::show_instant_hover_tooltip(
-                    ui,
-                    &response,
-                    Self::tr_lang(
-                        language,
+            Self::show_instant_hover_tooltip(
+                ui,
+                &response,
+                Self::tr_lang(
+                    language,
                     "Timer\nOpen start, pause, stop, and read timer actions.",
                     "Timer\nOpen start, pause, stop, and read timer actions.",
                 ),
@@ -3435,7 +3475,13 @@ impl CrosshairApp {
         };
         let pending_macro_group_scroll_target = resolved_scroll_target;
         let mut pending_macro_group_scroll_consumed = false;
+        let macro_panel_scroll_id = ui.make_persistent_id((
+            "macro-panel-scroll",
+            self.macro_folders_panel_open,
+            self.resolved_active_macro_folder_view(),
+        ));
         egui::ScrollArea::vertical()
+            .id_salt(macro_panel_scroll_id)
             .auto_shrink([false, false])
             .max_height(macro_panel_scroll_height)
             .show_viewport(ui, |ui, viewport| {
@@ -4759,26 +4805,31 @@ impl CrosshairApp {
                                                 ui.set_min_width(220.0);
                                                 ui.label(Self::tr_lang(language, "Folder", "Folder"));
                                                 ui.separator();
-                                                if ui
-                                                    .selectable_label(
-                                                        group.folder_id.is_none(),
-                                                        Self::tr_lang(language, "No folder", "No folder"),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    selected_folder_after_popup = Some(None);
-                                                }
-                                                for folder in &self.state.macro_folders {
-                                                    if ui
-                                                        .selectable_label(
-                                                            group.folder_id == Some(folder.id),
-                                                            &folder.name,
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        selected_folder_after_popup = Some(Some(folder.id));
-                                                    }
-                                                }
+                                                egui::ScrollArea::vertical()
+                                                    .id_salt((group.id, "macro-group-folder-popup-scroll"))
+                                                    .max_height(180.0)
+                                                    .show(ui, |ui| {
+                                                        if ui
+                                                            .selectable_label(
+                                                                group.folder_id.is_none(),
+                                                                Self::tr_lang(language, "No folder", "No folder"),
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            selected_folder_after_popup = Some(None);
+                                                        }
+                                                        for folder in &self.state.macro_folders {
+                                                            if ui
+                                                                .selectable_label(
+                                                                    group.folder_id == Some(folder.id),
+                                                                    &folder.name,
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                selected_folder_after_popup = Some(Some(folder.id));
+                                                            }
+                                                        }
+                                                    });
                                             });
                                         if let Some(selected_folder) = selected_folder_after_popup {
                                             group.folder_id = selected_folder;
@@ -6103,11 +6154,14 @@ impl CrosshairApp {
                                                         .find(|(gid, _, _)| *gid == trig_group_id)
                                                         .map(|(_, _, gpresets)| gpresets.clone())
                                                         .unwrap_or_default();
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = Self::option_label_by_id(
+                                                    let mut selected_ids =
+                                                        Self::parse_macro_preset_toggle_ids(&step.key);
+                                                    selected_ids.retain(|id| {
+                                                        trig_presets.iter().any(|(preset_id, _)| preset_id == id)
+                                                    });
+                                                    let selected_label = Self::macro_preset_toggle_summary(
                                                         &trig_presets,
-                                                        selected_id,
-                                                        "Select macro",
+                                                        &selected_ids,
                                                         language,
                                                     );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-enable-disable-macro-preset"))
@@ -6115,11 +6169,17 @@ impl CrosshairApp {
                                                         .selected_text(selected_label)
                                                         .show_ui(ui, |ui| {
                                                             for (preset_option_id, preset_option_label) in &trig_presets {
-                                                                if ui
-                                                                    .selectable_label(selected_id == Some(*preset_option_id), preset_option_label)
-                                                                    .clicked()
-                                                                {
-                                                                    step.key = preset_option_id.to_string();
+                                                                let mut selected =
+                                                                    selected_ids.contains(preset_option_id);
+                                                                if ui.checkbox(&mut selected, preset_option_label).changed() {
+                                                                    if selected {
+                                                                        if !selected_ids.contains(preset_option_id) {
+                                                                            selected_ids.push(*preset_option_id);
+                                                                        }
+                                                                    } else {
+                                                                        selected_ids.retain(|id| *id != *preset_option_id);
+                                                                    }
+                                                                    step.key = Self::serialize_macro_preset_toggle_ids(&selected_ids);
                                                                     live_sync = true;
                                                                 }
                                                             }
@@ -7960,9 +8020,26 @@ impl CrosshairApp {
                                                              }
                                                          }
                                                      });
-                                                 })
+                                                })
                                                 }).inner;
                                                 hs_menu_response.response.on_hover_text(Self::tr_lang(language, "Manually select key", "Manually select key"));
+                                                if step.action == MacroAction::KeyDown {
+                                                    let response = ui
+                                                        .checkbox(
+                                                            &mut step.auto_key_up_on_macro_end,
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Auto up on end",
+                                                                "Auto up on end",
+                                                            ),
+                                                        )
+                                                        .on_hover_text(Self::tr_lang(
+                                                            language,
+                                                            "Release this held key automatically when the macro ends.",
+                                                            "Release this held key automatically when the macro ends.",
+                                                        ));
+                                                    live_sync |= response.changed();
+                                                }
                                             } else {
                                                 ui.add_sized([28.0, 20.0], egui::Label::new(""));
                                             }
@@ -10182,9 +10259,26 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                              }
                                                          }
                                                      });
-                                                 })
+                                                })
                                                 }).inner;
                                                 hs_menu_response.response.on_hover_text(Self::tr_lang(language, "Manually select key", "Manually select key"));
+                                                if step.action == MacroAction::KeyDown {
+                                                    let response = ui
+                                                        .checkbox(
+                                                            &mut step.auto_key_up_on_macro_end,
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Auto up on end",
+                                                                "Auto up on end",
+                                                            ),
+                                                        )
+                                                        .on_hover_text(Self::tr_lang(
+                                                            language,
+                                                            "Release this held key automatically when the macro ends.",
+                                                            "Release this held key automatically when the macro ends.",
+                                                        ));
+                                                    live_sync |= response.changed();
+                                                }
                                             } else {
                                                 ui.add_sized([28.0, 20.0], egui::Label::new(""));
                                             }
@@ -11391,11 +11485,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         .find(|(gid, _, _)| *gid == trig_group_id)
                                                         .map(|(_, _, gpresets)| gpresets.clone())
                                                         .unwrap_or_default();
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = Self::option_label_by_id(
+                                                    let mut selected_ids =
+                                                        Self::parse_macro_preset_toggle_ids(&step.key);
+                                                    selected_ids.retain(|id| {
+                                                        trig_presets.iter().any(|(preset_id, _)| preset_id == id)
+                                                    });
+                                                    let selected_label = Self::macro_preset_toggle_summary(
                                                         &trig_presets,
-                                                        selected_id,
-                                                        "Select macro",
+                                                        &selected_ids,
                                                         language,
                                                     );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "enable-disable-macro-preset-step"))
@@ -11403,11 +11500,17 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         .selected_text(selected_label)
                                                         .show_ui(ui, |ui| {
                                                             for (preset_option_id, preset_option_label) in &trig_presets {
-                                                                if ui
-                                                                    .selectable_label(selected_id == Some(*preset_option_id), preset_option_label)
-                                                                    .clicked()
-                                                                {
-                                                                    step.key = preset_option_id.to_string();
+                                                                let mut selected =
+                                                                    selected_ids.contains(preset_option_id);
+                                                                if ui.checkbox(&mut selected, preset_option_label).changed() {
+                                                                    if selected {
+                                                                        if !selected_ids.contains(preset_option_id) {
+                                                                            selected_ids.push(*preset_option_id);
+                                                                        }
+                                                                    } else {
+                                                                        selected_ids.retain(|id| *id != *preset_option_id);
+                                                                    }
+                                                                    step.key = Self::serialize_macro_preset_toggle_ids(&selected_ids);
                                                                     live_sync = true;
                                                                 }
                                                             }
@@ -13817,9 +13920,28 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 })
                                                 }).inner;
                                                 menu_response.response.on_hover_text(Self::tr_lang(language, "Manually select key", "Manually select key"));
+                                                if step.action == MacroAction::KeyDown {
+                                                    let response = ui
+                                                        .checkbox(
+                                                            &mut step.auto_key_up_on_macro_end,
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Auto up on end",
+                                                                "Auto up on end",
+                                                            ),
+                                                        )
+                                                        .on_hover_text(Self::tr_lang(
+                                                            language,
+                                                            "Release this held key automatically when the macro ends.",
+                                                            "Release this held key automatically when the macro ends.",
+                                                        ));
+                                                    live_sync |= response.changed();
+                                                }
                                                 // Trailing spacers placed after buttons to align columns with other rows having X/Y coords
-                                                ui.add_sized([48.0, 20.0], egui::Label::new(""));
-                                                ui.add_sized([48.0, 20.0], egui::Label::new(""));
+                                                let trailing_spacer_width =
+                                                    if self.macro_folders_panel_open { 32.0 } else { 44.0 };
+                                                ui.add_sized([trailing_spacer_width, 20.0], egui::Label::new(""));
+                                                ui.add_sized([trailing_spacer_width, 20.0], egui::Label::new(""));
                                             } else {
                                                 ui.add_sized([28.0, 20.0], egui::Label::new(""));
                                             }
@@ -16424,8 +16546,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                 &mut step.key,
             );
             if response.changed() {
-                step.geometry_preset_id =
-                    Self::find_named_id(step.key.trim(), preset_options, |(id, _)| *id, |(_, name)| name);
+                step.geometry_preset_id = Self::find_named_id(
+                    step.key.trim(),
+                    preset_options,
+                    |(id, _)| *id,
+                    |(_, name)| name,
+                );
                 *live_sync = true;
             }
             Self::render_variable_suggestions_braced(
@@ -19215,7 +19341,9 @@ mod tests {
     fn delay_drag_persists_only_after_release() {
         assert!(!CrosshairApp::should_persist_delay_drag(true, true, true));
         assert!(!CrosshairApp::should_persist_delay_drag(false, true, true));
-        assert!(!CrosshairApp::should_persist_delay_drag(false, false, false));
+        assert!(!CrosshairApp::should_persist_delay_drag(
+            false, false, false
+        ));
         assert!(CrosshairApp::should_persist_delay_drag(false, false, true));
     }
 }
