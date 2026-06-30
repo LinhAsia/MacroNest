@@ -7250,7 +7250,7 @@ impl CrosshairApp {
                 if Self::render_premium_color_picker(
                     ui,
                     color,
-                    egui::color_picker::Alpha::Opaque,
+                    egui::color_picker::Alpha::BlendOrAdditive,
                 ) {
                     changed = true;
                 }
