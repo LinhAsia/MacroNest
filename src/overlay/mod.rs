@@ -228,6 +228,18 @@ mod windows_overlay {
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 6;
     const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 110;
     const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
+    const SCREEN_DRAW_TOOLBAR_BRUSH_SVG: &str = r##"<svg viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M131 270.102C136.931 258.193 142.915 246.327 149.193 234.617C156.453 221.081 163.971 206.401 168.564 191.528C169.122 189.716 170.145 181.169 172.084 180.124C192.331 169.193 205.553 185.969 222.056 150.34C224.854 144.301 253.912 74.3274 265.506 96.2309C282.774 128.856 211.761 175.888 237.023 209.979" stroke="#F0F6FF" stroke-opacity="0.96" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M236.842 221.187C227.518 251.443 209.099 279.783 199.623 307.729" stroke="#F0F6FF" stroke-opacity="0.96" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+<path opacity="0.55" d="M176.361 212.407C190.116 220.56 201.019 221.813 217.07 231.22" stroke="#D8E2F0" stroke-opacity="0.96" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M208.927 245.017C199.972 262.54 192.419 282.39 186.828 300.203" stroke="#F0F6FF" stroke-opacity="0.96" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M191.481 242.508C183.937 258.302 181.476 277.698 172.871 292.678" stroke="#F0F6FF" stroke-opacity="0.96" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M172.871 246.271C172.933 255.199 157.21 285.416 157.765 282.438" stroke="#F0F6FF" stroke-opacity="0.96" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M168.219 226.203C165.813 236.356 141.16 279.669 144.025 276.173" stroke="#F0F6FF" stroke-opacity="0.96" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>"##;
+    const SCREEN_DRAW_TOOLBAR_ARROW_SVG: &str = r##"<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M9.16421 9.66421L15.4142 3.41421L12.5858 0.585785L6.33579 6.83578L3.5 4L2 5.5V14H10.5L12 12.5L9.16421 9.66421Z" fill="#F0F6FF"/>
+</svg>"##;
     const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 508;
     const SCREEN_DRAW_TOOLBAR_HEIGHT: i32 = 56;
     const SCREEN_DRAW_TOOLBAR_BRUSH_X: i32 = 148;
@@ -11525,43 +11537,14 @@ mod windows_overlay {
                 [255, 255, 255, 34]
             },
         );
-        let brush_center_x = SCREEN_DRAW_TOOLBAR_BRUSH_X as f32 + 14.0;
-        draw_skia_line(
+        draw_toolbar_svg_icon(
             &mut pixmap,
-            brush_center_x - 7.2,
-            35.0,
-            brush_center_x + 0.6,
-            27.2,
-            [240, 246, 255, 246],
-            4.4,
+            SCREEN_DRAW_TOOLBAR_BRUSH_SVG,
+            SCREEN_DRAW_TOOLBAR_BRUSH_X + 4,
+            13,
+            20,
+            24,
         );
-        draw_skia_line(
-            &mut pixmap,
-            brush_center_x - 3.8,
-            31.6,
-            brush_center_x + 3.5,
-            24.3,
-            [160, 176, 198, 246],
-            1.4,
-        );
-        let mut ferrule = tiny_skia::PathBuilder::new();
-        ferrule.move_to(brush_center_x + 0.4, 27.0);
-        ferrule.line_to(brush_center_x + 4.3, 23.1);
-        ferrule.line_to(brush_center_x + 6.9, 25.7);
-        ferrule.line_to(brush_center_x + 3.1, 29.5);
-        ferrule.close();
-        if let Some(path) = ferrule.finish() {
-            fill_skia_path(&mut pixmap, &path, [225, 232, 244, 246]);
-        }
-        let mut bristle = tiny_skia::PathBuilder::new();
-        bristle.move_to(brush_center_x + 4.2, 22.1);
-        bristle.line_to(brush_center_x + 9.3, 17.0);
-        bristle.line_to(brush_center_x + 8.0, 12.8);
-        bristle.line_to(brush_center_x + 2.1, 18.7);
-        bristle.close();
-        if let Some(path) = bristle.finish() {
-            fill_skia_path(&mut pixmap, &path, [240, 246, 255, 246]);
-        }
 
         let line_button_x = SCREEN_DRAW_TOOLBAR_LINE_X as f32;
         fill_skia_rounded_rect(
@@ -11629,23 +11612,14 @@ mod windows_overlay {
                 [255, 255, 255, 34]
             },
         );
-        draw_skia_line(
+        draw_toolbar_svg_icon(
             &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 7.4,
-            34.6,
-            SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 17.6,
-            24.4,
-            [240, 246, 255, 246],
-            2.8,
+            SCREEN_DRAW_TOOLBAR_ARROW_SVG,
+            SCREEN_DRAW_TOOLBAR_ARROW_X + 5,
+            14,
+            18,
+            18,
         );
-        let mut arrow_head = tiny_skia::PathBuilder::new();
-        arrow_head.move_to(SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 23.8, 18.2);
-        arrow_head.line_to(SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 15.8, 22.1);
-        arrow_head.line_to(SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 19.9, 26.2);
-        arrow_head.close();
-        if let Some(path) = arrow_head.finish() {
-            fill_skia_path(&mut pixmap, &path, [240, 246, 255, 246]);
-        }
 
         let rect_button_x = SCREEN_DRAW_TOOLBAR_RECT_X as f32;
         fill_skia_rounded_rect(
@@ -12032,6 +12006,68 @@ mod windows_overlay {
                     src_r,
                     src_g,
                     src_b,
+                    src_a,
+                );
+            }
+        }
+    }
+
+    fn draw_toolbar_svg_icon(
+        pixmap: &mut tiny_skia::Pixmap,
+        svg: &str,
+        x: i32,
+        y: i32,
+        target_width: u32,
+        target_height: u32,
+    ) {
+        let cache_key = (
+            svg.to_owned(),
+            target_width,
+            target_height,
+            255u32,
+            0i32,
+        );
+        let rendered = {
+            let mut cache = GEOMETRY_SVG_CACHE.lock();
+            if let Some(existing) = cache.get(&cache_key) {
+                existing.clone()
+            } else {
+                match render_svg_image(svg, target_width, target_height, 1.0, 0.0) {
+                    Ok(rendered) => {
+                        cache.insert(cache_key.clone(), rendered.clone());
+                        rendered
+                    }
+                    Err(_) => return,
+                }
+            }
+        };
+
+        let dst_w = pixmap.width() as usize;
+        let dst_h = pixmap.height() as usize;
+        let dst = pixmap.data_mut();
+        let src_w = rendered.width as usize;
+        let src_h = rendered.height as usize;
+        for py in 0..src_h {
+            let dst_y = y + py as i32;
+            if dst_y < 0 || dst_y >= dst_h as i32 {
+                continue;
+            }
+            for px in 0..src_w {
+                let dst_x = x + px as i32;
+                if dst_x < 0 || dst_x >= dst_w as i32 {
+                    continue;
+                }
+                let src_offset = (py * src_w + px) * 4;
+                let src_a = rendered.rgba[src_offset + 3];
+                if src_a == 0 {
+                    continue;
+                }
+                let dst_offset = (dst_y as usize * dst_w + dst_x as usize) * 4;
+                blend_premultiplied_rgba(
+                    &mut dst[dst_offset..dst_offset + 4],
+                    rendered.rgba[src_offset],
+                    rendered.rgba[src_offset + 1],
+                    rendered.rgba[src_offset + 2],
                     src_a,
                 );
             }

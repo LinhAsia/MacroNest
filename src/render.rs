@@ -14,6 +14,7 @@ pub struct RenderedCrosshair {
     pub rgba: Vec<u8>,
 }
 
+#[derive(Clone)]
 pub struct RenderedSvgImage {
     pub width: u32,
     pub height: u32,
