@@ -515,6 +515,8 @@ pub struct AppState {
     pub quick_screen_draw_smoothing: bool,
     #[serde(default = "default_screen_draw_smoothing_amount")]
     pub quick_screen_draw_smoothing_amount: f32,
+    #[serde(default)]
+    pub quick_screen_draw_fill: bool,
     #[serde(default = "default_screen_draw_freeze")]
     pub quick_screen_draw_freeze: bool,
     #[serde(default)]
@@ -633,6 +635,7 @@ impl Default for AppState {
             quick_screen_draw_brush_size: default_screen_draw_brush_size(),
             quick_screen_draw_smoothing: false,
             quick_screen_draw_smoothing_amount: default_screen_draw_smoothing_amount(),
+            quick_screen_draw_fill: false,
             quick_screen_draw_freeze: default_screen_draw_freeze(),
             quick_screen_draw_tool: QuickScreenDrawTool::Brush,
             quick_key_sound_enabled: false,
