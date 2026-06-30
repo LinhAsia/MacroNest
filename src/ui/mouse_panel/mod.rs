@@ -1921,7 +1921,7 @@ impl CrosshairApp {
         );
         let mut new_preset = MousePathPreset::new(id);
         new_preset.name = name;
-        new_preset.collapsed = false;
+        new_preset.collapsed = true;
         new_preset.replay_relative_motion = replay_relative_motion;
         new_preset.events = events;
         self.state.mouse_path_presets.push(new_preset);
@@ -1943,7 +1943,7 @@ impl CrosshairApp {
                 .cloned()
         });
         let mut new_preset = MousePathPreset::new(id);
-        new_preset.collapsed = false;
+        new_preset.collapsed = true;
         if let Some(source_preset) = source_preset {
             new_preset.replay_relative_motion = source_preset.replay_relative_motion;
             new_preset.events = source_preset.events;
