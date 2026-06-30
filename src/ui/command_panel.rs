@@ -26,7 +26,6 @@ impl CrosshairApp {
         let mut changed = false;
         let mut open_ai_dialog: Option<u32> = None;
         for index in 0..self.state.command_presets.len() {
-            ui.add_space(6.0);
             let preset = &mut self.state.command_presets[index];
             preset.target_window_title = None;
             preset.extra_target_window_titles.clear();
