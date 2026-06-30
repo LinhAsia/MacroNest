@@ -18256,38 +18256,39 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
         if let Some((base, prop)) = trimmed.split_once('.') {
             let base = base.trim().replace(' ', "").to_ascii_lowercase();
             let prop = prop.trim().to_ascii_lowercase();
-            if base.is_empty() || prop.is_empty() {
+            let prop_clean: String = prop.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            if base.is_empty() || prop_clean.is_empty() {
                 return VariableValueKind::Neutral;
             }
             return match base.as_str() {
-                "system" => match prop.as_str() {
+                "system" => match prop_clean.as_str() {
                     "date" | "time" => VariableValueKind::Text,
                     "year" | "month" | "day" | "hour" | "minute" | "second" | "millisecond"
                     | "ms" => VariableValueKind::Number,
                     _ => VariableValueKind::Neutral,
                 },
-                "screen" => match prop.as_str() {
+                "screen" => match prop_clean.as_str() {
                     "width" | "height" | "w" | "h" => VariableValueKind::Number,
                     _ => VariableValueKind::Neutral,
                 },
-                "mouse" => match prop.as_str() {
+                "mouse" => match prop_clean.as_str() {
                     "x" | "y" | "sensitivity" => VariableValueKind::Number,
                     _ => VariableValueKind::Neutral,
                 },
-                "window" => match prop.as_str() {
+                "window" => match prop_clean.as_str() {
                     "title" => VariableValueKind::Text,
-                    "width" | "height" | "w" | "h" => VariableValueKind::Number,
+                    "width" | "height" | "w" | "h" | "x" | "y" => VariableValueKind::Number,
                     _ => VariableValueKind::Neutral,
                 },
-                "volume" => match prop.as_str() {
+                "volume" => match prop_clean.as_str() {
                     "level" | "percent" | "value" => VariableValueKind::Number,
                     _ => VariableValueKind::Neutral,
                 },
-                "clipboard" => match prop.as_str() {
+                "clipboard" => match prop_clean.as_str() {
                     "text" => VariableValueKind::Text,
                     _ => VariableValueKind::Neutral,
                 },
-                s if s.starts_with("timer") => match prop.as_str() {
+                s if s.starts_with("timer") => match prop_clean.as_str() {
                     "hour" | "minute" | "second" | "millisecond" | "ms" | "raw" | "total_sec" => {
                         VariableValueKind::Number
                     }
