@@ -11646,16 +11646,7 @@ mod windows_overlay {
                         width.max(1),
                         height,
                         &text,
-                        if stroke.text.is_empty() {
-                            RgbaColor {
-                                r: stroke.color.r,
-                                g: stroke.color.g,
-                                b: stroke.color.b,
-                                a: stroke.color.a.min(150),
-                            }
-                        } else {
-                            stroke.color
-                        },
+                        stroke.color,
                         font_size,
                     );
                 }
@@ -13078,10 +13069,10 @@ mod windows_overlay {
             pixels,
             width as u32,
             height as u32,
-            toolbar_x + SCREEN_DRAW_TOOLBAR_FILL_X + 3,
-            toolbar_y + 18,
-            SCREEN_DRAW_TOOLBAR_FILL_W - 6,
-            12,
+            toolbar_x + SCREEN_DRAW_TOOLBAR_FILL_X + 2,
+            toolbar_y + 16,
+            SCREEN_DRAW_TOOLBAR_FILL_W - 4,
+            16,
             "Fill",
             RgbaColor {
                 r: 240,
@@ -13089,7 +13080,7 @@ mod windows_overlay {
                 b: 255,
                 a: if fill_shapes { 240 } else { 210 },
             },
-            8.0,
+            10.0,
         );
     }
 
