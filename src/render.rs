@@ -85,6 +85,7 @@ fn render_custom_pixels(style: &CrosshairStyle, pixels_str: &str) -> Result<Rend
                         out_size,
                         out_size,
                         outline_color,
+                        false,
                     )?;
                 }
             }
@@ -104,6 +105,7 @@ fn render_custom_pixels(style: &CrosshairStyle, pixels_str: &str) -> Result<Rend
                     pixel_scale,
                     pixel_scale,
                     fill_color,
+                    false,
                 )?;
             } else if ch == '@' || ch == 'o' || ch == 'O' || ch == '2' {
                 fill_rect(
@@ -113,6 +115,7 @@ fn render_custom_pixels(style: &CrosshairStyle, pixels_str: &str) -> Result<Rend
                     pixel_scale,
                     pixel_scale,
                     outline_color,
+                    false,
                 )?;
             }
         }
@@ -176,12 +179,13 @@ fn render_builtin(style: &CrosshairStyle) -> Result<RenderedCrosshair> {
                 w + outline * 2.0,
                 h + outline * 2.0,
                 outline_color,
+                true,
             )?;
         }
     }
 
     for (x, y, w, h) in arms {
-        fill_rect(&mut pixmap, x, y, w, h, fill_color)?;
+        fill_rect(&mut pixmap, x, y, w, h, fill_color, true)?;
     }
 
     if style.center_dot {
@@ -194,6 +198,7 @@ fn render_builtin(style: &CrosshairStyle) -> Result<RenderedCrosshair> {
                 dot + outline * 2.0,
                 dot + outline * 2.0,
                 outline_color,
+                true,
             )?;
         }
         fill_rect(
@@ -203,6 +208,7 @@ fn render_builtin(style: &CrosshairStyle) -> Result<RenderedCrosshair> {
             dot,
             dot,
             fill_color,
+            true,
         )?;
     }
 
@@ -288,10 +294,12 @@ fn fill_rect(
     width: f32,
     height: f32,
     color: RgbaColor,
+    anti_alias: bool,
 ) -> Result<()> {
     let rect = Rect::from_xywh(x, y, width, height).context("Invalid rectangle dimensions")?;
     let mut paint = Paint::default();
     paint.set_color(to_skia_color(color));
+    paint.anti_alias = anti_alias;
     pixmap.fill_rect(rect, &paint, Transform::identity(), None);
     Ok(())
 }

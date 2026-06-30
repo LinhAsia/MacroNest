@@ -6889,10 +6889,11 @@ mod windows_overlay {
             visual.translate_y -= 2.2 * hold_t;
         }
 
-        if let Some(released_at) = entry.released_at {
-            let exit_elapsed = now.saturating_duration_since(released_at);
+        let exit_duration = QUICK_KEY_DISPLAY_ANIM_EXIT_DURATION;
+        if now >= entry.hide_at - exit_duration {
+            let exit_elapsed = now.saturating_duration_since(entry.hide_at - exit_duration);
             let exit_t = (exit_elapsed.as_secs_f32()
-                / QUICK_KEY_DISPLAY_ANIM_EXIT_DURATION.as_secs_f32())
+                / exit_duration.as_secs_f32())
             .clamp(0.0, 1.0);
             if exit_t > 0.0 {
                 let eased = quick_key_display_ease_in_cubic(exit_t);
@@ -13455,8 +13456,8 @@ mod windows_overlay {
         true
     }
 
-    const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(3000);
-    const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(1000);
+    const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(4000);
+    const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(2000);
     const QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION: Duration = Duration::from_millis(180);
     const QUICK_KEY_DISPLAY_ANIM_EXIT_DURATION: Duration = Duration::from_millis(200);
     const QUICK_KEY_DISPLAY_HOLD_MIN_DURATION: Duration = Duration::from_millis(400);
