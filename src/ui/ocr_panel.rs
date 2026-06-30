@@ -36,7 +36,12 @@ impl CrosshairApp {
                     &mut self.state.next_ocr_preset_id,
                     |preset| preset.id,
                 );
-                let preset = OcrPreset::new(id);
+                let mut preset = OcrPreset::new(id);
+                let mut suffix = 1;
+                while self.state.ocr_presets.iter().any(|p| p.name == format!("OCR {}", suffix)) {
+                    suffix += 1;
+                }
+                preset.name = format!("OCR {}", suffix);
                 self.state.ocr_presets.push(preset);
                 self.persist_ocr_presets();
             }

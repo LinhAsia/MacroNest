@@ -202,7 +202,13 @@ impl CrosshairApp {
             &mut self.state.next_command_preset_id,
             |preset| preset.id,
         );
-        self.state.command_presets.push(CommandPreset::new(id));
+        let mut new_preset = CommandPreset::new(id);
+        let mut suffix = 1;
+        while self.state.command_presets.iter().any(|p| p.name == format!("Command {}", suffix)) {
+            suffix += 1;
+        }
+        new_preset.name = format!("Command {}", suffix);
+        self.state.command_presets.push(new_preset);
         self.sync_command_presets();
         self.status = format!("Added custom preset {id}.");
     }

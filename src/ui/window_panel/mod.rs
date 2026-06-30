@@ -2979,48 +2979,76 @@ impl CrosshairApp {
     }
 
     pub(crate) fn add_window_preset(&mut self) {
+        let mut suffix = 1;
+        while self.state.window_presets.iter().any(|p| p.name == format!("Window Resize {}", suffix)) {
+            suffix += 1;
+        }
         let id = Self::add_window_panel_preset(
             &mut self.state.window_presets,
             &mut self.state.next_preset_id,
             |preset| preset.id,
             WindowPreset::new,
         );
+        if let Some(preset) = self.state.window_presets.iter_mut().find(|p| p.id == id) {
+            preset.name = format!("Window Resize {}", suffix);
+        }
         self.reconcile_master_presets();
         self.sync_window_presets();
         self.status = format!("Added window preset {id}.");
     }
 
     pub(crate) fn add_window_focus_preset(&mut self) {
+        let mut suffix = 1;
+        while self.state.window_focus_presets.iter().any(|p| p.name == format!("Focus {}", suffix)) {
+            suffix += 1;
+        }
         let id = Self::add_window_panel_preset(
             &mut self.state.window_focus_presets,
             &mut self.state.next_window_focus_preset_id,
             |preset| preset.id,
             WindowFocusPreset::new,
         );
+        if let Some(preset) = self.state.window_focus_presets.iter_mut().find(|p| p.id == id) {
+            preset.name = format!("Focus {}", suffix);
+        }
         self.reconcile_master_presets();
         self.sync_window_presets();
         self.status = format!("Added window focus preset {id}.");
     }
 
     pub(crate) fn add_zoom_preset(&mut self) {
+        let mut suffix = 1;
+        while self.state.zoom_presets.iter().any(|p| p.name == format!("Zoom {}", suffix)) {
+            suffix += 1;
+        }
         let id = Self::add_window_panel_preset(
             &mut self.state.zoom_presets,
             &mut self.state.next_zoom_preset_id,
             |preset| preset.id,
             ZoomPreset::new,
         );
+        if let Some(preset) = self.state.zoom_presets.iter_mut().find(|p| p.id == id) {
+            preset.name = format!("Zoom {}", suffix);
+        }
         self.reconcile_master_presets();
         self.sync_window_presets();
         self.status = format!("Added zoom preset {id}.");
     }
 
     pub(crate) fn add_pin_preset(&mut self) {
+        let mut suffix = 1;
+        while self.state.pin_presets.iter().any(|p| p.name == format!("Pin {}", suffix)) {
+            suffix += 1;
+        }
         let id = Self::add_window_panel_preset(
             &mut self.state.pin_presets,
             &mut self.state.next_pin_preset_id,
             |preset| preset.id,
             PinPreset::new,
         );
+        if let Some(preset) = self.state.pin_presets.iter_mut().find(|p| p.id == id) {
+            preset.name = format!("Pin {}", suffix);
+        }
         self.sync_window_presets();
         self.status = format!("Added pin preset {id}.");
     }
@@ -3106,7 +3134,13 @@ impl CrosshairApp {
             &mut self.state.next_window_layout_id,
             |layout| layout.id,
         );
-        self.state.window_layouts.push(WindowLayout::new(id));
+        let mut new_preset = WindowLayout::new(id);
+        let mut suffix = 1;
+        while self.state.window_layouts.iter().any(|l| l.name == format!("Layout {}", suffix)) {
+            suffix += 1;
+        }
+        new_preset.name = format!("Layout {}", suffix);
+        self.state.window_layouts.push(new_preset);
         self.persist_window_layouts();
         self.status = format!("Added layout {id}.");
     }

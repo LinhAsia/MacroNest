@@ -1965,6 +1965,13 @@ impl CrosshairApp {
         if let Some(source_preset) = source_preset {
             new_preset.replay_relative_motion = source_preset.replay_relative_motion;
             new_preset.events = source_preset.events;
+            new_preset.name = format!("{} Copy", source_preset.name);
+        } else {
+            let mut suffix = 1;
+            while self.state.mouse_path_presets.iter().any(|p| p.name == format!("Mouse Path {}", suffix)) {
+                suffix += 1;
+            }
+            new_preset.name = format!("Mouse Path {}", suffix);
         }
         self.state.mouse_path_presets.push(new_preset);
         self.sync_mouse_path_presets();
@@ -2107,9 +2114,15 @@ impl CrosshairApp {
             &mut self.state.next_mouse_sensitivity_preset_id,
             |preset| preset.id,
         );
+        let mut new_preset = MouseSensitivityPreset::new(id);
+        let mut suffix = 1;
+        while self.state.mouse_sensitivity_presets.iter().any(|p| p.name == format!("Mouse Sensitivity {}", suffix)) {
+            suffix += 1;
+        }
+        new_preset.name = format!("Mouse Sensitivity {}", suffix);
         self.state
             .mouse_sensitivity_presets
-            .push(MouseSensitivityPreset::new(id));
+            .push(new_preset);
         self.sync_mouse_sensitivity_presets();
         self.status = format!("Added mouse sensitivity preset {id}.");
     }
