@@ -6,9 +6,13 @@
   <a href="https://github.com/LinhAsia/MacroNest/releases/latest"><img src="assets/download-button-v2.svg" alt="Download MacroNest" height="38" /></a>
 </p>
 
-> **MacroNest is a Windows desktop macro tool.**
+> **MacroNest is a free, open-source Windows desktop macro and automation tool.**
 >
-> Combine keyboard, mouse, OCR, image search, color detect, geometry drawing, pin part of a window, crosshair overlays, commands, sound playback, HUD labels, window control, and more in the same macro flow, with variables to build more flexible automation.
+> Built with security, transparency, and performance in mind, MacroNest lets you combine keyboard, mouse, OCR, image search, color detect, geometry drawing, window pinning/zooming, crosshair overlays, system commands, audio playback, HUD labels, and more into a single flexible automation flow.
+>
+> > [!IMPORTANT]
+> > **Security & Trust Notice**
+> > Because MacroNest manages low-level keyboard/mouse hooks and captures screen regions for image search/OCR, it is built **100% open-source** to ensure complete transparency. The application runs entirely locally with **zero telemetry, no data collection, and no internet communication** (except when downloading opt-in OCR models or checking updates). You can inspect every line of code to verify its safety.
 
 ## Key Features
 
