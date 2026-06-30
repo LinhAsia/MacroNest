@@ -1891,7 +1891,7 @@ mod windows_overlay {
         height: usize,
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
     struct ScreenDrawDirtyRect {
         left: usize,
         top: usize,
@@ -9770,6 +9770,9 @@ mod windows_overlay {
             && !matches!(hit, ScreenDrawHit::ToolbarBody | ScreenDrawHit::DragHandle)
         {
             let committed = commit_screen_draw_text_session(&mut state);
+            let canvas_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
+            mark_screen_draw_dirty(&mut state, canvas_rect);
+            mark_screen_draw_repaint_pending(&mut state);
             if committed {
                 should_sync_config = true;
             }
@@ -10462,6 +10465,7 @@ mod windows_overlay {
         if !state.active || state.capturing_region {
             return false;
         }
+        let previous_preview_rect = screen_draw_color_pick_panel_rect(&state);
         state.pointer_point = point;
         match state.active_control {
             ScreenDrawControl::MoveToolbar => {
@@ -10494,15 +10498,19 @@ mod windows_overlay {
                     let preview_rect = screen_draw_color_pick_panel_rect(&state);
                     let next_preview =
                         sample_screen_draw_color_preview_at_local_point(&state, point);
+                    let rect_changed = previous_preview_rect != preview_rect;
                     let changed = next_preview != state.color_pick_preview;
-                    if changed {
+                    if changed || rect_changed {
                         state.color_pick_preview = next_preview;
+                        if let Some(rect) = previous_preview_rect {
+                            mark_screen_draw_dirty(&mut state, rect);
+                        }
                         if let Some(rect) = preview_rect {
                             mark_screen_draw_dirty(&mut state, rect);
                         }
                         mark_screen_draw_repaint_pending(&mut state);
                     }
-                    return changed;
+                    return changed || rect_changed;
                 }
                 if let Some(stroke) = state.current_stroke.as_mut() {
                     let changed = append_screen_draw_point(stroke, point);
@@ -12979,37 +12987,6 @@ mod windows_overlay {
                 [255, 255, 255, 34]
             },
         );
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            fill_x + 7.0,
-            18.0,
-            14.0,
-            14.0,
-            4.0,
-            1.8,
-            [240, 246, 255, 246],
-        );
-        if fill_shapes {
-            fill_skia_rounded_rect(
-                &mut pixmap,
-                fill_x + 9.5,
-                20.5,
-                9.0,
-                9.0,
-                2.5,
-                [240, 246, 255, 246],
-            );
-        } else {
-            draw_skia_line(
-                &mut pixmap,
-                fill_x + 9.0,
-                30.0,
-                fill_x + 19.0,
-                20.0,
-                [240, 246, 255, 246],
-                1.8,
-            );
-        }
         if color_palette_open {
             let palette_x = 19.0;
             let palette_y = base_toolbar_h + 4.0;
@@ -13097,6 +13074,23 @@ mod windows_overlay {
                 );
             }
         }
+        draw_screen_draw_text_into_rgba(
+            pixels,
+            width as u32,
+            height as u32,
+            toolbar_x + SCREEN_DRAW_TOOLBAR_FILL_X + 3,
+            toolbar_y + 18,
+            SCREEN_DRAW_TOOLBAR_FILL_W - 6,
+            12,
+            "Fill",
+            RgbaColor {
+                r: 240,
+                g: 246,
+                b: 255,
+                a: if fill_shapes { 240 } else { 210 },
+            },
+            8.0,
+        );
     }
 
     fn draw_toolbar_svg_icon(
