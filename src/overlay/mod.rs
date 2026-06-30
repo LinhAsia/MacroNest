@@ -254,6 +254,8 @@ mod windows_overlay {
     const SCREEN_DRAW_TOOLBAR_PICK_COLOR_X: i32 = 436;
     const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 474;
     const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 512;
+    const SCREEN_DRAW_TOOLBAR_FILL_X: i32 = 552;
+    const SCREEN_DRAW_TOOLBAR_FILL_W: i32 = 64;
     #[derive(Debug, Clone)]
     struct VisionRunOutcome {
         matched: bool,
@@ -1823,6 +1825,7 @@ mod windows_overlay {
         ToolPolygon,
         ToolText,
         PickScreenColor,
+        FillShapes,
         Eraser,
         Smoothing,
         SmoothingAmount,
@@ -1981,6 +1984,7 @@ mod windows_overlay {
         text_session: Option<ScreenDrawTextSession>,
         screen_color_pick_mode: bool,
         color_pick_preview: Option<ScreenDrawColorPickPreview>,
+        pointer_point: POINT,
     }
 
     impl Default for ScreenDrawState {
@@ -2038,6 +2042,7 @@ mod windows_overlay {
                 text_session: None,
                 screen_color_pick_mode: false,
                 color_pick_preview: None,
+                pointer_point: POINT { x: 0, y: 0 },
             }
         }
     }
@@ -9753,6 +9758,7 @@ mod windows_overlay {
         if !state.active || state.capturing_region {
             return false;
         }
+        state.pointer_point = point;
         if right_button {
             start_screen_draw_stroke(&mut state, point, true);
             sync_screen_draw_live_stroke_dirty(&mut state);
@@ -9917,6 +9923,12 @@ mod windows_overlay {
                 {
                     mark_screen_draw_dirty(&mut state, rect);
                 }
+            }
+            ScreenDrawHit::FillShapes => {
+                state.fill_shapes = !state.fill_shapes;
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                should_sync_config = true;
             }
             ScreenDrawHit::Eraser => {
                 state.eraser = !state.eraser;
@@ -10450,6 +10462,7 @@ mod windows_overlay {
         if !state.active || state.capturing_region {
             return false;
         }
+        state.pointer_point = point;
         match state.active_control {
             ScreenDrawControl::MoveToolbar => {
                 let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
@@ -10817,6 +10830,13 @@ mod windows_overlay {
         {
             return ScreenDrawHit::PickScreenColor;
         }
+        if x >= SCREEN_DRAW_TOOLBAR_FILL_X
+            && x <= SCREEN_DRAW_TOOLBAR_FILL_X + SCREEN_DRAW_TOOLBAR_FILL_W
+            && y >= 12
+            && y <= 44
+        {
+            return ScreenDrawHit::FillShapes;
+        }
         if x >= SCREEN_DRAW_TOOLBAR_CAPTURE_X
             && x <= SCREEN_DRAW_TOOLBAR_CAPTURE_X + 32
             && y >= 12
@@ -10863,6 +10883,25 @@ mod windows_overlay {
         let last = stroke.points.last().copied().unwrap_or(anchor);
         let font_size = screen_draw_text_font_size(stroke.brush_size);
         let default_height = (font_size * 1.55).ceil() as i32 + 12;
+        if stroke.tool == ScreenDrawTool::Text
+            && stroke.text_box_width <= 0
+            && stroke.text_box_height <= 0
+        {
+            let text = if stroke.text.is_empty() {
+                fallback_text.to_owned()
+            } else {
+                stroke.text.clone()
+            };
+            let width = (font_size * 9.0).round() as i32;
+            return Some((
+                last.x,
+                last.y,
+                width.max(160),
+                default_height.max(28),
+                font_size,
+                text,
+            ));
+        }
         let drag_width = (last.x - anchor.x).abs();
         let drag_height = (last.y - anchor.y).abs();
         let width = stroke
@@ -11069,13 +11108,33 @@ mod windows_overlay {
         if !state.screen_color_pick_mode {
             return None;
         }
-        let left = (state.toolbar_x + SCREEN_DRAW_TOOLBAR_WIDTH + 12).max(12) as usize;
-        let top = state.toolbar_y.max(12) as usize;
-        Some(ScreenDrawDirtyRect {
-            left,
-            top,
-            right: left + 200,
-            bottom: top + 232,
+        let panel_w = 200usize;
+        let panel_h = 232usize;
+        let margin = 18usize;
+        let canvas_w = state.canvas_width.max(panel_w + margin * 2);
+        let canvas_h = state.canvas_height.max(panel_h + margin * 2);
+        let right_rect = ScreenDrawDirtyRect {
+            left: canvas_w.saturating_sub(panel_w + margin),
+            top: margin,
+            right: canvas_w.saturating_sub(margin),
+            bottom: (margin + panel_h).min(canvas_h),
+        };
+        let left_rect = ScreenDrawDirtyRect {
+            left: margin,
+            top: margin,
+            right: margin + panel_w,
+            bottom: (margin + panel_h).min(canvas_h),
+        };
+        let pointer = state.pointer_point;
+        let pointer_in_right = (right_rect.left as i32..right_rect.right as i32)
+            .contains(&pointer.x)
+            && (right_rect.top as i32..right_rect.bottom as i32).contains(&pointer.y);
+        let pointer_in_left = (left_rect.left as i32..left_rect.right as i32).contains(&pointer.x)
+            && (left_rect.top as i32..left_rect.bottom as i32).contains(&pointer.y);
+        Some(if pointer_in_right || pointer_in_left {
+            left_rect
+        } else {
+            right_rect
         })
     }
 
@@ -11770,6 +11829,7 @@ mod windows_overlay {
         let toolbar_smoothing = state_guard.smoothing;
         let toolbar_smoothing_amount = state_guard.smoothing_amount;
         let toolbar_tool = state_guard.tool;
+        let toolbar_fill_shapes = state_guard.fill_shapes;
         let toolbar_color_palette_open = state_guard.color_palette_open;
         let toolbar_color_pick_mode = state_guard.screen_color_pick_mode;
         let color_pick_preview = state_guard.color_pick_preview.clone();
@@ -11787,6 +11847,7 @@ mod windows_overlay {
                 toolbar_smoothing,
                 toolbar_smoothing_amount,
                 toolbar_tool,
+                toolbar_fill_shapes,
                 toolbar_color_palette_open,
                 toolbar_color_pick_mode,
             );
@@ -12223,6 +12284,7 @@ mod windows_overlay {
         _smoothing: bool,
         _smoothing_amount: f32,
         tool: ScreenDrawTool,
+        fill_shapes: bool,
         color_palette_open: bool,
         color_pick_mode: bool,
     ) {
@@ -12891,6 +12953,34 @@ mod windows_overlay {
             [255, 255, 255, 255],
             2.0,
         );
+        let fill_x = SCREEN_DRAW_TOOLBAR_FILL_X as f32;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            fill_x,
+            12.0,
+            SCREEN_DRAW_TOOLBAR_FILL_W as f32,
+            32.0,
+            8.0,
+            if fill_shapes {
+                [86, 150, 122, 232]
+            } else {
+                [82, 96, 120, 214]
+            },
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            fill_x + 0.5,
+            12.5,
+            SCREEN_DRAW_TOOLBAR_FILL_W as f32 - 1.0,
+            31.0,
+            8.0,
+            1.0,
+            if fill_shapes {
+                [196, 255, 226, 110]
+            } else {
+                [255, 255, 255, 34]
+            },
+        );
         if color_palette_open {
             let palette_x = 19.0;
             let palette_y = base_toolbar_h + 4.0;
@@ -12978,6 +13068,23 @@ mod windows_overlay {
                 );
             }
         }
+        draw_screen_draw_text_into_rgba(
+            pixels,
+            width as u32,
+            height as u32,
+            toolbar_x + SCREEN_DRAW_TOOLBAR_FILL_X + 8,
+            toolbar_y + 18,
+            SCREEN_DRAW_TOOLBAR_FILL_W - 16,
+            18,
+            if fill_shapes { "Fill" } else { "Stroke" },
+            RgbaColor {
+                r: 240,
+                g: 246,
+                b: 255,
+                a: 220,
+            },
+            10.0,
+        );
     }
 
     fn draw_toolbar_svg_icon(
@@ -24649,7 +24756,7 @@ mod windows_overlay {
         }
 
         #[test]
-        fn screen_draw_text_layout_uses_dragged_box_when_available() {
+        fn screen_draw_text_layout_tracks_latest_pointer_for_text_preview() {
             let stroke = ScreenDrawStroke {
                 tool: ScreenDrawTool::Text,
                 points: vec![POINT { x: 300, y: 220 }, POINT { x: 180, y: 268 }],
@@ -24673,7 +24780,7 @@ mod windows_overlay {
                 screen_draw_text_layout(&stroke, "Text").unwrap();
 
             assert_eq!(left, 180);
-            assert_eq!(top, 220);
+            assert_eq!(top, 268);
             assert_eq!(width, 234);
             assert_eq!(height, 53);
             assert_eq!(font_size, 26.0);

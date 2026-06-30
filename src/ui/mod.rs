@@ -4968,23 +4968,6 @@ impl CrosshairApp {
                                     }
 
                                     ui.add_space(4.0);
-                                    let fill_changed = ui
-                                        .checkbox(
-                                            &mut self.state.quick_screen_draw_fill,
-                                            RichText::new(Self::tr_lang(
-                                                self.state.ui_language,
-                                                "Fill shapes",
-                                                "Tô kín hình",
-                                            ))
-                                            .size(10.0),
-                                        )
-                                        .changed();
-                                    if fill_changed {
-                                        self.sync_quick_screen_draw_config();
-                                        self.persist();
-                                    }
-
-                                    ui.add_space(4.0);
                                     let capture_active =
                                         self.capture_target.as_ref().is_some_and(|target| {
                                             matches!(target, CaptureRequest::QuickScreenDrawHotkey)
