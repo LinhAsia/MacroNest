@@ -4751,7 +4751,7 @@ impl CrosshairApp {
                                                 egui::DragValue::new(
                                                     &mut self.state.quick_key_display_size,
                                                 )
-                                                .range(18.0..=96.0)
+                                                .range(10.0..=96.0)
                                                 .speed(1.0),
                                             )
                                             .changed();

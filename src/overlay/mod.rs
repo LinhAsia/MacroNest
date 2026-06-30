@@ -4254,7 +4254,7 @@ mod windows_overlay {
                     {
                         let x = (lparam.0 & 0xffff) as i16 as i32;
                         let y = ((lparam.0 >> 16) & 0xffff) as i16 as i32;
-                        let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+                        let font_size = runtime.quick_key_display_size.clamp(10.0, 96.0);
                         let (width, height) = quick_key_display_mascot_layout_size(
                             font_size,
                             runtime.quick_key_display_mascot_style,
@@ -6870,12 +6870,12 @@ mod windows_overlay {
         }
 
         let bounce_elapsed = now.saturating_duration_since(entry.last_pressed_at);
-        let bounce_t = (bounce_elapsed.as_secs_f32() / 0.150).clamp(0.0, 1.0);
+        let bounce_t = (bounce_elapsed.as_secs_f32() / 0.200).clamp(0.0, 1.0);
         if bounce_t < 1.0 {
             let wave = (bounce_t * std::f32::consts::PI).sin();
-            visual.scale_x *= 1.0 - 0.12 * wave;
-            visual.scale_y *= 1.0 - 0.12 * wave;
-            visual.translate_y += 4.0 * wave;
+            visual.scale_x *= 1.0 + 0.24 * wave;
+            visual.scale_y *= 1.0 + 0.24 * wave;
+            visual.translate_y -= 8.0 * wave;
         }
 
         let held_long_enough = shown_elapsed >= QUICK_KEY_DISPLAY_HOLD_MIN_DURATION;
@@ -7187,9 +7187,9 @@ mod windows_overlay {
                 .quick_key_display_slot_labels
                 .insert((lane, slot), text.clone());
             
-            let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+            let font_size = runtime.quick_key_display_size.clamp(10.0, 96.0);
             let cap_height = (font_size * 1.12 + 18.0).round().max(44.0) as i32;
-            let entry_gap = (font_size * 0.52).round().max(18.0) as i32;
+            let entry_gap = (font_size * 0.36).round().max(10.0) as i32;
             let (row, row_slot, x_offset) = quick_key_display_allocate_row_and_slot(
                 runtime,
                 &text,
@@ -7867,7 +7867,7 @@ mod windows_overlay {
     }
 
     fn ensure_quick_key_display_mascot_positions(runtime: &mut Runtime) {
-        let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+        let font_size = runtime.quick_key_display_size.clamp(10.0, 96.0);
         let styles = quick_key_display_active_mascot_styles(runtime);
         let items = quick_key_display_default_mascot_centers(
             runtime.quick_key_display_center_x,
@@ -7889,7 +7889,7 @@ mod windows_overlay {
         center_x: i32,
         center_y: i32,
     ) {
-        let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+        let font_size = runtime.quick_key_display_size.clamp(10.0, 96.0);
         let styles = quick_key_display_active_mascot_styles(runtime);
         let Some(index) = styles.iter().position(|entry| *entry == style) else {
             return;
@@ -7962,7 +7962,7 @@ mod windows_overlay {
 
         match message {
             WM_LBUTTONDOWN => {
-                let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+                let font_size = runtime.quick_key_display_size.clamp(10.0, 96.0);
                 let styles = quick_key_display_active_mascot_styles(runtime);
                 let hwnds = quick_key_display_hwnds(runtime);
                 let items = quick_key_display_default_mascot_centers(
@@ -8019,7 +8019,7 @@ mod windows_overlay {
                 else {
                     return false;
                 };
-                let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+                let font_size = runtime.quick_key_display_size.clamp(10.0, 96.0);
                 let (width, height) = quick_key_display_mascot_layout_size(font_size, style);
                 let insets = quick_key_display_mascot_visible_insets(font_size, style);
                 let center_x = start_center_x + (cursor.x - start_mouse_x);
@@ -8842,7 +8842,7 @@ mod windows_overlay {
                     runtime.quick_key_display_enabled = enabled;
                     runtime.quick_key_display_center_x = center_x;
                     runtime.quick_key_display_center_y = center_y;
-                    runtime.quick_key_display_size = size.clamp(18.0, 96.0);
+                    runtime.quick_key_display_size = size.clamp(10.0, 96.0);
                     runtime.quick_key_display_mode = mode;
                     runtime.quick_key_display_mascot_style = mascot_style;
                     runtime.quick_key_display_mascot_styles = if mascot_styles.is_empty() {
@@ -9439,7 +9439,7 @@ mod windows_overlay {
             update_quick_key_display_mascot_mouse(runtime);
         }
 
-        let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+        let font_size = runtime.quick_key_display_size.clamp(10.0, 96.0);
         let entries = runtime.quick_key_display_entries.clone();
         let slot_labels = runtime.quick_key_display_slot_labels.clone();
         let mascot_styles = quick_key_display_active_mascot_styles(runtime);
@@ -16945,7 +16945,7 @@ mod windows_overlay {
         let outer_pad_y = (font_size * 0.34).round().max(10.0) as i32;
         let combo_gap = (font_size * 0.14).round().max(4.0) as i32;
         let plus_width = (font_size * 0.48).round().max(10.0) as i32;
-        let entry_gap = (font_size * 0.52).round().max(18.0) as i32;
+        let entry_gap = (font_size * 0.36).round().max(10.0) as i32;
         let barrier_gap = (font_size * 0.62).round().max(20.0) as i32;
 
         let max_rows = 4;
