@@ -17,17 +17,18 @@ The modules below are built to work with the macro system, so you can combine th
 
 | Module | What it does | How macros use it |
 | :--- | :--- | :--- |
-| Macro Engine | Run key presses, mouse actions, loops, waits, and conditions | Build the main flow of your automation |
-| Computer Vision | Find images on screen, watch colors, and count matching pixels | Trigger actions when something appears on screen |
-| OCR | Read text and numbers from the screen with fast local PaddleOCR | Run a macro when text matches |
-| Window Control | Move, resize, pin, and zoom windows | Control your workspace during a macro |
-| Audio Sense | Watch system audio or microphone levels and pitch | Trigger actions from sound |
-| Sound Effects | Play sound alerts and use custom clips | Confirm status, warnings, or macro events |
-| Crosshair | Show a custom crosshair with your own style | Turn overlays on or off with macros |
-| Geometry Overlay | Draw lines, boxes, circles, and other shapes | Mark screen targets during a macro |
-| HUD Labels | Show text, timers, and countdowns on screen | Display values and progress while running |
-| Script Command | Run CMD and PowerShell commands | Call system scripts inside a macro |
-| Hardware Input | Use Interception, Arduino, and recorded mouse paths | Send input in different ways when needed |
+| **Macro Engine** | Run key presses, mouse actions, loops, waits, and conditional branches | Build logic: click buttons, enter input fields, loop tasks, and branch flow using variables |
+| **Computer Vision** | Find images on screen, watch colors, and count matching pixels | Scan screen: locate game icons, wait for color changes, or trigger actions when an enemy bar fills up |
+| **OCR** | Extract text/numbers from screen regions and save to variables, or check if specific text is found | Save scan results to variables (e.g. read coordinates/scores) and branch macro logic based on text matches |
+| **Window Control** | Move, resize, layout (arrange in grid), pin, and zoom windows | Setup workspace: tile windows side-by-side, crop active regions, or center windows for precise clicking |
+| **Audio Sense** | Monitor system audio, microphone levels, and audio frequency (pitch) | Handle sound cues: trigger automated responses when a voice call starts or game sound plays |
+| **Sound Effects** | Play sound alerts, text-to-speech, and custom audio clips | Audible alerts: play warning sound on error, or read status messages aloud during execution |
+| **Crosshair** | Render a customizable crosshair overlay on the screen | Visual aid: overlay a targeting crosshair for manual games, toggled on/off via macro steps |
+| **Geometry Overlay** | Draw lines, rectangles, circles, and polygons on screen | Mark zones: highlight active scan regions, frame targets, or draw guides during macro execution |
+| **HUD Labels** | Display customizable floating text labels and values on screen | Live dashboard: show variable values, current step status, or custom status labels overlaying the screen |
+| **Timer** | Create stopwatches, countdowns, and cooldown overlays on screen | Track time: trigger actions after elapsed time, or overlay skill cooldown indicators on screen |
+| **Script Command** | Execute CMD and PowerShell commands, capturing their output to variables | System integration: fetch system info, run Python scripts, or query network endpoints inside a macro |
+| **Hardware Input** | Send input via Interception driver, Arduino boards, or recorded mouse paths | Bypass anti-cheat: send natural human-like input and replay recorded smooth mouse movements |
 
 ## Quick Actions
 

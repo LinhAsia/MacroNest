@@ -17,17 +17,18 @@ Các mô-đun dưới đây được thiết kế để hoạt động tương t
 
 | Mô-đun | Chức năng | Cách hoạt động trong Macro |
 | :--- | :--- | :--- |
-| Macro Engine | Chạy phím bấm, hành động chuột, vòng lặp, chờ đợi và điều kiện rẽ nhánh | Xây dựng luồng chính cho kịch bản tự động hóa |
-| Computer Vision | Tìm ảnh trên màn hình, giám sát màu sắc và đếm số pixel trùng khớp | Kích hoạt hành động khi một hình ảnh/màu sắc xuất hiện trên màn hình |
-| OCR | Đọc chữ và số trên màn hình cực nhanh bằng PaddleOCR cục bộ | Chạy macro khi phát hiện nội dung văn bản trùng khớp |
-| Window Control | Di chuyển, đổi kích thước, ghim nổi và thu phóng các cửa sổ ứng dụng | Kiểm soát không gian làm việc của bạn trong khi macro đang chạy |
-| Audio Sense | Giám sát mức âm lượng và tần số âm thanh hệ thống hoặc micrô | Kích hoạt hành động tự động từ tín hiệu âm thanh |
-| Sound Effects | Phát âm thanh cảnh báo và sử dụng các clip âm thanh tùy chỉnh | Xác nhận trạng thái, cảnh báo hoặc các sự kiện macro |
-| Crosshair | Hiển thị hồng tâm tùy chỉnh màn hình theo phong cách riêng của bạn | Bật hoặc tắt lớp phủ hồng tâm bằng phím tắt hoặc macro |
-| Geometry Overlay | Vẽ đường thẳng, hộp thoại, hình tròn và các hình dạng hình học khác | Đánh dấu các mục tiêu trên màn hình trực quan trong khi chạy macro |
-| HUD Labels | Hiển thị chữ viết, đồng hồ đếm giờ và bộ đếm ngược trên màn hình | Hiển thị các giá trị và tiến trình của macro khi đang chạy |
-| Script Command | Chạy trực tiếp lệnh CMD và PowerShell | Gọi các đoạn mã kịch bản hệ thống ngay bên trong luồng macro |
-| Hardware Input | Hỗ trợ mô phỏng chuột bàn phím qua Interception, Arduino, và đường di chuyển chuột ghi lại | Gửi tín hiệu nhập liệu ở cấp độ phần cứng khi cần |
+| **Macro Engine** | Chạy phím bấm, hành động chuột, vòng lặp, chờ đợi và điều kiện rẽ nhánh | Xây dựng logic: click nút, điền thông tin, lặp lại công việc và rẽ nhánh luồng chạy bằng biến số |
+| **Computer Vision** | Tìm ảnh trên màn hình, giám sát màu sắc và đếm số pixel trùng khớp | Quét màn hình: tự động tìm icon, đợi một vùng chuyển màu, hoặc kích hoạt khi thanh máu đầy |
+| **OCR** | Trích xuất chữ/số từ màn hình vào biến số, kiểm tra sự tồn tại và tọa độ của văn bản | Đọc số liệu (tọa độ, điểm số) lưu vào biến và rẽ nhánh kịch bản khi văn bản khớp điều kiện |
+| **Window Control** | Di chuyển, đổi kích thước, chia bố cục (layout), ghim nổi và phóng to cửa sổ | Thiết lập không gian: chia đôi màn hình ứng dụng, cắt bớt viền cửa sổ để click tọa độ chính xác |
+| **Audio Sense** | Giám sát mức âm lượng và tần số (pitch) âm thanh hệ thống hoặc micrô | Nhận diện âm thanh: tự động phản hồi khi có cuộc gọi nói chuyện hoặc âm thanh game phát ra |
+| **Sound Effects** | Phát âm thanh cảnh báo, đọc văn bản thành giọng nói (TTS) và clip tùy chỉnh | Cảnh báo bằng giọng nói: phát âm thanh khi có lỗi, hoặc thông báo trạng thái kịch bản đang chạy |
+| **Crosshair** | Hiển thị hồng tâm tùy chỉnh màn hình theo phong cách riêng của bạn | Hỗ trợ ngắm bắn: hiển thị hồng tâm ảo trên màn hình, bật/tắt tự động bằng kịch bản macro |
+| **Geometry Overlay** | Vẽ đường thẳng, hình chữ nhật, hình tròn và đa giác trên màn hình | Đánh dấu vùng quét: vẽ khung bao quanh mục tiêu cần quét, tạo đường kẻ dẫn hướng trực quan |
+| **HUD Labels** | Hiển thị chữ viết và giá trị biến số nổi trên màn hình | Bảng theo dõi trực tiếp: hiển thị giá trị các biến số, bước kịch bản hiện tại đè lên màn hình |
+| **Timer** | Tạo đồng hồ bấm giờ, đếm ngược và đếm thời gian hồi chiêu trên màn hình | Kiểm soát thời gian: kích hoạt hành động sau khi đếm xong, hoặc hiện thời gian hồi chiêu của chiêu thức |
+| **Script Command** | Chạy trực tiếp lệnh CMD/PowerShell và lưu kết quả trả về vào biến số | Liên kết hệ thống: thu thập thông tin máy tính, chạy file Python, truy vấn API trong luồng chạy |
+| **Hardware Input** | Giả lập chuột bàn phím qua Interception, Arduino, và đường chuột ghi lại | Vượt anti-cheat: mô phỏng chuyển động chuột mượt mà và nhập liệu mô phỏng như người thật |
 
 ## Thao tác Nhanh (Quick Actions)
 
