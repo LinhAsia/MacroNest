@@ -9122,26 +9122,69 @@ impl CrosshairApp {
     }
 
     fn capture_request_accepts_mouse(&self, target: &CaptureRequest) -> bool {
-        matches!(
-            target,
-            CaptureRequest::MacroPresetHotkey(_, _)
-                | CaptureRequest::MacroPresetRecordHotkey(_, _)
-                | CaptureRequest::MacroPresetReleaseWaitKey(_, _)
-                | CaptureRequest::MacroPresetHoldStopInput(_, _)
-                | CaptureRequest::CommandPresetHotkey(_)
-                | CaptureRequest::WindowPresetHotkey(_)
-                | CaptureRequest::WindowFocusPresetHotkey(_)
-                | CaptureRequest::WindowLayoutHotkey(_)
-                | CaptureRequest::WindowPresetAnimateHotkey(_)
-                | CaptureRequest::WindowPresetTitlebarHotkey(_)
-                | CaptureRequest::WindowExpandHotkey(_)
-                | CaptureRequest::PinPresetHotkey(_)
-                | CaptureRequest::MouseSensitivityPresetHotkey(_)
-                | CaptureRequest::ZoomPresetHotkey(_)
-                | CaptureRequest::VisionPresetHotkey(_)
-                | CaptureRequest::QuickScreenDrawHotkey
-                | CaptureRequest::MacrosMasterHotkey
-                | CaptureRequest::MacroStepInput { .. }
+        match target {
+            CaptureRequest::MacroStepInput {
+                group_id,
+                preset_id,
+                step_index,
+                extra_cond_index,
+            } => self.capture_macro_step_input_accepts_mouse(
+                *group_id,
+                *preset_id,
+                *step_index,
+                *extra_cond_index,
+            ),
+            _ => matches!(
+                target,
+                CaptureRequest::MacroPresetHotkey(_, _)
+                    | CaptureRequest::MacroPresetRecordHotkey(_, _)
+                    | CaptureRequest::MacroPresetReleaseWaitKey(_, _)
+                    | CaptureRequest::MacroPresetHoldStopInput(_, _)
+                    | CaptureRequest::CommandPresetHotkey(_)
+                    | CaptureRequest::WindowPresetHotkey(_)
+                    | CaptureRequest::WindowFocusPresetHotkey(_)
+                    | CaptureRequest::WindowLayoutHotkey(_)
+                    | CaptureRequest::WindowPresetAnimateHotkey(_)
+                    | CaptureRequest::WindowPresetTitlebarHotkey(_)
+                    | CaptureRequest::WindowExpandHotkey(_)
+                    | CaptureRequest::PinPresetHotkey(_)
+                    | CaptureRequest::MouseSensitivityPresetHotkey(_)
+                    | CaptureRequest::ZoomPresetHotkey(_)
+                    | CaptureRequest::VisionPresetHotkey(_)
+                    | CaptureRequest::QuickScreenDrawHotkey
+                    | CaptureRequest::MacrosMasterHotkey
+            ),
+        }
+    }
+
+    fn capture_macro_step_input_accepts_mouse(
+        &self,
+        group_id: u32,
+        preset_id: u32,
+        step_index: usize,
+        extra_cond_index: Option<usize>,
+    ) -> bool {
+        let Some(step) = self
+            .state
+            .macro_groups
+            .iter()
+            .find(|group| group.id == group_id)
+            .and_then(|group| group.presets.iter().find(|preset| preset.id == preset_id))
+            .and_then(|preset| preset.steps.get(step_index))
+        else {
+            return true;
+        };
+
+        if let Some(extra_idx) = extra_cond_index {
+            return step
+                .extra_conditions
+                .get(extra_idx)
+                .is_some_and(|cond| cond.condition_type == crate::model::IfConditionType::MouseHeld);
+        }
+
+        !matches!(
+            step.action,
+            MacroAction::KeyPress | MacroAction::KeyDown | MacroAction::KeyUp
         )
     }
 
