@@ -255,7 +255,7 @@ mod windows_overlay {
     const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 474;
     const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 512;
     const SCREEN_DRAW_TOOLBAR_FILL_X: i32 = 552;
-    const SCREEN_DRAW_TOOLBAR_FILL_W: i32 = 32;
+    const SCREEN_DRAW_TOOLBAR_FILL_W: i32 = 72;
     #[derive(Debug, Clone)]
     struct VisionRunOutcome {
         matched: bool,
@@ -10900,11 +10900,15 @@ mod windows_overlay {
             } else {
                 stroke.text.clone()
             };
-            let width = (font_size * 9.0).round() as i32;
+            let estimated_text_width = if stroke.text.is_empty() {
+                (font_size * 9.0).round() as i32
+            } else {
+                ((text.chars().count() as f32 * font_size * 0.64).ceil() as i32 + 24).max(160)
+            };
             return Some((
                 last.x,
                 last.y,
-                width.max(160),
+                estimated_text_width.max(160),
                 default_height.max(28),
                 font_size,
                 text,
@@ -11179,7 +11183,11 @@ mod windows_overlay {
             return;
         }
 
-        let mut bgra = vec![0u8; pixel_count * 4];
+        let supersample_scale = 2usize;
+        let supersampled_width = region_width.saturating_mul(supersample_scale);
+        let supersampled_height = region_height.saturating_mul(supersample_scale);
+        let supersampled_pixels = supersampled_width.saturating_mul(supersampled_height);
+        let mut bgra = vec![0u8; supersampled_pixels * 4];
 
         unsafe {
             let screen_dc = GetDC(None);
@@ -11188,8 +11196,8 @@ mod windows_overlay {
             let bitmap_info = BITMAPINFO {
                 bmiHeader: BITMAPINFOHEADER {
                     biSize: size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: region_width as i32,
-                    biHeight: -(region_height as i32),
+                    biWidth: supersampled_width as i32,
+                    biHeight: -(supersampled_height as i32),
                     biPlanes: 1,
                     biBitCount: 32,
                     biCompression: BI_RGB.0,
@@ -11223,7 +11231,7 @@ mod windows_overlay {
                 .chain(std::iter::once(0))
                 .collect::<Vec<_>>();
             let font = CreateFontW(
-                -(font_size.round() as i32).max(1),
+                -((font_size * supersample_scale as f32).round() as i32).max(1),
                 0,
                 0,
                 0,
@@ -11245,8 +11253,8 @@ mod windows_overlay {
             let mut rect = RECT {
                 left: 0,
                 top: 0,
-                right: region_width as i32,
-                bottom: region_height as i32,
+                right: supersampled_width as i32,
+                bottom: supersampled_height as i32,
             };
             if rect.left < rect.right && rect.top < rect.bottom {
                 let mut wide = text
@@ -11268,11 +11276,26 @@ mod windows_overlay {
 
         for py in 0..region_height {
             for px in 0..region_width {
-                let src_offset = (py * region_width + px) * 4;
-                let src_b = bgra[src_offset];
-                let src_g = bgra[src_offset + 1];
-                let src_r = bgra[src_offset + 2];
-                let src_a = screen_draw_text_mask_alpha(src_r, src_g, src_b, color.a);
+                let mut coverage_sum = 0u32;
+                for sy in 0..supersample_scale {
+                    for sx in 0..supersample_scale {
+                        let sample_x = px * supersample_scale + sx;
+                        let sample_y = py * supersample_scale + sy;
+                        let src_offset = (sample_y * supersampled_width + sample_x) * 4;
+                        let src_b = bgra[src_offset];
+                        let src_g = bgra[src_offset + 1];
+                        let src_r = bgra[src_offset + 2];
+                        coverage_sum += src_r.max(src_g).max(src_b) as u32;
+                    }
+                }
+                let average_coverage =
+                    (coverage_sum / (supersample_scale * supersample_scale) as u32) as u8;
+                let src_a = screen_draw_text_mask_alpha(
+                    average_coverage,
+                    average_coverage,
+                    average_coverage,
+                    color.a,
+                );
                 if src_a == 0 {
                     continue;
                 }
@@ -13069,10 +13092,10 @@ mod windows_overlay {
             pixels,
             width as u32,
             height as u32,
-            toolbar_x + SCREEN_DRAW_TOOLBAR_FILL_X + 2,
-            toolbar_y + 16,
-            SCREEN_DRAW_TOOLBAR_FILL_W - 4,
-            16,
+            toolbar_x + SCREEN_DRAW_TOOLBAR_FILL_X + 6,
+            toolbar_y + 14,
+            SCREEN_DRAW_TOOLBAR_FILL_W - 12,
+            20,
             "Fill",
             RgbaColor {
                 r: 240,
@@ -13080,7 +13103,7 @@ mod windows_overlay {
                 b: 255,
                 a: if fill_shapes { 240 } else { 210 },
             },
-            10.0,
+            12.0,
         );
     }
 
