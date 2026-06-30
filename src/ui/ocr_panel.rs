@@ -54,7 +54,6 @@ impl CrosshairApp {
         for index in 0..self.state.ocr_presets.len() {
             let preset = &mut self.state.ocr_presets[index];
             preset.enabled = true; // Always enabled for macros
-            ui.add_space(6.0);
 
             Self::show_preset_card(ui, false, |ui| {
                 ui.horizontal(|ui| {

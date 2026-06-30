@@ -152,7 +152,6 @@ impl CrosshairApp {
                 let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
 
                 preset.enabled = preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
-                ui.add_space(6.0);
                 Self::show_preset_card(ui, preset.enabled, |ui| {
                     ui.horizontal(|ui| {
                         let name_width = Self::preset_header_name_width(ui);
