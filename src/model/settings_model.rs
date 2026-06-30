@@ -34,6 +34,7 @@ pub enum QuickScreenDrawTool {
     Ellipse,
     Circle,
     Polygon,
+    Text,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
