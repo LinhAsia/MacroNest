@@ -7243,49 +7243,17 @@ impl CrosshairApp {
             .open_bool(&mut popup_open)
             .align(egui::RectAlign::BOTTOM_START)
             .layout(egui::Layout::top_down_justified(egui::Align::Min))
-            .width(220.0)
+            .width(260.0)
             .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
             .show(|ui| {
-                ui.set_min_width(220.0);
-
-                // Visual color picker
-                let mut color32 =
-                    egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, color.a);
-                if egui::color_picker::color_picker_color32(
+                ui.set_min_width(260.0);
+                if Self::render_premium_color_picker(
                     ui,
-                    &mut color32,
+                    color,
                     egui::color_picker::Alpha::Opaque,
                 ) {
-                    color.r = color32.r();
-                    color.g = color32.g();
-                    color.b = color32.b();
-                    color.a = color32.a();
                     changed = true;
                 }
-
-                ui.add_space(4.0);
-
-                // Manual HEX text input
-                ui.horizontal(|ui| {
-                    ui.label("#");
-                    let mut hex_str = format!("{:02X}{:02X}{:02X}", color.r, color.g, color.b);
-                    let hex_resp = ui.add(
-                        egui::TextEdit::singleline(&mut hex_str)
-                            .hint_text("RRGGBB")
-                            .desired_width(120.0),
-                    );
-                    if hex_resp.changed() {
-                        let hex = hex_str.trim().trim_start_matches('#');
-                        if hex.len() == 6 {
-                            if let Ok(color_val) = u32::from_str_radix(hex, 16) {
-                                color.r = ((color_val >> 16) & 0xFF) as u8;
-                                color.g = ((color_val >> 8) & 0xFF) as u8;
-                                color.b = (color_val & 0xFF) as u8;
-                                changed = true;
-                            }
-                        }
-                    }
-                });
             });
 
         // Close popup if cursor hovers away from both the button and the popup

@@ -521,28 +521,18 @@ impl CrosshairApp {
                                             .open_bool(&mut popup_open)
                                             .align(egui::RectAlign::BOTTOM_START)
                                             .layout(egui::Layout::top_down_justified(egui::Align::Min))
-                                            .width(220.0)
+                                            .width(260.0)
                                             .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
                                             .show(|ui| {
-                                                ui.set_min_width(220.0);
+                                                ui.set_min_width(260.0);
                                                 ui.label(Self::tr_lang(language, "Manual color", "Manual color"));
                                                 ui.separator();
 
-                                                let mut color32 = egui::Color32::from_rgba_unmultiplied(
-                                                    self.vision_manual_color.r,
-                                                    self.vision_manual_color.g,
-                                                    self.vision_manual_color.b,
-                                                    self.vision_manual_color.a,
-                                                );
-                                                if egui::color_picker::color_picker_color32(
+                                                if Self::render_premium_color_picker(
                                                     ui,
-                                                    &mut color32,
+                                                    &mut self.vision_manual_color,
                                                     egui::color_picker::Alpha::Opaque,
                                                 ) {
-                                                    self.vision_manual_color.r = color32.r();
-                                                    self.vision_manual_color.g = color32.g();
-                                                    self.vision_manual_color.b = color32.b();
-                                                    self.vision_manual_color.a = color32.a();
                                                     self.vision_manual_color_hex = format!(
                                                         "{:02X}{:02X}{:02X}",
                                                         self.vision_manual_color.r,
@@ -550,27 +540,6 @@ impl CrosshairApp {
                                                         self.vision_manual_color.b
                                                     );
                                                 }
-
-                                                ui.add_space(4.0);
-
-                                                ui.horizontal(|ui| {
-                                                    ui.label("#");
-                                                    let hex_resp = ui.add(
-                                                        TextEdit::singleline(&mut self.vision_manual_color_hex)
-                                                            .hint_text("RRGGBB")
-                                                    );
-                                                    if hex_resp.changed() {
-                                                        let hex = self.vision_manual_color_hex.trim().trim_start_matches('#');
-                                                        if hex.len() == 6 {
-                                                            if let Ok(color_val) = u32::from_str_radix(hex, 16) {
-                                                                self.vision_manual_color.r = ((color_val >> 16) & 0xFF) as u8;
-                                                                self.vision_manual_color.g = ((color_val >> 8) & 0xFF) as u8;
-                                                                self.vision_manual_color.b = (color_val & 0xFF) as u8;
-                                                            }
-                                                        }
-                                                    }
-                                                });
-
                                                 ui.add_space(8.0);
 
                                                 if ui.button(Self::tr_lang(language, "Add color", "Add color")).clicked() {
