@@ -183,14 +183,18 @@ impl CrosshairApp {
                 for pack in crate::ocr::ocr_language_packs() {
                     let installed = crate::ocr::is_language_pack_installed(pack.code);
                     let is_downloading = is_ocr_download_running && !installed;
+                    let is_selected = step.ocr_language == pack.code;
+                    let label_text = crate::ocr::display_label_for_language_code(pack.code);
                     let row = ui
                         .horizontal(|ui| {
+                            let btn_width = if installed {
+                                184.0
+                            } else {
+                                118.0
+                            };
                             let label_response = ui.add_sized(
-                                [118.0, 0.0],
-                                egui::Button::selectable(
-                                    step.ocr_language == pack.code,
-                                    crate::ocr::display_label_for_language_code(pack.code),
-                                ),
+                                [btn_width, 20.0],
+                                egui::SelectableLabel::new(is_selected, label_text),
                             );
                             if is_downloading {
                                 ui.add_sized([58.0, 18.0], egui::Spinner::new());
