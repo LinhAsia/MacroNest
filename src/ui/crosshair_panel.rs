@@ -286,27 +286,17 @@ impl CrosshairApp {
                     ui.data_mut(|data| data.insert_temp(size_id, pending_size));
 
                     // ---- Paint color picker (edits style.color directly so the render matches) ----
-                    let mut paint_rgba =
-                        [style.color.r, style.color.g, style.color.b, style.color.a];
                     ui.horizontal(|ui| {
                         ui.label(Self::tr_lang(language, "Paint color", "Paint color"));
-                        if ui
-                            .color_edit_button_srgba_unmultiplied(&mut paint_rgba)
-                            .changed()
-                        {
-                            style.color.r = paint_rgba[0];
-                            style.color.g = paint_rgba[1];
-                            style.color.b = paint_rgba[2];
-                            style.color.a = paint_rgba[3];
-                            changed = true;
-                        }
+                        let response = Self::edit_rgba_color(ui, &mut style.color);
+                        changed |= response.changed();
                     });
 
                     let paint_egui_color = Color32::from_rgba_unmultiplied(
-                        paint_rgba[0],
-                        paint_rgba[1],
-                        paint_rgba[2],
-                        paint_rgba[3],
+                        style.color.r,
+                        style.color.g,
+                        style.color.b,
+                        style.color.a,
                     );
 
                     ui.add_space(6.0);
