@@ -11537,14 +11537,43 @@ mod windows_overlay {
                 [255, 255, 255, 34]
             },
         );
-        draw_toolbar_svg_icon(
+        let brush_center_x = SCREEN_DRAW_TOOLBAR_BRUSH_X as f32 + 14.0;
+        draw_skia_line(
             &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_BRUSH_SVG,
-            SCREEN_DRAW_TOOLBAR_BRUSH_X + 2,
-            10,
-            24,
-            28,
+            brush_center_x - 5.6,
+            34.8,
+            brush_center_x + 0.8,
+            28.4,
+            [240, 246, 255, 246],
+            4.6,
         );
+        draw_skia_line(
+            &mut pixmap,
+            brush_center_x - 3.2,
+            32.4,
+            brush_center_x + 2.8,
+            26.4,
+            [166, 182, 204, 246],
+            1.4,
+        );
+        let mut ferrule = tiny_skia::PathBuilder::new();
+        ferrule.move_to(brush_center_x + 0.2, 28.0);
+        ferrule.line_to(brush_center_x + 4.4, 23.8);
+        ferrule.line_to(brush_center_x + 7.2, 26.6);
+        ferrule.line_to(brush_center_x + 3.0, 30.8);
+        ferrule.close();
+        if let Some(path) = ferrule.finish() {
+            fill_skia_path(&mut pixmap, &path, [226, 234, 246, 246]);
+        }
+        let mut bristle = tiny_skia::PathBuilder::new();
+        bristle.move_to(brush_center_x + 4.0, 22.4);
+        bristle.line_to(brush_center_x + 8.8, 17.6);
+        bristle.line_to(brush_center_x + 7.0, 13.0);
+        bristle.line_to(brush_center_x + 1.6, 18.5);
+        bristle.close();
+        if let Some(path) = bristle.finish() {
+            fill_skia_path(&mut pixmap, &path, [240, 246, 255, 246]);
+        }
 
         let line_button_x = SCREEN_DRAW_TOOLBAR_LINE_X as f32;
         fill_skia_rounded_rect(
@@ -11612,14 +11641,23 @@ mod windows_overlay {
                 [255, 255, 255, 34]
             },
         );
-        draw_toolbar_svg_icon(
+        draw_skia_line(
             &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_ARROW_SVG,
-            SCREEN_DRAW_TOOLBAR_ARROW_X + 3,
-            11,
-            22,
-            22,
+            SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 7.8,
+            34.2,
+            SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 17.0,
+            25.0,
+            [240, 246, 255, 246],
+            3.0,
         );
+        let mut arrow_head = tiny_skia::PathBuilder::new();
+        arrow_head.move_to(SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 20.0, 17.6);
+        arrow_head.line_to(SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 14.9, 24.4);
+        arrow_head.line_to(SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 23.8, 24.2);
+        arrow_head.close();
+        if let Some(path) = arrow_head.finish() {
+            fill_skia_path(&mut pixmap, &path, [240, 246, 255, 246]);
+        }
 
         let rect_button_x = SCREEN_DRAW_TOOLBAR_RECT_X as f32;
         fill_skia_rounded_rect(
