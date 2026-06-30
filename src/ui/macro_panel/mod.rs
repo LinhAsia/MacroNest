@@ -768,6 +768,12 @@ impl CrosshairApp {
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
             .unwrap_or(false);
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
+        }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
             egui::Layout::top_down(egui::Align::Center),
@@ -913,6 +919,12 @@ impl CrosshairApp {
         if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::If) {
             open = false;
         }
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
+        }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
             egui::Layout::top_down(egui::Align::Center),
@@ -1041,6 +1053,12 @@ impl CrosshairApp {
         if top_level_hovered {
             open = false;
             Self::clear_macro_action_submenus(ui, id_source);
+        }
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
         }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
@@ -1242,6 +1260,12 @@ impl CrosshairApp {
             ui.ctx()
                 .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
         }
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
+        }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
             egui::Layout::top_down(egui::Align::Center),
@@ -1421,6 +1445,12 @@ impl CrosshairApp {
             open = false;
             ui.ctx()
                 .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
+        }
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
         }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
@@ -15709,6 +15739,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
             ui.ctx()
                 .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
         }
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
+        }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
             egui::Layout::top_down(egui::Align::Center),
@@ -15855,6 +15891,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
             ui.ctx()
                 .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
         }
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
+        }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
             egui::Layout::top_down(egui::Align::Center),
@@ -15986,6 +16028,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
             open = false;
             ui.ctx()
                 .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
+        }
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
         }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
@@ -16272,6 +16320,12 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
             open = false;
             ui.ctx()
                 .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
+        }
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
         }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),

@@ -17,9 +17,8 @@ use windows::Win32::{
 
 use super::{
     HOOK_STATE, WindowFocusPreset, WindowPreset, calculate_window_bounds, ensure_window_restored,
-    find_preset_by_spec, find_target_window_hwnd, is_internal_app_window,
-    remove_window_title_bar, resolve_window_target, restore_window_title_bar,
-    window_belongs_to_current_process,
+    find_preset_by_spec, find_target_window_hwnd, is_internal_app_window, remove_window_title_bar,
+    resolve_window_target, restore_window_title_bar, window_belongs_to_current_process,
 };
 
 pub(super) fn apply_window_preset_by_id(spec: &str) -> Result<()> {

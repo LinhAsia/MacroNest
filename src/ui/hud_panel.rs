@@ -219,7 +219,10 @@ impl CrosshairApp {
             });
         }
         if let Some(pid) = begin_hud_picker_preset_id {
-            self.begin_region_capture(ui.ctx(), crate::ui::VisionCaptureTarget::HudPresetRegion(pid));
+            self.begin_region_capture(
+                ui.ctx(),
+                crate::ui::VisionCaptureTarget::HudPresetRegion(pid),
+            );
         }
 
         if let Some(id) = remove_id {

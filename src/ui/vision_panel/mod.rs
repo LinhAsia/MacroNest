@@ -1672,7 +1672,10 @@ impl CrosshairApp {
                         }
                     }
                 } else {
-                    self.cancel_image_search_capture_with_status(ctx, "Image area capture cancelled.");
+                    self.cancel_image_search_capture_with_status(
+                        ctx,
+                        "Image area capture cancelled.",
+                    );
                 }
             }
             VisionCaptureMode::ColorSample
@@ -2010,11 +2013,10 @@ impl CrosshairApp {
 
     pub(crate) fn vision_capture_target_is_circle(&self, target: VisionCaptureTarget) -> bool {
         match target {
-            VisionCaptureTarget::Preset(preset_id) => Self::vision_preset_by_id(
-                &self.state.vision_presets,
-                Some(preset_id),
-            )
-            .is_some_and(|preset| preset.search_region_is_circle),
+            VisionCaptureTarget::Preset(preset_id) => {
+                Self::vision_preset_by_id(&self.state.vision_presets, Some(preset_id))
+                    .is_some_and(|preset| preset.search_region_is_circle)
+            }
             VisionCaptureTarget::GeometryColor => false,
             VisionCaptureTarget::OcrPreset(_) => false,
             VisionCaptureTarget::OcrStepRegion { .. } => false,
@@ -2078,11 +2080,7 @@ impl CrosshairApp {
                         );
 
                         (
-                            self.finish_vision_template_capture(
-                                preset_id,
-                                &capture,
-                                save_result,
-                            ),
+                            self.finish_vision_template_capture(preset_id, &capture, save_result),
                             false,
                         )
                     }
@@ -2123,8 +2121,8 @@ impl CrosshairApp {
                 let region = self.screen_region_from_rect(ctx, rect, ctx.pixels_per_point());
                 self.restore_image_search_viewport(ctx);
                 if let Some((screen_x, screen_y, width, height)) = region {
-                    self.status =
-                        self.apply_image_search_region(ctx, target, screen_x, screen_y, width, height);
+                    self.status = self
+                        .apply_image_search_region(ctx, target, screen_x, screen_y, width, height);
                 } else {
                     self.status = "Failed to save the selected search area.".to_owned();
                 }
@@ -2839,7 +2837,8 @@ impl CrosshairApp {
         }
 
         self.restore_image_search_capture_window(ctx);
-        self.status = self.apply_image_search_region(ctx, target, screen_x, screen_y, width, height);
+        self.status =
+            self.apply_image_search_region(ctx, target, screen_x, screen_y, width, height);
         ctx.request_repaint();
     }
 

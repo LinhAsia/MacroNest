@@ -3345,34 +3345,40 @@ impl CrosshairApp {
                 );
             }
             TitlebarQuickActionKind::ClearOverlays => {
-                let body =
-                    egui::Rect::from_center_size(rect.center() + vec2(-1.0, 2.0), vec2(26.0, 18.0));
+                let center = rect.center();
+                
+                // Bottom-right layer
+                let lay1 = egui::Rect::from_center_size(center + vec2(4.0, -4.0), vec2(16.0, 16.0));
                 painter.rect_stroke(
-                    body,
-                    5.0,
+                    lay1,
+                    2.0,
+                    egui::Stroke::new(1.2, icon_color.gamma_multiply(0.5)),
+                    StrokeKind::Inside,
+                );
+                
+                // Top-left layer
+                let lay2 = egui::Rect::from_center_size(center + vec2(-4.0, 4.0), vec2(16.0, 16.0));
+                // Fill behind with dark background to hide overlapping lines of lay1
+                painter.rect_filled(
+                    lay2,
+                    2.0,
+                    Color32::from_rgba_premultiplied(15, 23, 42, 240),
+                );
+                painter.rect_stroke(
+                    lay2,
+                    2.0,
                     egui::Stroke::new(1.8, icon_color),
                     StrokeKind::Inside,
                 );
+
+                // A diagonal slash line representing "clear" or "prohibit"
+                let slash_start = pos2(center.x + 11.0, center.y - 11.0);
+                let slash_end = pos2(center.x - 11.0, center.y + 11.0);
+                
+                // Draw slash with slightly thicker stroke
                 painter.line_segment(
-                    [
-                        pos2(body.left() + 4.0, body.top() + 6.0),
-                        pos2(body.right() - 4.0, body.bottom() - 5.0),
-                    ],
+                    [slash_start, slash_end],
                     egui::Stroke::new(2.4, icon_color),
-                );
-                painter.line_segment(
-                    [
-                        pos2(body.center().x - 4.0, body.top() - 8.0),
-                        pos2(body.center().x + 9.0, body.top() + 5.0),
-                    ],
-                    egui::Stroke::new(2.4, icon_color),
-                );
-                painter.line_segment(
-                    [
-                        pos2(body.center().x + 6.0, body.top() - 8.0),
-                        pos2(body.center().x + 11.0, body.top() - 3.0),
-                    ],
-                    egui::Stroke::new(2.0, icon_color),
                 );
             }
             TitlebarQuickActionKind::KeySound => {

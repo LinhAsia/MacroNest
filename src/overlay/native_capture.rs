@@ -934,9 +934,12 @@ fn distance_measure_status_text(
     ui_language: crate::model::UiLanguage,
 ) -> &'static str {
     match ui_language {
-        crate::model::UiLanguage::Vietnamese => "Thuoc do: Click diem A, re chuot de do, click diem B de chot. Nhan Esc de huy.",
-        crate::model::UiLanguage::English | crate::model::UiLanguage::Icon =>
-            "Ruler: Click point A, move the mouse to measure, click point B to confirm. Press Esc to cancel.",
+        crate::model::UiLanguage::Vietnamese => {
+            "Thuoc do: Click diem A, re chuot de do, click diem B de chot. Nhan Esc de huy."
+        }
+        crate::model::UiLanguage::English | crate::model::UiLanguage::Icon => {
+            "Ruler: Click point A, move the mouse to measure, click point B to confirm. Press Esc to cancel."
+        }
     }
 }
 
@@ -1567,55 +1570,57 @@ unsafe fn draw_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<(
     let _ = SetBkMode(hdc, TRANSPARENT);
     let _ = SetTextColor(hdc, rgb(255, 255, 255));
 
-    let mut text_u16: Vec<u16> = status_text.encode_utf16().collect();
-    let mut calc_rect = RECT::default();
-    let _ = DrawTextW(hdc, &mut text_u16, &mut calc_rect, DT_CALCRECT);
-    let text_w = calc_rect.right - calc_rect.left;
-    let text_h = calc_rect.bottom - calc_rect.top;
+    if !matches!(state.mode, NativeCaptureMode::PointClick { .. }) {
+        let mut text_u16: Vec<u16> = status_text.encode_utf16().collect();
+        let mut calc_rect = RECT::default();
+        let _ = DrawTextW(hdc, &mut text_u16, &mut calc_rect, DT_CALCRECT);
+        let text_w = calc_rect.right - calc_rect.left;
+        let text_h = calc_rect.bottom - calc_rect.top;
 
-    let pill_w = text_w + 48;
-    let pill_h = text_h + 16;
-    let pill_x = (state.width - pill_w) / 2;
-    let pill_y = 40;
+        let pill_w = text_w + 48;
+        let pill_h = text_h + 16;
+        let pill_x = (state.width - pill_w) / 2;
+        let pill_y = 40;
 
-    // Draw pill background (using GDI round rect)
-    let brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(rgb(12, 18, 28));
-    let pen = windows::Win32::Graphics::Gdi::CreatePen(
-        windows::Win32::Graphics::Gdi::PS_SOLID,
-        1,
-        rgb(110, 156, 210),
-    );
-    let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
-    let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+        // Draw pill background (using GDI round rect)
+        let brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(rgb(12, 18, 28));
+        let pen = windows::Win32::Graphics::Gdi::CreatePen(
+            windows::Win32::Graphics::Gdi::PS_SOLID,
+            1,
+            rgb(110, 156, 210),
+        );
+        let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
+        let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
 
-    let _ = windows::Win32::Graphics::Gdi::RoundRect(
-        hdc,
-        pill_x,
-        pill_y,
-        pill_x + pill_w,
-        pill_y + pill_h,
-        18,
-        18,
-    );
+        let _ = windows::Win32::Graphics::Gdi::RoundRect(
+            hdc,
+            pill_x,
+            pill_y,
+            pill_x + pill_w,
+            pill_y + pill_h,
+            18,
+            18,
+        );
 
-    let mut text_rect = RECT {
-        left: pill_x,
-        top: pill_y,
-        right: pill_x + pill_w,
-        bottom: pill_y + pill_h,
-    };
-    let _ = DrawTextW(
-        hdc,
-        &mut text_u16,
-        &mut text_rect,
-        DT_CENTER | DT_SINGLELINE | DT_VCENTER,
-    );
+        let mut text_rect = RECT {
+            left: pill_x,
+            top: pill_y,
+            right: pill_x + pill_w,
+            bottom: pill_y + pill_h,
+        };
+        let _ = DrawTextW(
+            hdc,
+            &mut text_u16,
+            &mut text_rect,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
 
-    // Clean up pill graphics objects
-    let _ = SelectObject(hdc, old_brush);
-    let _ = SelectObject(hdc, old_pen);
-    let _ = DeleteObject(HGDIOBJ(brush.0));
-    let _ = DeleteObject(HGDIOBJ(pen.0));
+        // Clean up pill graphics objects
+        let _ = SelectObject(hdc, old_brush);
+        let _ = SelectObject(hdc, old_pen);
+        let _ = DeleteObject(HGDIOBJ(brush.0));
+        let _ = DeleteObject(HGDIOBJ(pen.0));
+    }
 
     // Render coordinates tooltip next to mouse cursor
     if show_cursor_tooltip && let Some(curr) = state.current_point {

@@ -13,14 +13,15 @@ use super::{
     default_protractor_needle1_angle, default_protractor_needle2_angle, default_protractor_scale,
     default_protractor_thickness, default_quick_key_display_size, default_quick_key_display_x,
     default_quick_key_display_y, default_screen_draw_brush_size, default_screen_draw_color,
-    default_screen_draw_smoothing_amount, default_screen_draw_freeze, default_timer_progress_border_color,
-    default_timer_progress_border_thickness, default_timer_progress_smoothness_fps, default_true,
+    default_screen_draw_freeze, default_screen_draw_smoothing_amount,
+    default_timer_progress_border_color, default_timer_progress_border_thickness,
+    default_timer_progress_smoothness_fps, default_true,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum QuickKeyDisplayMode {
-    #[default]
     Normal,
+    #[default]
     Mascot,
 }
 
@@ -624,7 +625,7 @@ impl Default for AppState {
             quick_key_display_x: default_quick_key_display_x(),
             quick_key_display_y: default_quick_key_display_y(),
             quick_key_display_size: default_quick_key_display_size(),
-            quick_key_display_mode: QuickKeyDisplayMode::Normal,
+            quick_key_display_mode: QuickKeyDisplayMode::Mascot,
             quick_key_display_mascot_style: MascotStyle::Hachiware,
             quick_key_display_mascot_styles: vec![MascotStyle::Hachiware],
             quick_key_display_mascot_positions: Vec::new(),
