@@ -4870,6 +4870,11 @@ impl CrosshairApp {
                                             QuickScreenDrawTool::Circle,
                                             Self::tr_lang(self.state.ui_language, "Circle", "Tròn"),
                                         );
+                                        ui.selectable_value(
+                                            &mut self.state.quick_screen_draw_tool,
+                                            QuickScreenDrawTool::Text,
+                                            "Text",
+                                        );
                                     });
                                     if before_tool != self.state.quick_screen_draw_tool {
                                         self.sync_quick_screen_draw_config();
