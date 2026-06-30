@@ -26,7 +26,7 @@ Các mô-đun dưới đây được thiết kế để hoạt động tương t
 | **Crosshair** | Hiển thị hồng tâm tùy chỉnh màn hình theo phong cách riêng của bạn | Hỗ trợ ngắm bắn: hiển thị hồng tâm ảo trên màn hình, bật/tắt tự động bằng kịch bản kịch bản |
 | **Geometry Overlay** | Vẽ điểm, đường thẳng, hình chữ nhật, hình tròn, elip, mũi tên, polyline, đa giác, cung tròn, nhãn chữ và SVG | Vẽ chỉ báo động: hiển thị vùng quét, mục tiêu di chuyển theo tọa độ biến số nhờ biểu thức toán học |
 | **HUD Labels** | Hiển thị chữ viết và giá trị biến số nổi trên màn hình | Bảng theo dõi trực tiếp: hiển thị giá trị các biến số, bước kịch bản hiện tại đè lên màn hình |
-| **Timer** | Tạo đồng hồ bấm giờ, đếm ngược và đếm thời gian hồi chiêu trên màn hình | Quản lý thời gian: đọc thời gian trôi qua/còn lại vào biến số (`timer1.second`, `timer1.raw`), kích hoạt hành động khi đếm xong |
+| **Timer** | Tạo đồng hồ bấm giờ, đếm ngược và đếm thời gian hồi chiêu trên màn hình | Quản lý thời gian: đọc giá trị đồng hồ bấm giờ/đếm ngược vào biến số thông qua hành động macro, kích hoạt hành động khi đếm xong, hoặc hiển thị thời gian hồi chiêu của chiêu thức |
 | **Script Command** | Chạy trực tiếp lệnh CMD/PowerShell và lưu kết quả trả về vào biến số | Liên kết hệ thống: thực thi các công cụ dòng lệnh, chạy script cục bộ hoặc gọi API bên ngoài |
 | **Hardware Input** | Giả lập chuột bàn phím qua Interception, Arduino, và đường chuột ghi lại | Mô phỏng nhập liệu: gửi tín hiệu chuột/bàn phím cấp thấp nhằm tương thích tối đa với các trò chơi hoặc ứng dụng bảo mật cao |
 
