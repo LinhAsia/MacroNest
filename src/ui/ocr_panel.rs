@@ -141,9 +141,14 @@ impl CrosshairApp {
                                         self.ocr_download_job.is_some() && !installed;
                                     let row = ui
                                         .horizontal(|ui| {
+                                            let btn_width = if installed {
+                                                236.0
+                                            } else {
+                                                148.0
+                                            };
                                             let label_response = ui.add_sized(
-                                                [148.0, 0.0],
-                                                egui::Button::selectable(is_selected, pack.label),
+                                                [btn_width, 20.0],
+                                                egui::SelectableLabel::new(is_selected, pack.label),
                                             );
                                             if is_downloading {
                                                 ui.add_sized([82.0, 18.0], egui::Spinner::new());
