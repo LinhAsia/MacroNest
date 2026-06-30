@@ -699,7 +699,6 @@ impl CrosshairApp {
                 for index in 0..self.state.mouse_sensitivity_presets.len() {
                     let active_capture_target = self.capture_target.clone();
                     let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
-                    ui.add_space(6.0);
                     let preset = &mut self.state.mouse_sensitivity_presets[index];
                     preset.target_window_title = None;
                     preset.extra_target_window_titles.clear();
@@ -918,7 +917,6 @@ impl CrosshairApp {
                 for index in 0..self.state.mouse_path_presets.len() {
                     let active_capture_target = self.capture_target.clone();
                     let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
-                    ui.add_space(6.0);
                     let preset = &mut self.state.mouse_path_presets[index];
                     if self.mouse_path_timeline_initialized.insert(preset.id) {
                         Self::reset_mouse_path_timeline_state(ui.ctx(), preset.id, &preset.events);
