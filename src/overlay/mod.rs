@@ -11150,52 +11150,6 @@ mod windows_overlay {
         })
     }
 
-    fn measure_screen_draw_text(text: &str, font_size: f32) -> Option<(i32, i32)> {
-        if text.trim().is_empty() {
-            return None;
-        }
-        unsafe {
-            let screen_dc = GetDC(None);
-            let mem_dc = CreateCompatibleDC(Some(screen_dc));
-            let _ = ReleaseDC(None, screen_dc);
-            if mem_dc.0.is_null() {
-                return None;
-            }
-
-            let font_name = "Segoe UI"
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect::<Vec<_>>();
-            let font = CreateFontW(
-                -(font_size.round() as i32).max(1),
-                0,
-                0,
-                0,
-                FW_MEDIUM.0 as i32,
-                0,
-                0,
-                0,
-                DEFAULT_CHARSET,
-                OUT_DEFAULT_PRECIS,
-                CLIP_DEFAULT_PRECIS,
-                ANTIALIASED_QUALITY,
-                FF_DONTCARE.0 as u32,
-                PCWSTR(font_name.as_ptr()),
-            );
-            let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
-            let utf16 = text.encode_utf16().collect::<Vec<_>>();
-            let mut size = SIZE { cx: 0, cy: 0 };
-            let ok = windows::Win32::Graphics::Gdi::GetTextExtentPoint32W(
-                mem_dc, &utf16, &mut size,
-            )
-            .as_bool();
-            let _ = SelectObject(mem_dc, old_font);
-            let _ = DeleteObject(HGDIOBJ(font.0));
-            let _ = DeleteDC(mem_dc);
-            ok.then_some((size.cx, size.cy))
-        }
-    }
-
     fn draw_screen_draw_text_into_rgba(
         pixels: &mut [u8],
         width: u32,
@@ -11354,6 +11308,70 @@ mod windows_overlay {
                     color.b,
                     src_a,
                 );
+            }
+        }
+    }
+
+    fn measure_screen_draw_text(text: &str, font_size: f32) -> Option<(i32, i32)> {
+        if text.trim().is_empty() {
+            return None;
+        }
+
+        unsafe {
+            let screen_dc = GetDC(None);
+            let mem_dc = CreateCompatibleDC(Some(screen_dc));
+            let _ = ReleaseDC(None, screen_dc);
+
+            let font_name = "Segoe UI"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let font = CreateFontW(
+                -(font_size.round() as i32).max(1),
+                0,
+                0,
+                0,
+                FW_MEDIUM.0 as i32,
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                ANTIALIASED_QUALITY,
+                FF_DONTCARE.0 as u32,
+                PCWSTR(font_name.as_ptr()),
+            );
+            let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
+
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: 4096,
+                bottom: 512,
+            };
+            let mut wide = text
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let ok = DrawTextW(
+                mem_dc,
+                &mut wide,
+                &mut rect,
+                DT_SINGLELINE | DT_VCENTER | DT_CALCRECT,
+            );
+
+            let _ = SelectObject(mem_dc, old_font);
+            let _ = DeleteObject(HGDIOBJ(font.0));
+            let _ = DeleteDC(mem_dc);
+
+            if ok == 0 {
+                None
+            } else {
+                Some((
+                    (rect.right - rect.left).max(1),
+                    (rect.bottom - rect.top).max(1),
+                ))
             }
         }
     }
@@ -13046,6 +13064,13 @@ mod windows_overlay {
                 [255, 255, 255, 34]
             },
         );
+        let fill_text = "Fill";
+        let fill_font_size = 17.0;
+        let (fill_text_w, fill_text_h) =
+            measure_screen_draw_text(fill_text, fill_font_size).unwrap_or((28, 18));
+        let fill_left =
+            SCREEN_DRAW_TOOLBAR_FILL_X + ((SCREEN_DRAW_TOOLBAR_FILL_W - fill_text_w).max(0) / 2);
+        let fill_top = 12 + ((32 - fill_text_h).max(0) / 2) - 1;
         if color_palette_open {
             let palette_x = 19.0;
             let palette_y = base_toolbar_h + 4.0;
@@ -13102,6 +13127,23 @@ mod windows_overlay {
             }
         }
 
+        draw_screen_draw_text_into_rgba(
+            pixmap.data_mut(),
+            toolbar_w as u32,
+            toolbar_h as u32,
+            fill_left,
+            fill_top,
+            fill_text_w + 2,
+            fill_text_h.max(20),
+            fill_text,
+            RgbaColor {
+                r: 240,
+                g: 246,
+                b: 255,
+                a: if fill_shapes { 252 } else { 228 },
+            },
+            fill_font_size,
+        );
         let data = pixmap.data();
         let base_x = toolbar_x.max(0) as usize;
         let base_y = toolbar_y.max(0) as usize;
@@ -13133,31 +13175,6 @@ mod windows_overlay {
                 );
             }
         }
-        let fill_font_size = 13.0;
-        let fill_box_width = SCREEN_DRAW_TOOLBAR_FILL_W - 12;
-        let (fill_text_w, fill_text_h) =
-            measure_screen_draw_text("Fill", fill_font_size).unwrap_or((28, 14));
-        let fill_left = toolbar_x
-            + SCREEN_DRAW_TOOLBAR_FILL_X
-            + ((SCREEN_DRAW_TOOLBAR_FILL_W - fill_text_w).max(0) / 2);
-        let fill_top = toolbar_y + ((SCREEN_DRAW_TOOLBAR_HEIGHT - fill_text_h).max(0) / 2);
-        draw_screen_draw_text_into_rgba(
-            pixels,
-            width as u32,
-            height as u32,
-            fill_left,
-            fill_top,
-            fill_box_width.max(fill_text_w + 2),
-            fill_text_h.max(20),
-            "Fill",
-            RgbaColor {
-                r: 240,
-                g: 246,
-                b: 255,
-                a: if fill_shapes { 240 } else { 210 },
-            },
-            fill_font_size,
-        );
     }
 
     fn draw_toolbar_svg_icon(
