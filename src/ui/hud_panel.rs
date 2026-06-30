@@ -6,9 +6,6 @@ use eframe::egui::{self, Color32, RichText, Sense, Slider, TextBuffer, TextEdit,
 impl CrosshairApp {
     pub(crate) fn render_hud_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
-        let mut remove_timer_id = None;
-        let mut timer_changed = false;
-        let mut active_timer_preview: Option<TimerPreset> = None;
 
         ui.add_space(2.0);
         ui.horizontal(|ui| {
@@ -18,20 +15,6 @@ impl CrosshairApp {
             {
                 self.add_toolbox_preset();
                 self.persist_hud_presets();
-            }
-            if ui
-                .button(self.tr("+ Add timer preset", "+ Add timer preset"))
-                .clicked()
-            {
-                let id = Self::allocate_next_id(
-                    &self.state.timer_presets,
-                    &mut self.state.next_timer_preset_id,
-                    |preset| preset.id,
-                );
-                let mut new_preset = TimerPreset::new(id);
-                new_preset.name = format!("Timer {id}");
-                self.state.timer_presets.push(new_preset);
-                timer_changed = true;
             }
         });
 
@@ -240,6 +223,31 @@ impl CrosshairApp {
         if changed {
             self.persist_hud_presets_deferred(ui.ctx());
         }
+    }
+
+    pub(crate) fn render_timer_panel(&mut self, ui: &mut egui::Ui) {
+        let language = self.state.ui_language;
+        let mut remove_timer_id = None;
+        let mut timer_changed = false;
+        let mut active_timer_preview: Option<TimerPreset> = None;
+
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            if ui
+                .button(self.tr("+ Add timer preset", "+ Add timer preset"))
+                .clicked()
+            {
+                let id = Self::allocate_next_id(
+                    &self.state.timer_presets,
+                    &mut self.state.next_timer_preset_id,
+                    |preset| preset.id,
+                );
+                let mut new_preset = TimerPreset::new(id);
+                new_preset.name = format!("Timer {id}");
+                self.state.timer_presets.push(new_preset);
+                timer_changed = true;
+            }
+        });
 
         ui.add_space(16.0);
         ui.label(
