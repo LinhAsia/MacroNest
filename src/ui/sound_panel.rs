@@ -1238,7 +1238,11 @@ impl CrosshairApp {
                     .map(|item| item.clip.file_path.clone())
                     .unwrap_or_default();
                 let waveform = self.prepare_audio_editor_waveform(&waveform_path);
-                let mut duration = self.library_clip_duration_ms.get(&item_id).copied().flatten();
+                let mut duration = self
+                    .library_clip_duration_ms
+                    .get(&item_id)
+                    .copied()
+                    .flatten();
                 if let Some(item) = self
                     .state
                     .audio_settings
@@ -1268,9 +1272,8 @@ impl CrosshairApp {
                     self.close_audio_editor();
                 }
                 if let Some((item_id, outcome)) = pending_outcome {
-                    choose_file_for = self.finish_audio_media_editor_library_outcome(
-                        outcome, item_id, duration,
-                    );
+                    choose_file_for =
+                        self.finish_audio_media_editor_library_outcome(outcome, item_id, duration);
                 }
                 if let Some(item_id) = choose_file_for {
                     self.choose_audio_file_for_target(AudioEditorTarget::Library(item_id));
@@ -1369,9 +1372,7 @@ impl CrosshairApp {
         self.apply_audio_media_editor_outcome_shared(outcome)
     }
 
-    fn split_audio_media_editor_outcome(
-        outcome: AudioCardOutcome,
-    ) -> (Option<String>, bool, bool) {
+    fn split_audio_media_editor_outcome(outcome: AudioCardOutcome) -> (Option<String>, bool, bool) {
         (outcome.status, outcome.changed, outcome.choose_file)
     }
 

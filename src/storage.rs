@@ -768,8 +768,8 @@ fn state_snapshot_for_save(state: &AppState) -> AppState {
 }
 
 fn write_text_file(path: &Path, content: &str) -> Result<()> {
-    let mut file = fs::File::create(path)
-        .with_context(|| format!("Failed to create {}", path.display()))?;
+    let mut file =
+        fs::File::create(path).with_context(|| format!("Failed to create {}", path.display()))?;
     file.write_all(content.as_bytes())
         .with_context(|| format!("Failed to write {}", path.display()))?;
     file.sync_all().ok();
@@ -838,7 +838,11 @@ fn find_local_opencv_videoio_ffmpeg_plugin() -> Option<PathBuf> {
     if let Ok(current_dir) = env::current_dir() {
         push_opencv_videoio_ffmpeg_candidates(
             &mut candidates,
-            current_dir.join("target").join("tmp").join("python_pkgs").join("cv2"),
+            current_dir
+                .join("target")
+                .join("tmp")
+                .join("python_pkgs")
+                .join("cv2"),
         );
     }
 
@@ -883,7 +887,9 @@ mod tests {
     fn save_snapshot_keeps_crosshair_profiles() {
         let mut state = AppState::default();
         state.profiles.push(ProfileRecord::default());
-        state.window_focus_presets.push(WindowFocusPreset::default());
+        state
+            .window_focus_presets
+            .push(WindowFocusPreset::default());
 
         let snapshot = state_snapshot_for_save(&state);
 

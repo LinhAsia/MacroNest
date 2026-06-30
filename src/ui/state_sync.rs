@@ -602,10 +602,7 @@ impl CrosshairApp {
         self.persist();
     }
 
-    pub(crate) fn persist_after_syncs(
-        &mut self,
-        syncs: impl IntoIterator<Item = fn(&mut Self)>,
-    ) {
+    pub(crate) fn persist_after_syncs(&mut self, syncs: impl IntoIterator<Item = fn(&mut Self)>) {
         for sync in syncs {
             sync(self);
         }

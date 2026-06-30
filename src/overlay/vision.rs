@@ -15,8 +15,8 @@ use opencv::{
 
 use super::{
     HOOK_STATE, UiCommand, find_preset_by_spec, resolve_text_variable_value,
-    send_mouse_left_click_backend,
-    set_text_variable_value, set_variable_value, settle_image_search_mouse_move,
+    send_mouse_left_click_backend, set_text_variable_value, set_variable_value,
+    settle_image_search_mouse_move,
 };
 use crate::model::{RgbaColor, VisionPreset};
 use crate::window_list;

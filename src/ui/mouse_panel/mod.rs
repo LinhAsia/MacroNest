@@ -39,8 +39,11 @@ impl CrosshairApp {
         preview_from_ms: Option<u64>,
     ) {
         self.mouse_path_step_preview_preset_id = preset_id;
-        let preview = preset_id.map(|active_id| (active_id, events.unwrap_or_default(), preview_from_ms));
-        let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(preview));
+        let preview =
+            preset_id.map(|active_id| (active_id, events.unwrap_or_default(), preview_from_ms));
+        let _ = self
+            .overlay_tx
+            .send(OverlayCommand::PreviewMousePath(preview));
         crate::overlay::wake_command_queue();
     }
 
@@ -1111,7 +1114,11 @@ impl CrosshairApp {
             );
         }
         if let Some((preset_id, start_ms, end_ms)) = trim_mouse_path_request {
-            let mut pending_trim_preview: Option<(Option<u32>, Option<Vec<MousePathEvent>>, Option<u64>)> = None;
+            let mut pending_trim_preview: Option<(
+                Option<u32>,
+                Option<Vec<MousePathEvent>>,
+                Option<u64>,
+            )> = None;
             if let Some(preset) = self
                 .state
                 .mouse_path_presets
@@ -1126,16 +1133,22 @@ impl CrosshairApp {
                         .iter()
                         .any(|event| matches!(event.kind, MousePathEventKind::Move));
                     if has_move {
-                        pending_trim_preview = Some((Some(preset_id), Some(preset.events.clone()), Some(0)));
+                        pending_trim_preview =
+                            Some((Some(preset_id), Some(preset.events.clone()), Some(0)));
                     } else {
                         pending_trim_preview = Some((None, None, None));
                     }
                 }
                 live_sync = true;
             }
-            if let Some((preview_preset_id, preview_events, preview_from_ms)) = pending_trim_preview {
+            if let Some((preview_preset_id, preview_events, preview_from_ms)) = pending_trim_preview
+            {
                 if preview_preset_id.is_some() {
-                    self.sync_mouse_path_preview(preview_preset_id, preview_events, preview_from_ms);
+                    self.sync_mouse_path_preview(
+                        preview_preset_id,
+                        preview_events,
+                        preview_from_ms,
+                    );
                 } else {
                     self.clear_mouse_path_preview();
                 }

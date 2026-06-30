@@ -2506,9 +2506,11 @@ mod windows_overlay {
         lane: QuickKeyDisplayLane,
         slot: usize,
         held: bool,
+        first_shown_at: Instant,
         shown_at: Instant,
         released_at: Option<Instant>,
         hide_at: Instant,
+        last_pressed_at: Instant,
     }
 
     #[derive(Clone, Copy)]
@@ -3355,7 +3357,7 @@ mod windows_overlay {
                 quick_key_display_center_x: GetSystemMetrics(SM_CXSCREEN).max(1) / 2,
                 quick_key_display_center_y: GetSystemMetrics(SM_CYSCREEN).max(1) / 2,
                 quick_key_display_size: 36.0,
-                quick_key_display_mode: QuickKeyDisplayMode::Normal,
+                quick_key_display_mode: QuickKeyDisplayMode::Mascot,
                 quick_key_display_mascot_style: crate::model::MascotStyle::Hachiware,
                 quick_key_display_mascot_styles: vec![crate::model::MascotStyle::Hachiware],
                 quick_key_display_mascot_positions: HashMap::new(),
@@ -6853,7 +6855,7 @@ mod windows_overlay {
             hold_mix: 0.0,
         };
 
-        let shown_elapsed = now.saturating_duration_since(entry.shown_at);
+        let shown_elapsed = now.saturating_duration_since(entry.first_shown_at);
         let enter_t = (shown_elapsed.as_secs_f32()
             / QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION.as_secs_f32())
         .clamp(0.0, 1.0);
@@ -6863,6 +6865,15 @@ mod windows_overlay {
             visual.scale_x *= 1.1 - (0.1 * eased);
             visual.scale_y *= 0.9 + (0.1 * eased);
             visual.translate_y += 10.0 * (1.0 - eased);
+        }
+
+        let bounce_elapsed = now.saturating_duration_since(entry.last_pressed_at);
+        let bounce_t = (bounce_elapsed.as_secs_f32() / 0.150).clamp(0.0, 1.0);
+        if bounce_t < 1.0 {
+            let wave = (bounce_t * std::f32::consts::PI).sin();
+            visual.scale_x *= 1.0 - 0.12 * wave;
+            visual.scale_y *= 1.0 - 0.12 * wave;
+            visual.translate_y += 4.0 * wave;
         }
 
         let held_long_enough = shown_elapsed >= QUICK_KEY_DISPLAY_HOLD_MIN_DURATION;
@@ -7062,43 +7073,57 @@ mod windows_overlay {
         let now = Instant::now();
         quick_key_display_release_expired_entries(runtime, now);
 
-        let existing_slot = runtime
+        let mut found = false;
+        if let Some(entry) = runtime
             .quick_key_display_entries
-            .iter()
+            .iter_mut()
             .find(|entry| entry.identity == identity)
-            .map(|entry| entry.slot);
-        runtime
-            .quick_key_display_entries
-            .retain(|entry| entry.identity != identity);
-
-        let preferred_slot = existing_slot.or_else(|| {
+        {
+            entry.text = text.clone();
+            entry.combo_keys = combo_keys.clone();
+            entry.lane = lane;
+            entry.held = held;
+            entry.shown_at = now;
+            entry.released_at = None;
+            entry.hide_at = now + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
+            entry.last_pressed_at = now;
             runtime
+                .quick_key_display_slot_labels
+                .insert((lane, entry.slot), text.clone());
+            found = true;
+        }
+
+        if !found {
+            let preferred_slot = runtime
                 .quick_key_display_slot_memory
                 .get(&identity)
-                .copied()
-        });
-        let slot = quick_key_display_allocate_slot(runtime, lane, preferred_slot);
-        runtime
-            .quick_key_display_slot_memory
-            .insert(identity.clone(), slot);
-        runtime
-            .quick_key_display_slot_labels
-            .insert((lane, slot), text.clone());
+                .copied();
+            let slot = quick_key_display_allocate_slot(runtime, lane, preferred_slot);
+            runtime
+                .quick_key_display_slot_memory
+                .insert(identity.clone(), slot);
+            runtime
+                .quick_key_display_slot_labels
+                .insert((lane, slot), text.clone());
+            runtime
+                .quick_key_display_entries
+                .push(QuickKeyDisplayEntry {
+                    text,
+                    identity,
+                    combo_keys,
+                    lane,
+                    slot,
+                    held,
+                    first_shown_at: now,
+                    shown_at: now,
+                    released_at: None,
+                    hide_at: now + QUICK_KEY_DISPLAY_DISPLAY_DURATION,
+                    last_pressed_at: now,
+                });
+        }
+
         runtime.quick_key_display_spam_heat =
             (runtime.quick_key_display_spam_heat + 0.055).min(1.0);
-        runtime
-            .quick_key_display_entries
-            .push(QuickKeyDisplayEntry {
-                text,
-                identity,
-                combo_keys,
-                lane,
-                slot,
-                held,
-                shown_at: now,
-                released_at: None,
-                hide_at: now + QUICK_KEY_DISPLAY_DISPLAY_DURATION,
-            });
     }
 
     fn quick_key_display_release_entry(runtime: &mut Runtime, identity: &str) {
@@ -13430,8 +13455,8 @@ mod windows_overlay {
         true
     }
 
-    const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(1200);
-    const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(240);
+    const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(3000);
+    const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(1000);
     const QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION: Duration = Duration::from_millis(180);
     const QUICK_KEY_DISPLAY_ANIM_EXIT_DURATION: Duration = Duration::from_millis(200);
     const QUICK_KEY_DISPLAY_HOLD_MIN_DURATION: Duration = Duration::from_millis(400);

@@ -322,6 +322,9 @@ mod tests {
 
     #[test]
     fn stopwatch_min_sec_ms_keeps_classic_format() {
-        assert_eq!(format_stopwatch_time(125_432, true, true, true), "02:05.432");
+        assert_eq!(
+            format_stopwatch_time(125_432, true, true, true),
+            "02:05.432"
+        );
     }
 }

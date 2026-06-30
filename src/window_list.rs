@@ -302,10 +302,7 @@ mod windows_impl {
         parse_window_match_rule(target).1.is_some()
     }
 
-    pub fn select_window_by_match_rule(
-        candidates: &[HWND],
-        rule: WindowMatchRule,
-    ) -> Option<HWND> {
+    pub fn select_window_by_match_rule(candidates: &[HWND], rule: WindowMatchRule) -> Option<HWND> {
         let mut best_hwnd = None;
         let mut best_val = match rule {
             WindowMatchRule::Lowest | WindowMatchRule::Rightmost => i32::MIN,
@@ -386,7 +383,11 @@ mod windows_impl {
     ) -> Vec<HWND> {
         let mut candidates = Vec::new();
         unsafe {
-            let mut payload = (title_or_selector, match_duplicate_window_titles, &mut candidates);
+            let mut payload = (
+                title_or_selector,
+                match_duplicate_window_titles,
+                &mut candidates,
+            );
             let _ = EnumWindows(
                 Some(find_all_windows_by_candidate_proc),
                 LPARAM((&mut payload) as *mut _ as isize),
