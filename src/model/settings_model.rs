@@ -24,6 +24,18 @@ pub enum QuickKeyDisplayMode {
     Mascot,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum QuickScreenDrawTool {
+    #[default]
+    Brush,
+    Line,
+    Arrow,
+    Rectangle,
+    Ellipse,
+    Circle,
+    Polygon,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum MascotStyle {
     #[default]
@@ -505,6 +517,8 @@ pub struct AppState {
     #[serde(default = "default_screen_draw_freeze")]
     pub quick_screen_draw_freeze: bool,
     #[serde(default)]
+    pub quick_screen_draw_tool: QuickScreenDrawTool,
+    #[serde(default)]
     pub quick_key_sound_enabled: bool,
     #[serde(default)]
     pub quick_key_sound_style: u32,
@@ -619,6 +633,7 @@ impl Default for AppState {
             quick_screen_draw_smoothing: false,
             quick_screen_draw_smoothing_amount: default_screen_draw_smoothing_amount(),
             quick_screen_draw_freeze: default_screen_draw_freeze(),
+            quick_screen_draw_tool: QuickScreenDrawTool::Brush,
             quick_key_sound_enabled: false,
             quick_key_sound_style: 2,
             quick_key_sound_volume: default_key_sound_volume(),

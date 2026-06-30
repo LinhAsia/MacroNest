@@ -26,9 +26,9 @@ use crate::{
         MacroFolder, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode, MasterMacroGroupState,
         MasterMacroPresetState, MasterPreset, MasterWindowFocusPresetState,
         MasterWindowPresetState, MasterZoomPresetState, MascotStyle, MousePathEvent,
-        MousePathEventKind, ProfileRecord, QuickKeyDisplayMode, RgbaColor, SoundLibraryItem,
-        TimerPreset, UiLanguage, UiThemeMode, VietnameseInputMode, VisionSettings, WindowAnchor,
-        WindowExpandDirection, WindowPreset,
+        MousePathEventKind, ProfileRecord, QuickKeyDisplayMode, QuickScreenDrawTool, RgbaColor,
+        SoundLibraryItem, TimerPreset, UiLanguage, UiThemeMode, VietnameseInputMode,
+        VisionSettings, WindowAnchor, WindowExpandDirection, WindowPreset,
     },
     overlay::{OverlayCommand, UiCommand},
     storage::AppPaths,
@@ -573,7 +573,17 @@ pub struct CrosshairApp {
             Vec<(MascotStyle, i32, i32)>,
         )>,
     last_synced_quick_screen_draw_config:
-        Option<(bool, Option<HotkeyBinding>, bool, RgbaColor, f32, bool, f32, bool)>,
+        Option<(
+            bool,
+            Option<HotkeyBinding>,
+            bool,
+            RgbaColor,
+            f32,
+            bool,
+            f32,
+            bool,
+            QuickScreenDrawTool,
+        )>,
     last_synced_quick_key_sound_config: Option<(bool, u32, f32)>,
     last_synced_macro_master_hotkey: Option<Option<HotkeyBinding>>,
     last_synced_macros_master_enabled: Option<bool>,
@@ -4825,6 +4835,43 @@ impl CrosshairApp {
                                         )
                                         .changed();
                                     if freeze_changed {
+                                        self.sync_quick_screen_draw_config();
+                                        self.persist();
+                                    }
+
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Draw tool",
+                                            "Công cụ vẽ",
+                                        ))
+                                        .size(10.0),
+                                    );
+                                    let before_tool = self.state.quick_screen_draw_tool;
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.selectable_value(
+                                            &mut self.state.quick_screen_draw_tool,
+                                            QuickScreenDrawTool::Brush,
+                                            Self::tr_lang(self.state.ui_language, "Free", "Tự do"),
+                                        );
+                                        ui.selectable_value(
+                                            &mut self.state.quick_screen_draw_tool,
+                                            QuickScreenDrawTool::Line,
+                                            "Line",
+                                        );
+                                        ui.selectable_value(
+                                            &mut self.state.quick_screen_draw_tool,
+                                            QuickScreenDrawTool::Rectangle,
+                                            Self::tr_lang(self.state.ui_language, "Quad", "Tứ giác"),
+                                        );
+                                        ui.selectable_value(
+                                            &mut self.state.quick_screen_draw_tool,
+                                            QuickScreenDrawTool::Circle,
+                                            Self::tr_lang(self.state.ui_language, "Circle", "Tròn"),
+                                        );
+                                    });
+                                    if before_tool != self.state.quick_screen_draw_tool {
                                         self.sync_quick_screen_draw_config();
                                         self.persist();
                                     }
@@ -10961,12 +11008,14 @@ impl eframe::App for CrosshairApp {
                     smoothing,
                     smoothing_amount,
                     freeze,
+                    tool,
                 } => {
                     self.state.quick_screen_draw_color = color;
                     self.state.quick_screen_draw_brush_size = brush_size;
                     self.state.quick_screen_draw_smoothing = smoothing;
                     self.state.quick_screen_draw_smoothing_amount = smoothing_amount;
                     self.state.quick_screen_draw_freeze = freeze;
+                    self.state.quick_screen_draw_tool = tool;
                     self.persist();
                 }
 
