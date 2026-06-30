@@ -39,6 +39,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | Window Pin | Keep a selected window always on top |
 | Focus Highlight | Outline the active window with a configurable border and decoration |
 | Protractor | Show a draggable protractor overlay for angle checking |
+| Ruler | Measure the distance between two screen points and optionally copy the result |
 | Get Coordinates | Pick a screen point and optionally copy X and Y |
 | Get Color | Sample a screen color and optionally copy the hex value |
 | Key Display | Show a live key overlay with normal and mascot display modes |

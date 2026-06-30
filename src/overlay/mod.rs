@@ -114,8 +114,8 @@ mod windows_overlay {
                 Input::KeyboardAndMouse::{
                     GetAsyncKeyState, GetKeyboardState, INPUT, INPUT_0, INPUT_KEYBOARD,
                     INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-                    KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC, MOD_ALT,
-                    MOD_CONTROL, MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
+                    KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC, MOD_ALT, MOD_CONTROL,
+                    MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
                     MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
                     MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
                     MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT,
@@ -131,9 +131,8 @@ mod windows_overlay {
                     DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW,
                     EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA,
                     GetAncestor, GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow,
-                    GetMessageW, GetSystemMetrics, GetWindow,
-                    GetWindowLongPtrW, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId,
-                    HC_ACTION, HHOOK, HMENU,
+                    GetMessageW, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW,
+                    GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU,
                     HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT,
                     KillTimer, LR_LOADFROMFILE, LoadCursorW, LoadImageW, MA_NOACTIVATE,
                     MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage,
@@ -1973,10 +1972,6 @@ mod windows_overlay {
         color_palette_open: bool,
         text_session: Option<ScreenDrawTextSession>,
         screen_color_pick_mode: bool,
-        cursor_point: POINT,
-        cursor_visible: bool,
-        cursor_preview_rect: Option<ScreenDrawDirtyRect>,
-        color_pick_preview: Option<RgbaColor>,
     }
 
     impl Default for ScreenDrawState {
@@ -2033,10 +2028,6 @@ mod windows_overlay {
                 color_palette_open: false,
                 text_session: None,
                 screen_color_pick_mode: false,
-                cursor_point: POINT { x: 0, y: 0 },
-                cursor_visible: false,
-                cursor_preview_rect: None,
-                color_pick_preview: None,
             }
         }
     }
@@ -8090,20 +8081,16 @@ mod windows_overlay {
         }
         let scan_code = unsafe { MapVirtualKeyW(vk_code, MAPVK_VK_TO_VSC) };
         let mut buffer = [0u16; 8];
-        let written = unsafe {
-            ToUnicode(
-                vk_code,
-                scan_code,
-                Some(&keyboard_state),
-                &mut buffer,
-                0,
-            )
-        };
+        let written =
+            unsafe { ToUnicode(vk_code, scan_code, Some(&keyboard_state), &mut buffer, 0) };
         if written <= 0 {
             return None;
         }
         let text = String::from_utf16_lossy(&buffer[..written as usize]);
-        let filtered = text.chars().filter(|ch| !ch.is_control()).collect::<String>();
+        let filtered = text
+            .chars()
+            .filter(|ch| !ch.is_control())
+            .collect::<String>();
         (!filtered.is_empty()).then_some(filtered)
     }
 
@@ -9673,9 +9660,6 @@ mod windows_overlay {
         state.freeze_frame = None;
         state.text_session = None;
         state.screen_color_pick_mode = false;
-        state.cursor_visible = false;
-        state.cursor_preview_rect = None;
-        state.color_pick_preview = None;
     }
 
     fn release_screen_draw_surface(state: &mut ScreenDrawState) {
@@ -9758,17 +9742,16 @@ mod windows_overlay {
         if !state.active || state.capturing_region {
             return false;
         }
-        state.cursor_point = point;
-        state.cursor_visible = true;
         if right_button {
             start_screen_draw_stroke(&mut state, point, true);
             sync_screen_draw_live_stroke_dirty(&mut state);
-            sync_screen_draw_cursor_preview_dirty(&mut state);
             mark_screen_draw_repaint_pending(&mut state);
             return true;
         }
         let hit = screen_draw_hit(&state, point);
-        if state.text_session.is_some() && !matches!(hit, ScreenDrawHit::ToolbarBody | ScreenDrawHit::DragHandle) {
+        if state.text_session.is_some()
+            && !matches!(hit, ScreenDrawHit::ToolbarBody | ScreenDrawHit::DragHandle)
+        {
             let committed = commit_screen_draw_text_session(&mut state);
             if committed {
                 should_sync_config = true;
@@ -9861,7 +9844,6 @@ mod windows_overlay {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.active_control = ScreenDrawControl::BrushSize;
                 update_screen_draw_brush_slider(&mut state, point.x);
-                sync_screen_draw_cursor_preview_dirty(&mut state);
                 mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
                 should_sync_config = true;
             }
@@ -9916,12 +9898,6 @@ mod windows_overlay {
             ScreenDrawHit::PickScreenColor => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.screen_color_pick_mode = !state.screen_color_pick_mode;
-                state.color_pick_preview = if state.screen_color_pick_mode {
-                    sample_screen_draw_color_at_local_point(state.cursor_point)
-                } else {
-                    None
-                };
-                sync_screen_draw_cursor_preview_dirty(&mut state);
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
             }
             ScreenDrawHit::Eraser => {
@@ -9953,7 +9929,6 @@ mod windows_overlay {
                     capture_session_id = state.capture_session_id;
                     state.active_control = ScreenDrawControl::None;
                     state.current_stroke = None;
-                    sync_screen_draw_cursor_preview_dirty(&mut state);
                     state.pending_repaint = false;
                     capture_mode = Some(ScreenDrawCaptureMode::MouseDrag);
                 }
@@ -9962,33 +9937,25 @@ mod windows_overlay {
                 state.active_control = ScreenDrawControl::MoveToolbar;
                 state.drag_offset_x = point.x - state.toolbar_x;
                 state.drag_offset_y = point.y - state.toolbar_y;
-                sync_screen_draw_cursor_preview_dirty(&mut state);
             }
             ScreenDrawHit::DragHandle => {
                 state.active_control = ScreenDrawControl::MoveToolbar;
                 state.drag_offset_x = point.x - state.toolbar_x;
                 state.drag_offset_y = point.y - state.toolbar_y;
-                sync_screen_draw_cursor_preview_dirty(&mut state);
             }
             ScreenDrawHit::Canvas => {
                 if state.screen_color_pick_mode {
-                    if let Some(sampled) = state
-                        .color_pick_preview
-                        .or_else(|| sample_screen_draw_color_at_local_point(point))
-                    {
+                    if let Some(sampled) = sample_screen_draw_color_at_local_point(point) {
                         state.color = sampled;
                         state.screen_color_pick_mode = false;
-                        state.color_pick_preview = None;
                         should_sync_config = true;
                     }
                     let toolbar_rect = screen_draw_toolbar_rect(&state);
-                    sync_screen_draw_cursor_preview_dirty(&mut state);
                     mark_screen_draw_dirty(&mut state, toolbar_rect);
                 } else {
                     let eraser = state.eraser && state.tool != ScreenDrawTool::Text;
                     start_screen_draw_stroke(&mut state, point, eraser);
                     sync_screen_draw_live_stroke_dirty(&mut state);
-                    sync_screen_draw_cursor_preview_dirty(&mut state);
                 }
             }
         }
@@ -10488,23 +10455,15 @@ mod windows_overlay {
                 true
             }
             ScreenDrawControl::None => {
-                state.cursor_point = point;
-                state.cursor_visible = true;
-                if state.screen_color_pick_mode {
-                    state.color_pick_preview = sample_screen_draw_color_at_local_point(point);
-                }
                 if let Some(stroke) = state.current_stroke.as_mut() {
                     let changed = append_screen_draw_point(stroke, point);
                     if changed {
                         sync_screen_draw_live_stroke_dirty(&mut state);
-                        sync_screen_draw_cursor_preview_dirty(&mut state);
                         mark_screen_draw_repaint_pending(&mut state);
                     }
                     changed
                 } else {
-                    sync_screen_draw_cursor_preview_dirty(&mut state);
-                    mark_screen_draw_repaint_pending(&mut state);
-                    true
+                    false
                 }
             }
         }
@@ -10550,7 +10509,6 @@ mod windows_overlay {
             }
         }
         state.active_control = ScreenDrawControl::None;
-        sync_screen_draw_cursor_preview_dirty(&mut state);
         if state.active {
             mark_screen_draw_repaint_pending(&mut state);
         }
@@ -10980,142 +10938,18 @@ mod windows_overlay {
 
     fn sample_screen_draw_color_at_local_point(point: POINT) -> Option<RgbaColor> {
         let (screen_x, screen_y, _, _) = window_list::virtual_screen_bounds();
-        let capture =
-            window_list::capture_virtual_screen_region(screen_x + point.x, screen_y + point.y, 1, 1)?;
+        let capture = window_list::capture_virtual_screen_region(
+            screen_x + point.x,
+            screen_y + point.y,
+            1,
+            1,
+        )?;
         (capture.rgba.len() >= 4).then(|| RgbaColor {
             r: capture.rgba[0],
             g: capture.rgba[1],
             b: capture.rgba[2],
             a: 255,
         })
-    }
-
-    fn screen_draw_cursor_preview_rect(state: &ScreenDrawState) -> Option<ScreenDrawDirtyRect> {
-        if !state.cursor_visible
-            || state.capturing_region
-            || state.current_stroke.is_some()
-            || state.active_control != ScreenDrawControl::None
-            || (state.tool == ScreenDrawTool::Text && !state.eraser && !state.screen_color_pick_mode)
-        {
-            return None;
-        }
-
-        let radius = (state.brush_size * 0.5).ceil() as i32 + 10;
-        let mut rect = ScreenDrawDirtyRect {
-            left: state.cursor_point.x.saturating_sub(radius).max(0) as usize,
-            top: state.cursor_point.y.saturating_sub(radius).max(0) as usize,
-            right: (state.cursor_point.x + radius + 1).max(0) as usize,
-            bottom: (state.cursor_point.y + radius + 1).max(0) as usize,
-        };
-
-        if state.screen_color_pick_mode {
-            let card_left = (state.cursor_point.x + 18).max(0) as usize;
-            let card_top = (state.cursor_point.y + 18).max(0) as usize;
-            rect = rect.union(ScreenDrawDirtyRect {
-                left: card_left,
-                top: card_top,
-                right: card_left + 132,
-                bottom: card_top + 64,
-            });
-        }
-
-        Some(rect)
-    }
-
-    fn sync_screen_draw_cursor_preview_dirty(state: &mut ScreenDrawState) {
-        if let Some(previous) = state.cursor_preview_rect.take() {
-            mark_screen_draw_dirty(state, previous);
-        }
-        if let Some(current) = screen_draw_cursor_preview_rect(state) {
-            mark_screen_draw_dirty(state, current);
-            state.cursor_preview_rect = Some(current);
-        }
-    }
-
-    fn draw_screen_draw_cursor_preview(
-        pixmap: &mut tiny_skia::PixmapMut,
-        point: POINT,
-        brush_size: f32,
-        color: RgbaColor,
-        eraser: bool,
-    ) {
-        let radius = (brush_size.max(1.0) * 0.5).max(1.0);
-        let mut fill_paint = tiny_skia::Paint::default();
-        fill_paint.anti_alias = true;
-        fill_paint.set_color(tiny_skia::Color::from_rgba8(
-            color.r,
-            color.g,
-            color.b,
-            if eraser { 24 } else { 56 },
-        ));
-        let mut ring_paint = tiny_skia::Paint::default();
-        ring_paint.anti_alias = true;
-        ring_paint.set_color(tiny_skia::Color::from_rgba8(
-            if eraser { 255 } else { 255 },
-            if eraser { 132 } else { 255 },
-            if eraser { 132 } else { 255 },
-            220,
-        ));
-        let ring_stroke = tiny_skia::Stroke {
-            width: 1.5,
-            ..Default::default()
-        };
-        let mut pb = tiny_skia::PathBuilder::new();
-        pb.push_circle(point.x as f32, point.y as f32, radius);
-        if let Some(path) = pb.finish() {
-            pixmap.fill_path(
-                &path,
-                &fill_paint,
-                tiny_skia::FillRule::Winding,
-                tiny_skia::Transform::identity(),
-                None,
-            );
-            pixmap.stroke_path(
-                &path,
-                &ring_paint,
-                &ring_stroke,
-                tiny_skia::Transform::identity(),
-                None,
-            );
-        }
-
-        if eraser {
-            let mut cross_paint = tiny_skia::Paint::default();
-            cross_paint.anti_alias = true;
-            cross_paint.set_color(tiny_skia::Color::from_rgba8(255, 132, 132, 210));
-            let cross_stroke = tiny_skia::Stroke {
-                width: 1.2,
-                line_cap: tiny_skia::LineCap::Round,
-                ..Default::default()
-            };
-            for (x1, y1, x2, y2) in [
-                (
-                    point.x as f32 - radius * 0.5,
-                    point.y as f32 - radius * 0.5,
-                    point.x as f32 + radius * 0.5,
-                    point.y as f32 + radius * 0.5,
-                ),
-                (
-                    point.x as f32 + radius * 0.5,
-                    point.y as f32 - radius * 0.5,
-                    point.x as f32 - radius * 0.5,
-                    point.y as f32 + radius * 0.5,
-                ),
-            ] {
-                let mut cross = tiny_skia::PathBuilder::new();
-                cross.move_to(x1, y1);
-                cross.line_to(x2, y2);
-                if let Some(path) = cross.finish() {
-                    pixmap.stroke_path(
-                        &path,
-                        &cross_paint,
-                        &cross_stroke,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
-                }
-            }
-        }
     }
 
     fn commit_screen_draw_text_session(state: &mut ScreenDrawState) -> bool {
@@ -11238,12 +11072,7 @@ mod windows_overlay {
                     .encode_utf16()
                     .chain(std::iter::once(0))
                     .collect::<Vec<_>>();
-                let _ = DrawTextW(
-                    mem_dc,
-                    &mut wide,
-                    &mut rect,
-                    DT_SINGLELINE | DT_VCENTER,
-                );
+                let _ = DrawTextW(mem_dc, &mut wide, &mut rect, DT_SINGLELINE | DT_VCENTER);
             }
 
             if !bits.is_null() {
@@ -11268,139 +11097,6 @@ mod windows_overlay {
                 out_px[3] = out_px[3].max(color.a.max(1));
             }
         }
-    }
-
-    fn draw_screen_draw_color_pick_preview_rgba(
-        pixels: &mut [u8],
-        width: usize,
-        height: usize,
-        point: POINT,
-        color: RgbaColor,
-    ) {
-        let card_left = point.x + 18;
-        let card_top = point.y + 18;
-        let card_w = 124usize;
-        let card_h = 56usize;
-        let base_x = card_left.max(0) as usize;
-        let base_y = card_top.max(0) as usize;
-        let mut pixmap = match tiny_skia::Pixmap::new(card_w as u32, card_h as u32) {
-            Some(pixmap) => pixmap,
-            None => return,
-        };
-
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            2.0,
-            3.0,
-            card_w as f32 - 4.0,
-            card_h as f32 - 4.0,
-            10.0,
-            [0, 0, 0, 92],
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            0.0,
-            0.0,
-            card_w as f32,
-            card_h as f32,
-            10.0,
-            [24, 30, 40, 236],
-        );
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            0.5,
-            0.5,
-            card_w as f32 - 1.0,
-            card_h as f32 - 1.0,
-            10.0,
-            1.0,
-            [220, 232, 248, 36],
-        );
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            12.0,
-            12.0,
-            32.0,
-            32.0,
-            7.0,
-            [color.r, color.g, color.b, 255],
-        );
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            11.5,
-            11.5,
-            33.0,
-            33.0,
-            7.0,
-            1.0,
-            [255, 255, 255, 42],
-        );
-
-        let data = pixmap.data();
-        for py in 0..card_h {
-            let dst_y = base_y + py;
-            if dst_y >= height {
-                break;
-            }
-            for px in 0..card_w {
-                let dst_x = base_x + px;
-                if dst_x >= width {
-                    break;
-                }
-                let src_offset = (py * card_w + px) * 4;
-                let src_r = data[src_offset];
-                let src_g = data[src_offset + 1];
-                let src_b = data[src_offset + 2];
-                let src_a = data[src_offset + 3];
-                if src_a == 0 {
-                    continue;
-                }
-                let dst_offset = (dst_y * width + dst_x) * 4;
-                blend_premultiplied_rgba(
-                    &mut pixels[dst_offset..dst_offset + 4],
-                    src_r,
-                    src_g,
-                    src_b,
-                    src_a,
-                );
-            }
-        }
-
-        let hex = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
-        draw_screen_draw_text_into_rgba(
-            pixels,
-            width as u32,
-            height as u32,
-            card_left + 54,
-            card_top + 10,
-            62,
-            18,
-            "Pick color",
-            RgbaColor {
-                r: 232,
-                g: 240,
-                b: 252,
-                a: 220,
-            },
-            11.0,
-        );
-        draw_screen_draw_text_into_rgba(
-            pixels,
-            width as u32,
-            height as u32,
-            card_left + 54,
-            card_top + 28,
-            58,
-            18,
-            &hex,
-            RgbaColor {
-                r: 255,
-                g: 255,
-                b: 255,
-                a: 255,
-            },
-            12.0,
-        );
     }
 
     fn ensure_screen_draw_canvas(state: &mut ScreenDrawState, width: usize, height: usize) -> bool {
@@ -11584,10 +11280,7 @@ mod windows_overlay {
                 let length = dx.hypot(dy).max(1.0);
                 let shaft_end = if length > head_size {
                     let ratio = (length - head_size * 0.72) / length;
-                    (
-                        first.x as f32 + dx * ratio,
-                        first.y as f32 + dy * ratio,
-                    )
+                    (first.x as f32 + dx * ratio, first.y as f32 + dy * ratio)
                 } else {
                     (first.x as f32, first.y as f32)
                 };
@@ -11603,13 +11296,7 @@ mod windows_overlay {
                         None,
                     );
                 }
-                draw_screen_draw_arrow_head(
-                    pixmap,
-                    &paint,
-                    first,
-                    last,
-                    head_size,
-                );
+                draw_screen_draw_arrow_head(pixmap, &paint, first, last, head_size);
             }
             ScreenDrawTool::Rectangle => {
                 let left = first.x.min(last.x) as f32;
@@ -11719,8 +11406,7 @@ mod windows_overlay {
                 let sides = 5;
                 let mut pb = tiny_skia::PathBuilder::new();
                 for index in 0..sides {
-                    let t = rotation
-                        + (index as f32 / sides as f32) * std::f32::consts::TAU;
+                    let t = rotation + (index as f32 / sides as f32) * std::f32::consts::TAU;
                     let px = first.x as f32 + radius * t.cos();
                     let py = first.y as f32 + radius * t.sin();
                     if index == 0 {
@@ -11955,35 +11641,7 @@ mod windows_overlay {
         let toolbar_tool = state_guard.tool;
         let toolbar_color_palette_open = state_guard.color_palette_open;
         let toolbar_color_pick_mode = state_guard.screen_color_pick_mode;
-        let cursor_point = state_guard.cursor_point;
-        let cursor_visible = state_guard.cursor_visible;
-        let color_pick_preview = state_guard.color_pick_preview;
         let capturing_region = state_guard.capturing_region;
-        if cursor_visible && !capturing_region {
-            if let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
-                state_guard.frame_rgba.as_mut_slice(),
-                width as u32,
-                height as u32,
-            ) {
-                draw_screen_draw_cursor_preview(
-                    &mut pixmap,
-                    cursor_point,
-                    toolbar_brush_size,
-                    toolbar_color,
-                    toolbar_eraser,
-                );
-            }
-            if toolbar_color_pick_mode {
-                let preview_color = color_pick_preview.unwrap_or(toolbar_color);
-                draw_screen_draw_color_pick_preview_rgba(
-                    state_guard.frame_rgba.as_mut_slice(),
-                    width,
-                    height,
-                    cursor_point,
-                    preview_color,
-                );
-            }
-        }
         if !capturing_region {
             draw_screen_draw_toolbar_rgba(
                 state_guard.frame_rgba.as_mut_slice(),
@@ -11999,23 +11657,6 @@ mod windows_overlay {
                 toolbar_tool,
                 toolbar_color_palette_open,
                 toolbar_color_pick_mode,
-            );
-            draw_screen_draw_text_into_rgba(
-                state_guard.frame_rgba.as_mut_slice(),
-                width as u32,
-                height as u32,
-                toolbar_x + 552,
-                toolbar_y + 19,
-                78,
-                16,
-                "RMB erase",
-                RgbaColor {
-                    r: 220,
-                    g: 232,
-                    b: 248,
-                    a: 190,
-                },
-                10.0,
             );
         }
         if state_guard.active_control == ScreenDrawControl::BrushSize && !capturing_region {
@@ -12605,7 +12246,8 @@ mod windows_overlay {
             },
         );
         let mut ellipse_icon = tiny_skia::PathBuilder::new();
-        if let Some(oval_rect) = tiny_skia::Rect::from_xywh(ellipse_button_x + 4.0, 21.0, 20.0, 14.0)
+        if let Some(oval_rect) =
+            tiny_skia::Rect::from_xywh(ellipse_button_x + 4.0, 21.0, 20.0, 14.0)
         {
             ellipse_icon.push_oval(oval_rect);
         }
@@ -13028,13 +12670,7 @@ mod windows_overlay {
         target_width: u32,
         target_height: u32,
     ) {
-        let cache_key = (
-            svg.to_owned(),
-            target_width,
-            target_height,
-            255u32,
-            0i32,
-        );
+        let cache_key = (svg.to_owned(), target_width, target_height, 255u32, 0i32);
         let rendered = {
             let mut cache = GEOMETRY_SVG_CACHE.lock();
             if let Some(existing) = cache.get(&cache_key) {
@@ -24774,7 +24410,9 @@ mod windows_overlay {
         fn internal_overlay_windows_do_not_bypass_mouse_macro_processing() {
             assert!(should_bypass_mouse_event_for_app_window_flags(true, false));
             assert!(!should_bypass_mouse_event_for_app_window_flags(true, true));
-            assert!(!should_bypass_mouse_event_for_app_window_flags(false, false));
+            assert!(!should_bypass_mouse_event_for_app_window_flags(
+                false, false
+            ));
         }
 
         #[test]
