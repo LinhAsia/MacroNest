@@ -7188,7 +7188,7 @@ mod windows_overlay {
                 .insert((lane, slot), text.clone());
             
             let font_size = runtime.quick_key_display_size.clamp(10.0, 96.0);
-            let cap_height = (font_size * 1.12 + 18.0).round().max(44.0) as i32;
+            let cap_height = (font_size * 1.12 + 18.0).round().max(18.0) as i32;
             let entry_gap = (font_size * 0.36).round().max(10.0) as i32;
             let (row, row_slot, x_offset) = quick_key_display_allocate_row_and_slot(
                 runtime,
@@ -7332,9 +7332,9 @@ mod windows_overlay {
         _slot_labels: &HashMap<(QuickKeyDisplayLane, usize), String>,
         font_size: f32,
     ) -> (i32, i32) {
-        let cap_height = (font_size * 1.12 + 18.0).round().max(44.0) as i32;
-        let outer_pad_x = (font_size * 0.46).round().max(16.0) as i32;
-        let outer_pad_y = (font_size * 0.34).round().max(10.0) as i32;
+        let cap_height = (font_size * 1.12 + 18.0).round().max(18.0) as i32;
+        let outer_pad_x = (font_size * 0.46).round().max(6.0) as i32;
+        let outer_pad_y = (font_size * 0.34).round().max(4.0) as i32;
         let row_gap = (font_size * 0.2).round().max(8.0) as i32;
 
         let max_rows = 4;
@@ -16939,10 +16939,10 @@ mod windows_overlay {
 
         let mut pixmap = tiny_skia::Pixmap::new(width as u32, height as u32)
             .ok_or_else(|| anyhow::anyhow!("Failed to allocate quick key display pixmap"))?;
-        let cap_height = (font_size * 1.12 + 18.0).round().max(44.0) as i32;
-        let cap_radius = (cap_height as f32 * 0.26).clamp(11.0, 18.0);
-        let outer_pad_x = (font_size * 0.46).round().max(16.0) as i32;
-        let outer_pad_y = (font_size * 0.34).round().max(10.0) as i32;
+        let cap_height = (font_size * 1.12 + 18.0).round().max(18.0) as i32;
+        let cap_radius = (cap_height as f32 * 0.26).clamp(4.0, 18.0);
+        let outer_pad_x = (font_size * 0.46).round().max(6.0) as i32;
+        let outer_pad_y = (font_size * 0.34).round().max(4.0) as i32;
         let combo_gap = (font_size * 0.14).round().max(4.0) as i32;
         let plus_width = (font_size * 0.48).round().max(10.0) as i32;
         let entry_gap = (font_size * 0.36).round().max(10.0) as i32;
