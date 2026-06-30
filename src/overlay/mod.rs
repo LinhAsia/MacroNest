@@ -241,7 +241,7 @@ mod windows_overlay {
     const SCREEN_DRAW_TOOLBAR_ARROW_SVG: &str = r##"<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M9.16421 9.66421L15.4142 3.41421L12.5858 0.585785L6.33579 6.83578L3.5 4L2 5.5V14H10.5L12 12.5L9.16421 9.66421Z" fill="#F0F6FF"/>
 </svg>"##;
-    const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 640;
+    const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 548;
     const SCREEN_DRAW_TOOLBAR_HEIGHT: i32 = 56;
     const SCREEN_DRAW_TOOLBAR_BRUSH_X: i32 = 148;
     const SCREEN_DRAW_TOOLBAR_LINE_X: i32 = 184;
@@ -254,8 +254,6 @@ mod windows_overlay {
     const SCREEN_DRAW_TOOLBAR_PICK_COLOR_X: i32 = 436;
     const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 474;
     const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 512;
-    const SCREEN_DRAW_TOOLBAR_FILL_X: i32 = 552;
-    const SCREEN_DRAW_TOOLBAR_FILL_W: i32 = 80;
     #[derive(Debug, Clone)]
     struct VisionRunOutcome {
         matched: bool,
@@ -1825,7 +1823,6 @@ mod windows_overlay {
         ToolPolygon,
         ToolText,
         PickScreenColor,
-        FillShapes,
         Eraser,
         Smoothing,
         SmoothingAmount,
@@ -1946,7 +1943,6 @@ mod windows_overlay {
         eraser: bool,
         smoothing: bool,
         smoothing_amount: f32,
-        fill_shapes: bool,
         tool: ScreenDrawTool,
         toolbar_x: i32,
         toolbar_y: i32,
@@ -2004,7 +2000,6 @@ mod windows_overlay {
                 eraser: false,
                 smoothing: false,
                 smoothing_amount: 0.45,
-                fill_shapes: false,
                 tool: ScreenDrawTool::Brush,
                 toolbar_x: 24,
                 toolbar_y: 24,
@@ -8860,7 +8855,6 @@ mod windows_overlay {
                         state.brush_size = brush_size.clamp(2.0, 80.0);
                         state.smoothing = smoothing;
                         state.smoothing_amount = smoothing_amount.clamp(0.0, 1.0);
-                        state.fill_shapes = fill;
                         state.freeze_screen = freeze;
                         state.tool = match tool {
                             crate::model::QuickScreenDrawTool::Brush => ScreenDrawTool::Brush,
@@ -9927,12 +9921,6 @@ mod windows_overlay {
                     mark_screen_draw_dirty(&mut state, rect);
                 }
             }
-            ScreenDrawHit::FillShapes => {
-                state.fill_shapes = !state.fill_shapes;
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
-                should_sync_config = true;
-            }
             ScreenDrawHit::Eraser => {
                 state.eraser = !state.eraser;
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
@@ -10577,14 +10565,13 @@ mod windows_overlay {
     }
 
     fn send_screen_draw_config_to_ui() {
-        let (color, brush_size, smoothing, smoothing_amount, fill, freeze, tool) = {
+        let (color, brush_size, smoothing, smoothing_amount, freeze, tool) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
                 state.color,
                 state.brush_size,
                 state.smoothing,
                 state.smoothing_amount,
-                state.fill_shapes,
                 state.freeze_screen,
                 match state.tool {
                     ScreenDrawTool::Line => crate::model::QuickScreenDrawTool::Line,
@@ -10604,7 +10591,7 @@ mod windows_overlay {
                 brush_size,
                 smoothing,
                 smoothing_amount,
-                fill,
+                fill: false,
                 freeze,
                 tool,
             });
@@ -10838,13 +10825,6 @@ mod windows_overlay {
         {
             return ScreenDrawHit::PickScreenColor;
         }
-        if x >= SCREEN_DRAW_TOOLBAR_FILL_X
-            && x <= SCREEN_DRAW_TOOLBAR_FILL_X + SCREEN_DRAW_TOOLBAR_FILL_W
-            && y >= 12
-            && y <= 44
-        {
-            return ScreenDrawHit::FillShapes;
-        }
         if x >= SCREEN_DRAW_TOOLBAR_CAPTURE_X
             && x <= SCREEN_DRAW_TOOLBAR_CAPTURE_X + 32
             && y >= 12
@@ -10871,16 +10851,6 @@ mod windows_overlay {
 
     fn screen_draw_text_font_size(brush_size: f32) -> f32 {
         brush_size.clamp(14.0, 72.0)
-    }
-
-    fn screen_draw_tool_supports_fill(tool: ScreenDrawTool) -> bool {
-        matches!(
-            tool,
-            ScreenDrawTool::Rectangle
-                | ScreenDrawTool::Ellipse
-                | ScreenDrawTool::Circle
-                | ScreenDrawTool::Polygon
-        )
     }
 
     fn screen_draw_text_layout(
@@ -10958,7 +10928,7 @@ mod windows_overlay {
             eraser: force_eraser || state.eraser,
             smoothing: state.smoothing,
             smoothing_amount: state.smoothing_amount,
-            filled: state.fill_shapes && screen_draw_tool_supports_fill(tool),
+            filled: false,
             text: String::new(),
             text_box_width: 0,
             text_box_height: 0,
@@ -11308,70 +11278,6 @@ mod windows_overlay {
                     color.b,
                     src_a,
                 );
-            }
-        }
-    }
-
-    fn measure_screen_draw_text(text: &str, font_size: f32) -> Option<(i32, i32)> {
-        if text.trim().is_empty() {
-            return None;
-        }
-
-        unsafe {
-            let screen_dc = GetDC(None);
-            let mem_dc = CreateCompatibleDC(Some(screen_dc));
-            let _ = ReleaseDC(None, screen_dc);
-
-            let font_name = "Segoe UI"
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect::<Vec<_>>();
-            let font = CreateFontW(
-                -(font_size.round() as i32).max(1),
-                0,
-                0,
-                0,
-                FW_MEDIUM.0 as i32,
-                0,
-                0,
-                0,
-                DEFAULT_CHARSET,
-                OUT_DEFAULT_PRECIS,
-                CLIP_DEFAULT_PRECIS,
-                ANTIALIASED_QUALITY,
-                FF_DONTCARE.0 as u32,
-                PCWSTR(font_name.as_ptr()),
-            );
-            let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
-
-            let mut rect = RECT {
-                left: 0,
-                top: 0,
-                right: 4096,
-                bottom: 512,
-            };
-            let mut wide = text
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect::<Vec<_>>();
-            let ok = DrawTextW(
-                mem_dc,
-                &mut wide,
-                &mut rect,
-                DT_SINGLELINE | DT_VCENTER | DT_CALCRECT,
-            );
-
-            let _ = SelectObject(mem_dc, old_font);
-            let _ = DeleteObject(HGDIOBJ(font.0));
-            let _ = DeleteDC(mem_dc);
-
-            if ok == 0 {
-                None
-            } else {
-                Some((
-                    (rect.right - rect.left).max(1),
-                    (rect.bottom - rect.top).max(1),
-                ))
             }
         }
     }
@@ -11912,7 +11818,6 @@ mod windows_overlay {
         let toolbar_smoothing = state_guard.smoothing;
         let toolbar_smoothing_amount = state_guard.smoothing_amount;
         let toolbar_tool = state_guard.tool;
-        let toolbar_fill_shapes = state_guard.fill_shapes;
         let toolbar_color_palette_open = state_guard.color_palette_open;
         let toolbar_color_pick_mode = state_guard.screen_color_pick_mode;
         let color_pick_preview = state_guard.color_pick_preview.clone();
@@ -11930,7 +11835,6 @@ mod windows_overlay {
                 toolbar_smoothing,
                 toolbar_smoothing_amount,
                 toolbar_tool,
-                toolbar_fill_shapes,
                 toolbar_color_palette_open,
                 toolbar_color_pick_mode,
             );
@@ -12367,7 +12271,6 @@ mod windows_overlay {
         _smoothing: bool,
         _smoothing_amount: f32,
         tool: ScreenDrawTool,
-        fill_shapes: bool,
         color_palette_open: bool,
         color_pick_mode: bool,
     ) {
@@ -13036,41 +12939,6 @@ mod windows_overlay {
             [255, 255, 255, 255],
             2.0,
         );
-        let fill_x = SCREEN_DRAW_TOOLBAR_FILL_X as f32;
-        fill_skia_rounded_rect(
-            &mut pixmap,
-            fill_x,
-            12.0,
-            SCREEN_DRAW_TOOLBAR_FILL_W as f32,
-            32.0,
-            8.0,
-            if fill_shapes {
-                [86, 150, 122, 232]
-            } else {
-                [82, 96, 120, 214]
-            },
-        );
-        stroke_skia_rounded_rect(
-            &mut pixmap,
-            fill_x + 0.5,
-            12.5,
-            SCREEN_DRAW_TOOLBAR_FILL_W as f32 - 1.0,
-            31.0,
-            8.0,
-            1.0,
-            if fill_shapes {
-                [196, 255, 226, 110]
-            } else {
-                [255, 255, 255, 34]
-            },
-        );
-        let fill_text = "Fill";
-        let fill_font_size = 17.0;
-        let (fill_text_w, fill_text_h) =
-            measure_screen_draw_text(fill_text, fill_font_size).unwrap_or((28, 18));
-        let fill_left =
-            SCREEN_DRAW_TOOLBAR_FILL_X + ((SCREEN_DRAW_TOOLBAR_FILL_W - fill_text_w).max(0) / 2);
-        let fill_top = 12 + ((32 - fill_text_h).max(0) / 2) - 1;
         if color_palette_open {
             let palette_x = 19.0;
             let palette_y = base_toolbar_h + 4.0;
@@ -13127,23 +12995,6 @@ mod windows_overlay {
             }
         }
 
-        draw_screen_draw_text_into_rgba(
-            pixmap.data_mut(),
-            toolbar_w as u32,
-            toolbar_h as u32,
-            fill_left,
-            fill_top,
-            fill_text_w + 2,
-            fill_text_h.max(20),
-            fill_text,
-            RgbaColor {
-                r: 240,
-                g: 246,
-                b: 255,
-                a: if fill_shapes { 252 } else { 228 },
-            },
-            fill_font_size,
-        );
         let data = pixmap.data();
         let base_x = toolbar_x.max(0) as usize;
         let base_y = toolbar_y.max(0) as usize;
@@ -24875,14 +24726,6 @@ mod windows_overlay {
             assert_eq!(height, 53);
             assert_eq!(font_size, 26.0);
             assert_eq!(text, "Text");
-        }
-
-        #[test]
-        fn screen_draw_tool_supports_fill_is_geometric_only() {
-            assert!(screen_draw_tool_supports_fill(ScreenDrawTool::Rectangle));
-            assert!(screen_draw_tool_supports_fill(ScreenDrawTool::Circle));
-            assert!(!screen_draw_tool_supports_fill(ScreenDrawTool::Brush));
-            assert!(!screen_draw_tool_supports_fill(ScreenDrawTool::Text));
         }
 
         #[test]
