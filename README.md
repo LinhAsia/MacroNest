@@ -19,16 +19,16 @@ The modules below are built to work with the macro system, so you can combine th
 | :--- | :--- | :--- |
 | **Macro Engine** | Run key presses, mouse actions, loops, waits, and conditional branches | Build logic: click buttons, enter input fields, loop tasks, and branch flow using variables |
 | **Computer Vision** | Find images on screen, watch colors, and count matching pixels | Scan screen: locate game icons, wait for color changes, or trigger actions when an enemy bar fills up |
-| **OCR** | Extract text/numbers from screen regions and save to variables, or check if specific text is found | Save scan results to variables (e.g. read coordinates/scores) and branch macro logic based on text matches |
+| **OCR** | Extract text/numbers from screen regions and check if specific text is found | Save scan results to variables (e.g. read coordinates/scores) and branch macro logic based on text matches |
 | **Window Control** | Move, resize, layout (arrange in grid), pin, and zoom windows | Setup workspace: tile windows side-by-side, crop active regions, or center windows for precise clicking |
 | **Audio Sense** | Monitor system audio, microphone levels, and audio frequency (pitch) | Handle sound cues: trigger automated responses when a voice call starts or game sound plays |
 | **Sound Effects** | Play sound alerts, text-to-speech, and custom audio clips | Audible alerts: play warning sound on error, or read status messages aloud during execution |
 | **Crosshair** | Render a customizable crosshair overlay on the screen | Visual aid: overlay a targeting crosshair for manual games, toggled on/off via macro steps |
-| **Geometry Overlay** | Draw lines, rectangles, circles, and polygons on screen | Mark zones: highlight active scan regions, frame targets, or draw guides during macro execution |
+| **Geometry Overlay** | Draw shapes (Points, Lines, Circles, Rectangles, Ellipses, Arrows, Polylines, Polygons, Arcs, Labels, and SVGs) on screen | Draw dynamic visual indicators, track zones, or display text labels on screen using mathematical expressions bound to variables |
 | **HUD Labels** | Display customizable floating text labels and values on screen | Live dashboard: show variable values, current step status, or custom status labels overlaying the screen |
-| **Timer** | Create stopwatches, countdowns, and cooldown overlays on screen | Track time: trigger actions after elapsed time, or overlay skill cooldown indicators on screen |
-| **Script Command** | Execute CMD and PowerShell commands, capturing their output to variables | System integration: fetch system info, run Python scripts, or query network endpoints inside a macro |
-| **Hardware Input** | Send input via Interception driver, Arduino boards, or recorded mouse paths | Bypass anti-cheat: send natural human-like input and replay recorded smooth mouse movements |
+| **Timer** | Create stopwatches, countdowns, and cooldown overlays on screen | Track time: read elapsed/remaining time into variables (`timer1.second`, `timer1.raw`), trigger actions after elapsed time, or overlay skill cooldown indicators on screen |
+| **Script Command** | Execute CMD and PowerShell commands, capturing their output to variables | System integration: execute local scripts, run command-line tools, or query network endpoints inside a macro |
+| **Hardware Input** | Send input via Interception driver, Arduino boards, or recorded mouse paths | Emulate input: send low-level mouse and keyboard signals to ensure compatibility with high-security applications or games |
 
 ## Quick Actions
 
