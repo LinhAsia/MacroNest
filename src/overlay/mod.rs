@@ -228,14 +228,19 @@ mod windows_overlay {
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 6;
     const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 110;
     const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
-    const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 374;
+    const SCREEN_DRAW_TOOLBAR_WIDTH: i32 = 616;
     const SCREEN_DRAW_TOOLBAR_HEIGHT: i32 = 56;
     const SCREEN_DRAW_TOOLBAR_BRUSH_X: i32 = 148;
     const SCREEN_DRAW_TOOLBAR_LINE_X: i32 = 184;
-    const SCREEN_DRAW_TOOLBAR_RECT_X: i32 = 220;
-    const SCREEN_DRAW_TOOLBAR_CIRCLE_X: i32 = 256;
-    const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 294;
-    const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 332;
+    const SCREEN_DRAW_TOOLBAR_ARROW_X: i32 = 220;
+    const SCREEN_DRAW_TOOLBAR_RECT_X: i32 = 256;
+    const SCREEN_DRAW_TOOLBAR_ELLIPSE_X: i32 = 292;
+    const SCREEN_DRAW_TOOLBAR_CIRCLE_X: i32 = 328;
+    const SCREEN_DRAW_TOOLBAR_TEXT_X: i32 = 364;
+    const SCREEN_DRAW_TOOLBAR_POLYGON_X: i32 = 400;
+    const SCREEN_DRAW_TOOLBAR_MEASURE_X: i32 = 436;
+    const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 474;
+    const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 512;
     #[derive(Debug, Clone)]
     struct VisionRunOutcome {
         matched: bool,
@@ -1796,8 +1801,13 @@ mod windows_overlay {
         BrushSize,
         ToolBrush,
         ToolLine,
+        ToolArrow,
         ToolRectangle,
+        ToolEllipse,
         ToolCircle,
+        ToolTextLabel,
+        ToolPolygon,
+        ToolMeasure,
         Eraser,
         Smoothing,
         SmoothingAmount,
@@ -1821,8 +1831,13 @@ mod windows_overlay {
     enum ScreenDrawTool {
         Brush,
         Line,
+        Arrow,
         Rectangle,
+        Ellipse,
         Circle,
+        TextLabel,
+        Polygon,
+        Measure,
     }
 
     impl Default for ScreenDrawTool {
@@ -7232,7 +7247,7 @@ mod windows_overlay {
         let scale = quick_key_display_mascot_scale(font_size, mascot_style);
         let (left, top, right, bottom) = match mascot_style {
             crate::model::MascotStyle::Hachiware => (38.0, 16.0, 88.0, 62.0),
-            crate::model::MascotStyle::ChiikawaClassic => (18.0, 6.0, 56.0, 62.0),
+            crate::model::MascotStyle::ChiikawaClassic => (0.0, 6.0, 0.0, 62.0),
             crate::model::MascotStyle::Chiikawa => (40.0, 10.0, 88.0, 62.0),
         };
         (
@@ -8898,6 +8913,13 @@ mod windows_overlay {
         let _ = refresh_overlay(runtime);
         if ui_foreground {
             reset_all_input_and_locks();
+            {
+                let mut screen_draw = SCREEN_DRAW_STATE.lock();
+                if screen_draw.active || screen_draw.capturing_region {
+                    deactivate_screen_draw(&mut screen_draw);
+                }
+            }
+            let _ = ShowWindow(runtime.screen_draw_hwnd, SW_HIDE);
             let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
             let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
             runtime.hud_display = None;
@@ -9394,7 +9416,15 @@ mod windows_overlay {
             max_x = max_x.max(point.x);
             max_y = max_y.max(point.y);
         }
-        let pad = (stroke.brush_size.ceil() as i32 + 6).max(4);
+        let extra_pad = match stroke.tool {
+            ScreenDrawTool::Brush | ScreenDrawTool::Line | ScreenDrawTool::Rectangle => 6,
+            ScreenDrawTool::Arrow
+            | ScreenDrawTool::Ellipse
+            | ScreenDrawTool::Circle
+            | ScreenDrawTool::Polygon => 16,
+            ScreenDrawTool::TextLabel | ScreenDrawTool::Measure => 42,
+        };
+        let pad = (stroke.brush_size.ceil() as i32 + extra_pad).max(4);
         Some(ScreenDrawDirtyRect {
             left: min_x.saturating_sub(pad).max(0) as usize,
             top: min_y.saturating_sub(pad).max(0) as usize,
@@ -9642,14 +9672,39 @@ mod windows_overlay {
                 state.tool = ScreenDrawTool::Line;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
             }
+            ScreenDrawHit::ToolArrow => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                state.tool = ScreenDrawTool::Arrow;
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
+            }
             ScreenDrawHit::ToolRectangle => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.tool = ScreenDrawTool::Rectangle;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
             }
+            ScreenDrawHit::ToolEllipse => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                state.tool = ScreenDrawTool::Ellipse;
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
+            }
             ScreenDrawHit::ToolCircle => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.tool = ScreenDrawTool::Circle;
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
+            }
+            ScreenDrawHit::ToolTextLabel => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                state.tool = ScreenDrawTool::TextLabel;
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
+            }
+            ScreenDrawHit::ToolPolygon => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                state.tool = ScreenDrawTool::Polygon;
+                mark_screen_draw_dirty(&mut state, toolbar_rect);
+            }
+            ScreenDrawHit::ToolMeasure => {
+                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                state.tool = ScreenDrawTool::Measure;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
             }
             ScreenDrawHit::Eraser => {
@@ -10281,6 +10336,11 @@ mod windows_overlay {
     }
 
     fn append_screen_draw_point(stroke: &mut ScreenDrawStroke, point: POINT) -> bool {
+        let point = if stroke.tool == ScreenDrawTool::Brush {
+            point
+        } else {
+            snapped_screen_draw_point(stroke.points.first().copied().unwrap_or(point), point)
+        };
         if stroke.tool != ScreenDrawTool::Brush {
             if stroke.points.len() == 1 {
                 stroke.points.push(point);
@@ -10307,6 +10367,29 @@ mod windows_overlay {
 
         stroke.points.push(point);
         true
+    }
+
+    fn screen_draw_snap_axis_active() -> bool {
+        (unsafe { GetAsyncKeyState(0x10) } as u16 & 0x8000) != 0
+    }
+
+    fn snapped_screen_draw_point(anchor: POINT, point: POINT) -> POINT {
+        if !screen_draw_snap_axis_active() {
+            return point;
+        }
+        let dx = point.x - anchor.x;
+        let dy = point.y - anchor.y;
+        if dx.abs() >= dy.abs() {
+            POINT {
+                x: point.x,
+                y: anchor.y,
+            }
+        } else {
+            POINT {
+                x: anchor.x,
+                y: point.y,
+            }
+        }
     }
 
     fn process_screen_draw_mouse_event(message: u32, screen_point: POINT) -> bool {
@@ -10410,6 +10493,13 @@ mod windows_overlay {
         {
             return ScreenDrawHit::ToolLine;
         }
+        if x >= SCREEN_DRAW_TOOLBAR_ARROW_X
+            && x <= SCREEN_DRAW_TOOLBAR_ARROW_X + 28
+            && y >= 12
+            && y <= 44
+        {
+            return ScreenDrawHit::ToolArrow;
+        }
         if x >= SCREEN_DRAW_TOOLBAR_RECT_X
             && x <= SCREEN_DRAW_TOOLBAR_RECT_X + 28
             && y >= 12
@@ -10417,12 +10507,40 @@ mod windows_overlay {
         {
             return ScreenDrawHit::ToolRectangle;
         }
+        if x >= SCREEN_DRAW_TOOLBAR_ELLIPSE_X
+            && x <= SCREEN_DRAW_TOOLBAR_ELLIPSE_X + 28
+            && y >= 12
+            && y <= 44
+        {
+            return ScreenDrawHit::ToolEllipse;
+        }
         if x >= SCREEN_DRAW_TOOLBAR_CIRCLE_X
             && x <= SCREEN_DRAW_TOOLBAR_CIRCLE_X + 28
             && y >= 12
             && y <= 44
         {
             return ScreenDrawHit::ToolCircle;
+        }
+        if x >= SCREEN_DRAW_TOOLBAR_TEXT_X
+            && x <= SCREEN_DRAW_TOOLBAR_TEXT_X + 28
+            && y >= 12
+            && y <= 44
+        {
+            return ScreenDrawHit::ToolTextLabel;
+        }
+        if x >= SCREEN_DRAW_TOOLBAR_POLYGON_X
+            && x <= SCREEN_DRAW_TOOLBAR_POLYGON_X + 28
+            && y >= 12
+            && y <= 44
+        {
+            return ScreenDrawHit::ToolPolygon;
+        }
+        if x >= SCREEN_DRAW_TOOLBAR_MEASURE_X
+            && x <= SCREEN_DRAW_TOOLBAR_MEASURE_X + 28
+            && y >= 12
+            && y <= 44
+        {
+            return ScreenDrawHit::ToolMeasure;
         }
         if x >= SCREEN_DRAW_TOOLBAR_CAPTURE_X
             && x <= SCREEN_DRAW_TOOLBAR_CAPTURE_X + 32
@@ -10546,17 +10664,302 @@ mod windows_overlay {
         true
     }
 
+    fn screen_draw_shape_points(stroke: &ScreenDrawStroke) -> Vec<POINT> {
+        if stroke.tool == ScreenDrawTool::Brush {
+            let filtered = filtered_screen_draw_points(
+                &stroke.points,
+                if stroke.smoothing { 1.2 } else { 0.6 },
+            );
+            if stroke.smoothing {
+                smoothed_screen_draw_points(&filtered, stroke.smoothing_amount)
+            } else {
+                filtered
+            }
+        } else {
+            stroke.points.clone()
+        }
+    }
+
+    fn draw_screen_draw_arrow_head(
+        pixmap: &mut tiny_skia::PixmapMut,
+        paint: &tiny_skia::Paint,
+        from: POINT,
+        to: POINT,
+        size: f32,
+    ) {
+        let dx = (to.x - from.x) as f32;
+        let dy = (to.y - from.y) as f32;
+        let length = dx.hypot(dy).max(1.0);
+        let ux = dx / length;
+        let uy = dy / length;
+        let px = -uy;
+        let py = ux;
+        let base_x = to.x as f32 - ux * size;
+        let base_y = to.y as f32 - uy * size;
+        let wing = size * 0.42;
+
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.move_to(to.x as f32, to.y as f32);
+        pb.line_to(base_x + px * wing, base_y + py * wing);
+        pb.line_to(base_x - px * wing, base_y - py * wing);
+        pb.close();
+        if let Some(path) = pb.finish() {
+            pixmap.fill_path(
+                &path,
+                paint,
+                tiny_skia::FillRule::Winding,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    }
+
+    fn draw_screen_draw_text_label(
+        pixmap: &mut tiny_skia::PixmapMut,
+        paint: &tiny_skia::Paint,
+        first: POINT,
+        last: POINT,
+        stroke_style: &tiny_skia::Stroke,
+    ) {
+        let left = first.x.min(last.x) as f32;
+        let top = first.y.min(last.y) as f32;
+        let width = ((first.x - last.x).abs().max(72)) as f32;
+        let height = ((first.y - last.y).abs().max(34)) as f32;
+
+        let mut box_path = tiny_skia::PathBuilder::new();
+        box_path.move_to(left, top);
+        box_path.line_to(left + width, top);
+        box_path.line_to(left + width, top + height);
+        box_path.line_to(left + 22.0, top + height);
+        box_path.line_to(left + 12.0, top + height + 10.0);
+        box_path.line_to(left + 14.0, top + height);
+        box_path.line_to(left, top + height);
+        box_path.close();
+        if let Some(path) = box_path.finish() {
+            pixmap.stroke_path(
+                &path,
+                paint,
+                stroke_style,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+
+        let text_left = left + 18.0;
+        let text_top = top + 10.0;
+        let text_mid_x = text_left + 16.0;
+        let text_mid_y = text_top + 8.0;
+
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.move_to(text_left, text_top);
+        pb.line_to(text_left + 32.0, text_top);
+        pb.move_to(text_mid_x, text_top);
+        pb.line_to(text_mid_x, text_top + 18.0);
+        pb.move_to(text_mid_x - 12.0, text_mid_y);
+        pb.line_to(text_mid_x + 12.0, text_mid_y);
+        if let Some(path) = pb.finish() {
+            pixmap.stroke_path(
+                &path,
+                paint,
+                stroke_style,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    }
+
+    fn draw_screen_draw_measure_marks(
+        pixmap: &mut tiny_skia::PixmapMut,
+        paint: &tiny_skia::Paint,
+        first: POINT,
+        last: POINT,
+        stroke_style: &tiny_skia::Stroke,
+    ) {
+        let dx = (last.x - first.x) as f32;
+        let dy = (last.y - first.y) as f32;
+        let length = dx.hypot(dy).max(1.0);
+        let ux = dx / length;
+        let uy = dy / length;
+        let px = -uy;
+        let py = ux;
+        let tick = stroke_style.width * 1.6 + 5.0;
+
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.move_to(first.x as f32, first.y as f32);
+        pb.line_to(last.x as f32, last.y as f32);
+        pb.move_to(first.x as f32 + px * tick, first.y as f32 + py * tick);
+        pb.line_to(first.x as f32 - px * tick, first.y as f32 - py * tick);
+        pb.move_to(last.x as f32 + px * tick, last.y as f32 + py * tick);
+        pb.line_to(last.x as f32 - px * tick, last.y as f32 - py * tick);
+        if let Some(path) = pb.finish() {
+            pixmap.stroke_path(
+                &path,
+                paint,
+                stroke_style,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+
+        let label_left = ((first.x + last.x) as f32 * 0.5 + px * 12.0) - 38.0;
+        let label_top = ((first.y + last.y) as f32 * 0.5 + py * 12.0) - 11.0;
+        if let Some(rect) = tiny_skia::Rect::from_xywh(label_left, label_top, 76.0, 22.0) {
+            let mut bg = tiny_skia::Paint::default();
+            bg.anti_alias = true;
+            bg.set_color(tiny_skia::Color::from_rgba8(14, 18, 26, 210));
+            pixmap.fill_rect(rect, &bg, tiny_skia::Transform::identity(), None);
+        }
+
+        let angle_deg = dy.atan2(dx).to_degrees().round() as i32;
+        let label = format!("{:.0}px {angle_deg}deg", length);
+        draw_screen_draw_overlay_text(
+            pixmap,
+            &label,
+            label_left as i32 + 8,
+            label_top as i32 + 4,
+            60,
+            16,
+            13,
+            [255, 255, 255, 255],
+        );
+    }
+
+    fn draw_screen_draw_overlay_text(
+        pixmap: &mut tiny_skia::PixmapMut,
+        text: &str,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        font_size: i32,
+        color: [u8; 4],
+    ) {
+        if text.is_empty() || width <= 0 || height <= 0 {
+            return;
+        }
+
+        let bytes_len = (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4);
+        let screen_dc = unsafe { GetDC(None) };
+        let mem_dc = unsafe { CreateCompatibleDC(Some(screen_dc)) };
+        let bitmap_info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits_ptr: *mut c_void = null_mut();
+        let Ok(bitmap) = (unsafe {
+            CreateDIBSection(
+                Some(mem_dc),
+                &bitmap_info,
+                DIB_RGB_COLORS,
+                &mut bits_ptr,
+                None,
+                0,
+            )
+        }) else {
+            let _ = unsafe { DeleteDC(mem_dc) };
+            let _ = unsafe { ReleaseDC(None, screen_dc) };
+            return;
+        };
+        let old_bitmap = unsafe { SelectObject(mem_dc, HGDIOBJ(bitmap.0)) };
+        let pixels = unsafe { std::slice::from_raw_parts_mut(bits_ptr as *mut u8, bytes_len) };
+        pixels.fill(0);
+
+        let font_name = "Segoe UI"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let font = unsafe {
+            CreateFontW(
+                -font_size.max(10),
+                0,
+                0,
+                0,
+                FW_MEDIUM.0 as i32,
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                ANTIALIASED_QUALITY,
+                FF_DONTCARE.0 as u32,
+                PCWSTR(font_name.as_ptr()),
+            )
+        };
+        let old_font = unsafe { SelectObject(mem_dc, HGDIOBJ(font.0)) };
+        let _ = unsafe { SetBkMode(mem_dc, TRANSPARENT) };
+        let _ = unsafe {
+            SetTextColor(
+                mem_dc,
+                COLORREF((color[2] as u32) << 16 | (color[1] as u32) << 8 | color[0] as u32),
+            )
+        };
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: height,
+        };
+        let mut wide = text
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let _ = unsafe {
+            DrawTextW(
+                mem_dc,
+                &mut wide,
+                &mut rect,
+                windows::Win32::Graphics::Gdi::DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+            )
+        };
+
+        for row in 0..height as usize {
+            for col in 0..width as usize {
+                let src = (row * width as usize + col) * 4;
+                let b = pixels[src];
+                let g = pixels[src + 1];
+                let r = pixels[src + 2];
+                let a = b.max(g).max(r);
+                if a == 0 {
+                    continue;
+                }
+                let dst_x = x + col as i32;
+                let dst_y = y + row as i32;
+                if dst_x < 0
+                    || dst_y < 0
+                    || dst_x >= pixmap.width() as i32
+                    || dst_y >= pixmap.height() as i32
+                {
+                    continue;
+                }
+                let dst = (dst_y as usize * pixmap.width() as usize + dst_x as usize) * 4;
+                blend_premultiplied_rgba(&mut pixmap.data_mut()[dst..dst + 4], r, g, b, a);
+            }
+        }
+
+        let _ = unsafe { SelectObject(mem_dc, old_font) };
+        let _ = unsafe { DeleteObject(HGDIOBJ(font.0)) };
+        let _ = unsafe { SelectObject(mem_dc, old_bitmap) };
+        let _ = unsafe { DeleteObject(HGDIOBJ(bitmap.0)) };
+        let _ = unsafe { DeleteDC(mem_dc) };
+        let _ = unsafe { ReleaseDC(None, screen_dc) };
+    }
+
     fn render_screen_draw_stroke_skia(
         pixmap: &mut tiny_skia::PixmapMut,
         stroke: &ScreenDrawStroke,
     ) {
-        let filtered_points =
-            filtered_screen_draw_points(&stroke.points, if stroke.smoothing { 1.2 } else { 0.6 });
-        let points = if stroke.smoothing {
-            smoothed_screen_draw_points(&filtered_points, stroke.smoothing_amount)
-        } else {
-            filtered_points
-        };
+        let points = screen_draw_shape_points(stroke);
         if points.is_empty() {
             return;
         }
@@ -10647,6 +11050,27 @@ mod windows_overlay {
                     );
                 }
             }
+            ScreenDrawTool::Arrow => {
+                let mut pb = tiny_skia::PathBuilder::new();
+                pb.move_to(first.x as f32, first.y as f32);
+                pb.line_to(last.x as f32, last.y as f32);
+                if let Some(path) = pb.finish() {
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke_style,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
+                draw_screen_draw_arrow_head(
+                    pixmap,
+                    &paint,
+                    first,
+                    last,
+                    (stroke.brush_size * 2.4).max(10.0),
+                );
+            }
             ScreenDrawTool::Rectangle => {
                 let left = first.x.min(last.x) as f32;
                 let top = first.y.min(last.y) as f32;
@@ -10658,6 +11082,40 @@ mod windows_overlay {
                     pb.line_to(left + width, top);
                     pb.line_to(left + width, top + height);
                     pb.line_to(left, top + height);
+                    pb.close();
+                    if let Some(path) = pb.finish() {
+                        pixmap.stroke_path(
+                            &path,
+                            &paint,
+                            &stroke_style,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
+                    }
+                }
+            }
+            ScreenDrawTool::Ellipse => {
+                let left = first.x.min(last.x) as f32;
+                let top = first.y.min(last.y) as f32;
+                let width = (first.x - last.x).unsigned_abs() as f32;
+                let height = (first.y - last.y).unsigned_abs() as f32;
+                if width > 1.0 && height > 1.0 {
+                    let cx = left + width * 0.5;
+                    let cy = top + height * 0.5;
+                    let rx = width * 0.5;
+                    let ry = height * 0.5;
+                    let steps = 48;
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    for index in 0..=steps {
+                        let t = (index as f32 / steps as f32) * std::f32::consts::TAU;
+                        let px = cx + rx * t.cos();
+                        let py = cy + ry * t.sin();
+                        if index == 0 {
+                            pb.move_to(px, py);
+                        } else {
+                            pb.line_to(px, py);
+                        }
+                    }
                     pb.close();
                     if let Some(path) = pb.finish() {
                         pixmap.stroke_path(
@@ -10685,6 +11143,41 @@ mod windows_overlay {
                         None,
                     );
                 }
+            }
+            ScreenDrawTool::TextLabel => {
+                draw_screen_draw_text_label(pixmap, &paint, first, last, &stroke_style);
+            }
+            ScreenDrawTool::Polygon => {
+                let dx = (last.x - first.x) as f32;
+                let dy = (last.y - first.y) as f32;
+                let radius = dx.hypot(dy).max(6.0);
+                let rotation = dy.atan2(dx);
+                let sides = 6;
+                let mut pb = tiny_skia::PathBuilder::new();
+                for index in 0..=sides {
+                    let t = rotation
+                        + (index as f32 / sides as f32) * std::f32::consts::TAU;
+                    let px = first.x as f32 + radius * t.cos();
+                    let py = first.y as f32 + radius * t.sin();
+                    if index == 0 {
+                        pb.move_to(px, py);
+                    } else {
+                        pb.line_to(px, py);
+                    }
+                }
+                pb.close();
+                if let Some(path) = pb.finish() {
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke_style,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
+            }
+            ScreenDrawTool::Measure => {
+                draw_screen_draw_measure_marks(pixmap, &paint, first, last, &stroke_style);
             }
         }
     }
@@ -11267,9 +11760,33 @@ mod windows_overlay {
             },
         );
         let brush_center_x = SCREEN_DRAW_TOOLBAR_BRUSH_X as f32 + 14.0;
-        draw_skia_circle_fill(&mut pixmap, brush_center_x, 28.0, 4.5, [240, 246, 255, 246]);
-        draw_skia_circle_fill(&mut pixmap, brush_center_x, 22.0, 2.4, [240, 246, 255, 246]);
-        draw_skia_circle_fill(&mut pixmap, brush_center_x, 34.0, 2.4, [240, 246, 255, 246]);
+        draw_skia_line(
+            &mut pixmap,
+            brush_center_x - 5.5,
+            34.5,
+            brush_center_x + 5.5,
+            21.0,
+            [240, 246, 255, 246],
+            3.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            brush_center_x - 3.0,
+            36.5,
+            brush_center_x + 0.8,
+            32.0,
+            [218, 230, 246, 246],
+            2.6,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            brush_center_x + 3.8,
+            18.6,
+            brush_center_x + 7.0,
+            14.6,
+            [240, 246, 255, 246],
+            2.1,
+        );
 
         let line_button_x = SCREEN_DRAW_TOOLBAR_LINE_X as f32;
         fill_skia_rounded_rect(
@@ -11307,6 +11824,62 @@ mod windows_overlay {
             18.0,
             [240, 246, 255, 246],
             2.4,
+        );
+
+        let arrow_button_x = SCREEN_DRAW_TOOLBAR_ARROW_X as f32;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            arrow_button_x,
+            12.0,
+            28.0,
+            32.0,
+            8.0,
+            if tool == ScreenDrawTool::Arrow {
+                [86, 150, 122, 232]
+            } else {
+                [82, 96, 120, 214]
+            },
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            arrow_button_x + 0.5,
+            12.5,
+            27.0,
+            31.0,
+            8.0,
+            1.0,
+            if tool == ScreenDrawTool::Arrow {
+                [196, 255, 226, 110]
+            } else {
+                [255, 255, 255, 34]
+            },
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 7.0,
+            36.0,
+            SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 21.0,
+            20.0,
+            [240, 246, 255, 246],
+            2.2,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 16.0,
+            20.0,
+            SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 21.0,
+            20.0,
+            [240, 246, 255, 246],
+            2.2,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 21.0,
+            20.0,
+            SCREEN_DRAW_TOOLBAR_ARROW_X as f32 + 21.0,
+            25.0,
+            [240, 246, 255, 246],
+            2.2,
         );
 
         let rect_button_x = SCREEN_DRAW_TOOLBAR_RECT_X as f32;
@@ -11348,6 +11921,52 @@ mod windows_overlay {
             [240, 246, 255, 246],
         );
 
+        let ellipse_button_x = SCREEN_DRAW_TOOLBAR_ELLIPSE_X as f32;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            ellipse_button_x,
+            12.0,
+            28.0,
+            32.0,
+            8.0,
+            if tool == ScreenDrawTool::Ellipse {
+                [86, 150, 122, 232]
+            } else {
+                [82, 96, 120, 214]
+            },
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            ellipse_button_x + 0.5,
+            12.5,
+            27.0,
+            31.0,
+            8.0,
+            1.0,
+            if tool == ScreenDrawTool::Ellipse {
+                [196, 255, 226, 110]
+            } else {
+                [255, 255, 255, 34]
+            },
+        );
+        draw_skia_circle_outline(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_ELLIPSE_X as f32 + 14.0,
+            28.0,
+            6.2,
+            [240, 246, 255, 246],
+            2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_ELLIPSE_X as f32 + 8.0,
+            28.0,
+            SCREEN_DRAW_TOOLBAR_ELLIPSE_X as f32 + 20.0,
+            28.0,
+            [28, 36, 48, 0],
+            3.0,
+        );
+
         let circle_button_x = SCREEN_DRAW_TOOLBAR_CIRCLE_X as f32;
         fill_skia_rounded_rect(
             &mut pixmap,
@@ -11381,6 +12000,192 @@ mod windows_overlay {
             SCREEN_DRAW_TOOLBAR_CIRCLE_X as f32 + 14.0,
             28.0,
             8.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
+
+        let text_button_x = SCREEN_DRAW_TOOLBAR_TEXT_X as f32;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            text_button_x,
+            12.0,
+            28.0,
+            32.0,
+            8.0,
+            if tool == ScreenDrawTool::TextLabel {
+                [86, 150, 122, 232]
+            } else {
+                [82, 96, 120, 214]
+            },
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            text_button_x + 0.5,
+            12.5,
+            27.0,
+            31.0,
+            8.0,
+            1.0,
+            if tool == ScreenDrawTool::TextLabel {
+                [196, 255, 226, 110]
+            } else {
+                [255, 255, 255, 34]
+            },
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_TEXT_X as f32 + 7.0,
+            19.0,
+            SCREEN_DRAW_TOOLBAR_TEXT_X as f32 + 21.0,
+            19.0,
+            [240, 246, 255, 246],
+            2.2,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_TEXT_X as f32 + 14.0,
+            19.0,
+            SCREEN_DRAW_TOOLBAR_TEXT_X as f32 + 14.0,
+            36.0,
+            [240, 246, 255, 246],
+            2.2,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_TEXT_X as f32 + 9.0,
+            27.0,
+            SCREEN_DRAW_TOOLBAR_TEXT_X as f32 + 19.0,
+            27.0,
+            [240, 246, 255, 246],
+            2.2,
+        );
+
+        let polygon_button_x = SCREEN_DRAW_TOOLBAR_POLYGON_X as f32;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            polygon_button_x,
+            12.0,
+            28.0,
+            32.0,
+            8.0,
+            if tool == ScreenDrawTool::Polygon {
+                [86, 150, 122, 232]
+            } else {
+                [82, 96, 120, 214]
+            },
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            polygon_button_x + 0.5,
+            12.5,
+            27.0,
+            31.0,
+            8.0,
+            1.0,
+            if tool == ScreenDrawTool::Polygon {
+                [196, 255, 226, 110]
+            } else {
+                [255, 255, 255, 34]
+            },
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 8.0,
+            30.0,
+            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 14.0,
+            18.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 14.0,
+            18.0,
+            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 22.0,
+            21.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 22.0,
+            21.0,
+            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 21.0,
+            32.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 21.0,
+            32.0,
+            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 10.0,
+            35.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 10.0,
+            35.0,
+            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 8.0,
+            30.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
+
+        let measure_button_x = SCREEN_DRAW_TOOLBAR_MEASURE_X as f32;
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            measure_button_x,
+            12.0,
+            28.0,
+            32.0,
+            8.0,
+            if tool == ScreenDrawTool::Measure {
+                [86, 150, 122, 232]
+            } else {
+                [82, 96, 120, 214]
+            },
+        );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            measure_button_x + 0.5,
+            12.5,
+            27.0,
+            31.0,
+            8.0,
+            1.0,
+            if tool == ScreenDrawTool::Measure {
+                [196, 255, 226, 110]
+            } else {
+                [255, 255, 255, 34]
+            },
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_MEASURE_X as f32 + 8.0,
+            20.0,
+            SCREEN_DRAW_TOOLBAR_MEASURE_X as f32 + 8.0,
+            36.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_MEASURE_X as f32 + 20.0,
+            20.0,
+            SCREEN_DRAW_TOOLBAR_MEASURE_X as f32 + 20.0,
+            36.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            SCREEN_DRAW_TOOLBAR_MEASURE_X as f32 + 8.0,
+            28.0,
+            SCREEN_DRAW_TOOLBAR_MEASURE_X as f32 + 20.0,
+            28.0,
             [240, 246, 255, 246],
             2.0,
         );
