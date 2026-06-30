@@ -12801,36 +12801,45 @@ mod windows_overlay {
         );
         draw_skia_line(
             &mut pixmap,
-            pick_button_x + 9.0,
-            31.0,
+            pick_button_x + 8.5,
+            31.5,
             pick_button_x + 18.0,
             22.0,
             [240, 246, 255, 246],
-            2.2,
+            3.2,
         );
         draw_skia_line(
             &mut pixmap,
-            pick_button_x + 17.0,
-            23.0,
-            pick_button_x + 21.0,
-            27.0,
-            [240, 246, 255, 246],
-            2.2,
+            pick_button_x + 10.2,
+            33.2,
+            pick_button_x + 19.7,
+            23.7,
+            [166, 188, 216, 220],
+            1.1,
         );
+        let mut dropper_head = tiny_skia::PathBuilder::new();
+        dropper_head.move_to(pick_button_x + 17.5, 21.0);
+        dropper_head.line_to(pick_button_x + 21.6, 16.9);
+        dropper_head.line_to(pick_button_x + 23.9, 19.2);
+        dropper_head.line_to(pick_button_x + 19.8, 23.3);
+        dropper_head.close();
+        if let Some(path) = dropper_head.finish() {
+            fill_skia_path(&mut pixmap, &path, [240, 246, 255, 246]);
+        }
         draw_skia_circle_outline(
             &mut pixmap,
-            pick_button_x + 20.5,
-            28.5,
-            3.6,
+            pick_button_x + 21.2,
+            18.7,
+            3.0,
             [240, 246, 255, 246],
-            1.6,
+            1.8,
         );
         draw_skia_circle_fill(
             &mut pixmap,
-            pick_button_x + 9.0,
-            31.0,
-            2.2,
-            [240, 246, 255, 246],
+            pick_button_x + 8.3,
+            31.7,
+            2.1,
+            [255, 208, 96, 255],
         );
 
         // 4. Capture (Camera - 32x32 button bounds)
