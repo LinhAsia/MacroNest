@@ -125,6 +125,7 @@ impl CrosshairApp {
         let mut next_capture_target = None;
         let mut live_sync = false;
         let mut cancel_active_capture = false;
+        let mut draw_preset_id = None;
         let mut mouse_path_timeline_zoom = self.trim_timeline_zoom;
         let mouse_path_options: Vec<(u32, String)> = self
             .state
@@ -995,6 +996,20 @@ impl CrosshairApp {
                                 });
                                 ui.end_row();
 
+                                ui.label(Self::tr_lang(language, "Draw Path", "Vẽ Path"));
+                                ui.horizontal(|ui| {
+                                    let draw_text = Self::tr_lang(language, "Draw on screen", "Vẽ trên màn hình");
+                                    let draw_btn = Button::new(RichText::new(draw_text).strong());
+                                    if ui.add(draw_btn).on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Hide app and draw path with mouse",
+                                        "Ẩn ứng dụng và vẽ đường di chuột bằng chuột"
+                                    )).clicked() {
+                                        draw_preset_id = Some(preset.id);
+                                    }
+                                });
+                                ui.end_row();
+
                                 if self.active_mouse_record_preset_id == Some(preset.id) {
                                     ui.label("");
                                     ui.label(
@@ -1203,6 +1218,9 @@ impl CrosshairApp {
         }
         if cancel_active_capture {
             self.cancel_capture();
+        }
+        if let Some(preset_id) = draw_preset_id {
+            self.begin_mouse_path_draw_capture(ui.ctx(), preset_id);
         }
         if live_sync {
             self.persist_mouse_path_presets();
