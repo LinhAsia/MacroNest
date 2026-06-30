@@ -55,7 +55,6 @@ impl CrosshairApp {
             let mut run_resize_now = false;
             let active_capture_target = self.capture_target.clone();
             let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
-            ui.add_space(6.0);
             let preset_snapshot = self.state.window_presets[index].clone();
             let preview = if preset_snapshot.preview_enabled && !preset_snapshot.collapsed {
                 self.window_preview_for_target(
@@ -665,7 +664,6 @@ impl CrosshairApp {
             let mut toggle_pin_now = false;
             let active_capture_target = self.capture_target.clone();
             let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
-            ui.add_space(6.0);
             let preset_snapshot = self.state.pin_presets[index].clone();
             let source_preview = if pin_preview_allowed && !preset_snapshot.collapsed {
                 self.pin_preview_for_target(
