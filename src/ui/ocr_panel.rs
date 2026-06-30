@@ -485,10 +485,10 @@ impl CrosshairApp {
                 name: preset.name.clone(),
                 collapsed: false,
                 preview_enabled: true,
-                text: format!("OCR Zone: {}", preset.name),
+                text: String::new(),
                 font_size: 16.0,
                 background_opacity: 0.08,
-                rounded_background: true,
+                rounded_background: false,
                 border_enabled: true,
                 border_color: RgbaColor {
                     r: 0,
