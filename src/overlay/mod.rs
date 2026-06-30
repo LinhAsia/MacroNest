@@ -4594,7 +4594,7 @@ mod windows_overlay {
             let hwnd_at_point = WindowFromPoint(info.pt);
             if !hwnd_at_point.0.is_null() && !is_vision_capture_mouse_blocked() {
                 let root = GetAncestor(hwnd_at_point, GA_ROOT);
-                if !root.0.is_null() && window_belongs_to_current_process(root) {
+                if should_bypass_mouse_event_for_app_window(root) {
                     return CallNextHookEx(None, code, wparam, lparam);
                 }
             }
@@ -8629,11 +8629,10 @@ mod windows_overlay {
                         hide_quick_key_display_windows(runtime);
                     }
                     let mut ex_style = GetWindowLongW(runtime.key_display_hwnd, GWL_EXSTYLE) as u32;
-                    if enabled && mode == QuickKeyDisplayMode::Mascot {
-                        ex_style &= !WS_EX_TRANSPARENT.0;
-                    } else {
-                        ex_style |= WS_EX_TRANSPARENT.0;
-                    }
+                    // Keep key display windows click-through even in mascot mode.
+                    // Dragging is handled by the low-level mouse hook, so the overlay itself
+                    // does not need to become the physical click target.
+                    ex_style |= WS_EX_TRANSPARENT.0;
                     let _ = SetWindowLongW(runtime.key_display_hwnd, GWL_EXSTYLE, ex_style as i32);
                     for hwnd in &runtime.key_display_extra_hwnds {
                         let _ = SetWindowLongW(*hwnd, GWL_EXSTYLE, ex_style as i32);
@@ -23779,6 +23778,13 @@ mod windows_overlay {
         }
 
         #[test]
+        fn internal_overlay_windows_do_not_bypass_mouse_macro_processing() {
+            assert!(should_bypass_mouse_event_for_app_window_flags(true, false));
+            assert!(!should_bypass_mouse_event_for_app_window_flags(true, true));
+            assert!(!should_bypass_mouse_event_for_app_window_flags(false, false));
+        }
+
+        #[test]
         fn test_mascot_switches_to_newer_active_key() {
             let _guard = TEST_MUTEX.lock().unwrap();
             let now = Instant::now();
@@ -26762,6 +26768,21 @@ mod windows_overlay {
                 "CrosshairController" | "CrosshairOverlay" | "CrosshairToolbox" | "Magnifier"
             )
         })
+    }
+
+    fn should_bypass_mouse_event_for_app_window_flags(
+        window_belongs_to_process: bool,
+        internal_app_window: bool,
+    ) -> bool {
+        window_belongs_to_process && !internal_app_window
+    }
+
+    fn should_bypass_mouse_event_for_app_window(hwnd: HWND) -> bool {
+        !hwnd.0.is_null()
+            && should_bypass_mouse_event_for_app_window_flags(
+                window_belongs_to_current_process(hwnd),
+                is_internal_app_window(hwnd),
+            )
     }
 
     fn window_belongs_to_current_process(hwnd: HWND) -> bool {
