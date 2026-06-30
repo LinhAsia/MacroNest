@@ -75,15 +75,22 @@ fn render_custom_pixels(style: &CrosshairStyle, pixels_str: &str) -> Result<Rend
         for (r, line) in lines.iter().enumerate() {
             for (c, ch) in line.chars().enumerate() {
                 if ch == '#' || ch == 'x' || ch == 'X' || ch == '1' {
-                    let center_x = pad + (c as f32 + 0.5) * pixel_scale;
-                    let center_y = pad + (r as f32 + 0.5) * pixel_scale;
-                    let out_size = pixel_scale + outline_thickness * 2.0;
+                    let left = (pad + c as f32 * pixel_scale).round();
+                    let right = (pad + (c + 1) as f32 * pixel_scale).round();
+                    let top = (pad + r as f32 * pixel_scale).round();
+                    let bottom = (pad + (r + 1) as f32 * pixel_scale).round();
+
+                    let out_left = left - outline_thickness;
+                    let out_top = top - outline_thickness;
+                    let out_width = (right + outline_thickness) - out_left;
+                    let out_height = (bottom + outline_thickness) - out_top;
+
                     fill_rect(
                         &mut pixmap,
-                        center_x - out_size / 2.0,
-                        center_y - out_size / 2.0,
-                        out_size,
-                        out_size,
+                        out_left,
+                        out_top,
+                        out_width,
+                        out_height,
                         outline_color,
                         false,
                     )?;
@@ -95,25 +102,31 @@ fn render_custom_pixels(style: &CrosshairStyle, pixels_str: &str) -> Result<Rend
     // Pass 2: Draw the pixels themselves
     for (r, line) in lines.iter().enumerate() {
         for (c, ch) in line.chars().enumerate() {
-            let center_x = pad + (c as f32 + 0.5) * pixel_scale;
-            let center_y = pad + (r as f32 + 0.5) * pixel_scale;
+            let left = (pad + c as f32 * pixel_scale).round();
+            let right = (pad + (c + 1) as f32 * pixel_scale).round();
+            let top = (pad + r as f32 * pixel_scale).round();
+            let bottom = (pad + (r + 1) as f32 * pixel_scale).round();
+
+            let width = right - left;
+            let height = bottom - top;
+
             if ch == '#' || ch == 'x' || ch == 'X' || ch == '1' {
                 fill_rect(
                     &mut pixmap,
-                    center_x - pixel_scale / 2.0,
-                    center_y - pixel_scale / 2.0,
-                    pixel_scale,
-                    pixel_scale,
+                    left,
+                    top,
+                    width,
+                    height,
                     fill_color,
                     false,
                 )?;
             } else if ch == '@' || ch == 'o' || ch == 'O' || ch == '2' {
                 fill_rect(
                     &mut pixmap,
-                    center_x - pixel_scale / 2.0,
-                    center_y - pixel_scale / 2.0,
-                    pixel_scale,
-                    pixel_scale,
+                    left,
+                    top,
+                    width,
+                    height,
                     outline_color,
                     false,
                 )?;

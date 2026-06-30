@@ -2504,6 +2504,7 @@ mod windows_overlay {
         identity: String,
         combo_keys: Vec<String>,
         lane: QuickKeyDisplayLane,
+        row: usize,
         slot: usize,
         held: bool,
         first_shown_at: Instant,
@@ -7063,6 +7064,78 @@ mod windows_overlay {
         slot
     }
 
+    fn quick_key_display_allocate_row_and_slot(
+        runtime: &Runtime,
+        text: &str,
+        font_size: f32,
+        cap_height: i32,
+        entry_gap: i32,
+    ) -> (usize, usize) {
+        let max_width = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(400) - 100;
+        let new_width = quick_key_display_entry_width(text, font_size, cap_height);
+        
+        let max_rows = 4;
+        
+        // Calculate the occupancy of each row
+        let mut row_entries: Vec<Vec<&QuickKeyDisplayEntry>> = vec![Vec::new(); max_rows];
+        for entry in &runtime.quick_key_display_entries {
+            if entry.row < max_rows {
+                row_entries[entry.row].push(entry);
+            }
+        }
+        
+        // Sort each row by slot to ensure correct order
+        for r in 0..max_rows {
+            row_entries[r].sort_by_key(|e| e.slot);
+        }
+        
+        // Calculate width of each row
+        let mut row_widths = vec![0i32; max_rows];
+        for r in 0..max_rows {
+            let count = row_entries[r].len();
+            if count > 0 {
+                let sum_widths: i32 = row_entries[r].iter()
+                    .map(|e| quick_key_display_entry_width(&e.text, font_size, cap_height))
+                    .sum();
+                row_widths[r] = sum_widths + entry_gap * (count as i32 - 1);
+            }
+        }
+        
+        // Find the first row that has enough space
+        for r in 0..max_rows {
+            let current_w = row_widths[r];
+            let space_needed = if current_w == 0 {
+                new_width
+            } else {
+                entry_gap + new_width
+            };
+            if current_w + space_needed <= max_width {
+                let next_slot = row_entries[r].len();
+                return (r, next_slot);
+            }
+        }
+        
+        // If all rows are full, look for a completely empty row
+        for r in 0..max_rows {
+            if row_entries[r].is_empty() {
+                return (r, 0);
+            }
+        }
+        
+        // Otherwise, place on the row with the smallest current width
+        let mut min_r = 0;
+        let mut min_w = row_widths[0];
+        for r in 1..max_rows {
+            if row_widths[r] < min_w {
+                min_w = row_widths[r];
+                min_r = r;
+            }
+        }
+        
+        let next_slot = row_entries[min_r].len();
+        (min_r, next_slot)
+    }
+
     fn quick_key_display_press_entry(
         runtime: &mut Runtime,
         text: String,
@@ -7106,6 +7179,18 @@ mod windows_overlay {
             runtime
                 .quick_key_display_slot_labels
                 .insert((lane, slot), text.clone());
+            
+            let font_size = runtime.quick_key_display_size.clamp(18.0, 96.0);
+            let cap_height = (font_size * 1.12 + 18.0).round().max(44.0) as i32;
+            let entry_gap = (font_size * 0.52).round().max(18.0) as i32;
+            let (row, row_slot) = quick_key_display_allocate_row_and_slot(
+                runtime,
+                &text,
+                font_size,
+                cap_height,
+                entry_gap,
+            );
+
             runtime
                 .quick_key_display_entries
                 .push(QuickKeyDisplayEntry {
@@ -7113,7 +7198,8 @@ mod windows_overlay {
                     identity,
                     combo_keys,
                     lane,
-                    slot,
+                    row,
+                    slot: row_slot,
                     held,
                     first_shown_at: now,
                     shown_at: now,
@@ -7235,38 +7321,42 @@ mod windows_overlay {
 
     fn quick_key_display_layout_size(
         entries: &[QuickKeyDisplayEntry],
-        slot_labels: &HashMap<(QuickKeyDisplayLane, usize), String>,
+        _slot_labels: &HashMap<(QuickKeyDisplayLane, usize), String>,
         font_size: f32,
     ) -> (i32, i32) {
         let cap_height = (font_size * 1.12 + 18.0).round().max(44.0) as i32;
         let outer_pad_x = (font_size * 0.46).round().max(16.0) as i32;
         let outer_pad_y = (font_size * 0.34).round().max(10.0) as i32;
         let entry_gap = (font_size * 0.52).round().max(18.0) as i32;
-        let barrier_gap = (font_size * 0.62).round().max(20.0) as i32;
-        let keyboard_widths = quick_key_display_lane_slot_widths(
-            entries,
-            slot_labels,
-            QuickKeyDisplayLane::Keyboard,
-            font_size,
-            cap_height,
-        );
-        let mouse_widths = quick_key_display_lane_slot_widths(
-            entries,
-            slot_labels,
-            QuickKeyDisplayLane::Mouse,
-            font_size,
-            cap_height,
-        );
-        let keyboard_width = quick_key_display_lane_width(&keyboard_widths, entry_gap);
-        let mouse_width = quick_key_display_lane_width(&mouse_widths, entry_gap);
-        let center_gap = if keyboard_width > 0 && mouse_width > 0 {
-            barrier_gap
-        } else {
-            0
-        };
-        let width = outer_pad_x * 2 + keyboard_width + center_gap + mouse_width;
+        let row_gap = (font_size * 0.2).round().max(8.0) as i32;
 
-        let height = cap_height + outer_pad_y * 2 + 6;
+        let max_rows = 4;
+        let mut rows: Vec<Vec<&QuickKeyDisplayEntry>> = vec![Vec::new(); max_rows];
+        for entry in entries {
+            if entry.row < max_rows {
+                rows[entry.row].push(entry);
+            }
+        }
+
+        let mut active_rows_count = 0;
+        let mut max_row_width = 0;
+        for r in 0..max_rows {
+            let count = rows[r].len();
+            if count > 0 {
+                active_rows_count = r + 1;
+                let sum_widths: i32 = rows[r].iter()
+                    .map(|e| quick_key_display_entry_width(&e.text, font_size, cap_height))
+                    .sum();
+                let row_width = sum_widths + entry_gap * (count as i32 - 1);
+                if row_width > max_row_width {
+                    max_row_width = row_width;
+                }
+            }
+        }
+
+        let active_rows_count = active_rows_count.max(1);
+        let width = outer_pad_x * 2 + max_row_width;
+        let height = outer_pad_y * 2 + active_rows_count as i32 * cap_height + (active_rows_count as i32 - 1) * row_gap + 6;
         (width.max(cap_height), height.max(cap_height))
     }
 
@@ -13456,8 +13546,8 @@ mod windows_overlay {
         true
     }
 
-    const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(4000);
-    const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(2000);
+    const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(3000);
+    const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(1500);
     const QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION: Duration = Duration::from_millis(180);
     const QUICK_KEY_DISPLAY_ANIM_EXIT_DURATION: Duration = Duration::from_millis(200);
     const QUICK_KEY_DISPLAY_HOLD_MIN_DURATION: Duration = Duration::from_millis(400);
@@ -16860,54 +16950,25 @@ mod windows_overlay {
         let entry_gap = (font_size * 0.52).round().max(18.0) as i32;
         let barrier_gap = (font_size * 0.62).round().max(20.0) as i32;
 
-        let mut keyboard_entries = entries
-            .iter()
-            .filter(|entry| entry.lane == QuickKeyDisplayLane::Keyboard)
-            .collect::<Vec<_>>();
-        keyboard_entries.sort_by_key(|entry| entry.slot);
+        let max_rows = 4;
+        let mut rows: Vec<Vec<&QuickKeyDisplayEntry>> = vec![Vec::new(); max_rows];
+        for entry in entries {
+            if entry.row < max_rows {
+                rows[entry.row].push(entry);
+            }
+        }
 
-        let mut mouse_entries = entries
-            .iter()
-            .filter(|entry| entry.lane == QuickKeyDisplayLane::Mouse)
-            .collect::<Vec<_>>();
-        mouse_entries.sort_by_key(|entry| entry.slot);
-
-        let keyboard_slot_widths = quick_key_display_lane_slot_widths(
-            entries,
-            slot_labels,
-            QuickKeyDisplayLane::Keyboard,
-            font_size,
-            cap_height,
-        );
-        let mouse_slot_widths = quick_key_display_lane_slot_widths(
-            entries,
-            slot_labels,
-            QuickKeyDisplayLane::Mouse,
-            font_size,
-            cap_height,
-        );
-        let keyboard_width = quick_key_display_lane_width(&keyboard_slot_widths, entry_gap);
-        let mouse_width = quick_key_display_lane_width(&mouse_slot_widths, entry_gap);
-        let center_gap = if keyboard_width > 0 && mouse_width > 0 {
-            barrier_gap
-        } else {
-            0
-        };
         let now = Instant::now();
-
         let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
-        let cap_y = outer_pad_y;
-        let keyboard_left_edge = outer_pad_x;
-        let mouse_left_edge = outer_pad_x + keyboard_width + center_gap;
 
-        let mut draw_entry = |entry: &QuickKeyDisplayEntry, entry_left: i32, alpha_scale: f32| {
+        let mut draw_entry = |entry: &QuickKeyDisplayEntry, entry_left: i32, entry_top: i32, alpha_scale: f32| {
             let visual = quick_key_display_entry_visual(entry, now);
             let entry_width = quick_key_display_entry_width(&entry.text, font_size, cap_height);
             let scaled_entry_width = (entry_width as f32 * visual.scale_x).round().max(1.0) as i32;
             let scaled_cap_height = (cap_height as f32 * visual.scale_y).round().max(1.0) as i32;
             let entry_center_x = entry_left + (entry_width / 2);
             let scaled_left = entry_center_x - (scaled_entry_width / 2);
-            let scaled_top = cap_y + visual.translate_y.round() as i32;
+            let scaled_top = entry_top + visual.translate_y.round() as i32;
             let palette = quick_key_display_entry_palette(entry);
             let (base_fill, inner_fill, border, mut text_color) =
                 quick_key_display_palette_colors(palette);
@@ -17003,30 +17064,37 @@ mod windows_overlay {
             });
         };
 
-        let keyboard_count = keyboard_entries.len().max(1) as f32;
-        let keyboard_slot_offset = |slot: usize| -> i32 {
-            keyboard_slot_widths
-                .iter()
-                .take(slot)
-                .fold(0, |acc, width| acc + *width + entry_gap)
-        };
-        for (entry_index, entry) in keyboard_entries.iter().enumerate() {
-            let alpha_scale = 0.56 + (((entry_index + 1) as f32 / keyboard_count) * 0.44);
-            let entry_left = keyboard_left_edge + keyboard_slot_offset(entry.slot);
-            draw_entry(entry, entry_left, alpha_scale);
-        }
-
-        let mouse_count = mouse_entries.len().max(1) as f32;
-        let mouse_slot_offset = |slot: usize| -> i32 {
-            mouse_slot_widths
-                .iter()
-                .take(slot)
-                .fold(0, |acc, width| acc + *width + entry_gap)
-        };
-        for (entry_index, entry) in mouse_entries.iter().enumerate() {
-            let alpha_scale = 0.56 + (((entry_index + 1) as f32 / mouse_count) * 0.44);
-            let entry_left = mouse_left_edge + mouse_slot_offset(entry.slot);
-            draw_entry(entry, entry_left, alpha_scale);
+        let row_gap = (font_size * 0.2).round().max(8.0) as i32;
+        for r in 0..max_rows {
+            let count = rows[r].len();
+            if count > 0 {
+                let row_top = outer_pad_y + r as i32 * (cap_height + row_gap);
+                
+                let mut sorted_row = rows[r].clone();
+                sorted_row.sort_by_key(|e| e.slot);
+                
+                let mut slot_widths = Vec::new();
+                for entry in &sorted_row {
+                    slot_widths.push(quick_key_display_entry_width(&entry.text, font_size, cap_height));
+                }
+                
+                let row_width = quick_key_display_lane_width(&slot_widths, entry_gap);
+                let row_left_edge = outer_pad_x + (width - outer_pad_x * 2 - row_width) / 2;
+                
+                let get_slot_offset = |slot: usize| -> i32 {
+                    slot_widths
+                        .iter()
+                        .take(slot)
+                        .fold(0, |acc, w| acc + *w + entry_gap)
+                };
+                
+                let row_count = count as f32;
+                for (entry_index, entry) in sorted_row.iter().enumerate() {
+                    let alpha_scale = 0.56 + (((entry_index + 1) as f32 / row_count) * 0.44);
+                    let entry_left = row_left_edge + get_slot_offset(entry_index);
+                    draw_entry(entry, entry_left, row_top, alpha_scale);
+                }
+            }
         }
 
         let pixmap_data = pixmap.data();
