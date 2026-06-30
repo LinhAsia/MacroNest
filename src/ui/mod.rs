@@ -11901,7 +11901,7 @@ impl eframe::App for CrosshairApp {
         if !keep_pin_preview && self.disable_pin_preview_modes() {
             self.persist();
         }
-        let keep_toolbox_preview = viewport_focused && self.state.active_panel == AppPanel::Hud;
+        let keep_toolbox_preview = viewport_focused && (self.state.active_panel == AppPanel::Hud || self.state.active_panel == AppPanel::Timer);
         let mut hud_changed = false;
         if !keep_toolbox_preview {
             hud_changed |= self.disable_hud_preview_modes();
@@ -12510,6 +12510,15 @@ impl eframe::App for CrosshairApp {
                     if response.clicked() {
                         self.state.active_panel = AppPanel::Hud;
                     }
+                    let text = RichText::new(self.panel_label(AppPanel::Timer));
+                    let response = Self::add_with_show_hover_radius(
+                        ui,
+                        10,
+                        self.top_tab_button(text, self.state.active_panel == AppPanel::Timer, false),
+                    );
+                    if response.clicked() {
+                        self.state.active_panel = AppPanel::Timer;
+                    }
                 });
             });
 
@@ -12588,6 +12597,7 @@ impl eframe::App for CrosshairApp {
                                 AppPanel::Commands => self.render_commands_panel(ui),
                                 AppPanel::Sound => self.render_sound_panel(ui),
                                 AppPanel::Hud => self.render_hud_panel(ui),
+                                AppPanel::Timer => self.render_timer_panel(ui),
                                 AppPanel::Media => self.render_media_panel(ui),
                             };
                             if self.capture_target.is_some() {

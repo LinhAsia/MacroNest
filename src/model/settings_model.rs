@@ -70,6 +70,7 @@ pub enum AppPanel {
     Hud,
     Ocr,
     Geometry,
+    Timer,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]

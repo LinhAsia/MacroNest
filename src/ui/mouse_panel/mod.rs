@@ -55,11 +55,7 @@ impl CrosshairApp {
     }
 
     fn selected_mouse_input_backend_mode(&self) -> MouseInputBackendMode {
-        if self.state.vision_settings.use_arduino_mouse
-            || self.arduino_restore_emulation_after_flash
-        {
-            MouseInputBackendMode::Arduino
-        } else if self.state.vision_settings.use_interception {
+        if self.state.vision_settings.use_interception {
             MouseInputBackendMode::Interception
         } else {
             MouseInputBackendMode::Normal
@@ -67,15 +63,13 @@ impl CrosshairApp {
     }
 
     fn set_mouse_input_backend_mode(&mut self, mode: MouseInputBackendMode) -> bool {
-        let use_arduino_mouse = matches!(mode, MouseInputBackendMode::Arduino);
+        let use_arduino_mouse = false;
         let use_interception = matches!(mode, MouseInputBackendMode::Interception);
         let changed = self.state.vision_settings.use_arduino_mouse != use_arduino_mouse
             || self.state.vision_settings.use_interception != use_interception;
         self.state.vision_settings.use_arduino_mouse = use_arduino_mouse;
         self.state.vision_settings.use_interception = use_interception;
-        if mode != MouseInputBackendMode::Arduino {
-            self.arduino_restore_emulation_after_flash = false;
-        }
+        self.arduino_restore_emulation_after_flash = false;
         changed
     }
 
@@ -246,7 +240,10 @@ impl CrosshairApp {
                 MouseInputBackendMode::Normal,
                 self.tr("Normal", "Normal"),
             );
-            ui.selectable_value(&mut next_mode, MouseInputBackendMode::Arduino, "Arduino");
+            ui.add_enabled_ui(false, |ui| {
+                let mut dummy = MouseInputBackendMode::Arduino;
+                ui.selectable_value(&mut dummy, MouseInputBackendMode::Arduino, "Arduino (Not Stable)");
+            });
             ui.selectable_value(
                 &mut next_mode,
                 MouseInputBackendMode::Interception,
@@ -341,14 +338,18 @@ impl CrosshairApp {
 
         ui.add_space(6.0);
 
-        let arduino_panel_title =
-            self.tr("Arduino Leonardo Emulation", "Arduino Leonardo Emulation");
+        let arduino_panel_title = format!(
+            "{} ({})",
+            self.tr("Arduino Leonardo Emulation", "Arduino Leonardo Emulation"),
+            self.tr("Not Stable / Under Development", "Chưa ổn định / Đang phát triển")
+        );
         let mut arduino_open = self.mouse_input_arduino_open;
-        Self::show_preset_card(ui, next_mode == MouseInputBackendMode::Arduino, |ui| {
+        ui.add_enabled_ui(false, |ui| {
+            Self::show_preset_card(ui, false, |ui| {
             self.render_mouse_input_mode_card_header(
                 ui,
-                arduino_panel_title,
-                next_mode == MouseInputBackendMode::Arduino,
+                &arduino_panel_title,
+                false,
                 &mut arduino_open,
             );
             if !arduino_open {
@@ -603,6 +604,7 @@ impl CrosshairApp {
                     arduino_changed = true;
                 }
             });
+        });
         });
         self.mouse_input_arduino_open = arduino_open;
 
