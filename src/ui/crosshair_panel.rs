@@ -415,7 +415,7 @@ impl CrosshairApp {
                     }
 
                     // 3. Draw grid lines
-                    let grid_color = Color32::from_gray(70);
+                    let grid_color = Color32::from_rgba_unmultiplied(0, 0, 0, 120);
                     for i in 0..=grid_size {
                         let offset = i as f32 * cell_size;
                         painter.line_segment(
@@ -423,14 +423,14 @@ impl CrosshairApp {
                                 rect.min + vec2(offset, 0.0),
                                 rect.min + vec2(offset, canvas_size.y),
                             ],
-                            egui::Stroke::new(0.5, grid_color),
+                            egui::Stroke::new(1.0, grid_color),
                         );
                         painter.line_segment(
                             [
                                 rect.min + vec2(0.0, offset),
                                 rect.min + vec2(canvas_size.x, offset),
                             ],
-                            egui::Stroke::new(0.5, grid_color),
+                            egui::Stroke::new(1.0, grid_color),
                         );
                     }
 
