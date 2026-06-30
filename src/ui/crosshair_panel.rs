@@ -500,7 +500,6 @@ impl CrosshairApp {
         let mut refresh_crosshair_profiles = false;
         let can_paste_crosshair = self.crosshair_profile_clipboard.is_some();
         for index in 0..self.state.profiles.len() {
-            ui.add_space(6.0);
             let mut remove = false;
             let mut preset_changed = false;
             let is_selected = self.state.selected_profile.as_deref()
@@ -550,12 +549,11 @@ impl CrosshairApp {
                             {
                                 paste_crosshair_profile_after = Some(index);
                             }
-                            if ui
-                                .add_sized(
-                                    [84.0, 21.0],
-                                    Button::new(Self::tr_lang(language, "Copy", "Copy")),
-                                )
-                                .clicked()
+                            if Self::sound_style_toggle_button(
+                                ui,
+                                &Self::tr_lang(language, "Copy", "Copy"),
+                            )
+                            .clicked()
                             {
                                 copy_crosshair_profile = Some(preset_snapshot.clone());
                             }

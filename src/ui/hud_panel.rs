@@ -33,7 +33,6 @@ impl CrosshairApp {
         let mut begin_hud_picker_preset_id = None;
         for index in 0..self.state.hud_presets.len() {
             let language = self.state.ui_language;
-            ui.add_space(6.0);
             let preset = &mut self.state.hud_presets[index];
             Self::show_preset_card(ui, false, |ui| {
                 ui.horizontal(|ui| {
@@ -258,7 +257,6 @@ impl CrosshairApp {
         ui.add_space(4.0);
 
         for index in 0..self.state.timer_presets.len() {
-            ui.add_space(6.0);
             let preset = &mut self.state.timer_presets[index];
             if preset.show_progress_bar || !preset.show_text {
                 preset.show_progress_bar = false;

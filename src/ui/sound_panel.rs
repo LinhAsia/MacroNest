@@ -855,7 +855,6 @@ impl CrosshairApp {
                 changed = true;
             }
 
-            ui.add_space(6.0);
             Self::show_preset_card(ui, false, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
@@ -870,11 +869,7 @@ impl CrosshairApp {
                     );
                     changed |= response.changed();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_sized(
-                                [36.0, 21.0],
-                                Button::new(Self::material_icon_text(0xe872, 18.0)),
-                            )
+                        if Self::sound_style_remove_button(ui)
                             .on_hover_text(Self::tr_lang(
                                 language,
                                 "Delete sound preset",
@@ -884,16 +879,15 @@ impl CrosshairApp {
                         {
                             remove_sound_preset = Some(preset.id);
                         }
-                        if ui
-                            .add_sized(
-                                [84.0, 21.0],
-                                Button::new(if preset.collapsed {
-                                    Self::tr_lang(language, "Show", "Show")
-                                } else {
-                                    Self::tr_lang(language, "Hide", "Hide")
-                                }),
-                            )
-                            .clicked()
+                        if Self::sound_style_toggle_button(
+                            ui,
+                            if preset.collapsed {
+                                Self::tr_lang(language, "Show", "Show")
+                            } else {
+                                Self::tr_lang(language, "Hide", "Hide")
+                            },
+                        )
+                        .clicked()
                         {
                             preset.collapsed = !preset.collapsed;
                         }
