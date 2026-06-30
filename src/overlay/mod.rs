@@ -10394,7 +10394,11 @@ mod windows_overlay {
         let point = if stroke.tool == ScreenDrawTool::Brush {
             point
         } else {
-            snapped_screen_draw_point(stroke.points.first().copied().unwrap_or(point), point)
+            snapped_screen_draw_point(
+                stroke.tool,
+                stroke.points.first().copied().unwrap_or(point),
+                point,
+            )
         };
         if stroke.tool != ScreenDrawTool::Brush {
             if stroke.points.len() == 1 {
@@ -10428,12 +10432,24 @@ mod windows_overlay {
         (unsafe { GetAsyncKeyState(0x10) } as u16 & 0x8000) != 0
     }
 
-    fn snapped_screen_draw_point(anchor: POINT, point: POINT) -> POINT {
-        if !screen_draw_snap_axis_active() {
+    fn constrained_screen_draw_point(
+        tool: ScreenDrawTool,
+        shift_held: bool,
+        anchor: POINT,
+        point: POINT,
+    ) -> POINT {
+        if !shift_held {
             return point;
         }
         let dx = point.x - anchor.x;
         let dy = point.y - anchor.y;
+        if tool == ScreenDrawTool::Ellipse {
+            let size = dx.abs().max(dy.abs());
+            return POINT {
+                x: anchor.x + size * dx.signum(),
+                y: anchor.y + size * dy.signum(),
+            };
+        }
         if dx.abs() >= dy.abs() {
             POINT {
                 x: point.x,
@@ -10445,6 +10461,10 @@ mod windows_overlay {
                 y: point.y,
             }
         }
+    }
+
+    fn snapped_screen_draw_point(tool: ScreenDrawTool, anchor: POINT, point: POINT) -> POINT {
+        constrained_screen_draw_point(tool, screen_draw_snap_axis_active(), anchor, point)
     }
 
     fn process_screen_draw_mouse_event(message: u32, screen_point: POINT) -> bool {
@@ -11839,51 +11859,25 @@ mod windows_overlay {
                 [255, 255, 255, 34]
             },
         );
-        draw_skia_line(
-            &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 8.0,
-            30.0,
-            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 14.0,
-            18.0,
-            [240, 246, 255, 246],
-            2.0,
-        );
-        draw_skia_line(
-            &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 14.0,
-            18.0,
-            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 22.0,
-            21.0,
-            [240, 246, 255, 246],
-            2.0,
-        );
-        draw_skia_line(
-            &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 22.0,
-            21.0,
-            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 21.0,
-            32.0,
-            [240, 246, 255, 246],
-            2.0,
-        );
-        draw_skia_line(
-            &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 21.0,
-            32.0,
-            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 10.0,
-            35.0,
-            [240, 246, 255, 246],
-            2.0,
-        );
-        draw_skia_line(
-            &mut pixmap,
-            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 10.0,
-            35.0,
-            SCREEN_DRAW_TOOLBAR_POLYGON_X as f32 + 8.0,
-            30.0,
-            [240, 246, 255, 246],
-            2.0,
-        );
+        let mut polygon_icon = tiny_skia::PathBuilder::new();
+        let polygon_center_x = polygon_button_x + 14.0;
+        let polygon_center_y = 28.0;
+        let polygon_radius = 8.0;
+        let polygon_rotation = -std::f32::consts::FRAC_PI_2;
+        for index in 0..5 {
+            let theta = polygon_rotation + (index as f32 / 5.0) * std::f32::consts::TAU;
+            let px = polygon_center_x + polygon_radius * theta.cos();
+            let py = polygon_center_y + polygon_radius * theta.sin();
+            if index == 0 {
+                polygon_icon.move_to(px, py);
+            } else {
+                polygon_icon.line_to(px, py);
+            }
+        }
+        polygon_icon.close();
+        if let Some(path) = polygon_icon.finish() {
+            stroke_skia_path(&mut pixmap, &path, [240, 246, 255, 246], 2.0);
+        }
 
         // 4. Capture (Camera - 32x32 button bounds)
         let capture_x = SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32;
@@ -23739,6 +23733,19 @@ mod windows_overlay {
                 let mut vars = RUNTIME_VARIABLES.lock();
                 vars.clear();
             }
+        }
+
+        #[test]
+        fn constrained_screen_draw_point_keeps_ellipse_visible_with_shift() {
+            let anchor = POINT { x: 100, y: 100 };
+            let dragged = POINT { x: 140, y: 110 };
+            let ellipse =
+                constrained_screen_draw_point(ScreenDrawTool::Ellipse, true, anchor, dragged);
+            let rectangle =
+                constrained_screen_draw_point(ScreenDrawTool::Rectangle, true, anchor, dragged);
+
+            assert_eq!(ellipse, POINT { x: 140, y: 140 });
+            assert_eq!(rectangle, POINT { x: 140, y: 100 });
         }
 
         #[test]
