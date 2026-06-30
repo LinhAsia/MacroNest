@@ -11182,36 +11182,119 @@ mod windows_overlay {
         {
             return;
         }
-        let fill_hex = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
-        let fill_opacity = (color.a as f32 / 255.0).clamp(0.0, 1.0);
-        let escaped_text = screen_draw_escape_svg_text(text);
-        let svg = format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
-<text x="0" y="50%" dominant-baseline="middle" text-anchor="start"
- font-family="Segoe UI, Arial, sans-serif" font-size="{font_size}" font-weight="500"
- fill="{fill_hex}" fill-opacity="{fill_opacity}" text-rendering="geometricPrecision">{text}</text>
-</svg>"#,
-            w = region_width.max(1),
-            h = region_height.max(1),
-            font_size = font_size.max(1.0),
-            fill_hex = fill_hex,
-            fill_opacity = fill_opacity,
-            text = escaped_text,
-        );
-        let rendered =
-            match render_svg_image(&svg, region_width as u32, region_height as u32, 1.0, 0.0) {
-                Ok(rendered) => rendered,
-                Err(_) => return,
+        let supersample_scale = 2usize;
+        let supersampled_width = region_width.saturating_mul(supersample_scale);
+        let supersampled_height = region_height.saturating_mul(supersample_scale);
+        let supersampled_pixels = supersampled_width.saturating_mul(supersampled_height);
+        let mut bgra = vec![0u8; supersampled_pixels * 4];
+
+        unsafe {
+            let screen_dc = GetDC(None);
+            let mem_dc = CreateCompatibleDC(Some(screen_dc));
+            let mut bits: *mut c_void = null_mut();
+            let bitmap_info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: supersampled_width as i32,
+                    biHeight: -(supersampled_height as i32),
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
             };
-        let rendered_width = rendered.width as usize;
-        let rendered_height = rendered.height as usize;
-        for py in 0..region_height.min(rendered_height) {
-            for px in 0..region_width.min(rendered_width) {
-                let src_offset = (py * rendered_width + px) * 4;
-                let src_r = rendered.rgba[src_offset];
-                let src_g = rendered.rgba[src_offset + 1];
-                let src_b = rendered.rgba[src_offset + 2];
-                let src_a = rendered.rgba[src_offset + 3];
+            let bitmap = match CreateDIBSection(
+                Some(mem_dc),
+                &bitmap_info,
+                DIB_RGB_COLORS,
+                &mut bits,
+                None,
+                0,
+            ) {
+                Ok(bitmap) => bitmap,
+                Err(_) => {
+                    let _ = DeleteDC(mem_dc);
+                    let _ = ReleaseDC(None, screen_dc);
+                    return;
+                }
+            };
+            let _ = ReleaseDC(None, screen_dc);
+            let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
+            if !bits.is_null() {
+                std::ptr::copy_nonoverlapping(bgra.as_ptr(), bits.cast::<u8>(), bgra.len());
+            }
+
+            let font_name = "Segoe UI"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let font = CreateFontW(
+                -((font_size * supersample_scale as f32).round() as i32).max(1),
+                0,
+                0,
+                0,
+                FW_MEDIUM.0 as i32,
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                ANTIALIASED_QUALITY,
+                FF_DONTCARE.0 as u32,
+                PCWSTR(font_name.as_ptr()),
+            );
+            let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
+            let _ = SetBkMode(mem_dc, TRANSPARENT);
+            let _ = SetTextColor(mem_dc, COLORREF(0x00FF_FFFF));
+
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: supersampled_width as i32,
+                bottom: supersampled_height as i32,
+            };
+            if rect.left < rect.right && rect.top < rect.bottom {
+                let mut wide = text
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect::<Vec<_>>();
+                let _ = DrawTextW(mem_dc, &mut wide, &mut rect, DT_SINGLELINE | DT_VCENTER);
+            }
+
+            if !bits.is_null() {
+                std::ptr::copy_nonoverlapping(bits.cast::<u8>(), bgra.as_mut_ptr(), bgra.len());
+            }
+            let _ = SelectObject(mem_dc, old_font);
+            let _ = DeleteObject(HGDIOBJ(font.0));
+            let _ = SelectObject(mem_dc, old_bitmap);
+            let _ = DeleteObject(HGDIOBJ(bitmap.0));
+            let _ = DeleteDC(mem_dc);
+        }
+
+        for py in 0..region_height {
+            for px in 0..region_width {
+                let mut coverage_sum = 0u32;
+                for sy in 0..supersample_scale {
+                    for sx in 0..supersample_scale {
+                        let sample_x = px * supersample_scale + sx;
+                        let sample_y = py * supersample_scale + sy;
+                        let src_offset = (sample_y * supersampled_width + sample_x) * 4;
+                        let src_b = bgra[src_offset];
+                        let src_g = bgra[src_offset + 1];
+                        let src_r = bgra[src_offset + 2];
+                        coverage_sum += src_r.max(src_g).max(src_b) as u32;
+                    }
+                }
+                let average_coverage =
+                    (coverage_sum / (supersample_scale * supersample_scale) as u32) as u8;
+                let src_a = screen_draw_text_mask_alpha(
+                    average_coverage,
+                    average_coverage,
+                    average_coverage,
+                    color.a,
+                );
                 if src_a == 0 {
                     continue;
                 }
@@ -11220,9 +11303,9 @@ mod windows_overlay {
                         * 4;
                 blend_premultiplied_rgba(
                     &mut pixels[dst_offset..dst_offset + 4],
-                    src_r,
-                    src_g,
-                    src_b,
+                    color.r,
+                    color.g,
+                    color.b,
                     src_a,
                 );
             }
@@ -11232,21 +11315,6 @@ mod windows_overlay {
     fn screen_draw_text_mask_alpha(src_r: u8, src_g: u8, src_b: u8, text_alpha: u8) -> u8 {
         let coverage = src_r.max(src_g).max(src_b) as u16;
         ((coverage * text_alpha as u16) / 255) as u8
-    }
-
-    fn screen_draw_escape_svg_text(text: &str) -> String {
-        let mut escaped = String::with_capacity(text.len());
-        for ch in text.chars() {
-            match ch {
-                '&' => escaped.push_str("&amp;"),
-                '<' => escaped.push_str("&lt;"),
-                '>' => escaped.push_str("&gt;"),
-                '"' => escaped.push_str("&quot;"),
-                '\'' => escaped.push_str("&apos;"),
-                _ => escaped.push(ch),
-            }
-        }
-        escaped
     }
 
     fn ensure_screen_draw_canvas(state: &mut ScreenDrawState, width: usize, height: usize) -> bool {
@@ -13023,10 +13091,10 @@ mod windows_overlay {
             pixels,
             width as u32,
             height as u32,
-            toolbar_x + SCREEN_DRAW_TOOLBAR_FILL_X + 10,
-            toolbar_y + 13,
-            SCREEN_DRAW_TOOLBAR_FILL_W - 20,
-            22,
+            toolbar_x + SCREEN_DRAW_TOOLBAR_FILL_X + 8,
+            toolbar_y + 12,
+            SCREEN_DRAW_TOOLBAR_FILL_W - 16,
+            24,
             "Fill",
             RgbaColor {
                 r: 240,
@@ -13034,7 +13102,7 @@ mod windows_overlay {
                 b: 255,
                 a: if fill_shapes { 240 } else { 210 },
             },
-            14.0,
+            16.0,
         );
     }
 
