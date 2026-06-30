@@ -255,7 +255,7 @@ mod windows_overlay {
     const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 474;
     const SCREEN_DRAW_TOOLBAR_CLOSE_X: i32 = 512;
     const SCREEN_DRAW_TOOLBAR_FILL_X: i32 = 552;
-    const SCREEN_DRAW_TOOLBAR_FILL_W: i32 = 64;
+    const SCREEN_DRAW_TOOLBAR_FILL_W: i32 = 32;
     #[derive(Debug, Clone)]
     struct VisionRunOutcome {
         matched: bool,
@@ -11232,10 +11232,7 @@ mod windows_overlay {
             );
             let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
             let _ = SetBkMode(mem_dc, TRANSPARENT);
-            let _ = SetTextColor(
-                mem_dc,
-                COLORREF((color.b as u32) << 16 | (color.g as u32) << 8 | color.r as u32),
-            );
+            let _ = SetTextColor(mem_dc, COLORREF(0x00FF_FFFF));
 
             let mut rect = RECT {
                 left: 0,
@@ -11267,11 +11264,7 @@ mod windows_overlay {
                 let src_b = bgra[src_offset];
                 let src_g = bgra[src_offset + 1];
                 let src_r = bgra[src_offset + 2];
-                let src_a = if src_r == 0 && src_g == 0 && src_b == 0 {
-                    0
-                } else {
-                    color.a.max(1)
-                };
+                let src_a = screen_draw_text_mask_alpha(src_r, src_g, src_b, color.a);
                 if src_a == 0 {
                     continue;
                 }
@@ -11280,13 +11273,18 @@ mod windows_overlay {
                         * 4;
                 blend_premultiplied_rgba(
                     &mut pixels[dst_offset..dst_offset + 4],
-                    src_r,
-                    src_g,
-                    src_b,
+                    color.r,
+                    color.g,
+                    color.b,
                     src_a,
                 );
             }
         }
+    }
+
+    fn screen_draw_text_mask_alpha(src_r: u8, src_g: u8, src_b: u8, text_alpha: u8) -> u8 {
+        let coverage = src_r.max(src_g).max(src_b) as u16;
+        ((coverage * text_alpha as u16) / 255) as u8
     }
 
     fn ensure_screen_draw_canvas(state: &mut ScreenDrawState, width: usize, height: usize) -> bool {
@@ -12981,6 +12979,37 @@ mod windows_overlay {
                 [255, 255, 255, 34]
             },
         );
+        stroke_skia_rounded_rect(
+            &mut pixmap,
+            fill_x + 7.0,
+            18.0,
+            14.0,
+            14.0,
+            4.0,
+            1.8,
+            [240, 246, 255, 246],
+        );
+        if fill_shapes {
+            fill_skia_rounded_rect(
+                &mut pixmap,
+                fill_x + 9.5,
+                20.5,
+                9.0,
+                9.0,
+                2.5,
+                [240, 246, 255, 246],
+            );
+        } else {
+            draw_skia_line(
+                &mut pixmap,
+                fill_x + 9.0,
+                30.0,
+                fill_x + 19.0,
+                20.0,
+                [240, 246, 255, 246],
+                1.8,
+            );
+        }
         if color_palette_open {
             let palette_x = 19.0;
             let palette_y = base_toolbar_h + 4.0;
@@ -13068,23 +13097,6 @@ mod windows_overlay {
                 );
             }
         }
-        draw_screen_draw_text_into_rgba(
-            pixels,
-            width as u32,
-            height as u32,
-            toolbar_x + SCREEN_DRAW_TOOLBAR_FILL_X + 8,
-            toolbar_y + 18,
-            SCREEN_DRAW_TOOLBAR_FILL_W - 16,
-            18,
-            if fill_shapes { "Fill" } else { "Stroke" },
-            RgbaColor {
-                r: 240,
-                g: 246,
-                b: 255,
-                a: 220,
-            },
-            10.0,
-        );
     }
 
     fn draw_toolbar_svg_icon(
@@ -24793,6 +24805,13 @@ mod windows_overlay {
             assert!(screen_draw_tool_supports_fill(ScreenDrawTool::Circle));
             assert!(!screen_draw_tool_supports_fill(ScreenDrawTool::Brush));
             assert!(!screen_draw_tool_supports_fill(ScreenDrawTool::Text));
+        }
+
+        #[test]
+        fn screen_draw_text_mask_alpha_uses_glyph_coverage() {
+            assert_eq!(screen_draw_text_mask_alpha(0, 0, 0, 255), 0);
+            assert_eq!(screen_draw_text_mask_alpha(255, 255, 255, 255), 255);
+            assert_eq!(screen_draw_text_mask_alpha(128, 96, 32, 200), 100);
         }
 
         #[test]
