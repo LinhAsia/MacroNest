@@ -1785,6 +1785,7 @@ mod windows_overlay {
             smoothing: bool,
             smoothing_amount: f32,
             freeze: bool,
+            tool: crate::model::QuickScreenDrawTool,
         },
         UpdateKeySoundConfig {
             enabled: bool,
@@ -2034,6 +2035,7 @@ mod windows_overlay {
             smoothing: bool,
             smoothing_amount: f32,
             freeze: bool,
+            tool: crate::model::QuickScreenDrawTool,
         },
         VisionFinished(String),
         MacroStepInlineFeedback {
@@ -8714,6 +8716,7 @@ mod windows_overlay {
                     smoothing,
                     smoothing_amount,
                     freeze,
+                    tool,
                 } => {
                     {
                         let mut state = SCREEN_DRAW_STATE.lock();
@@ -8725,6 +8728,17 @@ mod windows_overlay {
                         state.smoothing = smoothing;
                         state.smoothing_amount = smoothing_amount.clamp(0.0, 1.0);
                         state.freeze_screen = freeze;
+                        state.tool = match tool {
+                            crate::model::QuickScreenDrawTool::Brush => ScreenDrawTool::Brush,
+                            crate::model::QuickScreenDrawTool::Line => ScreenDrawTool::Line,
+                            crate::model::QuickScreenDrawTool::Arrow => ScreenDrawTool::Arrow,
+                            crate::model::QuickScreenDrawTool::Rectangle => {
+                                ScreenDrawTool::Rectangle
+                            }
+                            crate::model::QuickScreenDrawTool::Ellipse => ScreenDrawTool::Ellipse,
+                            crate::model::QuickScreenDrawTool::Circle => ScreenDrawTool::Circle,
+                            crate::model::QuickScreenDrawTool::Polygon => ScreenDrawTool::Polygon,
+                        };
                         if !enabled && state.active {
                             deactivate_screen_draw(&mut state);
                         }
@@ -9701,36 +9715,43 @@ mod windows_overlay {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.tool = ScreenDrawTool::Brush;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
+                should_sync_config = true;
             }
             ScreenDrawHit::ToolLine => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.tool = ScreenDrawTool::Line;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
+                should_sync_config = true;
             }
             ScreenDrawHit::ToolArrow => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.tool = ScreenDrawTool::Arrow;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
+                should_sync_config = true;
             }
             ScreenDrawHit::ToolRectangle => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.tool = ScreenDrawTool::Rectangle;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
+                should_sync_config = true;
             }
             ScreenDrawHit::ToolEllipse => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.tool = ScreenDrawTool::Ellipse;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
+                should_sync_config = true;
             }
             ScreenDrawHit::ToolCircle => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.tool = ScreenDrawTool::Circle;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
+                should_sync_config = true;
             }
             ScreenDrawHit::ToolPolygon => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.tool = ScreenDrawTool::Polygon;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
+                should_sync_config = true;
             }
             ScreenDrawHit::Eraser => {
                 state.eraser = !state.eraser;
@@ -10339,7 +10360,7 @@ mod windows_overlay {
     }
 
     fn send_screen_draw_config_to_ui() {
-        let (color, brush_size, smoothing, smoothing_amount, freeze) = {
+        let (color, brush_size, smoothing, smoothing_amount, freeze, tool) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
                 state.color,
@@ -10347,6 +10368,15 @@ mod windows_overlay {
                 state.smoothing,
                 state.smoothing_amount,
                 state.freeze_screen,
+                match state.tool {
+                    ScreenDrawTool::Line => crate::model::QuickScreenDrawTool::Line,
+                    ScreenDrawTool::Arrow => crate::model::QuickScreenDrawTool::Arrow,
+                    ScreenDrawTool::Rectangle => crate::model::QuickScreenDrawTool::Rectangle,
+                    ScreenDrawTool::Ellipse => crate::model::QuickScreenDrawTool::Ellipse,
+                    ScreenDrawTool::Circle => crate::model::QuickScreenDrawTool::Circle,
+                    ScreenDrawTool::Polygon => crate::model::QuickScreenDrawTool::Polygon,
+                    ScreenDrawTool::Brush => crate::model::QuickScreenDrawTool::Brush,
+                },
             )
         };
         if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
@@ -10356,6 +10386,7 @@ mod windows_overlay {
                 smoothing,
                 smoothing_amount,
                 freeze,
+                tool,
             });
         }
     }
