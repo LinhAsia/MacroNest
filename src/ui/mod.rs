@@ -582,6 +582,7 @@ pub struct CrosshairApp {
             bool,
             f32,
             bool,
+            bool,
             QuickScreenDrawTool,
         )>,
     last_synced_quick_key_sound_config: Option<(bool, u32, f32)>,
@@ -4908,6 +4909,18 @@ impl CrosshairApp {
                                             self.sync_quick_screen_draw_config();
                                             self.persist();
                                         }
+                                    }
+
+                                    ui.add_space(4.0);
+                                    let fill_changed = ui
+                                        .checkbox(
+                                            &mut self.state.quick_screen_draw_fill,
+                                            RichText::new("Fill shapes").size(10.0),
+                                        )
+                                        .changed();
+                                    if fill_changed {
+                                        self.sync_quick_screen_draw_config();
+                                        self.persist();
                                     }
 
                                     ui.add_space(4.0);
@@ -11055,6 +11068,7 @@ impl eframe::App for CrosshairApp {
                     brush_size,
                     smoothing,
                     smoothing_amount,
+                    fill,
                     freeze,
                     tool,
                 } => {
@@ -11062,6 +11076,7 @@ impl eframe::App for CrosshairApp {
                     self.state.quick_screen_draw_brush_size = brush_size;
                     self.state.quick_screen_draw_smoothing = smoothing;
                     self.state.quick_screen_draw_smoothing_amount = smoothing_amount;
+                    self.state.quick_screen_draw_fill = fill;
                     self.state.quick_screen_draw_freeze = freeze;
                     self.state.quick_screen_draw_tool = tool;
                     self.persist();

@@ -307,6 +307,7 @@ impl CrosshairApp {
             self.state.quick_screen_draw_brush_size,
             self.state.quick_screen_draw_smoothing,
             self.state.quick_screen_draw_smoothing_amount,
+            self.state.quick_screen_draw_fill,
             self.state.quick_screen_draw_freeze,
             self.state.quick_screen_draw_tool,
         );
@@ -322,8 +323,9 @@ impl CrosshairApp {
                 brush_size: config.4,
                 smoothing: config.5,
                 smoothing_amount: config.6,
-                freeze: config.7,
-                tool: config.8,
+                fill: config.7,
+                freeze: config.8,
+                tool: config.9,
             },
         );
     }
