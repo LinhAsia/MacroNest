@@ -2647,11 +2647,11 @@ impl CrosshairApp {
 
                 drag_anchor = match active_handle {
                     SelectionDragHandle::Left
-                    | SelectionDragHandle::TopLeft
-                    | SelectionDragHandle::BottomLeft => rect.max,
+                    | SelectionDragHandle::TopLeft => rect.max,
+                    SelectionDragHandle::BottomLeft => egui::pos2(rect.max.x, rect.min.y),
                     SelectionDragHandle::Right
-                    | SelectionDragHandle::TopRight
                     | SelectionDragHandle::BottomRight => rect.min,
+                    SelectionDragHandle::TopRight => egui::pos2(rect.min.x, rect.max.y),
                     SelectionDragHandle::Top => rect.max,
                     SelectionDragHandle::Bottom => rect.min,
                     _ => egui::Pos2::ZERO,
