@@ -18,9 +18,15 @@ impl CrosshairApp {
                     &mut self.state.next_audio_sense_preset_id,
                     |preset| preset.id,
                 );
+                let mut preset = AudioSensePreset::new_pitch(id);
+                let mut suffix = 1;
+                while self.state.audio_sense_presets.iter().any(|p| p.name == format!("Pitch Detect {}", suffix)) {
+                    suffix += 1;
+                }
+                preset.name = format!("Pitch Detect {}", suffix);
                 self.state
                     .audio_sense_presets
-                    .push(AudioSensePreset::new_pitch(id));
+                    .push(preset);
                 self.persist_audio_sense_presets();
             }
 

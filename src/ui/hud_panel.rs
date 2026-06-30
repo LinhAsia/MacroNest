@@ -242,7 +242,11 @@ impl CrosshairApp {
                     |preset| preset.id,
                 );
                 let mut new_preset = TimerPreset::new(id);
-                new_preset.name = format!("Timer {id}");
+                let mut suffix = 1;
+                while self.state.timer_presets.iter().any(|p| p.name == format!("Timer {}", suffix)) {
+                    suffix += 1;
+                }
+                new_preset.name = format!("Timer {}", suffix);
                 self.state.timer_presets.push(new_preset);
                 timer_changed = true;
             }
@@ -928,7 +932,13 @@ impl CrosshairApp {
             &mut self.state.next_hud_preset_id,
             |preset| preset.id,
         );
-        self.state.hud_presets.push(HudPreset::new(id));
+        let mut new_preset = HudPreset::new(id);
+        let mut suffix = 1;
+        while self.state.hud_presets.iter().any(|p| p.name == format!("HUD {}", suffix)) {
+            suffix += 1;
+        }
+        new_preset.name = format!("HUD {}", suffix);
+        self.state.hud_presets.push(new_preset);
         self.sync_hud_presets();
         self.status = format!("Added HUD preset {id}.");
     }

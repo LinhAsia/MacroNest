@@ -49,6 +49,11 @@ impl CrosshairApp {
                 );
                 let mut preset = VisionPreset::new(id);
                 preset.use_color_matching = false;
+                let mut suffix = 1;
+                while self.state.vision_presets.iter().any(|p| p.name == format!("Image Search {}", suffix)) {
+                    suffix += 1;
+                }
+                preset.name = format!("Image Search {}", suffix);
                 self.state.vision_presets.push(preset);
                 self.persist_vision_presets();
             }
@@ -62,7 +67,11 @@ impl CrosshairApp {
                     |preset| preset.id,
                 );
                 let mut preset = VisionPreset::new(id);
-                preset.name = format!("Color Search {id}");
+                let mut suffix = 1;
+                while self.state.vision_presets.iter().any(|p| p.name == format!("Color Search {}", suffix)) {
+                    suffix += 1;
+                }
+                preset.name = format!("Color Search {}", suffix);
                 preset.use_color_matching = true;
                 self.state.vision_presets.push(preset);
                 self.persist_vision_presets();
@@ -81,7 +90,11 @@ impl CrosshairApp {
                     |preset| preset.id,
                 );
                 let mut preset = VisionPreset::new(id);
-                preset.name = format!("Pixel Counter {id}");
+                let mut suffix = 1;
+                while self.state.vision_presets.iter().any(|p| p.name == format!("Pixel Counter {}", suffix)) {
+                    suffix += 1;
+                }
+                preset.name = format!("Pixel Counter {}", suffix);
                 preset.use_color_matching = true;
                 preset.is_pixel_counter = true;
                 self.state.vision_presets.push(preset);

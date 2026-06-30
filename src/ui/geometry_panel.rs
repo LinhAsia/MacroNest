@@ -81,7 +81,13 @@ impl CrosshairApp {
                     &mut self.state.next_geometry_preset_id,
                     |preset| preset.id,
                 );
-                self.state.geometry_presets.push(GeometryPreset::new(id));
+                let mut new_preset = GeometryPreset::new(id);
+                let mut suffix = 1;
+                while self.state.geometry_presets.iter().any(|p| p.name == format!("Geometry {}", suffix)) {
+                    suffix += 1;
+                }
+                new_preset.name = format!("Geometry {}", suffix);
+                self.state.geometry_presets.push(new_preset);
                 changed = true;
             }
         });
