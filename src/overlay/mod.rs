@@ -11540,10 +11540,10 @@ mod windows_overlay {
         draw_toolbar_svg_icon(
             &mut pixmap,
             SCREEN_DRAW_TOOLBAR_BRUSH_SVG,
-            SCREEN_DRAW_TOOLBAR_BRUSH_X + 4,
-            13,
-            20,
+            SCREEN_DRAW_TOOLBAR_BRUSH_X + 2,
+            10,
             24,
+            28,
         );
 
         let line_button_x = SCREEN_DRAW_TOOLBAR_LINE_X as f32;
@@ -11615,10 +11615,10 @@ mod windows_overlay {
         draw_toolbar_svg_icon(
             &mut pixmap,
             SCREEN_DRAW_TOOLBAR_ARROW_SVG,
-            SCREEN_DRAW_TOOLBAR_ARROW_X + 5,
-            14,
-            18,
-            18,
+            SCREEN_DRAW_TOOLBAR_ARROW_X + 3,
+            11,
+            22,
+            22,
         );
 
         let rect_button_x = SCREEN_DRAW_TOOLBAR_RECT_X as f32;
