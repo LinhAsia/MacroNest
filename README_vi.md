@@ -23,12 +23,12 @@ Các mô-đun dưới đây được thiết kế để hoạt động tương t
 | **Window Control** | Di chuyển, đổi kích thước, chia bố cục (layout), ghim nổi và phóng to cửa sổ | Thiết lập không gian: chia đôi màn hình ứng dụng, cắt bớt viền cửa sổ để click tọa độ chính xác |
 | **Audio Sense** | Giám sát mức âm lượng và tần số (pitch) âm thanh hệ thống hoặc micrô | Nhận diện âm thanh: tự động phản hồi khi có cuộc gọi nói chuyện hoặc âm thanh game phát ra |
 | **Sound Effects** | Phát âm thanh cảnh báo, đọc văn bản thành giọng nói (TTS) và clip tùy chỉnh | Cảnh báo bằng giọng nói: phát âm thanh khi có lỗi, hoặc thông báo trạng thái kịch bản đang chạy |
-| **Crosshair** | Hiển thị hồng tâm tùy chỉnh màn hình theo phong cách riêng của bạn | Hỗ trợ ngắm bắn: hiển thị hồng tâm ảo trên màn hình, bật/tắt tự động bằng kịch bản macro |
-| **Geometry Overlay** | Vẽ đường thẳng, hình chữ nhật, hình tròn và đa giác trên màn hình | Đánh dấu vùng quét: vẽ khung bao quanh mục tiêu cần quét, tạo đường kẻ dẫn hướng trực quan |
+| **Crosshair** | Hiển thị hồng tâm tùy chỉnh màn hình theo phong cách riêng của bạn | Hỗ trợ ngắm bắn: hiển thị hồng tâm ảo trên màn hình, bật/tắt tự động bằng kịch bản kịch bản |
+| **Geometry Overlay** | Vẽ điểm, đường thẳng, hình chữ nhật, hình tròn, elip, mũi tên, polyline, đa giác, cung tròn, nhãn chữ và SVG | Vẽ chỉ báo động: hiển thị vùng quét, mục tiêu di chuyển theo tọa độ biến số nhờ biểu thức toán học |
 | **HUD Labels** | Hiển thị chữ viết và giá trị biến số nổi trên màn hình | Bảng theo dõi trực tiếp: hiển thị giá trị các biến số, bước kịch bản hiện tại đè lên màn hình |
-| **Timer** | Tạo đồng hồ bấm giờ, đếm ngược và đếm thời gian hồi chiêu trên màn hình | Kiểm soát thời gian: kích hoạt hành động sau khi đếm xong, hoặc hiện thời gian hồi chiêu của chiêu thức |
-| **Script Command** | Chạy trực tiếp lệnh CMD/PowerShell và lưu kết quả trả về vào biến số | Liên kết hệ thống: thu thập thông tin máy tính, chạy file Python, truy vấn API trong luồng chạy |
-| **Hardware Input** | Giả lập chuột bàn phím qua Interception, Arduino, và đường chuột ghi lại | Vượt anti-cheat: mô phỏng chuyển động chuột mượt mà và nhập liệu mô phỏng như người thật |
+| **Timer** | Tạo đồng hồ bấm giờ, đếm ngược và đếm thời gian hồi chiêu trên màn hình | Quản lý thời gian: đọc thời gian trôi qua/còn lại vào biến số (`timer1.second`, `timer1.raw`), kích hoạt hành động khi đếm xong |
+| **Script Command** | Chạy trực tiếp lệnh CMD/PowerShell và lưu kết quả trả về vào biến số | Liên kết hệ thống: thực thi các công cụ dòng lệnh, chạy script cục bộ hoặc gọi API bên ngoài |
+| **Hardware Input** | Giả lập chuột bàn phím qua Interception, Arduino, và đường chuột ghi lại | Mô phỏng nhập liệu: gửi tín hiệu chuột/bàn phím cấp thấp nhằm tương thích tối đa với các trò chơi hoặc ứng dụng bảo mật cao |
 
 ## Thao tác Nhanh (Quick Actions)
 
