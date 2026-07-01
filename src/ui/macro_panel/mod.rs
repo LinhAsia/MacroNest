@@ -177,6 +177,58 @@ impl CrosshairApp {
         )
     }
 
+    fn render_scan_vision_move_mouse_controls(
+        ui: &mut egui::Ui,
+        step: &mut MacroStep,
+        language: UiLanguage,
+        live_sync: &mut bool,
+    ) {
+        ui.add_space(4.0);
+        let resp = ui.checkbox(
+            &mut step.vision_move_cursor_on_match,
+            Self::tr_lang(language, "Move Mouse", "Move Mouse"),
+        );
+        *live_sync |= resp.changed();
+        if !step.vision_move_cursor_on_match {
+            return;
+        }
+
+        ui.add_space(2.0);
+        ui.label(Self::tr_lang(language, "Movement:", "Movement:"));
+        egui::ComboBox::from_id_salt(ui.id().with("scan-vision-move-axis-lock"))
+            .selected_text(match step.vision_move_axis_lock {
+                VisionMoveAxisLock::None => Self::tr_lang(language, "Free", "Free"),
+                VisionMoveAxisLock::HorizontalOnly => {
+                    Self::tr_lang(language, "Horizontal only", "Horizontal only")
+                }
+                VisionMoveAxisLock::VerticalOnly => {
+                    Self::tr_lang(language, "Vertical only", "Vertical only")
+                }
+            })
+            .show_ui(ui, |ui| {
+                let free = ui.selectable_value(
+                    &mut step.vision_move_axis_lock,
+                    VisionMoveAxisLock::None,
+                    Self::tr_lang(language, "Free", "Free"),
+                );
+                *live_sync |= free.changed();
+
+                let horizontal = ui.selectable_value(
+                    &mut step.vision_move_axis_lock,
+                    VisionMoveAxisLock::HorizontalOnly,
+                    Self::tr_lang(language, "Horizontal only", "Horizontal only"),
+                );
+                *live_sync |= horizontal.changed();
+
+                let vertical = ui.selectable_value(
+                    &mut step.vision_move_axis_lock,
+                    VisionMoveAxisLock::VerticalOnly,
+                    Self::tr_lang(language, "Vertical only", "Vertical only"),
+                );
+                *live_sync |= vertical.changed();
+            });
+    }
+
     fn render_macro_action_button(
         ui: &mut egui::Ui,
         language: UiLanguage,
@@ -6674,13 +6726,13 @@ impl CrosshairApp {
                                                                        });
                                                                });
                                                       }
-                                                      if supports_move_mouse {
-                                                          ui.add_space(4.0);
-                                                          let resp = ui.checkbox(
-                                                              &mut step.vision_move_cursor_on_match,
-                                                              Self::tr_lang(language, "Move Mouse", "Move Mouse"),
+if supports_move_mouse {
+                                                          Self::render_scan_vision_move_mouse_controls(
+                                                              ui,
+                                                              step,
+                                                              language,
+                                                              &mut live_sync,
                                                           );
-                                                          live_sync |= resp.changed();
                                                       }
                                                   }
                                                 } else if step.action == MacroAction::ApplyMouseSensitivityPreset {
@@ -7892,14 +7944,10 @@ impl CrosshairApp {
                                                     ui.spacing_mut().item_spacing.x = 2.0;
                                                     ui.spacing_mut().interact_size.y = 21.0;
                                                     ui.spacing_mut().button_padding.y = 0.0;
-                                                    let mut is_permanent = step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
+                        let mut is_permanent = !step.timed_override;
                                                     let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
                                                     if cb_response.changed() {
-                                                        if is_permanent {
-                                                            step.duration_expr = "0".to_string();
-                                                        } else {
-                                                            step.duration_expr = "1500".to_string();
-                                                        }
+                                                        step.timed_override = !is_permanent;
                                                         live_sync = true;
                                                     }
                                                     if !is_permanent {
@@ -8910,13 +8958,13 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                        });
                                                                });
                                                       }
-                                                      if supports_move_mouse {
-                                                          ui.add_space(4.0);
-                                                          let resp = ui.checkbox(
-                                                              &mut step.vision_move_cursor_on_match,
-                                                              Self::tr_lang(language, "Move Mouse", "Move Mouse"),
+if supports_move_mouse {
+                                                          Self::render_scan_vision_move_mouse_controls(
+                                                              ui,
+                                                              step,
+                                                              language,
+                                                              &mut live_sync,
                                                           );
-                                                          live_sync |= resp.changed();
                                                       }
                                                   }
                                                 } else if step.action == MacroAction::ApplyMouseSensitivityPreset {
@@ -10131,14 +10179,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     ui.spacing_mut().item_spacing.x = 2.0;
                                                     ui.spacing_mut().interact_size.y = 21.0;
                                                     ui.spacing_mut().button_padding.y = 0.0;
-                                                    let mut is_permanent = step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
+                        let mut is_permanent = !step.timed_override;
                                                     let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
                                                     if cb_response.changed() {
-                                                        if is_permanent {
-                                                            step.duration_expr = "0".to_string();
-                                                        } else {
-                                                            step.duration_expr = "1500".to_string();
-                                                        }
+                                                        step.timed_override = !is_permanent;
                                                         live_sync = true;
                                                     }
                                                     if !is_permanent {
@@ -12097,13 +12141,13 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                           });
                                                                   });
                                                           }
-                                                          if supports_move_mouse {
-                                                              ui.add_space(4.0);
-                                                              let resp = ui.checkbox(
-                                                                  &mut step.vision_move_cursor_on_match,
-                                                                  Self::tr_lang(language, "Move Mouse", "Move Mouse"),
+if supports_move_mouse {
+                                                              Self::render_scan_vision_move_mouse_controls(
+                                                                  ui,
+                                                                  step,
+                                                                  language,
+                                                                  &mut live_sync,
                                                               );
-                                                              live_sync |= resp.changed();
                                                           }
                                                       }
                                                 } else if step.action == MacroAction::EnableZoomPreset {
@@ -12621,7 +12665,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             Self::render_variable_suggestions(
                                                                 ui,
                                                                 &response,
-                                                                &mut step.text_override,
+                                                                         &mut step.text_override,
                                                                 &timer_names,
                                                                 language,
                                                             );
@@ -12630,7 +12674,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             if cb_response.changed() {
                                                                 if is_permanent {
                                                                     step.duration_expr = "0".to_string();
-                                                                } else {
+                                                                } else if step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty() {
                                                                     step.duration_expr = "1500".to_string();
                                                                 }
                                                                 live_sync = true;
@@ -13473,13 +13517,13 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                           });
                                                                   });
                                                           }
-                                                          if supports_move_mouse {
-                                                              ui.add_space(4.0);
-                                                              let resp = ui.checkbox(
-                                                                  &mut step.vision_move_cursor_on_match,
-                                                                  Self::tr_lang(language, "Move Mouse", "Move Mouse"),
+if supports_move_mouse {
+                                                              Self::render_scan_vision_move_mouse_controls(
+                                                                  ui,
+                                                                  step,
+                                                                  language,
+                                                                  &mut live_sync,
                                                               );
-                                                              live_sync |= resp.changed();
                                                           }
                                                       }
                                                 } else {
@@ -13788,7 +13832,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     if cb_response.changed() {
                                                         if is_permanent {
                                                             step.duration_expr = "0".to_string();
-                                                        } else {
+                                                        } else if step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty() {
                                                             step.duration_expr = "1500".to_string();
                                                         }
                                                         live_sync = true;
@@ -17473,14 +17517,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                 }
                             });
                         ui.add_space(6.0);
-                        let mut is_permanent = step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
+                        let mut is_permanent = !step.timed_override;
                         let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
                         if cb_response.changed() {
-                            if is_permanent {
-                                step.duration_expr = "0".to_string();
-                            } else {
-                                step.duration_expr = "1500".to_string();
-                            }
+                            step.timed_override = !is_permanent;
                             *live_sync = true;
                         }
                         if !is_permanent {
@@ -17682,20 +17722,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                             }
                         }
                         ui.add_space(6.0);
-                        let mut is_permanent =
-                            step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
-                        let permanent_changed = ui
-                            .checkbox(
-                                &mut is_permanent,
-                                Self::tr_lang(language, "Permanent", "Permanent"),
-                            )
-                            .changed();
+                        let mut is_permanent = !step.timed_override;
+                        let permanent_changed = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent")).changed();
                         if permanent_changed {
-                            step.duration_expr = if is_permanent {
-                                "0".to_string()
-                            } else {
-                                "1500".to_string()
-                            };
+                            step.timed_override = !is_permanent;
                             *live_sync = true;
                         }
                         if !is_permanent {
@@ -18256,7 +18286,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
         if let Some((base, prop)) = trimmed.split_once('.') {
             let base = base.trim().replace(' ', "").to_ascii_lowercase();
             let prop = prop.trim().to_ascii_lowercase();
-            let prop_clean: String = prop.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            let prop_clean: String = prop
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
             if base.is_empty() || prop_clean.is_empty() {
                 return VariableValueKind::Neutral;
             }

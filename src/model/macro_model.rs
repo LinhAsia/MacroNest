@@ -121,6 +121,15 @@ pub enum IfConditionType {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VisionMoveAxisLock {
+    #[default]
+    None,
+    HorizontalOnly,
+    VerticalOnly,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ExtraCondition {
@@ -221,6 +230,8 @@ pub struct MacroStep {
     pub mouse_speed_percent: u32,
     #[serde(default = "default_false", alias = "image_search_move_cursor_on_match")]
     pub vision_move_cursor_on_match: bool,
+    #[serde(default)]
+    pub vision_move_axis_lock: VisionMoveAxisLock,
     #[serde(default, alias = "image_search_wait_until_found")]
     pub vision_wait_until_found: bool,
     #[serde(default, alias = "image_search_trigger_macro_enabled")]
@@ -368,6 +379,7 @@ impl Default for MacroStep {
             mouse_speed_expr: String::new(),
             mouse_speed_percent: 100,
             vision_move_cursor_on_match: false,
+            vision_move_axis_lock: VisionMoveAxisLock::None,
             vision_wait_until_found: false,
             vision_trigger_macro_enabled: false,
             vision_trigger_macro_preset_id: None,
@@ -533,7 +545,9 @@ impl MacroStep {
             | MacroAction::EnablePinPreset
             | MacroAction::ShowHud
             | MacroAction::DrawGeometry => {
-                if !self.duration_expr.trim().is_empty() {
+                let is_timed = self.timed_override
+                    || (!self.duration_expr.trim().is_empty() && self.duration_expr.trim() != "0");
+                if is_timed && !self.duration_expr.trim().is_empty() {
                     let trimmed = self.duration_expr.trim();
                     let interpolated = crate::overlay::interpolate_variables(trimmed);
                     let val = crate::overlay::evaluate_math_expression(&interpolated);

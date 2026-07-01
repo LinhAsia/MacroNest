@@ -18,8 +18,9 @@ use super::{
     send_mouse_left_click_backend, set_text_variable_value, set_variable_value,
     settle_image_search_mouse_move,
 };
-use crate::model::{RgbaColor, VisionPreset};
+use crate::model::{RgbaColor, VisionMoveAxisLock, VisionPreset};
 use crate::window_list;
+use windows::Win32::{Foundation::POINT, UI::WindowsAndMessaging::GetCursorPos};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TemplateMatchHit {
@@ -126,7 +127,12 @@ pub(crate) fn vision_preset_by_id(spec: &str) -> Result<VisionPreset> {
     find_vision_preset_by_spec(spec).context("Vision preset was not found")
 }
 
-pub(crate) fn start_vision_following(spec: &str, variable_override: Option<&str>) -> Result<()> {
+pub(crate) fn start_vision_following(
+    spec: &str,
+    variable_override: Option<&str>,
+    offset_x: i32,
+    offset_y: i32,
+) -> Result<()> {
     let preset = vision_preset_by_id(spec)?;
     if image_search_following_is_active(preset.id) {
         return Ok(());
@@ -134,6 +140,10 @@ pub(crate) fn start_vision_following(spec: &str, variable_override: Option<&str>
 
     let ui_tx = HOOK_STATE.lock().ui_tx.clone();
     set_image_search_following_active(preset.id, true);
+    HOOK_STATE
+        .lock()
+        .vision_following_offsets
+        .insert(preset.id, (offset_x, offset_y));
     let var_override = variable_override.map(|s| s.to_string());
     thread::spawn(move || run_image_search_follow_loop(preset, ui_tx, var_override));
     Ok(())
@@ -1072,6 +1082,48 @@ pub(crate) struct VisionRunOutcome {
     pub(crate) status: String,
 }
 
+fn current_cursor_position() -> Option<(i32, i32)> {
+    let mut point = POINT::default();
+    if unsafe { GetCursorPos(&mut point) }.is_ok() {
+        Some((point.x, point.y))
+    } else {
+        None
+    }
+}
+
+fn apply_move_axis_lock(
+    target_x: i32,
+    target_y: i32,
+    axis_lock: VisionMoveAxisLock,
+    cursor_position: Option<(i32, i32)>,
+) -> (i32, i32) {
+    match (axis_lock, cursor_position) {
+        (VisionMoveAxisLock::HorizontalOnly, Some((_, cursor_y))) => (target_x, cursor_y),
+        (VisionMoveAxisLock::VerticalOnly, Some((cursor_x, _))) => (cursor_x, target_y),
+        _ => (target_x, target_y),
+    }
+}
+
+fn move_axis_lock_status_suffix(
+    move_cursor: bool,
+    axis_lock: VisionMoveAxisLock,
+    move_target_x: i32,
+    move_target_y: i32,
+) -> String {
+    if !move_cursor {
+        return String::new();
+    }
+    match axis_lock {
+        VisionMoveAxisLock::None => String::new(),
+        VisionMoveAxisLock::HorizontalOnly => {
+            format!(" Cursor moved horizontally to {move_target_x}, {move_target_y}.")
+        }
+        VisionMoveAxisLock::VerticalOnly => {
+            format!(" Cursor moved vertically to {move_target_x}, {move_target_y}.")
+        }
+    }
+}
+
 pub(crate) fn run_vision_once_with_options(
     preset: &VisionPreset,
     move_cursor: bool,
@@ -1080,6 +1132,9 @@ pub(crate) fn run_vision_once_with_options(
     pos_var_x: Option<&str>,
     pos_var_y: Option<&str>,
     found_var: Option<&str>,
+    axis_lock: VisionMoveAxisLock,
+    step_offset_x: i32,
+    step_offset_y: i32,
 ) -> Result<VisionRunOutcome> {
     let set_found_var = |matched: bool| {
         if let Some(var_name) = found_var.filter(|s| !s.trim().is_empty()) {
@@ -1278,22 +1333,26 @@ pub(crate) fn run_vision_once_with_options(
 
         let center_x = screen.screen_x + hit.x;
         let center_y = screen.screen_y + hit.y;
-        let moved_x = center_x + preset.move_offset_x;
-        let moved_y = center_y + preset.move_offset_y;
+        let target_x = center_x + preset.move_offset_x + step_offset_x;
+        let target_y = center_y + preset.move_offset_y + step_offset_y;
+        let move_target =
+            apply_move_axis_lock(target_x, target_y, axis_lock, current_cursor_position());
+        let move_status_suffix =
+            move_axis_lock_status_suffix(move_cursor, axis_lock, move_target.0, move_target.1);
 
         if let Some(var_x) = pos_var_x.filter(|s| !s.trim().is_empty()) {
-            set_variable_value(var_x, moved_x as f64);
+            set_variable_value(var_x, target_x as f64);
         }
 
         if let Some(var_y) = pos_var_y.filter(|s| !s.trim().is_empty()) {
-            set_variable_value(var_y, moved_y as f64);
+            set_variable_value(var_y, target_y as f64);
         }
         set_found_var(true);
 
         if move_cursor {
             settle_image_search_mouse_move(
-                moved_x,
-                moved_y,
+                move_target.0,
+                move_target.1,
                 preset.non_interception_move_passes,
                 preset.non_interception_move_delay_ms,
             )?;
@@ -1308,33 +1367,46 @@ pub(crate) fn run_vision_once_with_options(
             matched: true,
             status: if anchor.is_some() {
                 format!(
-                    "Matched colors from priority point at {moved_x}, {moved_y} with tolerance {} and offset {:+}, {:+}.",
-                    preset.color_tolerance, preset.move_offset_x, preset.move_offset_y
+                    "Matched colors from priority point at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
+                    preset.color_tolerance,
+                    preset.move_offset_x,
+                    preset.move_offset_y,
+                    move_status_suffix
                 )
             } else if preset.color_scan_average_centroid {
                 format!(
-                    "Matched colors centroid at {moved_x}, {moved_y} with tolerance {} and offset {:+}, {:+}.",
-                    preset.color_tolerance, preset.move_offset_x, preset.move_offset_y
+                    "Matched colors centroid at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
+                    preset.color_tolerance,
+                    preset.move_offset_x,
+                    preset.move_offset_y,
+                    move_status_suffix
                 )
             } else if preset.require_connected_target_colors && target_colors.len() >= 2 {
                 format!(
-                    "Matched connected colors at {moved_x}, {moved_y} with tolerance {} and offset {:+}, {:+}.",
-                    preset.color_tolerance, preset.move_offset_x, preset.move_offset_y
+                    "Matched connected colors at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
+                    preset.color_tolerance,
+                    preset.move_offset_x,
+                    preset.move_offset_y,
+                    move_status_suffix
                 )
             } else if preset.dual_color_scan_midpoint {
                 format!(
-                    "Matched colors midpoint at {moved_x}, {moved_y} with tolerance {} and offset {:+}, {:+}.",
-                    preset.color_tolerance, preset.move_offset_x, preset.move_offset_y
+                    "Matched colors midpoint at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
+                    preset.color_tolerance,
+                    preset.move_offset_x,
+                    preset.move_offset_y,
+                    move_status_suffix
                 )
             } else {
                 format!(
-                    "Matched color #{:02X}{:02X}{:02X} at {moved_x}, {moved_y} with tolerance {} and offset {:+}, {:+}.",
+                    "Matched color #{:02X}{:02X}{:02X} at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
                     hit.matched_color.r,
                     hit.matched_color.g,
                     hit.matched_color.b,
                     preset.color_tolerance,
                     preset.move_offset_x,
-                    preset.move_offset_y
+                    preset.move_offset_y,
+                    move_status_suffix
                 )
             },
         });
@@ -1478,33 +1550,37 @@ pub(crate) fn run_vision_once_with_options(
     };
     let center_x = screen.screen_x + hit.x + (hit.width / 2);
     let center_y = screen.screen_y + hit.y + (hit.height / 2);
-    let moved_x = center_x + preset.move_offset_x;
-    let moved_y = center_y + preset.move_offset_y;
+    let target_x = center_x + preset.move_offset_x + step_offset_x;
+    let target_y = center_y + preset.move_offset_y + step_offset_y;
+    let move_target =
+        apply_move_axis_lock(target_x, target_y, axis_lock, current_cursor_position());
+    let move_status_suffix =
+        move_axis_lock_status_suffix(move_cursor, axis_lock, move_target.0, move_target.1);
     let required_confidence = preset.confidence_threshold.clamp(0.35, 0.99);
     if hit.confidence < required_confidence {
         set_found_var(false);
         return Ok(VisionRunOutcome {
             matched: false,
             status: format!(
-                "Best match near {moved_x}, {moved_y} scored {:.3} at scale {:.2}x, below threshold {:.2}.",
+                "Best match near {target_x}, {target_y} scored {:.3} at scale {:.2}x, below threshold {:.2}.",
                 hit.confidence, hit.scale, required_confidence
             ),
         });
     }
 
     if let Some(var_x) = pos_var_x.filter(|s| !s.trim().is_empty()) {
-        set_variable_value(var_x, moved_x as f64);
+        set_variable_value(var_x, target_x as f64);
     }
 
     if let Some(var_y) = pos_var_y.filter(|s| !s.trim().is_empty()) {
-        set_variable_value(var_y, moved_y as f64);
+        set_variable_value(var_y, target_y as f64);
     }
     set_found_var(true);
 
     if move_cursor {
         settle_image_search_mouse_move(
-            moved_x,
-            moved_y,
+            move_target.0,
+            move_target.1,
             preset.non_interception_move_passes,
             preset.non_interception_move_delay_ms,
         )?;
@@ -1518,8 +1594,12 @@ pub(crate) fn run_vision_once_with_options(
     Ok(VisionRunOutcome {
         matched: true,
         status: format!(
-            "OpenCV matched at {moved_x}, {moved_y} with confidence {:.3} on {:.2}x (offset {:+}, {:+}).",
-            hit.confidence, hit.scale, preset.move_offset_x, preset.move_offset_y
+            "OpenCV matched at {target_x}, {target_y} with confidence {:.3} on {:.2}x (offset {:+}, {:+}).{}",
+            hit.confidence,
+            hit.scale,
+            preset.move_offset_x,
+            preset.move_offset_y,
+            move_status_suffix
         ),
     })
 }
@@ -1533,6 +1613,9 @@ pub(crate) fn run_vision_once(preset: &VisionPreset) -> Result<String> {
         None,
         None,
         None,
+        VisionMoveAxisLock::None,
+        0,
+        0,
     )
     .map(|outcome| outcome.status)
 }
@@ -1550,6 +1633,14 @@ pub(crate) fn run_image_search_follow_loop(
     }
 
     while image_search_following_is_active(preset.id) {
+        let (offset_x, offset_y) = {
+            let state = HOOK_STATE.lock();
+            state
+                .vision_following_offsets
+                .get(&preset.id)
+                .copied()
+                .unwrap_or((0, 0))
+        };
         match run_vision_once_with_options(
             &preset,
             true,
@@ -1558,6 +1649,9 @@ pub(crate) fn run_image_search_follow_loop(
             None,
             None,
             None,
+            VisionMoveAxisLock::None,
+            offset_x,
+            offset_y,
         ) {
             Ok(_) => {}
 
@@ -1584,6 +1678,28 @@ pub(crate) fn run_image_search_follow_loop(
             "{}: repeat mode stopped.",
             preset.name
         )));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_move_axis_lock;
+    use crate::model::VisionMoveAxisLock;
+
+    #[test]
+    fn axis_lock_keeps_requested_axis_fixed() {
+        assert_eq!(
+            apply_move_axis_lock(120, 240, VisionMoveAxisLock::HorizontalOnly, Some((15, 25))),
+            (120, 25)
+        );
+        assert_eq!(
+            apply_move_axis_lock(120, 240, VisionMoveAxisLock::VerticalOnly, Some((15, 25))),
+            (15, 240)
+        );
+        assert_eq!(
+            apply_move_axis_lock(120, 240, VisionMoveAxisLock::None, Some((15, 25))),
+            (120, 240)
+        );
     }
 }
 
@@ -1659,6 +1775,9 @@ pub(crate) fn trigger_vision_move_with_options(
             None,
             None,
             None,
+            VisionMoveAxisLock::None,
+            0,
+            0,
         ) {
             Ok(outcome) => outcome,
             Err(error) => {
