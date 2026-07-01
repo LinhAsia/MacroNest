@@ -2289,6 +2289,7 @@ mod windows_overlay {
         preview_geometry_preset_id: Option<u32>,
         vision_following_presets: HashSet<u32>,
         pub(crate) vision_following_offsets: HashMap<u32, (i32, i32)>,
+        pub(crate) vision_following_axis_locks: HashMap<u32, crate::model::VisionMoveAxisLock>,
         vision_dir: PathBuf,
         opencv_dll_path: PathBuf,
         interception_dll_path: PathBuf,
@@ -2392,6 +2393,7 @@ mod windows_overlay {
                 preview_geometry_preset_id: None,
                 vision_following_presets: HashSet::new(),
                 vision_following_offsets: HashMap::new(),
+                vision_following_axis_locks: HashMap::new(),
                 vision_dir: PathBuf::new(),
                 opencv_dll_path: PathBuf::new(),
                 interception_dll_path: PathBuf::new(),
@@ -4038,7 +4040,11 @@ mod windows_overlay {
                             }
                         }
                     } else if let Some(preset) = runtime.registered_macro_hotkeys.get(&hotkey_id) {
-                        if !SUPPRESSED_MACRO_HOTKEYS.lock().contains(&hotkey_id) {
+                        if preset.stop_on_retrigger_immediate
+                            && macro_started_vision_searches_are_active(preset)
+                        {
+                            stop_macro_started_vision_searches(preset);
+                        } else if !SUPPRESSED_MACRO_HOTKEYS.lock().contains(&hotkey_id) {
                             let trigger_key = preset
                                 .hotkey
                                 .as_ref()
@@ -5735,6 +5741,12 @@ mod windows_overlay {
         ) in press_matches
         {
             let hotkey_id = MACRO_PRESET_BASE_ID + preset.id as i32;
+            if preset.stop_on_retrigger_immediate
+                && macro_started_vision_searches_are_active(&preset)
+            {
+                stop_macro_started_vision_searches(&preset);
+                continue;
+            }
             if !SUPPRESSED_MACRO_HOTKEYS.lock().contains(&hotkey_id) {
                 let _ = play_macro_preset(
                     hotkey_id,
@@ -21020,8 +21032,6 @@ mod windows_overlay {
 
             cleanup_press_macro_locks(&press_locked_keys, &press_locked_mouse_masks);
 
-            let image_search_preset_ids = collect_macro_image_search_start_ids(&preset.steps);
-            stop_vision_following_ids(&image_search_preset_ids);
             hide_toolbox_for_owner(preset.id);
             HOOK_STATE.lock().stop_ignore_keys.remove(&preset.id);
             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset.id);
@@ -22267,6 +22277,7 @@ mod windows_overlay {
                 let _ = start_vision_following(
                     &step.key,
                     Some(&step.if_variable_name),
+                    step.vision_move_axis_lock,
                     step.get_x(),
                     step.get_y(),
                 );
@@ -22989,6 +23000,7 @@ mod windows_overlay {
                     let _ = start_vision_following(
                         &step.key,
                         Some(&step.if_variable_name),
+                        step.vision_move_axis_lock,
                         step.get_x(),
                         step.get_y(),
                     );
@@ -23686,6 +23698,7 @@ mod windows_overlay {
                     let _ = start_vision_following(
                         &step.key,
                         Some(&step.if_variable_name),
+                        step.vision_move_axis_lock,
                         step.get_x(),
                         step.get_y(),
                     );
@@ -25957,6 +25970,27 @@ mod windows_overlay {
         ids.into_iter().collect()
     }
 
+    fn macro_started_vision_searches_are_active(preset: &MacroPreset) -> bool {
+        collect_macro_image_search_start_ids(&preset.steps)
+            .into_iter()
+            .any(image_search_following_is_active)
+    }
+
+    fn stop_macro_started_vision_searches(preset: &MacroPreset) -> bool {
+        let preset_ids = collect_macro_image_search_start_ids(&preset.steps);
+        if preset_ids.is_empty()
+            || !preset_ids
+                .iter()
+                .copied()
+                .any(image_search_following_is_active)
+        {
+            return false;
+        }
+
+        stop_vision_following_ids(&preset_ids);
+        true
+    }
+
     fn send_key_event(step: &MacroStep) -> Result<()> {
         match step.action {
             MacroAction::MouseLeftClick
@@ -28169,6 +28203,12 @@ mod windows_overlay {
         ) in matches
         {
             let hotkey_id = MACRO_PRESET_BASE_ID + preset.id as i32;
+            if preset.stop_on_retrigger_immediate
+                && macro_started_vision_searches_are_active(&preset)
+            {
+                stop_macro_started_vision_searches(&preset);
+                continue;
+            }
             if !SUPPRESSED_MACRO_HOTKEYS.lock().contains(&hotkey_id) {
                 let _ = play_macro_preset(
                     hotkey_id,
