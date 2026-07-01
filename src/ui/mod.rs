@@ -207,6 +207,44 @@ pub(crate) enum MacroShareCodeKind {
     Group,
 }
 
+#[derive(Default)]
+struct MacroShareCollectSeen {
+    crosshair_profiles: HashSet<String>,
+    window_presets: HashSet<u32>,
+    window_layouts: HashSet<u32>,
+    window_focus_presets: HashSet<u32>,
+    pin_presets: HashSet<u32>,
+    mouse_path_presets: HashSet<u32>,
+    mouse_sensitivity_presets: HashSet<u32>,
+    zoom_presets: HashSet<u32>,
+    hud_presets: HashSet<u32>,
+    command_presets: HashSet<u32>,
+    geometry_presets: HashSet<u32>,
+    vision_presets: HashSet<u32>,
+    ocr_presets: HashSet<u32>,
+    audio_sense_presets: HashSet<u32>,
+    timer_presets: HashSet<u32>,
+}
+
+#[derive(Default)]
+struct ImportedMacroShareMaps {
+    crosshair_profiles: HashMap<String, String>,
+    window_presets: HashMap<u32, u32>,
+    window_layouts: HashMap<u32, u32>,
+    window_focus_presets: HashMap<u32, u32>,
+    pin_presets: HashMap<u32, u32>,
+    mouse_path_presets: HashMap<u32, u32>,
+    mouse_sensitivity_presets: HashMap<u32, u32>,
+    zoom_presets: HashMap<u32, u32>,
+    hud_presets: HashMap<u32, u32>,
+    command_presets: HashMap<u32, u32>,
+    geometry_presets: HashMap<u32, u32>,
+    vision_presets: HashMap<u32, u32>,
+    ocr_presets: HashMap<u32, u32>,
+    audio_sense_presets: HashMap<u32, u32>,
+    timer_presets: HashMap<u32, u32>,
+}
+
 #[derive(Clone)]
 pub(crate) struct CommandAiDialog {
     preset_id: u32,
@@ -1175,8 +1213,691 @@ impl CrosshairApp {
         self.status = format!("Pasted crosshair preset: {}.", name);
     }
 
+    fn find_named_item_by_spec<'a, T>(
+        items: &'a [T],
+        spec: &str,
+        id_of: impl Fn(&T) -> u32,
+        name_of: impl Fn(&T) -> &str,
+    ) -> Option<&'a T> {
+        let trimmed = spec.trim();
+        if let Ok(id) = trimmed.parse::<u32>() {
+            return items.iter().find(|item| id_of(item) == id);
+        }
+        items
+            .iter()
+            .find(|item| Self::trimmed_eq_ignore_ascii_case(name_of(item), trimmed))
+    }
+
+    fn collect_macro_share_resources_for_step(
+        &self,
+        step: &MacroStep,
+    ) -> crate::macro_code::MacroShareResources {
+        let mut resources = crate::macro_code::MacroShareResources::default();
+        let mut seen = MacroShareCollectSeen::default();
+        self.collect_macro_share_resources_from_step(step, &mut resources, &mut seen);
+        resources
+    }
+
+    fn collect_macro_share_resources_for_preset(
+        &self,
+        preset: &MacroPreset,
+    ) -> crate::macro_code::MacroShareResources {
+        let mut resources = crate::macro_code::MacroShareResources::default();
+        let mut seen = MacroShareCollectSeen::default();
+        self.collect_macro_share_resources_from_step(
+            &preset.hold_stop_step,
+            &mut resources,
+            &mut seen,
+        );
+        self.collect_macro_share_resources_from_step(
+            &preset.press_stop_step,
+            &mut resources,
+            &mut seen,
+        );
+        for step in &preset.steps {
+            self.collect_macro_share_resources_from_step(step, &mut resources, &mut seen);
+        }
+        resources
+    }
+
+    fn collect_macro_share_resources_for_group(
+        &self,
+        group: &MacroGroup,
+    ) -> crate::macro_code::MacroShareResources {
+        let mut resources = crate::macro_code::MacroShareResources::default();
+        let mut seen = MacroShareCollectSeen::default();
+        for preset in &group.presets {
+            self.collect_macro_share_resources_from_step(
+                &preset.hold_stop_step,
+                &mut resources,
+                &mut seen,
+            );
+            self.collect_macro_share_resources_from_step(
+                &preset.press_stop_step,
+                &mut resources,
+                &mut seen,
+            );
+            for step in &preset.steps {
+                self.collect_macro_share_resources_from_step(step, &mut resources, &mut seen);
+            }
+        }
+        resources
+    }
+
+    fn collect_macro_share_resources_from_step(
+        &self,
+        step: &MacroStep,
+        resources: &mut crate::macro_code::MacroShareResources,
+        seen: &mut MacroShareCollectSeen,
+    ) {
+        let trimmed_key = step.key.trim();
+        match step.action {
+            MacroAction::ApplyWindowPreset => {
+                if let Some(layout_spec) = trimmed_key.strip_prefix("layout:") {
+                    if let Some(layout) = Self::find_named_item_by_spec(
+                        &self.state.window_layouts,
+                        layout_spec,
+                        |item| item.id,
+                        |item| &item.name,
+                    ) && seen.window_layouts.insert(layout.id)
+                    {
+                        resources.window_layouts.push(layout.clone());
+                    }
+                } else if let Some(preset) = Self::find_named_item_by_spec(
+                    &self.state.window_presets,
+                    trimmed_key,
+                    |item| item.id,
+                    |item| &item.name,
+                ) && seen.window_presets.insert(preset.id)
+                {
+                    resources.window_presets.push(preset.clone());
+                }
+            }
+            MacroAction::FocusWindowPreset => {
+                if let Some(preset) = Self::find_named_item_by_spec(
+                    &self.state.window_focus_presets,
+                    trimmed_key,
+                    |item| item.id,
+                    |item| &item.name,
+                ) && seen.window_focus_presets.insert(preset.id)
+                {
+                    resources.window_focus_presets.push(preset.clone());
+                }
+            }
+            MacroAction::TriggerCommandPreset => {
+                if let Some(preset_id) =
+                    Self::command_preset_id_from_key(&self.state.command_presets, trimmed_key)
+                    && let Some(preset) = self
+                        .state
+                        .command_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.command_presets.insert(preset.id)
+                {
+                    resources.command_presets.push(preset.clone());
+                }
+            }
+            MacroAction::EnableCrosshairProfile | MacroAction::DisableCrosshair => {
+                if !trimmed_key.is_empty()
+                    && let Some(profile) = self.state.profiles.iter().find(|profile| {
+                        Self::trimmed_eq_ignore_ascii_case(&profile.name, trimmed_key)
+                    })
+                    && seen
+                        .crosshair_profiles
+                        .insert(profile.name.trim().to_ascii_lowercase())
+                {
+                    resources.crosshair_profiles.push(profile.clone());
+                }
+            }
+            MacroAction::EnablePinPreset | MacroAction::DisablePin => {
+                if let Ok(preset_id) = trimmed_key.parse::<u32>()
+                    && let Some(preset) = self.pin_preset(preset_id)
+                    && seen.pin_presets.insert(preset.id)
+                {
+                    resources.pin_presets.push(preset.clone());
+                }
+            }
+            MacroAction::PlayMousePathPreset => {
+                if let Ok(preset_id) = trimmed_key.parse::<u32>()
+                    && let Some(preset) = self
+                        .state
+                        .mouse_path_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.mouse_path_presets.insert(preset.id)
+                {
+                    resources.mouse_path_presets.push(preset.clone());
+                }
+            }
+            MacroAction::ApplyMouseSensitivityPreset => {
+                if let Some(preset_id) = trimmed_key.parse::<u32>().ok()
+                    && let Some(preset) = self
+                        .state
+                        .mouse_sensitivity_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.mouse_sensitivity_presets.insert(preset.id)
+                {
+                    resources.mouse_sensitivity_presets.push(preset.clone());
+                }
+            }
+            MacroAction::EnableZoomPreset => {
+                if let Ok(preset_id) = trimmed_key.parse::<u32>()
+                    && let Some(preset) = self
+                        .state
+                        .zoom_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.zoom_presets.insert(preset.id)
+                {
+                    resources.zoom_presets.push(preset.clone());
+                }
+            }
+            MacroAction::StartVisionSearch
+            | MacroAction::ScanVisionOnce
+            | MacroAction::StopVision => {
+                if let Some(preset) = Self::find_named_item_by_spec(
+                    &self.state.vision_presets,
+                    trimmed_key,
+                    |item| item.id,
+                    |item| &item.name,
+                ) && seen.vision_presets.insert(preset.id)
+                {
+                    resources
+                        .vision_presets
+                        .push(crate::macro_code::SharedVisionPreset {
+                            preset: preset.clone(),
+                            template_png: fs::read(self.vision_template_file_for_preset(preset.id))
+                                .ok(),
+                        });
+                }
+            }
+            MacroAction::StartAudioSensePreset => {
+                if let Some(preset_id) = step.audio_sense_preset_id
+                    && let Some(preset) = self
+                        .state
+                        .audio_sense_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.audio_sense_presets.insert(preset.id)
+                {
+                    resources.audio_sense_presets.push(preset.clone());
+                }
+            }
+            MacroAction::ShowHud => {
+                if let Ok(preset_id) = trimmed_key.parse::<u32>()
+                    && let Some(preset) = self
+                        .state
+                        .hud_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.hud_presets.insert(preset.id)
+                {
+                    resources.hud_presets.push(preset.clone());
+                }
+            }
+            MacroAction::OcrSearch => {
+                if let Ok(preset_id) = trimmed_key.parse::<u32>()
+                    && preset_id != 0
+                    && let Some(preset) = self
+                        .state
+                        .ocr_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.ocr_presets.insert(preset.id)
+                {
+                    resources.ocr_presets.push(preset.clone());
+                }
+            }
+            MacroAction::ShowGeometryPreset | MacroAction::HideGeometryPreset => {
+                if let Ok(preset_id) = trimmed_key.parse::<u32>()
+                    && let Some(preset) = self
+                        .state
+                        .geometry_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.geometry_presets.insert(preset.id)
+                {
+                    resources.geometry_presets.push(preset.clone());
+                }
+            }
+            MacroAction::DrawGeometry => {
+                if let Some(preset_id) = step.geometry_preset_id
+                    && let Some(preset) = self
+                        .state
+                        .geometry_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.geometry_presets.insert(preset.id)
+                {
+                    resources.geometry_presets.push(preset.clone());
+                }
+            }
+            MacroAction::StartTimerPreset
+            | MacroAction::PauseTimerPreset
+            | MacroAction::StopTimerPreset
+            | MacroAction::ReadTimerPreset => {
+                if let Some(preset_id) = step.timer_preset_id
+                    && let Some(preset) = self
+                        .state
+                        .timer_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.timer_presets.insert(preset.id)
+                {
+                    resources.timer_presets.push(preset.clone());
+                }
+            }
+            _ => {}
+        }
+
+        if let Some(preset_id) = step.if_vision_preset_id
+            && let Some(preset) = self
+                .state
+                .vision_presets
+                .iter()
+                .find(|item| item.id == preset_id)
+            && seen.vision_presets.insert(preset.id)
+        {
+            resources
+                .vision_presets
+                .push(crate::macro_code::SharedVisionPreset {
+                    preset: preset.clone(),
+                    template_png: fs::read(self.vision_template_file_for_preset(preset.id)).ok(),
+                });
+        }
+
+        if let Some(preset_id) = step.if_ocr_preset_id
+            && let Some(preset) = self
+                .state
+                .ocr_presets
+                .iter()
+                .find(|item| item.id == preset_id)
+            && seen.ocr_presets.insert(preset.id)
+        {
+            resources.ocr_presets.push(preset.clone());
+        }
+
+        for extra in &step.extra_conditions {
+            if let Some(preset_id) = extra.vision_preset_id
+                && let Some(preset) = self
+                    .state
+                    .vision_presets
+                    .iter()
+                    .find(|item| item.id == preset_id)
+                && seen.vision_presets.insert(preset.id)
+            {
+                resources
+                    .vision_presets
+                    .push(crate::macro_code::SharedVisionPreset {
+                        preset: preset.clone(),
+                        template_png: fs::read(self.vision_template_file_for_preset(preset.id))
+                            .ok(),
+                    });
+            }
+            if let Some(preset_id) = extra.ocr_preset_id
+                && let Some(preset) = self
+                    .state
+                    .ocr_presets
+                    .iter()
+                    .find(|item| item.id == preset_id)
+                && seen.ocr_presets.insert(preset.id)
+            {
+                resources.ocr_presets.push(preset.clone());
+            }
+        }
+    }
+
+    fn import_macro_share_resources(
+        &mut self,
+        resources: crate::macro_code::MacroShareResources,
+    ) -> ImportedMacroShareMaps {
+        let mut maps = ImportedMacroShareMaps::default();
+
+        for profile in resources.crosshair_profiles {
+            let mut imported = profile.clone();
+            let old_name = imported.name.clone();
+            if self
+                .state
+                .profiles
+                .iter()
+                .any(|item| Self::trimmed_eq_ignore_ascii_case(&item.name, &imported.name))
+            {
+                imported.name = self.unique_profile_name(&imported.name);
+            }
+            imported.collapsed = true;
+            maps.crosshair_profiles
+                .insert(old_name, imported.name.clone());
+            self.state.profiles.push(imported);
+        }
+
+        for mut preset in resources.window_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.window_presets,
+                &mut self.state.next_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.window_presets.insert(old_id, preset.id);
+            self.state.window_presets.push(preset);
+        }
+
+        for mut layout in resources.window_layouts {
+            let old_id = layout.id;
+            layout.id = Self::allocate_next_id(
+                &self.state.window_layouts,
+                &mut self.state.next_window_layout_id,
+                |item| item.id,
+            );
+            layout.collapsed = true;
+            maps.window_layouts.insert(old_id, layout.id);
+            self.state.window_layouts.push(layout);
+        }
+
+        for mut preset in resources.window_focus_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.window_focus_presets,
+                &mut self.state.next_window_focus_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.window_focus_presets.insert(old_id, preset.id);
+            self.state.window_focus_presets.push(preset);
+        }
+
+        for mut preset in resources.pin_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.pin_presets,
+                &mut self.state.next_pin_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.pin_presets.insert(old_id, preset.id);
+            self.state.pin_presets.push(preset);
+        }
+
+        for mut preset in resources.mouse_path_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.mouse_path_presets,
+                &mut self.state.next_mouse_path_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.mouse_path_presets.insert(old_id, preset.id);
+            self.state.mouse_path_presets.push(preset);
+        }
+
+        for mut preset in resources.mouse_sensitivity_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.mouse_sensitivity_presets,
+                &mut self.state.next_mouse_sensitivity_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.mouse_sensitivity_presets.insert(old_id, preset.id);
+            self.state.mouse_sensitivity_presets.push(preset);
+        }
+
+        for mut preset in resources.zoom_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.zoom_presets,
+                &mut self.state.next_zoom_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.zoom_presets.insert(old_id, preset.id);
+            self.state.zoom_presets.push(preset);
+        }
+
+        for mut preset in resources.hud_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.hud_presets,
+                &mut self.state.next_hud_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.hud_presets.insert(old_id, preset.id);
+            self.state.hud_presets.push(preset);
+        }
+
+        for mut preset in resources.command_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.command_presets,
+                &mut self.state.next_command_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.command_presets.insert(old_id, preset.id);
+            self.state.command_presets.push(preset);
+        }
+
+        for mut preset in resources.geometry_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.geometry_presets,
+                &mut self.state.next_geometry_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.geometry_presets.insert(old_id, preset.id);
+            self.state.geometry_presets.push(preset);
+        }
+
+        for shared in resources.vision_presets {
+            let old_id = shared.preset.id;
+            let mut preset = shared.preset;
+            preset.id = Self::allocate_next_id(
+                &self.state.vision_presets,
+                &mut self.state.next_vision_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            if let Some(bytes) = shared.template_png {
+                let _ = fs::write(self.vision_template_file_for_preset(preset.id), bytes);
+            }
+            maps.vision_presets.insert(old_id, preset.id);
+            self.state.vision_presets.push(preset);
+        }
+
+        for mut preset in resources.ocr_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.ocr_presets,
+                &mut self.state.next_ocr_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.ocr_presets.insert(old_id, preset.id);
+            self.state.ocr_presets.push(preset);
+        }
+
+        for mut preset in resources.audio_sense_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.audio_sense_presets,
+                &mut self.state.next_audio_sense_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.audio_sense_presets.insert(old_id, preset.id);
+            self.state.audio_sense_presets.push(preset);
+        }
+
+        for mut preset in resources.timer_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.timer_presets,
+                &mut self.state.next_timer_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            maps.timer_presets.insert(old_id, preset.id);
+            self.state.timer_presets.push(preset);
+        }
+
+        maps
+    }
+
+    fn remap_macro_share_refs_in_key(
+        key: &mut String,
+        mapping: &HashMap<u32, u32>,
+        prefix: Option<&str>,
+    ) {
+        let trimmed = key.trim();
+        let Some(raw_spec) =
+            prefix.map_or_else(|| Some(trimmed), |value| trimmed.strip_prefix(value))
+        else {
+            return;
+        };
+        let raw_spec = raw_spec.trim();
+        if let Ok(old_id) = raw_spec.parse::<u32>()
+            && let Some(new_id) = mapping.get(&old_id)
+        {
+            *key = prefix
+                .map(|value| format!("{value}{new_id}"))
+                .unwrap_or_else(|| new_id.to_string());
+        }
+    }
+
+    fn remap_macro_share_resource_refs_in_step(
+        step: &mut MacroStep,
+        maps: &ImportedMacroShareMaps,
+    ) {
+        match step.action {
+            MacroAction::ApplyWindowPreset => {
+                if step.key.trim().starts_with("layout:") {
+                    Self::remap_macro_share_refs_in_key(
+                        &mut step.key,
+                        &maps.window_layouts,
+                        Some("layout:"),
+                    );
+                } else {
+                    Self::remap_macro_share_refs_in_key(&mut step.key, &maps.window_presets, None);
+                }
+            }
+            MacroAction::FocusWindowPreset => {
+                Self::remap_macro_share_refs_in_key(
+                    &mut step.key,
+                    &maps.window_focus_presets,
+                    None,
+                );
+            }
+            MacroAction::TriggerCommandPreset => {
+                Self::remap_macro_share_refs_in_key(&mut step.key, &maps.command_presets, None);
+            }
+            MacroAction::EnableCrosshairProfile | MacroAction::DisableCrosshair => {
+                if let Some((_, new_name)) = maps.crosshair_profiles.iter().find(|(old_name, _)| {
+                    Self::trimmed_eq_ignore_ascii_case(old_name, step.key.trim())
+                }) {
+                    step.key = new_name.clone();
+                }
+            }
+            MacroAction::EnablePinPreset | MacroAction::DisablePin => {
+                Self::remap_macro_share_refs_in_key(&mut step.key, &maps.pin_presets, None);
+            }
+            MacroAction::PlayMousePathPreset => {
+                Self::remap_macro_share_refs_in_key(&mut step.key, &maps.mouse_path_presets, None);
+            }
+            MacroAction::ApplyMouseSensitivityPreset => {
+                Self::remap_macro_share_refs_in_key(
+                    &mut step.key,
+                    &maps.mouse_sensitivity_presets,
+                    None,
+                );
+            }
+            MacroAction::EnableZoomPreset => {
+                Self::remap_macro_share_refs_in_key(&mut step.key, &maps.zoom_presets, None);
+            }
+            MacroAction::StartVisionSearch
+            | MacroAction::ScanVisionOnce
+            | MacroAction::StopVision => {
+                Self::remap_macro_share_refs_in_key(&mut step.key, &maps.vision_presets, None);
+            }
+            MacroAction::StartAudioSensePreset => {
+                if let Some(old_id) = step.audio_sense_preset_id
+                    && let Some(new_id) = maps.audio_sense_presets.get(&old_id)
+                {
+                    step.audio_sense_preset_id = Some(*new_id);
+                }
+            }
+            MacroAction::ShowHud => {
+                Self::remap_macro_share_refs_in_key(&mut step.key, &maps.hud_presets, None);
+            }
+            MacroAction::OcrSearch => {
+                Self::remap_macro_share_refs_in_key(&mut step.key, &maps.ocr_presets, None);
+            }
+            MacroAction::ShowGeometryPreset | MacroAction::HideGeometryPreset => {
+                Self::remap_macro_share_refs_in_key(&mut step.key, &maps.geometry_presets, None);
+            }
+            MacroAction::DrawGeometry => {
+                if let Some(old_id) = step.geometry_preset_id
+                    && let Some(new_id) = maps.geometry_presets.get(&old_id)
+                {
+                    step.geometry_preset_id = Some(*new_id);
+                }
+            }
+            MacroAction::StartTimerPreset
+            | MacroAction::PauseTimerPreset
+            | MacroAction::StopTimerPreset
+            | MacroAction::ReadTimerPreset => {
+                if let Some(old_id) = step.timer_preset_id
+                    && let Some(new_id) = maps.timer_presets.get(&old_id)
+                {
+                    step.timer_preset_id = Some(*new_id);
+                }
+            }
+            _ => {}
+        }
+
+        if let Some(old_id) = step.if_vision_preset_id
+            && let Some(new_id) = maps.vision_presets.get(&old_id)
+        {
+            step.if_vision_preset_id = Some(*new_id);
+        }
+        if let Some(old_id) = step.if_ocr_preset_id
+            && let Some(new_id) = maps.ocr_presets.get(&old_id)
+        {
+            step.if_ocr_preset_id = Some(*new_id);
+        }
+        for extra in &mut step.extra_conditions {
+            if let Some(old_id) = extra.vision_preset_id
+                && let Some(new_id) = maps.vision_presets.get(&old_id)
+            {
+                extra.vision_preset_id = Some(*new_id);
+            }
+            if let Some(old_id) = extra.ocr_preset_id
+                && let Some(new_id) = maps.ocr_presets.get(&old_id)
+            {
+                extra.ocr_preset_id = Some(*new_id);
+            }
+        }
+    }
+
+    fn remap_macro_share_resource_refs_in_preset(
+        preset: &mut MacroPreset,
+        maps: &ImportedMacroShareMaps,
+    ) {
+        Self::remap_macro_share_resource_refs_in_step(&mut preset.hold_stop_step, maps);
+        Self::remap_macro_share_resource_refs_in_step(&mut preset.press_stop_step, maps);
+        for step in &mut preset.steps {
+            Self::remap_macro_share_resource_refs_in_step(step, maps);
+        }
+    }
+
     fn export_macro_step(&mut self, preset_id: u32, step_index: usize, step: &MacroStep) {
-        match crate::macro_code::encode_step(step) {
+        let shared = crate::macro_code::SharedMacroStep {
+            step: step.clone(),
+            resources: self.collect_macro_share_resources_for_step(step),
+        };
+        match crate::macro_code::encode_shared_step(&shared) {
             Ok(code) => self.write_macro_share_code(
                 code,
                 "Step code copied to clipboard.",
@@ -1198,8 +1919,11 @@ impl CrosshairApp {
         let Some(code) = self.read_clipboard_text() else {
             return;
         };
-        match crate::macro_code::decode_step(&code) {
-            Ok(mut step) => {
+        match crate::macro_code::decode_shared_step(&code) {
+            Ok(shared) => {
+                let maps = self.import_macro_share_resources(shared.resources);
+                let mut step = shared.step;
+                Self::remap_macro_share_resource_refs_in_step(&mut step, &maps);
                 Self::bind_trigger_macro_step_to_group(&mut step, group_id);
                 if let Ok((group_index, preset_index)) =
                     self.macro_preset_indices(group_id, preset_id)
@@ -1214,7 +1938,20 @@ impl CrosshairApp {
                     } else {
                         preset.steps.push(step);
                     }
-                    self.persist_macro_presets();
+                    self.persist_after_syncs([
+                        Self::sync_profiles,
+                        Self::sync_window_presets,
+                        Self::sync_window_layouts,
+                        Self::sync_mouse_sensitivity_presets,
+                        Self::sync_hud_presets,
+                        Self::sync_command_presets,
+                        Self::sync_vision_presets,
+                        Self::sync_ocr_presets,
+                        Self::sync_geometry_presets,
+                        Self::sync_audio_sense_presets,
+                        Self::sync_timer_presets,
+                        Self::sync_macro_presets,
+                    ]);
                     self.status = Self::tr_lang(
                         self.state.ui_language,
                         "Step imported successfully.",
@@ -1228,7 +1965,11 @@ impl CrosshairApp {
     }
 
     fn export_macro_preset(&mut self, preset_id: u32, preset: &MacroPreset) {
-        match crate::macro_code::encode_preset(preset) {
+        let shared = crate::macro_code::SharedMacroPreset {
+            preset: preset.clone(),
+            resources: self.collect_macro_share_resources_for_preset(preset),
+        };
+        match crate::macro_code::encode_shared_preset(&shared) {
             Ok(code) => self.write_macro_share_code(
                 code,
                 "Preset code copied to clipboard.",
@@ -1249,8 +1990,10 @@ impl CrosshairApp {
         let Some(code) = self.read_clipboard_text() else {
             return;
         };
-        match crate::macro_code::decode_preset(&code) {
-            Ok(mut preset) => {
+        match crate::macro_code::decode_shared_preset(&code) {
+            Ok(shared) => {
+                let maps = self.import_macro_share_resources(shared.resources);
+                let mut preset = shared.preset;
                 let source_preset_id = preset.id;
                 let id = self.allocate_next_macro_preset_id();
                 preset.id = id;
@@ -1262,6 +2005,7 @@ impl CrosshairApp {
                     Self::remap_macro_step_self_ref(step, source_preset_id, id);
                     Self::bind_trigger_macro_step_to_group(step, group_id);
                 }
+                Self::remap_macro_share_resource_refs_in_preset(&mut preset, &maps);
                 if let Some(group) = self
                     .state
                     .macro_groups
@@ -1274,7 +2018,20 @@ impl CrosshairApp {
                         preset,
                         |preset| preset.id,
                     );
-                    self.persist_reconciled_macro_presets();
+                    self.persist_after_syncs([
+                        Self::sync_profiles,
+                        Self::sync_window_presets,
+                        Self::sync_window_layouts,
+                        Self::sync_mouse_sensitivity_presets,
+                        Self::sync_hud_presets,
+                        Self::sync_command_presets,
+                        Self::sync_vision_presets,
+                        Self::sync_ocr_presets,
+                        Self::sync_geometry_presets,
+                        Self::sync_audio_sense_presets,
+                        Self::sync_timer_presets,
+                        Self::sync_reconciled_macro_presets,
+                    ]);
                     self.status = Self::tr_lang(
                         self.state.ui_language,
                         "Preset imported successfully.",
@@ -1288,7 +2045,11 @@ impl CrosshairApp {
     }
 
     fn export_macro_group(&mut self, group_id: u32, group: &MacroGroup) {
-        match crate::macro_code::encode_group(group) {
+        let shared = crate::macro_code::SharedMacroGroup {
+            group: group.clone(),
+            resources: self.collect_macro_share_resources_for_group(group),
+        };
+        match crate::macro_code::encode_shared_group(&shared) {
             Ok(code) => self.write_macro_share_code(
                 code,
                 "Group code copied to clipboard.",
@@ -1309,8 +2070,10 @@ impl CrosshairApp {
         let Some(code) = self.read_clipboard_text() else {
             return;
         };
-        match crate::macro_code::decode_group(&code) {
-            Ok(mut group) => {
+        match crate::macro_code::decode_shared_group(&code) {
+            Ok(shared) => {
+                let maps = self.import_macro_share_resources(shared.resources);
+                let mut group = shared.group;
                 let source_group_id = group.id;
                 let id = Self::allocate_next_id(
                     &self.state.macro_groups,
@@ -1350,6 +2113,7 @@ impl CrosshairApp {
                             id,
                         );
                     }
+                    Self::remap_macro_share_resource_refs_in_preset(preset, &maps);
                 }
 
                 Self::insert_after_id_or_push(
@@ -1359,7 +2123,20 @@ impl CrosshairApp {
                     |group| group.id,
                 );
                 self.pending_macro_group_scroll_target = Some(id);
-                self.persist_reconciled_macro_presets();
+                self.persist_after_syncs([
+                    Self::sync_profiles,
+                    Self::sync_window_presets,
+                    Self::sync_window_layouts,
+                    Self::sync_mouse_sensitivity_presets,
+                    Self::sync_hud_presets,
+                    Self::sync_command_presets,
+                    Self::sync_vision_presets,
+                    Self::sync_ocr_presets,
+                    Self::sync_geometry_presets,
+                    Self::sync_audio_sense_presets,
+                    Self::sync_timer_presets,
+                    Self::sync_reconciled_macro_presets,
+                ]);
                 self.status = Self::tr_lang(
                     self.state.ui_language,
                     "Group imported successfully.",
@@ -3346,7 +4123,7 @@ impl CrosshairApp {
             }
             TitlebarQuickActionKind::ClearOverlays => {
                 let center = rect.center();
-                
+
                 // Bottom-right layer
                 let lay1 = egui::Rect::from_center_size(center + vec2(4.0, -4.0), vec2(16.0, 16.0));
                 painter.rect_stroke(
@@ -3355,15 +4132,11 @@ impl CrosshairApp {
                     egui::Stroke::new(1.2, icon_color.gamma_multiply(0.5)),
                     StrokeKind::Inside,
                 );
-                
+
                 // Top-left layer
                 let lay2 = egui::Rect::from_center_size(center + vec2(-4.0, 4.0), vec2(16.0, 16.0));
                 // Fill behind with dark background to hide overlapping lines of lay1
-                painter.rect_filled(
-                    lay2,
-                    2.0,
-                    Color32::from_rgba_premultiplied(15, 23, 42, 240),
-                );
+                painter.rect_filled(lay2, 2.0, Color32::from_rgba_premultiplied(15, 23, 42, 240));
                 painter.rect_stroke(
                     lay2,
                     2.0,
@@ -3374,12 +4147,9 @@ impl CrosshairApp {
                 // A diagonal slash line representing "clear" or "prohibit"
                 let slash_start = pos2(center.x + 11.0, center.y - 11.0);
                 let slash_end = pos2(center.x - 11.0, center.y + 11.0);
-                
+
                 // Draw slash with slightly thicker stroke
-                painter.line_segment(
-                    [slash_start, slash_end],
-                    egui::Stroke::new(2.4, icon_color),
-                );
+                painter.line_segment([slash_start, slash_end], egui::Stroke::new(2.4, icon_color));
             }
             TitlebarQuickActionKind::KeySound => {
                 let center = rect.center();
@@ -6891,11 +7661,20 @@ impl CrosshairApp {
 
     fn macro_share_code_kind_from_text(text: &str) -> MacroShareCodeKind {
         let payload = text.trim();
-        if payload.starts_with("MN2_STEP:") || payload.starts_with("MN_STEP:") {
+        if payload.starts_with("MN3_STEP:")
+            || payload.starts_with("MN2_STEP:")
+            || payload.starts_with("MN_STEP:")
+        {
             MacroShareCodeKind::Step
-        } else if payload.starts_with("MN2_PRESET:") || payload.starts_with("MN_PRESET:") {
+        } else if payload.starts_with("MN3_PRESET:")
+            || payload.starts_with("MN2_PRESET:")
+            || payload.starts_with("MN_PRESET:")
+        {
             MacroShareCodeKind::Preset
-        } else if payload.starts_with("MN2_GROUP:") || payload.starts_with("MN_GROUP:") {
+        } else if payload.starts_with("MN3_GROUP:")
+            || payload.starts_with("MN2_GROUP:")
+            || payload.starts_with("MN_GROUP:")
+        {
             MacroShareCodeKind::Group
         } else {
             MacroShareCodeKind::None
@@ -11869,7 +12648,9 @@ impl eframe::App for CrosshairApp {
         if !keep_pin_preview && self.disable_pin_preview_modes() {
             self.persist();
         }
-        let keep_toolbox_preview = viewport_focused && (self.state.active_panel == AppPanel::Hud || self.state.active_panel == AppPanel::Timer);
+        let keep_toolbox_preview = viewport_focused
+            && (self.state.active_panel == AppPanel::Hud
+                || self.state.active_panel == AppPanel::Timer);
         let mut hud_changed = false;
         if !keep_toolbox_preview {
             hud_changed |= self.disable_hud_preview_modes();
@@ -12482,7 +13263,11 @@ impl eframe::App for CrosshairApp {
                     let response = Self::add_with_show_hover_radius(
                         ui,
                         10,
-                        self.top_tab_button(text, self.state.active_panel == AppPanel::Timer, false),
+                        self.top_tab_button(
+                            text,
+                            self.state.active_panel == AppPanel::Timer,
+                            false,
+                        ),
                     );
                     if response.clicked() {
                         self.state.active_panel = AppPanel::Timer;

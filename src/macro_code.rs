@@ -4,7 +4,11 @@ use flate2::{Compression, read::DeflateDecoder, write::DeflateEncoder};
 use serde::{Serialize, de::DeserializeOwned};
 use std::io::{Read, Write};
 
-use crate::model::{MacroGroup, MacroPreset, MacroStep};
+use crate::model::{
+    AudioSensePreset, CommandPreset, GeometryPreset, HudPreset, MacroGroup, MacroPreset, MacroStep,
+    MousePathPreset, MouseSensitivityPreset, OcrPreset, PinPreset, ProfileRecord, TimerPreset,
+    VisionPreset, WindowFocusPreset, WindowLayout, WindowPreset, ZoomPreset,
+};
 
 const PREFIX_STEP: &str = "MN_STEP:";
 const PREFIX_PRESET: &str = "MN_PRESET:";
@@ -13,6 +17,10 @@ const PREFIX_GROUP: &str = "MN_GROUP:";
 const PREFIX_STEP_V2: &str = "MN2_STEP:";
 const PREFIX_PRESET_V2: &str = "MN2_PRESET:";
 const PREFIX_GROUP_V2: &str = "MN2_GROUP:";
+
+const PREFIX_STEP_V3: &str = "MN3_STEP:";
+const PREFIX_PRESET_V3: &str = "MN3_PRESET:";
+const PREFIX_GROUP_V3: &str = "MN3_GROUP:";
 
 const Z85_ALPHABET: &[u8; 85] =
     b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#";
@@ -132,6 +140,79 @@ fn decode_any<T: DeserializeOwned>(
     decode_v1(encoded, kind)
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct SharedVisionPreset {
+    pub preset: VisionPreset,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template_png: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct MacroShareResources {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crosshair_profiles: Vec<ProfileRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub window_presets: Vec<WindowPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub window_layouts: Vec<WindowLayout>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub window_focus_presets: Vec<WindowFocusPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pin_presets: Vec<PinPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mouse_path_presets: Vec<MousePathPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mouse_sensitivity_presets: Vec<MouseSensitivityPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zoom_presets: Vec<ZoomPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hud_presets: Vec<HudPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command_presets: Vec<CommandPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub geometry_presets: Vec<GeometryPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vision_presets: Vec<SharedVisionPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ocr_presets: Vec<OcrPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audio_sense_presets: Vec<AudioSensePreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timer_presets: Vec<TimerPreset>,
+}
+
+impl MacroShareResources {
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct SharedMacroStep {
+    pub step: MacroStep,
+    #[serde(default, skip_serializing_if = "MacroShareResources::is_empty")]
+    pub resources: MacroShareResources,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct SharedMacroPreset {
+    pub preset: MacroPreset,
+    #[serde(default, skip_serializing_if = "MacroShareResources::is_empty")]
+    pub resources: MacroShareResources,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct SharedMacroGroup {
+    pub group: MacroGroup,
+    #[serde(default, skip_serializing_if = "MacroShareResources::is_empty")]
+    pub resources: MacroShareResources,
+}
+
 pub fn encode_step(step: &MacroStep) -> Result<String> {
     encode_v2(step, PREFIX_STEP_V2, "step")
 }
@@ -154,6 +235,51 @@ pub fn encode_group(group: &MacroGroup) -> Result<String> {
 
 pub fn decode_group(code: &str) -> Result<MacroGroup> {
     decode_any(code, PREFIX_GROUP_V2, PREFIX_GROUP, "group")
+}
+
+pub fn encode_shared_step(shared: &SharedMacroStep) -> Result<String> {
+    encode_v2(shared, PREFIX_STEP_V3, "step")
+}
+
+pub fn decode_shared_step(code: &str) -> Result<SharedMacroStep> {
+    let payload = code.trim();
+    if payload.starts_with(PREFIX_STEP_V3) {
+        return decode_any(code, PREFIX_STEP_V3, PREFIX_STEP_V3, "step");
+    }
+    decode_step(code).map(|step| SharedMacroStep {
+        step,
+        resources: MacroShareResources::default(),
+    })
+}
+
+pub fn encode_shared_preset(shared: &SharedMacroPreset) -> Result<String> {
+    encode_v2(shared, PREFIX_PRESET_V3, "preset")
+}
+
+pub fn decode_shared_preset(code: &str) -> Result<SharedMacroPreset> {
+    let payload = code.trim();
+    if payload.starts_with(PREFIX_PRESET_V3) {
+        return decode_any(code, PREFIX_PRESET_V3, PREFIX_PRESET_V3, "preset");
+    }
+    decode_preset(code).map(|preset| SharedMacroPreset {
+        preset,
+        resources: MacroShareResources::default(),
+    })
+}
+
+pub fn encode_shared_group(shared: &SharedMacroGroup) -> Result<String> {
+    encode_v2(shared, PREFIX_GROUP_V3, "group")
+}
+
+pub fn decode_shared_group(code: &str) -> Result<SharedMacroGroup> {
+    let payload = code.trim();
+    if payload.starts_with(PREFIX_GROUP_V3) {
+        return decode_any(code, PREFIX_GROUP_V3, PREFIX_GROUP_V3, "group");
+    }
+    decode_group(code).map(|group| SharedMacroGroup {
+        group,
+        resources: MacroShareResources::default(),
+    })
 }
 
 #[cfg(test)]
@@ -182,5 +308,23 @@ mod tests {
         let encoded = encode_group(&group).expect("encode group");
         let decoded = decode_group(&encoded).expect("decode group");
         assert_eq!(decoded, group);
+    }
+
+    #[test]
+    fn shared_preset_round_trip_v3() {
+        let shared = SharedMacroPreset {
+            preset: MacroPreset::default(),
+            resources: MacroShareResources {
+                crosshair_profiles: vec![ProfileRecord::default()],
+                vision_presets: vec![SharedVisionPreset {
+                    preset: VisionPreset::default(),
+                    template_png: Some(vec![1, 2, 3, 4]),
+                }],
+                ..MacroShareResources::default()
+            },
+        };
+        let encoded = encode_shared_preset(&shared).expect("encode shared preset");
+        let decoded = decode_shared_preset(&encoded).expect("decode shared preset");
+        assert_eq!(decoded, shared);
     }
 }
