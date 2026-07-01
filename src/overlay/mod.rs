@@ -2288,6 +2288,7 @@ mod windows_overlay {
         preview_geometry_spec: Option<GeometrySpec>,
         preview_geometry_preset_id: Option<u32>,
         vision_following_presets: HashSet<u32>,
+        pub(crate) vision_following_offsets: HashMap<u32, (i32, i32)>,
         vision_dir: PathBuf,
         opencv_dll_path: PathBuf,
         interception_dll_path: PathBuf,
@@ -2390,6 +2391,7 @@ mod windows_overlay {
                 preview_geometry_spec: None,
                 preview_geometry_preset_id: None,
                 vision_following_presets: HashSet::new(),
+                vision_following_offsets: HashMap::new(),
                 vision_dir: PathBuf::new(),
                 opencv_dll_path: PathBuf::new(),
                 interception_dll_path: PathBuf::new(),
@@ -6894,9 +6896,7 @@ mod windows_overlay {
         let exit_duration = QUICK_KEY_DISPLAY_ANIM_EXIT_DURATION;
         if now >= entry.hide_at - exit_duration {
             let exit_elapsed = now.saturating_duration_since(entry.hide_at - exit_duration);
-            let exit_t = (exit_elapsed.as_secs_f32()
-                / exit_duration.as_secs_f32())
-            .clamp(0.0, 1.0);
+            let exit_t = (exit_elapsed.as_secs_f32() / exit_duration.as_secs_f32()).clamp(0.0, 1.0);
             if exit_t > 0.0 {
                 let eased = quick_key_display_ease_in_cubic(exit_t);
                 visual.alpha *= 1.0 - eased;
@@ -7075,9 +7075,9 @@ mod windows_overlay {
         let max_width = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(400) - 100;
         let new_width = quick_key_display_entry_width(text, font_size, cap_height);
         let outer_pad_x = (font_size * 0.46).round().max(16.0) as i32;
-        
+
         let max_rows = 4;
-        
+
         // Group active entries by row
         let mut row_entries: Vec<Vec<&QuickKeyDisplayEntry>> = vec![Vec::new(); max_rows];
         for entry in &runtime.quick_key_display_entries {
@@ -7085,19 +7085,22 @@ mod windows_overlay {
                 row_entries[entry.row].push(entry);
             }
         }
-        
+
         // Calculate the current rightmost edge of each row
         let mut row_rights = vec![outer_pad_x; max_rows];
         for r in 0..max_rows {
             if !row_entries[r].is_empty() {
-                let max_right = row_entries[r].iter()
-                    .map(|e| e.x_offset + quick_key_display_entry_width(&e.text, font_size, cap_height))
+                let max_right = row_entries[r]
+                    .iter()
+                    .map(|e| {
+                        e.x_offset + quick_key_display_entry_width(&e.text, font_size, cap_height)
+                    })
                     .max()
                     .unwrap_or(outer_pad_x);
                 row_rights[r] = max_right;
             }
         }
-        
+
         // Find the first row that has enough space at the right end
         for r in 0..max_rows {
             let right = row_rights[r];
@@ -7116,14 +7119,14 @@ mod windows_overlay {
                 return (r, next_slot, x_offset);
             }
         }
-        
+
         // If all rows are full, look for a completely empty row
         for r in 0..max_rows {
             if row_entries[r].is_empty() {
                 return (r, 0, outer_pad_x);
             }
         }
-        
+
         // Otherwise, place on the row with the smallest rightmost edge (most space at the end)
         let mut min_r = 0;
         let mut min_right = row_rights[0];
@@ -7133,7 +7136,7 @@ mod windows_overlay {
                 min_r = r;
             }
         }
-        
+
         let next_slot = row_entries[min_r].len();
         let x_offset = if min_right == outer_pad_x {
             outer_pad_x
@@ -7186,16 +7189,12 @@ mod windows_overlay {
             runtime
                 .quick_key_display_slot_labels
                 .insert((lane, slot), text.clone());
-            
+
             let font_size = runtime.quick_key_display_size.clamp(10.0, 96.0);
             let cap_height = (font_size * 1.12 + 18.0).round().max(18.0) as i32;
             let entry_gap = (font_size * 0.36).round().max(10.0) as i32;
             let (row, row_slot, x_offset) = quick_key_display_allocate_row_and_slot(
-                runtime,
-                &text,
-                font_size,
-                cap_height,
-                entry_gap,
+                runtime, &text, font_size, cap_height, entry_gap,
             );
 
             runtime
@@ -7344,7 +7343,8 @@ mod windows_overlay {
         for entry in entries {
             if entry.row < max_rows {
                 active_rows_count = active_rows_count.max(entry.row + 1);
-                let right = entry.x_offset + quick_key_display_entry_width(&entry.text, font_size, cap_height);
+                let right = entry.x_offset
+                    + quick_key_display_entry_width(&entry.text, font_size, cap_height);
                 if right > max_right {
                     max_right = right;
                 }
@@ -7353,7 +7353,10 @@ mod windows_overlay {
 
         let active_rows_count = active_rows_count.max(1);
         let width = max_right + outer_pad_x;
-        let height = outer_pad_y * 2 + active_rows_count as i32 * cap_height + (active_rows_count as i32 - 1) * row_gap + 6;
+        let height = outer_pad_y * 2
+            + active_rows_count as i32 * cap_height
+            + (active_rows_count as i32 - 1) * row_gap
+            + 6;
         (width.max(cap_height), height.max(cap_height))
     }
 
@@ -9309,11 +9312,7 @@ mod windows_overlay {
 
         let _previous = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
         let bgra = rgba_to_bgra(canvas.as_raw());
-        std::ptr::copy_nonoverlapping(
-            bgra.as_ptr(),
-            bits as *mut u8,
-            bgra.len(),
-        );
+        std::ptr::copy_nonoverlapping(bgra.as_ptr(), bits as *mut u8, bgra.len());
         let blend = BLENDFUNCTION {
             BlendOp: AC_SRC_OVER as u8,
             BlendFlags: 0,
@@ -22265,7 +22264,12 @@ mod windows_overlay {
             }
 
             MacroAction::StartVisionSearch => {
-                let _ = start_vision_following(&step.key, Some(&step.if_variable_name));
+                let _ = start_vision_following(
+                    &step.key,
+                    Some(&step.if_variable_name),
+                    step.get_x(),
+                    step.get_y(),
+                );
             }
 
             MacroAction::StartAudioSensePreset => {
@@ -22282,6 +22286,9 @@ mod windows_overlay {
                         Some(&step.vision_pos_var_x),
                         Some(&step.vision_pos_var_y),
                         Some(&step.vision_found_var),
+                        step.vision_move_axis_lock,
+                        step.get_x(),
+                        step.get_y(),
                     ) {
                         Ok(outcome) => outcome,
                         Err(error) => {
@@ -22979,7 +22986,12 @@ mod windows_overlay {
                 }
 
                 MacroAction::StartVisionSearch => {
-                    let _ = start_vision_following(&step.key, Some(&step.if_variable_name));
+                    let _ = start_vision_following(
+                        &step.key,
+                        Some(&step.if_variable_name),
+                        step.get_x(),
+                        step.get_y(),
+                    );
                 }
 
                 MacroAction::StartAudioSensePreset => {
@@ -23003,6 +23015,9 @@ mod windows_overlay {
                             Some(&step.vision_pos_var_x),
                             Some(&step.vision_pos_var_y),
                             Some(&step.vision_found_var),
+                            step.vision_move_axis_lock,
+                            step.get_x(),
+                            step.get_y(),
                         ) {
                             Ok(outcome) => outcome,
                             Err(error) => {
@@ -23668,7 +23683,12 @@ mod windows_overlay {
                 }
 
                 MacroAction::StartVisionSearch => {
-                    let _ = start_vision_following(&step.key, Some(&step.if_variable_name));
+                    let _ = start_vision_following(
+                        &step.key,
+                        Some(&step.if_variable_name),
+                        step.get_x(),
+                        step.get_y(),
+                    );
                 }
 
                 MacroAction::StartAudioSensePreset => {
@@ -23685,6 +23705,9 @@ mod windows_overlay {
                             Some(&step.vision_pos_var_x),
                             Some(&step.vision_pos_var_y),
                             Some(&step.vision_found_var),
+                            step.vision_move_axis_lock,
+                            step.get_x(),
+                            step.get_y(),
                         ) {
                             Ok(outcome) => outcome,
                             Err(error) => {
@@ -24374,7 +24397,16 @@ mod windows_overlay {
                     };
                     if let Some(preset) = preset {
                         if let Ok(outcome) = run_vision_once_with_options(
-                            &preset, false, false, None, None, None, None,
+                            &preset,
+                            false,
+                            false,
+                            None,
+                            None,
+                            None,
+                            None,
+                            crate::model::VisionMoveAxisLock::None,
+                            0,
+                            0,
                         ) {
                             return outcome.matched;
                         }
