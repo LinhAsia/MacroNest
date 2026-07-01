@@ -890,7 +890,7 @@ impl CrosshairApp {
                 let _popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
-                    .align(egui::RectAlign::BOTTOM_START)
+                    .align(egui::RectAlign::TOP_START)
                     .layout(egui::Layout::top_down_justified(egui::Align::Min))
                     .width(140.0)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
@@ -925,7 +925,7 @@ impl CrosshairApp {
                             keep_open_rect = keep_open_rect.union(rect.expand(12.0));
                             let bridge_min = egui::pos2(
                                 response.rect.min.x.min(rect.min.x) - 6.0,
-                                response.rect.max.y.min(rect.min.y) - 8.0,
+                                response.rect.min.y.min(rect.max.y) - 8.0,
                             );
                             let bridge_max = egui::pos2(
                                 response.rect.max.x.max(rect.max.x) + 6.0,

@@ -3705,6 +3705,14 @@ mod windows_overlay {
                                 if angle < 0.0 {
                                     angle += 360.0;
                                 }
+                                let shift_down =
+                                    unsafe { (GetAsyncKeyState(0x10) as u16 & 0x8000) != 0 };
+                                if shift_down {
+                                    angle = (angle / 15.0).round() * 15.0;
+                                    if angle >= 360.0 {
+                                        angle -= 360.0;
+                                    }
+                                }
 
                                 {
                                     let mut state = PROTRACTOR_STATE.lock();

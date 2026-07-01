@@ -5046,6 +5046,26 @@ impl CrosshairApp {
                                 ));
                             },
                         );
+
+                        render_popup(
+                            ui,
+                            &button_response,
+                            TitlebarQuickActionKind::Protractor,
+                            &mut |ui| {
+                                ui.vertical_centered(|ui| {
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Hold Shift while dragging a needle to snap the angle to 15° steps.",
+                                            "Giữ Shift khi kéo kim để snap góc theo từng bước 15°.",
+                                        ))
+                                        .size(10.0),
+                                    );
+                                    false
+                                })
+                                .inner
+                            },
+                        );
                     },
                 );
 
