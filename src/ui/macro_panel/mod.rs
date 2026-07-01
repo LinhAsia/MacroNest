@@ -229,6 +229,14 @@ impl CrosshairApp {
             });
     }
 
+    fn handle_duration_permanent_toggle(step: &mut MacroStep, is_permanent: bool) {
+        step.set_duration_permanent(is_permanent);
+    }
+
+    fn remember_duration_input(step: &mut MacroStep) {
+        step.remember_duration_input();
+    }
+
     fn render_macro_action_button(
         ui: &mut egui::Ui,
         language: UiLanguage,
@@ -7944,10 +7952,10 @@ if supports_move_mouse {
                                                     ui.spacing_mut().item_spacing.x = 2.0;
                                                     ui.spacing_mut().interact_size.y = 21.0;
                                                     ui.spacing_mut().button_padding.y = 0.0;
-                        let mut is_permanent = !step.timed_override;
+                        let mut is_permanent = step.duration_is_permanent();
                                                     let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
                                                     if cb_response.changed() {
-                                                        step.timed_override = !is_permanent;
+                                                        Self::handle_duration_permanent_toggle(step, is_permanent);
                                                         live_sync = true;
                                                     }
                                                     if !is_permanent {
@@ -7960,6 +7968,9 @@ if supports_move_mouse {
                                                             &mut step.duration_expr,
                                                         );
                                                         live_sync |= response.changed();
+                                                        if response.changed() {
+                                                            Self::remember_duration_input(step);
+                                                        }
                                                         Self::render_variable_suggestions(
                                                             ui,
                                                             &response,
@@ -10179,10 +10190,10 @@ if supports_move_mouse {
                                                     ui.spacing_mut().item_spacing.x = 2.0;
                                                     ui.spacing_mut().interact_size.y = 21.0;
                                                     ui.spacing_mut().button_padding.y = 0.0;
-                        let mut is_permanent = !step.timed_override;
+                        let mut is_permanent = step.duration_is_permanent();
                                                     let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
                                                     if cb_response.changed() {
-                                                        step.timed_override = !is_permanent;
+                                                        Self::handle_duration_permanent_toggle(step, is_permanent);
                                                         live_sync = true;
                                                     }
                                                     if !is_permanent {
@@ -10195,6 +10206,9 @@ if supports_move_mouse {
                                                             &mut step.duration_expr,
                                                         );
                                                         live_sync |= response.changed();
+                                                        if response.changed() {
+                                                            Self::remember_duration_input(step);
+                                                        }
                                                         Self::render_variable_suggestions(
                                                             ui,
                                                             &response,
@@ -12669,14 +12683,10 @@ if supports_move_mouse {
                                                                 &timer_names,
                                                                 language,
                                                             );
-                                                            let mut is_permanent = step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
+                                                            let mut is_permanent = step.duration_is_permanent();
                                                             let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
                                                             if cb_response.changed() {
-                                                                if is_permanent {
-                                                                    step.duration_expr = "0".to_string();
-                                                                } else if step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty() {
-                                                                    step.duration_expr = "1500".to_string();
-                                                                }
+                                                                Self::handle_duration_permanent_toggle(step, is_permanent);
                                                                 live_sync = true;
                                                             }
                                                             if !is_permanent {
@@ -12704,6 +12714,9 @@ if supports_move_mouse {
                                                                     &mut step.duration_expr,
                                                                 );
                                                                 live_sync |= duration_response.changed();
+                                                                if duration_response.changed() {
+                                                                    Self::remember_duration_input(step);
+                                                                }
                                                                 Self::render_variable_suggestions(
                                                                     ui,
                                                                     &duration_response,
@@ -13817,7 +13830,7 @@ if supports_move_mouse {
                                                     ui.spacing_mut().item_spacing.x = 2.0;
                                                     ui.spacing_mut().interact_size.y = 20.0;
                                                     ui.spacing_mut().button_padding.y = 0.0;
-                                                    let mut is_permanent = step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty();
+                                                    let mut is_permanent = step.duration_is_permanent();
                                                     let width_val = if is_permanent { 96.0 } else { 190.0 };
                                                     let (rect, _) = ui.allocate_exact_size(egui::vec2(width_val, 21.0), egui::Sense::hover());
                                                     let mut child_ui = ui.new_child(
@@ -13830,11 +13843,7 @@ if supports_move_mouse {
                                                     child_ui.spacing_mut().interact_size.y = 21.0;
                                                     let cb_response = child_ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
                                                     if cb_response.changed() {
-                                                        if is_permanent {
-                                                            step.duration_expr = "0".to_string();
-                                                        } else if step.duration_expr.trim() == "0" || step.duration_expr.trim().is_empty() {
-                                                            step.duration_expr = "1500".to_string();
-                                                        }
+                                                        Self::handle_duration_permanent_toggle(step, is_permanent);
                                                         live_sync = true;
                                                     }
                                                     if !is_permanent {
@@ -13856,6 +13865,9 @@ if supports_move_mouse {
                                                             &mut step.duration_expr,
                                                         );
                                                         live_sync |= response.changed();
+                                                        if response.changed() {
+                                                            Self::remember_duration_input(step);
+                                                        }
                                                         Self::render_variable_suggestions(
                                                             ui,
                                                             &response,
@@ -17517,10 +17529,10 @@ if supports_move_mouse {
                                 }
                             });
                         ui.add_space(6.0);
-                        let mut is_permanent = !step.timed_override;
+                        let mut is_permanent = step.duration_is_permanent();
                         let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
                         if cb_response.changed() {
-                            step.timed_override = !is_permanent;
+                            Self::handle_duration_permanent_toggle(step, is_permanent);
                             *live_sync = true;
                         }
                         if !is_permanent {
@@ -17545,6 +17557,9 @@ if supports_move_mouse {
                                 &mut step.duration_expr,
                             );
                             *live_sync |= response.changed();
+                            if response.changed() {
+                                Self::remember_duration_input(step);
+                            }
                             Self::render_variable_suggestions(
                                 ui,
                                 &response,
@@ -17722,10 +17737,10 @@ if supports_move_mouse {
                             }
                         }
                         ui.add_space(6.0);
-                        let mut is_permanent = !step.timed_override;
+                        let mut is_permanent = step.duration_is_permanent();
                         let permanent_changed = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent")).changed();
                         if permanent_changed {
-                            step.timed_override = !is_permanent;
+                            Self::handle_duration_permanent_toggle(step, is_permanent);
                             *live_sync = true;
                         }
                         if !is_permanent {
@@ -17754,6 +17769,9 @@ if supports_move_mouse {
                                 &mut step.duration_expr,
                             );
                             *live_sync |= duration_response.changed();
+                            if duration_response.changed() {
+                                Self::remember_duration_input(step);
+                            }
                             Self::render_variable_suggestions(
                                 ui,
                                 &duration_response,
