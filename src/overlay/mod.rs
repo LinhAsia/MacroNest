@@ -6065,6 +6065,12 @@ mod windows_overlay {
         ) in press_matches
         {
             let hotkey_id = MACRO_PRESET_BASE_ID + preset.id as i32;
+            if preset.stop_on_retrigger_immediate
+                && macro_started_vision_searches_are_active(&preset)
+            {
+                stop_macro_started_vision_searches(&preset);
+                continue;
+            }
             if !SUPPRESSED_MACRO_HOTKEYS.lock().contains(&hotkey_id) {
                 let _ = play_macro_preset(
                     hotkey_id,
