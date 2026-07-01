@@ -577,6 +577,33 @@ impl MacroStep {
         Self::resolve_i32_expression(&self.y_expr).unwrap_or(self.y)
     }
 
+    pub fn duration_is_permanent(&self) -> bool {
+        !self.timed_override
+    }
+
+    pub fn set_duration_permanent(&mut self, permanent: bool) {
+        self.timed_override = !permanent;
+        if !permanent {
+            let trimmed = self.duration_expr.trim();
+            if trimmed.is_empty() || trimmed == "0" {
+                self.duration_expr = self.duration_override_ms.max(1).to_string();
+            }
+        }
+    }
+
+    pub fn remember_duration_input(&mut self) {
+        let trimmed = self.duration_expr.trim();
+        if trimmed.is_empty() || trimmed == "0" {
+            return;
+        }
+
+        let interpolated = crate::overlay::interpolate_variables(trimmed);
+        let value = crate::overlay::evaluate_math_expression(&interpolated).max(0) as u64;
+        if value > 0 {
+            self.duration_override_ms = value;
+        }
+    }
+
     pub fn get_mouse_speed_multiplier(&self) -> f32 {
         Self::resolve_mouse_speed_multiplier(&self.mouse_speed_expr)
             .unwrap_or_else(|| self.legacy_mouse_speed_multiplier())
@@ -889,5 +916,19 @@ mod tests {
 
         assert_eq!(*restored.hold_stop_step, stop_step);
         assert!(restored.press_stop_step.is_empty());
+    }
+
+    #[test]
+    fn duration_toggle_restores_previous_value_instead_of_resetting_default() {
+        let mut step = MacroStep::default();
+        step.set_duration_permanent(false);
+        step.duration_expr = "4321".to_string();
+        step.remember_duration_input();
+
+        step.set_duration_permanent(true);
+        step.set_duration_permanent(false);
+
+        assert_eq!(step.duration_expr, "4321");
+        assert_eq!(step.duration_override_ms, 4321);
     }
 }
