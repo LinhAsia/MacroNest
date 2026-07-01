@@ -193,6 +193,26 @@ impl CrosshairApp {
             return;
         }
 
+        Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
+    }
+
+    fn render_start_vision_move_mouse_controls(
+        ui: &mut egui::Ui,
+        step: &mut MacroStep,
+        language: UiLanguage,
+        live_sync: &mut bool,
+    ) {
+        ui.add_space(4.0);
+        ui.weak(Self::tr_lang(language, "Move Mouse", "Move Mouse"));
+        Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
+    }
+
+    fn render_vision_axis_lock_controls(
+        ui: &mut egui::Ui,
+        step: &mut MacroStep,
+        language: UiLanguage,
+        live_sync: &mut bool,
+    ) {
         ui.add_space(2.0);
         ui.label(Self::tr_lang(language, "Movement:", "Movement:"));
         egui::ComboBox::from_id_salt(ui.id().with("scan-vision-move-axis-lock"))
@@ -235,6 +255,14 @@ impl CrosshairApp {
 
     fn remember_duration_input(step: &mut MacroStep) {
         step.remember_duration_input();
+    }
+
+    fn vision_search_needs_explicit_stop(preset: &MacroPreset) -> bool {
+        matches!(
+            preset.trigger_mode,
+            MacroTriggerMode::Release
+                | MacroTriggerMode::Press if !preset.stop_on_retrigger_immediate
+        )
     }
 
     fn render_macro_action_button(
@@ -4258,6 +4286,7 @@ impl CrosshairApp {
                         s.action == MacroAction::LoopStart && s.is_infinite_loop()
                     });
                 let has_vision_leak = preset.enabled
+                    && Self::vision_search_needs_explicit_stop(preset)
                     && preset.steps.iter().any(|s| {
                         s.action == MacroAction::StartVisionSearch && s.enabled
                     })
@@ -4641,7 +4670,7 @@ impl CrosshairApp {
                             let has_group_vision_leak = group.enabled
                                 && group.presets.iter().any(|preset| {
                                     preset.enabled
-                                        && (preset.trigger_mode == MacroTriggerMode::Press || preset.trigger_mode == MacroTriggerMode::Release)
+                                        && Self::vision_search_needs_explicit_stop(preset)
                                         && preset.steps.iter().any(|s| s.action == MacroAction::StartVisionSearch && s.enabled)
                                         && !preset.steps.iter().any(|s| s.action == MacroAction::StopVision && s.enabled)
                                 });
@@ -5708,7 +5737,7 @@ impl CrosshairApp {
                                                  )
                                                  && preset.steps.iter().any(|s| s.action == MacroAction::LoopStart && s.is_infinite_loop());
                                              let has_preset_vision_leak = preset.enabled
-                                                 && (preset.trigger_mode == MacroTriggerMode::Press || preset.trigger_mode == MacroTriggerMode::Release)
+                                                 && Self::vision_search_needs_explicit_stop(preset)
                                                  && preset.steps.iter().any(|s| s.action == MacroAction::StartVisionSearch && s.enabled)
                                                  && !preset.steps.iter().any(|s| s.action == MacroAction::StopVision && s.enabled);
                                              let has_preset_audio_leak = preset.enabled
@@ -6662,7 +6691,14 @@ impl CrosshairApp {
                                                             && !preset.is_pixel_counter
                                                     });
                                                  let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
-                                                    if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
+                                                    if step.action == MacroAction::StartVisionSearch && supports_move_mouse {
+                                                        Self::render_start_vision_move_mouse_controls(
+                                                            ui,
+                                                            step,
+                                                            language,
+                                                            &mut live_sync,
+                                                        );
+                                                    } else if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
                                                         ui.add_space(4.0);
                                                         ui.weak(Self::tr_lang(language, "(Mouse move only)", "(Mouse move only)"));
                                                     }
@@ -8897,7 +8933,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             && !preset.is_pixel_counter
                                                     });
                                                  let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
-                                                    if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
+                                                    if step.action == MacroAction::StartVisionSearch && supports_move_mouse {
+                                                        Self::render_start_vision_move_mouse_controls(
+                                                            ui,
+                                                            step,
+                                                            language,
+                                                            &mut live_sync,
+                                                        );
+                                                    } else if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
                                                         ui.add_space(4.0);
                                                         ui.weak(Self::tr_lang(language, "(Mouse move only)", "(Mouse move only)"));
                                                     }
@@ -10770,6 +10813,8 @@ if supports_move_mouse {
                                         MacroAction::StopAudioSense
                                     ) && s.enabled
                                 });
+                                let needs_explicit_vision_stop =
+                                    Self::vision_search_needs_explicit_stop(preset);
                                 let step = &mut preset.steps[step_index];
                                 let is_selected = selected_steps_snapshot
                                     .contains(&(group.id, preset.id, step_index));
@@ -10816,7 +10861,7 @@ if supports_move_mouse {
                                     && step.action == MacroAction::LoopStart
                                     && step.is_infinite_loop();
                                 let has_step_vision_leak = preset.enabled
-                                    && (preset.trigger_mode == MacroTriggerMode::Press || preset.trigger_mode == MacroTriggerMode::Release)
+                                    && needs_explicit_vision_stop
                                     && step.action == MacroAction::StartVisionSearch
                                     && step.enabled
                                     && !has_stop_vision;
@@ -12083,7 +12128,14 @@ if supports_move_mouse {
                                                             && !preset.is_pixel_counter
                                                     });
                                                      let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
-                                                    if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
+                                                    if step.action == MacroAction::StartVisionSearch && supports_move_mouse {
+                                                        Self::render_start_vision_move_mouse_controls(
+                                                            ui,
+                                                            step,
+                                                            language,
+                                                            &mut live_sync,
+                                                        );
+                                                    } else if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
                                                         ui.add_space(4.0);
                                                         ui.weak(Self::tr_lang(language, "(Mouse move only)", "(Mouse move only)"));
                                                     }
@@ -13458,7 +13510,14 @@ if supports_move_mouse {
                                                      let is_pixel = selected_preset.map(|p| p.is_pixel_counter).unwrap_or(false);
                                                      let is_single_pixel = selected_preset.map(|p| p.use_color_matching && p.search_region_is_single_pixel && !p.is_pixel_counter).unwrap_or(false);
                                                      let supports_move_mouse = selected_preset.is_some() && !is_pixel && !is_single_pixel;
-                                                     if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
+                                                     if step.action == MacroAction::StartVisionSearch && supports_move_mouse {
+                                                         Self::render_start_vision_move_mouse_controls(
+                                                             ui,
+                                                             step,
+                                                             language,
+                                                             &mut live_sync,
+                                                         );
+                                                     } else if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
                                                          ui.add_space(4.0);
                                                          ui.weak(Self::tr_lang(language, "(Mouse move only)", "(Mouse move only)"));
                                                      }

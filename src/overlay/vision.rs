@@ -98,6 +98,8 @@ pub(crate) fn set_image_search_following_active(preset_id: u32, active: bool) {
         state.vision_following_presets.insert(preset_id);
     } else {
         state.vision_following_presets.remove(&preset_id);
+        state.vision_following_offsets.remove(&preset_id);
+        state.vision_following_axis_locks.remove(&preset_id);
     }
 }
 
@@ -130,6 +132,7 @@ pub(crate) fn vision_preset_by_id(spec: &str) -> Result<VisionPreset> {
 pub(crate) fn start_vision_following(
     spec: &str,
     variable_override: Option<&str>,
+    axis_lock: VisionMoveAxisLock,
     offset_x: i32,
     offset_y: i32,
 ) -> Result<()> {
@@ -144,6 +147,10 @@ pub(crate) fn start_vision_following(
         .lock()
         .vision_following_offsets
         .insert(preset.id, (offset_x, offset_y));
+    HOOK_STATE
+        .lock()
+        .vision_following_axis_locks
+        .insert(preset.id, axis_lock);
     let var_override = variable_override.map(|s| s.to_string());
     thread::spawn(move || run_image_search_follow_loop(preset, ui_tx, var_override));
     Ok(())
@@ -1633,13 +1640,27 @@ pub(crate) fn run_image_search_follow_loop(
     }
 
     while image_search_following_is_active(preset.id) {
-        let (offset_x, offset_y) = {
+        let (offset_x, offset_y, axis_lock) = {
             let state = HOOK_STATE.lock();
-            state
-                .vision_following_offsets
-                .get(&preset.id)
-                .copied()
-                .unwrap_or((0, 0))
+            (
+                state
+                    .vision_following_offsets
+                    .get(&preset.id)
+                    .copied()
+                    .unwrap_or((0, 0))
+                    .0,
+                state
+                    .vision_following_offsets
+                    .get(&preset.id)
+                    .copied()
+                    .unwrap_or((0, 0))
+                    .1,
+                state
+                    .vision_following_axis_locks
+                    .get(&preset.id)
+                    .copied()
+                    .unwrap_or(VisionMoveAxisLock::None),
+            )
         };
         match run_vision_once_with_options(
             &preset,
@@ -1649,7 +1670,7 @@ pub(crate) fn run_image_search_follow_loop(
             None,
             None,
             None,
-            VisionMoveAxisLock::None,
+            axis_lock,
             offset_x,
             offset_y,
         ) {
