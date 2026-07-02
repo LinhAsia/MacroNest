@@ -228,14 +228,16 @@ fn focus_window_for_title(
         let _ = SetForegroundWindow(hwnd);
         let _ = SetActiveWindow(hwnd);
         let _ = SetFocus(Some(hwnd));
-        thread::sleep(Duration::from_millis(18));
 
+        // ponytail: detach input queues before the settle delay so physical or
+        // macro-driven key events do not get stuck in a shared thread state.
         if attach_target {
             let _ = AttachThreadInput(target_thread, current_thread, false);
         }
         if attach_foreground {
             let _ = AttachThreadInput(foreground_thread, current_thread, false);
         }
+        thread::sleep(Duration::from_millis(18));
     }
     Ok(())
 }
@@ -525,13 +527,13 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
                 let _ = SetForegroundWindow(hwnd);
                 let _ = SetActiveWindow(hwnd);
                 let _ = SetFocus(Some(hwnd));
-                thread::sleep(Duration::from_millis(15));
                 if fg_tid != 0 && fg_tid != cur_tid {
                     let _ = AttachThreadInput(fg_tid, cur_tid, false);
                 }
                 if tgt_tid != 0 && tgt_tid != cur_tid {
                     let _ = AttachThreadInput(tgt_tid, cur_tid, false);
                 }
+                thread::sleep(Duration::from_millis(15));
             }
         }
     }
