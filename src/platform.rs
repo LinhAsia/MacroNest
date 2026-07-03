@@ -126,6 +126,10 @@ mod windows_platform {
         Ok(true)
     }
 
+    pub fn is_running_as_admin() -> bool {
+        unsafe { IsUserAnAdmin().as_bool() }
+    }
+
     pub fn launch_process_as_admin(executable: &Path, arguments: Option<&str>) -> Result<()> {
         launch_process_as_admin_with_show(executable, arguments, SW_SHOWNORMAL)
     }
@@ -625,6 +629,10 @@ mod fallback {
 
     pub fn relaunch_as_admin_if_needed() -> Result<bool> {
         Ok(false)
+    }
+
+    pub fn is_running_as_admin() -> bool {
+        false
     }
 
     pub fn acquire_single_instance() -> Result<Option<SingleInstanceGuard>> {

@@ -26,6 +26,8 @@ pub enum MacroAction {
     StopMacroPreset,
     #[serde(alias = "TriggerCustomPreset")]
     TriggerCommandPreset,
+    DisableNetworkAdapter,
+    EnableNetworkAdapter,
     EnableCrosshairProfile,
     DisableCrosshair,
     EnablePinPreset,
