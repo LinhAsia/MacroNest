@@ -219,6 +219,7 @@ mod windows_overlay {
     const XBUTTON2_DATA: u16 = 0x0002;
     const WMAPP_TRAYICON: u32 = WM_APP + 1;
     static NETWORK_ACTION_RESULT_SEQ: AtomicU64 = AtomicU64::new(1);
+    static NETWORK_LATENCY_RESULT_SEQ: AtomicU64 = AtomicU64::new(1);
     const NETWORK_LATENCY_RULE_GROUP: &str = "MacroNestHighPing";
     const WMAPP_PROCESS_QUEUE: u32 = WM_APP + 2;
     const WMAPP_WINDOW_FOCUS_CHANGED: u32 = WM_APP + 3;
@@ -21580,6 +21581,51 @@ mod windows_overlay {
         Ok(filter)
     }
 
+    fn network_latency_result_file_path() -> PathBuf {
+        let id = NETWORK_LATENCY_RESULT_SEQ.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("macronest_network_latency_{id}.txt"))
+    }
+
+    fn build_network_latency_start_command(
+        firewall_filter: &str,
+        stop_file: &std::path::Path,
+        result_file: &std::path::Path,
+        block_ms: u64,
+    ) -> String {
+        let stop_path = powershell_single_quote(&stop_file.to_string_lossy());
+        let result_path = powershell_single_quote(&result_file.to_string_lossy());
+        let group = powershell_single_quote(NETWORK_LATENCY_RULE_GROUP);
+        let inbound_name = powershell_single_quote(&format!("{NETWORK_LATENCY_RULE_GROUP}_In"));
+        let outbound_name = powershell_single_quote(&format!("{NETWORK_LATENCY_RULE_GROUP}_Out"));
+        let release_ms = 40_u64;
+        let filter_suffix = if firewall_filter.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" {firewall_filter}")
+        };
+        format!(
+            "$mnStopPath = '{stop_path}'; $mnResultPath = '{result_path}'; $mnGroup = '{group}'; $mnInbound = '{inbound_name}'; $mnOutbound = '{outbound_name}'; Remove-Item -LiteralPath $mnStopPath -ErrorAction SilentlyContinue; try {{ Remove-NetFirewallRule -Group $mnGroup -ErrorAction SilentlyContinue | Out-Null; New-NetFirewallRule -Name $mnInbound -DisplayName $mnInbound -Group $mnGroup -Direction Inbound -Action Block -Enabled False -Profile Any{filter_suffix} | Out-Null; New-NetFirewallRule -Name $mnOutbound -DisplayName $mnOutbound -Group $mnGroup -Direction Outbound -Action Block -Enabled False -Profile Any{filter_suffix} | Out-Null; Set-Content -LiteralPath $mnResultPath -Value 'OK'; while (-not (Test-Path -LiteralPath $mnStopPath)) {{ Set-NetFirewallRule -Group $mnGroup -Enabled True -ErrorAction SilentlyContinue | Out-Null; Start-Sleep -Milliseconds {block_ms}; Set-NetFirewallRule -Group $mnGroup -Enabled False -ErrorAction SilentlyContinue | Out-Null; Start-Sleep -Milliseconds {release_ms}; }} exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }} finally {{ Set-NetFirewallRule -Group $mnGroup -Enabled False -ErrorAction SilentlyContinue | Out-Null; Remove-NetFirewallRule -Group $mnGroup -ErrorAction SilentlyContinue | Out-Null; }}"
+        )
+    }
+
+    fn read_network_latency_result(result_file: &std::path::Path) -> Result<Option<String>> {
+        let content = std::fs::read_to_string(result_file)
+            .with_context(|| format!("Failed to read {}", result_file.display()))?;
+        let mut lines = content.lines();
+        let status = lines.next().unwrap_or_default().trim();
+        match status {
+            "OK" => Ok(None),
+            "ERR" => Ok(Some(
+                lines
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )),
+            _ => bail!("Unexpected network latency action result"),
+        }
+    }
+
     fn cleanup_network_latency_temp_files() {
         if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
             for entry in entries.flatten() {
@@ -21602,12 +21648,18 @@ mod windows_overlay {
     }
 
     fn stop_network_latency_simulation(notify: bool) -> Result<bool> {
-        let target_label = {
+        let (stop_file, target_label) = {
             let mut hook_state = HOOK_STATE.lock();
-            hook_state.network_latency_stop_file = None;
-            hook_state.network_latency_target_label.take()
+            (
+                hook_state.network_latency_stop_file.take(),
+                hook_state.network_latency_target_label.take(),
+            )
         };
         let had_target = target_label.is_some();
+        if let Some(stop_file) = stop_file {
+            let _ = std::fs::write(&stop_file, b"stop");
+            let _ = std::fs::remove_file(&stop_file);
+        }
         cleanup_network_latency_temp_files();
         cleanup_network_latency_firewall_rules()?;
         if notify {
@@ -21618,16 +21670,48 @@ mod windows_overlay {
     }
 
     fn trigger_network_latency_step(step: &MacroStep) -> Result<()> {
+        let block_ms = step.get_duration_ms().clamp(50, 5_000);
+        let firewall_filter = build_network_target_firewall_filter(&step.key)?;
         let target_label = network_action_target_label(&step.key);
-        let _ = build_network_target_firewall_filter(&step.key)?;
         let _ = stop_network_latency_simulation(false);
+        let stop_file = network_latency_result_file_path().with_extension("stop");
+        let result_file = network_latency_result_file_path();
+        let command_text = build_network_latency_start_command(
+            &firewall_filter,
+            &stop_file,
+            &result_file,
+            block_ms,
+        );
+        let args = format!(
+            "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {}",
+            encode_powershell_command(&command_text)
+        );
+        crate::platform::launch_hidden_process_as_admin(&powershell_executable_path(), Some(&args))
+            .context("Failed to start ping simulation helper")?;
+        let started = Instant::now();
+        let startup_error = loop {
+            if result_file.exists() {
+                break read_network_latency_result(&result_file)?;
+            }
+            if started.elapsed() >= Duration::from_secs(4) {
+                break Some("Timed out while starting ping simulation helper.".to_owned());
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+        let _ = std::fs::remove_file(&result_file);
+        if let Some(error) = startup_error {
+            let _ = std::fs::write(&stop_file, b"stop");
+            let _ = std::fs::remove_file(&stop_file);
+            let _ = cleanup_network_latency_firewall_rules();
+            bail!("{error}");
+        }
         {
             let mut hook_state = HOOK_STATE.lock();
-            hook_state.network_latency_stop_file = None;
+            hook_state.network_latency_stop_file = Some(stop_file);
             hook_state.network_latency_target_label = Some(target_label.clone());
         }
         send_network_action_status(format!(
-            "IncreasePing is temporarily disabled. The old firewall-based method could block the whole network and could not produce accurate low values like 20 ms on {target_label}."
+            "Ping simulation started on {target_label} ({block_ms} ms pulses)."
         ));
         Ok(())
     }
