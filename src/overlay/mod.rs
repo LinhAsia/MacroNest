@@ -21563,6 +21563,13 @@ mod windows_overlay {
         if trimmed.is_empty() {
             bail!("App executable path is empty");
         }
+        let path = std::path::Path::new(trimmed);
+        if !path.exists() {
+            bail!("App executable not found: {trimmed}");
+        }
+        if !path.is_file() {
+            bail!("App executable path is not a file: {trimmed}");
+        }
         Ok(trimmed.to_owned())
     }
 
@@ -21619,7 +21626,7 @@ mod windows_overlay {
             .map(|(rule_name, direction)| {
                 let escaped_name = powershell_single_quote(rule_name);
                 format!(
-                    "Remove-NetFirewallRule -Name '{escaped_name}' -ErrorAction SilentlyContinue | Out-Null; New-NetFirewallRule -Name '{escaped_name}' -DisplayName '{escaped_name}' -Group '{group}' -Direction {direction} -Action Block -Enabled True -Program '{program}' -Profile Any | Out-Null"
+                    "Remove-NetFirewallRule -Name '{escaped_name}' -ErrorAction SilentlyContinue | Out-Null; New-NetFirewallRule -Name '{escaped_name}' -DisplayName '{escaped_name}' -Group '{group}' -Direction {direction} -Action Block -Enabled True -Program '{program}' -Profile Any | Out-Null; Get-NetFirewallRule -Name '{escaped_name}' -ErrorAction Stop | Out-Null"
                 )
             })
             .collect::<Vec<_>>()
@@ -21668,6 +21675,15 @@ mod windows_overlay {
         }
     }
 
+    fn format_app_network_exit_failure(exit_code: u32) -> String {
+        match exit_code {
+            0 => "App network action finished without creating a result.".to_owned(),
+            1 => "App network action failed. Windows may have denied the firewall change, or the admin prompt was cancelled.".to_owned(),
+            124 => "App network action timed out while waiting for the elevated firewall command.".to_owned(),
+            code => format!("App network action failed with exit code {code}."),
+        }
+    }
+
     fn update_app_network_session_state(block: bool, rule_names: &[String]) {
         let mut hook_state = HOOK_STATE.lock();
         if block {
@@ -21698,7 +21714,7 @@ mod windows_overlay {
         let directions = app_network_direction_labels(step)?.join(" + ");
         thread::spawn(move || {
             let message = match run_hidden_powershell_script(&command_text, true, 15_000) {
-                Ok(_) => match read_simple_network_action_result(&result_file) {
+                Ok(exit_code) => match read_simple_network_action_result(&result_file) {
                     Ok(None) => {
                         update_app_network_session_state(block, &rule_names);
                         if block {
@@ -21711,7 +21727,7 @@ mod windows_overlay {
                         format!("App network action failed: {error}")
                     }
                     Ok(Some(_)) => "App network action failed.".to_owned(),
-                    Err(error) => format!("App network action failed: {error}"),
+                    Err(_) => format_app_network_exit_failure(exit_code),
                 },
                 Err(error) => format!("App network action failed: {error}"),
             };
