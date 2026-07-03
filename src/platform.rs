@@ -134,6 +134,13 @@ mod windows_platform {
         launch_process_as_admin_with_show(executable, arguments, SW_SHOWNORMAL)
     }
 
+    pub fn launch_hidden_process_as_admin(
+        executable: &Path,
+        arguments: Option<&str>,
+    ) -> Result<()> {
+        launch_process_as_admin_with_show(executable, arguments, SW_HIDE)
+    }
+
     pub fn run_hidden_process_as_admin_and_wait(
         executable: &Path,
         arguments: Option<&str>,
@@ -644,6 +651,13 @@ mod fallback {
         _timeout_ms: u32,
     ) -> Result<u32> {
         Ok(0)
+    }
+
+    pub fn launch_hidden_process_as_admin(
+        _executable: &std::path::Path,
+        _arguments: Option<&str>,
+    ) -> Result<()> {
+        Ok(())
     }
 
     pub fn set_native_window_transitions_disabled(_frame: &Frame, _disabled: bool) -> bool {
