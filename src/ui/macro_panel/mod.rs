@@ -548,43 +548,6 @@ impl CrosshairApp {
         });
     }
 
-    fn render_network_latency_editor(
-        ui: &mut egui::Ui,
-        language: UiLanguage,
-        id_salt: impl std::hash::Hash + Copy,
-        step: &mut MacroStep,
-        live_sync: &mut bool,
-        width: f32,
-    ) {
-        Self::render_network_adapter_target_editor(
-            ui,
-            language,
-            (id_salt, "target"),
-            &mut step.key,
-            live_sync,
-            width,
-        );
-        ui.horizontal(|ui| {
-            ui.label(Self::tr_lang(language, "Lag", "Lag"));
-            let response = Self::render_variable_text_edit(
-                ui,
-                &mut step.duration_expr,
-                ui.make_persistent_id((id_salt, "lag-ms")),
-                68.0,
-                120.0,
-                21.0,
-                21.0,
-                "1500",
-                false,
-            );
-            if response.changed() {
-                Self::remember_duration_input(step);
-                *live_sync = true;
-            }
-            ui.label(Self::tr_lang(language, "ms", "ms"));
-        });
-    }
-
     fn clear_macro_action_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let macro_popup_id = ui.make_persistent_id((id_source, "macro-submenu-popup"));
@@ -1437,8 +1400,6 @@ impl CrosshairApp {
         &[
             MacroAction::DisableNetworkAdapter,
             MacroAction::EnableNetworkAdapter,
-            MacroAction::IncreaseNetworkLatency,
-            MacroAction::ResetNetworkLatency,
         ]
     }
 
@@ -1565,8 +1526,8 @@ impl CrosshairApp {
         let response = inner.response.interact(egui::Sense::hover());
         response.on_hover_text(Self::tr_lang(
             language,
-            "Network actions: disable, enable, increase ping, and reset ping.",
-            "Network actions: disable, enable, increase ping, and reset ping.",
+            "Network actions: disable and enable network adapters.",
+            "Network actions: disable and enable network adapters.",
         ));
     }
 
@@ -6510,17 +6471,6 @@ impl CrosshairApp {
                                                         &mut live_sync,
                                                         160.0,
                                                     );
-                                                } else if step.action
-                                                    == MacroAction::IncreaseNetworkLatency
-                                                {
-                                                    Self::render_network_latency_editor(
-                                                        ui,
-                                                        language,
-                                                        (group.id, preset.id, "hold-stop-network-latency"),
-                                                        step,
-                                                        &mut live_sync,
-                                                        160.0,
-                                                    );
                                                 } else if matches!(
                                                     step.action,
                                                     MacroAction::EnableMacroPreset
@@ -8784,17 +8734,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         language,
                                                         (group.id, preset.id, "press-stop-network-target"),
                                                         &mut step.key,
-                                                        &mut live_sync,
-                                                        160.0,
-                                                    );
-                                                } else if step.action
-                                                    == MacroAction::IncreaseNetworkLatency
-                                                {
-                                                    Self::render_network_latency_editor(
-                                                        ui,
-                                                        language,
-                                                        (group.id, preset.id, "press-stop-network-latency"),
-                                                        step,
                                                         &mut live_sync,
                                                         160.0,
                                                     );
@@ -11920,17 +11859,6 @@ if supports_move_mouse {
                                                         language,
                                                         (group.id, preset.id, step_index, "network-target"),
                                                         &mut step.key,
-                                                        &mut live_sync,
-                                                        146.0,
-                                                    );
-                                                } else if step.action
-                                                    == MacroAction::IncreaseNetworkLatency
-                                                {
-                                                    Self::render_network_latency_editor(
-                                                        ui,
-                                                        language,
-                                                        (group.id, preset.id, step_index, "network-latency"),
-                                                        step,
                                                         &mut live_sync,
                                                         146.0,
                                                     );
