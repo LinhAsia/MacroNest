@@ -567,8 +567,8 @@ impl CrosshairApp {
                 .button(Self::tr_lang(language, "Browse", "Browse"))
                 .on_hover_text(Self::tr_lang(
                     language,
-                    "Choose one executable file to block or unblock.",
-                    "Choose one executable file to block or unblock.",
+                    "Choose the exact executable that opens the game's network connection.",
+                    "Choose the exact executable that opens the game's network connection.",
                 ))
                 .clicked()
                 && let Some(path) = rfd::FileDialog::new()
@@ -604,6 +604,14 @@ impl CrosshairApp {
                 );
             }
         });
+        ui.small(
+            RichText::new(Self::tr_lang(
+                language,
+                "Blocks only the exact .exe that owns the socket. If the launcher starts another game process, choose that real network .exe instead.",
+                "Blocks only the exact .exe that owns the socket. If the launcher starts another game process, choose that real network .exe instead.",
+            ))
+            .color(Color32::from_gray(190)),
+        );
     }
 
     fn clear_macro_action_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
