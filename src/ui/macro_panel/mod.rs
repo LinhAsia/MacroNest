@@ -565,7 +565,7 @@ impl CrosshairApp {
                         RichText::new(Self::tr_lang(
                             language,
                             "App .exe path",
-                            "App .exe path",
+                            "Đường dẫn .exe của app",
                         ))
                         .color(hint_color)
                         .weak(),
@@ -576,11 +576,11 @@ impl CrosshairApp {
                 *live_sync = true;
             }
             if ui
-                .button(Self::tr_lang(language, "Browse", "Browse"))
+                .button(Self::tr_lang(language, "Browse", "Duyệt"))
                 .on_hover_text(Self::tr_lang(
                     language,
                     "Choose the exact executable that opens the game's network connection.",
-                    "Choose the exact executable that opens the game's network connection.",
+                    "Chọn đúng file thực thi đang mở kết nối mạng của game.",
                 ))
                 .clicked()
                 && let Some(path) = rfd::FileDialog::new()
@@ -599,7 +599,7 @@ impl CrosshairApp {
                 ui.horizontal(|ui| {
                     ui.label(Self::material_icon_text(0xe002, 14.0).color(warn_color));
                     ui.label(
-                        RichText::new(Self::tr_lang(language, "APP NETWORK TIP", "APP NETWORK TIP"))
+                        RichText::new(Self::tr_lang(language, "APP NETWORK TIP", "MẸO CHẶN MẠNG APP"))
                             .strong()
                             .color(warn_color),
                     );
@@ -607,7 +607,7 @@ impl CrosshairApp {
                 ui.label(Self::tr_lang(
                     language,
                     "Blocks only the exact .exe that owns the socket. If the launcher starts another game process, choose that real network .exe instead.",
-                    "Blocks only the exact .exe that owns the socket. If the launcher starts another game process, choose that real network .exe instead.",
+                    "Chỉ chặn đúng file .exe đang giữ kết nối mạng. Nếu launcher mở ra process game khác, hãy chọn đúng file .exe mạng thật đó.",
                 ));
             });
         });
@@ -615,13 +615,13 @@ impl CrosshairApp {
             let inbound_changed = ui
                 .checkbox(
                     &mut step.network_block_inbound,
-                    Self::tr_lang(language, "Inbound", "Inbound"),
+                    Self::tr_lang(language, "Inbound", "Chiều vào"),
                 )
                 .changed();
             let outbound_changed = ui
                 .checkbox(
                     &mut step.network_block_outbound,
-                    Self::tr_lang(language, "Outbound", "Outbound"),
+                    Self::tr_lang(language, "Outbound", "Chiều ra"),
                 )
                 .changed();
             *live_sync |= inbound_changed || outbound_changed;
@@ -631,7 +631,7 @@ impl CrosshairApp {
                     Self::tr_lang(
                         language,
                         "Select at least one direction",
-                        "Select at least one direction",
+                        "Hãy chọn ít nhất một chiều",
                     ),
                 );
             }
@@ -1612,14 +1612,14 @@ impl CrosshairApp {
                 }
                 ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
                 ui.add_space(2.0);
-                ui.label(RichText::new(Self::tr_lang(language, "Network", "Network")).size(10.0));
+                ui.label(RichText::new(Self::tr_lang(language, "Network", "Mạng")).size(10.0));
             },
         );
         let response = inner.response.interact(egui::Sense::hover());
         response.on_hover_text(Self::tr_lang(
             language,
             "Network actions: adapter toggles and per-app network blocking.",
-            "Network actions: adapter toggles and per-app network blocking.",
+            "Các action mạng: bật/tắt adapter và chặn mạng theo từng app.",
         ));
     }
 

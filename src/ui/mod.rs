@@ -5682,6 +5682,16 @@ impl CrosshairApp {
                                         self.persist();
                                     }
 
+                                    if self.state.quick_screen_draw_tool
+                                        != QuickScreenDrawTool::Brush
+                                    {
+                                        self.state.quick_screen_draw_tool =
+                                            QuickScreenDrawTool::Brush;
+                                        self.sync_quick_screen_draw_config();
+                                        self.persist();
+                                    }
+
+                                    if false {
                                     ui.add_space(4.0);
                                     ui.label(
                                         RichText::new(Self::tr_lang(
@@ -5726,6 +5736,7 @@ impl CrosshairApp {
                                     if before_tool != self.state.quick_screen_draw_tool {
                                         self.sync_quick_screen_draw_config();
                                         self.persist();
+                                    }
                                     }
 
                                     ui.add_space(4.0);
