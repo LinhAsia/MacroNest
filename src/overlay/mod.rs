@@ -219,8 +219,6 @@ mod windows_overlay {
     const XBUTTON2_DATA: u16 = 0x0002;
     const WMAPP_TRAYICON: u32 = WM_APP + 1;
     static NETWORK_ACTION_RESULT_SEQ: AtomicU64 = AtomicU64::new(1);
-    static NETWORK_LATENCY_RESULT_SEQ: AtomicU64 = AtomicU64::new(1);
-    const NETWORK_LATENCY_RULE_GROUP: &str = "MacroNestHighPing";
     const WMAPP_PROCESS_QUEUE: u32 = WM_APP + 2;
     const WMAPP_WINDOW_FOCUS_CHANGED: u32 = WM_APP + 3;
     const WMAPP_WINDOW_LOCATION_CHANGED: u32 = WM_APP + 4;
@@ -2320,8 +2318,6 @@ mod windows_overlay {
         ocr_presets: Vec<crate::model::OcrPreset>,
         command_presets: Vec<CommandPreset>,
         disabled_network_adapters_this_session: HashSet<String>,
-        network_latency_stop_file: Option<PathBuf>,
-        network_latency_target_label: Option<String>,
         groq_settings: crate::model::GroqSettings,
         macro_groups: Vec<MacroGroup>,
         active_macro_folder_scope: MacroFolderScope,
@@ -2427,8 +2423,6 @@ mod windows_overlay {
                 ocr_presets: Vec::new(),
                 command_presets: Vec::new(),
                 disabled_network_adapters_this_session: HashSet::new(),
-                network_latency_stop_file: None,
-                network_latency_target_label: None,
                 groq_settings: crate::model::GroqSettings::default(),
                 macro_groups: Vec::new(),
                 active_macro_folder_scope: MacroFolderScope::Root,
@@ -21560,167 +21554,6 @@ mod windows_overlay {
         Ok(())
     }
 
-    fn build_network_target_firewall_filter(target_spec: &str) -> Result<String> {
-        let target_spec = interpolate_variables(target_spec);
-        let trimmed = target_spec.trim();
-        let normalized = if trimmed.is_empty() { "wifi" } else { trimmed };
-        let filter = if let Some(custom_name) = normalized.strip_prefix("custom:") {
-            let custom_name = custom_name.trim();
-            if custom_name.is_empty() {
-                bail!("Custom network adapter name is empty");
-            }
-            let escaped = powershell_single_quote(custom_name);
-            format!("-InterfaceAlias '{escaped}'")
-        } else if normalized.eq_ignore_ascii_case("all") {
-            String::new()
-        } else if normalized.eq_ignore_ascii_case("ethernet") {
-            "-InterfaceType Wired".to_owned()
-        } else {
-            "-InterfaceType Wireless".to_owned()
-        };
-        Ok(filter)
-    }
-
-    fn network_latency_result_file_path() -> PathBuf {
-        let id = NETWORK_LATENCY_RESULT_SEQ.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("macronest_network_latency_{id}.txt"))
-    }
-
-    fn build_network_latency_start_command(
-        firewall_filter: &str,
-        stop_file: &std::path::Path,
-        result_file: &std::path::Path,
-        block_ms: u64,
-    ) -> String {
-        let stop_path = powershell_single_quote(&stop_file.to_string_lossy());
-        let result_path = powershell_single_quote(&result_file.to_string_lossy());
-        let group = powershell_single_quote(NETWORK_LATENCY_RULE_GROUP);
-        let inbound_name = powershell_single_quote(&format!("{NETWORK_LATENCY_RULE_GROUP}_In"));
-        let outbound_name = powershell_single_quote(&format!("{NETWORK_LATENCY_RULE_GROUP}_Out"));
-        let release_ms = 40_u64;
-        let filter_suffix = if firewall_filter.trim().is_empty() {
-            String::new()
-        } else {
-            format!(" {firewall_filter}")
-        };
-        format!(
-            "$mnStopPath = '{stop_path}'; $mnResultPath = '{result_path}'; $mnGroup = '{group}'; $mnInbound = '{inbound_name}'; $mnOutbound = '{outbound_name}'; Remove-Item -LiteralPath $mnStopPath -ErrorAction SilentlyContinue; try {{ Remove-NetFirewallRule -Group $mnGroup -ErrorAction SilentlyContinue | Out-Null; New-NetFirewallRule -Name $mnInbound -DisplayName $mnInbound -Group $mnGroup -Direction Inbound -Action Block -Enabled False -Profile Any{filter_suffix} | Out-Null; New-NetFirewallRule -Name $mnOutbound -DisplayName $mnOutbound -Group $mnGroup -Direction Outbound -Action Block -Enabled False -Profile Any{filter_suffix} | Out-Null; Set-Content -LiteralPath $mnResultPath -Value 'OK'; while (-not (Test-Path -LiteralPath $mnStopPath)) {{ Set-NetFirewallRule -Group $mnGroup -Enabled True -ErrorAction SilentlyContinue | Out-Null; Start-Sleep -Milliseconds {block_ms}; Set-NetFirewallRule -Group $mnGroup -Enabled False -ErrorAction SilentlyContinue | Out-Null; Start-Sleep -Milliseconds {release_ms}; }} exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }} finally {{ Set-NetFirewallRule -Group $mnGroup -Enabled False -ErrorAction SilentlyContinue | Out-Null; Remove-NetFirewallRule -Group $mnGroup -ErrorAction SilentlyContinue | Out-Null; }}"
-        )
-    }
-
-    fn read_network_latency_result(result_file: &std::path::Path) -> Result<Option<String>> {
-        let content = std::fs::read_to_string(result_file)
-            .with_context(|| format!("Failed to read {}", result_file.display()))?;
-        let mut lines = content.lines();
-        let status = lines.next().unwrap_or_default().trim();
-        match status {
-            "OK" => Ok(None),
-            "ERR" => Ok(Some(
-                lines
-                    .map(str::trim)
-                    .filter(|line| !line.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            )),
-            _ => bail!("Unexpected network latency action result"),
-        }
-    }
-
-    fn cleanup_network_latency_temp_files() {
-        if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
-            for entry in entries.flatten() {
-                let file_name = entry.file_name();
-                let file_name = file_name.to_string_lossy();
-                if file_name.starts_with("macronest_network_latency_") {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
-        }
-    }
-
-    fn cleanup_network_latency_firewall_rules() -> Result<()> {
-        let group = powershell_single_quote(NETWORK_LATENCY_RULE_GROUP);
-        let command_text = format!(
-            "$mnGroup = '{group}'; Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object {{ $_.Group -eq $mnGroup -or $_.Name -like \"$($mnGroup)*\" -or $_.DisplayName -like \"$($mnGroup)*\" }} | Remove-NetFirewallRule -ErrorAction SilentlyContinue | Out-Null"
-        );
-        let _ = run_hidden_powershell_script(&command_text, true, 15_000)?;
-        Ok(())
-    }
-
-    fn stop_network_latency_simulation(notify: bool) -> Result<bool> {
-        let (stop_file, target_label) = {
-            let mut hook_state = HOOK_STATE.lock();
-            (
-                hook_state.network_latency_stop_file.take(),
-                hook_state.network_latency_target_label.take(),
-            )
-        };
-        let had_target = target_label.is_some();
-        if let Some(stop_file) = stop_file {
-            let _ = std::fs::write(&stop_file, b"stop");
-            let _ = std::fs::remove_file(&stop_file);
-        }
-        cleanup_network_latency_temp_files();
-        cleanup_network_latency_firewall_rules()?;
-        if notify {
-            let label = target_label.unwrap_or_else(|| "network traffic".to_owned());
-            send_network_action_status(format!("Restored normal ping for {label}."));
-        }
-        Ok(had_target)
-    }
-
-    fn trigger_network_latency_step(step: &MacroStep) -> Result<()> {
-        let block_ms = step.get_duration_ms().clamp(50, 5_000);
-        let firewall_filter = build_network_target_firewall_filter(&step.key)?;
-        let target_label = network_action_target_label(&step.key);
-        let _ = stop_network_latency_simulation(false);
-        let stop_file = network_latency_result_file_path().with_extension("stop");
-        let result_file = network_latency_result_file_path();
-        let command_text = build_network_latency_start_command(
-            &firewall_filter,
-            &stop_file,
-            &result_file,
-            block_ms,
-        );
-        let args = format!(
-            "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {}",
-            encode_powershell_command(&command_text)
-        );
-        crate::platform::launch_hidden_process_as_admin(&powershell_executable_path(), Some(&args))
-            .context("Failed to start ping simulation helper")?;
-        let started = Instant::now();
-        let startup_error = loop {
-            if result_file.exists() {
-                break read_network_latency_result(&result_file)?;
-            }
-            if started.elapsed() >= Duration::from_secs(4) {
-                break Some("Timed out while starting ping simulation helper.".to_owned());
-            }
-            thread::sleep(Duration::from_millis(50));
-        };
-        let _ = std::fs::remove_file(&result_file);
-        if let Some(error) = startup_error {
-            let _ = std::fs::write(&stop_file, b"stop");
-            let _ = std::fs::remove_file(&stop_file);
-            let _ = cleanup_network_latency_firewall_rules();
-            bail!("{error}");
-        }
-        {
-            let mut hook_state = HOOK_STATE.lock();
-            hook_state.network_latency_stop_file = Some(stop_file);
-            hook_state.network_latency_target_label = Some(target_label.clone());
-        }
-        send_network_action_status(format!(
-            "Ping simulation started on {target_label} ({block_ms} ms pulses)."
-        ));
-        Ok(())
-    }
-
-    fn restore_network_latency_on_exit() -> Result<()> {
-        let _ = stop_network_latency_simulation(false)?;
-        Ok(())
-    }
-
     fn find_command_preset_by_spec(spec: &str) -> Option<CommandPreset> {
         let hook_state = HOOK_STATE.lock();
         find_preset_by_spec(
@@ -22663,14 +22496,6 @@ mod windows_overlay {
                 let _ = trigger_network_adapter_step(step, true);
             }
 
-            MacroAction::IncreaseNetworkLatency => {
-                let _ = trigger_network_latency_step(step);
-            }
-
-            MacroAction::ResetNetworkLatency => {
-                let _ = stop_network_latency_simulation(true);
-            }
-
             MacroAction::FunnyMemeReply => {
                 let _ = trigger_funny_meme_reply_step(preset_id, None, step);
             }
@@ -23389,14 +23214,6 @@ mod windows_overlay {
                     let _ = trigger_network_adapter_step(step, true);
                 }
 
-                MacroAction::IncreaseNetworkLatency => {
-                    let _ = trigger_network_latency_step(step);
-                }
-
-                MacroAction::ResetNetworkLatency => {
-                    let _ = stop_network_latency_simulation(true);
-                }
-
                 MacroAction::FunnyMemeReply => {
                     let _ = trigger_funny_meme_reply_step(preset_id, Some(absolute_index), step);
                 }
@@ -24101,14 +23918,6 @@ mod windows_overlay {
 
                 MacroAction::EnableNetworkAdapter => {
                     let _ = trigger_network_adapter_step(step, true);
-                }
-
-                MacroAction::IncreaseNetworkLatency => {
-                    let _ = trigger_network_latency_step(step);
-                }
-
-                MacroAction::ResetNetworkLatency => {
-                    let _ = stop_network_latency_simulation(true);
                 }
 
                 MacroAction::FunnyMemeReply => {
@@ -25500,25 +25309,6 @@ mod windows_overlay {
         }
 
         #[test]
-        fn test_build_network_latency_filter_supports_wifi_ethernet_all_and_custom_targets() {
-            let _guard = TEST_MUTEX.lock().unwrap();
-
-            assert_eq!(
-                build_network_target_firewall_filter("").unwrap(),
-                "-InterfaceType Wireless"
-            );
-            assert_eq!(
-                build_network_target_firewall_filter("ethernet").unwrap(),
-                "-InterfaceType Wired"
-            );
-            assert_eq!(build_network_target_firewall_filter("all").unwrap(), "");
-            assert_eq!(
-                build_network_target_firewall_filter("custom:Office LAN's USB").unwrap(),
-                "-InterfaceAlias 'Office LAN''s USB'"
-            );
-        }
-
-        #[test]
         fn test_queue_macro_preset_enabled_change_accepts_multiple_ids() {
             let _guard = TEST_MUTEX.lock().unwrap();
             let mut pending = HashMap::new();
@@ -26373,8 +26163,6 @@ mod windows_overlay {
                 | MacroAction::TriggerCommandPreset
                 | MacroAction::DisableNetworkAdapter
                 | MacroAction::EnableNetworkAdapter
-                | MacroAction::IncreaseNetworkLatency
-                | MacroAction::ResetNetworkLatency
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::DisableCrosshair
                 | MacroAction::EnablePinPreset
@@ -26554,8 +26342,6 @@ mod windows_overlay {
             | MacroAction::TriggerCommandPreset
             | MacroAction::DisableNetworkAdapter
             | MacroAction::EnableNetworkAdapter
-            | MacroAction::IncreaseNetworkLatency
-            | MacroAction::ResetNetworkLatency
             | MacroAction::EnableCrosshairProfile
             | MacroAction::DisableCrosshair
             | MacroAction::EnablePinPreset
@@ -29971,7 +29757,6 @@ mod windows_overlay {
         let _ = crate::platform::show_taskbar();
         let _ = restore_mouse_sensitivity_on_exit();
         let _ = restore_network_adapters_on_exit();
-        let _ = restore_network_latency_on_exit();
         let _ = unsafe { ShowWindow(runtime.overlay_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.hud_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.pin_hwnd, SW_HIDE) };

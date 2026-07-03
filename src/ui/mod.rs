@@ -6623,8 +6623,6 @@ impl CrosshairApp {
             MacroAction::TriggerCommandPreset => "TriggerCommand",
             MacroAction::DisableNetworkAdapter => "DisableNetwork",
             MacroAction::EnableNetworkAdapter => "EnableNetwork",
-            MacroAction::IncreaseNetworkLatency => "IncreasePing",
-            MacroAction::ResetNetworkLatency => "ResetPing",
             MacroAction::EnableCrosshairProfile => "EnableCrosshair",
             MacroAction::DisableCrosshair => "DisableCrosshair",
             MacroAction::EnablePinPreset => "EnablePin",
@@ -6744,14 +6742,6 @@ impl CrosshairApp {
             MacroAction::EnableNetworkAdapter => (
                 "macro_action_tooltip.enable_network_adapter",
                 "Enable Wi-Fi, Ethernet, all physical adapters, or one exact adapter name.",
-            ),
-            MacroAction::IncreaseNetworkLatency => (
-                "macro_action_tooltip.increase_network_latency",
-                "Simulate higher ping by pulsing firewall blocks on the selected network target until you reset it.",
-            ),
-            MacroAction::ResetNetworkLatency => (
-                "macro_action_tooltip.reset_network_latency",
-                "Stop the active ping simulation and restore normal traffic flow.",
             ),
             MacroAction::EnableCrosshairProfile => (
                 "macro_action_tooltip.enable_crosshair_profile",
@@ -7022,8 +7012,6 @@ impl CrosshairApp {
             MacroAction::TriggerCommandPreset => 0xeb8e,
             MacroAction::DisableNetworkAdapter => 0xe648,
             MacroAction::EnableNetworkAdapter => 0xe63e,
-            MacroAction::IncreaseNetworkLatency => 0xe1ba,
-            MacroAction::ResetNetworkLatency => 0xe8ac,
             MacroAction::EnableCrosshairProfile => 0xe3c5,
             MacroAction::DisableCrosshair => 0xe1b7,
             MacroAction::EnablePinPreset => 0xe0c8,
@@ -7127,13 +7115,6 @@ impl CrosshairApp {
             }
             MacroAction::EnableNetworkAdapter => {
                 ("macro_action_short_label.enable_network_adapter", "NetOn")
-            }
-            MacroAction::IncreaseNetworkLatency => (
-                "macro_action_short_label.increase_network_latency",
-                "PingUp",
-            ),
-            MacroAction::ResetNetworkLatency => {
-                ("macro_action_short_label.reset_network_latency", "PingOk")
             }
             MacroAction::EnableCrosshairProfile => {
                 ("macro_action_short_label.enable_crosshair_profile", "Cross")
@@ -7382,7 +7363,6 @@ impl CrosshairApp {
                 | MacroAction::TriggerCommandPreset
                 | MacroAction::DisableNetworkAdapter
                 | MacroAction::EnableNetworkAdapter
-                | MacroAction::IncreaseNetworkLatency
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::EnablePinPreset
                 | MacroAction::PlayMousePathPreset
