@@ -548,6 +548,43 @@ impl CrosshairApp {
         });
     }
 
+    fn render_network_latency_editor(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_salt: impl std::hash::Hash + Copy,
+        step: &mut MacroStep,
+        live_sync: &mut bool,
+        width: f32,
+    ) {
+        Self::render_network_adapter_target_editor(
+            ui,
+            language,
+            (id_salt, "target"),
+            &mut step.key,
+            live_sync,
+            width,
+        );
+        ui.horizontal(|ui| {
+            ui.label(Self::tr_lang(language, "Lag", "Lag"));
+            let response = Self::render_variable_text_edit(
+                ui,
+                &mut step.duration_expr,
+                ui.make_persistent_id((id_salt, "lag-ms")),
+                68.0,
+                120.0,
+                21.0,
+                21.0,
+                "1500",
+                false,
+            );
+            if response.changed() {
+                Self::remember_duration_input(step);
+                *live_sync = true;
+            }
+            ui.label(Self::tr_lang(language, "ms", "ms"));
+        });
+    }
+
     fn clear_macro_action_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let macro_popup_id = ui.make_persistent_id((id_source, "macro-submenu-popup"));
@@ -1394,6 +1431,143 @@ impl CrosshairApp {
             MacroAction::ScanVisionOnce,
             MacroAction::StopVision,
         ]
+    }
+
+    fn network_macro_actions() -> &'static [MacroAction] {
+        &[
+            MacroAction::DisableNetworkAdapter,
+            MacroAction::EnableNetworkAdapter,
+            MacroAction::IncreaseNetworkLatency,
+            MacroAction::ResetNetworkLatency,
+        ]
+    }
+
+    fn macro_action_is_network(action: MacroAction) -> bool {
+        Self::network_macro_actions().contains(&action)
+    }
+
+    fn render_network_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_source: impl std::hash::Hash + Copy,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        let selected = Self::macro_action_is_network(*current);
+        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let popup_id = ui.make_persistent_id((id_source, "network-submenu-popup"));
+        let active_owner = ui
+            .ctx()
+            .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
+        let top_level_hovered = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(action_hover_id))
+            .unwrap_or(false);
+        let mut open = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(popup_id))
+            .unwrap_or(false);
+        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::Network) {
+            open = false;
+        }
+        if top_level_hovered {
+            open = false;
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
+        }
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
+        }
+        let inner = ui.allocate_ui_with_layout(
+            vec2(58.0, 42.0),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| {
+                let response = ui.add_sized(
+                    [34.0, 24.0],
+                    Button::new(Self::material_icon_text(0xe1ba, 18.0)).selected(selected),
+                );
+                if response.hovered() || response.clicked() {
+                    Self::clear_macro_action_submenus(ui, id_source);
+                    open = true;
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(owner_id, MacroActionSubmenuKind::Network)
+                    });
+                }
+                let popup_rect_id = ui.make_persistent_id((id_source, "network-submenu-rect"));
+                egui::Popup::from_response(&response)
+                    .id(popup_id)
+                    .open_bool(&mut open)
+                    .align(egui::RectAlign::BOTTOM_START)
+                    .layout(egui::Layout::top_down_justified(egui::Align::Min))
+                    .width(220.0)
+                    .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                    .show(|ui| {
+                        let rect = ui.max_rect();
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(popup_rect_id, rect));
+                        egui::Grid::new((id_source, "network-action-grid"))
+                            .num_columns(2)
+                            .spacing([6.0, 6.0])
+                            .show(ui, |ui| {
+                                for (index, action) in
+                                    Self::network_macro_actions().iter().copied().enumerate()
+                                {
+                                    Self::render_macro_action_option(
+                                        ui,
+                                        language,
+                                        current,
+                                        action,
+                                        live_sync,
+                                        action_hover_id,
+                                        true,
+                                    );
+                                    if (index + 1) % 2 == 0 {
+                                        ui.end_row();
+                                    }
+                                }
+                            });
+                    });
+                let popup_rect: Option<egui::Rect> =
+                    ui.ctx().data(|data| data.get_temp(popup_rect_id));
+                if open {
+                    if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
+                        let mut keep_open_rect = response.rect.expand(10.0);
+                        if let Some(rect) = popup_rect {
+                            keep_open_rect = keep_open_rect.union(rect.expand(10.0));
+                            if rect.contains(pointer_pos) {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(owner_id, MacroActionSubmenuKind::Network)
+                                });
+                            }
+                        }
+                        if !keep_open_rect.contains(pointer_pos) {
+                            open = false;
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
+                            });
+                        }
+                    } else {
+                        open = false;
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
+                        });
+                    }
+                }
+                ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
+                ui.add_space(2.0);
+                ui.label(RichText::new(Self::tr_lang(language, "Network", "Network")).size(10.0));
+            },
+        );
+        let response = inner.response.interact(egui::Sense::hover());
+        response.on_hover_text(Self::tr_lang(
+            language,
+            "Network actions: disable, enable, increase ping, and reset ping.",
+            "Network actions: disable, enable, increase ping, and reset ping.",
+        ));
     }
 
     fn macro_action_is_image_search(action: MacroAction) -> bool {
@@ -6071,8 +6245,6 @@ impl CrosshairApp {
                                                             MacroAction::ApplyWindowPreset,
                                                             MacroAction::FocusWindowPreset,
                                                             MacroAction::TriggerCommandPreset,
-                                                            MacroAction::DisableNetworkAdapter,
-                                                            MacroAction::EnableNetworkAdapter,
                                                             MacroAction::EnableCrosshairProfile,
                                                             MacroAction::DisableCrosshair,
                                                             MacroAction::EnablePinPreset,
@@ -6125,6 +6297,16 @@ impl CrosshairApp {
                                                             ui,
                                                             language,
                                                             (group.id, preset.id, "hold-stop-trigger-macro-group"),
+                                                            &mut step.action,
+                                                            &mut live_sync,
+                                                            action_hover_id,
+                                                        );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
+                                                        Self::render_network_action_group_option(
+                                                            ui,
+                                                            language,
+                                                            (group.id, preset.id, "hold-stop-network-group"),
                                                             &mut step.action,
                                                             &mut live_sync,
                                                             action_hover_id,
@@ -6325,6 +6507,17 @@ impl CrosshairApp {
                                                         language,
                                                         (group.id, preset.id, "hold-stop-network-target"),
                                                         &mut step.key,
+                                                        &mut live_sync,
+                                                        160.0,
+                                                    );
+                                                } else if step.action
+                                                    == MacroAction::IncreaseNetworkLatency
+                                                {
+                                                    Self::render_network_latency_editor(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, "hold-stop-network-latency"),
+                                                        step,
                                                         &mut live_sync,
                                                         160.0,
                                                     );
@@ -8329,8 +8522,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             MacroAction::ApplyWindowPreset,
                                                             MacroAction::FocusWindowPreset,
                                                             MacroAction::TriggerCommandPreset,
-                                                            MacroAction::DisableNetworkAdapter,
-                                                            MacroAction::EnableNetworkAdapter,
                                                             MacroAction::EnableCrosshairProfile,
                                                             MacroAction::DisableCrosshair,
                                                             MacroAction::EnablePinPreset,
@@ -8383,6 +8574,16 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             ui,
                                                             language,
                                                             (group.id, preset.id, "press-stop-trigger-macro-group"),
+                                                            &mut step.action,
+                                                            &mut live_sync,
+                                                            action_hover_id,
+                                                        );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
+                                                        Self::render_network_action_group_option(
+                                                            ui,
+                                                            language,
+                                                            (group.id, preset.id, "press-stop-network-group"),
                                                             &mut step.action,
                                                             &mut live_sync,
                                                             action_hover_id,
@@ -8583,6 +8784,17 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         language,
                                                         (group.id, preset.id, "press-stop-network-target"),
                                                         &mut step.key,
+                                                        &mut live_sync,
+                                                        160.0,
+                                                    );
+                                                } else if step.action
+                                                    == MacroAction::IncreaseNetworkLatency
+                                                {
+                                                    Self::render_network_latency_editor(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, "press-stop-network-latency"),
+                                                        step,
                                                         &mut live_sync,
                                                         160.0,
                                                     );
@@ -11447,8 +11659,6 @@ if supports_move_mouse {
                                                                 MacroAction::ApplyWindowPreset,
                                                                 MacroAction::FocusWindowPreset,
                                                                 MacroAction::TriggerCommandPreset,
-                                                                MacroAction::DisableNetworkAdapter,
-                                                                MacroAction::EnableNetworkAdapter,
                                                                 MacroAction::EnableCrosshairProfile,
                                                                 MacroAction::DisableCrosshair,
                                                                 MacroAction::EnablePinPreset,
@@ -11500,6 +11710,16 @@ if supports_move_mouse {
                                                                 ui,
                                                                 language,
                                                                 (group.id, preset.id, step_index, "trigger-macro-group"),
+                                                                &mut step.action,
+                                                                &mut live_sync,
+                                                                action_hover_id,
+                                                            );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
+                                                            Self::render_network_action_group_option(
+                                                                ui,
+                                                                language,
+                                                                (group.id, preset.id, step_index, "network-group"),
                                                                 &mut step.action,
                                                                 &mut live_sync,
                                                                 action_hover_id,
@@ -11700,6 +11920,17 @@ if supports_move_mouse {
                                                         language,
                                                         (group.id, preset.id, step_index, "network-target"),
                                                         &mut step.key,
+                                                        &mut live_sync,
+                                                        146.0,
+                                                    );
+                                                } else if step.action
+                                                    == MacroAction::IncreaseNetworkLatency
+                                                {
+                                                    Self::render_network_latency_editor(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, step_index, "network-latency"),
+                                                        step,
                                                         &mut live_sync,
                                                         146.0,
                                                     );

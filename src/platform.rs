@@ -653,6 +653,13 @@ mod fallback {
         Ok(0)
     }
 
+    pub fn launch_hidden_process_as_admin(
+        _executable: &std::path::Path,
+        _arguments: Option<&str>,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     pub fn set_native_window_transitions_disabled(_frame: &Frame, _disabled: bool) -> bool {
         true
     }

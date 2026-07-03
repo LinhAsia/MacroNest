@@ -28,6 +28,8 @@ pub enum MacroAction {
     TriggerCommandPreset,
     DisableNetworkAdapter,
     EnableNetworkAdapter,
+    IncreaseNetworkLatency,
+    ResetNetworkLatency,
     EnableCrosshairProfile,
     DisableCrosshair,
     EnablePinPreset,
