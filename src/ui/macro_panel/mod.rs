@@ -464,6 +464,90 @@ impl CrosshairApp {
         });
     }
 
+    fn render_network_adapter_target_editor(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_salt: impl std::hash::Hash,
+        step_key: &mut String,
+        live_sync: &mut bool,
+        width: f32,
+    ) {
+        if step_key.trim().is_empty() {
+            *step_key = "wifi".to_owned();
+            *live_sync = true;
+        }
+        let trimmed = step_key.trim();
+        let mut mode = if trimmed.eq_ignore_ascii_case("all") {
+            2_u8
+        } else if trimmed.eq_ignore_ascii_case("ethernet") {
+            1_u8
+        } else if trimmed.starts_with("custom:") {
+            3_u8
+        } else {
+            0_u8
+        };
+        let mut custom_name = trimmed
+            .strip_prefix("custom:")
+            .unwrap_or("")
+            .trim()
+            .to_owned();
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt(id_salt)
+                .width(width)
+                .selected_text(match mode {
+                    1 => Self::tr_lang(language, "Ethernet", "Ethernet"),
+                    2 => Self::tr_lang(language, "All adapters", "All adapters"),
+                    3 => Self::tr_lang(language, "Custom name", "Custom name"),
+                    _ => Self::tr_lang(language, "Wi-Fi", "Wi-Fi"),
+                })
+                .show_ui(ui, |ui| {
+                    for (mode_value, label, value) in [
+                        (0_u8, Self::tr_lang(language, "Wi-Fi", "Wi-Fi"), "wifi"),
+                        (
+                            1_u8,
+                            Self::tr_lang(language, "Ethernet", "Ethernet"),
+                            "ethernet",
+                        ),
+                        (
+                            2_u8,
+                            Self::tr_lang(language, "All adapters", "All adapters"),
+                            "all",
+                        ),
+                        (
+                            3_u8,
+                            Self::tr_lang(language, "Custom name", "Custom name"),
+                            "custom:",
+                        ),
+                    ] {
+                        if ui.selectable_label(mode == mode_value, label).clicked() {
+                            mode = mode_value;
+                            *step_key = if mode == 3 {
+                                if custom_name.is_empty() {
+                                    "custom:".to_owned()
+                                } else {
+                                    format!("custom:{custom_name}")
+                                }
+                            } else {
+                                value.to_owned()
+                            };
+                            *live_sync = true;
+                        }
+                    }
+                });
+            if mode == 3 {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut custom_name)
+                        .desired_width(width)
+                        .hint_text(Self::tr_lang(language, "Adapter name", "Adapter name")),
+                );
+                if response.changed() {
+                    *step_key = format!("custom:{}", custom_name.trim());
+                    *live_sync = true;
+                }
+            }
+        });
+    }
+
     fn clear_macro_action_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let macro_popup_id = ui.make_persistent_id((id_source, "macro-submenu-popup"));
@@ -5987,6 +6071,8 @@ impl CrosshairApp {
                                                             MacroAction::ApplyWindowPreset,
                                                             MacroAction::FocusWindowPreset,
                                                             MacroAction::TriggerCommandPreset,
+                                                            MacroAction::DisableNetworkAdapter,
+                                                            MacroAction::EnableNetworkAdapter,
                                                             MacroAction::EnableCrosshairProfile,
                                                             MacroAction::DisableCrosshair,
                                                             MacroAction::EnablePinPreset,
@@ -6229,6 +6315,19 @@ impl CrosshairApp {
                                                      if let Some(preset_id) = open_ai_preset_id {
                                                          pending_open_ai_preset_id = Some(preset_id);
                                                      }
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::DisableNetworkAdapter
+                                                        | MacroAction::EnableNetworkAdapter
+                                                ) {
+                                                    Self::render_network_adapter_target_editor(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, "hold-stop-network-target"),
+                                                        &mut step.key,
+                                                        &mut live_sync,
+                                                        160.0,
+                                                    );
                                                 } else if matches!(
                                                     step.action,
                                                     MacroAction::EnableMacroPreset
@@ -8230,6 +8329,8 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             MacroAction::ApplyWindowPreset,
                                                             MacroAction::FocusWindowPreset,
                                                             MacroAction::TriggerCommandPreset,
+                                                            MacroAction::DisableNetworkAdapter,
+                                                            MacroAction::EnableNetworkAdapter,
                                                             MacroAction::EnableCrosshairProfile,
                                                             MacroAction::DisableCrosshair,
                                                             MacroAction::EnablePinPreset,
@@ -8469,9 +8570,22 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                              is_ad_hoc,
                                                          ));
                                                      }
-                                                     if let Some(preset_id) = open_ai_preset_id {
-                                                         pending_open_ai_preset_id = Some(preset_id);
-                                                     }
+                                                      if let Some(preset_id) = open_ai_preset_id {
+                                                          pending_open_ai_preset_id = Some(preset_id);
+                                                      }
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::DisableNetworkAdapter
+                                                        | MacroAction::EnableNetworkAdapter
+                                                ) {
+                                                    Self::render_network_adapter_target_editor(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, "press-stop-network-target"),
+                                                        &mut step.key,
+                                                        &mut live_sync,
+                                                        160.0,
+                                                    );
                                                 } else if matches!(
                                                     step.action,
                                                     MacroAction::EnableMacroPreset
@@ -11333,6 +11447,8 @@ if supports_move_mouse {
                                                                 MacroAction::ApplyWindowPreset,
                                                                 MacroAction::FocusWindowPreset,
                                                                 MacroAction::TriggerCommandPreset,
+                                                                MacroAction::DisableNetworkAdapter,
+                                                                MacroAction::EnableNetworkAdapter,
                                                                 MacroAction::EnableCrosshairProfile,
                                                                 MacroAction::DisableCrosshair,
                                                                 MacroAction::EnablePinPreset,
@@ -11574,6 +11690,19 @@ if supports_move_mouse {
                                                      if let Some(preset_id) = open_ai_preset_id {
                                                          pending_open_ai_preset_id = Some(preset_id);
                                                      }
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::DisableNetworkAdapter
+                                                        | MacroAction::EnableNetworkAdapter
+                                                ) {
+                                                    Self::render_network_adapter_target_editor(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, step_index, "network-target"),
+                                                        &mut step.key,
+                                                        &mut live_sync,
+                                                        146.0,
+                                                    );
                                                 } else if matches!(
                                                     step.action,
                                                     MacroAction::EnableMacroPreset

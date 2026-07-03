@@ -21293,6 +21293,139 @@ mod windows_overlay {
         });
     }
 
+    fn build_network_adapter_command(enable: bool, target_spec: &str) -> Result<String> {
+        let target_spec = interpolate_variables(target_spec);
+        let trimmed = target_spec.trim();
+        let normalized = if trimmed.is_empty() { "wifi" } else { trimmed };
+        let adapter_query = if let Some(custom_name) = normalized.strip_prefix("custom:") {
+            let custom_name = custom_name.trim();
+            if custom_name.is_empty() {
+                bail!("Custom network adapter name is empty");
+            }
+            let escaped = custom_name.replace('\'', "''");
+            format!("Get-NetAdapter -Name '{escaped}' -ErrorAction SilentlyContinue")
+        } else if normalized.eq_ignore_ascii_case("all") {
+            "Get-NetAdapter -Physical -ErrorAction SilentlyContinue".to_owned()
+        } else if normalized.eq_ignore_ascii_case("ethernet") {
+            "Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)wi-?fi|wlan|wireless' -and $_.InterfaceDescription -notmatch '(?i)wi-?fi|wlan|wireless|802\\.11' }".to_owned()
+        } else {
+            "Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '(?i)wi-?fi|wlan|wireless' -or $_.InterfaceDescription -match '(?i)wi-?fi|wlan|wireless|802\\.11' }".to_owned()
+        };
+        let adapter_action = if enable {
+            "Enable-NetAdapter"
+        } else {
+            "Disable-NetAdapter"
+        };
+        Ok(format!(
+            "$adapters = @({adapter_query}); if ($adapters.Count -eq 0) {{ Write-Output 'No matching network adapters found.'; exit 0 }}; $adapters | {adapter_action} -Confirm:$false -ErrorAction Stop"
+        ))
+    }
+
+    fn network_action_target_label(target_spec: &str) -> String {
+        let trimmed = target_spec.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("wifi") {
+            "Wi-Fi".to_owned()
+        } else if trimmed.eq_ignore_ascii_case("ethernet") {
+            "Ethernet".to_owned()
+        } else if trimmed.eq_ignore_ascii_case("all") {
+            "all adapters".to_owned()
+        } else if let Some(custom_name) = trimmed.strip_prefix("custom:") {
+            custom_name.trim().to_owned()
+        } else {
+            trimmed.to_owned()
+        }
+    }
+
+    fn send_network_action_status(message: String) {
+        send_ui_command(UiCommand::CustomCommandResult {
+            preset_id: 0,
+            output: message,
+        });
+    }
+
+    fn spawn_network_adapter_command(enable: bool, command_text: String, target_spec: String) {
+        let target_label = network_action_target_label(&target_spec);
+        thread::spawn(move || {
+            let success_message = if enable {
+                format!("Enabled {target_label}.")
+            } else {
+                format!("Disabled {target_label}.")
+            };
+            if crate::platform::is_running_as_admin() {
+                let mut command = Command::new("powershell.exe");
+                command.args([
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-Command",
+                    &command_text,
+                ]);
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    command.creation_flags(CREATE_NO_WINDOW.0);
+                }
+                let message = match command.output() {
+                    Ok(output) if output.status.success() => success_message,
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+                        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                        if !stderr.is_empty() {
+                            format!("Network action failed: {stderr}")
+                        } else if !stdout.is_empty() {
+                            format!("Network action failed: {stdout}")
+                        } else {
+                            format!(
+                                "Network action failed with exit code {}.",
+                                output.status.code().unwrap_or(-1)
+                            )
+                        }
+                    }
+                    Err(error) => format!("Failed to run network action: {error}"),
+                };
+                send_network_action_status(message);
+                return;
+            }
+
+            let encoded = {
+                use base64::Engine as _;
+                let utf16: Vec<u8> = command_text
+                    .encode_utf16()
+                    .flat_map(|unit| unit.to_le_bytes())
+                    .collect();
+                base64::engine::general_purpose::STANDARD.encode(utf16)
+            };
+            let args = format!(
+                "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encoded}"
+            );
+            let powershell = std::env::var("SystemRoot")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from(r"C:\Windows"))
+                .join("System32")
+                .join("WindowsPowerShell")
+                .join("v1.0")
+                .join("powershell.exe");
+            let message = match crate::platform::run_hidden_process_as_admin_and_wait(
+                &powershell,
+                Some(&args),
+                15_000,
+            ) {
+                Ok(0) => success_message,
+                Ok(code) => format!("Network action failed with exit code {code}."),
+                Err(error) => format!("Network action failed: {error}"),
+            };
+            send_network_action_status(message);
+        });
+    }
+
+    fn trigger_network_adapter_step(step: &MacroStep, enable: bool) -> Result<()> {
+        let command_text = build_network_adapter_command(enable, &step.key)?;
+        spawn_network_adapter_command(enable, command_text, step.key.clone());
+        Ok(())
+    }
+
     fn find_command_preset_by_spec(spec: &str) -> Option<CommandPreset> {
         let hook_state = HOOK_STATE.lock();
         find_preset_by_spec(
@@ -22227,6 +22360,14 @@ mod windows_overlay {
                 let _ = trigger_command_preset_step(step);
             }
 
+            MacroAction::DisableNetworkAdapter => {
+                let _ = trigger_network_adapter_step(step, false);
+            }
+
+            MacroAction::EnableNetworkAdapter => {
+                let _ = trigger_network_adapter_step(step, true);
+            }
+
             MacroAction::FunnyMemeReply => {
                 let _ = trigger_funny_meme_reply_step(preset_id, None, step);
             }
@@ -22937,6 +23078,14 @@ mod windows_overlay {
                     let _ = trigger_command_preset_step(step);
                 }
 
+                MacroAction::DisableNetworkAdapter => {
+                    let _ = trigger_network_adapter_step(step, false);
+                }
+
+                MacroAction::EnableNetworkAdapter => {
+                    let _ = trigger_network_adapter_step(step, true);
+                }
+
                 MacroAction::FunnyMemeReply => {
                     let _ = trigger_funny_meme_reply_step(preset_id, Some(absolute_index), step);
                 }
@@ -23633,6 +23782,14 @@ mod windows_overlay {
 
                 MacroAction::TriggerCommandPreset => {
                     let _ = trigger_command_preset_step(step);
+                }
+
+                MacroAction::DisableNetworkAdapter => {
+                    let _ = trigger_network_adapter_step(step, false);
+                }
+
+                MacroAction::EnableNetworkAdapter => {
+                    let _ = trigger_network_adapter_step(step, true);
                 }
 
                 MacroAction::FunnyMemeReply => {
@@ -25005,6 +25162,23 @@ mod windows_overlay {
         }
 
         #[test]
+        fn test_build_network_adapter_command_supports_default_all_and_custom_targets() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+
+            let default_wifi = build_network_adapter_command(false, "").unwrap();
+            assert!(default_wifi.contains("Disable-NetAdapter"));
+            assert!(default_wifi.contains("802\\.11"));
+
+            let all_adapters = build_network_adapter_command(true, "all").unwrap();
+            assert!(all_adapters.contains("Enable-NetAdapter"));
+            assert!(all_adapters.contains("Get-NetAdapter -Physical"));
+
+            let custom_adapter =
+                build_network_adapter_command(false, "custom:Office LAN's USB").unwrap();
+            assert!(custom_adapter.contains("Get-NetAdapter -Name 'Office LAN''s USB'"));
+        }
+
+        #[test]
         fn test_queue_macro_preset_enabled_change_accepts_multiple_ids() {
             let _guard = TEST_MUTEX.lock().unwrap();
             let mut pending = HashMap::new();
@@ -25857,6 +26031,8 @@ mod windows_overlay {
                 | MacroAction::TriggerMacroPresetIfEnabled
                 | MacroAction::StopMacroPreset
                 | MacroAction::TriggerCommandPreset
+                | MacroAction::DisableNetworkAdapter
+                | MacroAction::EnableNetworkAdapter
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::DisableCrosshair
                 | MacroAction::EnablePinPreset
@@ -26034,6 +26210,8 @@ mod windows_overlay {
             | MacroAction::TriggerMacroPresetIfEnabled
             | MacroAction::StopMacroPreset
             | MacroAction::TriggerCommandPreset
+            | MacroAction::DisableNetworkAdapter
+            | MacroAction::EnableNetworkAdapter
             | MacroAction::EnableCrosshairProfile
             | MacroAction::DisableCrosshair
             | MacroAction::EnablePinPreset

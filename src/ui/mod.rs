@@ -6620,6 +6620,8 @@ impl CrosshairApp {
             MacroAction::TriggerMacroPresetIfEnabled => "TriggerMacroIfEnabled",
             MacroAction::StopMacroPreset => "StopMacro",
             MacroAction::TriggerCommandPreset => "TriggerCommand",
+            MacroAction::DisableNetworkAdapter => "DisableNetwork",
+            MacroAction::EnableNetworkAdapter => "EnableNetwork",
             MacroAction::EnableCrosshairProfile => "EnableCrosshair",
             MacroAction::DisableCrosshair => "DisableCrosshair",
             MacroAction::EnablePinPreset => "EnablePin",
@@ -6731,6 +6733,14 @@ impl CrosshairApp {
             MacroAction::TriggerCommandPreset => (
                 "macro_action_tooltip.trigger_command_preset",
                 "Run one custom command preset from the Custom tab.",
+            ),
+            MacroAction::DisableNetworkAdapter => (
+                "macro_action_tooltip.disable_network_adapter",
+                "Disable Wi-Fi, Ethernet, all physical adapters, or one exact adapter name.",
+            ),
+            MacroAction::EnableNetworkAdapter => (
+                "macro_action_tooltip.enable_network_adapter",
+                "Enable Wi-Fi, Ethernet, all physical adapters, or one exact adapter name.",
             ),
             MacroAction::EnableCrosshairProfile => (
                 "macro_action_tooltip.enable_crosshair_profile",
@@ -6999,6 +7009,8 @@ impl CrosshairApp {
             MacroAction::TriggerMacroPresetIfEnabled => 0xe86c,
             MacroAction::StopMacroPreset => 0xe047,
             MacroAction::TriggerCommandPreset => 0xeb8e,
+            MacroAction::DisableNetworkAdapter => 0xe648,
+            MacroAction::EnableNetworkAdapter => 0xe63e,
             MacroAction::EnableCrosshairProfile => 0xe3c5,
             MacroAction::DisableCrosshair => 0xe1b7,
             MacroAction::EnablePinPreset => 0xe0c8,
@@ -7096,6 +7108,12 @@ impl CrosshairApp {
             MacroAction::StopMacroPreset => ("macro_action_short_label.stop_macro_preset", "Stop"),
             MacroAction::TriggerCommandPreset => {
                 ("macro_action_short_label.trigger_command_preset", "Cmd")
+            }
+            MacroAction::DisableNetworkAdapter => {
+                ("macro_action_short_label.disable_network_adapter", "NetOff")
+            }
+            MacroAction::EnableNetworkAdapter => {
+                ("macro_action_short_label.enable_network_adapter", "NetOn")
             }
             MacroAction::EnableCrosshairProfile => {
                 ("macro_action_short_label.enable_crosshair_profile", "Cross")
@@ -7342,6 +7360,8 @@ impl CrosshairApp {
                 | MacroAction::TriggerMacroPresetIfEnabled
                 | MacroAction::StopMacroPreset
                 | MacroAction::TriggerCommandPreset
+                | MacroAction::DisableNetworkAdapter
+                | MacroAction::EnableNetworkAdapter
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::EnablePinPreset
                 | MacroAction::PlayMousePathPreset
@@ -12367,6 +12387,8 @@ impl eframe::App for CrosshairApp {
                         .find(|p| p.id == preset_id)
                     {
                         preset.run_output = Some(output);
+                    } else {
+                        self.status = output;
                     }
                     ctx.request_repaint();
                 }
