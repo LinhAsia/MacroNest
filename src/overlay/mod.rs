@@ -219,6 +219,7 @@ mod windows_overlay {
     const XBUTTON2_DATA: u16 = 0x0002;
     const WMAPP_TRAYICON: u32 = WM_APP + 1;
     static NETWORK_ACTION_RESULT_SEQ: AtomicU64 = AtomicU64::new(1);
+    const APP_NETWORK_RULE_GROUP: &str = "MacroNestAppNetwork";
     const WMAPP_PROCESS_QUEUE: u32 = WM_APP + 2;
     const WMAPP_WINDOW_FOCUS_CHANGED: u32 = WM_APP + 3;
     const WMAPP_WINDOW_LOCATION_CHANGED: u32 = WM_APP + 4;
@@ -2318,6 +2319,7 @@ mod windows_overlay {
         ocr_presets: Vec<crate::model::OcrPreset>,
         command_presets: Vec<CommandPreset>,
         disabled_network_adapters_this_session: HashSet<String>,
+        blocked_app_network_rules_this_session: HashSet<String>,
         groq_settings: crate::model::GroqSettings,
         macro_groups: Vec<MacroGroup>,
         active_macro_folder_scope: MacroFolderScope,
@@ -2423,6 +2425,7 @@ mod windows_overlay {
                 ocr_presets: Vec::new(),
                 command_presets: Vec::new(),
                 disabled_network_adapters_this_session: HashSet::new(),
+                blocked_app_network_rules_this_session: HashSet::new(),
                 groq_settings: crate::model::GroqSettings::default(),
                 macro_groups: Vec::new(),
                 active_macro_folder_scope: MacroFolderScope::Root,
@@ -21554,6 +21557,193 @@ mod windows_overlay {
         Ok(())
     }
 
+    fn normalize_app_network_program_path(step: &MacroStep) -> Result<String> {
+        let interpolated = interpolate_variables(&step.key);
+        let trimmed = interpolated.trim();
+        if trimmed.is_empty() {
+            bail!("App executable path is empty");
+        }
+        Ok(trimmed.to_owned())
+    }
+
+    fn app_network_direction_labels(step: &MacroStep) -> Result<Vec<&'static str>> {
+        let mut labels = Vec::new();
+        if step.network_block_inbound {
+            labels.push("Inbound");
+        }
+        if step.network_block_outbound {
+            labels.push("Outbound");
+        }
+        if labels.is_empty() {
+            bail!("Select at least one app network direction");
+        }
+        Ok(labels)
+    }
+
+    fn app_network_rule_names(program_path: &str, step: &MacroStep) -> Result<Vec<String>> {
+        let direction_labels = app_network_direction_labels(step)?;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        use std::hash::{Hash, Hasher};
+        program_path.to_ascii_lowercase().hash(&mut hasher);
+        let hash = hasher.finish();
+        Ok(direction_labels
+            .into_iter()
+            .map(|direction| {
+                let dir_short = if direction == "Inbound" { "In" } else { "Out" };
+                format!("{APP_NETWORK_RULE_GROUP}_{dir_short}_{hash:016x}")
+            })
+            .collect())
+    }
+
+    fn app_network_label(program_path: &str) -> String {
+        std::path::Path::new(program_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(program_path)
+            .to_owned()
+    }
+
+    fn build_block_app_network_command(
+        program_path: &str,
+        step: &MacroStep,
+        result_file: &std::path::Path,
+    ) -> Result<String> {
+        let direction_labels = app_network_direction_labels(step)?;
+        let rule_names = app_network_rule_names(program_path, step)?;
+        let group = powershell_single_quote(APP_NETWORK_RULE_GROUP);
+        let program = powershell_single_quote(program_path);
+        let result_path = powershell_single_quote(&result_file.to_string_lossy());
+        let create_rules = rule_names
+            .iter()
+            .zip(direction_labels.iter())
+            .map(|(rule_name, direction)| {
+                let escaped_name = powershell_single_quote(rule_name);
+                format!(
+                    "Remove-NetFirewallRule -Name '{escaped_name}' -ErrorAction SilentlyContinue | Out-Null; New-NetFirewallRule -Name '{escaped_name}' -DisplayName '{escaped_name}' -Group '{group}' -Direction {direction} -Action Block -Enabled True -Program '{program}' -Profile Any | Out-Null"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        Ok(format!(
+            "$mnResultPath = '{result_path}'; try {{ {create_rules}; Set-Content -LiteralPath $mnResultPath -Value @('OK'); exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
+        ))
+    }
+
+    fn build_unblock_app_network_command(
+        rule_names: &[String],
+        result_file: &std::path::Path,
+    ) -> Result<String> {
+        if rule_names.is_empty() {
+            bail!("No app network rules were selected");
+        }
+        let result_path = powershell_single_quote(&result_file.to_string_lossy());
+        let remove_rules = rule_names
+            .iter()
+            .map(|rule_name| {
+                let escaped_name = powershell_single_quote(rule_name);
+                format!("Remove-NetFirewallRule -Name '{escaped_name}' -ErrorAction SilentlyContinue | Out-Null;")
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        Ok(format!(
+            "$mnResultPath = '{result_path}'; try {{ {remove_rules} Set-Content -LiteralPath $mnResultPath -Value @('OK'); exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
+        ))
+    }
+
+    fn read_simple_network_action_result(result_file: &std::path::Path) -> Result<Option<String>> {
+        let content = std::fs::read_to_string(result_file)
+            .with_context(|| format!("Failed to read {}", result_file.display()))?;
+        let mut lines = content.lines();
+        let status = lines.next().unwrap_or_default().trim();
+        match status {
+            "OK" => Ok(None),
+            "ERR" => Ok(Some(
+                lines
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )),
+            _ => bail!("Unexpected app network action result"),
+        }
+    }
+
+    fn update_app_network_session_state(block: bool, rule_names: &[String]) {
+        let mut hook_state = HOOK_STATE.lock();
+        if block {
+            for name in rule_names {
+                hook_state
+                    .blocked_app_network_rules_this_session
+                    .insert(name.clone());
+            }
+        } else {
+            for name in rule_names {
+                hook_state
+                    .blocked_app_network_rules_this_session
+                    .remove(name);
+            }
+        }
+    }
+
+    fn trigger_app_network_step(step: &MacroStep, block: bool) -> Result<()> {
+        let program_path = normalize_app_network_program_path(step)?;
+        let rule_names = app_network_rule_names(&program_path, step)?;
+        let result_file = network_action_result_file_path();
+        let command_text = if block {
+            build_block_app_network_command(&program_path, step, &result_file)?
+        } else {
+            build_unblock_app_network_command(&rule_names, &result_file)?
+        };
+        let target_label = app_network_label(&program_path);
+        let directions = app_network_direction_labels(step)?.join(" + ");
+        thread::spawn(move || {
+            let message = match run_hidden_powershell_script(&command_text, true, 15_000) {
+                Ok(_) => match read_simple_network_action_result(&result_file) {
+                    Ok(None) => {
+                        update_app_network_session_state(block, &rule_names);
+                        if block {
+                            format!("Blocked {directions} network for {target_label}.")
+                        } else {
+                            format!("Restored {directions} network for {target_label}.")
+                        }
+                    }
+                    Ok(Some(error)) if !error.is_empty() => {
+                        format!("App network action failed: {error}")
+                    }
+                    Ok(Some(_)) => "App network action failed.".to_owned(),
+                    Err(error) => format!("App network action failed: {error}"),
+                },
+                Err(error) => format!("App network action failed: {error}"),
+            };
+            let _ = std::fs::remove_file(&result_file);
+            send_network_action_status(message);
+        });
+        Ok(())
+    }
+
+    fn restore_blocked_app_network_rules_on_exit() -> Result<()> {
+        let rule_names = {
+            let hook_state = HOOK_STATE.lock();
+            hook_state
+                .blocked_app_network_rules_this_session
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        if rule_names.is_empty() {
+            return Ok(());
+        }
+        let result_file = network_action_result_file_path();
+        let command_text = build_unblock_app_network_command(&rule_names, &result_file)?;
+        let _ = run_hidden_powershell_script(&command_text, true, 15_000)?;
+        let _ = std::fs::remove_file(&result_file);
+        HOOK_STATE
+            .lock()
+            .blocked_app_network_rules_this_session
+            .clear();
+        Ok(())
+    }
+
     fn find_command_preset_by_spec(spec: &str) -> Option<CommandPreset> {
         let hook_state = HOOK_STATE.lock();
         find_preset_by_spec(
@@ -22496,6 +22686,14 @@ mod windows_overlay {
                 let _ = trigger_network_adapter_step(step, true);
             }
 
+            MacroAction::BlockAppNetwork => {
+                let _ = trigger_app_network_step(step, true);
+            }
+
+            MacroAction::UnblockAppNetwork => {
+                let _ = trigger_app_network_step(step, false);
+            }
+
             MacroAction::FunnyMemeReply => {
                 let _ = trigger_funny_meme_reply_step(preset_id, None, step);
             }
@@ -23214,6 +23412,14 @@ mod windows_overlay {
                     let _ = trigger_network_adapter_step(step, true);
                 }
 
+                MacroAction::BlockAppNetwork => {
+                    let _ = trigger_app_network_step(step, true);
+                }
+
+                MacroAction::UnblockAppNetwork => {
+                    let _ = trigger_app_network_step(step, false);
+                }
+
                 MacroAction::FunnyMemeReply => {
                     let _ = trigger_funny_meme_reply_step(preset_id, Some(absolute_index), step);
                 }
@@ -23918,6 +24124,14 @@ mod windows_overlay {
 
                 MacroAction::EnableNetworkAdapter => {
                     let _ = trigger_network_adapter_step(step, true);
+                }
+
+                MacroAction::BlockAppNetwork => {
+                    let _ = trigger_app_network_step(step, true);
+                }
+
+                MacroAction::UnblockAppNetwork => {
+                    let _ = trigger_app_network_step(step, false);
                 }
 
                 MacroAction::FunnyMemeReply => {
@@ -25309,6 +25523,23 @@ mod windows_overlay {
         }
 
         #[test]
+        fn test_app_network_rule_names_follow_selected_directions() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let mut step = MacroStep::default();
+            step.network_block_inbound = true;
+            step.network_block_outbound = false;
+            let names = app_network_rule_names(r"C:\Games\TestGame.exe", &step).unwrap();
+            assert_eq!(names.len(), 1);
+            assert!(names[0].contains("_In_"));
+
+            step.network_block_outbound = true;
+            let names = app_network_rule_names(r"C:\Games\TestGame.exe", &step).unwrap();
+            assert_eq!(names.len(), 2);
+            assert!(names.iter().any(|name| name.contains("_In_")));
+            assert!(names.iter().any(|name| name.contains("_Out_")));
+        }
+
+        #[test]
         fn test_queue_macro_preset_enabled_change_accepts_multiple_ids() {
             let _guard = TEST_MUTEX.lock().unwrap();
             let mut pending = HashMap::new();
@@ -26163,6 +26394,8 @@ mod windows_overlay {
                 | MacroAction::TriggerCommandPreset
                 | MacroAction::DisableNetworkAdapter
                 | MacroAction::EnableNetworkAdapter
+                | MacroAction::BlockAppNetwork
+                | MacroAction::UnblockAppNetwork
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::DisableCrosshair
                 | MacroAction::EnablePinPreset
@@ -26342,6 +26575,8 @@ mod windows_overlay {
             | MacroAction::TriggerCommandPreset
             | MacroAction::DisableNetworkAdapter
             | MacroAction::EnableNetworkAdapter
+            | MacroAction::BlockAppNetwork
+            | MacroAction::UnblockAppNetwork
             | MacroAction::EnableCrosshairProfile
             | MacroAction::DisableCrosshair
             | MacroAction::EnablePinPreset
@@ -29757,6 +29992,7 @@ mod windows_overlay {
         let _ = crate::platform::show_taskbar();
         let _ = restore_mouse_sensitivity_on_exit();
         let _ = restore_network_adapters_on_exit();
+        let _ = restore_blocked_app_network_rules_on_exit();
         let _ = unsafe { ShowWindow(runtime.overlay_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.hud_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.pin_hwnd, SW_HIDE) };

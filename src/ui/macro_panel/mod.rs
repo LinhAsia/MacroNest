@@ -548,6 +548,64 @@ impl CrosshairApp {
         });
     }
 
+    fn render_app_network_editor(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        step: &mut MacroStep,
+        live_sync: &mut bool,
+    ) {
+        ui.horizontal(|ui| {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut step.key)
+                    .desired_width(280.0)
+                    .hint_text(Self::tr_lang(language, "App .exe path", "App .exe path")),
+            );
+            if response.changed() {
+                *live_sync = true;
+            }
+            if ui
+                .button(Self::tr_lang(language, "Browse", "Browse"))
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Choose one executable file to block or unblock.",
+                    "Choose one executable file to block or unblock.",
+                ))
+                .clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Executable", &["exe"])
+                    .pick_file()
+            {
+                step.key = path.to_string_lossy().to_string();
+                *live_sync = true;
+            }
+        });
+        ui.horizontal(|ui| {
+            let inbound_changed = ui
+                .checkbox(
+                    &mut step.network_block_inbound,
+                    Self::tr_lang(language, "Inbound", "Inbound"),
+                )
+                .changed();
+            let outbound_changed = ui
+                .checkbox(
+                    &mut step.network_block_outbound,
+                    Self::tr_lang(language, "Outbound", "Outbound"),
+                )
+                .changed();
+            *live_sync |= inbound_changed || outbound_changed;
+            if !step.network_block_inbound && !step.network_block_outbound {
+                ui.colored_label(
+                    Color32::from_rgb(255, 140, 0),
+                    Self::tr_lang(
+                        language,
+                        "Select at least one direction",
+                        "Select at least one direction",
+                    ),
+                );
+            }
+        });
+    }
+
     fn clear_macro_action_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let macro_popup_id = ui.make_persistent_id((id_source, "macro-submenu-popup"));
@@ -1400,6 +1458,8 @@ impl CrosshairApp {
         &[
             MacroAction::DisableNetworkAdapter,
             MacroAction::EnableNetworkAdapter,
+            MacroAction::BlockAppNetwork,
+            MacroAction::UnblockAppNetwork,
         ]
     }
 
@@ -1526,8 +1586,8 @@ impl CrosshairApp {
         let response = inner.response.interact(egui::Sense::hover());
         response.on_hover_text(Self::tr_lang(
             language,
-            "Network actions: disable and enable network adapters.",
-            "Network actions: disable and enable network adapters.",
+            "Network actions: adapter toggles and per-app network blocking.",
+            "Network actions: adapter toggles and per-app network blocking.",
         ));
     }
 
@@ -6473,6 +6533,17 @@ impl CrosshairApp {
                                                     );
                                                 } else if matches!(
                                                     step.action,
+                                                    MacroAction::BlockAppNetwork
+                                                        | MacroAction::UnblockAppNetwork
+                                                ) {
+                                                    Self::render_app_network_editor(
+                                                        ui,
+                                                        language,
+                                                        step,
+                                                        &mut live_sync,
+                                                    );
+                                                } else if matches!(
+                                                    step.action,
                                                     MacroAction::EnableMacroPreset
                                                         | MacroAction::DisableMacroPreset
                                                 ) {
@@ -8736,6 +8807,17 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         &mut step.key,
                                                         &mut live_sync,
                                                         160.0,
+                                                    );
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::BlockAppNetwork
+                                                        | MacroAction::UnblockAppNetwork
+                                                ) {
+                                                    Self::render_app_network_editor(
+                                                        ui,
+                                                        language,
+                                                        step,
+                                                        &mut live_sync,
                                                     );
                                                 } else if matches!(
                                                     step.action,
@@ -11861,6 +11943,17 @@ if supports_move_mouse {
                                                         &mut step.key,
                                                         &mut live_sync,
                                                         146.0,
+                                                    );
+                                                } else if matches!(
+                                                    step.action,
+                                                    MacroAction::BlockAppNetwork
+                                                        | MacroAction::UnblockAppNetwork
+                                                ) {
+                                                    Self::render_app_network_editor(
+                                                        ui,
+                                                        language,
+                                                        step,
+                                                        &mut live_sync,
                                                     );
                                                 } else if matches!(
                                                     step.action,
