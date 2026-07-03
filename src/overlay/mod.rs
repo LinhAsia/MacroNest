@@ -21567,17 +21567,25 @@ mod windows_overlay {
         ))
     }
 
-    fn spawn_network_adapter_command(enable: bool, adapter_query: String, target_spec: String) {
-        let target_label = network_action_target_label(&target_spec);
-        let wifi_profiles = if enable && is_wifi_network_target(&target_spec) {
+    fn saved_wifi_profiles_for_target(target_spec: &str) -> HashMap<String, String> {
+        if is_wifi_network_target(target_spec) {
             HOOK_STATE
                 .lock()
                 .disconnected_wifi_profiles_this_session
                 .clone()
         } else {
             HashMap::new()
-        };
+        }
+    }
+
+    fn spawn_network_adapter_command(enable: bool, adapter_query: String, target_spec: String) {
+        let target_label = network_action_target_label(&target_spec);
         enqueue_network_action(move || {
+            let wifi_profiles = if enable {
+                saved_wifi_profiles_for_target(&target_spec)
+            } else {
+                HashMap::new()
+            };
             let result_file = network_action_result_file_path();
             let command_text = if is_wifi_network_target(&target_spec) {
                 if enable {
@@ -25704,6 +25712,24 @@ mod windows_overlay {
             );
             assert!(error.is_none());
             assert_eq!(wifi_profiles.get("Wi-Fi"), Some(&"Home 5G".to_owned()));
+        }
+
+        #[test]
+        fn test_saved_wifi_profiles_for_target_reads_latest_session_state() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let previous = {
+                let mut hook_state = HOOK_STATE.lock();
+                std::mem::replace(
+                    &mut hook_state.disconnected_wifi_profiles_this_session,
+                    HashMap::from([("Wi-Fi".to_owned(), "Home 5G".to_owned())]),
+                )
+            };
+
+            let wifi_profiles = saved_wifi_profiles_for_target("wifi");
+            assert_eq!(wifi_profiles.get("Wi-Fi"), Some(&"Home 5G".to_owned()));
+            assert!(saved_wifi_profiles_for_target("ethernet").is_empty());
+
+            HOOK_STATE.lock().disconnected_wifi_profiles_this_session = previous;
         }
 
         #[test]
