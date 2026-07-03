@@ -218,6 +218,7 @@ mod windows_overlay {
     const XBUTTON1_DATA: u16 = 0x0001;
     const XBUTTON2_DATA: u16 = 0x0002;
     const WMAPP_TRAYICON: u32 = WM_APP + 1;
+    static NETWORK_ACTION_RESULT_SEQ: AtomicU64 = AtomicU64::new(1);
     const WMAPP_PROCESS_QUEUE: u32 = WM_APP + 2;
     const WMAPP_WINDOW_FOCUS_CHANGED: u32 = WM_APP + 3;
     const WMAPP_WINDOW_LOCATION_CHANGED: u32 = WM_APP + 4;
@@ -2316,6 +2317,7 @@ mod windows_overlay {
         hud_presets: Vec<HudPreset>,
         ocr_presets: Vec<crate::model::OcrPreset>,
         command_presets: Vec<CommandPreset>,
+        disabled_network_adapters_this_session: HashSet<String>,
         groq_settings: crate::model::GroqSettings,
         macro_groups: Vec<MacroGroup>,
         active_macro_folder_scope: MacroFolderScope,
@@ -2420,6 +2422,7 @@ mod windows_overlay {
                 hud_presets: Vec::new(),
                 ocr_presets: Vec::new(),
                 command_presets: Vec::new(),
+                disabled_network_adapters_this_session: HashSet::new(),
                 groq_settings: crate::model::GroqSettings::default(),
                 macro_groups: Vec::new(),
                 active_macro_folder_scope: MacroFolderScope::Root,
@@ -21293,7 +21296,30 @@ mod windows_overlay {
         });
     }
 
-    fn build_network_adapter_command(enable: bool, target_spec: &str) -> Result<String> {
+    fn powershell_single_quote(value: &str) -> String {
+        value.replace('\'', "''")
+    }
+
+    fn encode_powershell_command(command_text: &str) -> String {
+        use base64::Engine as _;
+        let utf16: Vec<u8> = command_text
+            .encode_utf16()
+            .flat_map(|unit| unit.to_le_bytes())
+            .collect();
+        base64::engine::general_purpose::STANDARD.encode(utf16)
+    }
+
+    fn powershell_executable_path() -> PathBuf {
+        std::env::var("SystemRoot")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(r"C:\Windows"))
+            .join("System32")
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe")
+    }
+
+    fn build_network_adapter_query(target_spec: &str) -> Result<String> {
         let target_spec = interpolate_variables(target_spec);
         let trimmed = target_spec.trim();
         let normalized = if trimmed.is_empty() { "wifi" } else { trimmed };
@@ -21302,7 +21328,7 @@ mod windows_overlay {
             if custom_name.is_empty() {
                 bail!("Custom network adapter name is empty");
             }
-            let escaped = custom_name.replace('\'', "''");
+            let escaped = powershell_single_quote(custom_name);
             format!("Get-NetAdapter -Name '{escaped}' -ErrorAction SilentlyContinue")
         } else if normalized.eq_ignore_ascii_case("all") {
             "Get-NetAdapter -Physical -ErrorAction SilentlyContinue".to_owned()
@@ -21311,14 +21337,39 @@ mod windows_overlay {
         } else {
             "Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '(?i)wi-?fi|wlan|wireless' -or $_.InterfaceDescription -match '(?i)wi-?fi|wlan|wireless|802\\.11' }".to_owned()
         };
+        Ok(adapter_query)
+    }
+
+    fn build_named_network_adapter_query(names: &[String]) -> Result<String> {
+        let cleaned = names
+            .iter()
+            .map(|name| name.trim())
+            .filter(|name| !name.is_empty())
+            .map(powershell_single_quote)
+            .collect::<Vec<_>>();
+        if cleaned.is_empty() {
+            bail!("No network adapters were queued for restore");
+        }
+        Ok(format!(
+            "Get-NetAdapter -Name @('{}') -ErrorAction SilentlyContinue",
+            cleaned.join("','")
+        ))
+    }
+
+    fn build_network_adapter_command(
+        enable: bool,
+        adapter_query: &str,
+        result_file: &std::path::Path,
+    ) -> String {
         let adapter_action = if enable {
             "Enable-NetAdapter"
         } else {
             "Disable-NetAdapter"
         };
-        Ok(format!(
-            "$adapters = @({adapter_query}); if ($adapters.Count -eq 0) {{ Write-Output 'No matching network adapters found.'; exit 0 }}; $adapters | {adapter_action} -Confirm:$false -ErrorAction Stop"
-        ))
+        let result_path = powershell_single_quote(&result_file.to_string_lossy());
+        format!(
+            "$mnResultPath = '{result_path}'; try {{ $adapters = @({adapter_query}); if ($adapters.Count -eq 0) {{ Set-Content -LiteralPath $mnResultPath -Value @('NONE'); exit 0 }}; $names = @($adapters | Select-Object -ExpandProperty Name); $adapters | {adapter_action} -Confirm:$false -ErrorAction Stop; Set-Content -LiteralPath $mnResultPath -Value (@('OK') + $names); exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
+        )
     }
 
     fn network_action_target_label(target_spec: &str) -> String {
@@ -21343,86 +21394,163 @@ mod windows_overlay {
         });
     }
 
-    fn spawn_network_adapter_command(enable: bool, command_text: String, target_spec: String) {
+    fn network_action_result_file_path() -> PathBuf {
+        let id = NETWORK_ACTION_RESULT_SEQ.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("macronest_network_action_{id}.txt"))
+    }
+
+    fn read_network_action_result(
+        result_file: &std::path::Path,
+    ) -> Result<(Option<Vec<String>>, Option<String>)> {
+        let content = std::fs::read_to_string(result_file)
+            .with_context(|| format!("Failed to read {}", result_file.display()))?;
+        let mut lines = content.lines();
+        let status = lines.next().unwrap_or_default().trim();
+        match status {
+            "OK" => Ok((
+                Some(
+                    lines
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .map(str::to_owned)
+                        .collect(),
+                ),
+                None,
+            )),
+            "NONE" => Ok((Some(Vec::new()), None)),
+            "ERR" => Ok((
+                None,
+                Some(
+                    lines
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ),
+            )),
+            _ => bail!("Unexpected network action result"),
+        }
+    }
+
+    fn run_hidden_powershell_script(
+        script: &str,
+        require_admin: bool,
+        timeout_ms: u32,
+    ) -> Result<u32> {
+        let encoded = encode_powershell_command(script);
+        let powershell = powershell_executable_path();
+        if require_admin && !crate::platform::is_running_as_admin() {
+            let args = format!(
+                "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encoded}"
+            );
+            return crate::platform::run_hidden_process_as_admin_and_wait(
+                &powershell,
+                Some(&args),
+                timeout_ms,
+            );
+        }
+
+        let status = Command::new(&powershell)
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-EncodedCommand",
+                &encoded,
+            ])
+            .creation_flags(CREATE_NO_WINDOW.0)
+            .status()?;
+        Ok(status.code().unwrap_or(-1) as u32)
+    }
+
+    fn update_network_action_session_state(enable: bool, adapter_names: &[String]) {
+        let mut hook_state = HOOK_STATE.lock();
+        if enable {
+            for name in adapter_names {
+                hook_state
+                    .disabled_network_adapters_this_session
+                    .remove(name);
+            }
+        } else {
+            for name in adapter_names {
+                hook_state
+                    .disabled_network_adapters_this_session
+                    .insert(name.clone());
+            }
+        }
+    }
+
+    fn spawn_network_adapter_command(enable: bool, adapter_query: String, target_spec: String) {
         let target_label = network_action_target_label(&target_spec);
         thread::spawn(move || {
+            let result_file = network_action_result_file_path();
+            let command_text = build_network_adapter_command(enable, &adapter_query, &result_file);
             let success_message = if enable {
                 format!("Enabled {target_label}.")
             } else {
                 format!("Disabled {target_label}.")
             };
-            if crate::platform::is_running_as_admin() {
-                let mut command = Command::new("powershell.exe");
-                command.args([
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-Command",
-                    &command_text,
-                ]);
-                #[cfg(windows)]
-                {
-                    use std::os::windows::process::CommandExt;
-                    command.creation_flags(CREATE_NO_WINDOW.0);
-                }
-                let message = match command.output() {
-                    Ok(output) if output.status.success() => success_message,
-                    Ok(output) => {
-                        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-                        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-                        if !stderr.is_empty() {
-                            format!("Network action failed: {stderr}")
-                        } else if !stdout.is_empty() {
-                            format!("Network action failed: {stdout}")
+            let message = match run_hidden_powershell_script(&command_text, true, 15_000) {
+                Ok(_) => match read_network_action_result(&result_file) {
+                    Ok((Some(adapter_names), None)) => {
+                        update_network_action_session_state(enable, &adapter_names);
+                        if adapter_names.is_empty() {
+                            "No matching network adapters found.".to_owned()
                         } else {
-                            format!(
-                                "Network action failed with exit code {}.",
-                                output.status.code().unwrap_or(-1)
-                            )
+                            success_message
                         }
                     }
-                    Err(error) => format!("Failed to run network action: {error}"),
-                };
-                send_network_action_status(message);
-                return;
-            }
-
-            let encoded = {
-                use base64::Engine as _;
-                let utf16: Vec<u8> = command_text
-                    .encode_utf16()
-                    .flat_map(|unit| unit.to_le_bytes())
-                    .collect();
-                base64::engine::general_purpose::STANDARD.encode(utf16)
-            };
-            let args = format!(
-                "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encoded}"
-            );
-            let powershell = std::env::var("SystemRoot")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::path::PathBuf::from(r"C:\Windows"))
-                .join("System32")
-                .join("WindowsPowerShell")
-                .join("v1.0")
-                .join("powershell.exe");
-            let message = match crate::platform::run_hidden_process_as_admin_and_wait(
-                &powershell,
-                Some(&args),
-                15_000,
-            ) {
-                Ok(0) => success_message,
-                Ok(code) => format!("Network action failed with exit code {code}."),
+                    Ok((Some(adapter_names), Some(_))) => {
+                        update_network_action_session_state(enable, &adapter_names);
+                        if adapter_names.is_empty() {
+                            "No matching network adapters found.".to_owned()
+                        } else {
+                            success_message
+                        }
+                    }
+                    Ok((None, Some(error))) if !error.is_empty() => {
+                        format!("Network action failed: {error}")
+                    }
+                    Ok((None, Some(_))) => "Network action failed.".to_owned(),
+                    Ok((None, None)) => "Network action failed.".to_owned(),
+                    Err(error) => format!("Network action failed: {error}"),
+                },
                 Err(error) => format!("Network action failed: {error}"),
             };
+            let _ = std::fs::remove_file(&result_file);
             send_network_action_status(message);
         });
     }
 
     fn trigger_network_adapter_step(step: &MacroStep, enable: bool) -> Result<()> {
-        let command_text = build_network_adapter_command(enable, &step.key)?;
-        spawn_network_adapter_command(enable, command_text, step.key.clone());
+        let adapter_query = build_network_adapter_query(&step.key)?;
+        spawn_network_adapter_command(enable, adapter_query, step.key.clone());
+        Ok(())
+    }
+
+    fn restore_network_adapters_on_exit() -> Result<()> {
+        let names = {
+            let hook_state = HOOK_STATE.lock();
+            hook_state
+                .disabled_network_adapters_this_session
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        if names.is_empty() {
+            return Ok(());
+        }
+        let result_file = network_action_result_file_path();
+        let adapter_query = build_named_network_adapter_query(&names)?;
+        let command_text = build_network_adapter_command(true, &adapter_query, &result_file);
+        let _ = run_hidden_powershell_script(&command_text, true, 15_000)?;
+        let _ = std::fs::remove_file(&result_file);
+        HOOK_STATE
+            .lock()
+            .disabled_network_adapters_this_session
+            .clear();
         Ok(())
     }
 
@@ -25165,17 +25293,19 @@ mod windows_overlay {
         fn test_build_network_adapter_command_supports_default_all_and_custom_targets() {
             let _guard = TEST_MUTEX.lock().unwrap();
 
-            let default_wifi = build_network_adapter_command(false, "").unwrap();
-            assert!(default_wifi.contains("Disable-NetAdapter"));
+            let default_wifi = build_network_adapter_query("").unwrap();
             assert!(default_wifi.contains("802\\.11"));
 
-            let all_adapters = build_network_adapter_command(true, "all").unwrap();
-            assert!(all_adapters.contains("Enable-NetAdapter"));
+            let all_adapters = build_network_adapter_query("all").unwrap();
             assert!(all_adapters.contains("Get-NetAdapter -Physical"));
 
-            let custom_adapter =
-                build_network_adapter_command(false, "custom:Office LAN's USB").unwrap();
+            let custom_adapter = build_network_adapter_query("custom:Office LAN's USB").unwrap();
             assert!(custom_adapter.contains("Get-NetAdapter -Name 'Office LAN''s USB'"));
+
+            let named_query =
+                build_named_network_adapter_query(&["Ethernet".to_owned(), "USB LAN".to_owned()])
+                    .unwrap();
+            assert!(named_query.contains("@('Ethernet','USB LAN')"));
         }
 
         #[test]
@@ -29626,6 +29756,7 @@ mod windows_overlay {
         let _ = unsafe { Shell_NotifyIconW(NIM_DELETE, &notify_icon(hwnd)) };
         let _ = crate::platform::show_taskbar();
         let _ = restore_mouse_sensitivity_on_exit();
+        let _ = restore_network_adapters_on_exit();
         let _ = unsafe { ShowWindow(runtime.overlay_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.hud_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.pin_hwnd, SW_HIDE) };
