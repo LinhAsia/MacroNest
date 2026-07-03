@@ -73,7 +73,13 @@ mod windows_overlay {
     use windows::{
         Win32::{
             Devices::HumanInterfaceDevice::HidD_SetOutputReport,
-            Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM},
+            Foundation::{COLORREF, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM},
+            NetworkManagement::WiFi::{
+                WLAN_INTERFACE_INFO_LIST, WLAN_RADIO_STATE, WlanCloseHandle,
+                WlanEnumInterfaces, WlanFreeMemory, WlanOpenHandle, WlanQueryInterface,
+                WlanSetInterface, dot11_radio_state_off, dot11_radio_state_on,
+                wlan_intf_opcode_radio_state,
+            },
             Graphics::{
                 Dwm::{
                     DWM_THUMBNAIL_PROPERTIES, DWM_TNP_OPACITY, DWM_TNP_RECTDESTINATION,
@@ -2326,7 +2332,7 @@ mod windows_overlay {
         ocr_presets: Vec<crate::model::OcrPreset>,
         command_presets: Vec<CommandPreset>,
         disabled_network_adapters_this_session: HashSet<String>,
-        disconnected_wifi_profiles_this_session: HashMap<String, String>,
+        wifi_radios_disabled_this_session: HashSet<String>,
         blocked_app_network_rules_this_session: HashSet<String>,
         groq_settings: crate::model::GroqSettings,
         macro_groups: Vec<MacroGroup>,
@@ -2433,7 +2439,7 @@ mod windows_overlay {
                 ocr_presets: Vec::new(),
                 command_presets: Vec::new(),
                 disabled_network_adapters_this_session: HashSet::new(),
-                disconnected_wifi_profiles_this_session: HashMap::new(),
+                wifi_radios_disabled_this_session: HashSet::new(),
                 blocked_app_network_rules_this_session: HashSet::new(),
                 groq_settings: crate::model::GroqSettings::default(),
                 macro_groups: Vec::new(),
@@ -21435,7 +21441,7 @@ mod windows_overlay {
 
     fn read_network_action_result(
         result_file: &std::path::Path,
-    ) -> Result<(Option<Vec<String>>, Option<String>, HashMap<String, String>)> {
+    ) -> Result<(Option<Vec<String>>, Option<String>)> {
         let content = std::fs::read_to_string(result_file)
             .with_context(|| format!("Failed to read {}", result_file.display()))?;
         let mut lines = content.lines();
@@ -21443,23 +21449,12 @@ mod windows_overlay {
         match status {
             "OK" => {
                 let mut adapter_names = Vec::new();
-                let mut wifi_profiles = HashMap::new();
                 for line in lines.map(str::trim).filter(|line| !line.is_empty()) {
-                    if let Some(rest) = line.strip_prefix("WIFI\t") {
-                        let mut parts = rest.splitn(2, '\t');
-                        let name = parts.next().unwrap_or_default().trim();
-                        let profile = parts.next().unwrap_or_default().trim();
-                        if !name.is_empty() {
-                            adapter_names.push(name.to_owned());
-                            wifi_profiles.insert(name.to_owned(), profile.to_owned());
-                        }
-                    } else {
-                        adapter_names.push(line.to_owned());
-                    }
+                    adapter_names.push(line.to_owned());
                 }
-                Ok((Some(adapter_names), None, wifi_profiles))
+                Ok((Some(adapter_names), None))
             }
-            "NONE" => Ok((Some(Vec::new()), None, HashMap::new())),
+            "NONE" => Ok((Some(Vec::new()), None)),
             "ERR" => Ok((
                 None,
                 Some(
@@ -21469,7 +21464,6 @@ mod windows_overlay {
                         .collect::<Vec<_>>()
                         .join(" "),
                 ),
-                HashMap::new(),
             )),
             _ => bail!("Unexpected network action result"),
         }
@@ -21508,133 +21502,178 @@ mod windows_overlay {
         Ok(status.code().unwrap_or(-1) as u32)
     }
 
-    fn update_network_action_session_state(
-        enable: bool,
-        adapter_names: &[String],
-        wifi_profiles: &HashMap<String, String>,
-    ) {
+    fn update_network_action_session_state(enable: bool, adapter_names: &[String], is_wifi: bool) {
         let mut hook_state = HOOK_STATE.lock();
         if enable {
             for name in adapter_names {
-                hook_state
-                    .disabled_network_adapters_this_session
-                    .remove(name);
-                hook_state
-                    .disconnected_wifi_profiles_this_session
-                    .remove(name);
+                if is_wifi {
+                    hook_state.wifi_radios_disabled_this_session.remove(name);
+                } else {
+                    hook_state.disabled_network_adapters_this_session.remove(name);
+                }
             }
         } else {
             for name in adapter_names {
-                if let Some(profile) = wifi_profiles.get(name) {
-                    hook_state
-                        .disconnected_wifi_profiles_this_session
-                        .insert(name.clone(), profile.clone());
+                if is_wifi {
+                    hook_state.wifi_radios_disabled_this_session.insert(name.clone());
                 } else {
-                    hook_state
-                        .disabled_network_adapters_this_session
-                        .insert(name.clone());
+                    hook_state.disabled_network_adapters_this_session.insert(name.clone());
                 }
             }
         }
     }
 
-    fn build_wifi_disconnect_command(adapter_query: &str, result_file: &std::path::Path) -> String {
-        let result_path = powershell_single_quote(&result_file.to_string_lossy());
-        format!(
-            "$mnResultPath = '{result_path}'; try {{ $adapters = @({adapter_query}); if ($adapters.Count -eq 0) {{ Set-Content -LiteralPath $mnResultPath -Value @('NONE'); exit 0 }}; $lines = @('OK'); foreach ($adapter in $adapters) {{ $name = [string]$adapter.Name; $profile = ''; $profileObj = Get-NetConnectionProfile -InterfaceAlias $name -ErrorAction SilentlyContinue | Select-Object -First 1; if ($profileObj) {{ $profile = [string]$profileObj.Name }}; netsh wlan disconnect interface=\"$name\" | Out-Null; $lines += \"WIFI`t$name`t$profile\" }}; Set-Content -LiteralPath $mnResultPath -Value $lines; exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
+    fn wide_buf_to_string(wide: &[u16]) -> String {
+        let len = wide.iter().position(|&unit| unit == 0).unwrap_or(wide.len());
+        String::from_utf16_lossy(&wide[..len]).trim().to_owned()
+    }
+
+    fn wifi_api_error(context: &str, code: u32) -> anyhow::Error {
+        anyhow::anyhow!(
+            "{context}: {} (code {code})",
+            std::io::Error::from_raw_os_error(code as i32)
         )
     }
 
-    fn build_wifi_connect_command(
-        adapter_query: &str,
-        wifi_profiles: &HashMap<String, String>,
-        result_file: &std::path::Path,
-    ) -> Result<String> {
-        let result_path = powershell_single_quote(&result_file.to_string_lossy());
-        let profile_map_entries = wifi_profiles
-            .iter()
-            .map(|(name, profile)| {
-                format!(
-                    "$profiles[{name}] = {profile}",
-                    name = powershell_single_quote(name),
-                    profile = powershell_single_quote(profile),
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("; ");
-        Ok(format!(
-            "$mnResultPath = '{result_path}'; try {{ $adapters = @({adapter_query}); if ($adapters.Count -eq 0) {{ Set-Content -LiteralPath $mnResultPath -Value @('NONE'); exit 0 }}; $profiles = @{{}}; {profile_map_entries}; $lines = @('OK'); foreach ($adapter in $adapters) {{ $name = [string]$adapter.Name; $profile = ''; if ($profiles.ContainsKey($name)) {{ $profile = [string]$profiles[$name] }}; if ([string]::IsNullOrWhiteSpace($profile)) {{ throw \"No saved Wi-Fi profile for $name\" }}; netsh wlan connect name=\"$profile\" interface=\"$name\" | Out-Null; $lines += \"WIFI`t$name`t$profile\" }}; Set-Content -LiteralPath $mnResultPath -Value $lines; exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
-        ))
-    }
+    fn set_wifi_radio_enabled(enable: bool) -> Result<Vec<String>> {
+        unsafe {
+            let mut client_handle = HANDLE::default();
+            let mut negotiated_version = 0_u32;
+            let mut interface_list_ptr: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
 
-    fn saved_wifi_profiles_for_target(target_spec: &str) -> HashMap<String, String> {
-        if is_wifi_network_target(target_spec) {
-            HOOK_STATE
-                .lock()
-                .disconnected_wifi_profiles_this_session
-                .clone()
-        } else {
-            HashMap::new()
+            let result = (|| -> Result<Vec<String>> {
+                let open_code =
+                    WlanOpenHandle(2, None, &mut negotiated_version, &mut client_handle);
+                if open_code != 0 {
+                    bail!(wifi_api_error("Failed to open Wi-Fi client handle", open_code));
+                }
+
+                let enum_code = WlanEnumInterfaces(client_handle, None, &mut interface_list_ptr);
+                if enum_code != 0 {
+                    bail!(wifi_api_error("Failed to enumerate Wi-Fi interfaces", enum_code));
+                }
+                if interface_list_ptr.is_null() {
+                    return Ok(Vec::new());
+                }
+
+                let interface_list = &*interface_list_ptr;
+                let interface_count = interface_list.dwNumberOfItems as usize;
+                let interfaces = std::slice::from_raw_parts(
+                    interface_list.InterfaceInfo.as_ptr(),
+                    interface_count,
+                );
+                let mut updated_names = Vec::new();
+
+                for interface in interfaces {
+                    let interface_name = wide_buf_to_string(&interface.strInterfaceDescription);
+                    let mut data_size = 0_u32;
+                    let mut data_ptr: *mut c_void = std::ptr::null_mut();
+                    let query_code = WlanQueryInterface(
+                        client_handle,
+                        &interface.InterfaceGuid,
+                        wlan_intf_opcode_radio_state,
+                        None,
+                        &mut data_size,
+                        &mut data_ptr,
+                        None,
+                    );
+                    if query_code != 0 {
+                        bail!(wifi_api_error(
+                            "Failed to query Wi-Fi radio state",
+                            query_code
+                        ));
+                    }
+                    if data_ptr.is_null() {
+                        continue;
+                    }
+
+                    let mut radio_state = *(data_ptr as *const WLAN_RADIO_STATE);
+                    WlanFreeMemory(data_ptr);
+
+                    let phys_count = usize::min(
+                        radio_state.dwNumberOfPhys as usize,
+                        radio_state.PhyRadioState.len(),
+                    );
+                    for phy_state in radio_state.PhyRadioState[..phys_count].iter_mut() {
+                        phy_state.dot11SoftwareRadioState = if enable {
+                            dot11_radio_state_on
+                        } else {
+                            dot11_radio_state_off
+                        };
+                    }
+
+                    let set_code = WlanSetInterface(
+                        client_handle,
+                        &interface.InterfaceGuid,
+                        wlan_intf_opcode_radio_state,
+                        std::mem::size_of::<WLAN_RADIO_STATE>() as u32,
+                        &radio_state as *const WLAN_RADIO_STATE as *const c_void,
+                        None,
+                    );
+                    if set_code != 0 {
+                        bail!(wifi_api_error("Failed to change Wi-Fi radio state", set_code));
+                    }
+                    updated_names.push(interface_name);
+                }
+
+                Ok(updated_names)
+            })();
+
+            if !interface_list_ptr.is_null() {
+                WlanFreeMemory(interface_list_ptr as *const c_void);
+            }
+            if !client_handle.is_invalid() {
+                let _ = WlanCloseHandle(client_handle, None);
+            }
+            result
         }
     }
 
     fn spawn_network_adapter_command(enable: bool, adapter_query: String, target_spec: String) {
         let target_label = network_action_target_label(&target_spec);
         enqueue_network_action(move || {
-            let wifi_profiles = if enable {
-                saved_wifi_profiles_for_target(&target_spec)
-            } else {
-                HashMap::new()
-            };
-            let result_file = network_action_result_file_path();
-            let command_text = if is_wifi_network_target(&target_spec) {
-                if enable {
-                    match build_wifi_connect_command(&adapter_query, &wifi_profiles, &result_file) {
-                        Ok(command) => command,
-                        Err(error) => {
-                            send_network_action_status(format!("Network action failed: {error}"));
-                            return;
-                        }
-                    }
-                } else {
-                    build_wifi_disconnect_command(&adapter_query, &result_file)
-                }
-            } else {
-                build_network_adapter_command(enable, &adapter_query, &result_file)
-            };
             let success_message = if enable {
                 format!("Enabled {target_label}.")
             } else {
                 format!("Disabled {target_label}.")
             };
-            let message = match run_hidden_powershell_script(&command_text, true, 15_000) {
-                Ok(_) => match read_network_action_result(&result_file) {
-                    Ok((Some(adapter_names), None, wifi_profiles)) => {
-                        update_network_action_session_state(enable, &adapter_names, &wifi_profiles);
+            let message = if is_wifi_network_target(&target_spec) {
+                match set_wifi_radio_enabled(enable) {
+                    Ok(adapter_names) => {
+                        update_network_action_session_state(enable, &adapter_names, true);
                         if adapter_names.is_empty() {
                             "No matching network adapters found.".to_owned()
                         } else {
                             success_message
                         }
                     }
-                    Ok((Some(adapter_names), Some(_), wifi_profiles)) => {
-                        update_network_action_session_state(enable, &adapter_names, &wifi_profiles);
-                        if adapter_names.is_empty() {
-                            "No matching network adapters found.".to_owned()
-                        } else {
-                            success_message
-                        }
-                    }
-                    Ok((None, Some(error), _)) if !error.is_empty() => {
-                        format!("Network action failed: {error}")
-                    }
-                    Ok((None, Some(_), _)) => "Network action failed.".to_owned(),
-                    Ok((None, None, _)) => "Network action failed.".to_owned(),
                     Err(error) => format!("Network action failed: {error}"),
-                },
-                Err(error) => format!("Network action failed: {error}"),
+                }
+            } else {
+                let result_file = network_action_result_file_path();
+                let command_text = build_network_adapter_command(enable, &adapter_query, &result_file);
+                let message = match run_hidden_powershell_script(&command_text, true, 15_000) {
+                    Ok(_) => match read_network_action_result(&result_file) {
+                        Ok((Some(adapter_names), None)) | Ok((Some(adapter_names), Some(_))) => {
+                            update_network_action_session_state(enable, &adapter_names, false);
+                            if adapter_names.is_empty() {
+                                "No matching network adapters found.".to_owned()
+                            } else {
+                                success_message
+                            }
+                        }
+                        Ok((None, Some(error))) if !error.is_empty() => {
+                            format!("Network action failed: {error}")
+                        }
+                        Ok((None, Some(_))) => "Network action failed.".to_owned(),
+                        Ok((None, None)) => "Network action failed.".to_owned(),
+                        Err(error) => format!("Network action failed: {error}"),
+                    },
+                    Err(error) => format!("Network action failed: {error}"),
+                };
+                let _ = std::fs::remove_file(&result_file);
+                message
             };
-            let _ = std::fs::remove_file(&result_file);
             send_network_action_status(message);
         });
     }
@@ -21646,7 +21685,7 @@ mod windows_overlay {
     }
 
     fn restore_network_adapters_on_exit() -> Result<()> {
-        let (names, wifi_profiles) = {
+        let (names, wifi_names) = {
             let hook_state = HOOK_STATE.lock();
             (
                 hook_state
@@ -21654,7 +21693,11 @@ mod windows_overlay {
                     .iter()
                     .cloned()
                     .collect::<Vec<_>>(),
-                hook_state.disconnected_wifi_profiles_this_session.clone(),
+                hook_state
+                    .wifi_radios_disabled_this_session
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>(),
             )
         };
         if !names.is_empty() {
@@ -21668,18 +21711,9 @@ mod windows_overlay {
                 .disabled_network_adapters_this_session
                 .clear();
         }
-        if !wifi_profiles.is_empty() {
-            let result_file = network_action_result_file_path();
-            let wifi_names = wifi_profiles.keys().cloned().collect::<Vec<_>>();
-            let adapter_query = build_named_network_adapter_query(&wifi_names)?;
-            let command_text =
-                build_wifi_connect_command(&adapter_query, &wifi_profiles, &result_file)?;
-            let _ = run_hidden_powershell_script(&command_text, true, 15_000)?;
-            let _ = std::fs::remove_file(&result_file);
-            HOOK_STATE
-                .lock()
-                .disconnected_wifi_profiles_this_session
-                .clear();
+        if !wifi_names.is_empty() {
+            let _ = set_wifi_radio_enabled(true)?;
+            HOOK_STATE.lock().wifi_radios_disabled_this_session.clear();
         }
         Ok(())
     }
@@ -25698,38 +25732,47 @@ mod windows_overlay {
         }
 
         #[test]
-        fn test_read_network_action_result_parses_wifi_profiles() {
+        fn test_read_network_action_result_reads_adapter_names() {
             let _guard = TEST_MUTEX.lock().unwrap();
             let result_file =
-                std::env::temp_dir().join("macronest_network_action_result_wifi_test.txt");
-            std::fs::write(&result_file, "OK\nWIFI\tWi-Fi\tHome 5G\nEthernet\n").unwrap();
-            let (adapter_names, error, wifi_profiles) =
-                read_network_action_result(&result_file).unwrap();
+                std::env::temp_dir().join("macronest_network_action_result_names_test.txt");
+            std::fs::write(&result_file, "OK\nWi-Fi\nEthernet\n").unwrap();
+            let (adapter_names, error) = read_network_action_result(&result_file).unwrap();
             let _ = std::fs::remove_file(&result_file);
             assert_eq!(
                 adapter_names.unwrap(),
                 vec!["Wi-Fi".to_owned(), "Ethernet".to_owned()]
             );
             assert!(error.is_none());
-            assert_eq!(wifi_profiles.get("Wi-Fi"), Some(&"Home 5G".to_owned()));
         }
 
         #[test]
-        fn test_saved_wifi_profiles_for_target_reads_latest_session_state() {
+        fn test_update_network_action_session_state_tracks_wifi_radios() {
             let _guard = TEST_MUTEX.lock().unwrap();
             let previous = {
                 let mut hook_state = HOOK_STATE.lock();
                 std::mem::replace(
-                    &mut hook_state.disconnected_wifi_profiles_this_session,
-                    HashMap::from([("Wi-Fi".to_owned(), "Home 5G".to_owned())]),
+                    &mut hook_state.wifi_radios_disabled_this_session,
+                    HashSet::new(),
                 )
             };
 
-            let wifi_profiles = saved_wifi_profiles_for_target("wifi");
-            assert_eq!(wifi_profiles.get("Wi-Fi"), Some(&"Home 5G".to_owned()));
-            assert!(saved_wifi_profiles_for_target("ethernet").is_empty());
+            update_network_action_session_state(false, &["Wi-Fi".to_owned()], true);
+            assert!(
+                HOOK_STATE
+                    .lock()
+                    .wifi_radios_disabled_this_session
+                    .contains("Wi-Fi")
+            );
+            update_network_action_session_state(true, &["Wi-Fi".to_owned()], true);
+            assert!(
+                !HOOK_STATE
+                    .lock()
+                    .wifi_radios_disabled_this_session
+                    .contains("Wi-Fi")
+            );
 
-            HOOK_STATE.lock().disconnected_wifi_profiles_this_session = previous;
+            HOOK_STATE.lock().wifi_radios_disabled_this_session = previous;
         }
 
         #[test]
