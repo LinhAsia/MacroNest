@@ -262,6 +262,8 @@ mod windows_overlay {
         status: String,
     }
 
+    type NetworkActionJob = Box<dyn FnOnce() + Send + 'static>;
+
     const MENU_SHOW: usize = 2002;
     const MENU_EXIT: usize = 2003;
     static SUPPRESSED_MACRO_HOTKEYS: Lazy<Mutex<HashSet<i32>>> =
@@ -292,6 +294,11 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static MASCOT_DRAG_STYLE: Lazy<Mutex<Option<crate::model::MascotStyle>>> =
         Lazy::new(|| Mutex::new(None));
+    static NETWORK_ACTION_QUEUE: Lazy<Sender<NetworkActionJob>> = Lazy::new(|| {
+        let (tx, rx) = crossbeam_channel::unbounded::<NetworkActionJob>();
+        let _ = spawn_network_action_worker(rx);
+        tx
+    });
     static HOOKS_THREAD: Lazy<Mutex<Option<(u32, thread::JoinHandle<()>)>>> =
         Lazy::new(|| Mutex::new(None));
     const OPEN_WINDOW_SNAPSHOT_TTL: Duration = Duration::from_millis(400);
@@ -21397,6 +21404,23 @@ mod windows_overlay {
         });
     }
 
+    fn spawn_network_action_worker(rx: Receiver<NetworkActionJob>) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            while let Ok(job) = rx.recv() {
+                job();
+            }
+        })
+    }
+
+    fn enqueue_network_action<F>(job: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        if NETWORK_ACTION_QUEUE.send(Box::new(job)).is_err() {
+            send_network_action_status("Network action queue is unavailable.".to_owned());
+        }
+    }
+
     fn network_action_result_file_path() -> PathBuf {
         let id = NETWORK_ACTION_RESULT_SEQ.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!("macronest_network_action_{id}.txt"))
@@ -21487,7 +21511,7 @@ mod windows_overlay {
 
     fn spawn_network_adapter_command(enable: bool, adapter_query: String, target_spec: String) {
         let target_label = network_action_target_label(&target_spec);
-        thread::spawn(move || {
+        enqueue_network_action(move || {
             let result_file = network_action_result_file_path();
             let command_text = build_network_adapter_command(enable, &adapter_query, &result_file);
             let success_message = if enable {
@@ -21712,7 +21736,7 @@ mod windows_overlay {
         };
         let target_label = app_network_label(&program_path);
         let directions = app_network_direction_labels(step)?.join(" + ");
-        thread::spawn(move || {
+        enqueue_network_action(move || {
             let message = match run_hidden_powershell_script(&command_text, true, 15_000) {
                 Ok(exit_code) => match read_simple_network_action_result(&result_file) {
                     Ok(None) => {
@@ -25568,6 +25592,22 @@ mod windows_overlay {
             assert!(command.contains("MacroNestAppNetwork_In_"));
             assert!(command.contains("MacroNestAppNetwork_Out_"));
             assert!(command.contains("Out-Null; Remove-NetFirewallRule"));
+        }
+
+        #[test]
+        fn test_network_action_worker_preserves_job_order() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let (tx, rx) = crossbeam_channel::unbounded::<NetworkActionJob>();
+            let output = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let handle = spawn_network_action_worker(rx);
+            for value in [1_u8, 2, 3] {
+                let output = output.clone();
+                tx.send(Box::new(move || output.lock().unwrap().push(value)))
+                    .unwrap();
+            }
+            drop(tx);
+            handle.join().unwrap();
+            assert_eq!(*output.lock().unwrap(), vec![1, 2, 3]);
         }
 
         #[test]
