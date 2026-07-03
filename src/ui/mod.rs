@@ -6623,6 +6623,8 @@ impl CrosshairApp {
             MacroAction::TriggerCommandPreset => "TriggerCommand",
             MacroAction::DisableNetworkAdapter => "DisableNetwork",
             MacroAction::EnableNetworkAdapter => "EnableNetwork",
+            MacroAction::BlockAppNetwork => "BlockAppNetwork",
+            MacroAction::UnblockAppNetwork => "UnblockAppNetwork",
             MacroAction::EnableCrosshairProfile => "EnableCrosshair",
             MacroAction::DisableCrosshair => "DisableCrosshair",
             MacroAction::EnablePinPreset => "EnablePin",
@@ -6742,6 +6744,14 @@ impl CrosshairApp {
             MacroAction::EnableNetworkAdapter => (
                 "macro_action_tooltip.enable_network_adapter",
                 "Enable Wi-Fi, Ethernet, all physical adapters, or one exact adapter name.",
+            ),
+            MacroAction::BlockAppNetwork => (
+                "macro_action_tooltip.block_app_network",
+                "Block inbound, outbound, or both network directions for one selected app executable.",
+            ),
+            MacroAction::UnblockAppNetwork => (
+                "macro_action_tooltip.unblock_app_network",
+                "Restore network access for one selected app executable and direction choice.",
             ),
             MacroAction::EnableCrosshairProfile => (
                 "macro_action_tooltip.enable_crosshair_profile",
@@ -7012,6 +7022,8 @@ impl CrosshairApp {
             MacroAction::TriggerCommandPreset => 0xeb8e,
             MacroAction::DisableNetworkAdapter => 0xe648,
             MacroAction::EnableNetworkAdapter => 0xe63e,
+            MacroAction::BlockAppNetwork => 0xe89b,
+            MacroAction::UnblockAppNetwork => 0xe89c,
             MacroAction::EnableCrosshairProfile => 0xe3c5,
             MacroAction::DisableCrosshair => 0xe1b7,
             MacroAction::EnablePinPreset => 0xe0c8,
@@ -7115,6 +7127,12 @@ impl CrosshairApp {
             }
             MacroAction::EnableNetworkAdapter => {
                 ("macro_action_short_label.enable_network_adapter", "NetOn")
+            }
+            MacroAction::BlockAppNetwork => {
+                ("macro_action_short_label.block_app_network", "AppOff")
+            }
+            MacroAction::UnblockAppNetwork => {
+                ("macro_action_short_label.unblock_app_network", "AppOn")
             }
             MacroAction::EnableCrosshairProfile => {
                 ("macro_action_short_label.enable_crosshair_profile", "Cross")
@@ -7363,6 +7381,8 @@ impl CrosshairApp {
                 | MacroAction::TriggerCommandPreset
                 | MacroAction::DisableNetworkAdapter
                 | MacroAction::EnableNetworkAdapter
+                | MacroAction::BlockAppNetwork
+                | MacroAction::UnblockAppNetwork
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::EnablePinPreset
                 | MacroAction::PlayMousePathPreset

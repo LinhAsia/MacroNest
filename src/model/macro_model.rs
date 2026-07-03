@@ -28,6 +28,8 @@ pub enum MacroAction {
     TriggerCommandPreset,
     DisableNetworkAdapter,
     EnableNetworkAdapter,
+    BlockAppNetwork,
+    UnblockAppNetwork,
     EnableCrosshairProfile,
     DisableCrosshair,
     EnablePinPreset,
@@ -265,6 +267,10 @@ pub struct MacroStep {
     #[serde(default)]
     pub timer_on_complete_macro_preset_id: Option<u32>,
     #[serde(default = "default_true")]
+    pub network_block_inbound: bool,
+    #[serde(default = "default_true")]
+    pub network_block_outbound: bool,
+    #[serde(default = "default_true")]
     pub lock_mouse_left: bool,
     #[serde(default = "default_true")]
     pub lock_mouse_right: bool,
@@ -397,6 +403,8 @@ impl Default for MacroStep {
             if_running_preset_group_id: None,
             timer_preset_id: None,
             timer_on_complete_macro_preset_id: None,
+            network_block_inbound: true,
+            network_block_outbound: true,
             lock_mouse_left: true,
             lock_mouse_right: true,
             lock_mouse_middle: true,
