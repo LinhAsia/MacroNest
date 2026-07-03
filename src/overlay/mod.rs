@@ -21630,7 +21630,7 @@ mod windows_overlay {
                 )
             })
             .collect::<Vec<_>>()
-            .join(" ");
+            .join("; ");
         Ok(format!(
             "$mnResultPath = '{result_path}'; try {{ {create_rules}; Set-Content -LiteralPath $mnResultPath -Value @('OK'); exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
         ))
@@ -25553,6 +25553,21 @@ mod windows_overlay {
             assert_eq!(names.len(), 2);
             assert!(names.iter().any(|name| name.contains("_In_")));
             assert!(names.iter().any(|name| name.contains("_Out_")));
+        }
+
+        #[test]
+        fn test_block_app_network_command_separates_multiple_rules() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let mut step = MacroStep::default();
+            step.network_block_inbound = true;
+            step.network_block_outbound = true;
+            let result_file = std::env::temp_dir().join("macronest_app_network_test.txt");
+            let command =
+                build_block_app_network_command(r"C:\Games\TestGame.exe", &step, &result_file)
+                    .unwrap();
+            assert!(command.contains("MacroNestAppNetwork_In_"));
+            assert!(command.contains("MacroNestAppNetwork_Out_"));
+            assert!(command.contains("Out-Null; Remove-NetFirewallRule"));
         }
 
         #[test]
