@@ -555,11 +555,23 @@ impl CrosshairApp {
         live_sync: &mut bool,
     ) {
         ui.horizontal(|ui| {
+            let hint_color = ui.visuals().weak_text_color();
+            let prev_override = ui.visuals().override_text_color;
+            ui.visuals_mut().override_text_color = None;
             let response = ui.add(
                 egui::TextEdit::singleline(&mut step.key)
                     .desired_width(280.0)
-                    .hint_text(Self::tr_lang(language, "App .exe path", "App .exe path")),
+                    .hint_text(
+                        RichText::new(Self::tr_lang(
+                            language,
+                            "App .exe path",
+                            "App .exe path",
+                        ))
+                        .color(hint_color)
+                        .weak(),
+                    ),
             );
+            ui.visuals_mut().override_text_color = prev_override;
             if response.changed() {
                 *live_sync = true;
             }
@@ -578,6 +590,26 @@ impl CrosshairApp {
                 step.key = path.to_string_lossy().to_string();
                 *live_sync = true;
             }
+            let warn_color = Color32::from_rgb(255, 170, 0);
+            let warning_response = ui.add(
+                egui::Label::new(Self::material_icon_text(0xe002, 14.0).color(warn_color))
+                    .sense(egui::Sense::hover()),
+            );
+            warning_response.on_hover_ui(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(Self::material_icon_text(0xe002, 14.0).color(warn_color));
+                    ui.label(
+                        RichText::new(Self::tr_lang(language, "APP NETWORK TIP", "APP NETWORK TIP"))
+                            .strong()
+                            .color(warn_color),
+                    );
+                });
+                ui.label(Self::tr_lang(
+                    language,
+                    "Blocks only the exact .exe that owns the socket. If the launcher starts another game process, choose that real network .exe instead.",
+                    "Blocks only the exact .exe that owns the socket. If the launcher starts another game process, choose that real network .exe instead.",
+                ));
+            });
         });
         ui.horizontal(|ui| {
             let inbound_changed = ui
@@ -604,14 +636,6 @@ impl CrosshairApp {
                 );
             }
         });
-        ui.small(
-            RichText::new(Self::tr_lang(
-                language,
-                "Blocks only the exact .exe that owns the socket. If the launcher starts another game process, choose that real network .exe instead.",
-                "Blocks only the exact .exe that owns the socket. If the launcher starts another game process, choose that real network .exe instead.",
-            ))
-            .color(Color32::from_gray(190)),
-        );
     }
 
     fn clear_macro_action_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
