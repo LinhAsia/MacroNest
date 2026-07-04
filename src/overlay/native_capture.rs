@@ -8,7 +8,7 @@ use windows::Win32::{
         DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint, FONT_CHARSET,
         FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_BOLD, FillRect, GetDC, HDC,
         HFONT, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, ReleaseDC, SRCCOPY,
-        SelectObject, SetBkMode, SetTextColor, StretchDIBits, TRANSPARENT,
+        SelectObject, SetBkMode, SetTextColor, StretchDIBits, TRANSPARENT, UpdateWindow,
     },
     UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN},
     UI::WindowsAndMessaging::{
@@ -472,6 +472,7 @@ unsafe extern "system" fn capture_wnd_proc(
                                 } else {
                                     InvalidateRect(hwnd, None, false);
                                 }
+                                let _ = UpdateWindow(hwnd);
                             } else {
                                 InvalidateRect(hwnd, None, false);
                             }
