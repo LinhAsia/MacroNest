@@ -14,13 +14,13 @@ use windows::Win32::{
     UI::WindowsAndMessaging::{
         CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
         DispatchMessageW, GWLP_USERDATA, GetCursorPos, GetMessageW, GetWindowLongPtrW, HCURSOR,
-        HWND_TOPMOST, IDC_ARROW, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE,
-        IMAGE_CURSOR, LR_SHARED, LoadCursorW, LoadImageW, MSG, PostMessageW, PostQuitMessage,
-        RegisterClassW, SW_HIDE, SW_SHOW, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetCursor,
-        SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, WINDOW_EX_STYLE,
-        WINDOW_LONG_PTR_INDEX, WINDOW_STYLE, WM_CREATE, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN,
-        WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT, WM_RBUTTONUP, WM_SETCURSOR, WNDCLASSW,
-        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+        HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS,
+        IDC_SIZENWSE, IDC_SIZEWE, IMAGE_CURSOR, LR_SHARED, LoadCursorW, LoadImageW, MSG,
+        PostMessageW, PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW, SW_SHOWNORMAL,
+        SWP_NOACTIVATE, SWP_SHOWWINDOW, SetCursor, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+        TranslateMessage, WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINDOW_STYLE, WM_CREATE,
+        WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT,
+        WM_RBUTTONUP, WM_SETCURSOR, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     },
 };
 use windows::core::w;
@@ -375,6 +375,16 @@ unsafe extern "system" fn capture_wnd_proc(
             LRESULT(1)
         }
         WM_CREATE => LRESULT(0),
+        WM_SETCURSOR => {
+            if let Some(state) = get_state(hwnd)
+                && matches!(state.mode, NativeCaptureMode::PointClick { .. })
+                && let Ok(cursor) = LoadCursorW(None, IDC_CROSS)
+            {
+                SetCursor(Some(cursor));
+                return LRESULT(1);
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_LBUTTONDOWN => {
             let state = get_state(hwnd);
             if let Some(state) = state {
@@ -1158,15 +1168,6 @@ unsafe fn draw_point_click_capture_to_dc(
     let Some(curr) = state.current_point else {
         return Ok(());
     };
-
-    let pen = CreatePen(PS_SOLID, 1, rgb(0, 160, 255));
-    let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
-    let _ = MoveToEx(hdc, curr.0 - 10, curr.1, None);
-    let _ = LineTo(hdc, curr.0 + 11, curr.1);
-    let _ = MoveToEx(hdc, curr.0, curr.1 - 10, None);
-    let _ = LineTo(hdc, curr.0, curr.1 + 11);
-    let _ = SelectObject(hdc, old_pen);
-    let _ = DeleteObject(HGDIOBJ(pen.0));
 
     let (panel_x, panel_y) = point_click_panel_origin(state, curr);
     let panel_brush = CreateSolidBrush(rgb(12, 18, 28));
