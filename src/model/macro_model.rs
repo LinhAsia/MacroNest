@@ -30,6 +30,8 @@ pub enum MacroAction {
     EnableNetworkAdapter,
     CutInternetRoute,
     RestoreInternetRoute,
+    SetWifiRadioOff,
+    SetWifiRadioOn,
     EnableCrosshairProfile,
     DisableCrosshair,
     EnablePinPreset,

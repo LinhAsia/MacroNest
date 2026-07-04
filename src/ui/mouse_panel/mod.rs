@@ -243,7 +243,11 @@ impl CrosshairApp {
             );
             ui.add_enabled_ui(false, |ui| {
                 let mut dummy = MouseInputBackendMode::Arduino;
-                ui.selectable_value(&mut dummy, MouseInputBackendMode::Arduino, "Arduino (Not Stable)");
+                ui.selectable_value(
+                    &mut dummy,
+                    MouseInputBackendMode::Arduino,
+                    "Arduino (Not Stable)",
+                );
             });
             ui.selectable_value(
                 &mut next_mode,
@@ -342,7 +346,10 @@ impl CrosshairApp {
         let arduino_panel_title = format!(
             "{} ({})",
             self.tr("Arduino Leonardo Emulation", "Arduino Leonardo Emulation"),
-            self.tr("Not Stable / Under Development", "Chưa ổn định / Đang phát triển")
+            self.tr(
+                "Not Stable / Under Development",
+                "Chưa ổn định / Đang phát triển"
+            )
         );
         let mut arduino_open = self.mouse_input_arduino_open;
         ui.add_enabled_ui(false, |ui| {
@@ -998,13 +1005,21 @@ impl CrosshairApp {
 
                                 ui.label(Self::tr_lang(language, "Draw Path", "Vẽ Path"));
                                 ui.horizontal(|ui| {
-                                    let draw_text = Self::tr_lang(language, "Draw on screen", "Vẽ trên màn hình");
-                                    let draw_btn = Button::new(RichText::new(draw_text).strong());
-                                    if ui.add(draw_btn).on_hover_text(Self::tr_lang(
+                                    let draw_text = Self::tr_lang(
                                         language,
-                                        "Hide app and draw path with mouse",
-                                        "Ẩn ứng dụng và vẽ đường di chuột bằng chuột"
-                                    )).clicked() {
+                                        "Draw on screen",
+                                        "Vẽ trên màn hình",
+                                    );
+                                    let draw_btn = Button::new(RichText::new(draw_text).strong());
+                                    if ui
+                                        .add(draw_btn)
+                                        .on_hover_text(Self::tr_lang(
+                                            language,
+                                            "Hide app and draw path with mouse",
+                                            "Ẩn ứng dụng và vẽ đường di chuột bằng chuột",
+                                        ))
+                                        .clicked()
+                                    {
                                         draw_preset_id = Some(preset.id);
                                     }
                                 });
@@ -1968,7 +1983,12 @@ impl CrosshairApp {
             new_preset.name = format!("{} Copy", source_preset.name);
         } else {
             let mut suffix = 1;
-            while self.state.mouse_path_presets.iter().any(|p| p.name == format!("Mouse Path {}", suffix)) {
+            while self
+                .state
+                .mouse_path_presets
+                .iter()
+                .any(|p| p.name == format!("Mouse Path {}", suffix))
+            {
                 suffix += 1;
             }
             new_preset.name = format!("Mouse Path {}", suffix);
@@ -2116,13 +2136,16 @@ impl CrosshairApp {
         );
         let mut new_preset = MouseSensitivityPreset::new(id);
         let mut suffix = 1;
-        while self.state.mouse_sensitivity_presets.iter().any(|p| p.name == format!("Mouse Sensitivity {}", suffix)) {
+        while self
+            .state
+            .mouse_sensitivity_presets
+            .iter()
+            .any(|p| p.name == format!("Mouse Sensitivity {}", suffix))
+        {
             suffix += 1;
         }
         new_preset.name = format!("Mouse Sensitivity {}", suffix);
-        self.state
-            .mouse_sensitivity_presets
-            .push(new_preset);
+        self.state.mouse_sensitivity_presets.push(new_preset);
         self.sync_mouse_sensitivity_presets();
         self.status = format!("Added mouse sensitivity preset {id}.");
     }

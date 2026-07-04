@@ -437,7 +437,8 @@ impl CrosshairApp {
 
             // 3. Alpha Slider (Opacity)
             match alpha_mode {
-                egui::color_picker::Alpha::BlendOrAdditive | egui::color_picker::Alpha::OnlyBlend => {
+                egui::color_picker::Alpha::BlendOrAdditive
+                | egui::color_picker::Alpha::OnlyBlend => {
                     ui.add_space(8.0);
                     let mut a = hsva.a;
                     if Self::premium_alpha_slider(ui, &mut a, hsva.h, hsva.s, hsva.v) {
@@ -459,22 +460,32 @@ impl CrosshairApp {
             // 4. Hex input at the bottom
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("#").strong().color(ui.visuals().weak_text_color()));
+                ui.label(
+                    RichText::new("#")
+                        .strong()
+                        .color(ui.visuals().weak_text_color()),
+                );
                 let mut hex_string = match alpha_mode {
                     egui::color_picker::Alpha::Opaque => {
                         format!("{:02X}{:02X}{:02X}", color.r, color.g, color.b)
                     }
                     _ => {
-                        format!("{:02X}{:02X}{:02X}{:02X}", color.r, color.g, color.b, color.a)
+                        format!(
+                            "{:02X}{:02X}{:02X}{:02X}",
+                            color.r, color.g, color.b, color.a
+                        )
                     }
                 };
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut hex_string)
                         .font(egui::TextStyle::Monospace.resolve(ui.style()))
-                        .desired_width(120.0)
+                        .desired_width(120.0),
                 );
                 if response.changed() {
-                    let cleaned: String = hex_string.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+                    let cleaned: String = hex_string
+                        .chars()
+                        .filter(|c| c.is_ascii_hexdigit())
+                        .collect();
                     if cleaned.len() == 6 && alpha_mode == egui::color_picker::Alpha::Opaque {
                         if let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
                             && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
@@ -497,7 +508,8 @@ impl CrosshairApp {
                             color.a = a;
                             changed = true;
                         }
-                    } else if cleaned.len() == 6 && alpha_mode != egui::color_picker::Alpha::Opaque {
+                    } else if cleaned.len() == 6 && alpha_mode != egui::color_picker::Alpha::Opaque
+                    {
                         if let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
                             && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
                             && let Ok(b) = u8::from_str_radix(&cleaned[4..6], 16)
@@ -515,12 +527,7 @@ impl CrosshairApp {
         changed
     }
 
-    fn premium_color_slider_2d(
-        ui: &mut egui::Ui,
-        h: f32,
-        s: &mut f32,
-        v: &mut f32,
-    ) -> bool {
+    fn premium_color_slider_2d(ui: &mut egui::Ui, h: f32, s: &mut f32, v: &mut f32) -> bool {
         let mut changed = false;
         let desired_size = egui::vec2(ui.available_width().max(200.0), 160.0);
         let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click_and_drag());
@@ -539,7 +546,7 @@ impl CrosshairApp {
                     let st = xi as f32 / steps as f32;
                     let vt = 1.0 - (yi as f32 / steps as f32);
                     let color = egui::Color32::from(egui::epaint::Hsva::new(h, st, vt, 1.0));
-                    
+
                     let x = rect.left() + st * rect.width();
                     let y = rect.top() + (1.0 - vt) * rect.height();
                     mesh.colored_vertex(egui::pos2(x, y), color);
@@ -555,14 +562,23 @@ impl CrosshairApp {
             ui.painter().add(egui::epaint::Shape::mesh(mesh));
 
             // Draw border
-            ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+                egui::StrokeKind::Inside,
+            );
 
             // Draw selector dot
             let dot_x = rect.left() + (*s) * rect.width();
             let dot_y = rect.top() + (1.0 - *v) * rect.height();
             let picked_color = egui::Color32::from(egui::epaint::Hsva::new(h, *s, *v, 1.0));
-            let contrast = if picked_color.intensity() < 128.0 { egui::Color32::WHITE } else { egui::Color32::BLACK };
-            
+            let contrast = if picked_color.intensity() < 128.0 {
+                egui::Color32::WHITE
+            } else {
+                egui::Color32::BLACK
+            };
+
             ui.painter().circle(
                 egui::pos2(dot_x, dot_y),
                 6.0,
@@ -603,16 +619,27 @@ impl CrosshairApp {
             ui.painter().add(egui::epaint::Shape::mesh(mesh));
 
             // Draw border
-            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(
+                rect,
+                2.0,
+                egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+                egui::StrokeKind::Inside,
+            );
 
             // Draw cursor indicator
             let cursor_x = rect.left() + (*h) * rect.width();
             ui.painter().line_segment(
-                [egui::pos2(cursor_x, rect.top() - 2.0), egui::pos2(cursor_x, rect.bottom() + 2.0)],
+                [
+                    egui::pos2(cursor_x, rect.top() - 2.0),
+                    egui::pos2(cursor_x, rect.bottom() + 2.0),
+                ],
                 egui::Stroke::new(2.0, egui::Color32::WHITE),
             );
             ui.painter().line_segment(
-                [egui::pos2(cursor_x, rect.top() - 2.0), egui::pos2(cursor_x, rect.bottom() + 2.0)],
+                [
+                    egui::pos2(cursor_x, rect.top() - 2.0),
+                    egui::pos2(cursor_x, rect.bottom() + 2.0),
+                ],
                 egui::Stroke::new(1.0, egui::Color32::BLACK),
             );
         }
@@ -639,12 +666,18 @@ impl CrosshairApp {
                 let color1 = egui::Color32::from_gray(60);
                 let color2 = egui::Color32::from_gray(120);
                 ui.painter().rect_filled(
-                    egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(cell_size, cell_size)),
+                    egui::Rect::from_min_size(
+                        egui::pos2(x, rect.top()),
+                        egui::vec2(cell_size, cell_size),
+                    ),
                     0.0,
                     if i % 2 == 0 { color1 } else { color2 },
                 );
                 ui.painter().rect_filled(
-                    egui::Rect::from_min_size(egui::pos2(x, rect.top() + cell_size), egui::vec2(cell_size, cell_size)),
+                    egui::Rect::from_min_size(
+                        egui::pos2(x, rect.top() + cell_size),
+                        egui::vec2(cell_size, cell_size),
+                    ),
                     0.0,
                     if i % 2 == 0 { color2 } else { color1 },
                 );
@@ -669,16 +702,27 @@ impl CrosshairApp {
             ui.painter().add(egui::epaint::Shape::mesh(mesh));
 
             // Draw border
-            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(
+                rect,
+                2.0,
+                egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+                egui::StrokeKind::Inside,
+            );
 
             // Draw cursor indicator
             let cursor_x = rect.left() + (*a) * rect.width();
             ui.painter().line_segment(
-                [egui::pos2(cursor_x, rect.top() - 2.0), egui::pos2(cursor_x, rect.bottom() + 2.0)],
+                [
+                    egui::pos2(cursor_x, rect.top() - 2.0),
+                    egui::pos2(cursor_x, rect.bottom() + 2.0),
+                ],
                 egui::Stroke::new(2.0, egui::Color32::WHITE),
             );
             ui.painter().line_segment(
-                [egui::pos2(cursor_x, rect.top() - 2.0), egui::pos2(cursor_x, rect.bottom() + 2.0)],
+                [
+                    egui::pos2(cursor_x, rect.top() - 2.0),
+                    egui::pos2(cursor_x, rect.bottom() + 2.0),
+                ],
                 egui::Stroke::new(1.0, egui::Color32::BLACK),
             );
         }

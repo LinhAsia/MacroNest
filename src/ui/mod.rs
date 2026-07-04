@@ -6644,6 +6644,8 @@ impl CrosshairApp {
             MacroAction::EnableNetworkAdapter => "EnableNetwork",
             MacroAction::CutInternetRoute => "CutInternet",
             MacroAction::RestoreInternetRoute => "RestoreInternet",
+            MacroAction::SetWifiRadioOff => "SetWifiRadioOff",
+            MacroAction::SetWifiRadioOn => "SetWifiRadioOn",
             MacroAction::EnableCrosshairProfile => "EnableCrosshair",
             MacroAction::DisableCrosshair => "DisableCrosshair",
             MacroAction::EnablePinPreset => "EnablePin",
@@ -6771,6 +6773,14 @@ impl CrosshairApp {
             MacroAction::RestoreInternetRoute => (
                 "macro_action_tooltip.restore_internet_route",
                 "Restore default internet routes previously cut by MacroNest.",
+            ),
+            MacroAction::SetWifiRadioOff => (
+                "macro_action_tooltip.set_wifi_radio_off",
+                "Instantly turn off the Wi-Fi radio using the Windows Radio API — like pressing the hardware Wi-Fi button.",
+            ),
+            MacroAction::SetWifiRadioOn => (
+                "macro_action_tooltip.set_wifi_radio_on",
+                "Instantly turn on the Wi-Fi radio using the Windows Radio API — like pressing the hardware Wi-Fi button.",
             ),
             MacroAction::EnableCrosshairProfile => (
                 "macro_action_tooltip.enable_crosshair_profile",
@@ -7043,6 +7053,8 @@ impl CrosshairApp {
             MacroAction::EnableNetworkAdapter => 0xe63e,
             MacroAction::CutInternetRoute => 0xe628,
             MacroAction::RestoreInternetRoute => 0xe2bd,
+            MacroAction::SetWifiRadioOff => 0xe648,
+            MacroAction::SetWifiRadioOn => 0xe63e,
             MacroAction::EnableCrosshairProfile => 0xe3c5,
             MacroAction::DisableCrosshair => 0xe1b7,
             MacroAction::EnablePinPreset => 0xe0c8,
@@ -7152,6 +7164,12 @@ impl CrosshairApp {
             }
             MacroAction::RestoreInternetRoute => {
                 ("macro_action_short_label.restore_internet_route", "RestNet")
+            }
+            MacroAction::SetWifiRadioOff => {
+                ("macro_action_short_label.set_wifi_radio_off", "RadioOff")
+            }
+            MacroAction::SetWifiRadioOn => {
+                ("macro_action_short_label.set_wifi_radio_on", "RadioOn")
             }
             MacroAction::EnableCrosshairProfile => {
                 ("macro_action_short_label.enable_crosshair_profile", "Cross")
@@ -7291,6 +7309,8 @@ impl CrosshairApp {
                 | MacroAction::EnableNetworkAdapter
                 | MacroAction::CutInternetRoute
                 | MacroAction::RestoreInternetRoute
+                | MacroAction::SetWifiRadioOff
+                | MacroAction::SetWifiRadioOn
         ) {
             return match language {
                 UiLanguage::Vietnamese => "Mạng".to_owned(),
@@ -7337,6 +7357,8 @@ impl CrosshairApp {
                 | MacroAction::EnableNetworkAdapter
                 | MacroAction::CutInternetRoute
                 | MacroAction::RestoreInternetRoute
+                | MacroAction::SetWifiRadioOff
+                | MacroAction::SetWifiRadioOn
         ) {
             char::from_u32(0xe1ba).unwrap_or('?')
         } else {
@@ -7419,6 +7441,8 @@ impl CrosshairApp {
                 | MacroAction::EnableNetworkAdapter
                 | MacroAction::CutInternetRoute
                 | MacroAction::RestoreInternetRoute
+                | MacroAction::SetWifiRadioOff
+                | MacroAction::SetWifiRadioOn
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::EnablePinPreset
                 | MacroAction::PlayMousePathPreset
