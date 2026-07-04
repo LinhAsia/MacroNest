@@ -519,6 +519,12 @@ unsafe extern "system" fn capture_wnd_proc(
             if !hdc.0.is_null() {
                 let state = get_state(hwnd);
                 if let Some(state) = state {
+                    if matches!(state.mode, NativeCaptureMode::PointClick { .. }) {
+                        let mut pt = POINT::default();
+                        if GetCursorPos(&mut pt).is_ok() {
+                            state.current_point = Some((pt.x - state.left, pt.y - state.top));
+                        }
+                    }
                     let _ = draw_capture_to_dc(hdc, state);
                 }
             }
