@@ -3,12 +3,12 @@
 use windows::Win32::{
     Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, CreateCompatibleDC, CreateDIBSection,
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleDC, CreateDIBSection,
         CreateFontW, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
         DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint, FONT_CHARSET,
         FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_BOLD, FillRect, GetDC, HDC,
         HFONT, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, ReleaseDC, SRCCOPY,
-        SelectObject, SetBkMode, SetTextColor, StretchDIBits, TRANSPARENT, UpdateWindow,
+        SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, StretchDIBits, TRANSPARENT, UpdateWindow,
     },
     UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN},
     UI::WindowsAndMessaging::{
@@ -1150,33 +1150,30 @@ unsafe fn draw_point_click_capture_to_dc(
         biCompression: BI_RGB.0,
         ..Default::default()
     };
-    let _ = StretchDIBits(
-        hdc,
-        dirty.left,
-        dirty.top,
-        dirty_w,
-        dirty_h,
-        0,
-        0,
-        dirty_w,
-        dirty_h,
-        Some(bgra.as_ptr() as *const std::ffi::c_void),
-        &bmi,
-        DIB_RGB_COLORS,
-        SRCCOPY,
-    );
+    let mut dib_bits: *mut std::ffi::c_void = std::ptr::null_mut();
+    let dib = CreateDIBSection(Some(hdc), &bmi, DIB_RGB_COLORS, &mut dib_bits, None, 0)?;
+    if !dib_bits.is_null() {
+        std::ptr::copy_nonoverlapping(bgra.as_ptr(), dib_bits as *mut u8, bgra.len());
+    }
+    let draw_hdc = CreateCompatibleDC(Some(hdc));
+    let old_bitmap = SelectObject(draw_hdc, HGDIOBJ(dib.0));
+    let _ = SetViewportOrgEx(draw_hdc, -dirty.left, -dirty.top, None);
 
     let Some(curr) = state.current_point else {
+        let _ = BitBlt(hdc, dirty.left, dirty.top, dirty_w, dirty_h, Some(draw_hdc), 0, 0, SRCCOPY);
+        let _ = SelectObject(draw_hdc, old_bitmap);
+        let _ = DeleteObject(HGDIOBJ(dib.0));
+        let _ = DeleteDC(draw_hdc);
         return Ok(());
     };
 
     let (panel_x, panel_y) = point_click_panel_origin(state, curr);
     let panel_brush = CreateSolidBrush(rgb(12, 18, 28));
     let panel_pen = CreatePen(PS_SOLID, 1, rgb(110, 156, 210));
-    let old_brush = SelectObject(hdc, HGDIOBJ(panel_brush.0));
-    let old_pen = SelectObject(hdc, HGDIOBJ(panel_pen.0));
+    let old_brush = SelectObject(draw_hdc, HGDIOBJ(panel_brush.0));
+    let old_pen = SelectObject(draw_hdc, HGDIOBJ(panel_pen.0));
     let _ = windows::Win32::Graphics::Gdi::RoundRect(
-        hdc,
+        draw_hdc,
         panel_x,
         panel_y,
         panel_x + 200,
@@ -1184,8 +1181,8 @@ unsafe fn draw_point_click_capture_to_dc(
         10,
         10,
     );
-    let _ = SelectObject(hdc, old_brush);
-    let _ = SelectObject(hdc, old_pen);
+    let _ = SelectObject(draw_hdc, old_brush);
+    let _ = SelectObject(draw_hdc, old_pen);
     let _ = DeleteObject(HGDIOBJ(panel_brush.0));
     let _ = DeleteObject(HGDIOBJ(panel_pen.0));
 
@@ -1214,26 +1211,26 @@ unsafe fn draw_point_click_capture_to_dc(
                 right: preview_x + (dx + 1) * cell,
                 bottom: preview_y + (dy + 1) * cell,
             };
-            let _ = FillRect(hdc, &rect, brush);
+            let _ = FillRect(draw_hdc, &rect, brush);
             let _ = DeleteObject(HGDIOBJ(brush.0));
         }
     }
 
     let border_pen = CreatePen(PS_SOLID, 1, rgb(146, 192, 248));
-    let old_pen = SelectObject(hdc, HGDIOBJ(border_pen.0));
+    let old_pen = SelectObject(draw_hdc, HGDIOBJ(border_pen.0));
     let null_brush =
         windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH);
-    let old_brush = SelectObject(hdc, null_brush);
-    let _ = Rectangle(hdc, preview_x, preview_y, preview_x + 17 * cell, preview_y + 17 * cell);
+    let old_brush = SelectObject(draw_hdc, null_brush);
+    let _ = Rectangle(draw_hdc, preview_x, preview_y, preview_x + 17 * cell, preview_y + 17 * cell);
     let _ = Rectangle(
-        hdc,
+        draw_hdc,
         preview_x + 8 * cell,
         preview_y + 8 * cell,
         preview_x + 9 * cell,
         preview_y + 9 * cell,
     );
-    let _ = SelectObject(hdc, old_pen);
-    let _ = SelectObject(hdc, old_brush);
+    let _ = SelectObject(draw_hdc, old_pen);
+    let _ = SelectObject(draw_hdc, old_brush);
     let _ = DeleteObject(HGDIOBJ(border_pen.0));
 
     let swatch_brush = CreateSolidBrush(rgb(center_color.0, center_color.1, center_color.2));
@@ -1243,7 +1240,7 @@ unsafe fn draw_point_click_capture_to_dc(
         right: panel_x + 38,
         bottom: panel_y + 194,
     };
-    let _ = FillRect(hdc, &swatch_rect, swatch_brush);
+    let _ = FillRect(draw_hdc, &swatch_rect, swatch_brush);
     let _ = DeleteObject(HGDIOBJ(swatch_brush.0));
 
     let font = CreateFontW(
@@ -1262,9 +1259,9 @@ unsafe fn draw_point_click_capture_to_dc(
         0,
         w!("Segoe UI"),
     );
-    let old_font = SelectObject(hdc, HGDIOBJ(font.0));
-    let _ = SetBkMode(hdc, TRANSPARENT);
-    let _ = SetTextColor(hdc, rgb(255, 255, 255));
+    let old_font = SelectObject(draw_hdc, HGDIOBJ(font.0));
+    let _ = SetBkMode(draw_hdc, TRANSPARENT);
+    let _ = SetTextColor(draw_hdc, rgb(255, 255, 255));
     let mut hex_u16: Vec<u16> = format!(
         "#{:02X}{:02X}{:02X}",
         center_color.0, center_color.1, center_color.2
@@ -1277,7 +1274,7 @@ unsafe fn draw_point_click_capture_to_dc(
         right: panel_x + 192,
         bottom: panel_y + 194,
     };
-    let _ = DrawTextW(hdc, &mut hex_u16, &mut hex_rect, DT_SINGLELINE | DT_VCENTER);
+    let _ = DrawTextW(draw_hdc, &mut hex_u16, &mut hex_rect, DT_SINGLELINE | DT_VCENTER);
 
     let mut coord_u16: Vec<u16> = format!("X: {}  Y: {}", curr.0 + state.left, curr.1 + state.top)
         .encode_utf16()
@@ -1288,8 +1285,8 @@ unsafe fn draw_point_click_capture_to_dc(
         right: panel_x + 192,
         bottom: panel_y + 220,
     };
-    let _ = SetTextColor(hdc, rgb(188, 206, 230));
-    let _ = DrawTextW(hdc, &mut coord_u16, &mut coord_rect, DT_SINGLELINE | DT_VCENTER);
+    let _ = SetTextColor(draw_hdc, rgb(188, 206, 230));
+    let _ = DrawTextW(draw_hdc, &mut coord_u16, &mut coord_rect, DT_SINGLELINE | DT_VCENTER);
 
     let mut tip_u16: Vec<u16> = format!("X: {}, Y: {}", curr.0 + state.left, curr.1 + state.top)
         .encode_utf16()
@@ -1298,10 +1295,10 @@ unsafe fn draw_point_click_capture_to_dc(
     let tooltip_y = (curr.1 + 15).clamp(8, (state.height - 34).max(8));
     let tip_brush = CreateSolidBrush(rgb(15, 23, 42));
     let tip_pen = CreatePen(PS_SOLID, 1, rgb(0, 160, 255));
-    let old_brush = SelectObject(hdc, HGDIOBJ(tip_brush.0));
-    let old_pen = SelectObject(hdc, HGDIOBJ(tip_pen.0));
+    let old_brush = SelectObject(draw_hdc, HGDIOBJ(tip_brush.0));
+    let old_pen = SelectObject(draw_hdc, HGDIOBJ(tip_pen.0));
     let _ = windows::Win32::Graphics::Gdi::RoundRect(
-        hdc,
+        draw_hdc,
         tooltip_x,
         tooltip_y,
         tooltip_x + 152,
@@ -1309,21 +1306,35 @@ unsafe fn draw_point_click_capture_to_dc(
         6,
         6,
     );
-    let _ = SelectObject(hdc, old_brush);
-    let _ = SelectObject(hdc, old_pen);
+    let _ = SelectObject(draw_hdc, old_brush);
+    let _ = SelectObject(draw_hdc, old_pen);
     let _ = DeleteObject(HGDIOBJ(tip_brush.0));
     let _ = DeleteObject(HGDIOBJ(tip_pen.0));
-    let _ = SetTextColor(hdc, rgb(255, 255, 255));
+    let _ = SetTextColor(draw_hdc, rgb(255, 255, 255));
     let mut tip_rect = RECT {
         left: tooltip_x + 8,
         top: tooltip_y + 5,
         right: tooltip_x + 144,
         bottom: tooltip_y + 25,
     };
-    let _ = DrawTextW(hdc, &mut tip_u16, &mut tip_rect, DT_SINGLELINE | DT_VCENTER);
+    let _ = DrawTextW(draw_hdc, &mut tip_u16, &mut tip_rect, DT_SINGLELINE | DT_VCENTER);
 
-    let _ = SelectObject(hdc, old_font);
+    let _ = SelectObject(draw_hdc, old_font);
     let _ = DeleteObject(HGDIOBJ(font.0));
+    let _ = BitBlt(
+        hdc,
+        dirty.left,
+        dirty.top,
+        dirty_w,
+        dirty_h,
+        Some(draw_hdc),
+        0,
+        0,
+        SRCCOPY,
+    );
+    let _ = SelectObject(draw_hdc, old_bitmap);
+    let _ = DeleteObject(HGDIOBJ(dib.0));
+    let _ = DeleteDC(draw_hdc);
     Ok(())
 }
 
