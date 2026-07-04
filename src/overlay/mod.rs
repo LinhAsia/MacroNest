@@ -22570,6 +22570,58 @@ mod windows_overlay {
         Ok(())
     }
 
+    fn build_wifi_radio_command(enable: bool, result_file: &std::path::Path) -> String {
+        let result_path = powershell_single_quote(&result_file.to_string_lossy());
+        let state = if enable { "On" } else { "Off" };
+        format!(
+            "$mnResultPath = '{result_path}'; try {{ \
+                Add-Type -AssemblyName System.Runtime.WindowsRuntime; \
+                $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }})[0]; \
+                Function MnAwait($WinRtTask, $ResultType) {{ $asTask = $asTaskGeneric.MakeGenericMethod($ResultType); $netTask = $asTask.Invoke($null, @($WinRtTask)); $netTask.Wait(-1) | Out-Null; $netTask.Result }}; \
+                $null = [Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime]; \
+                $null = [Windows.Devices.Radios.RadioAccessStatus,Windows.System.Devices,ContentType=WindowsRuntime]; \
+                $null = [Windows.Devices.Radios.RadioState,Windows.System.Devices,ContentType=WindowsRuntime]; \
+                MnAwait ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null; \
+                $radios = MnAwait ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]]); \
+                $wifi = @($radios | Where-Object {{ $_.Kind -eq 'WiFi' }}); \
+                if ($wifi.Count -eq 0) {{ Set-Content -LiteralPath $mnResultPath -Value 'NONE'; exit 0 }}; \
+                foreach ($radio in $wifi) {{ MnAwait ($radio.SetStateAsync('{state}')) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null }}; \
+                Set-Content -LiteralPath $mnResultPath -Value 'OK'; exit 0 \
+            }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
+        )
+    }
+
+    fn spawn_wifi_radio_command(enable: bool) {
+        let action_label = if enable { "Wi-Fi radio on" } else { "Wi-Fi radio off" };
+        enqueue_network_action(move || {
+            let result_file = network_action_result_file_path();
+            let command_text = build_wifi_radio_command(enable, &result_file);
+            let message = match run_hidden_powershell_script(&command_text, true, 10_000) {
+                Ok(_) => {
+                    let content = std::fs::read_to_string(&result_file).unwrap_or_default();
+                    let first_line = content.lines().next().unwrap_or("").trim();
+                    if first_line == "OK" {
+                        format!("Set {}.", action_label)
+                    } else if first_line == "NONE" {
+                        "No Wi-Fi radio found.".to_owned()
+                    } else if first_line == "ERR" {
+                        let err = content.lines().nth(1).unwrap_or("unknown error").trim();
+                        format!("Wi-Fi radio action failed: {err}")
+                    } else {
+                        format!("Wi-Fi radio action failed.")
+                    }
+                }
+                Err(error) => format!("Wi-Fi radio action failed: {error}"),
+            };
+            let _ = std::fs::remove_file(&result_file);
+            send_network_action_status(message);
+        });
+    }
+
+    fn trigger_wifi_radio_step(enable: bool) {
+        spawn_wifi_radio_command(enable);
+    }
+
     fn restore_network_adapters_on_exit() -> Result<()> {
         let (names, wifi_profiles) = {
             let hook_state = HOOK_STATE.lock();
@@ -23577,6 +23629,14 @@ mod windows_overlay {
                 let _ = trigger_internet_route_step(step, false);
             }
 
+            MacroAction::SetWifiRadioOff => {
+                trigger_wifi_radio_step(false);
+            }
+
+            MacroAction::SetWifiRadioOn => {
+                trigger_wifi_radio_step(true);
+            }
+
             MacroAction::FunnyMemeReply => {
                 let _ = trigger_funny_meme_reply_step(preset_id, None, step);
             }
@@ -24303,6 +24363,14 @@ mod windows_overlay {
                     let _ = trigger_internet_route_step(step, false);
                 }
 
+                MacroAction::SetWifiRadioOff => {
+                    trigger_wifi_radio_step(false);
+                }
+
+                MacroAction::SetWifiRadioOn => {
+                    trigger_wifi_radio_step(true);
+                }
+
                 MacroAction::FunnyMemeReply => {
                     let _ = trigger_funny_meme_reply_step(preset_id, Some(absolute_index), step);
                 }
@@ -25015,6 +25083,14 @@ mod windows_overlay {
 
                 MacroAction::RestoreInternetRoute => {
                     let _ = trigger_internet_route_step(step, false);
+                }
+
+                MacroAction::SetWifiRadioOff => {
+                    trigger_wifi_radio_step(false);
+                }
+
+                MacroAction::SetWifiRadioOn => {
+                    trigger_wifi_radio_step(true);
                 }
 
                 MacroAction::FunnyMemeReply => {
@@ -27326,6 +27402,8 @@ mod windows_overlay {
                 | MacroAction::EnableNetworkAdapter
                 | MacroAction::CutInternetRoute
                 | MacroAction::RestoreInternetRoute
+                | MacroAction::SetWifiRadioOff
+                | MacroAction::SetWifiRadioOn
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::DisableCrosshair
                 | MacroAction::EnablePinPreset
@@ -27507,6 +27585,8 @@ mod windows_overlay {
             | MacroAction::EnableNetworkAdapter
             | MacroAction::CutInternetRoute
             | MacroAction::RestoreInternetRoute
+            | MacroAction::SetWifiRadioOff
+            | MacroAction::SetWifiRadioOn
             | MacroAction::EnableCrosshairProfile
             | MacroAction::DisableCrosshair
             | MacroAction::EnablePinPreset

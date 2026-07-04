@@ -187,11 +187,7 @@ impl CrosshairApp {
                     let label_text = crate::ocr::display_label_for_language_code(pack.code);
                     let row = ui
                         .horizontal(|ui| {
-                            let btn_width = if installed {
-                                184.0
-                            } else {
-                                118.0
-                            };
+                            let btn_width = if installed { 184.0 } else { 118.0 };
                             let label_response = ui.add_sized(
                                 [btn_width, 20.0],
                                 egui::SelectableLabel::new(is_selected, label_text),

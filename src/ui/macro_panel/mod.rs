@@ -354,7 +354,9 @@ impl CrosshairApp {
     fn network_step_is_enable_action(action: MacroAction) -> bool {
         matches!(
             action,
-            MacroAction::EnableNetworkAdapter | MacroAction::RestoreInternetRoute
+            MacroAction::EnableNetworkAdapter
+                | MacroAction::RestoreInternetRoute
+                | MacroAction::SetWifiRadioOn
         )
     }
 
@@ -362,6 +364,7 @@ impl CrosshairApp {
         match action {
             MacroAction::DisableNetworkAdapter | MacroAction::EnableNetworkAdapter => 0,
             MacroAction::CutInternetRoute | MacroAction::RestoreInternetRoute => 1,
+            MacroAction::SetWifiRadioOff | MacroAction::SetWifiRadioOn => 2,
             _ => 0,
         }
     }
@@ -372,6 +375,8 @@ impl CrosshairApp {
             (true, 0) => MacroAction::EnableNetworkAdapter,
             (false, 1) => MacroAction::CutInternetRoute,
             (true, 1) => MacroAction::RestoreInternetRoute,
+            (false, 2) => MacroAction::SetWifiRadioOff,
+            (true, 2) => MacroAction::SetWifiRadioOn,
             _ => MacroAction::DisableNetworkAdapter,
         };
     }
@@ -612,7 +617,77 @@ impl CrosshairApp {
         let mut method = Self::network_step_method_index(step.action);
         let original_action = step.action;
 
+        // Determine whether the current target is Wi-Fi (Radio option only applies to Wi-Fi)
+        let is_wifi_target = {
+            let k = step.key.trim();
+            k.is_empty() || k.eq_ignore_ascii_case("wifi")
+        };
+
+        // If the user previously had Radio selected but switched target to non-WiFi, reset to Slow
+        if method == 2 && !is_wifi_target {
+            method = 0;
+        }
+
         ui.horizontal(|ui| {
+            // 1. CHỌN MẠNG (Target Editor)
+            Self::render_network_adapter_target_editor(
+                ui,
+                language,
+                (id_salt, "network_target"),
+                &mut step.key,
+                live_sync,
+                width,
+            );
+
+            // Đọc lại target xem có phải WiFi không (vì target editor có thể đã thay đổi giá trị)
+            let is_wifi_target = {
+                let k = step.key.trim();
+                k.is_empty() || k.eq_ignore_ascii_case("wifi")
+            };
+
+            // Nếu trước đó đang chọn Radio nhưng chuyển target sang mạng khác ngoài WiFi thì reset về Slow
+            if method == 2 && !is_wifi_target {
+                method = 0;
+            }
+
+            // 2. CHỌN TỐC ĐỘ (Method/Speed dropdown)
+            egui::ComboBox::from_id_salt((id_salt, "network_method"))
+                .width(170.0)
+                .selected_text(match method {
+                    1 => Self::tr_lang(
+                        language,
+                        "Internet route (Fast)",
+                        "Internet route (Fast)",
+                    ),
+                    2 => Self::tr_lang(language, "Radio (Instant)", "Radio (Instant)"),
+                    _ => Self::tr_lang(language, "Adapter (Slow)", "Adapter (Slow)"),
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut method,
+                        0,
+                        Self::tr_lang(language, "Adapter (Slow)", "Adapter (Slow)"),
+                    );
+                    ui.selectable_value(
+                        &mut method,
+                        1,
+                        Self::tr_lang(
+                            language,
+                            "Internet route (Fast)",
+                            "Internet route (Fast)",
+                        ),
+                    );
+                    // Radio (Instant) chỉ khả dụng khi chọn mạng là Wi-Fi
+                    if is_wifi_target {
+                        ui.selectable_value(
+                            &mut method,
+                            2,
+                            Self::tr_lang(language, "Radio (Instant)", "Radio (Instant)"),
+                        );
+                    }
+                });
+
+            // 3. CHỌN TRẠNG THÁI (State On/Off dropdown)
             egui::ComboBox::from_id_salt((id_salt, "network_state"))
                 .width(72.0)
                 .selected_text(if is_enable {
@@ -633,46 +708,10 @@ impl CrosshairApp {
                     );
                 });
 
-            egui::ComboBox::from_id_salt((id_salt, "network_method"))
-                .width(170.0)
-                .selected_text(match method {
-                    1 => Self::tr_lang(
-                        language,
-                        "Internet route (Fast)",
-                        "Internet route (Fast)",
-                    ),
-                    _ => Self::tr_lang(language, "Adapter (Slow)", "Adapter (Slow)"),
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut method,
-                        0,
-                        Self::tr_lang(language, "Adapter (Slow)", "Adapter (Slow)"),
-                    );
-                    ui.selectable_value(
-                        &mut method,
-                        1,
-                        Self::tr_lang(
-                            language,
-                            "Internet route (Fast)",
-                            "Internet route (Fast)",
-                        ),
-                    );
-                });
-
             Self::sync_network_step_action(step, is_enable, method);
             if step.action != original_action {
                 *live_sync = true;
             }
-
-            Self::render_network_adapter_target_editor(
-                ui,
-                language,
-                (id_salt, "network_target"),
-                &mut step.key,
-                live_sync,
-                width,
-            );
         });
     }
 
@@ -1596,6 +1635,8 @@ impl CrosshairApp {
             MacroAction::EnableNetworkAdapter,
             MacroAction::CutInternetRoute,
             MacroAction::RestoreInternetRoute,
+            MacroAction::SetWifiRadioOff,
+            MacroAction::SetWifiRadioOn,
         ]
     }
 
@@ -6584,6 +6625,8 @@ impl CrosshairApp {
                                                         | MacroAction::EnableNetworkAdapter
                                                         | MacroAction::CutInternetRoute
                                                         | MacroAction::RestoreInternetRoute
+                                                        | MacroAction::SetWifiRadioOff
+                                                        | MacroAction::SetWifiRadioOn
                                                 ) {
                                                     Self::render_network_step_editor(
                                                         ui,
@@ -8851,6 +8894,8 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         | MacroAction::EnableNetworkAdapter
                                                         | MacroAction::CutInternetRoute
                                                         | MacroAction::RestoreInternetRoute
+                                                        | MacroAction::SetWifiRadioOff
+                                                        | MacroAction::SetWifiRadioOn
                                                 ) {
                                                     Self::render_network_step_editor(
                                                         ui,
@@ -11977,6 +12022,8 @@ if supports_move_mouse {
                                                         | MacroAction::EnableNetworkAdapter
                                                         | MacroAction::CutInternetRoute
                                                         | MacroAction::RestoreInternetRoute
+                                                        | MacroAction::SetWifiRadioOff
+                                                        | MacroAction::SetWifiRadioOn
                                                 ) {
                                                     Self::render_network_step_editor(
                                                         ui,

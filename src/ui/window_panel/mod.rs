@@ -2599,11 +2599,9 @@ impl CrosshairApp {
                 ui.data_mut(|d| d.insert_temp(offset_id, drag_offset));
 
                 drag_anchor = match active_handle {
-                    SelectionDragHandle::Left
-                    | SelectionDragHandle::TopLeft => rect.max,
+                    SelectionDragHandle::Left | SelectionDragHandle::TopLeft => rect.max,
                     SelectionDragHandle::BottomLeft => egui::pos2(rect.max.x, rect.min.y),
-                    SelectionDragHandle::Right
-                    | SelectionDragHandle::BottomRight => rect.min,
+                    SelectionDragHandle::Right | SelectionDragHandle::BottomRight => rect.min,
                     SelectionDragHandle::TopRight => egui::pos2(rect.min.x, rect.max.y),
                     SelectionDragHandle::Top => rect.max,
                     SelectionDragHandle::Bottom => rect.min,
@@ -2933,7 +2931,12 @@ impl CrosshairApp {
 
     pub(crate) fn add_window_preset(&mut self) {
         let mut suffix = 1;
-        while self.state.window_presets.iter().any(|p| p.name == format!("Window Resize {}", suffix)) {
+        while self
+            .state
+            .window_presets
+            .iter()
+            .any(|p| p.name == format!("Window Resize {}", suffix))
+        {
             suffix += 1;
         }
         let id = Self::add_window_panel_preset(
@@ -2952,7 +2955,12 @@ impl CrosshairApp {
 
     pub(crate) fn add_window_focus_preset(&mut self) {
         let mut suffix = 1;
-        while self.state.window_focus_presets.iter().any(|p| p.name == format!("Focus {}", suffix)) {
+        while self
+            .state
+            .window_focus_presets
+            .iter()
+            .any(|p| p.name == format!("Focus {}", suffix))
+        {
             suffix += 1;
         }
         let id = Self::add_window_panel_preset(
@@ -2961,7 +2969,12 @@ impl CrosshairApp {
             |preset| preset.id,
             WindowFocusPreset::new,
         );
-        if let Some(preset) = self.state.window_focus_presets.iter_mut().find(|p| p.id == id) {
+        if let Some(preset) = self
+            .state
+            .window_focus_presets
+            .iter_mut()
+            .find(|p| p.id == id)
+        {
             preset.name = format!("Focus {}", suffix);
         }
         self.reconcile_master_presets();
@@ -2971,7 +2984,12 @@ impl CrosshairApp {
 
     pub(crate) fn add_zoom_preset(&mut self) {
         let mut suffix = 1;
-        while self.state.zoom_presets.iter().any(|p| p.name == format!("Zoom {}", suffix)) {
+        while self
+            .state
+            .zoom_presets
+            .iter()
+            .any(|p| p.name == format!("Zoom {}", suffix))
+        {
             suffix += 1;
         }
         let id = Self::add_window_panel_preset(
@@ -2990,7 +3008,12 @@ impl CrosshairApp {
 
     pub(crate) fn add_pin_preset(&mut self) {
         let mut suffix = 1;
-        while self.state.pin_presets.iter().any(|p| p.name == format!("Pin {}", suffix)) {
+        while self
+            .state
+            .pin_presets
+            .iter()
+            .any(|p| p.name == format!("Pin {}", suffix))
+        {
             suffix += 1;
         }
         let id = Self::add_window_panel_preset(
@@ -3089,7 +3112,12 @@ impl CrosshairApp {
         );
         let mut new_preset = WindowLayout::new(id);
         let mut suffix = 1;
-        while self.state.window_layouts.iter().any(|l| l.name == format!("Layout {}", suffix)) {
+        while self
+            .state
+            .window_layouts
+            .iter()
+            .any(|l| l.name == format!("Layout {}", suffix))
+        {
             suffix += 1;
         }
         new_preset.name = format!("Layout {}", suffix);

@@ -38,7 +38,12 @@ impl CrosshairApp {
                 );
                 let mut preset = OcrPreset::new(id);
                 let mut suffix = 1;
-                while self.state.ocr_presets.iter().any(|p| p.name == format!("OCR {}", suffix)) {
+                while self
+                    .state
+                    .ocr_presets
+                    .iter()
+                    .any(|p| p.name == format!("OCR {}", suffix))
+                {
                     suffix += 1;
                 }
                 preset.name = format!("OCR {}", suffix);
@@ -141,11 +146,7 @@ impl CrosshairApp {
                                         self.ocr_download_job.is_some() && !installed;
                                     let row = ui
                                         .horizontal(|ui| {
-                                            let btn_width = if installed {
-                                                236.0
-                                            } else {
-                                                148.0
-                                            };
+                                            let btn_width = if installed { 236.0 } else { 148.0 };
                                             let label_response = ui.add_sized(
                                                 [btn_width, 20.0],
                                                 egui::SelectableLabel::new(is_selected, pack.label),

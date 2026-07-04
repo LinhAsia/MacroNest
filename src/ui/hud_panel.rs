@@ -158,6 +158,19 @@ impl CrosshairApp {
                             )
                             .changed();
                         ui.end_row();
+
+                        ui.label(Self::tr_lang(language, "Preview", "Preview"));
+                        changed |= ui
+                            .checkbox(
+                                &mut preset.preview_enabled,
+                                Self::tr_lang(
+                                    language,
+                                    "Stream preview in editor",
+                                    "Stream preview in editor",
+                                ),
+                            )
+                            .changed();
+                        ui.end_row();
                     });
 
                 ui.add_space(6.0);
@@ -243,7 +256,12 @@ impl CrosshairApp {
                 );
                 let mut new_preset = TimerPreset::new(id);
                 let mut suffix = 1;
-                while self.state.timer_presets.iter().any(|p| p.name == format!("Timer {}", suffix)) {
+                while self
+                    .state
+                    .timer_presets
+                    .iter()
+                    .any(|p| p.name == format!("Timer {}", suffix))
+                {
                     suffix += 1;
                 }
                 new_preset.name = format!("Timer {}", suffix);
@@ -934,7 +952,12 @@ impl CrosshairApp {
         );
         let mut new_preset = HudPreset::new(id);
         let mut suffix = 1;
-        while self.state.hud_presets.iter().any(|p| p.name == format!("HUD {}", suffix)) {
+        while self
+            .state
+            .hud_presets
+            .iter()
+            .any(|p| p.name == format!("HUD {}", suffix))
+        {
             suffix += 1;
         }
         new_preset.name = format!("HUD {}", suffix);

@@ -111,25 +111,9 @@ fn render_custom_pixels(style: &CrosshairStyle, pixels_str: &str) -> Result<Rend
             let height = bottom - top;
 
             if ch == '#' || ch == 'x' || ch == 'X' || ch == '1' {
-                fill_rect(
-                    &mut pixmap,
-                    left,
-                    top,
-                    width,
-                    height,
-                    fill_color,
-                    false,
-                )?;
+                fill_rect(&mut pixmap, left, top, width, height, fill_color, false)?;
             } else if ch == '@' || ch == 'o' || ch == 'O' || ch == '2' {
-                fill_rect(
-                    &mut pixmap,
-                    left,
-                    top,
-                    width,
-                    height,
-                    outline_color,
-                    false,
-                )?;
+                fill_rect(&mut pixmap, left, top, width, height, outline_color, false)?;
             }
         }
     }

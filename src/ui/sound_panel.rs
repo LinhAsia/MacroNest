@@ -819,7 +819,13 @@ impl CrosshairApp {
                 );
                 let mut new_preset = SoundPreset::new(id);
                 let mut suffix = 1;
-                while self.state.audio_settings.presets.iter().any(|p| p.name == format!("Sound {}", suffix)) {
+                while self
+                    .state
+                    .audio_settings
+                    .presets
+                    .iter()
+                    .any(|p| p.name == format!("Sound {}", suffix))
+                {
                     suffix += 1;
                 }
                 new_preset.name = format!("Sound {}", suffix);

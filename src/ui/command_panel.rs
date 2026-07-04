@@ -204,7 +204,12 @@ impl CrosshairApp {
         );
         let mut new_preset = CommandPreset::new(id);
         let mut suffix = 1;
-        while self.state.command_presets.iter().any(|p| p.name == format!("Command {}", suffix)) {
+        while self
+            .state
+            .command_presets
+            .iter()
+            .any(|p| p.name == format!("Command {}", suffix))
+        {
             suffix += 1;
         }
         new_preset.name = format!("Command {}", suffix);
