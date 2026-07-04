@@ -3,15 +3,30 @@ use crate::ai;
 use crate::hotkey;
 
 use crate::model::*;
-use crate::overlay::OverlayCommand;
-
 use crate::ui::{
     CrosshairApp, MATERIAL_ICONS_FONT, MacroActionSubmenuKind, MacroGroupFavoriteFilter,
     MacroStepDragPayload, MouseCaptureKind, MouseMoveAbsoluteCaptureTarget,
 };
 
 use eframe::egui::{self, *};
+use once_cell::sync::Lazy;
+use std::process::Command;
+use std::sync::Mutex;
+use std::thread;
 use std::time::{Duration, Instant};
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[derive(Default)]
+struct NetworkAdapterNameCache {
+    names: Vec<String>,
+    fetched_at: Option<Instant>,
+    loading: bool,
+}
+
+static NETWORK_ADAPTER_NAME_CACHE: Lazy<Mutex<NetworkAdapterNameCache>> =
+    Lazy::new(|| Mutex::new(NetworkAdapterNameCache::default()));
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 
@@ -336,6 +351,31 @@ impl CrosshairApp {
         }
     }
 
+    fn network_step_is_enable_action(action: MacroAction) -> bool {
+        matches!(
+            action,
+            MacroAction::EnableNetworkAdapter | MacroAction::RestoreInternetRoute
+        )
+    }
+
+    fn network_step_method_index(action: MacroAction) -> u8 {
+        match action {
+            MacroAction::DisableNetworkAdapter | MacroAction::EnableNetworkAdapter => 0,
+            MacroAction::CutInternetRoute | MacroAction::RestoreInternetRoute => 1,
+            _ => 0,
+        }
+    }
+
+    fn sync_network_step_action(step: &mut MacroStep, is_enable: bool, method: u8) {
+        step.action = match (is_enable, method) {
+            (false, 0) => MacroAction::DisableNetworkAdapter,
+            (true, 0) => MacroAction::EnableNetworkAdapter,
+            (false, 1) => MacroAction::CutInternetRoute,
+            (true, 1) => MacroAction::RestoreInternetRoute,
+            _ => MacroAction::DisableNetworkAdapter,
+        };
+    }
+
     fn render_window_control_step_comboboxes(
         window_presets: &[WindowPreset],
         window_layouts: &[WindowLayout],
@@ -472,171 +512,235 @@ impl CrosshairApp {
         live_sync: &mut bool,
         width: f32,
     ) {
+        let combo_id = egui::Id::new(&id_salt);
         if step_key.trim().is_empty() {
             *step_key = "wifi".to_owned();
             *live_sync = true;
         }
-        let trimmed = step_key.trim();
+        let trimmed = step_key.trim().to_owned();
         let mut mode = if trimmed.eq_ignore_ascii_case("all") {
-            2_u8
+            *step_key = "wifi".to_owned();
+            *live_sync = true;
+            0_u8
         } else if trimmed.eq_ignore_ascii_case("ethernet") {
             1_u8
         } else if trimmed.starts_with("custom:") {
-            3_u8
+            2_u8
         } else {
             0_u8
         };
+        let adapter_names = Self::query_network_adapter_names();
         let mut custom_name = trimmed
             .strip_prefix("custom:")
             .unwrap_or("")
             .trim()
             .to_owned();
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt(id_salt)
-                .width(width)
-                .selected_text(match mode {
-                    1 => Self::tr_lang(language, "Ethernet", "Ethernet"),
-                    2 => Self::tr_lang(language, "All adapters", "All adapters"),
-                    3 => Self::tr_lang(language, "Custom name", "Custom name"),
-                    _ => Self::tr_lang(language, "Wi-Fi", "Wi-Fi"),
-                })
-                .show_ui(ui, |ui| {
-                    for (mode_value, label, value) in [
-                        (0_u8, Self::tr_lang(language, "Wi-Fi", "Wi-Fi"), "wifi"),
-                        (
-                            1_u8,
-                            Self::tr_lang(language, "Ethernet", "Ethernet"),
-                            "ethernet",
-                        ),
-                        (
-                            2_u8,
-                            Self::tr_lang(language, "All adapters", "All adapters"),
-                            "all",
-                        ),
-                        (
-                            3_u8,
-                            Self::tr_lang(language, "Custom name", "Custom name"),
-                            "custom:",
-                        ),
-                    ] {
-                        if ui.selectable_label(mode == mode_value, label).clicked() {
-                            mode = mode_value;
-                            *step_key = if mode == 3 {
-                                if custom_name.is_empty() {
-                                    "custom:".to_owned()
-                                } else {
-                                    format!("custom:{custom_name}")
-                                }
-                            } else {
-                                value.to_owned()
-                            };
+        if mode == 2 && custom_name.is_empty() && !adapter_names.is_empty() {
+            custom_name = adapter_names[0].clone();
+            *step_key = format!("custom:{custom_name}");
+            *live_sync = true;
+        }
+        if adapter_names.is_empty() {
+            ui.ctx().request_repaint_after(Duration::from_millis(250));
+        }
+        egui::ComboBox::from_id_salt(combo_id)
+            .width(width)
+            .selected_text(match mode {
+                1 => Self::tr_lang(language, "Ethernet", "Ethernet"),
+                2 if custom_name.trim().is_empty() => {
+                    Self::tr_lang(language, "Loading adapters...", "Loading adapters...")
+                }
+                2 => custom_name.as_str(),
+                _ => Self::tr_lang(language, "Wi-Fi", "Wi-Fi"),
+            })
+            .show_ui(ui, |ui| {
+                for (mode_value, label, value) in [
+                    (0_u8, Self::tr_lang(language, "Wi-Fi", "Wi-Fi"), "wifi"),
+                    (
+                        1_u8,
+                        Self::tr_lang(language, "Ethernet", "Ethernet"),
+                        "ethernet",
+                    ),
+                ] {
+                    if ui.selectable_label(mode == mode_value, label).clicked() {
+                        mode = mode_value;
+                        *step_key = value.to_owned();
+                        *live_sync = true;
+                    }
+                }
+                ui.separator();
+                if adapter_names.is_empty() {
+                    ui.add_enabled(
+                        false,
+                        egui::Label::new(Self::tr_lang(
+                            language,
+                            "Loading adapters...",
+                            "Loading adapters...",
+                        )),
+                    );
+                } else {
+                    for adapter_name in &adapter_names {
+                        if ui
+                            .selectable_label(
+                                mode == 2 && custom_name == *adapter_name,
+                                format!(
+                                    "{}: {adapter_name}",
+                                    Self::tr_lang(language, "Adapter", "Adapter")
+                                ),
+                            )
+                            .clicked()
+                        {
+                            mode = 2;
+                            custom_name = adapter_name.clone();
+                            *step_key = format!("custom:{custom_name}");
                             *live_sync = true;
                         }
                     }
-                });
-            if mode == 3 {
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut custom_name)
-                        .desired_width(width)
-                        .hint_text(Self::tr_lang(language, "Adapter name", "Adapter name")),
-                );
-                if response.changed() {
-                    *step_key = format!("custom:{}", custom_name.trim());
-                    *live_sync = true;
                 }
+            });
+    }
+
+    fn render_network_step_editor(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_salt: impl std::hash::Hash + Copy,
+        step: &mut MacroStep,
+        live_sync: &mut bool,
+        width: f32,
+    ) {
+        let mut is_enable = Self::network_step_is_enable_action(step.action);
+        let mut method = Self::network_step_method_index(step.action);
+        let original_action = step.action;
+
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt((id_salt, "network_state"))
+                .width(72.0)
+                .selected_text(if is_enable {
+                    Self::tr_lang(language, "On", "On")
+                } else {
+                    Self::tr_lang(language, "Off", "Off")
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut is_enable,
+                        false,
+                        Self::tr_lang(language, "Off", "Off"),
+                    );
+                    ui.selectable_value(
+                        &mut is_enable,
+                        true,
+                        Self::tr_lang(language, "On", "On"),
+                    );
+                });
+
+            egui::ComboBox::from_id_salt((id_salt, "network_method"))
+                .width(170.0)
+                .selected_text(match method {
+                    1 => Self::tr_lang(
+                        language,
+                        "Internet route (Fast)",
+                        "Internet route (Fast)",
+                    ),
+                    _ => Self::tr_lang(language, "Adapter (Slow)", "Adapter (Slow)"),
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut method,
+                        0,
+                        Self::tr_lang(language, "Adapter (Slow)", "Adapter (Slow)"),
+                    );
+                    ui.selectable_value(
+                        &mut method,
+                        1,
+                        Self::tr_lang(
+                            language,
+                            "Internet route (Fast)",
+                            "Internet route (Fast)",
+                        ),
+                    );
+                });
+
+            Self::sync_network_step_action(step, is_enable, method);
+            if step.action != original_action {
+                *live_sync = true;
             }
+
+            Self::render_network_adapter_target_editor(
+                ui,
+                language,
+                (id_salt, "network_target"),
+                &mut step.key,
+                live_sync,
+                width,
+            );
         });
     }
 
-    fn render_app_network_editor(
-        ui: &mut egui::Ui,
-        language: UiLanguage,
-        step: &mut MacroStep,
-        live_sync: &mut bool,
-    ) {
-        ui.horizontal(|ui| {
-            let hint_color = ui.visuals().weak_text_color();
-            let prev_override = ui.visuals().override_text_color;
-            ui.visuals_mut().override_text_color = None;
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut step.key)
-                    .desired_width(280.0)
-                    .hint_text(
-                        RichText::new(Self::tr_lang(
-                            language,
-                            "App .exe path",
-                            "Đường dẫn .exe của app",
-                        ))
-                        .color(hint_color)
-                        .weak(),
-                    ),
-            );
-            ui.visuals_mut().override_text_color = prev_override;
-            if response.changed() {
-                *live_sync = true;
-            }
-            if ui
-                .button(Self::tr_lang(language, "Browse", "Duyệt"))
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Choose the exact executable that opens the game's network connection.",
-                    "Chọn đúng file thực thi đang mở kết nối mạng của game.",
-                ))
-                .clicked()
-                && let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Executable", &["exe"])
-                    .pick_file()
-            {
-                step.key = path.to_string_lossy().to_string();
-                *live_sync = true;
-            }
-            let warn_color = Color32::from_rgb(255, 170, 0);
-            let warning_response = ui.add(
-                egui::Label::new(Self::material_icon_text(0xe002, 14.0).color(warn_color))
-                    .sense(egui::Sense::hover()),
-            );
-            warning_response.on_hover_ui(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label(Self::material_icon_text(0xe002, 14.0).color(warn_color));
-                    ui.label(
-                        RichText::new(Self::tr_lang(language, "APP NETWORK TIP", "MẸO CHẶN MẠNG APP"))
-                            .strong()
-                            .color(warn_color),
-                    );
-                });
-                ui.label(Self::tr_lang(
-                    language,
-                    "Blocks only the exact .exe that owns the socket. If the launcher starts another game process, choose that real network .exe instead.",
-                    "Chỉ chặn đúng file .exe đang giữ kết nối mạng. Nếu launcher mở ra process game khác, hãy chọn đúng file .exe mạng thật đó.",
-                ));
-            });
-        });
-        ui.horizontal(|ui| {
-            let inbound_changed = ui
-                .checkbox(
-                    &mut step.network_block_inbound,
-                    Self::tr_lang(language, "Inbound", "Chiều vào"),
-                )
-                .changed();
-            let outbound_changed = ui
-                .checkbox(
-                    &mut step.network_block_outbound,
-                    Self::tr_lang(language, "Outbound", "Chiều ra"),
-                )
-                .changed();
-            *live_sync |= inbound_changed || outbound_changed;
-            if !step.network_block_inbound && !step.network_block_outbound {
-                ui.colored_label(
-                    Color32::from_rgb(255, 140, 0),
-                    Self::tr_lang(
-                        language,
-                        "Select at least one direction",
-                        "Hãy chọn ít nhất một chiều",
-                    ),
-                );
-            }
-        });
+    fn fetch_network_adapter_names() -> Vec<String> {
+        let powershell = std::env::var_os("WINDIR")
+            .map(std::path::PathBuf::from)
+            .map(|dir| {
+                dir.join("System32")
+                    .join("WindowsPowerShell")
+                    .join("v1.0")
+                    .join("powershell.exe")
+            })
+            .unwrap_or_else(|| std::path::PathBuf::from("powershell.exe"));
+        let mut command = Command::new(powershell);
+        command.args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "Get-NetAdapter -ErrorAction SilentlyContinue | Sort-Object -Property Name | Select-Object -ExpandProperty Name",
+            ]);
+        #[cfg(target_os = "windows")]
+        {
+            command.creation_flags(0x08000000);
+        }
+        let output = command.output();
+        match output {
+            Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_owned)
+                .collect(),
+            _ => Vec::new(),
+        }
     }
+
+    fn query_network_adapter_names() -> Vec<String> {
+        const NETWORK_ADAPTER_CACHE_TTL: Duration = Duration::from_secs(30);
+
+        let now = Instant::now();
+        if let Ok(mut cache) = NETWORK_ADAPTER_NAME_CACHE.lock() {
+            let is_fresh = cache
+                .fetched_at
+                .is_some_and(|fetched_at| now.saturating_duration_since(fetched_at) < NETWORK_ADAPTER_CACHE_TTL);
+            if is_fresh {
+                return cache.names.clone();
+            }
+
+            let cached_names = cache.names.clone();
+            if !cache.loading {
+                cache.loading = true;
+                thread::spawn(|| {
+                    let names = Self::fetch_network_adapter_names();
+                    if let Ok(mut cache) = NETWORK_ADAPTER_NAME_CACHE.lock() {
+                        cache.names = names;
+                        cache.fetched_at = Some(Instant::now());
+                        cache.loading = false;
+                    }
+                });
+            }
+            return cached_names;
+        }
+
+        Vec::new()
+    }
+
 
     fn clear_macro_action_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
@@ -1490,8 +1594,8 @@ impl CrosshairApp {
         &[
             MacroAction::DisableNetworkAdapter,
             MacroAction::EnableNetworkAdapter,
-            MacroAction::BlockAppNetwork,
-            MacroAction::UnblockAppNetwork,
+            MacroAction::CutInternetRoute,
+            MacroAction::RestoreInternetRoute,
         ]
     }
 
@@ -1499,42 +1603,15 @@ impl CrosshairApp {
         Self::network_macro_actions().contains(&action)
     }
 
-    fn render_network_action_group_option(
+
+    fn render_network_action_single_option(
         ui: &mut egui::Ui,
         language: UiLanguage,
-        id_source: impl std::hash::Hash + Copy,
         current: &mut MacroAction,
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
         let selected = Self::macro_action_is_network(*current);
-        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
-        let popup_id = ui.make_persistent_id((id_source, "network-submenu-popup"));
-        let active_owner = ui
-            .ctx()
-            .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
-        let top_level_hovered = ui
-            .ctx()
-            .data(|data| data.get_temp::<bool>(action_hover_id))
-            .unwrap_or(false);
-        let mut open = ui
-            .ctx()
-            .data(|data| data.get_temp::<bool>(popup_id))
-            .unwrap_or(false);
-        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::Network) {
-            open = false;
-        }
-        if top_level_hovered {
-            open = false;
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
-        }
-        if open {
-            let parent_layer = ui.layer_id();
-            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
-            ui.ctx().set_sublayer(parent_layer, popup_layer);
-            ui.ctx().move_to_top(popup_layer);
-        }
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
             egui::Layout::top_down(egui::Align::Center),
@@ -1543,83 +1620,35 @@ impl CrosshairApp {
                     [34.0, 24.0],
                     Button::new(Self::material_icon_text(0xe1ba, 18.0)).selected(selected),
                 );
-                if response.hovered() || response.clicked() {
-                    Self::clear_macro_action_submenus(ui, id_source);
-                    open = true;
-                    ui.ctx().data_mut(|data| {
-                        data.insert_temp(owner_id, MacroActionSubmenuKind::Network)
-                    });
+                if response.hovered() {
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(action_hover_id, true));
                 }
-                let popup_rect_id = ui.make_persistent_id((id_source, "network-submenu-rect"));
-                egui::Popup::from_response(&response)
-                    .id(popup_id)
-                    .open_bool(&mut open)
-                    .align(egui::RectAlign::BOTTOM_START)
-                    .layout(egui::Layout::top_down_justified(egui::Align::Min))
-                    .width(220.0)
-                    .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                    .show(|ui| {
-                        let rect = ui.max_rect();
-                        ui.ctx()
-                            .data_mut(|data| data.insert_temp(popup_rect_id, rect));
-                        egui::Grid::new((id_source, "network-action-grid"))
-                            .num_columns(2)
-                            .spacing([6.0, 6.0])
-                            .show(ui, |ui| {
-                                for (index, action) in
-                                    Self::network_macro_actions().iter().copied().enumerate()
-                                {
-                                    Self::render_macro_action_option(
-                                        ui,
-                                        language,
-                                        current,
-                                        action,
-                                        live_sync,
-                                        action_hover_id,
-                                        true,
-                                    );
-                                    if (index + 1) % 2 == 0 {
-                                        ui.end_row();
-                                    }
-                                }
-                            });
-                    });
-                let popup_rect: Option<egui::Rect> =
-                    ui.ctx().data(|data| data.get_temp(popup_rect_id));
-                if open {
-                    if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
-                        let mut keep_open_rect = response.rect.expand(10.0);
-                        if let Some(rect) = popup_rect {
-                            keep_open_rect = keep_open_rect.union(rect.expand(10.0));
-                            if rect.contains(pointer_pos) {
-                                ui.ctx().data_mut(|data| {
-                                    data.insert_temp(owner_id, MacroActionSubmenuKind::Network)
-                                });
-                            }
-                        }
-                        if !keep_open_rect.contains(pointer_pos) {
-                            open = false;
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
-                            });
-                        }
-                    } else {
-                        open = false;
-                        ui.ctx().data_mut(|data| {
-                            data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
-                        });
+                if response.clicked() {
+                    if !selected {
+                        *current = MacroAction::DisableNetworkAdapter;
+                        *live_sync = true;
                     }
+                    ui.close();
                 }
-                ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
                 ui.add_space(2.0);
-                ui.label(RichText::new(Self::tr_lang(language, "Network", "Mạng")).size(10.0));
+                let label_color = if selected {
+                    ui.visuals().strong_text_color()
+                } else {
+                    ui.visuals().text_color()
+                };
+                ui.label(
+                    RichText::new(Self::tr_lang(language, "Network", "Mạng"))
+                        .size(9.0)
+                        .color(label_color),
+                );
             },
         );
         let response = inner.response.interact(egui::Sense::hover());
         response.on_hover_text(Self::tr_lang(
             language,
-            "Network actions: adapter toggles and per-app network blocking.",
-            "Các action mạng: bật/tắt adapter và chặn mạng theo từng app.",
+            "One network action. Configure On/Off and Fast/Slow method in the step row.",
+            "Một action Network duy nhất. Chọn On/Off và cách Fast/Slow ngay trên hàng step.",
         ));
     }
 
@@ -6356,10 +6385,9 @@ impl CrosshairApp {
                                                         );
                                                         grid_col += 1;
                                                         if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_network_action_group_option(
+                                                        Self::render_network_action_single_option(
                                                             ui,
                                                             language,
-                                                            (group.id, preset.id, "hold-stop-network-group"),
                                                             &mut step.action,
                                                             &mut live_sync,
                                                             action_hover_id,
@@ -6554,25 +6582,16 @@ impl CrosshairApp {
                                                     step.action,
                                                     MacroAction::DisableNetworkAdapter
                                                         | MacroAction::EnableNetworkAdapter
+                                                        | MacroAction::CutInternetRoute
+                                                        | MacroAction::RestoreInternetRoute
                                                 ) {
-                                                    Self::render_network_adapter_target_editor(
+                                                    Self::render_network_step_editor(
                                                         ui,
                                                         language,
-                                                        (group.id, preset.id, "hold-stop-network-target"),
-                                                        &mut step.key,
-                                                        &mut live_sync,
-                                                        160.0,
-                                                    );
-                                                } else if matches!(
-                                                    step.action,
-                                                    MacroAction::BlockAppNetwork
-                                                        | MacroAction::UnblockAppNetwork
-                                                ) {
-                                                    Self::render_app_network_editor(
-                                                        ui,
-                                                        language,
+                                                        (group.id, preset.id, "hold-stop-network"),
                                                         step,
                                                         &mut live_sync,
+                                                        160.0,
                                                     );
                                                 } else if matches!(
                                                     step.action,
@@ -8633,10 +8652,9 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         );
                                                         grid_col += 1;
                                                         if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_network_action_group_option(
+                                                        Self::render_network_action_single_option(
                                                             ui,
                                                             language,
-                                                            (group.id, preset.id, "press-stop-network-group"),
                                                             &mut step.action,
                                                             &mut live_sync,
                                                             action_hover_id,
@@ -8831,25 +8849,16 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     step.action,
                                                     MacroAction::DisableNetworkAdapter
                                                         | MacroAction::EnableNetworkAdapter
+                                                        | MacroAction::CutInternetRoute
+                                                        | MacroAction::RestoreInternetRoute
                                                 ) {
-                                                    Self::render_network_adapter_target_editor(
+                                                    Self::render_network_step_editor(
                                                         ui,
                                                         language,
-                                                        (group.id, preset.id, "press-stop-network-target"),
-                                                        &mut step.key,
-                                                        &mut live_sync,
-                                                        160.0,
-                                                    );
-                                                } else if matches!(
-                                                    step.action,
-                                                    MacroAction::BlockAppNetwork
-                                                        | MacroAction::UnblockAppNetwork
-                                                ) {
-                                                    Self::render_app_network_editor(
-                                                        ui,
-                                                        language,
+                                                        (group.id, preset.id, "press-stop-network"),
                                                         step,
                                                         &mut live_sync,
+                                                        160.0,
                                                     );
                                                 } else if matches!(
                                                     step.action,
@@ -11769,10 +11778,9 @@ if supports_move_mouse {
                                                             );
                                                             grid_col += 1;
                                                             if grid_col % 8 == 0 { ui.end_row(); }
-                                                            Self::render_network_action_group_option(
+                                                            Self::render_network_action_single_option(
                                                                 ui,
                                                                 language,
-                                                                (group.id, preset.id, step_index, "network-group"),
                                                                 &mut step.action,
                                                                 &mut live_sync,
                                                                 action_hover_id,
@@ -11967,25 +11975,16 @@ if supports_move_mouse {
                                                     step.action,
                                                     MacroAction::DisableNetworkAdapter
                                                         | MacroAction::EnableNetworkAdapter
+                                                        | MacroAction::CutInternetRoute
+                                                        | MacroAction::RestoreInternetRoute
                                                 ) {
-                                                    Self::render_network_adapter_target_editor(
+                                                    Self::render_network_step_editor(
                                                         ui,
                                                         language,
-                                                        (group.id, preset.id, step_index, "network-target"),
-                                                        &mut step.key,
-                                                        &mut live_sync,
-                                                        146.0,
-                                                    );
-                                                } else if matches!(
-                                                    step.action,
-                                                    MacroAction::BlockAppNetwork
-                                                        | MacroAction::UnblockAppNetwork
-                                                ) {
-                                                    Self::render_app_network_editor(
-                                                        ui,
-                                                        language,
+                                                        (group.id, preset.id, step_index, "network"),
                                                         step,
                                                         &mut live_sync,
+                                                        146.0,
                                                     );
                                                 } else if matches!(
                                                     step.action,
