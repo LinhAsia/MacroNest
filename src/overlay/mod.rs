@@ -73,13 +73,7 @@ mod windows_overlay {
     use windows::{
         Win32::{
             Devices::HumanInterfaceDevice::HidD_SetOutputReport,
-            Foundation::{COLORREF, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM},
-            NetworkManagement::WiFi::{
-                WLAN_INTERFACE_INFO_LIST, WLAN_RADIO_STATE, WlanCloseHandle,
-                WlanEnumInterfaces, WlanFreeMemory, WlanOpenHandle, WlanQueryInterface,
-                WlanSetInterface, dot11_radio_state_off, dot11_radio_state_on,
-                wlan_intf_opcode_radio_state,
-            },
+            Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM},
             Graphics::{
                 Dwm::{
                     DWM_THUMBNAIL_PROPERTIES, DWM_TNP_OPACITY, DWM_TNP_RECTDESTINATION,
@@ -138,7 +132,7 @@ mod windows_overlay {
                     EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA,
                     GetAncestor, GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow,
                     GetMessageW, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW,
-                    GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU,
+                    GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTCLIENT,
                     HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT,
                     KillTimer, LR_LOADFROMFILE, LoadCursorW, LoadImageW, MA_NOACTIVATE,
                     MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage,
@@ -225,7 +219,6 @@ mod windows_overlay {
     const XBUTTON2_DATA: u16 = 0x0002;
     const WMAPP_TRAYICON: u32 = WM_APP + 1;
     static NETWORK_ACTION_RESULT_SEQ: AtomicU64 = AtomicU64::new(1);
-    const APP_NETWORK_RULE_GROUP: &str = "MacroNestAppNetwork";
     const WMAPP_PROCESS_QUEUE: u32 = WM_APP + 2;
     const WMAPP_WINDOW_FOCUS_CHANGED: u32 = WM_APP + 3;
     const WMAPP_WINDOW_LOCATION_CHANGED: u32 = WM_APP + 4;
@@ -234,9 +227,10 @@ mod windows_overlay {
     const FOCUS_TRIGGER_TIMER_ID: usize = 2;
     const SCREEN_DRAW_TIMER_ID: usize = 3;
     const SCREEN_DRAW_REFRESH_INTERVAL_MS: u32 = 16;
-    const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 6;
-    const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 110;
+    const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 4;
+    const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 260;
     const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
+    const SCREEN_DRAW_ORPHAN_STROKE_RELEASE_MS: u64 = 90;
     const SCREEN_DRAW_TOOLBAR_BRUSH_SVG: &str = r##"<svg viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M131 270.102C136.931 258.193 142.915 246.327 149.193 234.617C156.453 221.081 163.971 206.401 168.564 191.528C169.122 189.716 170.145 181.169 172.084 180.124C192.331 169.193 205.553 185.969 222.056 150.34C224.854 144.301 253.912 74.3274 265.506 96.2309C282.774 128.856 211.761 175.888 237.023 209.979" stroke="#F0F6FF" stroke-opacity="0.96" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M236.842 221.187C227.518 251.443 209.099 279.783 199.623 307.729" stroke="#F0F6FF" stroke-opacity="0.96" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1625,6 +1619,12 @@ mod windows_overlay {
         std::sync::atomic::AtomicU64::new(seed ^ 0x9E37_79B9_7F4A_7C15)
     });
     static SEARCH_AREA_OVERLAY_REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
+    static VISION_CAPTURE_MOUSE_MOVE_PENDING: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    static VISION_CAPTURE_MOUSE_MOVE_X: std::sync::atomic::AtomicI32 =
+        std::sync::atomic::AtomicI32::new(0);
+    static VISION_CAPTURE_MOUSE_MOVE_Y: std::sync::atomic::AtomicI32 =
+        std::sync::atomic::AtomicI32::new(0);
     static UI_CONTEXT: Lazy<Mutex<Option<egui::Context>>> = Lazy::new(|| Mutex::new(None));
     static CONTROLLER_HWND: AtomicIsize = AtomicIsize::new(0);
     static ACTIVE_HIGHLIGHT_HWND: AtomicIsize = AtomicIsize::new(0);
@@ -1961,11 +1961,16 @@ mod windows_overlay {
         tool: ScreenDrawTool,
         toolbar_x: i32,
         toolbar_y: i32,
+        toolbar_w: i32,
+        toolbar_h: i32,
         active_control: ScreenDrawControl,
         drag_offset_x: i32,
         drag_offset_y: i32,
         current_stroke: Option<ScreenDrawStroke>,
+        current_stroke_updated_at: Option<Instant>,
+        current_stroke_release_seen_at: Option<Instant>,
         strokes: Vec<ScreenDrawStroke>,
+        redo_strokes: Vec<ScreenDrawStroke>,
         canvas_width: usize,
         canvas_height: usize,
         committed_rgba: Vec<u8>,
@@ -1975,8 +1980,12 @@ mod windows_overlay {
         capturing_region: bool,
         capture_trigger: Option<HotkeyBinding>,
         trigger_latched: bool,
+        trigger_is_down: bool,
         trigger_pressed_at: Option<Instant>,
         trigger_started_from_inactive: bool,
+        trigger_release_should_keep_open: bool,
+        suppress_next_trigger_hold: bool,
+        last_toolbar_interaction_at: Option<Instant>,
         capture_trigger_release_point: Option<(i32, i32)>,
         capture_session_id: u64,
         last_present_at: Option<Instant>,
@@ -1998,6 +2007,8 @@ mod windows_overlay {
         pointer_point: POINT,
     }
 
+    fn screen_draw_debug_log(_message: impl AsRef<str>) {}
+
     impl Default for ScreenDrawState {
         fn default() -> Self {
             Self {
@@ -2018,11 +2029,16 @@ mod windows_overlay {
                 tool: ScreenDrawTool::Brush,
                 toolbar_x: 24,
                 toolbar_y: 24,
+                toolbar_w: 640,
+                toolbar_h: 42,
                 active_control: ScreenDrawControl::None,
                 drag_offset_x: 0,
                 drag_offset_y: 0,
                 current_stroke: None,
+                current_stroke_updated_at: None,
+                current_stroke_release_seen_at: None,
                 strokes: Vec::new(),
+                redo_strokes: Vec::new(),
                 canvas_width: 0,
                 canvas_height: 0,
                 committed_rgba: Vec::new(),
@@ -2032,8 +2048,12 @@ mod windows_overlay {
                 capturing_region: false,
                 capture_trigger: None,
                 trigger_latched: false,
+                trigger_is_down: false,
                 trigger_pressed_at: None,
                 trigger_started_from_inactive: false,
+                trigger_release_should_keep_open: false,
+                suppress_next_trigger_hold: false,
+                last_toolbar_interaction_at: None,
                 capture_trigger_release_point: None,
                 capture_session_id: 0,
                 last_present_at: None,
@@ -2242,10 +2262,28 @@ mod windows_overlay {
         *UI_CONTEXT.lock() = Some(ctx);
     }
 
+    pub fn screen_draw_set_toolbar_rect(x: i32, y: i32, w: i32, h: i32) {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        state.toolbar_x = x;
+        state.toolbar_y = y;
+        state.toolbar_w = w;
+        state.toolbar_h = h;
+    }
+
     pub fn request_ui_repaint() {
         if let Some(ctx) = UI_CONTEXT.lock().as_ref() {
             ctx.request_repaint();
         }
+    }
+
+    pub fn take_latest_vision_capture_mouse_move() -> Option<(i32, i32)> {
+        if !VISION_CAPTURE_MOUSE_MOVE_PENDING.swap(false, Ordering::AcqRel) {
+            return None;
+        }
+        Some((
+            VISION_CAPTURE_MOUSE_MOVE_X.load(Ordering::Acquire),
+            VISION_CAPTURE_MOUSE_MOVE_Y.load(Ordering::Acquire),
+        ))
     }
 
     #[derive(Debug, Clone)]
@@ -2332,8 +2370,8 @@ mod windows_overlay {
         ocr_presets: Vec<crate::model::OcrPreset>,
         command_presets: Vec<CommandPreset>,
         disabled_network_adapters_this_session: HashSet<String>,
-        wifi_radios_disabled_this_session: HashSet<String>,
-        blocked_app_network_rules_this_session: HashSet<String>,
+        disconnected_wifi_profiles_this_session: HashMap<String, String>,
+        cut_internet_routes_this_session: HashSet<String>,
         groq_settings: crate::model::GroqSettings,
         macro_groups: Vec<MacroGroup>,
         active_macro_folder_scope: MacroFolderScope,
@@ -2439,8 +2477,8 @@ mod windows_overlay {
                 ocr_presets: Vec::new(),
                 command_presets: Vec::new(),
                 disabled_network_adapters_this_session: HashSet::new(),
-                wifi_radios_disabled_this_session: HashSet::new(),
-                blocked_app_network_rules_this_session: HashSet::new(),
+                disconnected_wifi_profiles_this_session: HashMap::new(),
+                cut_internet_routes_this_session: HashSet::new(),
                 groq_settings: crate::model::GroqSettings::default(),
                 macro_groups: Vec::new(),
                 active_macro_folder_scope: MacroFolderScope::Root,
@@ -2538,6 +2576,9 @@ mod windows_overlay {
         released_at: Option<Instant>,
         hide_at: Instant,
         last_pressed_at: Instant,
+        press_count: usize,
+        pushed_at: Option<Instant>,
+        push_offset_rows: f32,
     }
 
     #[derive(Clone, Copy)]
@@ -4332,6 +4373,7 @@ mod windows_overlay {
             WM_TIMER => {
                 if _wparam.0 == SCREEN_DRAW_TIMER_ID {
                     screen_draw_maybe_begin_trigger_capture();
+                    finish_released_screen_draw_stroke_if_stale();
                     let should_paint = {
                         let state = SCREEN_DRAW_STATE.lock();
                         state.active && state.pending_repaint
@@ -4357,6 +4399,40 @@ mod windows_overlay {
         }
     }
 
+    fn sync_held_modifiers() {
+        let mut hook_state = HOOK_STATE.lock();
+        if unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x10) } == 0 {
+            // Shift
+            hook_state.held_inputs.remove("Shift");
+            hook_state.held_inputs.remove("LShift");
+            hook_state.held_inputs.remove("RShift");
+            hook_state.shift = false;
+        }
+        if unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x11) } == 0 {
+            // Ctrl
+            hook_state.held_inputs.remove("Ctrl");
+            hook_state.held_inputs.remove("LCtrl");
+            hook_state.held_inputs.remove("RCtrl");
+            hook_state.ctrl = false;
+        }
+        if unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x12) } == 0 {
+            // Alt
+            hook_state.held_inputs.remove("Alt");
+            hook_state.held_inputs.remove("LAlt");
+            hook_state.held_inputs.remove("RAlt");
+            hook_state.alt = false;
+        }
+        if unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5B) } == 0
+            && unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5C) } == 0
+        // Win
+        {
+            hook_state.held_inputs.remove("Win");
+            hook_state.held_inputs.remove("LWin");
+            hook_state.held_inputs.remove("RWin");
+            hook_state.win = false;
+        }
+    }
+
     unsafe extern "system" fn low_level_keyboard_proc(
         code: i32,
         wparam: WPARAM,
@@ -4367,186 +4443,281 @@ mod windows_overlay {
             let msg = wparam.0 as u32;
             let is_key_event = matches!(msg, WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP);
             let injected = info.flags.0 & 0x10 != 0;
-            if is_key_event && !injected {
-                wake_command_queue();
+            if is_key_event {
                 let is_key_down = matches!(msg, WM_KEYDOWN | WM_SYSKEYDOWN);
                 let is_key_up = matches!(msg, WM_KEYUP | WM_SYSKEYUP);
-
-                if is_key_down {
-                    let (sound_enabled, sound_style, sound_volume) = {
-                        let state = HOOK_STATE.lock();
-                        (
-                            state.quick_key_sound_enabled,
-                            state.quick_key_sound_style,
-                            state.quick_key_sound_volume,
-                        )
-                    };
-                    if sound_enabled {
-                        crate::audio::play_key_sound_vk(sound_style, info.vkCode, sound_volume);
-                    }
+                if info.vkCode == 0x44 {
+                    screen_draw_debug_log(format!(
+                        "keyboard_hook_d down={} up={} injected={} ui_foreground={} draw_active={}",
+                        is_key_down,
+                        is_key_up,
+                        injected,
+                        is_ui_in_foreground(),
+                        screen_draw_active()
+                    ));
                 }
-                if is_key_down && info.vkCode == 0x1B && is_mouse_path_draw_capture_active() {
-                    cancel_mouse_path_draw_capture("Mouse path draw cancelled.".to_owned());
-                    update_modifier_state(info.vkCode, is_key_down);
+
+                if process_screen_draw_text_input(info.vkCode, is_key_down, is_key_up) {
+                    if !injected {
+                        update_held_key(info.vkCode, is_key_down, is_key_up);
+                        update_modifier_state(info.vkCode, is_key_down);
+                    }
                     return LRESULT(1);
                 }
 
-                let key_name = hotkey::vk_to_key_name(info.vkCode).map(str::to_owned);
-                if !is_ui_in_foreground()
-                    && let Some(key_name) = key_name.as_ref()
-                {
-                    update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
-                }
-                if let Some(key_name) = key_name.clone() {
-                    if process_screen_draw_text_input(info.vkCode, is_key_down, is_key_up) {
-                        update_held_key(info.vkCode, is_key_down, is_key_up);
-                        update_modifier_state(info.vkCode, is_key_down);
-                        return LRESULT(1);
-                    }
-                    if screen_draw_capture_should_swallow_key_name(&key_name) {
-                        update_held_key(info.vkCode, is_key_down, is_key_up);
-                        if is_key_up {
-                            mark_screen_draw_capture_trigger_released();
-                        }
-                        if is_key_up {
-                            screen_draw_release_trigger_latch_if_ready();
-                        }
-                        update_modifier_state(info.vkCode, is_key_down);
-                        return LRESULT(1);
-                    }
-                    let binding = binding_from_trigger_event(&key_name);
+                if !injected {
+                    sync_held_modifiers();
+                    wake_command_queue();
+
                     if is_key_down {
-                        if process_screen_draw_hotkey(&binding, is_repeat_key(&key_name)) {
+                        let (sound_enabled, sound_style, sound_volume) = {
+                            let state = HOOK_STATE.lock();
+                            (
+                                state.quick_key_sound_enabled,
+                                state.quick_key_sound_style,
+                                state.quick_key_sound_volume,
+                            )
+                        };
+                        if sound_enabled {
+                            crate::audio::play_key_sound_vk(sound_style, info.vkCode, sound_volume);
+                        }
+                    }
+                    if is_key_down && info.vkCode == 0x1B && is_mouse_path_draw_capture_active() {
+                        cancel_mouse_path_draw_capture("Mouse path draw cancelled.".to_owned());
+                        update_modifier_state(info.vkCode, is_key_down);
+                        return LRESULT(1);
+                    }
+
+                    let key_name = hotkey::vk_to_key_name(info.vkCode).map(str::to_owned);
+                    if info.vkCode == 0x44 {
+                        screen_draw_debug_log(format!(
+                            "keyboard_hook_d key_name={:?} ui_foreground={} injected={} before_screen_draw_active={}",
+                            key_name,
+                            is_ui_in_foreground(),
+                            injected,
+                            screen_draw_active()
+                        ));
+                    }
+                    if !is_ui_in_foreground()
+                        && let Some(key_name) = key_name.as_ref()
+                    {
+                        update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
+                    }
+                    if let Some(key_name) = key_name.clone() {
+                        // Hook for Undo / Redo in screen draw mode
+                        let screen_draw_active = {
+                            let state = SCREEN_DRAW_STATE.lock();
+                            state.active && state.text_session.is_none()
+                        };
+                        if screen_draw_active {
+                            let ctrl_down = unsafe { GetAsyncKeyState(0x11) } < 0;
+                            if ctrl_down {
+                                if info.vkCode == 0x5A || info.vkCode == 0x59 {
+                                    // Z or Y
+                                    if is_key_down {
+                                        let shift_down = unsafe { GetAsyncKeyState(0x10) } < 0;
+                                        let is_redo = info.vkCode == 0x59
+                                            || (info.vkCode == 0x5A && shift_down);
+                                        if is_redo {
+                                            screen_draw_redo();
+                                        } else {
+                                            screen_draw_undo();
+                                        }
+                                        request_screen_draw_overlay_sync();
+                                    }
+                                    update_held_key(info.vkCode, is_key_down, is_key_up);
+                                    update_modifier_state(info.vkCode, is_key_down);
+                                    return LRESULT(1);
+                                }
+                            }
+                        }
+                        if screen_draw_capture_should_swallow_key_name(&key_name) {
+                            if info.vkCode == 0x44 {
+                                screen_draw_debug_log(
+                                    "keyboard_hook_d swallowed_by_capture_key_name".to_owned(),
+                                );
+                            }
                             update_held_key(info.vkCode, is_key_down, is_key_up);
+                            if is_key_up {
+                                mark_screen_draw_capture_trigger_released();
+                            }
+                            if is_key_up {
+                                screen_draw_release_trigger_latch_if_ready();
+                            }
                             update_modifier_state(info.vkCode, is_key_down);
                             return LRESULT(1);
                         }
-                    } else if is_key_up && process_screen_draw_hotkey_release(&binding) {
+                        let binding = binding_from_trigger_event(&key_name);
+                        if is_key_down {
+                            let was_held = is_repeat_key(&key_name);
+                            if info.vkCode == 0x44 {
+                                screen_draw_debug_log(format!(
+                                    "keyboard_hook_d before_process_down was_held={} binding_key={} alt={} ctrl={} shift={} win={}",
+                                    was_held,
+                                    binding.key,
+                                    binding.alt,
+                                    binding.ctrl,
+                                    binding.shift,
+                                    binding.win
+                                ));
+                            }
+                            update_held_key(info.vkCode, is_key_down, is_key_up);
+                            let swallowed = process_screen_draw_hotkey(&binding, was_held);
+                            if info.vkCode == 0x44 {
+                                screen_draw_debug_log(format!(
+                                    "keyboard_hook_d after_process_down swallowed={}",
+                                    swallowed
+                                ));
+                            }
+                            if swallowed {
+                                update_modifier_state(info.vkCode, is_key_down);
+                                return LRESULT(1);
+                            }
+                        } else if is_key_up {
+                            let swallowed = process_screen_draw_hotkey_release(&binding);
+                            if info.vkCode == 0x44 {
+                                screen_draw_debug_log(format!(
+                                    "keyboard_hook_d after_process_up swallowed={}",
+                                    swallowed
+                                ));
+                            }
+                            if swallowed {
+                                update_held_key(info.vkCode, is_key_down, is_key_up);
+                                update_modifier_state(info.vkCode, is_key_down);
+                                return LRESULT(1);
+                            }
+                        }
+                    }
+                    let windows_key_locked = {
+                        let hook_state = HOOK_STATE.lock();
+                        hook_state.windows_key_locked
+                    };
+                    if windows_key_locked && matches!(info.vkCode, 0x5B | 0x5C) {
                         update_held_key(info.vkCode, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
                         return LRESULT(1);
                     }
-                }
-                let windows_key_locked = {
-                    let hook_state = HOOK_STATE.lock();
-                    hook_state.windows_key_locked
-                };
-                if windows_key_locked && matches!(info.vkCode, 0x5B | 0x5C) {
-                    update_held_key(info.vkCode, is_key_down, is_key_up);
-                    update_modifier_state(info.vkCode, is_key_down);
-                    return LRESULT(1);
-                }
-                if is_key_down && !is_ui_in_foreground() {
-                    let mut rec_guard = MACRO_RECORDING.lock();
-                    if let Some(session) = rec_guard.as_mut() {
-                        let now = std::time::Instant::now();
-                        let delay_ms = now
-                            .saturating_duration_since(session.last_event_at)
-                            .as_millis()
-                            .min(u64::MAX as u128) as u64;
-                        if let Some(k_name) = key_name.clone() {
-                            session.last_event_at = now;
-                            session.events.push(MacroRecordingEvent {
-                                key: Some(k_name.clone()),
-                                action: crate::model::MacroAction::KeyPress,
-                                delay_ms,
-                                x: 0,
-                                y: 0,
-                            });
-                            if let Some(tx) = &HOOK_STATE.lock().ui_tx {
-                                let mut step = crate::model::MacroStep::default();
-                                step.action = crate::model::MacroAction::KeyPress;
-                                step.delay_ms = delay_ms;
-                                step.key = k_name;
-                                let _ = tx.send(UiCommand::MacroRealtimeStepAdded(
-                                    session.group_id,
-                                    session.preset_id,
-                                    step,
-                                ));
+                    if is_key_down && !is_ui_in_foreground() {
+                        let mut rec_guard = MACRO_RECORDING.lock();
+                        if let Some(session) = rec_guard.as_mut() {
+                            let now = std::time::Instant::now();
+                            let delay_ms =
+                                now.saturating_duration_since(session.last_event_at)
+                                    .as_millis()
+                                    .min(u64::MAX as u128) as u64;
+                            if let Some(k_name) = key_name.clone() {
+                                session.last_event_at = now;
+                                session.events.push(MacroRecordingEvent {
+                                    key: Some(k_name.clone()),
+                                    action: crate::model::MacroAction::KeyPress,
+                                    delay_ms,
+                                    x: 0,
+                                    y: 0,
+                                });
+                                if let Some(tx) = &HOOK_STATE.lock().ui_tx {
+                                    let mut step = crate::model::MacroStep::default();
+                                    step.action = crate::model::MacroAction::KeyPress;
+                                    step.delay_ms = delay_ms;
+                                    step.key = k_name;
+                                    let _ = tx.send(UiCommand::MacroRealtimeStepAdded(
+                                        session.group_id,
+                                        session.preset_id,
+                                        step,
+                                    ));
+                                }
                             }
                         }
                     }
-                }
 
-                // Global record toggle hotkey processing
+                    // Global record toggle hotkey processing
 
-                if let Some(key_name) = key_name.clone() {
-                    let binding = binding_from_trigger_event(&key_name);
-                    if is_key_down {
-                        let repeat = is_repeat_key(&key_name);
-                        if let Some(swallow) = process_macro_record_hotkey(&binding, repeat) {
-                            update_modifier_state(info.vkCode, is_key_down);
-                            if swallow {
-                                return LRESULT(1);
+                    if let Some(key_name) = key_name.clone() {
+                        let binding = binding_from_trigger_event(&key_name);
+                        if is_key_down {
+                            let repeat = is_repeat_key(&key_name);
+                            if let Some(swallow) = process_macro_record_hotkey(&binding, repeat) {
+                                update_modifier_state(info.vkCode, is_key_down);
+                                if swallow {
+                                    return LRESULT(1);
+                                }
                             }
-                        }
 
-                        if let Some(swallow) = process_mouse_path_record_hotkey(&binding, repeat) {
-                            update_modifier_state(info.vkCode, is_key_down);
-                            if swallow {
-                                return LRESULT(1);
+                            if let Some(swallow) =
+                                process_mouse_path_record_hotkey(&binding, repeat)
+                            {
+                                update_modifier_state(info.vkCode, is_key_down);
+                                if swallow {
+                                    return LRESULT(1);
+                                }
                             }
                         }
                     }
-                }
 
-                // Skip normal hotkeys if UI is focused
+                    // Skip normal hotkeys if UI is focused
 
-                if is_ui_in_foreground() {
-                    if key_name.is_some() {
-                        update_held_key(info.vkCode, is_key_down, is_key_up);
-                        if is_key_up {
-                            screen_draw_release_trigger_latch_if_ready();
+                    if is_ui_in_foreground() {
+                        if info.vkCode == 0x44 {
+                            screen_draw_debug_log(
+                                "keyboard_hook_d skipped_by_ui_foreground".to_owned(),
+                            );
                         }
-                    }
+                        if let Some(key_name) = key_name.as_ref() {
+                            update_held_key(info.vkCode, is_key_down, is_key_up);
+                            if is_key_up {
+                                let binding = binding_from_trigger_event(key_name);
+                                let _ = process_screen_draw_hotkey_release(&binding);
+                                screen_draw_release_trigger_latch_if_ready();
+                            }
+                        }
 
-                    update_modifier_state(info.vkCode, is_key_down);
-                    return CallNextHookEx(None, code, wparam, lparam);
-                }
-
-                if let Some(key_name) = key_name.clone() {
-                    let binding = binding_from_trigger_event(&key_name);
-                    if key_name.eq_ignore_ascii_case("Tab") && binding.alt {
-                        update_held_key(info.vkCode, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
                         return CallNextHookEx(None, code, wparam, lparam);
                     }
 
-                    let mut swallow = false;
-                    if is_key_down {
-                        let repeat = is_repeat_key(&key_name);
-                        if let Some(binding_swallow) = process_binding_press(&binding, repeat) {
-                            swallow |= binding_swallow;
+                    if let Some(key_name) = key_name.clone() {
+                        let binding = binding_from_trigger_event(&key_name);
+                        if key_name.eq_ignore_ascii_case("Tab") && binding.alt {
+                            update_held_key(info.vkCode, is_key_down, is_key_up);
+                            update_modifier_state(info.vkCode, is_key_down);
+                            return CallNextHookEx(None, code, wparam, lparam);
                         }
+
+                        let mut swallow = false;
+                        if is_key_down {
+                            let repeat = is_repeat_key(&key_name);
+                            if let Some(binding_swallow) = process_binding_press(&binding, repeat) {
+                                swallow |= binding_swallow;
+                            }
+                        }
+
+                        update_held_key(info.vkCode, is_key_down, is_key_up);
+                        if is_key_up {
+                            screen_draw_release_trigger_latch_if_ready();
+                        }
+                        if is_key_up {
+                            swallow |= process_binding_release(&binding);
+                        }
+
+                        let macros_master_enabled = {
+                            let hook_state = HOOK_STATE.lock();
+                            hook_state.macros_master_enabled
+                        };
+                        if macros_master_enabled {
+                            swallow |= binding_matches_any_hold_macro(&binding);
+                            swallow |= is_locked_input(&key_name);
+                        }
+
+                        swallow |= keyboard_arrow_mouse_should_swallow(&key_name);
+                        update_modifier_state(info.vkCode, is_key_down);
+                        return if swallow {
+                            LRESULT(1)
+                        } else {
+                            CallNextHookEx(None, code, wparam, lparam)
+                        };
                     }
 
-                    update_held_key(info.vkCode, is_key_down, is_key_up);
-                    if is_key_up {
-                        screen_draw_release_trigger_latch_if_ready();
-                    }
-                    if is_key_up {
-                        swallow |= process_binding_release(&binding);
-                    }
-
-                    let macros_master_enabled = {
-                        let hook_state = HOOK_STATE.lock();
-                        hook_state.macros_master_enabled
-                    };
-                    if macros_master_enabled {
-                        swallow |= binding_matches_any_hold_macro(&binding);
-                        swallow |= is_locked_input(&key_name);
-                    }
-
-                    swallow |= keyboard_arrow_mouse_should_swallow(&key_name);
                     update_modifier_state(info.vkCode, is_key_down);
-                    return if swallow {
-                        LRESULT(1)
-                    } else {
-                        CallNextHookEx(None, code, wparam, lparam)
-                    };
                 }
-
-                update_modifier_state(info.vkCode, is_key_down);
             }
         }
 
@@ -4631,7 +4802,9 @@ mod windows_overlay {
                         update_quick_key_display_key(key_name, 0, is_key_down, is_key_up);
                     }
                 }
-                if process_screen_draw_mouse_event(message, info.pt) {
+                if screen_draw_should_process_mouse_message(message)
+                    && process_screen_draw_mouse_event(message, info.pt)
+                {
                     return LRESULT(1);
                 }
             }
@@ -4699,6 +4872,26 @@ mod windows_overlay {
             }
 
             if is_vision_capture_mouse_blocked() {
+                if let Some(key_name) = mouse_binding_name_from_message(
+                    message,
+                    ((info.mouseData >> 16) & 0xFFFF) as u16,
+                ) {
+                    let binding = binding_from_trigger_event(key_name);
+                    let is_down = matches!(
+                        message,
+                        WM_LBUTTONDOWN
+                            | WM_RBUTTONDOWN
+                            | WM_MBUTTONDOWN
+                            | WM_XBUTTONDOWN
+                            | WM_MOUSEWHEEL
+                    );
+                    if !is_down && process_screen_draw_hotkey_release(&binding) {
+                        return LRESULT(1);
+                    }
+                    if is_down && process_screen_draw_hotkey(&binding, false) {
+                        return LRESULT(1);
+                    }
+                }
                 match message {
                     WM_MOUSEMOVE => {
                         let mut hook_state = HOOK_STATE.lock();
@@ -4725,16 +4918,24 @@ mod windows_overlay {
                             }
                         }
 
-                        let ui_tx = hook_state.ui_tx.clone();
+                        VISION_CAPTURE_MOUSE_MOVE_X.store(info.pt.x, Ordering::Release);
+                        VISION_CAPTURE_MOUSE_MOVE_Y.store(info.pt.y, Ordering::Release);
+                        let should_send_move_tick =
+                            !VISION_CAPTURE_MOUSE_MOVE_PENDING.swap(true, Ordering::AcqRel);
+                        let ui_tx = if should_send_move_tick {
+                            hook_state.ui_tx.clone()
+                        } else {
+                            None
+                        };
                         drop(hook_state);
                         if let Some(ui_tx) = ui_tx {
                             let _ = ui_tx.send(UiCommand::VisionCaptureMouseMove {
                                 screen_x: info.pt.x,
                                 screen_y: info.pt.y,
                             });
+                            wake_command_queue();
                         }
 
-                        wake_command_queue();
                         return CallNextHookEx(None, code, wparam, lparam);
                     }
 
@@ -4872,6 +5073,19 @@ mod windows_overlay {
                 }
 
                 update_held_mouse_button(message, ((info.mouseData >> 16) & 0xFFFF) as u16);
+                if let Some(key_name) = event_key_name
+                    && screen_draw_capture_should_swallow_key_name(key_name)
+                {
+                    if !is_down {
+                        mark_screen_draw_capture_trigger_released();
+                        let _ = process_screen_draw_hotkey_release(&binding);
+                        screen_draw_release_trigger_latch_if_ready();
+                    }
+                    return LRESULT(1);
+                }
+                if !is_down && process_screen_draw_hotkey_release(&binding) {
+                    return LRESULT(1);
+                }
                 if matches!(
                     message,
                     WM_LBUTTONUP
@@ -4880,17 +5094,6 @@ mod windows_overlay {
                         | WM_XBUTTONUP
                 ) {
                     screen_draw_release_trigger_latch_if_ready();
-                }
-                if !is_down && process_screen_draw_hotkey_release(&binding) {
-                    return LRESULT(1);
-                }
-                if let Some(key_name) = event_key_name
-                    && screen_draw_capture_should_swallow_key_name(key_name)
-                {
-                    if !is_down {
-                        mark_screen_draw_capture_trigger_released();
-                    }
-                    return LRESULT(1);
                 }
                 if screen_draw_capture_should_swallow_binding(&binding) {
                     return LRESULT(1);
@@ -6542,6 +6745,13 @@ mod windows_overlay {
     }
 
     fn clear_transient_input_state() {
+        let is_drawing = {
+            let state = SCREEN_DRAW_STATE.lock();
+            state.active || state.capturing_region
+        };
+        if is_drawing {
+            return;
+        }
         let mut hook_state = HOOK_STATE.lock();
         hook_state.ctrl = false;
         hook_state.alt = false;
@@ -7088,111 +7298,6 @@ mod windows_overlay {
             + perspective * side * (svg_y - 170.0) * 0.012;
         (px * scale, py * scale)
     }
-
-    fn quick_key_display_allocate_slot(
-        runtime: &Runtime,
-        lane: QuickKeyDisplayLane,
-        preferred_slot: Option<usize>,
-    ) -> usize {
-        let used_slots = runtime
-            .quick_key_display_entries
-            .iter()
-            .filter(|entry| entry.lane == lane)
-            .map(|entry| entry.slot)
-            .collect::<HashSet<_>>();
-        if let Some(slot) = preferred_slot
-            && !used_slots.contains(&slot)
-        {
-            return slot;
-        }
-        let mut slot = 0usize;
-        while used_slots.contains(&slot) {
-            slot = slot.saturating_add(1);
-        }
-        slot
-    }
-
-    fn quick_key_display_allocate_row_and_slot(
-        runtime: &Runtime,
-        text: &str,
-        font_size: f32,
-        cap_height: i32,
-        entry_gap: i32,
-    ) -> (usize, usize, i32) {
-        let max_width = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(400) - 100;
-        let new_width = quick_key_display_entry_width(text, font_size, cap_height);
-        let outer_pad_x = (font_size * 0.46).round().max(16.0) as i32;
-
-        let max_rows = 4;
-
-        // Group active entries by row
-        let mut row_entries: Vec<Vec<&QuickKeyDisplayEntry>> = vec![Vec::new(); max_rows];
-        for entry in &runtime.quick_key_display_entries {
-            if entry.row < max_rows {
-                row_entries[entry.row].push(entry);
-            }
-        }
-
-        // Calculate the current rightmost edge of each row
-        let mut row_rights = vec![outer_pad_x; max_rows];
-        for r in 0..max_rows {
-            if !row_entries[r].is_empty() {
-                let max_right = row_entries[r]
-                    .iter()
-                    .map(|e| {
-                        e.x_offset + quick_key_display_entry_width(&e.text, font_size, cap_height)
-                    })
-                    .max()
-                    .unwrap_or(outer_pad_x);
-                row_rights[r] = max_right;
-            }
-        }
-
-        // Find the first row that has enough space at the right end
-        for r in 0..max_rows {
-            let right = row_rights[r];
-            let space_needed = if right == outer_pad_x {
-                new_width
-            } else {
-                entry_gap + new_width
-            };
-            if right + space_needed <= max_width {
-                let next_slot = row_entries[r].len();
-                let x_offset = if right == outer_pad_x {
-                    outer_pad_x
-                } else {
-                    right + entry_gap
-                };
-                return (r, next_slot, x_offset);
-            }
-        }
-
-        // If all rows are full, look for a completely empty row
-        for r in 0..max_rows {
-            if row_entries[r].is_empty() {
-                return (r, 0, outer_pad_x);
-            }
-        }
-
-        // Otherwise, place on the row with the smallest rightmost edge (most space at the end)
-        let mut min_r = 0;
-        let mut min_right = row_rights[0];
-        for r in 1..max_rows {
-            if row_rights[r] < min_right {
-                min_right = row_rights[r];
-                min_r = r;
-            }
-        }
-
-        let next_slot = row_entries[min_r].len();
-        let x_offset = if min_right == outer_pad_x {
-            outer_pad_x
-        } else {
-            min_right + entry_gap
-        };
-        (min_r, next_slot, x_offset)
-    }
-
     fn quick_key_display_press_entry(
         runtime: &mut Runtime,
         text: String,
@@ -7204,45 +7309,41 @@ mod windows_overlay {
         let now = Instant::now();
         quick_key_display_release_expired_entries(runtime, now);
 
-        let mut found = false;
-        if let Some(entry) = runtime
+        let most_recent_idx = runtime
             .quick_key_display_entries
-            .iter_mut()
-            .find(|entry| entry.identity == identity)
-        {
-            entry.text = text.clone();
-            entry.combo_keys = combo_keys.clone();
-            entry.lane = lane;
-            entry.held = held;
-            entry.shown_at = now;
-            entry.released_at = None;
-            entry.hide_at = now + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
-            entry.last_pressed_at = now;
-            runtime
-                .quick_key_display_slot_labels
-                .insert((lane, entry.slot), text.clone());
-            found = true;
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, entry)| entry.last_pressed_at)
+            .map(|(idx, _)| idx);
+
+        let mut consecutive = false;
+        if let Some(idx) = most_recent_idx {
+            if runtime.quick_key_display_entries[idx].identity == identity {
+                let entry = &mut runtime.quick_key_display_entries[idx];
+                entry.press_count += 1;
+                entry.text = text.clone();
+                entry.combo_keys = combo_keys.clone();
+                entry.lane = lane;
+                entry.held = held;
+                entry.shown_at = now;
+                entry.released_at = None;
+                entry.hide_at = now + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
+                entry.last_pressed_at = now;
+                consecutive = true;
+            }
         }
 
-        if !found {
-            let preferred_slot = runtime
-                .quick_key_display_slot_memory
-                .get(&identity)
-                .copied();
-            let slot = quick_key_display_allocate_slot(runtime, lane, preferred_slot);
+        if !consecutive {
             runtime
-                .quick_key_display_slot_memory
-                .insert(identity.clone(), slot);
-            runtime
-                .quick_key_display_slot_labels
-                .insert((lane, slot), text.clone());
+                .quick_key_display_entries
+                .retain(|e| e.identity != identity);
 
-            let font_size = runtime.quick_key_display_size.clamp(10.0, 96.0);
-            let cap_height = (font_size * 1.12 + 18.0).round().max(18.0) as i32;
-            let entry_gap = (font_size * 0.36).round().max(10.0) as i32;
-            let (row, row_slot, x_offset) = quick_key_display_allocate_row_and_slot(
-                runtime, &text, font_size, cap_height, entry_gap,
-            );
+            if runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal {
+                for entry in &mut runtime.quick_key_display_entries {
+                    entry.pushed_at = Some(now);
+                    entry.push_offset_rows = 1.0;
+                }
+            }
 
             runtime
                 .quick_key_display_entries
@@ -7251,15 +7352,18 @@ mod windows_overlay {
                     identity,
                     combo_keys,
                     lane,
-                    row,
-                    slot: row_slot,
-                    x_offset,
+                    row: 0,
+                    slot: 0,
+                    x_offset: 0,
                     held,
                     first_shown_at: now,
                     shown_at: now,
                     released_at: None,
                     hide_at: now + QUICK_KEY_DISPLAY_DISPLAY_DURATION,
                     last_pressed_at: now,
+                    press_count: 1,
+                    pushed_at: None,
+                    push_offset_rows: 0.0,
                 });
         }
 
@@ -7383,27 +7487,23 @@ mod windows_overlay {
         let outer_pad_y = (font_size * 0.34).round().max(4.0) as i32;
         let row_gap = (font_size * 0.2).round().max(8.0) as i32;
 
-        let max_rows = 4;
-        let mut active_rows_count = 0;
-        let mut max_right = outer_pad_x;
-
+        let num_entries = entries.len().max(1) as i32;
+        let mut max_entry_width = 0;
         for entry in entries {
-            if entry.row < max_rows {
-                active_rows_count = active_rows_count.max(entry.row + 1);
-                let right = entry.x_offset
-                    + quick_key_display_entry_width(&entry.text, font_size, cap_height);
-                if right > max_right {
-                    max_right = right;
-                }
+            let display_text = if entry.press_count > 1 {
+                format!("{} x{}", entry.text, entry.press_count)
+            } else {
+                entry.text.clone()
+            };
+            let entry_width = quick_key_display_entry_width(&display_text, font_size, cap_height);
+            if entry_width > max_entry_width {
+                max_entry_width = entry_width;
             }
         }
-
-        let active_rows_count = active_rows_count.max(1);
-        let width = max_right + outer_pad_x;
-        let height = outer_pad_y * 2
-            + active_rows_count as i32 * cap_height
-            + (active_rows_count as i32 - 1) * row_gap
-            + 6;
+        // Add 30% extra width to accommodate the max bounce scale_x (up to 1.24x)
+        // so the scaled bubble never overflows the pixmap and clips text/borders.
+        let width = ((max_entry_width as f32 * 1.30).ceil() as i32) + outer_pad_x * 2;
+        let height = outer_pad_y * 2 + num_entries * cap_height + (num_entries - 1) * row_gap + 6;
         (width.max(cap_height), height.max(cap_height))
     }
 
@@ -8226,13 +8326,25 @@ mod windows_overlay {
         }
     }
 
+    fn screen_draw_trigger_binding_contains_observed_key(
+        trigger: &HotkeyBinding,
+        observed: &HotkeyBinding,
+    ) -> bool {
+        let trigger_keys = hotkey::binding_key_names(trigger);
+        let observed_keys = hotkey::binding_key_names(observed);
+        observed_keys.iter().any(|observed_key| {
+            trigger_keys
+                .iter()
+                .any(|trigger_key| trigger_key.eq_ignore_ascii_case(observed_key))
+        })
+    }
+
     fn screen_draw_capture_should_swallow_binding(binding: &HotkeyBinding) -> bool {
         let state = SCREEN_DRAW_STATE.lock();
         state.capturing_region
-            && state
-                .capture_trigger
-                .as_ref()
-                .is_some_and(|trigger| hotkey::binding_matches(trigger, binding))
+            && state.capture_trigger.as_ref().is_some_and(|trigger| {
+                screen_draw_trigger_binding_contains_observed_key(trigger, binding)
+            })
     }
 
     fn screen_draw_capture_should_swallow_key_name(key_name: &str) -> bool {
@@ -8249,8 +8361,10 @@ mod windows_overlay {
 
     fn screen_draw_text_input_char(vk_code: u32) -> Option<String> {
         let mut keyboard_state = [0u8; 256];
-        if unsafe { GetKeyboardState(&mut keyboard_state).is_err() } {
-            return None;
+        for vk in [0x10, 0x11, 0x12, 0x14] {
+            if unsafe { GetAsyncKeyState(vk) } < 0 {
+                keyboard_state[vk as usize] = 0x80;
+            }
         }
         let scan_code = unsafe { MapVirtualKeyW(vk_code, MAPVK_VK_TO_VSC) };
         let mut buffer = [0u16; 8];
@@ -8272,6 +8386,21 @@ mod windows_overlay {
         if state.text_session.is_none() {
             return false;
         }
+
+        // Do not swallow modifier keys or function keys
+        if matches!(vk_code, 0x10 | 0x11 | 0x12 | 0x5B | 0x5C)
+            || (vk_code >= 0x70 && vk_code <= 0x87)
+        {
+            return false;
+        }
+        if state
+            .trigger
+            .as_ref()
+            .is_some_and(|t| hotkey::key_name_to_vk(&t.key).is_some_and(|vk| vk == vk_code))
+        {
+            return false;
+        }
+
         if is_key_up {
             return true;
         }
@@ -8316,16 +8445,19 @@ mod windows_overlay {
                 }
             }
             _ => {
-                if let Some(fragment) = screen_draw_text_input_char(vk_code)
-                    && let Some(session) = state.text_session.as_mut()
-                {
-                    session.stroke.text.push_str(&fragment);
-                    changed = true;
+                if let Some(fragment) = screen_draw_text_input_char(vk_code) {
+                    if let Some(session) = state.text_session.as_mut() {
+                        session.stroke.text.push_str(&fragment);
+                        changed = true;
+                    }
+                } else {
+                    return false;
                 }
             }
         }
 
-        if changed || committed || cancelled {
+        let needs_sync = changed || committed || cancelled;
+        if needs_sync {
             let canvas_width = state.canvas_width;
             let canvas_height = state.canvas_height;
             mark_screen_draw_dirty(
@@ -8333,6 +8465,10 @@ mod windows_overlay {
                 ScreenDrawDirtyRect::full(canvas_width, canvas_height),
             );
             mark_screen_draw_repaint_pending(&mut state);
+        }
+        drop(state);
+        if needs_sync {
+            request_screen_draw_overlay_sync();
         }
         true
     }
@@ -8371,21 +8507,36 @@ mod windows_overlay {
         if !matches_trigger {
             return false;
         }
+        screen_draw_debug_log(format!(
+            "down key={} repeat={} active={} capturing={} latched={} suppress={}",
+            binding.key,
+            is_repeat,
+            active,
+            capturing_region,
+            trigger_latched,
+            SCREEN_DRAW_STATE.lock().suppress_next_trigger_hold
+        ));
         if trigger_latched {
             if is_repeat {
                 return !pass_trigger_through;
             }
             let mut state = SCREEN_DRAW_STATE.lock();
-            state.trigger_latched = false;
-            state.trigger_pressed_at = None;
-            state.trigger_started_from_inactive = false;
+            if state
+                .trigger
+                .as_ref()
+                .is_some_and(|trigger| hotkey::binding_matches(trigger, binding))
+            {
+                state.trigger_latched = false;
+                state.trigger_pressed_at = None;
+                state.trigger_release_should_keep_open = false;
+                state.suppress_next_trigger_hold = false;
+            }
         }
 
         if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
             return true;
         }
         let press_started_at = Instant::now();
-        let hold_trigger = trigger.unwrap_or_else(|| binding.clone());
         let started_from_inactive = !active;
         let mut captured_frame = None;
         if started_from_inactive {
@@ -8404,30 +8555,38 @@ mod windows_overlay {
         {
             let mut state = SCREEN_DRAW_STATE.lock();
             state.trigger_latched = true;
+            state.trigger_is_down = true;
             if active {
-                if !capturing_region {
+                if capturing_region {
+                    if !is_repeat {
+                        state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
+                        deactivate_screen_draw(&mut state);
+                    }
+                } else {
+                    state.suppress_next_trigger_hold = false;
                     state.trigger_pressed_at = Some(press_started_at);
                     state.trigger_started_from_inactive = false;
+                    state.trigger_release_should_keep_open = false;
                 }
             } else {
-                state.active = true;
-                state.freeze_frame = captured_frame;
-                state.capturing_region = false;
-                state.capture_trigger = None;
-                state.trigger_pressed_at = Some(press_started_at);
+                activate_screen_draw(&mut state, captured_frame);
+                state.trigger_pressed_at = None;
                 state.trigger_started_from_inactive = true;
-                state.capture_trigger_release_point = None;
-                state.current_stroke = None;
-                state.active_control = ScreenDrawControl::None;
-                state.pending_repaint = true;
-                state.dirty_rect = Some(ScreenDrawDirtyRect::full(
-                    state.canvas_width.max(1),
-                    state.canvas_height.max(1),
-                ));
-                state.live_stroke_rect = None;
+                state.trigger_release_should_keep_open = true;
             }
+            screen_draw_debug_log(format!(
+                "down_applied key={} active={} capturing={} pressed_at={} keep_open={} suppress={}",
+                binding.key,
+                state.active,
+                state.capturing_region,
+                state.trigger_pressed_at.is_some(),
+                state.trigger_release_should_keep_open,
+                state.suppress_next_trigger_hold
+            ));
         }
+        schedule_screen_draw_trigger_capture_check(press_started_at);
         request_screen_draw_overlay_sync();
+        request_ui_repaint();
         !pass_trigger_through
     }
 
@@ -8437,7 +8596,7 @@ mod windows_overlay {
             pass_trigger_through,
             active,
             capturing_region,
-            started_from_inactive,
+            had_trigger_press,
         ) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
@@ -8449,13 +8608,50 @@ mod windows_overlay {
                 state.pass_trigger_through,
                 state.active,
                 state.capturing_region,
-                state.trigger_started_from_inactive,
+                state.trigger_latched
+                    || state.trigger_is_down
+                    || state.trigger_pressed_at.is_some(),
             )
         };
         if !matches_trigger_key {
             return false;
         }
+        screen_draw_debug_log(format!(
+            "up key={} active={} capturing={}",
+            binding.key, active, capturing_region
+        ));
+        if !had_trigger_press {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            state.trigger_latched = false;
+            state.trigger_is_down = false;
+            state.trigger_pressed_at = None;
+            state.trigger_started_from_inactive = false;
+            state.trigger_release_should_keep_open = false;
+            screen_draw_debug_log(format!("up_orphan_ignored key={}", binding.key));
+            return !pass_trigger_through;
+        }
         if capturing_region {
+            // Trigger key released while in region capture mode (from camera button click).
+            // Cancel the capture session and deactivate drawing entirely.
+            let mut should_sync = false;
+            {
+                let mut state = SCREEN_DRAW_STATE.lock();
+                state.trigger_latched = false;
+                state.trigger_is_down = false;
+                state.trigger_started_from_inactive = false;
+                state.trigger_release_should_keep_open = false;
+                state.suppress_next_trigger_hold = false;
+                state.trigger_pressed_at = None;
+                // Only cancel if this is a mouse-drag capture (no capture_trigger means camera button)
+                if state.capture_trigger.is_none() {
+                    state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
+                    deactivate_screen_draw(&mut state);
+                    should_sync = true;
+                }
+            }
+            if should_sync {
+                request_screen_draw_overlay_sync();
+            }
             return !pass_trigger_through;
         }
 
@@ -8464,17 +8660,15 @@ mod windows_overlay {
         {
             let mut state = SCREEN_DRAW_STATE.lock();
             state.trigger_latched = false;
-            state.trigger_started_from_inactive = false;
-            if active
-                && let Some(pressed_at) = state.trigger_pressed_at.take()
-                && Instant::now().duration_since(pressed_at)
-                    < Duration::from_millis(SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS)
-                && !started_from_inactive
-            {
+            state.trigger_is_down = false;
+            state.suppress_next_trigger_hold = false;
+            if screen_draw_trigger_release_should_toggle_off(&mut state, active) {
                 deactivate_screen_draw(&mut state);
                 should_toggle_off = true;
                 should_sync = true;
             }
+            state.trigger_started_from_inactive = false;
+            state.trigger_release_should_keep_open = false;
         }
         if should_sync {
             request_screen_draw_overlay_sync();
@@ -8483,17 +8677,27 @@ mod windows_overlay {
     }
 
     fn screen_draw_release_trigger_latch_if_ready() {
-        let mut state = SCREEN_DRAW_STATE.lock();
-        let Some(trigger) = state.trigger.clone() else {
-            state.trigger_latched = false;
-            state.trigger_pressed_at = None;
-            state.trigger_started_from_inactive = false;
-            return;
+        let trigger = {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            let Some(trigger) = state.trigger.clone() else {
+                state.trigger_latched = false;
+                state.trigger_is_down = false;
+                state.trigger_pressed_at = None;
+                state.trigger_started_from_inactive = false;
+                state.trigger_release_should_keep_open = false;
+                state.suppress_next_trigger_hold = false;
+                return;
+            };
+            trigger
         };
         if !screen_draw_trigger_binding_is_down(&trigger) {
+            let mut state = SCREEN_DRAW_STATE.lock();
             state.trigger_latched = false;
+            state.trigger_is_down = false;
             state.trigger_pressed_at = None;
             state.trigger_started_from_inactive = false;
+            state.trigger_release_should_keep_open = false;
+            state.suppress_next_trigger_hold = false;
         }
     }
 
@@ -8509,6 +8713,58 @@ mod windows_overlay {
     }
 
     fn screen_draw_maybe_begin_trigger_capture() {
+        let trigger_for_suppression = {
+            let state = SCREEN_DRAW_STATE.lock();
+            if state.suppress_next_trigger_hold {
+                state.trigger.clone()
+            } else {
+                None
+            }
+        };
+        if let Some(trigger) = trigger_for_suppression
+            && !screen_draw_trigger_binding_is_down(&trigger)
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            state.suppress_next_trigger_hold = false;
+            state.trigger_is_down = false;
+            state.trigger_latched = false;
+            state.trigger_started_from_inactive = false;
+            state.trigger_release_should_keep_open = false;
+        }
+        let trigger_to_poll = {
+            let state = SCREEN_DRAW_STATE.lock();
+            if state.active
+                && !state.capturing_region
+                && state.trigger_pressed_at.is_none()
+                && !state.trigger_started_from_inactive
+                && !state.trigger_release_should_keep_open
+                && !state.suppress_next_trigger_hold
+            {
+                state.trigger.clone()
+            } else {
+                None
+            }
+        };
+        if let Some(trigger) = trigger_to_poll
+            && screen_draw_trigger_binding_is_down(&trigger)
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            if state.active
+                && !state.capturing_region
+                && state.trigger_pressed_at.is_none()
+                && !state.trigger_started_from_inactive
+                && !state.trigger_release_should_keep_open
+                && !state.suppress_next_trigger_hold
+            {
+                let pressed_at = Instant::now();
+                state.trigger_latched = true;
+                state.trigger_is_down = true;
+                state.trigger_pressed_at = Some(pressed_at);
+                state.trigger_started_from_inactive = false;
+                state.trigger_release_should_keep_open = false;
+                screen_draw_debug_log(format!("poll_down key={}", trigger.key));
+            }
+        }
         let trigger = {
             let mut state = SCREEN_DRAW_STATE.lock();
             if !state.active || state.capturing_region {
@@ -8518,30 +8774,48 @@ mod windows_overlay {
             let Some(pressed_at) = state.trigger_pressed_at else {
                 return;
             };
-            if Instant::now().duration_since(pressed_at)
-                < Duration::from_millis(SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS)
-            {
+            let hold_threshold_ms = SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS;
+            let elapsed = Instant::now().duration_since(pressed_at);
+            if elapsed < Duration::from_millis(hold_threshold_ms) {
+                return;
+            }
+            screen_draw_debug_log(format!(
+                "hold_check active={} capturing={} trigger_down={} elapsed_ms={} suppress={}",
+                state.active,
+                state.capturing_region,
+                state.trigger_is_down,
+                elapsed.as_millis(),
+                state.suppress_next_trigger_hold
+            ));
+            if !state.trigger_is_down {
+                state.trigger_pressed_at = None;
+                state.trigger_latched = false;
+                state.trigger_started_from_inactive = false;
+                state.trigger_release_should_keep_open = false;
+                state.suppress_next_trigger_hold = false;
                 return;
             }
             let Some(trigger) = state.trigger.clone() else {
                 state.trigger_pressed_at = None;
                 state.trigger_latched = false;
+                state.trigger_is_down = false;
                 state.trigger_started_from_inactive = false;
+                state.trigger_release_should_keep_open = false;
                 return;
             };
-            if !screen_draw_trigger_binding_is_down(&trigger) {
-                state.trigger_pressed_at = None;
-                state.trigger_latched = false;
-                state.trigger_started_from_inactive = false;
-                return;
-            }
-            state.trigger_pressed_at = None;
-            state.trigger_started_from_inactive = false;
-            state.capture_trigger_release_point = None;
             trigger
         };
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            state.trigger_pressed_at = None;
+            state.trigger_started_from_inactive = false;
+            state.trigger_release_should_keep_open = false;
+            state.capture_trigger_release_point = None;
+        }
         begin_screen_draw_capture_from_trigger(trigger);
     }
+
+    fn schedule_screen_draw_trigger_capture_check(_pressed_at: Instant) {}
 
     fn apply_keyboard_arrow_mouse_movement() {
         if let Some((dx, dy)) = keyboard_arrow_mouse_delta() {
@@ -9225,11 +9499,16 @@ mod windows_overlay {
         let _ = refresh_overlay(runtime);
         if ui_foreground {
             reset_all_input_and_locks();
+            let mut should_sync = false;
             {
                 let mut screen_draw = SCREEN_DRAW_STATE.lock();
                 if screen_draw.active || screen_draw.capturing_region {
                     deactivate_screen_draw(&mut screen_draw);
+                    should_sync = true;
                 }
+            }
+            if should_sync {
+                request_screen_draw_overlay_sync();
             }
             let _ = ShowWindow(runtime.screen_draw_hwnd, SW_HIDE);
             let _ = ShowWindow(runtime.pin_hwnd, SW_HIDE);
@@ -9511,8 +9790,23 @@ mod windows_overlay {
             runtime.quick_key_display_center_x = center_x;
             runtime.quick_key_display_center_y = center_y;
         }
-        let x = runtime.quick_key_display_center_x - (width / 2);
-        let y = runtime.quick_key_display_center_y - (height / 2);
+        // In Normal mode: center_x is the left anchor of the window so the window
+        // never shifts horizontally when a longer key makes the pixmap wider.
+        // In all other modes: center the window on center_x as before.
+        let x = if runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal {
+            runtime.quick_key_display_center_x
+        } else {
+            runtime.quick_key_display_center_x - (width / 2)
+        };
+        let y = if runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal {
+            let cap_height = (font_size * 1.12 + 18.0).round().max(18.0) as i32;
+            let outer_pad_y = (font_size * 0.34).round().max(4.0) as i32;
+            let base_height = outer_pad_y * 2 + cap_height + 6;
+            let bottom_y = runtime.quick_key_display_center_y + (base_height / 2);
+            bottom_y - height
+        } else {
+            runtime.quick_key_display_center_y - (height / 2)
+        };
         let mut mouse_hand_active = false;
 
         if runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot {
@@ -9640,19 +9934,324 @@ mod windows_overlay {
             (state.active, state.active && !state.capturing_region)
         };
         if active {
+            let mut style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            style |= WS_EX_TRANSPARENT.0;
+            let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, style as i32);
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
+            );
+
             set_screen_draw_refresh_timer(hwnd, interactive);
             paint_screen_draw_overlay(hwnd)
         } else {
             set_screen_draw_refresh_timer(hwnd, false);
             let _ = clear_screen_draw_overlay_window(hwnd);
             let _ = ShowWindow(hwnd, SW_HIDE);
+            {
+                let mut state = SCREEN_DRAW_STATE.lock();
+                release_screen_draw_surface(&mut state);
+            }
             Ok(())
         }
     }
 
-    fn screen_draw_active() -> bool {
+    pub fn screen_draw_active() -> bool {
         let state = SCREEN_DRAW_STATE.lock();
         state.active && !state.capturing_region
+    }
+
+    pub fn screen_draw_undo() {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if let Some(stroke) = state.strokes.pop() {
+            state.redo_strokes.push(stroke);
+            let w = state.canvas_width;
+            let h = state.canvas_height;
+            rebuild_screen_draw_canvas(&mut state);
+            mark_screen_draw_dirty(&mut state, ScreenDrawDirtyRect::full(w, h));
+            state.pending_repaint = true;
+        }
+    }
+
+    pub fn screen_draw_redo() {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if let Some(stroke) = state.redo_strokes.pop() {
+            state.strokes.push(stroke);
+            let w = state.canvas_width;
+            let h = state.canvas_height;
+            rebuild_screen_draw_canvas(&mut state);
+            mark_screen_draw_dirty(&mut state, ScreenDrawDirtyRect::full(w, h));
+            state.pending_repaint = true;
+        }
+    }
+
+    pub fn screen_draw_clear() {
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            state.strokes.clear();
+            state.redo_strokes.clear();
+            state.current_stroke = None;
+            state.current_stroke_updated_at = None;
+            state.current_stroke_release_seen_at = None;
+            state.text_session = None;
+            state.active_control = ScreenDrawControl::None;
+            state.live_stroke_rect = None;
+            reset_screen_draw_buffers(&mut state);
+            let w = state.canvas_width;
+            let h = state.canvas_height;
+            mark_screen_draw_dirty(&mut state, ScreenDrawDirtyRect::full(w, h));
+            state.pending_repaint = true;
+        }
+        request_screen_draw_overlay_sync();
+    }
+
+    pub fn screen_draw_set_eraser(enabled: bool) {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if state.text_session.is_some() {
+            commit_screen_draw_text_session(&mut state);
+        }
+        state.eraser = enabled;
+    }
+
+    pub fn screen_draw_get_eraser() -> bool {
+        SCREEN_DRAW_STATE.lock().eraser
+    }
+
+    pub fn screen_draw_get_color() -> crate::model::RgbaColor {
+        let state = SCREEN_DRAW_STATE.lock();
+        crate::model::RgbaColor {
+            r: state.color.r,
+            g: state.color.g,
+            b: state.color.b,
+            a: state.color.a,
+        }
+    }
+
+    pub fn screen_draw_set_color(color: crate::model::RgbaColor) {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        state.color = RgbaColor {
+            r: color.r,
+            g: color.g,
+            b: color.b,
+            a: color.a,
+        };
+    }
+
+    pub fn screen_draw_get_color_pick_mode() -> bool {
+        SCREEN_DRAW_STATE.lock().screen_color_pick_mode
+    }
+
+    pub fn screen_draw_toggle_color_pick_mode() {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        let toolbar_rect = screen_draw_toolbar_rect(&state);
+        let preview_rect = screen_draw_color_pick_panel_rect(&state);
+        state.screen_color_pick_mode = !state.screen_color_pick_mode;
+        state.color_pick_preview = None;
+        mark_screen_draw_dirty(&mut state, toolbar_rect);
+        if let Some(rect) = preview_rect.or_else(|| screen_draw_color_pick_panel_rect(&state)) {
+            mark_screen_draw_dirty(&mut state, rect);
+        }
+        mark_screen_draw_repaint_pending(&mut state);
+        drop(state);
+        request_screen_draw_overlay_sync();
+    }
+
+    pub fn screen_draw_get_brush_size() -> f32 {
+        SCREEN_DRAW_STATE.lock().brush_size
+    }
+
+    pub fn screen_draw_set_brush_size(size: f32) {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        state.brush_size = size.clamp(2.0, 80.0);
+        if state.active_control == ScreenDrawControl::BrushSize {
+            state.pending_repaint = true;
+        }
+    }
+
+    pub fn screen_draw_set_brush_size_active(active: bool) {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        let target_control = if active {
+            ScreenDrawControl::BrushSize
+        } else {
+            ScreenDrawControl::None
+        };
+        if state.active_control != target_control {
+            state.active_control = target_control;
+            state.pending_repaint = true;
+            let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
+            if hwnd_raw != 0 {
+                unsafe {
+                    let _ = PostMessageW(
+                        Some(HWND(hwnd_raw as *mut c_void)),
+                        WMAPP_SCREEN_DRAW_SYNC,
+                        WPARAM(0),
+                        LPARAM(0),
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn screen_draw_get_tool() -> crate::model::QuickScreenDrawTool {
+        match SCREEN_DRAW_STATE.lock().tool {
+            ScreenDrawTool::Brush => crate::model::QuickScreenDrawTool::Brush,
+            ScreenDrawTool::Line => crate::model::QuickScreenDrawTool::Line,
+            ScreenDrawTool::Arrow => crate::model::QuickScreenDrawTool::Arrow,
+            ScreenDrawTool::Rectangle => crate::model::QuickScreenDrawTool::Rectangle,
+            ScreenDrawTool::Ellipse => crate::model::QuickScreenDrawTool::Ellipse,
+            ScreenDrawTool::Circle => crate::model::QuickScreenDrawTool::Circle,
+            ScreenDrawTool::Polygon => crate::model::QuickScreenDrawTool::Polygon,
+            ScreenDrawTool::Text => crate::model::QuickScreenDrawTool::Text,
+        }
+    }
+
+    pub fn screen_draw_set_tool(tool: crate::model::QuickScreenDrawTool) {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if state.text_session.is_some() {
+            commit_screen_draw_text_session(&mut state);
+        }
+        state.tool = match tool {
+            crate::model::QuickScreenDrawTool::Brush => ScreenDrawTool::Brush,
+            crate::model::QuickScreenDrawTool::Line => ScreenDrawTool::Line,
+            crate::model::QuickScreenDrawTool::Arrow => ScreenDrawTool::Arrow,
+            crate::model::QuickScreenDrawTool::Rectangle => ScreenDrawTool::Rectangle,
+            crate::model::QuickScreenDrawTool::Ellipse => ScreenDrawTool::Ellipse,
+            crate::model::QuickScreenDrawTool::Circle => ScreenDrawTool::Circle,
+            crate::model::QuickScreenDrawTool::Polygon => ScreenDrawTool::Polygon,
+            crate::model::QuickScreenDrawTool::Text => ScreenDrawTool::Text,
+        };
+    }
+
+    pub fn screen_draw_get_smoothing() -> bool {
+        SCREEN_DRAW_STATE.lock().smoothing
+    }
+
+    pub fn screen_draw_set_smoothing(enabled: bool) {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        state.smoothing = enabled;
+    }
+
+    pub fn screen_draw_get_smoothing_amount() -> f32 {
+        SCREEN_DRAW_STATE.lock().smoothing_amount
+    }
+
+    pub fn screen_draw_set_smoothing_amount(amount: f32) {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        state.smoothing_amount = amount.clamp(0.0, 1.0);
+        if state.active_control == ScreenDrawControl::SmoothingAmount {
+            state.pending_repaint = true;
+        }
+    }
+
+    pub fn screen_draw_deactivate() {
+        deactivate_screen_draw_and_sync_trigger();
+    }
+
+    pub fn screen_draw_deactivate_from_toolbar() {
+        deactivate_screen_draw_from_toolbar();
+    }
+
+    pub fn screen_draw_toolbar_interacted() {
+        screen_draw_toolbar_interacted_from("unknown");
+    }
+
+    pub fn screen_draw_toolbar_interacted_from(source: &str) {
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            if !state.active {
+                screen_draw_debug_log(format!(
+                    "toolbar_interacted ignored_inactive source={} suppress={}",
+                    source, state.suppress_next_trigger_hold
+                ));
+                return;
+            }
+            if state
+                .last_toolbar_interaction_at
+                .is_some_and(|last| last.elapsed() < Duration::from_millis(250))
+            {
+                screen_draw_debug_log(format!("toolbar_interacted deduped source={source}"));
+                return;
+            }
+            state.last_toolbar_interaction_at = Some(Instant::now());
+        }
+        let handled_button_up = screen_draw_handle_button_up();
+        let trigger_to_sync = {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            screen_draw_debug_log(format!(
+                "toolbar_interacted source={} handled_button_up={} active={} capturing={} active_control={:?} stroke_present={} trigger_down={} suppress={}",
+                source,
+                handled_button_up,
+                state.active,
+                state.capturing_region,
+                state.active_control,
+                state.current_stroke.is_some(),
+                state.trigger_is_down,
+                state.suppress_next_trigger_hold
+            ));
+            state.trigger_latched = false;
+            state.trigger_is_down = false;
+            state.trigger_pressed_at = None;
+            state.trigger_started_from_inactive = false;
+            state.trigger_release_should_keep_open = false;
+            state.trigger.clone()
+        };
+        if let Some(trigger) = trigger_to_sync.as_ref() {
+            sync_trigger_binding_input_state(trigger);
+        }
+    }
+
+    fn deactivate_screen_draw_and_sync_trigger() {
+        let trigger_to_sync = {
+            let state = SCREEN_DRAW_STATE.lock();
+            state.trigger.clone()
+        };
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            deactivate_screen_draw(&mut state);
+        }
+        if let Some(trigger) = trigger_to_sync.as_ref() {
+            clear_trigger_binding_input_state(trigger);
+        }
+        request_screen_draw_overlay_sync();
+        request_ui_repaint();
+    }
+
+    fn deactivate_screen_draw_from_toolbar() {
+        let trigger_to_sync = {
+            let state = SCREEN_DRAW_STATE.lock();
+            state.trigger.clone()
+        };
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            deactivate_screen_draw(&mut state);
+            state.suppress_next_trigger_hold = true;
+        }
+        if let Some(trigger) = trigger_to_sync.as_ref() {
+            clear_trigger_binding_input_state(trigger);
+        }
+        request_screen_draw_overlay_sync();
+        request_ui_repaint();
+    }
+
+    pub fn screen_draw_trigger_capture_region_mouse() {
+        let mut capture_session_id = None;
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            capture_session_id = begin_screen_draw_capture_session(&mut state, None);
+        }
+        if let Some(capture_session_id) = capture_session_id {
+            request_screen_draw_overlay_sync();
+            begin_screen_draw_region_capture(ScreenDrawCaptureMode::MouseDrag, capture_session_id);
+        }
+    }
+
+    pub fn screen_draw_trigger_capture_region_from_toolbar() {
+        screen_draw_trigger_capture_region_mouse();
     }
 
     fn screen_draw_local_point_from_screen(point: POINT) -> POINT {
@@ -9811,25 +10410,83 @@ mod windows_overlay {
     }
 
     fn deactivate_screen_draw(state: &mut ScreenDrawState) {
+        if state.text_session.is_some() {
+            commit_screen_draw_text_session(state);
+        }
         state.active = false;
         state.current_stroke = None;
+        state.current_stroke_updated_at = None;
+        state.current_stroke_release_seen_at = None;
         state.active_control = ScreenDrawControl::None;
         state.capturing_region = false;
         state.capture_trigger = None;
         state.trigger_latched = false;
+        state.trigger_is_down = false;
         state.trigger_pressed_at = None;
         state.trigger_started_from_inactive = false;
+        state.trigger_release_should_keep_open = false;
         state.capture_trigger_release_point = None;
         state.strokes.clear();
-        state.committed_dirty = true;
+        state.redo_strokes.clear();
+        reset_screen_draw_buffers(state);
         state.pending_repaint = false;
         state.last_present_at = None;
         state.dirty_rect = None;
         state.live_stroke_rect = None;
+        // Do NOT release surface here to prevent race conditions with the painting thread!
+        // The surface will be safely released on the overlay thread inside sync_screen_draw_overlay_window.
+        request_ui_repaint();
         state.freeze_frame = None;
         state.text_session = None;
         state.screen_color_pick_mode = false;
         state.color_pick_preview = None;
+    }
+
+    fn activate_screen_draw(state: &mut ScreenDrawState, captured_frame: Option<Vec<u8>>) {
+        state.active = true;
+        state.freeze_frame = captured_frame;
+        state.capturing_region = false;
+        state.capture_trigger = None;
+        state.capture_trigger_release_point = None;
+        state.current_stroke = None;
+        state.current_stroke_updated_at = None;
+        state.current_stroke_release_seen_at = None;
+        state.strokes.clear();
+        state.redo_strokes.clear();
+        reset_screen_draw_buffers(state);
+        state.committed_dirty = true;
+        state.tool = ScreenDrawTool::Brush;
+        state.eraser = false;
+        state.active_control = ScreenDrawControl::None;
+        state.pending_repaint = true;
+        state.dirty_rect = Some(ScreenDrawDirtyRect::full(
+            state.canvas_width.max(1),
+            state.canvas_height.max(1),
+        ));
+        state.live_stroke_rect = None;
+    }
+
+    fn begin_screen_draw_capture_session(
+        state: &mut ScreenDrawState,
+        capture_trigger: Option<HotkeyBinding>,
+    ) -> Option<u64> {
+        if !state.active || state.capturing_region {
+            return None;
+        }
+        state.capturing_region = true;
+        state.capture_trigger = capture_trigger.clone();
+        state.trigger_latched = capture_trigger.is_some();
+        state.trigger_is_down = capture_trigger.is_some();
+        state.trigger_pressed_at = None;
+        state.trigger_started_from_inactive = false;
+        state.trigger_release_should_keep_open = false;
+        state.capture_trigger_release_point = None;
+        state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
+        state.active_control = ScreenDrawControl::None;
+        state.current_stroke = None;
+        state.pending_repaint = false;
+        request_ui_repaint();
+        Some(state.capture_session_id)
     }
 
     fn release_screen_draw_surface(state: &mut ScreenDrawState) {
@@ -9851,6 +10508,17 @@ mod windows_overlay {
         state.surface_bits_len = 0;
         state.surface_width = 0;
         state.surface_height = 0;
+    }
+
+    fn reset_screen_draw_buffers(state: &mut ScreenDrawState) {
+        state.committed_rgba.fill(0);
+        state.frame_rgba.fill(0);
+        state.committed_dirty = false;
+        if state.surface_bits != 0 && state.surface_bits_len > 0 {
+            unsafe {
+                std::ptr::write_bytes(state.surface_bits as *mut u8, 0, state.surface_bits_len);
+            }
+        }
     }
 
     unsafe fn clear_screen_draw_overlay_window(hwnd: HWND) -> Result<()> {
@@ -9908,6 +10576,8 @@ mod windows_overlay {
         let mut capture_mode = None;
         let mut capture_session_id = 0u64;
         let mut should_sync_config = false;
+        let mut should_deactivate = false;
+        let mut trigger_to_sync = None;
         let mut state = SCREEN_DRAW_STATE.lock();
         if !state.active || state.capturing_region {
             return false;
@@ -9933,7 +10603,11 @@ mod windows_overlay {
         }
         match hit {
             ScreenDrawHit::Close => {
+                screen_draw_debug_log("toolbar_close".to_owned());
+                trigger_to_sync = state.trigger.clone();
                 deactivate_screen_draw(&mut state);
+                state.suppress_next_trigger_hold = true;
+                should_deactivate = true;
             }
             ScreenDrawHit::Color => {
                 // Toggle the inline color palette on the overlay
@@ -10100,17 +10774,9 @@ mod windows_overlay {
                 should_sync_config = true;
             }
             ScreenDrawHit::CaptureRegion => {
-                if !state.capturing_region {
-                    state.capturing_region = true;
-                    state.capture_trigger = None;
-                    state.trigger_latched = false;
-                    state.trigger_pressed_at = None;
-                    state.capture_trigger_release_point = None;
-                    state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
-                    capture_session_id = state.capture_session_id;
+                if let Some(session_id) = begin_screen_draw_capture_session(&mut state, None) {
+                    capture_session_id = session_id;
                     state.active_control = ScreenDrawControl::None;
-                    state.current_stroke = None;
-                    state.pending_repaint = false;
                     capture_mode = Some(ScreenDrawCaptureMode::MouseDrag);
                 }
             }
@@ -10148,6 +10814,13 @@ mod windows_overlay {
             mark_screen_draw_repaint_pending(&mut state);
         }
         drop(state);
+        if should_deactivate {
+            if let Some(trigger) = trigger_to_sync.as_ref() {
+                clear_trigger_binding_input_state(trigger);
+            }
+            request_screen_draw_overlay_sync();
+            request_ui_repaint();
+        }
         if should_sync_config {
             send_screen_draw_config_to_ui();
         }
@@ -10159,31 +10832,37 @@ mod windows_overlay {
     }
 
     fn begin_screen_draw_capture_from_trigger(trigger: HotkeyBinding) {
-        let mut should_start = false;
-        let mut session_id = 0u64;
+        screen_draw_debug_log(format!("begin_capture key={}", trigger.key));
+        let mut session_id = None;
         {
             let mut state = SCREEN_DRAW_STATE.lock();
-            if state.active && !state.capturing_region {
-                state.capturing_region = true;
-                state.capture_trigger = Some(trigger.clone());
-                state.trigger_latched = true;
-                state.trigger_pressed_at = None;
-                state.trigger_started_from_inactive = false;
-                state.capture_trigger_release_point = None;
-                state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
-                session_id = state.capture_session_id;
-                state.active_control = ScreenDrawControl::None;
-                state.current_stroke = None;
-                state.pending_repaint = false;
-                should_start = true;
-            }
+            session_id = begin_screen_draw_capture_session(&mut state, Some(trigger.clone()));
         }
-        if !should_start {
+        let Some(session_id) = session_id else {
             return;
-        }
+        };
 
         request_screen_draw_overlay_sync();
         begin_screen_draw_region_capture(ScreenDrawCaptureMode::HoldTrigger(trigger), session_id);
+    }
+
+    fn screen_draw_trigger_release_should_toggle_off(
+        state: &mut ScreenDrawState,
+        active: bool,
+    ) -> bool {
+        if state.trigger_release_should_keep_open {
+            state.trigger_release_should_keep_open = false;
+            state.trigger_pressed_at = None;
+            return false;
+        }
+        let Some(pressed_at) = state.trigger_pressed_at.take() else {
+            return false;
+        };
+        if !active {
+            return false;
+        }
+        let elapsed = Instant::now().duration_since(pressed_at);
+        elapsed < Duration::from_millis(SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS)
     }
 
     fn begin_screen_draw_region_capture(capture_mode: ScreenDrawCaptureMode, session_id: u64) {
@@ -10249,6 +10928,9 @@ mod windows_overlay {
             if is_down(0x1B) || is_down(0x02) {
                 break Ok(None);
             }
+            if cancel_screen_draw_mouse_capture_from_trigger_press() {
+                break Ok(None);
+            }
 
             let completed_region = {
                 let hook_state = HOOK_STATE.lock();
@@ -10272,6 +10954,55 @@ mod windows_overlay {
 
         set_screen_draw_region_capture_mouse_blocked(false, false);
         result
+    }
+
+    fn should_cancel_screen_draw_mouse_capture_from_trigger_press(
+        capturing_region: bool,
+        capture_trigger_present: bool,
+        trigger_down: bool,
+    ) -> bool {
+        capturing_region && !capture_trigger_present && trigger_down
+    }
+
+    fn cancel_screen_draw_mouse_capture_from_trigger_press() -> bool {
+        let (trigger, capturing_region, capture_trigger_present) = {
+            let state = SCREEN_DRAW_STATE.lock();
+            (
+                state.trigger.clone(),
+                state.capturing_region,
+                state.capture_trigger.is_some(),
+            )
+        };
+        let trigger_down = trigger
+            .as_ref()
+            .is_some_and(screen_draw_trigger_binding_is_down);
+        let should_cancel = should_cancel_screen_draw_mouse_capture_from_trigger_press(
+            capturing_region,
+            capture_trigger_present,
+            trigger_down,
+        );
+        if !should_cancel {
+            return false;
+        }
+
+        let trigger_to_sync = {
+            let state = SCREEN_DRAW_STATE.lock();
+            state.trigger.clone()
+        };
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            if !state.active || !state.capturing_region || state.capture_trigger.is_some() {
+                return false;
+            }
+            state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
+            deactivate_screen_draw(&mut state);
+        }
+        if let Some(trigger) = trigger_to_sync.as_ref() {
+            sync_trigger_binding_input_state(trigger);
+        }
+        request_screen_draw_overlay_sync();
+        request_ui_repaint();
+        true
     }
 
     fn select_screen_draw_capture_region_from_trigger(
@@ -10332,52 +11063,51 @@ mod windows_overlay {
     }
 
     fn screen_draw_trigger_key_is_down(key_name: &str, hook_state: &HookState) -> bool {
-        if key_name.eq_ignore_ascii_case("Ctrl") || key_name.eq_ignore_ascii_case("Control") {
-            return hook_state.ctrl
-                || hotkey::key_name_to_vk(key_name).is_some_and(|vk| {
-                    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
-                });
-        }
-        if key_name.eq_ignore_ascii_case("Alt") {
-            return hook_state.alt
-                || hotkey::key_name_to_vk(key_name).is_some_and(|vk| {
-                    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
-                });
-        }
-        if key_name.eq_ignore_ascii_case("Shift") {
-            return hook_state.shift
-                || hotkey::key_name_to_vk(key_name).is_some_and(|vk| {
-                    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
-                });
-        }
-        if key_name.eq_ignore_ascii_case("Win") || key_name.eq_ignore_ascii_case("Meta") {
-            return hook_state.win
-                || hotkey::key_name_to_vk(key_name).is_some_and(|vk| {
-                    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
-                });
-        }
         if hotkey::is_mouse_key_name(key_name) {
             return hook_state
                 .held_mouse_buttons
                 .iter()
-                .any(|held| held.eq_ignore_ascii_case(key_name))
-                || hotkey::key_name_to_vk(key_name).is_some_and(|vk| {
-                    (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
-                });
+                .any(|held| held.eq_ignore_ascii_case(key_name));
         }
-        hook_state
+        if key_name.eq_ignore_ascii_case("Ctrl") || key_name.eq_ignore_ascii_case("Control") {
+            return hook_state.ctrl || hook_state.held_inputs.contains("Ctrl");
+        }
+        if key_name.eq_ignore_ascii_case("Alt") {
+            return hook_state.alt || hook_state.held_inputs.contains("Alt");
+        }
+        if key_name.eq_ignore_ascii_case("Shift") {
+            return hook_state.shift || hook_state.held_inputs.contains("Shift");
+        }
+        if key_name.eq_ignore_ascii_case("Win") || key_name.eq_ignore_ascii_case("Meta") {
+            return hook_state.win
+                || hook_state.held_inputs.contains("Win")
+                || hook_state.held_inputs.contains("Meta");
+        }
+        let held_by_hook = hook_state
             .held_inputs
             .iter()
-            .any(|held| held.eq_ignore_ascii_case(key_name))
-            || hotkey::key_name_to_vk(key_name)
-                .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0)
+            .any(|held| held.eq_ignore_ascii_case(key_name));
+        if let Some(vk) = hotkey::key_name_to_vk(key_name) {
+            return held_by_hook || (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0;
+        }
+        held_by_hook
     }
 
     fn screen_draw_trigger_binding_is_down(trigger: &HotkeyBinding) -> bool {
+        let state_trigger_down = {
+            let state = SCREEN_DRAW_STATE.try_lock();
+            state.as_ref().is_some_and(|state| {
+                state
+                    .trigger
+                    .as_ref()
+                    .is_some_and(|configured| hotkey::binding_matches(configured, trigger))
+                    && state.trigger_is_down
+            })
+        };
         let hook_state = HOOK_STATE.lock();
         hotkey::binding_key_names(trigger)
             .into_iter()
-            .all(|key| screen_draw_trigger_key_is_down(&key, &hook_state))
+            .all(|key| state_trigger_down || screen_draw_trigger_key_is_down(&key, &hook_state))
     }
 
     fn sync_trigger_binding_input_state(binding: &HotkeyBinding) {
@@ -10431,6 +11161,43 @@ mod windows_overlay {
         hook_state.win = win_down;
     }
 
+    fn clear_trigger_binding_input_state(binding: &HotkeyBinding) {
+        let keys = hotkey::binding_key_names(binding);
+        let mut hook_state = HOOK_STATE.lock();
+        for key in keys {
+            if hotkey::is_mouse_key_name(&key) {
+                if let Some(stored) = hook_state
+                    .held_mouse_buttons
+                    .iter()
+                    .find(|held| held.eq_ignore_ascii_case(&key))
+                    .cloned()
+                {
+                    hook_state.held_mouse_buttons.remove(&stored);
+                }
+                continue;
+            }
+            if let Some(stored) = hook_state
+                .held_inputs
+                .iter()
+                .find(|held| held.eq_ignore_ascii_case(&key))
+                .cloned()
+            {
+                hook_state.held_inputs.remove(&stored);
+            }
+            if let Some(stored) = hook_state
+                .pressed_inputs
+                .iter()
+                .find(|pressed| pressed.eq_ignore_ascii_case(&key))
+                .cloned()
+            {
+                hook_state.pressed_inputs.remove(&stored);
+            }
+            hook_state
+                .stop_ignore_keys
+                .retain(|_, ignored| !ignored.eq_ignore_ascii_case(&key));
+        }
+    }
+
     fn update_screen_draw_region_capture_preview(origin: POINT, point: POINT) {
         let left = origin.x.min(point.x);
         let top = origin.y.min(point.y);
@@ -10449,7 +11216,7 @@ mod windows_overlay {
         if hook_state.vision_capture_preview_regions.get(0) != Some(&region) {
             hook_state.vision_capture_preview_regions = vec![region];
             drop(hook_state);
-            wake_command_queue();
+            send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
         }
     }
 
@@ -10462,7 +11229,7 @@ mod windows_overlay {
         hook_state.vision_capture_preview_regions = Vec::new();
         hook_state.vision_preview_source = None;
         drop(hook_state);
-        wake_command_queue();
+        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
     fn build_screen_draw_capture_region(
@@ -10587,13 +11354,19 @@ mod windows_overlay {
             if state.capture_session_id != session_id {
                 return;
             }
-            let trigger = state.capture_trigger.clone();
+            let trigger = state
+                .capture_trigger
+                .clone()
+                .or_else(|| state.trigger.clone());
             state.capturing_region = false;
             state.capture_trigger = None;
             state.capture_trigger_release_point = None;
             state.trigger_latched = false;
+            state.trigger_is_down = false;
             state.trigger_pressed_at = None;
             state.trigger_started_from_inactive = false;
+            state.trigger_release_should_keep_open = false;
+            state.suppress_next_trigger_hold = true;
             if state.active {
                 state.pending_repaint = true;
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
@@ -10606,6 +11379,7 @@ mod windows_overlay {
         }
         let _ = hwnd_raw;
         request_screen_draw_overlay_sync();
+        request_ui_repaint();
     }
 
     fn screen_draw_handle_move(point: POINT) -> bool {
@@ -10663,6 +11437,8 @@ mod windows_overlay {
                 if let Some(stroke) = state.current_stroke.as_mut() {
                     let changed = append_screen_draw_point(stroke, point);
                     if changed {
+                        state.current_stroke_updated_at = Some(Instant::now());
+                        state.current_stroke_release_seen_at = None;
                         sync_screen_draw_live_stroke_dirty(&mut state);
                         mark_screen_draw_repaint_pending(&mut state);
                     }
@@ -10687,6 +11463,8 @@ mod windows_overlay {
             mark_screen_draw_dirty(&mut state, previous);
         }
         if let Some(stroke) = state.current_stroke.take() {
+            state.current_stroke_updated_at = None;
+            state.current_stroke_release_seen_at = None;
             if !stroke.points.is_empty() {
                 if stroke.tool == ScreenDrawTool::Text && !stroke.eraser {
                     state.text_session = Some(ScreenDrawTextSession { stroke });
@@ -10707,9 +11485,11 @@ mod windows_overlay {
                         state.committed_dirty = true;
                     }
                     state.strokes.push(stroke);
+                    state.redo_strokes.clear();
                 } else {
                     state.committed_dirty = true;
                     state.strokes.push(stroke);
+                    state.redo_strokes.clear();
                 }
             }
         }
@@ -10839,7 +11619,24 @@ mod windows_overlay {
         if !screen_draw_active() {
             return false;
         }
+        if message == WM_MOUSEMOVE && !screen_draw_needs_mouse_move_tracking() {
+            return false;
+        }
         let point = screen_draw_local_point_from_screen(screen_point);
+        let is_over_toolbar = {
+            let state = SCREEN_DRAW_STATE.lock();
+            point.x >= state.toolbar_x
+                && point.x <= state.toolbar_x + state.toolbar_w
+                && point.y >= state.toolbar_y
+                && point.y <= state.toolbar_y + state.toolbar_h
+        };
+        let finishing_stroke = matches!(message, WM_LBUTTONUP | WM_RBUTTONUP) && {
+            let state = SCREEN_DRAW_STATE.lock();
+            state.current_stroke.is_some()
+        };
+        if is_over_toolbar && !finishing_stroke {
+            return false;
+        }
         let (handled, repaint) = match message {
             WM_LBUTTONDOWN => {
                 let handled = screen_draw_handle_button_down(point, false);
@@ -10878,6 +11675,56 @@ mod windows_overlay {
         handled
     }
 
+    fn screen_draw_needs_mouse_move_tracking() -> bool {
+        let state = SCREEN_DRAW_STATE.lock();
+        if !state.active || state.capturing_region {
+            return false;
+        }
+        state.active_control != ScreenDrawControl::None
+            || state.current_stroke.is_some()
+            || state.screen_color_pick_mode
+    }
+
+    fn finish_released_screen_draw_stroke_if_stale() {
+        let should_finish = {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            if !state.active
+                || state.capturing_region
+                || state.active_control != ScreenDrawControl::None
+            {
+                return;
+            }
+            let Some(stroke) = state.current_stroke.as_ref() else {
+                state.current_stroke_release_seen_at = None;
+                return;
+            };
+            if stroke.points.len() < 2 {
+                state.current_stroke_release_seen_at = None;
+                return;
+            }
+            let mouse_released =
+                unsafe { GetAsyncKeyState(0x01) } >= 0 && unsafe { GetAsyncKeyState(0x02) } >= 0;
+            if !mouse_released {
+                state.current_stroke_release_seen_at = None;
+                return;
+            }
+            let now = Instant::now();
+            let release_seen_at = *state.current_stroke_release_seen_at.get_or_insert(now);
+            let updated_at = state.current_stroke_updated_at.unwrap_or(now);
+            now.duration_since(release_seen_at)
+                >= Duration::from_millis(SCREEN_DRAW_ORPHAN_STROKE_RELEASE_MS)
+                && now.duration_since(updated_at)
+                    >= Duration::from_millis(SCREEN_DRAW_ORPHAN_STROKE_RELEASE_MS)
+        };
+        if should_finish && screen_draw_handle_button_up() {
+            request_screen_draw_overlay_sync();
+        }
+    }
+
+    fn screen_draw_should_process_mouse_message(message: u32) -> bool {
+        message != WM_MOUSEMOVE || screen_draw_needs_mouse_move_tracking()
+    }
+
     fn screen_draw_lparam_point(lparam: LPARAM) -> POINT {
         POINT {
             x: (lparam.0 & 0xFFFF) as i16 as i32,
@@ -10889,10 +11736,9 @@ mod windows_overlay {
         let x = point.x - state.toolbar_x;
         let y = point.y - state.toolbar_y;
 
-        // Check palette hits first if open
         if state.color_palette_open {
-            let palette_y_min = SCREEN_DRAW_TOOLBAR_HEIGHT + 4; // 60
-            let palette_y_max = SCREEN_DRAW_TOOLBAR_HEIGHT + 36; // 92
+            let palette_y_min = SCREEN_DRAW_TOOLBAR_HEIGHT + 4;
+            let palette_y_max = SCREEN_DRAW_TOOLBAR_HEIGHT + 36;
             if x >= 19 && x <= 211 && y >= palette_y_min && y <= palette_y_max {
                 for i in 0..8 {
                     let cx = 31 + i * 24;
@@ -11075,7 +11921,7 @@ mod windows_overlay {
     }
 
     fn start_screen_draw_stroke(state: &mut ScreenDrawState, point: POINT, force_eraser: bool) {
-        let tool = if force_eraser && state.tool == ScreenDrawTool::Text {
+        let tool = if (force_eraser || state.eraser) && state.tool == ScreenDrawTool::Text {
             ScreenDrawTool::Brush
         } else {
             state.tool
@@ -11093,6 +11939,8 @@ mod windows_overlay {
             text_box_width: 0,
             text_box_height: 0,
         });
+        state.current_stroke_updated_at = Some(Instant::now());
+        state.current_stroke_release_seen_at = None;
     }
 
     fn next_screen_draw_color(color: RgbaColor) -> RgbaColor {
@@ -11238,6 +12086,7 @@ mod windows_overlay {
             return false;
         }
         state.strokes.push(session.stroke);
+        state.redo_strokes.clear();
         state.committed_dirty = true;
         true
     }
@@ -11905,13 +12754,30 @@ mod windows_overlay {
         width: usize,
         rect: ScreenDrawDirtyRect,
     ) {
+        // Fast R/B swap: treat every 4 bytes as a u32, mask-and-shift to swap channels.
+        // RGBA bytes in little-endian u32: bits [31:24]=A, [23:16]=B, [15:8]=G, [7:0]=R
+        // BGRA bytes in little-endian u32: bits [31:24]=A, [23:16]=R, [15:8]=G, [7:0]=B
+        // Swap: keep A and G in place, swap R (bits [7:0]) and B (bits [23:16]).
         for y in rect.top..rect.bottom {
-            for x in rect.left..rect.right {
-                let offset = (y * width + x) * 4;
-                dst[offset] = src[offset + 2];
-                dst[offset + 1] = src[offset + 1];
-                dst[offset + 2] = src[offset];
-                dst[offset + 3] = src[offset + 3];
+            let row_start = (y * width + rect.left) * 4;
+            let row_end = (y * width + rect.right) * 4;
+            let src_row = &src[row_start..row_end];
+            let dst_row = &mut dst[row_start..row_end];
+            for (src_chunk, dst_chunk) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
+                let pixel =
+                    u32::from_ne_bytes([src_chunk[0], src_chunk[1], src_chunk[2], src_chunk[3]]);
+                // Extract channels
+                let r = (pixel) & 0xFF;
+                let g = (pixel >> 8) & 0xFF;
+                let b = (pixel >> 16) & 0xFF;
+                let a = (pixel >> 24) & 0xFF;
+                // Write as BGRA
+                let bgra = b | (g << 8) | (r << 16) | (a << 24);
+                let out = bgra.to_ne_bytes();
+                dst_chunk[0] = out[0];
+                dst_chunk[1] = out[1];
+                dst_chunk[2] = out[2];
+                dst_chunk[3] = out[3];
             }
         }
     }
@@ -11931,6 +12797,19 @@ mod windows_overlay {
         let height = screen_h as usize;
         ensure_screen_draw_canvas(&mut state_guard, width, height);
         ensure_screen_draw_surface(&mut state_guard, width, height)?;
+
+        let has_visual_content = !state_guard.strokes.is_empty()
+            || state_guard.current_stroke.is_some()
+            || state_guard.text_session.is_some()
+            || state_guard.screen_color_pick_mode
+            || matches!(state_guard.active_control, ScreenDrawControl::BrushSize)
+            || state_guard.capturing_region;
+        if !has_visual_content {
+            state_guard.pending_repaint = false;
+            state_guard.dirty_rect = None;
+            let _ = ShowWindow(hwnd, SW_HIDE);
+            return Ok(());
+        }
         if state_guard.committed_dirty {
             rebuild_screen_draw_canvas(&mut state_guard);
         }
@@ -11970,34 +12849,10 @@ mod windows_overlay {
         {
             render_screen_draw_stroke_skia(&mut pixmap, &session.stroke);
         }
-        let toolbar_x = state_guard.toolbar_x;
-        let toolbar_y = state_guard.toolbar_y;
-        let toolbar_color = state_guard.color;
-        let toolbar_brush_size = state_guard.brush_size;
-        let toolbar_eraser = state_guard.eraser;
-        let toolbar_smoothing = state_guard.smoothing;
-        let toolbar_smoothing_amount = state_guard.smoothing_amount;
-        let toolbar_tool = state_guard.tool;
-        let toolbar_color_palette_open = state_guard.color_palette_open;
         let toolbar_color_pick_mode = state_guard.screen_color_pick_mode;
         let color_pick_preview = state_guard.color_pick_preview.clone();
         let capturing_region = state_guard.capturing_region;
         if !capturing_region {
-            draw_screen_draw_toolbar_rgba(
-                state_guard.frame_rgba.as_mut_slice(),
-                width,
-                height,
-                toolbar_x,
-                toolbar_y,
-                toolbar_color,
-                toolbar_brush_size,
-                toolbar_eraser,
-                toolbar_smoothing,
-                toolbar_smoothing_amount,
-                toolbar_tool,
-                toolbar_color_palette_open,
-                toolbar_color_pick_mode,
-            );
             if toolbar_color_pick_mode
                 && let Some(preview) = color_pick_preview.as_ref()
                 && let Some(panel_rect) = screen_draw_color_pick_panel_rect(&state_guard)
@@ -12012,12 +12867,14 @@ mod windows_overlay {
             }
         }
         if state_guard.active_control == ScreenDrawControl::BrushSize && !capturing_region {
+            let brush_size = state_guard.brush_size;
+            let brush_color = state_guard.color;
             if let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
                 state_guard.frame_rgba.as_mut_slice(),
                 width as u32,
                 height as u32,
             ) {
-                let radius = toolbar_brush_size / 2.0;
+                let radius = brush_size / 2.0;
                 // Center preview at the center of the screen
                 let preview_x = width as f32 / 2.0;
                 let preview_y = height as f32 / 2.0;
@@ -12067,10 +12924,10 @@ mod windows_overlay {
                 if let Some(path) = pb.finish() {
                     let mut paint = tiny_skia::Paint::default();
                     paint.set_color(tiny_skia::Color::from_rgba8(
-                        toolbar_color.r,
-                        toolbar_color.g,
-                        toolbar_color.b,
-                        toolbar_color.a,
+                        brush_color.r,
+                        brush_color.g,
+                        brush_color.b,
+                        brush_color.a,
                     ));
                     paint.anti_alias = true;
                     pixmap.fill_path(
@@ -12084,31 +12941,51 @@ mod windows_overlay {
             }
         }
 
-        let _ = SetWindowPos(
-            hwnd,
-            Some(HWND_TOPMOST),
-            screen_x,
-            screen_y,
-            screen_w,
-            screen_h,
-            SWP_NOACTIVATE,
-        );
-
-        let screen_dc = GetDC(None);
-        let pixels = std::slice::from_raw_parts_mut(
-            state_guard.surface_bits as *mut u8,
-            state_guard.surface_bits_len,
-        );
-        copy_screen_draw_rgba_to_bgra_region(
-            state_guard.frame_rgba.as_slice(),
-            pixels,
-            width,
-            dirty_rect,
-        );
+        // Perform BGRA pixel conversion directly from state_guard.frame_rgba to surface bits
+        // while holding the lock. This is extremely fast (approx 0.5-1.5ms for a 2560x1440 screen)
+        // and avoids allocating a massive temporary Vec snapshot buffer on every single frame,
+        // which was causing memory pressure and lag when resizing shapes.
+        if state_guard.surface_bits_len > 0 && state_guard.surface_bits != 0 {
+            let pixels = std::slice::from_raw_parts_mut(
+                state_guard.surface_bits as *mut u8,
+                state_guard.surface_bits_len,
+            );
+            copy_screen_draw_rgba_to_bgra_region(
+                state_guard.frame_rgba.as_slice(),
+                pixels,
+                width,
+                dirty_rect,
+            );
+        }
         let surface_dc = HDC(state_guard.surface_dc as *mut c_void);
         state_guard.pending_repaint = false;
         state_guard.last_present_at = Some(Instant::now());
-        drop(state_guard);
+        drop(state_guard); // Release lock BEFORE the expensive UpdateLayeredWindow call
+
+        // SetWindowPos to HWND_TOPMOST: only needed once when window is first shown/positioned.
+        // Check current window position to avoid calling it every frame (expensive DWM op).
+        let mut current_rect = windows::Win32::Foundation::RECT::default();
+        let needs_reposition = if GetWindowRect(hwnd, &mut current_rect).is_ok() {
+            current_rect.left != screen_x
+                || current_rect.top != screen_y
+                || (current_rect.right - current_rect.left) != screen_w
+                || (current_rect.bottom - current_rect.top) != screen_h
+        } else {
+            true
+        };
+        if needs_reposition {
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                screen_x,
+                screen_y,
+                screen_w,
+                screen_h,
+                SWP_NOACTIVATE,
+            );
+        }
+
+        let screen_dc = GetDC(None);
         let blend = BLENDFUNCTION {
             BlendOp: AC_SRC_OVER as u8,
             BlendFlags: 0,
@@ -13590,10 +14467,11 @@ mod windows_overlay {
         true
     }
 
-    const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(3000);
-    const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(1500);
+    const QUICK_KEY_DISPLAY_DISPLAY_DURATION: Duration = Duration::from_millis(1200);
+    const QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION: Duration = Duration::from_millis(600);
     const QUICK_KEY_DISPLAY_ANIM_ENTER_DURATION: Duration = Duration::from_millis(180);
     const QUICK_KEY_DISPLAY_ANIM_EXIT_DURATION: Duration = Duration::from_millis(200);
+    const QUICK_KEY_DISPLAY_PUSH_DURATION: Duration = Duration::from_millis(180);
     const QUICK_KEY_DISPLAY_HOLD_MIN_DURATION: Duration = Duration::from_millis(400);
     const QUICK_KEY_DISPLAY_HOLD_TRANSITION_DURATION: Duration = Duration::from_millis(80);
 
@@ -16993,25 +17871,33 @@ mod windows_overlay {
         let plus_width = (font_size * 0.48).round().max(10.0) as i32;
         let entry_gap = (font_size * 0.36).round().max(10.0) as i32;
         let barrier_gap = (font_size * 0.62).round().max(20.0) as i32;
-
-        let max_rows = 4;
-        let mut rows: Vec<Vec<&QuickKeyDisplayEntry>> = vec![Vec::new(); max_rows];
-        for entry in entries {
-            if entry.row < max_rows {
-                rows[entry.row].push(entry);
-            }
-        }
+        let row_gap = (font_size * 0.2).round().max(8.0) as i32;
+        let row_step = cap_height + row_gap;
 
         let now = Instant::now();
         let mut text_runs = Vec::<QuickKeyDisplayTextRun>::new();
 
         let mut draw_entry = |entry: &QuickKeyDisplayEntry, entry_top: i32, alpha_scale: f32| {
-            let visual = quick_key_display_entry_visual(entry, now);
-            let entry_width = quick_key_display_entry_width(&entry.text, font_size, cap_height);
+            let mut visual = quick_key_display_entry_visual(entry, now);
+            if let Some(pushed_at) = entry.pushed_at {
+                let push_t = (now.saturating_duration_since(pushed_at).as_secs_f32()
+                    / QUICK_KEY_DISPLAY_PUSH_DURATION.as_secs_f32())
+                .clamp(0.0, 1.0);
+                if push_t < 1.0 {
+                    let eased = quick_key_display_ease_out_cubic(push_t);
+                    visual.translate_y +=
+                        entry.push_offset_rows * row_step as f32 * (1.0 - eased);
+                }
+            }
+            let display_text = if entry.press_count > 1 {
+                format!("{} x{}", entry.text, entry.press_count)
+            } else {
+                entry.text.clone()
+            };
+            let entry_width = quick_key_display_entry_width(&display_text, font_size, cap_height);
             let scaled_entry_width = (entry_width as f32 * visual.scale_x).round().max(1.0) as i32;
             let scaled_cap_height = (cap_height as f32 * visual.scale_y).round().max(1.0) as i32;
-            let entry_center_x = entry.x_offset + (entry_width / 2);
-            let scaled_left = entry_center_x - (scaled_entry_width / 2);
+            let scaled_left = outer_pad_x;
             let scaled_top = entry_top + visual.translate_y.round() as i32;
             let palette = quick_key_display_entry_palette(entry);
             let (base_fill, inner_fill, border, mut text_color) =
@@ -17095,7 +17981,7 @@ mod windows_overlay {
             );
 
             text_runs.push(QuickKeyDisplayTextRun {
-                text: entry.text.clone(),
+                text: display_text,
                 rect: RECT {
                     left: scaled_left + (12.0 * visual.scale_x).round() as i32,
                     top: scaled_top,
@@ -17108,12 +17994,9 @@ mod windows_overlay {
             });
         };
 
-        let row_gap = (font_size * 0.2).round().max(8.0) as i32;
-        for entry in entries {
-            if entry.row < max_rows {
-                let row_top = outer_pad_y + entry.row as i32 * (cap_height + row_gap);
-                draw_entry(entry, row_top, 1.0);
-            }
+        for (i, entry) in entries.iter().enumerate() {
+            let row_top = outer_pad_y + i as i32 * row_step;
+            draw_entry(entry, row_top, 1.0);
         }
 
         let pixmap_data = pixmap.data();
@@ -21337,10 +22220,31 @@ mod windows_overlay {
             .join("powershell.exe")
     }
 
-    fn build_network_adapter_query(target_spec: &str) -> Result<String> {
+    fn normalize_network_target_spec(target_spec: &str) -> String {
         let target_spec = interpolate_variables(target_spec);
         let trimmed = target_spec.trim();
         let normalized = if trimmed.is_empty() { "wifi" } else { trimmed };
+        let bare = normalized
+            .strip_prefix("custom:")
+            .map(str::trim)
+            .unwrap_or(normalized);
+        if bare.eq_ignore_ascii_case("wifi")
+            || bare.eq_ignore_ascii_case("wi-fi")
+            || bare.eq_ignore_ascii_case("wlan")
+            || bare.eq_ignore_ascii_case("wireless")
+        {
+            "wifi".to_owned()
+        } else if bare.eq_ignore_ascii_case("ethernet") {
+            "ethernet".to_owned()
+        } else if normalized.starts_with("custom:") {
+            format!("custom:{bare}")
+        } else {
+            normalized.to_owned()
+        }
+    }
+
+    fn build_network_adapter_query(target_spec: &str) -> Result<String> {
+        let normalized = normalize_network_target_spec(target_spec);
         let adapter_query = if let Some(custom_name) = normalized.strip_prefix("custom:") {
             let custom_name = custom_name.trim();
             if custom_name.is_empty() {
@@ -21348,8 +22252,6 @@ mod windows_overlay {
             }
             let escaped = powershell_single_quote(custom_name);
             format!("Get-NetAdapter -Name '{escaped}' -ErrorAction SilentlyContinue")
-        } else if normalized.eq_ignore_ascii_case("all") {
-            "Get-NetAdapter -Physical -ErrorAction SilentlyContinue".to_owned()
         } else if normalized.eq_ignore_ascii_case("ethernet") {
             "Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)wi-?fi|wlan|wireless' -and $_.InterfaceDescription -notmatch '(?i)wi-?fi|wlan|wireless|802\\.11' }".to_owned()
         } else {
@@ -21391,23 +22293,20 @@ mod windows_overlay {
     }
 
     fn network_action_target_label(target_spec: &str) -> String {
-        let trimmed = target_spec.trim();
-        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("wifi") {
+        let normalized = normalize_network_target_spec(target_spec);
+        if normalized.eq_ignore_ascii_case("wifi") {
             "Wi-Fi".to_owned()
-        } else if trimmed.eq_ignore_ascii_case("ethernet") {
+        } else if normalized.eq_ignore_ascii_case("ethernet") {
             "Ethernet".to_owned()
-        } else if trimmed.eq_ignore_ascii_case("all") {
-            "all adapters".to_owned()
-        } else if let Some(custom_name) = trimmed.strip_prefix("custom:") {
+        } else if let Some(custom_name) = normalized.strip_prefix("custom:") {
             custom_name.trim().to_owned()
         } else {
-            trimmed.to_owned()
+            normalized
         }
     }
 
     fn is_wifi_network_target(target_spec: &str) -> bool {
-        let trimmed = target_spec.trim();
-        trimmed.is_empty() || trimmed.eq_ignore_ascii_case("wifi")
+        normalize_network_target_spec(target_spec).eq_ignore_ascii_case("wifi")
     }
 
     fn send_network_action_status(message: String) {
@@ -21441,7 +22340,7 @@ mod windows_overlay {
 
     fn read_network_action_result(
         result_file: &std::path::Path,
-    ) -> Result<(Option<Vec<String>>, Option<String>)> {
+    ) -> Result<(Option<Vec<String>>, Option<String>, HashMap<String, String>)> {
         let content = std::fs::read_to_string(result_file)
             .with_context(|| format!("Failed to read {}", result_file.display()))?;
         let mut lines = content.lines();
@@ -21449,11 +22348,54 @@ mod windows_overlay {
         match status {
             "OK" => {
                 let mut adapter_names = Vec::new();
+                let mut wifi_profiles = HashMap::new();
                 for line in lines.map(str::trim).filter(|line| !line.is_empty()) {
-                    adapter_names.push(line.to_owned());
+                    if let Some(rest) = line.strip_prefix("WIFI\t") {
+                        let mut parts = rest.splitn(2, '\t');
+                        let name = parts.next().unwrap_or_default().trim();
+                        let profile = parts.next().unwrap_or_default().trim();
+                        if !name.is_empty() {
+                            adapter_names.push(name.to_owned());
+                            wifi_profiles.insert(name.to_owned(), profile.to_owned());
+                        }
+                    } else {
+                        adapter_names.push(line.to_owned());
+                    }
                 }
-                Ok((Some(adapter_names), None))
+                Ok((Some(adapter_names), None, wifi_profiles))
             }
+            "NONE" => Ok((Some(Vec::new()), None, HashMap::new())),
+            "ERR" => Ok((
+                None,
+                Some(
+                    lines
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ),
+                HashMap::new(),
+            )),
+            _ => bail!("Unexpected network action result"),
+        }
+    }
+
+    fn read_route_action_result(result_file: &std::path::Path) -> Result<(Option<Vec<String>>, Option<String>)> {
+        let content = std::fs::read_to_string(result_file)
+            .with_context(|| format!("Failed to read {}", result_file.display()))?;
+        let mut lines = content.lines();
+        let status = lines.next().unwrap_or_default().trim();
+        match status {
+            "OK" => Ok((
+                Some(
+                    lines
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .map(str::to_owned)
+                        .collect(),
+                ),
+                None,
+            )),
             "NONE" => Ok((Some(Vec::new()), None)),
             "ERR" => Ok((
                 None,
@@ -21465,7 +22407,7 @@ mod windows_overlay {
                         .join(" "),
                 ),
             )),
-            _ => bail!("Unexpected network action result"),
+            _ => bail!("Unexpected route action result"),
         }
     }
 
@@ -21502,178 +22444,161 @@ mod windows_overlay {
         Ok(status.code().unwrap_or(-1) as u32)
     }
 
-    fn update_network_action_session_state(enable: bool, adapter_names: &[String], is_wifi: bool) {
+    fn update_network_action_session_state(
+        enable: bool,
+        adapter_names: &[String],
+        wifi_profiles: &HashMap<String, String>,
+    ) {
         let mut hook_state = HOOK_STATE.lock();
         if enable {
             for name in adapter_names {
-                if is_wifi {
-                    hook_state.wifi_radios_disabled_this_session.remove(name);
-                } else {
-                    hook_state.disabled_network_adapters_this_session.remove(name);
-                }
+                hook_state
+                    .disabled_network_adapters_this_session
+                    .remove(name);
+                hook_state
+                    .disconnected_wifi_profiles_this_session
+                    .remove(name);
             }
         } else {
             for name in adapter_names {
-                if is_wifi {
-                    hook_state.wifi_radios_disabled_this_session.insert(name.clone());
+                if let Some(profile) = wifi_profiles.get(name) {
+                    hook_state
+                        .disconnected_wifi_profiles_this_session
+                        .insert(name.clone(), profile.clone());
                 } else {
-                    hook_state.disabled_network_adapters_this_session.insert(name.clone());
+                    hook_state
+                        .disabled_network_adapters_this_session
+                        .insert(name.clone());
                 }
             }
         }
     }
 
-    fn wide_buf_to_string(wide: &[u16]) -> String {
-        let len = wide.iter().position(|&unit| unit == 0).unwrap_or(wide.len());
-        String::from_utf16_lossy(&wide[..len]).trim().to_owned()
-    }
-
-    fn wifi_api_error(context: &str, code: u32) -> anyhow::Error {
-        anyhow::anyhow!(
-            "{context}: {} (code {code})",
-            std::io::Error::from_raw_os_error(code as i32)
+    fn build_wifi_disconnect_command(adapter_query: &str, result_file: &std::path::Path) -> String {
+        let result_path = powershell_single_quote(&result_file.to_string_lossy());
+        format!(
+            "$mnResultPath = '{result_path}'; try {{ $adapters = @({adapter_query}); if ($adapters.Count -eq 0) {{ Set-Content -LiteralPath $mnResultPath -Value @('NONE'); exit 0 }}; $lines = @('OK'); foreach ($adapter in $adapters) {{ $name = [string]$adapter.Name; $profile = ''; $interfaceText = netsh wlan show interfaces 2>$null | Out-String; $currentInterface = ''; foreach ($line in ($interfaceText -split \"`r?`n\")) {{ if ($line -match '^\\s*Name\\s*:\\s*(.+)$') {{ $currentInterface = $Matches[1].Trim(); continue }}; if ($currentInterface -eq $name -and $line -match '^\\s*SSID\\s*:\\s*(.+)$' -and $line -notmatch '^\\s*BSSID\\s*:') {{ $profile = $Matches[1].Trim(); break }} }}; if ([string]::IsNullOrWhiteSpace($profile)) {{ $profileObj = Get-NetConnectionProfile -InterfaceAlias $name -ErrorAction SilentlyContinue | Select-Object -First 1; if ($profileObj) {{ $profile = [string]$profileObj.Name }} }}; netsh wlan disconnect interface=\"$name\" | Out-Null; $lines += \"WIFI`t$name`t$profile\" }}; Set-Content -LiteralPath $mnResultPath -Value $lines; exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
         )
     }
 
-    fn set_wifi_radio_enabled(enable: bool) -> Result<Vec<String>> {
-        unsafe {
-            let mut client_handle = HANDLE::default();
-            let mut negotiated_version = 0_u32;
-            let mut interface_list_ptr: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
+    fn build_wifi_connect_command(
+        adapter_query: &str,
+        wifi_profiles: &HashMap<String, String>,
+        result_file: &std::path::Path,
+    ) -> Result<String> {
+        let result_path = powershell_single_quote(&result_file.to_string_lossy());
+        let profile_map_entries = wifi_profiles
+            .iter()
+            .map(|(name, profile)| {
+                format!(
+                    "$profiles['{name}'] = '{profile}'",
+                    name = powershell_single_quote(name),
+                    profile = powershell_single_quote(profile),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        Ok(format!(
+            "$mnResultPath = '{result_path}'; try {{ $adapters = @({adapter_query}); if ($adapters.Count -eq 0) {{ Set-Content -LiteralPath $mnResultPath -Value @('NONE'); exit 0 }}; $profiles = @{{}}; {profile_map_entries}; $lines = @('OK'); foreach ($adapter in $adapters) {{ $name = [string]$adapter.Name; $profile = ''; if ($profiles.ContainsKey($name)) {{ $profile = [string]$profiles[$name] }}; if ([string]::IsNullOrWhiteSpace($profile)) {{ throw \"No saved Wi-Fi profile for $name\" }}; $connected = $false; for ($attempt = 0; $attempt -lt 8 -and -not $connected; $attempt++) {{ netsh wlan connect name=\"$profile\" ssid=\"$profile\" interface=\"$name\" | Out-Null; Start-Sleep -Milliseconds 900; $interfaceText = netsh wlan show interfaces 2>$null | Out-String; $currentInterface = ''; foreach ($line in ($interfaceText -split \"`r?`n\")) {{ if ($line -match '^\\s*Name\\s*:\\s*(.+)$') {{ $currentInterface = $Matches[1].Trim(); continue }}; if ($currentInterface -eq $name -and $line -match '^\\s*SSID\\s*:\\s*(.+)$' -and $line -notmatch '^\\s*BSSID\\s*:') {{ if ($Matches[1].Trim() -eq $profile) {{ $connected = $true }}; break }} }} }}; if (-not $connected) {{ throw \"Could not reconnect $name to $profile\" }}; $lines += \"WIFI`t$name`t$profile\" }}; Set-Content -LiteralPath $mnResultPath -Value $lines; exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
+        ))
+    }
 
-            let result = (|| -> Result<Vec<String>> {
-                let open_code =
-                    WlanOpenHandle(2, None, &mut negotiated_version, &mut client_handle);
-                if open_code != 0 {
-                    bail!(wifi_api_error("Failed to open Wi-Fi client handle", open_code));
-                }
+    fn build_cut_internet_route_command(
+        adapter_query: &str,
+        result_file: &std::path::Path,
+    ) -> String {
+        let result_path = powershell_single_quote(&result_file.to_string_lossy());
+        format!(
+            "$mnResultPath = '{result_path}'; try {{ $adapters = @({adapter_query}); if ($adapters.Count -eq 0) {{ Set-Content -LiteralPath $mnResultPath -Value @('NONE'); exit 0 }}; $ifIndexes = @($adapters | Select-Object -ExpandProperty ifIndex); $routes = @(Get-NetRoute -ErrorAction SilentlyContinue | Where-Object {{ ($_.DestinationPrefix -eq '0.0.0.0/0' -or $_.DestinationPrefix -eq '::/0') -and ($ifIndexes -contains $_.InterfaceIndex) }}); if ($routes.Count -eq 0) {{ Set-Content -LiteralPath $mnResultPath -Value @('NONE'); exit 0 }}; $lines = @('OK'); foreach ($route in $routes) {{ $ifIndex = [string]$route.InterfaceIndex; $destination = [string]$route.DestinationPrefix; $nextHop = [string]$route.NextHop; $metric = [string]$route.RouteMetric; $lines += \"ROUTE`t$ifIndex`t$destination`t$nextHop`t$metric\"; Remove-NetRoute -DestinationPrefix $route.DestinationPrefix -InterfaceIndex $route.InterfaceIndex -NextHop $route.NextHop -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }}; Set-Content -LiteralPath $mnResultPath -Value $lines; exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
+        )
+    }
 
-                let enum_code = WlanEnumInterfaces(client_handle, None, &mut interface_list_ptr);
-                if enum_code != 0 {
-                    bail!(wifi_api_error("Failed to enumerate Wi-Fi interfaces", enum_code));
-                }
-                if interface_list_ptr.is_null() {
-                    return Ok(Vec::new());
-                }
+    fn build_restore_internet_route_command(
+        saved_routes: &[String],
+        result_file: &std::path::Path,
+    ) -> Result<String> {
+        if saved_routes.is_empty() {
+            bail!("No saved internet routes to restore");
+        }
+        let result_path = powershell_single_quote(&result_file.to_string_lossy());
+        let route_entries = saved_routes
+            .iter()
+            .map(|route| format!("'{}'", powershell_single_quote(route)))
+            .collect::<Vec<_>>()
+            .join(",");
+        Ok(format!(
+            "$mnResultPath = '{result_path}'; try {{ $saved = @({route_entries}); $lines = @('OK'); foreach ($entry in $saved) {{ $parts = [string]$entry -split \"`t\", 5; if ($parts.Count -lt 5 -or $parts[0] -ne 'ROUTE') {{ continue }}; $ifIndex = [int]$parts[1]; $destination = [string]$parts[2]; $nextHop = [string]$parts[3]; $metric = [int]$parts[4]; $existing = Get-NetRoute -DestinationPrefix $destination -InterfaceIndex $ifIndex -NextHop $nextHop -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not $existing) {{ New-NetRoute -DestinationPrefix $destination -InterfaceIndex $ifIndex -NextHop $nextHop -RouteMetric $metric -ErrorAction Stop | Out-Null }}; $lines += $entry }}; Set-Content -LiteralPath $mnResultPath -Value $lines; exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
+        ))
+    }
 
-                let interface_list = &*interface_list_ptr;
-                let interface_count = interface_list.dwNumberOfItems as usize;
-                let interfaces = std::slice::from_raw_parts(
-                    interface_list.InterfaceInfo.as_ptr(),
-                    interface_count,
-                );
-                let mut updated_names = Vec::new();
-
-                for interface in interfaces {
-                    let interface_name = wide_buf_to_string(&interface.strInterfaceDescription);
-                    let mut data_size = 0_u32;
-                    let mut data_ptr: *mut c_void = std::ptr::null_mut();
-                    let query_code = WlanQueryInterface(
-                        client_handle,
-                        &interface.InterfaceGuid,
-                        wlan_intf_opcode_radio_state,
-                        None,
-                        &mut data_size,
-                        &mut data_ptr,
-                        None,
-                    );
-                    if query_code != 0 {
-                        bail!(wifi_api_error(
-                            "Failed to query Wi-Fi radio state",
-                            query_code
-                        ));
-                    }
-                    if data_ptr.is_null() {
-                        continue;
-                    }
-
-                    let mut radio_state = *(data_ptr as *const WLAN_RADIO_STATE);
-                    WlanFreeMemory(data_ptr);
-
-                    let phys_count = usize::min(
-                        radio_state.dwNumberOfPhys as usize,
-                        radio_state.PhyRadioState.len(),
-                    );
-                    for phy_state in radio_state.PhyRadioState[..phys_count].iter_mut() {
-                        phy_state.dot11SoftwareRadioState = if enable {
-                            dot11_radio_state_on
-                        } else {
-                            dot11_radio_state_off
-                        };
-                    }
-
-                    let set_code = WlanSetInterface(
-                        client_handle,
-                        &interface.InterfaceGuid,
-                        wlan_intf_opcode_radio_state,
-                        std::mem::size_of::<WLAN_RADIO_STATE>() as u32,
-                        &radio_state as *const WLAN_RADIO_STATE as *const c_void,
-                        None,
-                    );
-                    if set_code != 0 {
-                        bail!(wifi_api_error("Failed to change Wi-Fi radio state", set_code));
-                    }
-                    updated_names.push(interface_name);
-                }
-
-                Ok(updated_names)
-            })();
-
-            if !interface_list_ptr.is_null() {
-                WlanFreeMemory(interface_list_ptr as *const c_void);
-            }
-            if !client_handle.is_invalid() {
-                let _ = WlanCloseHandle(client_handle, None);
-            }
-            result
+    fn saved_wifi_profiles_for_target(target_spec: &str) -> HashMap<String, String> {
+        if is_wifi_network_target(target_spec) {
+            HOOK_STATE
+                .lock()
+                .disconnected_wifi_profiles_this_session
+                .clone()
+        } else {
+            HashMap::new()
         }
     }
 
     fn spawn_network_adapter_command(enable: bool, adapter_query: String, target_spec: String) {
         let target_label = network_action_target_label(&target_spec);
         enqueue_network_action(move || {
+            let wifi_profiles = if enable {
+                saved_wifi_profiles_for_target(&target_spec)
+            } else {
+                HashMap::new()
+            };
+            let result_file = network_action_result_file_path();
+            let command_text = if is_wifi_network_target(&target_spec) {
+                if enable {
+                    match build_wifi_connect_command(&adapter_query, &wifi_profiles, &result_file) {
+                        Ok(command) => command,
+                        Err(error) => {
+                            send_network_action_status(format!("Network action failed: {error}"));
+                            return;
+                        }
+                    }
+                } else {
+                    build_wifi_disconnect_command(&adapter_query, &result_file)
+                }
+            } else {
+                build_network_adapter_command(enable, &adapter_query, &result_file)
+            };
             let success_message = if enable {
                 format!("Enabled {target_label}.")
             } else {
                 format!("Disabled {target_label}.")
             };
-            let message = if is_wifi_network_target(&target_spec) {
-                match set_wifi_radio_enabled(enable) {
-                    Ok(adapter_names) => {
-                        update_network_action_session_state(enable, &adapter_names, true);
+            let message = match run_hidden_powershell_script(&command_text, true, 15_000) {
+                Ok(_) => match read_network_action_result(&result_file) {
+                    Ok((Some(adapter_names), None, wifi_profiles)) => {
+                        update_network_action_session_state(enable, &adapter_names, &wifi_profiles);
                         if adapter_names.is_empty() {
                             "No matching network adapters found.".to_owned()
                         } else {
                             success_message
                         }
                     }
-                    Err(error) => format!("Network action failed: {error}"),
-                }
-            } else {
-                let result_file = network_action_result_file_path();
-                let command_text = build_network_adapter_command(enable, &adapter_query, &result_file);
-                let message = match run_hidden_powershell_script(&command_text, true, 15_000) {
-                    Ok(_) => match read_network_action_result(&result_file) {
-                        Ok((Some(adapter_names), None)) | Ok((Some(adapter_names), Some(_))) => {
-                            update_network_action_session_state(enable, &adapter_names, false);
-                            if adapter_names.is_empty() {
-                                "No matching network adapters found.".to_owned()
-                            } else {
-                                success_message
-                            }
+                    Ok((Some(adapter_names), Some(_), wifi_profiles)) => {
+                        update_network_action_session_state(enable, &adapter_names, &wifi_profiles);
+                        if adapter_names.is_empty() {
+                            "No matching network adapters found.".to_owned()
+                        } else {
+                            success_message
                         }
-                        Ok((None, Some(error))) if !error.is_empty() => {
-                            format!("Network action failed: {error}")
-                        }
-                        Ok((None, Some(_))) => "Network action failed.".to_owned(),
-                        Ok((None, None)) => "Network action failed.".to_owned(),
-                        Err(error) => format!("Network action failed: {error}"),
-                    },
+                    }
+                    Ok((None, Some(error), _)) if !error.is_empty() => {
+                        format!("Network action failed: {error}")
+                    }
+                    Ok((None, Some(_), _)) => "Network action failed.".to_owned(),
+                    Ok((None, None, _)) => "Network action failed.".to_owned(),
                     Err(error) => format!("Network action failed: {error}"),
-                };
-                let _ = std::fs::remove_file(&result_file);
-                message
+                },
+                Err(error) => format!("Network action failed: {error}"),
             };
+            let _ = std::fs::remove_file(&result_file);
             send_network_action_status(message);
         });
     }
@@ -21684,8 +22609,79 @@ mod windows_overlay {
         Ok(())
     }
 
+    fn spawn_internet_route_command(cut: bool, adapter_query: String, target_spec: String) {
+        let target_label = network_action_target_label(&target_spec);
+        enqueue_network_action(move || {
+            let result_file = network_action_result_file_path();
+            let command_text = if cut {
+                build_cut_internet_route_command(&adapter_query, &result_file)
+            } else {
+                let saved_routes = HOOK_STATE
+                    .lock()
+                    .cut_internet_routes_this_session
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                match build_restore_internet_route_command(&saved_routes, &result_file) {
+                    Ok(command) => command,
+                    Err(error) => {
+                        send_network_action_status(format!("Internet route action failed: {error}"));
+                        return;
+                    }
+                }
+            };
+            let message = match run_hidden_powershell_script(&command_text, true, 15_000) {
+                Ok(_) => match read_route_action_result(&result_file) {
+                    Ok((Some(routes), None)) => {
+                        let mut hook_state = HOOK_STATE.lock();
+                        if cut {
+                            for route in &routes {
+                                hook_state.cut_internet_routes_this_session.insert(route.clone());
+                            }
+                        } else {
+                            for route in &routes {
+                                hook_state.cut_internet_routes_this_session.remove(route);
+                            }
+                        }
+                        if routes.is_empty() {
+                            if cut {
+                                format!("No default internet route found for {target_label}.")
+                            } else {
+                                "No saved internet routes to restore.".to_owned()
+                            }
+                        } else if cut {
+                            format!("Cut internet route for {target_label}.")
+                        } else {
+                            "Restored internet route.".to_owned()
+                        }
+                    }
+                    Ok((None, Some(error))) if !error.is_empty() => {
+                        format!("Internet route action failed: {error}")
+                    }
+                    Ok((Some(_), Some(error))) if !error.is_empty() => {
+                        format!("Internet route action failed: {error}")
+                    }
+                    Ok((Some(_), Some(_))) => "Internet route action failed.".to_owned(),
+                    Ok((None, Some(_))) | Ok((None, None)) => {
+                        "Internet route action failed.".to_owned()
+                    }
+                    Err(error) => format!("Internet route action failed: {error}"),
+                },
+                Err(error) => format!("Internet route action failed: {error}"),
+            };
+            let _ = std::fs::remove_file(&result_file);
+            send_network_action_status(message);
+        });
+    }
+
+    fn trigger_internet_route_step(step: &MacroStep, cut: bool) -> Result<()> {
+        let adapter_query = build_network_adapter_query(&step.key)?;
+        spawn_internet_route_command(cut, adapter_query, step.key.clone());
+        Ok(())
+    }
+
     fn restore_network_adapters_on_exit() -> Result<()> {
-        let (names, wifi_names) = {
+        let (names, wifi_profiles) = {
             let hook_state = HOOK_STATE.lock();
             (
                 hook_state
@@ -21693,11 +22689,7 @@ mod windows_overlay {
                     .iter()
                     .cloned()
                     .collect::<Vec<_>>(),
-                hook_state
-                    .wifi_radios_disabled_this_session
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>(),
+                hook_state.disconnected_wifi_profiles_this_session.clone(),
             )
         };
         if !names.is_empty() {
@@ -21711,213 +22703,37 @@ mod windows_overlay {
                 .disabled_network_adapters_this_session
                 .clear();
         }
-        if !wifi_names.is_empty() {
-            let _ = set_wifi_radio_enabled(true)?;
-            HOOK_STATE.lock().wifi_radios_disabled_this_session.clear();
-        }
-        Ok(())
-    }
-
-    fn normalize_app_network_program_path(step: &MacroStep) -> Result<String> {
-        let interpolated = interpolate_variables(&step.key);
-        let trimmed = interpolated.trim();
-        if trimmed.is_empty() {
-            bail!("App executable path is empty");
-        }
-        let path = std::path::Path::new(trimmed);
-        if !path.exists() {
-            bail!("App executable not found: {trimmed}");
-        }
-        if !path.is_file() {
-            bail!("App executable path is not a file: {trimmed}");
-        }
-        Ok(trimmed.to_owned())
-    }
-
-    fn app_network_direction_labels(step: &MacroStep) -> Result<Vec<&'static str>> {
-        let mut labels = Vec::new();
-        if step.network_block_inbound {
-            labels.push("Inbound");
-        }
-        if step.network_block_outbound {
-            labels.push("Outbound");
-        }
-        if labels.is_empty() {
-            bail!("Select at least one app network direction");
-        }
-        Ok(labels)
-    }
-
-    fn app_network_rule_names(program_path: &str, step: &MacroStep) -> Result<Vec<String>> {
-        let direction_labels = app_network_direction_labels(step)?;
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
-        program_path.to_ascii_lowercase().hash(&mut hasher);
-        let hash = hasher.finish();
-        Ok(direction_labels
-            .into_iter()
-            .map(|direction| {
-                let dir_short = if direction == "Inbound" { "In" } else { "Out" };
-                format!("{APP_NETWORK_RULE_GROUP}_{dir_short}_{hash:016x}")
-            })
-            .collect())
-    }
-
-    fn app_network_label(program_path: &str) -> String {
-        std::path::Path::new(program_path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(program_path)
-            .to_owned()
-    }
-
-    fn build_block_app_network_command(
-        program_path: &str,
-        step: &MacroStep,
-        result_file: &std::path::Path,
-    ) -> Result<String> {
-        let direction_labels = app_network_direction_labels(step)?;
-        let rule_names = app_network_rule_names(program_path, step)?;
-        let group = powershell_single_quote(APP_NETWORK_RULE_GROUP);
-        let program = powershell_single_quote(program_path);
-        let result_path = powershell_single_quote(&result_file.to_string_lossy());
-        let create_rules = rule_names
-            .iter()
-            .zip(direction_labels.iter())
-            .map(|(rule_name, direction)| {
-                let escaped_name = powershell_single_quote(rule_name);
-                format!(
-                    "Remove-NetFirewallRule -Name '{escaped_name}' -ErrorAction SilentlyContinue | Out-Null; New-NetFirewallRule -Name '{escaped_name}' -DisplayName '{escaped_name}' -Group '{group}' -Direction {direction} -Action Block -Enabled True -Program '{program}' -Profile Any | Out-Null; Get-NetFirewallRule -Name '{escaped_name}' -ErrorAction Stop | Out-Null"
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("; ");
-        Ok(format!(
-            "$mnResultPath = '{result_path}'; try {{ {create_rules}; Set-Content -LiteralPath $mnResultPath -Value @('OK'); exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
-        ))
-    }
-
-    fn build_unblock_app_network_command(
-        rule_names: &[String],
-        result_file: &std::path::Path,
-    ) -> Result<String> {
-        if rule_names.is_empty() {
-            bail!("No app network rules were selected");
-        }
-        let result_path = powershell_single_quote(&result_file.to_string_lossy());
-        let remove_rules = rule_names
-            .iter()
-            .map(|rule_name| {
-                let escaped_name = powershell_single_quote(rule_name);
-                format!("Remove-NetFirewallRule -Name '{escaped_name}' -ErrorAction SilentlyContinue | Out-Null;")
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        Ok(format!(
-            "$mnResultPath = '{result_path}'; try {{ {remove_rules} Set-Content -LiteralPath $mnResultPath -Value @('OK'); exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
-        ))
-    }
-
-    fn read_simple_network_action_result(result_file: &std::path::Path) -> Result<Option<String>> {
-        let content = std::fs::read_to_string(result_file)
-            .with_context(|| format!("Failed to read {}", result_file.display()))?;
-        let mut lines = content.lines();
-        let status = lines.next().unwrap_or_default().trim();
-        match status {
-            "OK" => Ok(None),
-            "ERR" => Ok(Some(
-                lines
-                    .map(str::trim)
-                    .filter(|line| !line.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            )),
-            _ => bail!("Unexpected app network action result"),
-        }
-    }
-
-    fn format_app_network_exit_failure(exit_code: u32) -> String {
-        match exit_code {
-            0 => "App network action finished without creating a result.".to_owned(),
-            1 => "App network action failed. Windows may have denied the firewall change, or the admin prompt was cancelled.".to_owned(),
-            124 => "App network action timed out while waiting for the elevated firewall command.".to_owned(),
-            code => format!("App network action failed with exit code {code}."),
-        }
-    }
-
-    fn update_app_network_session_state(block: bool, rule_names: &[String]) {
-        let mut hook_state = HOOK_STATE.lock();
-        if block {
-            for name in rule_names {
-                hook_state
-                    .blocked_app_network_rules_this_session
-                    .insert(name.clone());
-            }
-        } else {
-            for name in rule_names {
-                hook_state
-                    .blocked_app_network_rules_this_session
-                    .remove(name);
-            }
-        }
-    }
-
-    fn trigger_app_network_step(step: &MacroStep, block: bool) -> Result<()> {
-        let program_path = normalize_app_network_program_path(step)?;
-        let rule_names = app_network_rule_names(&program_path, step)?;
-        let result_file = network_action_result_file_path();
-        let command_text = if block {
-            build_block_app_network_command(&program_path, step, &result_file)?
-        } else {
-            build_unblock_app_network_command(&rule_names, &result_file)?
-        };
-        let target_label = app_network_label(&program_path);
-        let directions = app_network_direction_labels(step)?.join(" + ");
-        enqueue_network_action(move || {
-            let message = match run_hidden_powershell_script(&command_text, true, 15_000) {
-                Ok(exit_code) => match read_simple_network_action_result(&result_file) {
-                    Ok(None) => {
-                        update_app_network_session_state(block, &rule_names);
-                        if block {
-                            format!("Blocked {directions} network for {target_label}.")
-                        } else {
-                            format!("Restored {directions} network for {target_label}.")
-                        }
-                    }
-                    Ok(Some(error)) if !error.is_empty() => {
-                        format!("App network action failed: {error}")
-                    }
-                    Ok(Some(_)) => "App network action failed.".to_owned(),
-                    Err(_) => format_app_network_exit_failure(exit_code),
-                },
-                Err(error) => format!("App network action failed: {error}"),
-            };
+        if !wifi_profiles.is_empty() {
+            let result_file = network_action_result_file_path();
+            let wifi_names = wifi_profiles.keys().cloned().collect::<Vec<_>>();
+            let adapter_query = build_named_network_adapter_query(&wifi_names)?;
+            let command_text =
+                build_wifi_connect_command(&adapter_query, &wifi_profiles, &result_file)?;
+            let _ = run_hidden_powershell_script(&command_text, true, 15_000)?;
             let _ = std::fs::remove_file(&result_file);
-            send_network_action_status(message);
-        });
+            HOOK_STATE
+                .lock()
+                .disconnected_wifi_profiles_this_session
+                .clear();
+        }
         Ok(())
     }
 
-    fn restore_blocked_app_network_rules_on_exit() -> Result<()> {
-        let rule_names = {
-            let hook_state = HOOK_STATE.lock();
-            hook_state
-                .blocked_app_network_rules_this_session
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        if rule_names.is_empty() {
+    fn restore_cut_internet_routes_on_exit() -> Result<()> {
+        let routes = HOOK_STATE
+            .lock()
+            .cut_internet_routes_this_session
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        if routes.is_empty() {
             return Ok(());
         }
         let result_file = network_action_result_file_path();
-        let command_text = build_unblock_app_network_command(&rule_names, &result_file)?;
+        let command_text = build_restore_internet_route_command(&routes, &result_file)?;
         let _ = run_hidden_powershell_script(&command_text, true, 15_000)?;
         let _ = std::fs::remove_file(&result_file);
-        HOOK_STATE
-            .lock()
-            .blocked_app_network_rules_this_session
-            .clear();
+        HOOK_STATE.lock().cut_internet_routes_this_session.clear();
         Ok(())
     }
 
@@ -22863,12 +23679,12 @@ mod windows_overlay {
                 let _ = trigger_network_adapter_step(step, true);
             }
 
-            MacroAction::BlockAppNetwork => {
-                let _ = trigger_app_network_step(step, true);
+            MacroAction::CutInternetRoute => {
+                let _ = trigger_internet_route_step(step, true);
             }
 
-            MacroAction::UnblockAppNetwork => {
-                let _ = trigger_app_network_step(step, false);
+            MacroAction::RestoreInternetRoute => {
+                let _ = trigger_internet_route_step(step, false);
             }
 
             MacroAction::FunnyMemeReply => {
@@ -23589,12 +24405,12 @@ mod windows_overlay {
                     let _ = trigger_network_adapter_step(step, true);
                 }
 
-                MacroAction::BlockAppNetwork => {
-                    let _ = trigger_app_network_step(step, true);
+                MacroAction::CutInternetRoute => {
+                    let _ = trigger_internet_route_step(step, true);
                 }
 
-                MacroAction::UnblockAppNetwork => {
-                    let _ = trigger_app_network_step(step, false);
+                MacroAction::RestoreInternetRoute => {
+                    let _ = trigger_internet_route_step(step, false);
                 }
 
                 MacroAction::FunnyMemeReply => {
@@ -24303,12 +25119,12 @@ mod windows_overlay {
                     let _ = trigger_network_adapter_step(step, true);
                 }
 
-                MacroAction::BlockAppNetwork => {
-                    let _ = trigger_app_network_step(step, true);
+                MacroAction::CutInternetRoute => {
+                    let _ = trigger_internet_route_step(step, true);
                 }
 
-                MacroAction::UnblockAppNetwork => {
-                    let _ = trigger_app_network_step(step, false);
+                MacroAction::RestoreInternetRoute => {
+                    let _ = trigger_internet_route_step(step, false);
                 }
 
                 MacroAction::FunnyMemeReply => {
@@ -25508,6 +26324,22 @@ mod windows_overlay {
         }
 
         #[test]
+        fn screen_draw_mouse_capture_trigger_cancel_only_applies_to_camera_capture() {
+            assert!(should_cancel_screen_draw_mouse_capture_from_trigger_press(
+                true, false, true,
+            ));
+            assert!(!should_cancel_screen_draw_mouse_capture_from_trigger_press(
+                false, false, true,
+            ));
+            assert!(!should_cancel_screen_draw_mouse_capture_from_trigger_press(
+                true, true, true,
+            ));
+            assert!(!should_cancel_screen_draw_mouse_capture_from_trigger_press(
+                true, false, false,
+            ));
+        }
+
+        #[test]
         fn screen_draw_text_layout_tracks_latest_pointer_for_text_preview() {
             let stroke = ScreenDrawStroke {
                 tool: ScreenDrawTool::Text,
@@ -25681,14 +26513,11 @@ mod windows_overlay {
         }
 
         #[test]
-        fn test_build_network_adapter_command_supports_default_all_and_custom_targets() {
+        fn test_build_network_adapter_command_supports_default_and_custom_targets() {
             let _guard = TEST_MUTEX.lock().unwrap();
 
             let default_wifi = build_network_adapter_query("").unwrap();
             assert!(default_wifi.contains("802\\.11"));
-
-            let all_adapters = build_network_adapter_query("all").unwrap();
-            assert!(all_adapters.contains("Get-NetAdapter -Physical"));
 
             let custom_adapter = build_network_adapter_query("custom:Office LAN's USB").unwrap();
             assert!(custom_adapter.contains("Get-NetAdapter -Name 'Office LAN''s USB'"));
@@ -25700,79 +26529,38 @@ mod windows_overlay {
         }
 
         #[test]
-        fn test_app_network_rule_names_follow_selected_directions() {
-            let _guard = TEST_MUTEX.lock().unwrap();
-            let mut step = MacroStep::default();
-            step.network_block_inbound = true;
-            step.network_block_outbound = false;
-            let names = app_network_rule_names(r"C:\Games\TestGame.exe", &step).unwrap();
-            assert_eq!(names.len(), 1);
-            assert!(names[0].contains("_In_"));
-
-            step.network_block_outbound = true;
-            let names = app_network_rule_names(r"C:\Games\TestGame.exe", &step).unwrap();
-            assert_eq!(names.len(), 2);
-            assert!(names.iter().any(|name| name.contains("_In_")));
-            assert!(names.iter().any(|name| name.contains("_Out_")));
-        }
-
-        #[test]
-        fn test_block_app_network_command_separates_multiple_rules() {
-            let _guard = TEST_MUTEX.lock().unwrap();
-            let mut step = MacroStep::default();
-            step.network_block_inbound = true;
-            step.network_block_outbound = true;
-            let result_file = std::env::temp_dir().join("macronest_app_network_test.txt");
-            let command =
-                build_block_app_network_command(r"C:\Games\TestGame.exe", &step, &result_file)
-                    .unwrap();
-            assert!(command.contains("MacroNestAppNetwork_In_"));
-            assert!(command.contains("MacroNestAppNetwork_Out_"));
-            assert!(command.contains("Out-Null; Remove-NetFirewallRule"));
-        }
-
-        #[test]
-        fn test_read_network_action_result_reads_adapter_names() {
+        fn test_read_network_action_result_parses_wifi_profiles() {
             let _guard = TEST_MUTEX.lock().unwrap();
             let result_file =
-                std::env::temp_dir().join("macronest_network_action_result_names_test.txt");
-            std::fs::write(&result_file, "OK\nWi-Fi\nEthernet\n").unwrap();
-            let (adapter_names, error) = read_network_action_result(&result_file).unwrap();
+                std::env::temp_dir().join("macronest_network_action_result_wifi_test.txt");
+            std::fs::write(&result_file, "OK\nWIFI\tWi-Fi\tHome 5G\nEthernet\n").unwrap();
+            let (adapter_names, error, wifi_profiles) =
+                read_network_action_result(&result_file).unwrap();
             let _ = std::fs::remove_file(&result_file);
             assert_eq!(
                 adapter_names.unwrap(),
                 vec!["Wi-Fi".to_owned(), "Ethernet".to_owned()]
             );
             assert!(error.is_none());
+            assert_eq!(wifi_profiles.get("Wi-Fi"), Some(&"Home 5G".to_owned()));
         }
 
         #[test]
-        fn test_update_network_action_session_state_tracks_wifi_radios() {
+        fn test_saved_wifi_profiles_for_target_reads_latest_session_state() {
             let _guard = TEST_MUTEX.lock().unwrap();
             let previous = {
                 let mut hook_state = HOOK_STATE.lock();
                 std::mem::replace(
-                    &mut hook_state.wifi_radios_disabled_this_session,
-                    HashSet::new(),
+                    &mut hook_state.disconnected_wifi_profiles_this_session,
+                    HashMap::from([("Wi-Fi".to_owned(), "Home 5G".to_owned())]),
                 )
             };
 
-            update_network_action_session_state(false, &["Wi-Fi".to_owned()], true);
-            assert!(
-                HOOK_STATE
-                    .lock()
-                    .wifi_radios_disabled_this_session
-                    .contains("Wi-Fi")
-            );
-            update_network_action_session_state(true, &["Wi-Fi".to_owned()], true);
-            assert!(
-                !HOOK_STATE
-                    .lock()
-                    .wifi_radios_disabled_this_session
-                    .contains("Wi-Fi")
-            );
+            let wifi_profiles = saved_wifi_profiles_for_target("wifi");
+            assert_eq!(wifi_profiles.get("Wi-Fi"), Some(&"Home 5G".to_owned()));
+            assert!(saved_wifi_profiles_for_target("ethernet").is_empty());
 
-            HOOK_STATE.lock().wifi_radios_disabled_this_session = previous;
+            HOOK_STATE.lock().disconnected_wifi_profiles_this_session = previous;
         }
 
         #[test]
@@ -26646,8 +27434,8 @@ mod windows_overlay {
                 | MacroAction::TriggerCommandPreset
                 | MacroAction::DisableNetworkAdapter
                 | MacroAction::EnableNetworkAdapter
-                | MacroAction::BlockAppNetwork
-                | MacroAction::UnblockAppNetwork
+                | MacroAction::CutInternetRoute
+                | MacroAction::RestoreInternetRoute
                 | MacroAction::EnableCrosshairProfile
                 | MacroAction::DisableCrosshair
                 | MacroAction::EnablePinPreset
@@ -26827,8 +27615,8 @@ mod windows_overlay {
             | MacroAction::TriggerCommandPreset
             | MacroAction::DisableNetworkAdapter
             | MacroAction::EnableNetworkAdapter
-            | MacroAction::BlockAppNetwork
-            | MacroAction::UnblockAppNetwork
+            | MacroAction::CutInternetRoute
+            | MacroAction::RestoreInternetRoute
             | MacroAction::EnableCrosshairProfile
             | MacroAction::DisableCrosshair
             | MacroAction::EnablePinPreset
@@ -28829,6 +29617,9 @@ mod windows_overlay {
     }
 
     fn is_ui_in_foreground() -> bool {
+        if screen_draw_active() {
+            return false;
+        }
         is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed)
     }
 
@@ -30244,7 +31035,7 @@ mod windows_overlay {
         let _ = crate::platform::show_taskbar();
         let _ = restore_mouse_sensitivity_on_exit();
         let _ = restore_network_adapters_on_exit();
-        let _ = restore_blocked_app_network_rules_on_exit();
+        let _ = restore_cut_internet_routes_on_exit();
         let _ = unsafe { ShowWindow(runtime.overlay_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.hud_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.pin_hwnd, SW_HIDE) };
@@ -32247,6 +33038,47 @@ mod fallback {
     pub(crate) fn clear_geometry_overlay_now() {}
 
     pub(crate) fn hide_hud_now() {}
+
+    pub fn screen_draw_active() -> bool {
+        false
+    }
+    pub fn screen_draw_undo() {}
+    pub fn screen_draw_redo() {}
+    pub fn screen_draw_clear() {}
+    pub fn screen_draw_set_eraser(_enabled: bool) {}
+    pub fn screen_draw_get_eraser() -> bool {
+        false
+    }
+    pub fn screen_draw_get_color() -> crate::model::RgbaColor {
+        crate::model::RgbaColor::default()
+    }
+    pub fn screen_draw_set_color(_color: crate::model::RgbaColor) {}
+    pub fn screen_draw_get_color_pick_mode() -> bool {
+        false
+    }
+    pub fn screen_draw_toggle_color_pick_mode() {}
+    pub fn take_latest_vision_capture_mouse_move() -> Option<(i32, i32)> {
+        None
+    }
+    pub fn screen_draw_get_brush_size() -> f32 {
+        5.0
+    }
+    pub fn screen_draw_set_brush_size(_size: f32) {}
+    pub fn screen_draw_set_brush_size_active(_active: bool) {}
+    pub fn screen_draw_get_tool() -> crate::model::QuickScreenDrawTool {
+        crate::model::QuickScreenDrawTool::Brush
+    }
+    pub fn screen_draw_set_tool(_tool: crate::model::QuickScreenDrawTool) {}
+    pub fn screen_draw_get_smoothing() -> bool {
+        false
+    }
+    pub fn screen_draw_set_smoothing(_enabled: bool) {}
+    pub fn screen_draw_get_smoothing_amount() -> f32 {
+        0.0
+    }
+    pub fn screen_draw_set_smoothing_amount(_amount: f32) {}
+    pub fn screen_draw_deactivate() {}
+    pub fn screen_draw_trigger_capture_region_mouse() {}
 }
 
 #[cfg(all(test, windows))]
