@@ -4399,40 +4399,6 @@ mod windows_overlay {
         }
     }
 
-    fn sync_held_modifiers() {
-        let mut hook_state = HOOK_STATE.lock();
-        if unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x10) } == 0 {
-            // Shift
-            hook_state.held_inputs.remove("Shift");
-            hook_state.held_inputs.remove("LShift");
-            hook_state.held_inputs.remove("RShift");
-            hook_state.shift = false;
-        }
-        if unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x11) } == 0 {
-            // Ctrl
-            hook_state.held_inputs.remove("Ctrl");
-            hook_state.held_inputs.remove("LCtrl");
-            hook_state.held_inputs.remove("RCtrl");
-            hook_state.ctrl = false;
-        }
-        if unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x12) } == 0 {
-            // Alt
-            hook_state.held_inputs.remove("Alt");
-            hook_state.held_inputs.remove("LAlt");
-            hook_state.held_inputs.remove("RAlt");
-            hook_state.alt = false;
-        }
-        if unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5B) } == 0
-            && unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x5C) } == 0
-        // Win
-        {
-            hook_state.held_inputs.remove("Win");
-            hook_state.held_inputs.remove("LWin");
-            hook_state.held_inputs.remove("RWin");
-            hook_state.win = false;
-        }
-    }
-
     unsafe extern "system" fn low_level_keyboard_proc(
         code: i32,
         wparam: WPARAM,
@@ -4443,281 +4409,205 @@ mod windows_overlay {
             let msg = wparam.0 as u32;
             let is_key_event = matches!(msg, WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP);
             let injected = info.flags.0 & 0x10 != 0;
-            if is_key_event {
+            if is_key_event && !injected {
+                wake_command_queue();
                 let is_key_down = matches!(msg, WM_KEYDOWN | WM_SYSKEYDOWN);
                 let is_key_up = matches!(msg, WM_KEYUP | WM_SYSKEYUP);
-                if info.vkCode == 0x44 {
-                    screen_draw_debug_log(format!(
-                        "keyboard_hook_d down={} up={} injected={} ui_foreground={} draw_active={}",
-                        is_key_down,
-                        is_key_up,
-                        injected,
-                        is_ui_in_foreground(),
-                        screen_draw_active()
-                    ));
-                }
 
-                if process_screen_draw_text_input(info.vkCode, is_key_down, is_key_up) {
-                    if !injected {
-                        update_held_key(info.vkCode, is_key_down, is_key_up);
-                        update_modifier_state(info.vkCode, is_key_down);
+                if is_key_down {
+                    let (sound_enabled, sound_style, sound_volume) = {
+                        let state = HOOK_STATE.lock();
+                        (
+                            state.quick_key_sound_enabled,
+                            state.quick_key_sound_style,
+                            state.quick_key_sound_volume,
+                        )
+                    };
+                    if sound_enabled {
+                        crate::audio::play_key_sound_vk(sound_style, info.vkCode, sound_volume);
                     }
+                }
+                if is_key_down && info.vkCode == 0x1B && is_mouse_path_draw_capture_active() {
+                    cancel_mouse_path_draw_capture("Mouse path draw cancelled.".to_owned());
+                    update_modifier_state(info.vkCode, is_key_down);
                     return LRESULT(1);
                 }
 
-                if !injected {
-                    sync_held_modifiers();
-                    wake_command_queue();
-
-                    if is_key_down {
-                        let (sound_enabled, sound_style, sound_volume) = {
-                            let state = HOOK_STATE.lock();
-                            (
-                                state.quick_key_sound_enabled,
-                                state.quick_key_sound_style,
-                                state.quick_key_sound_volume,
-                            )
-                        };
-                        if sound_enabled {
-                            crate::audio::play_key_sound_vk(sound_style, info.vkCode, sound_volume);
-                        }
-                    }
-                    if is_key_down && info.vkCode == 0x1B && is_mouse_path_draw_capture_active() {
-                        cancel_mouse_path_draw_capture("Mouse path draw cancelled.".to_owned());
-                        update_modifier_state(info.vkCode, is_key_down);
-                        return LRESULT(1);
-                    }
-
-                    let key_name = hotkey::vk_to_key_name(info.vkCode).map(str::to_owned);
-                    if info.vkCode == 0x44 {
-                        screen_draw_debug_log(format!(
-                            "keyboard_hook_d key_name={:?} ui_foreground={} injected={} before_screen_draw_active={}",
-                            key_name,
-                            is_ui_in_foreground(),
-                            injected,
-                            screen_draw_active()
-                        ));
-                    }
-                    if !is_ui_in_foreground()
-                        && let Some(key_name) = key_name.as_ref()
-                    {
-                        update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
-                    }
-                    if let Some(key_name) = key_name.clone() {
-                        // Hook for Undo / Redo in screen draw mode
-                        let screen_draw_active = {
-                            let state = SCREEN_DRAW_STATE.lock();
-                            state.active && state.text_session.is_none()
-                        };
-                        if screen_draw_active {
-                            let ctrl_down = unsafe { GetAsyncKeyState(0x11) } < 0;
-                            if ctrl_down {
-                                if info.vkCode == 0x5A || info.vkCode == 0x59 {
-                                    // Z or Y
-                                    if is_key_down {
-                                        let shift_down = unsafe { GetAsyncKeyState(0x10) } < 0;
-                                        let is_redo = info.vkCode == 0x59
-                                            || (info.vkCode == 0x5A && shift_down);
-                                        if is_redo {
-                                            screen_draw_redo();
-                                        } else {
-                                            screen_draw_undo();
-                                        }
-                                        request_screen_draw_overlay_sync();
-                                    }
-                                    update_held_key(info.vkCode, is_key_down, is_key_up);
-                                    update_modifier_state(info.vkCode, is_key_down);
-                                    return LRESULT(1);
-                                }
-                            }
-                        }
-                        if screen_draw_capture_should_swallow_key_name(&key_name) {
-                            if info.vkCode == 0x44 {
-                                screen_draw_debug_log(
-                                    "keyboard_hook_d swallowed_by_capture_key_name".to_owned(),
-                                );
-                            }
-                            update_held_key(info.vkCode, is_key_down, is_key_up);
-                            if is_key_up {
-                                mark_screen_draw_capture_trigger_released();
-                            }
-                            if is_key_up {
-                                screen_draw_release_trigger_latch_if_ready();
-                            }
-                            update_modifier_state(info.vkCode, is_key_down);
-                            return LRESULT(1);
-                        }
-                        let binding = binding_from_trigger_event(&key_name);
-                        if is_key_down {
-                            let was_held = is_repeat_key(&key_name);
-                            if info.vkCode == 0x44 {
-                                screen_draw_debug_log(format!(
-                                    "keyboard_hook_d before_process_down was_held={} binding_key={} alt={} ctrl={} shift={} win={}",
-                                    was_held,
-                                    binding.key,
-                                    binding.alt,
-                                    binding.ctrl,
-                                    binding.shift,
-                                    binding.win
-                                ));
-                            }
-                            update_held_key(info.vkCode, is_key_down, is_key_up);
-                            let swallowed = process_screen_draw_hotkey(&binding, was_held);
-                            if info.vkCode == 0x44 {
-                                screen_draw_debug_log(format!(
-                                    "keyboard_hook_d after_process_down swallowed={}",
-                                    swallowed
-                                ));
-                            }
-                            if swallowed {
-                                update_modifier_state(info.vkCode, is_key_down);
-                                return LRESULT(1);
-                            }
-                        } else if is_key_up {
-                            let swallowed = process_screen_draw_hotkey_release(&binding);
-                            if info.vkCode == 0x44 {
-                                screen_draw_debug_log(format!(
-                                    "keyboard_hook_d after_process_up swallowed={}",
-                                    swallowed
-                                ));
-                            }
-                            if swallowed {
-                                update_held_key(info.vkCode, is_key_down, is_key_up);
-                                update_modifier_state(info.vkCode, is_key_down);
-                                return LRESULT(1);
-                            }
-                        }
-                    }
-                    let windows_key_locked = {
-                        let hook_state = HOOK_STATE.lock();
-                        hook_state.windows_key_locked
-                    };
-                    if windows_key_locked && matches!(info.vkCode, 0x5B | 0x5C) {
+                let key_name = hotkey::vk_to_key_name(info.vkCode).map(str::to_owned);
+                if !is_ui_in_foreground()
+                    && let Some(key_name) = key_name.as_ref()
+                {
+                    update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
+                }
+                if let Some(key_name) = key_name.clone() {
+                    if process_screen_draw_text_input(info.vkCode, is_key_down, is_key_up) {
                         update_held_key(info.vkCode, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
                         return LRESULT(1);
                     }
-                    if is_key_down && !is_ui_in_foreground() {
-                        let mut rec_guard = MACRO_RECORDING.lock();
-                        if let Some(session) = rec_guard.as_mut() {
-                            let now = std::time::Instant::now();
-                            let delay_ms =
-                                now.saturating_duration_since(session.last_event_at)
-                                    .as_millis()
-                                    .min(u64::MAX as u128) as u64;
-                            if let Some(k_name) = key_name.clone() {
-                                session.last_event_at = now;
-                                session.events.push(MacroRecordingEvent {
-                                    key: Some(k_name.clone()),
-                                    action: crate::model::MacroAction::KeyPress,
-                                    delay_ms,
-                                    x: 0,
-                                    y: 0,
-                                });
-                                if let Some(tx) = &HOOK_STATE.lock().ui_tx {
-                                    let mut step = crate::model::MacroStep::default();
-                                    step.action = crate::model::MacroAction::KeyPress;
-                                    step.delay_ms = delay_ms;
-                                    step.key = k_name;
-                                    let _ = tx.send(UiCommand::MacroRealtimeStepAdded(
-                                        session.group_id,
-                                        session.preset_id,
-                                        step,
-                                    ));
-                                }
+                    let screen_draw_active = {
+                        let state = SCREEN_DRAW_STATE.lock();
+                        state.active && state.text_session.is_none()
+                    };
+                    if screen_draw_active && is_key_down {
+                        let ctrl_down = unsafe { GetAsyncKeyState(0x11) } < 0;
+                        if ctrl_down && matches!(info.vkCode, 0x5A | 0x59) {
+                            let shift_down = unsafe { GetAsyncKeyState(0x10) } < 0;
+                            let is_redo =
+                                info.vkCode == 0x59 || (info.vkCode == 0x5A && shift_down);
+                            if is_redo {
+                                screen_draw_redo();
+                            } else {
+                                screen_draw_undo();
                             }
-                        }
-                    }
-
-                    // Global record toggle hotkey processing
-
-                    if let Some(key_name) = key_name.clone() {
-                        let binding = binding_from_trigger_event(&key_name);
-                        if is_key_down {
-                            let repeat = is_repeat_key(&key_name);
-                            if let Some(swallow) = process_macro_record_hotkey(&binding, repeat) {
-                                update_modifier_state(info.vkCode, is_key_down);
-                                if swallow {
-                                    return LRESULT(1);
-                                }
-                            }
-
-                            if let Some(swallow) =
-                                process_mouse_path_record_hotkey(&binding, repeat)
-                            {
-                                update_modifier_state(info.vkCode, is_key_down);
-                                if swallow {
-                                    return LRESULT(1);
-                                }
-                            }
-                        }
-                    }
-
-                    // Skip normal hotkeys if UI is focused
-
-                    if is_ui_in_foreground() {
-                        if info.vkCode == 0x44 {
-                            screen_draw_debug_log(
-                                "keyboard_hook_d skipped_by_ui_foreground".to_owned(),
-                            );
-                        }
-                        if let Some(key_name) = key_name.as_ref() {
+                            request_screen_draw_overlay_sync();
                             update_held_key(info.vkCode, is_key_down, is_key_up);
-                            if is_key_up {
-                                let binding = binding_from_trigger_event(key_name);
-                                let _ = process_screen_draw_hotkey_release(&binding);
-                                screen_draw_release_trigger_latch_if_ready();
+                            update_modifier_state(info.vkCode, is_key_down);
+                            return LRESULT(1);
+                        }
+                    }
+                    if screen_draw_capture_should_swallow_key_name(&key_name) {
+                        update_held_key(info.vkCode, is_key_down, is_key_up);
+                        if is_key_up {
+                            mark_screen_draw_capture_trigger_released();
+                        }
+                        if is_key_up {
+                            screen_draw_release_trigger_latch_if_ready();
+                        }
+                        update_modifier_state(info.vkCode, is_key_down);
+                        return LRESULT(1);
+                    }
+                    let binding = binding_from_trigger_event(&key_name);
+                    if is_key_down {
+                        if process_screen_draw_hotkey(&binding, is_repeat_key(&key_name)) {
+                            update_held_key(info.vkCode, is_key_down, is_key_up);
+                            update_modifier_state(info.vkCode, is_key_down);
+                            return LRESULT(1);
+                        }
+                    } else if is_key_up && process_screen_draw_hotkey_release(&binding) {
+                        update_held_key(info.vkCode, is_key_down, is_key_up);
+                        update_modifier_state(info.vkCode, is_key_down);
+                        return LRESULT(1);
+                    }
+                }
+                let windows_key_locked = {
+                    let hook_state = HOOK_STATE.lock();
+                    hook_state.windows_key_locked
+                };
+                if windows_key_locked && matches!(info.vkCode, 0x5B | 0x5C) {
+                    update_held_key(info.vkCode, is_key_down, is_key_up);
+                    update_modifier_state(info.vkCode, is_key_down);
+                    return LRESULT(1);
+                }
+                if is_key_down && !is_ui_in_foreground() {
+                    let mut rec_guard = MACRO_RECORDING.lock();
+                    if let Some(session) = rec_guard.as_mut() {
+                        let now = std::time::Instant::now();
+                        let delay_ms = now
+                            .saturating_duration_since(session.last_event_at)
+                            .as_millis()
+                            .min(u64::MAX as u128) as u64;
+                        if let Some(k_name) = key_name.clone() {
+                            session.last_event_at = now;
+                            session.events.push(MacroRecordingEvent {
+                                key: Some(k_name.clone()),
+                                action: crate::model::MacroAction::KeyPress,
+                                delay_ms,
+                                x: 0,
+                                y: 0,
+                            });
+                            if let Some(tx) = &HOOK_STATE.lock().ui_tx {
+                                let mut step = crate::model::MacroStep::default();
+                                step.action = crate::model::MacroAction::KeyPress;
+                                step.delay_ms = delay_ms;
+                                step.key = k_name;
+                                let _ = tx.send(UiCommand::MacroRealtimeStepAdded(
+                                    session.group_id,
+                                    session.preset_id,
+                                    step,
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                if let Some(key_name) = key_name.clone() {
+                    let binding = binding_from_trigger_event(&key_name);
+                    if is_key_down {
+                        let repeat = is_repeat_key(&key_name);
+                        if let Some(swallow) = process_macro_record_hotkey(&binding, repeat) {
+                            update_modifier_state(info.vkCode, is_key_down);
+                            if swallow {
+                                return LRESULT(1);
                             }
                         }
 
+                        if let Some(swallow) = process_mouse_path_record_hotkey(&binding, repeat) {
+                            update_modifier_state(info.vkCode, is_key_down);
+                            if swallow {
+                                return LRESULT(1);
+                            }
+                        }
+                    }
+                }
+
+                if is_ui_in_foreground() {
+                    if let Some(key_name) = key_name.as_ref() {
+                        update_held_key(info.vkCode, is_key_down, is_key_up);
+                        if is_key_up {
+                            let binding = binding_from_trigger_event(key_name);
+                            let _ = process_screen_draw_hotkey_release(&binding);
+                            screen_draw_release_trigger_latch_if_ready();
+                        }
+                    }
+
+                    update_modifier_state(info.vkCode, is_key_down);
+                    return CallNextHookEx(None, code, wparam, lparam);
+                }
+
+                if let Some(key_name) = key_name.clone() {
+                    let binding = binding_from_trigger_event(&key_name);
+                    if key_name.eq_ignore_ascii_case("Tab") && binding.alt {
+                        update_held_key(info.vkCode, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
                         return CallNextHookEx(None, code, wparam, lparam);
                     }
 
-                    if let Some(key_name) = key_name.clone() {
-                        let binding = binding_from_trigger_event(&key_name);
-                        if key_name.eq_ignore_ascii_case("Tab") && binding.alt {
-                            update_held_key(info.vkCode, is_key_down, is_key_up);
-                            update_modifier_state(info.vkCode, is_key_down);
-                            return CallNextHookEx(None, code, wparam, lparam);
+                    let mut swallow = false;
+                    if is_key_down {
+                        let repeat = is_repeat_key(&key_name);
+                        if let Some(binding_swallow) = process_binding_press(&binding, repeat) {
+                            swallow |= binding_swallow;
                         }
-
-                        let mut swallow = false;
-                        if is_key_down {
-                            let repeat = is_repeat_key(&key_name);
-                            if let Some(binding_swallow) = process_binding_press(&binding, repeat) {
-                                swallow |= binding_swallow;
-                            }
-                        }
-
-                        update_held_key(info.vkCode, is_key_down, is_key_up);
-                        if is_key_up {
-                            screen_draw_release_trigger_latch_if_ready();
-                        }
-                        if is_key_up {
-                            swallow |= process_binding_release(&binding);
-                        }
-
-                        let macros_master_enabled = {
-                            let hook_state = HOOK_STATE.lock();
-                            hook_state.macros_master_enabled
-                        };
-                        if macros_master_enabled {
-                            swallow |= binding_matches_any_hold_macro(&binding);
-                            swallow |= is_locked_input(&key_name);
-                        }
-
-                        swallow |= keyboard_arrow_mouse_should_swallow(&key_name);
-                        update_modifier_state(info.vkCode, is_key_down);
-                        return if swallow {
-                            LRESULT(1)
-                        } else {
-                            CallNextHookEx(None, code, wparam, lparam)
-                        };
                     }
 
+                    update_held_key(info.vkCode, is_key_down, is_key_up);
+                    if is_key_up {
+                        screen_draw_release_trigger_latch_if_ready();
+                    }
+                    if is_key_up {
+                        swallow |= process_binding_release(&binding);
+                    }
+
+                    let macros_master_enabled = {
+                        let hook_state = HOOK_STATE.lock();
+                        hook_state.macros_master_enabled
+                    };
+                    if macros_master_enabled {
+                        swallow |= binding_matches_any_hold_macro(&binding);
+                        swallow |= is_locked_input(&key_name);
+                    }
+
+                    swallow |= keyboard_arrow_mouse_should_swallow(&key_name);
                     update_modifier_state(info.vkCode, is_key_down);
+                    return if swallow {
+                        LRESULT(1)
+                    } else {
+                        CallNextHookEx(None, code, wparam, lparam)
+                    };
                 }
+
+                update_modifier_state(info.vkCode, is_key_down);
             }
         }
 

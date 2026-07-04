@@ -87,6 +87,8 @@ pub(crate) struct VietnameseInputSession {
 
 static VIETNAMESE_INPUT_SESSION: Lazy<Mutex<VietnameseInputSession>> =
     Lazy::new(|| Mutex::new(VietnameseInputSession::default()));
+static LIVE_WINDOW_TARGET_COMBO_WINDOWS: Lazy<Mutex<Option<Vec<WindowInfo>>>> =
+    Lazy::new(|| Mutex::new(None));
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) enum UpdateStatus {
@@ -6315,7 +6317,9 @@ impl CrosshairApp {
         allow_none: bool,
     ) -> bool {
         let mut changed = false;
-        let window_groups = Self::grouped_window_selectors(open_windows);
+        let live_open_windows = LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
+        let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
+        let window_groups = Self::grouped_window_selectors(effective_open_windows);
         let selected_text = target
             .as_deref()
             .map(|current| {
@@ -6347,7 +6351,8 @@ impl CrosshairApp {
                 if matched_rule {
                     display
                 } else {
-                    let base_title = Self::display_title_for_selector(current, open_windows);
+                    let base_title =
+                        Self::display_title_for_selector(current, effective_open_windows);
                     let selected_specific_duplicate = !*match_duplicate_window_titles
                         && window_groups
                             .iter()
@@ -6366,7 +6371,7 @@ impl CrosshairApp {
             .ctx()
             .data(|data| data.get_temp::<String>(popup_state_id));
 
-        egui::ComboBox::from_id_salt((id_source, "target-window-combo"))
+        let combo_response = egui::ComboBox::from_id_salt((id_source, "target-window-combo"))
             .width(width)
             .selected_text(truncated_selected_text)
             .show_ui(ui, |ui| {
@@ -6387,7 +6392,7 @@ impl CrosshairApp {
                     let has_duplicates = selectors.len() > 1;
                     let first_selector = selectors.first().cloned().unwrap_or_default();
                     let main_selected = target.as_deref().is_some_and(|current| {
-                        Self::display_title_for_selector(current, open_windows) == title
+                        Self::display_title_for_selector(current, effective_open_windows) == title
                     }) && *match_duplicate_window_titles;
                     let row_label = if has_duplicates {
                         format!("{title}  >")
@@ -6493,6 +6498,10 @@ impl CrosshairApp {
                     }
                 }
             });
+        if combo_response.response.clicked() {
+            *LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock() = Some(window_list::list_open_windows());
+            ui.ctx().request_repaint();
+        }
 
         ui.ctx().data_mut(|data| {
             if let Some(title) = expanded_title {
