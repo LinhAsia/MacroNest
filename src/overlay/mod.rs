@@ -1916,6 +1916,7 @@ mod windows_overlay {
         center_y: f32,
         rotation_deg: f32,
         corners: [(f32, f32); 4],
+        control_edge_mid: (f32, f32),
         confirm_button: (f32, f32),
         delete_button: (f32, f32),
         rotate_handle: (f32, f32),
@@ -2592,6 +2593,7 @@ mod windows_overlay {
         },
         Release {
             identity: String,
+            source_key: String,
         },
     }
 
@@ -7087,6 +7089,26 @@ mod windows_overlay {
         Some(held_state)
     }
 
+    fn quick_key_display_find_release_entry_index(
+        entries: &[QuickKeyDisplayEntry],
+        identity: &str,
+        source_key: &str,
+    ) -> Option<usize> {
+        entries
+            .iter()
+            .position(|entry| entry.identity == identity)
+            .or_else(|| {
+                entries
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, entry)| {
+                        entry.held && entry.source_key.eq_ignore_ascii_case(source_key)
+                    })
+                    .max_by_key(|(_, entry)| entry.last_pressed_at)
+                    .map(|(idx, _)| idx)
+            })
+    }
+
     fn quick_key_display_resolve_held_state(
         runtime: &mut Runtime,
         identity: &str,
@@ -7650,13 +7672,14 @@ mod windows_overlay {
             (runtime.quick_key_display_spam_heat + 0.055).min(1.0);
     }
 
-    fn quick_key_display_release_entry(runtime: &mut Runtime, identity: &str) {
+    fn quick_key_display_release_entry(runtime: &mut Runtime, identity: &str, source_key: &str) {
         let now = Instant::now();
         runtime.quick_key_display_held_states.remove(identity);
-        let Some(idx) = runtime
-            .quick_key_display_entries
-            .iter()
-            .position(|entry| entry.identity == identity)
+        let Some(idx) = quick_key_display_find_release_entry_index(
+            &runtime.quick_key_display_entries,
+            identity,
+            source_key,
+        )
         else {
             return;
         };
@@ -8639,7 +8662,10 @@ mod windows_overlay {
 
         if is_key_up && let Some(identity) = identity_info {
             send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(
-                QuickKeyDisplayUpdate::Release { identity },
+                QuickKeyDisplayUpdate::Release {
+                    identity,
+                    source_key: effective_key_name.to_owned(),
+                },
             ));
         }
     }
@@ -8802,6 +8828,7 @@ mod windows_overlay {
             capturing_region,
             trigger_latched,
             trigger,
+            editing_text,
         ) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
@@ -8815,10 +8842,14 @@ mod windows_overlay {
                 state.capturing_region,
                 state.trigger_latched,
                 state.trigger.clone(),
+                state.active && state.text_session.is_some(),
             )
         };
         if !matches_trigger {
             return false;
+        }
+        if editing_text {
+            return true;
         }
         screen_draw_debug_log(format!(
             "down key={} repeat={} active={} capturing={} latched={} suppress={}",
@@ -8910,6 +8941,7 @@ mod windows_overlay {
             active,
             capturing_region,
             had_trigger_press,
+            editing_text,
         ) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
@@ -8924,10 +8956,14 @@ mod windows_overlay {
                 state.trigger_latched
                     || state.trigger_is_down
                     || state.trigger_pressed_at.is_some(),
+                state.active && state.text_session.is_some(),
             )
         };
         if !matches_trigger_key {
             return false;
+        }
+        if editing_text {
+            return true;
         }
         screen_draw_debug_log(format!(
             "up key={} active={} capturing={}",
@@ -9569,9 +9605,12 @@ mod windows_overlay {
                                 );
                             }
                         }
-                        QuickKeyDisplayUpdate::Release { identity } => {
-                            quick_key_display_release_entry(runtime, &identity);
-                        }
+                QuickKeyDisplayUpdate::Release {
+                    identity,
+                    source_key,
+                } => {
+                    quick_key_display_release_entry(runtime, &identity, &source_key);
+                }
                     }
                     let _ = refresh_quick_key_display(runtime);
                 }
@@ -11768,10 +11807,17 @@ mod windows_overlay {
                 let Some(start_point) = state.text_interaction_start_point else {
                     return false;
                 };
+                let toolbar_bounds = screen_draw_toolbar_bounds_tuple(&state);
+                let canvas_height = state.canvas_height;
                 let Some(session) = state.text_session.as_mut() else {
                     return false;
                 };
-                let Some(geometry) = screen_draw_text_session_geometry(&origin, "Text") else {
+                let Some(geometry) = screen_draw_text_session_geometry_for_overlay(
+                    &origin,
+                    "Text",
+                    Some(toolbar_bounds),
+                    Some(canvas_height),
+                ) else {
                     return false;
                 };
                 let dx = point.x - start_point.x;
@@ -11799,49 +11845,47 @@ mod windows_overlay {
                 let Some(origin) = state.text_interaction_origin.clone() else {
                     return false;
                 };
+                let toolbar_bounds = screen_draw_toolbar_bounds_tuple(&state);
+                let canvas_height = state.canvas_height;
                 let Some(session) = state.text_session.as_mut() else {
                     return false;
                 };
-                let Some(geometry) = screen_draw_text_session_geometry(&origin, "Text") else {
+                let Some(geometry) = screen_draw_text_session_geometry_for_overlay(
+                    &origin,
+                    "Text",
+                    Some(toolbar_bounds),
+                    Some(canvas_height),
+                ) else {
                     return false;
                 };
-                let top_left = geometry.corners[0];
-                let top_right = geometry.corners[1];
-                let bottom_left = geometry.corners[3];
-                let axis_x = (
-                    top_right.0 - top_left.0,
-                    top_right.1 - top_left.1,
+                let (local_x, local_y) = screen_draw_text_world_to_local(
+                    geometry.left as f32,
+                    geometry.top as f32,
+                    geometry.width as f32,
+                    geometry.height as f32,
+                    geometry.rotation_deg,
+                    point.x as f32,
+                    point.y as f32,
                 );
-                let axis_y = (
-                    bottom_left.0 - top_left.0,
-                    bottom_left.1 - top_left.1,
-                );
-                let axis_x_len = (axis_x.0 * axis_x.0 + axis_x.1 * axis_x.1).sqrt().max(1.0);
-                let axis_y_len = (axis_y.0 * axis_y.0 + axis_y.1 * axis_y.1).sqrt().max(1.0);
-                let axis_x_unit = (axis_x.0 / axis_x_len, axis_x.1 / axis_x_len);
-                let axis_y_unit = (axis_y.0 / axis_y_len, axis_y.1 / axis_y_len);
-                let pointer_vec = (point.x as f32 - top_left.0, point.y as f32 - top_left.1);
-                let projected_width =
-                    pointer_vec.0 * axis_x_unit.0 + pointer_vec.1 * axis_x_unit.1;
-                let projected_height =
-                    pointer_vec.0 * axis_y_unit.0 + pointer_vec.1 * axis_y_unit.1;
-                let min_width = screen_draw_text_min_box_width(screen_draw_text_font_size(origin.brush_size));
-                let min_height =
-                    screen_draw_text_default_box_height(screen_draw_text_font_size(origin.brush_size));
-                let new_width = projected_width.round() as i32;
-                let new_height = projected_height.round() as i32;
+                let width_scale = (local_x / geometry.width.max(1) as f32).max(0.35);
+                let height_scale = (local_y / geometry.height.max(1) as f32).max(0.35);
+                let scale = width_scale.max(height_scale);
+                let base_font_size = screen_draw_text_font_size(origin.brush_size);
+                let next_font_size = (base_font_size * scale).clamp(14.0, 72.0);
+                session.stroke.brush_size = next_font_size;
+                sync_screen_draw_text_box_to_content(&mut session.stroke, "Text", true);
+                let new_width = session.stroke.text_box_width.max(1);
+                let new_height = session.stroke.text_box_height.max(1);
                 session.stroke.points = vec![
                     POINT {
                         x: geometry.left,
                         y: geometry.top,
                     },
                     POINT {
-                        x: geometry.left + new_width.max(min_width),
-                        y: geometry.top + new_height.max(min_height),
+                        x: geometry.left + new_width,
+                        y: geometry.top + new_height,
                     },
                 ];
-                session.stroke.text_box_width = new_width.max(min_width);
-                session.stroke.text_box_height = new_height.max(min_height);
                 let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 mark_screen_draw_dirty(&mut state, full_rect);
                 mark_screen_draw_repaint_pending(&mut state);
@@ -11854,10 +11898,17 @@ mod windows_overlay {
                 let Some(start_point) = state.text_interaction_start_point else {
                     return false;
                 };
+                let toolbar_bounds = screen_draw_toolbar_bounds_tuple(&state);
+                let canvas_height = state.canvas_height;
                 let Some(session) = state.text_session.as_mut() else {
                     return false;
                 };
-                let Some(geometry) = screen_draw_text_session_geometry(&origin, "Text") else {
+                let Some(geometry) = screen_draw_text_session_geometry_for_overlay(
+                    &origin,
+                    "Text",
+                    Some(toolbar_bounds),
+                    Some(canvas_height),
+                ) else {
                     return false;
                 };
                 let start_angle = (start_point.y as f32 - geometry.center_y)
@@ -12335,7 +12386,7 @@ mod windows_overlay {
     }
 
     fn screen_draw_text_min_box_width(font_size: f32) -> i32 {
-        ((font_size * 6.0).round() as i32).max(160)
+        ((font_size * 3.6).round() as i32).max(72)
     }
 
     fn screen_draw_text_default_box_height(font_size: f32) -> i32 {
@@ -12348,6 +12399,32 @@ mod windows_overlay {
         } else {
             ((text.chars().count() as f32 * font_size * 0.64).ceil() as i32 + 24)
                 .max(screen_draw_text_min_box_width(font_size))
+        }
+    }
+
+    fn screen_draw_text_content<'a>(stroke: &'a ScreenDrawStroke, fallback_text: &'a str) -> &'a str {
+        if stroke.text.trim().is_empty() {
+            fallback_text
+        } else {
+            stroke.text.as_str()
+        }
+    }
+
+    fn sync_screen_draw_text_box_to_content(
+        stroke: &mut ScreenDrawStroke,
+        fallback_text: &str,
+        allow_shrink: bool,
+    ) {
+        let font_size = screen_draw_text_font_size(stroke.brush_size);
+        let content = screen_draw_text_content(stroke, fallback_text);
+        let target_width = screen_draw_text_estimated_box_width(font_size, content);
+        let target_height = screen_draw_text_default_box_height(font_size);
+        if allow_shrink {
+            stroke.text_box_width = target_width;
+            stroke.text_box_height = target_height;
+        } else {
+            stroke.text_box_width = stroke.text_box_width.max(target_width);
+            stroke.text_box_height = stroke.text_box_height.max(target_height);
         }
     }
 
@@ -12409,9 +12486,46 @@ mod windows_overlay {
         (unrotated_x - left, unrotated_y - top)
     }
 
+    fn screen_draw_toolbar_bounds_tuple(state: &ScreenDrawState) -> (i32, i32, i32, i32) {
+        (
+            state.toolbar_x,
+            state.toolbar_y,
+            state.toolbar_x + state.toolbar_w,
+            state.toolbar_y + state.toolbar_h,
+        )
+    }
+
+    fn screen_draw_text_controls_below_box(
+        top: f32,
+        height: f32,
+        toolbar_bounds: Option<(i32, i32, i32, i32)>,
+        canvas_height: Option<usize>,
+    ) -> bool {
+        let toolbar_bottom = toolbar_bounds.map(|(_, _, _, bottom)| bottom as f32 + 12.0);
+        let above_top = top - 42.0;
+        let below_bottom = top + height + 42.0;
+        let above_overflow = toolbar_bottom
+            .map(|bottom| (bottom - above_top).max(0.0))
+            .unwrap_or_else(|| (12.0 - above_top).max(0.0));
+        let below_limit = canvas_height.map(|height| height as f32 - 12.0);
+        let below_overflow = below_limit
+            .map(|limit| (below_bottom - limit).max(0.0))
+            .unwrap_or(0.0);
+        above_overflow > 0.0 && below_overflow <= above_overflow
+    }
+
     fn screen_draw_text_session_geometry(
         stroke: &ScreenDrawStroke,
         fallback_text: &str,
+    ) -> Option<ScreenDrawTextSessionGeometry> {
+        screen_draw_text_session_geometry_for_overlay(stroke, fallback_text, None, None)
+    }
+
+    fn screen_draw_text_session_geometry_for_overlay(
+        stroke: &ScreenDrawStroke,
+        fallback_text: &str,
+        toolbar_bounds: Option<(i32, i32, i32, i32)>,
+        canvas_height: Option<usize>,
     ) -> Option<ScreenDrawTextSessionGeometry> {
         let (left, top, width, height, _, text) = screen_draw_text_layout(stroke, fallback_text)?;
         let _ = text;
@@ -12422,6 +12536,31 @@ mod windows_overlay {
         let center_x = left_f + width_f * 0.5;
         let center_y = top_f + height_f * 0.5;
         let rotation_deg = stroke.text_rotation_deg;
+        let controls_below =
+            screen_draw_text_controls_below_box(top_f, height_f, toolbar_bounds, canvas_height);
+        let control_local_y = if controls_below { height_f + 28.0 } else { -28.0 };
+        let rotate_local_y = if controls_below { height_f + 32.0 } else { -32.0 };
+        let control_edge_mid = if controls_below {
+            screen_draw_text_local_to_world(
+                left_f,
+                top_f,
+                width_f,
+                height_f,
+                rotation_deg,
+                width_f * 0.5,
+                height_f,
+            )
+        } else {
+            screen_draw_text_local_to_world(
+                left_f,
+                top_f,
+                width_f,
+                height_f,
+                rotation_deg,
+                width_f * 0.5,
+                0.0,
+            )
+        };
         let corners = [
             screen_draw_text_local_to_world(left_f, top_f, width_f, height_f, rotation_deg, 0.0, 0.0),
             screen_draw_text_local_to_world(left_f, top_f, width_f, height_f, rotation_deg, width_f, 0.0),
@@ -12437,6 +12576,7 @@ mod windows_overlay {
             center_y,
             rotation_deg,
             corners,
+            control_edge_mid,
             confirm_button: screen_draw_text_local_to_world(
                 left_f,
                 top_f,
@@ -12444,7 +12584,7 @@ mod windows_overlay {
                 height_f,
                 rotation_deg,
                 18.0,
-                -28.0,
+                control_local_y,
             ),
             delete_button: screen_draw_text_local_to_world(
                 left_f,
@@ -12453,7 +12593,7 @@ mod windows_overlay {
                 height_f,
                 rotation_deg,
                 (width_f - 18.0).max(18.0),
-                -28.0,
+                control_local_y,
             ),
             rotate_handle: screen_draw_text_local_to_world(
                 left_f,
@@ -12462,7 +12602,7 @@ mod windows_overlay {
                 height_f,
                 rotation_deg,
                 width_f * 0.5,
-                -32.0,
+                rotate_local_y,
             ),
             resize_handle: screen_draw_text_local_to_world(
                 left_f,
@@ -12488,11 +12628,7 @@ mod windows_overlay {
             && stroke.text_box_width <= 0
             && stroke.text_box_height <= 0
         {
-            let text = if stroke.text.is_empty() {
-                fallback_text.to_owned()
-            } else {
-                stroke.text.clone()
-            };
+            let text = screen_draw_text_content(stroke, fallback_text).to_owned();
             let estimated_text_width = screen_draw_text_estimated_box_width(font_size, &text);
             return Some((
                 last.x,
@@ -12524,11 +12660,7 @@ mod windows_overlay {
         } else {
             anchor.y.min(last.y)
         };
-        let text = if stroke.text.is_empty() {
-            fallback_text.to_owned()
-        } else {
-            stroke.text.clone()
-        };
+        let text = screen_draw_text_content(stroke, fallback_text).to_owned();
         Some((left, top, width, height, font_size, text))
     }
 
@@ -12551,12 +12683,7 @@ mod windows_overlay {
     }
 
     fn autofit_screen_draw_text_session(stroke: &mut ScreenDrawStroke) {
-        let font_size = screen_draw_text_font_size(stroke.brush_size);
-        let min_width = screen_draw_text_estimated_box_width(font_size, &stroke.text);
-        stroke.text_box_width = stroke.text_box_width.max(min_width);
-        stroke.text_box_height = stroke
-            .text_box_height
-            .max(screen_draw_text_default_box_height(font_size));
+        sync_screen_draw_text_box_to_content(stroke, "Text", false);
     }
 
     fn start_screen_draw_stroke(state: &mut ScreenDrawState, point: POINT, force_eraser: bool) {
@@ -12769,7 +12896,12 @@ mod windows_overlay {
         point: POINT,
     ) -> Option<ScreenDrawHit> {
         let session = state.text_session.as_ref()?;
-        let geometry = screen_draw_text_session_geometry(&session.stroke, "Text")?;
+        let geometry = screen_draw_text_session_geometry_for_overlay(
+            &session.stroke,
+            "Text",
+            Some(screen_draw_toolbar_bounds_tuple(state)),
+            Some(state.canvas_height),
+        )?;
         if screen_draw_point_hits_circle(point, geometry.confirm_button, 12.0) {
             return Some(ScreenDrawHit::TextSessionConfirm);
         }
@@ -12871,9 +13003,16 @@ mod windows_overlay {
 
     fn draw_screen_draw_text_editor_overlay(
         pixmap: &mut tiny_skia::PixmapMut<'_>,
+        toolbar_bounds: (i32, i32, i32, i32),
+        canvas_height: usize,
         session: &ScreenDrawTextSession,
     ) {
-        let Some(geometry) = screen_draw_text_session_geometry(&session.stroke, "Text") else {
+        let Some(geometry) = screen_draw_text_session_geometry_for_overlay(
+            &session.stroke,
+            "Text",
+            Some(toolbar_bounds),
+            Some(canvas_height),
+        ) else {
             return;
         };
         let border = [102, 203, 255, 235];
@@ -12887,14 +13026,10 @@ mod windows_overlay {
             draw_screen_draw_editor_line(pixmap, x0, y0, x1, y1, border, 1.7);
         }
 
-        let top_mid = (
-            (geometry.corners[0].0 + geometry.corners[1].0) * 0.5,
-            (geometry.corners[0].1 + geometry.corners[1].1) * 0.5,
-        );
         draw_screen_draw_editor_line(
             pixmap,
-            top_mid.0,
-            top_mid.1,
+            geometry.control_edge_mid.0,
+            geometry.control_edge_mid.1,
             geometry.rotate_handle.0,
             geometry.rotate_handle.1,
             guide,
@@ -13754,6 +13889,8 @@ mod windows_overlay {
         {
             render_screen_draw_stroke_skia(&mut pixmap, &stroke);
         }
+        let toolbar_bounds = screen_draw_toolbar_bounds_tuple(&state_guard);
+        let canvas_height = state_guard.canvas_height;
         if let Some(session) = state_guard.text_session.clone()
             && let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
                 state_guard.frame_rgba.as_mut_slice(),
@@ -13762,7 +13899,12 @@ mod windows_overlay {
             )
         {
             render_screen_draw_stroke_skia(&mut pixmap, &session.stroke);
-            draw_screen_draw_text_editor_overlay(&mut pixmap, &session);
+            draw_screen_draw_text_editor_overlay(
+                &mut pixmap,
+                toolbar_bounds,
+                canvas_height,
+                &session,
+            );
         }
         let toolbar_color_pick_mode = state_guard.screen_color_pick_mode;
         let color_pick_preview = state_guard.color_pick_preview.clone();
@@ -27438,6 +27580,66 @@ mod windows_overlay {
             assert!(quick_key_display_should_fallback_to_modifier(
                 QuickKeyDisplayMode::Mascot
             ));
+        }
+
+        #[test]
+        fn quick_key_display_release_finds_combo_entry_by_source_key() {
+            let now = Instant::now();
+            let entries = vec![QuickKeyDisplayEntry {
+                text: "Alt + Z".to_owned(),
+                identity: "keyboard:combo:alt+z".to_owned(),
+                source_key: "Z".to_owned(),
+                combo_keys: vec!["Alt".to_owned(), "Z".to_owned()],
+                lane: QuickKeyDisplayLane::Keyboard,
+                row: 0,
+                slot: 0,
+                x_offset: 0,
+                held: true,
+                first_shown_at: now,
+                shown_at: now,
+                released_at: None,
+                hide_at: now,
+                last_pressed_at: now,
+                press_count: 1,
+                pushed_at: None,
+                push_offset_rows: 0.0,
+            }];
+            assert_eq!(
+                quick_key_display_find_release_entry_index(&entries, "keyboard:z", "Z"),
+                Some(0)
+            );
+        }
+
+        #[test]
+        fn screen_draw_text_controls_drop_below_when_toolbar_blocks_top_space() {
+            let stroke = ScreenDrawStroke {
+                tool: ScreenDrawTool::Text,
+                points: vec![POINT { x: 48, y: 48 }, POINT { x: 208, y: 82 }],
+                color: RgbaColor {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                    a: 255,
+                },
+                brush_size: 24.0,
+                eraser: false,
+                smoothing: false,
+                smoothing_amount: 0.0,
+                filled: false,
+                text: "Alt + Z".to_owned(),
+                text_box_width: 160,
+                text_box_height: 40,
+                text_rotation_deg: 0.0,
+            };
+            let geometry = screen_draw_text_session_geometry_for_overlay(
+                &stroke,
+                "Text",
+                Some((0, 0, 300, 56)),
+                Some(400),
+            )
+            .unwrap();
+            assert!(geometry.confirm_button.1 > geometry.corners[2].1);
+            assert!(geometry.rotate_handle.1 > geometry.corners[2].1);
         }
 
         #[test]
