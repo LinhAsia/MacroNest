@@ -7121,10 +7121,17 @@ mod windows_overlay {
                 || hook_state.held_inputs.contains("Win")
                 || hook_state.held_inputs.contains("Meta");
         }
-        let held_by_hook = hook_state
+        hook_state
             .held_inputs
             .iter()
-            .any(|held| held.eq_ignore_ascii_case(key_name));
+            .any(|held| held.eq_ignore_ascii_case(key_name))
+    }
+
+    fn hook_state_key_is_down_or_async(hook_state: &HookState, key_name: &str) -> bool {
+        let held_by_hook = hook_state_key_is_down(hook_state, key_name);
+        if held_by_hook || hotkey::is_modifier_key_name(key_name) || hotkey::is_mouse_key_name(key_name) {
+            return held_by_hook;
+        }
         if let Some(vk) = hotkey::key_name_to_vk(key_name) {
             return held_by_hook || (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0;
         }
@@ -11140,7 +11147,7 @@ mod windows_overlay {
     }
 
     fn screen_draw_trigger_key_is_down(key_name: &str, hook_state: &HookState) -> bool {
-        hook_state_key_is_down(hook_state, key_name)
+        hook_state_key_is_down_or_async(hook_state, key_name)
     }
 
     fn screen_draw_trigger_binding_is_down(trigger: &HotkeyBinding) -> bool {
