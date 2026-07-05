@@ -12,6 +12,9 @@ use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 impl CrosshairApp {
     pub(crate) fn render_settings_popup(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
@@ -1572,12 +1575,34 @@ impl CrosshairApp {
         let current_exe = std::env::current_exe().unwrap_or_default();
         let old_exe = current_exe.with_extension("exe.old");
         let result: anyhow::Result<()> = (|| {
-            if old_exe.exists() {
-                let _ = fs::remove_file(&old_exe);
+            if !Path::new(&new_exe_path).exists() {
+                bail!("Downloaded update file was not found");
             }
-            fs::rename(&current_exe, &old_exe)?;
-            fs::copy(&new_exe_path, &current_exe)?;
-            Command::new(&current_exe).spawn()?;
+            let current_pid = std::process::id();
+            let current_exe_ps = current_exe.display().to_string().replace('\'', "''");
+            let new_exe_ps = new_exe_path.replace('\'', "''");
+            let old_exe_ps = old_exe.display().to_string().replace('\'', "''");
+            let helper = format!(
+                "$ErrorActionPreference='Stop'; \
+                 $pidToWait={current_pid}; \
+                 $currentExe='{current_exe_ps}'; \
+                 $newExe='{new_exe_ps}'; \
+                 $oldExe='{old_exe_ps}'; \
+                 Wait-Process -Id $pidToWait; \
+                 Start-Sleep -Milliseconds 350; \
+                 if (Test-Path -LiteralPath $oldExe) {{ Remove-Item -LiteralPath $oldExe -Force -ErrorAction SilentlyContinue }}; \
+                 if (Test-Path -LiteralPath $currentExe) {{ Move-Item -LiteralPath $currentExe -Destination $oldExe -Force }}; \
+                 Copy-Item -LiteralPath $newExe -Destination $currentExe -Force; \
+                 Start-Process -FilePath $currentExe"
+            );
+            let mut command = Command::new("powershell");
+            #[cfg(target_os = "windows")]
+            {
+                command.creation_flags(0x08000000);
+            }
+            command.args(["-NoProfile", "-NonInteractive", "-Command", &helper]);
+            crate::platform::release_single_instance();
+            command.spawn()?;
             std::process::exit(0);
         })();
         if let Err(e) = result {

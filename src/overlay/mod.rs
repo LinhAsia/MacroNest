@@ -2343,6 +2343,8 @@ mod windows_overlay {
         vision_following_presets: HashSet<u32>,
         pub(crate) vision_following_offsets: HashMap<u32, (i32, i32)>,
         pub(crate) vision_following_axis_locks: HashMap<u32, crate::model::VisionMoveAxisLock>,
+        pub(crate) vision_following_passes: HashMap<u32, u8>,
+        pub(crate) vision_following_delays: HashMap<u32, u64>,
         vision_dir: PathBuf,
         opencv_dll_path: PathBuf,
         interception_dll_path: PathBuf,
@@ -2450,6 +2452,8 @@ mod windows_overlay {
                 vision_following_presets: HashSet::new(),
                 vision_following_offsets: HashMap::new(),
                 vision_following_axis_locks: HashMap::new(),
+                vision_following_passes: HashMap::new(),
+                vision_following_delays: HashMap::new(),
                 vision_dir: PathBuf::new(),
                 opencv_dll_path: PathBuf::new(),
                 interception_dll_path: PathBuf::new(),
@@ -6861,32 +6865,54 @@ mod windows_overlay {
         )
     }
 
-    fn quick_key_display_identity_for_key_name(key_name: &str) -> Option<String> {
-        if quick_key_display_is_wheel_key_name(key_name) {
-            return Some(format!("wheel:{key_name}"));
-        }
-        if quick_key_display_is_mouse_key_name(key_name) {
-            return Some(format!("mouse:{key_name}"));
-        }
-        if hotkey::is_modifier_key_name(key_name) {
+    fn quick_key_display_normalized_combo_keys(mut combo_keys: Vec<String>) -> Vec<String> {
+        combo_keys.retain(|key| !key.trim().is_empty());
+        combo_keys.sort_by(|a, b| hotkey_binding_rank(a).cmp(&hotkey_binding_rank(b)));
+        combo_keys.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        combo_keys
+    }
+
+    fn quick_key_display_identity_for_combo_keys(
+        key_name: &str,
+        combo_keys: &[String],
+    ) -> Option<String> {
+        if combo_keys.is_empty() {
             return None;
         }
-        let (ctrl, alt, shift, win) = quick_key_display_modifier_flags();
-        Some(format!(
-            "keyboard:{key_name}|c:{}|a:{}|s:{}|w:{}",
-            ctrl as u8, alt as u8, shift as u8, win as u8
-        ))
+        let lane = if quick_key_display_is_wheel_key_name(key_name) {
+            "wheel"
+        } else if combo_keys
+            .iter()
+            .any(|key| quick_key_display_is_mouse_key_name(key))
+        {
+            "mouse"
+        } else {
+            "keyboard"
+        };
+        let signature = combo_keys
+            .iter()
+            .map(|key| key.trim().to_ascii_lowercase())
+            .collect::<Vec<_>>()
+            .join("+");
+        Some(format!("{lane}:{signature}"))
+    }
+
+    fn quick_key_display_identity_for_key_name(key_name: &str) -> Option<String> {
+        let (_, combo_keys) = quick_key_display_combo_snapshot_for_key_name(key_name)?;
+        quick_key_display_identity_for_combo_keys(key_name, &combo_keys)
     }
 
     fn quick_key_display_combo_snapshot_for_key_name(
         key_name: &str,
     ) -> Option<(String, Vec<String>)> {
-        if !quick_key_display_is_mouse_key_name(key_name) && hotkey::is_modifier_key_name(key_name)
-        {
-            return None;
+        let (mut ctrl, mut alt, mut shift, mut win) = quick_key_display_modifier_flags();
+        match key_name.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => ctrl = true,
+            "alt" => alt = true,
+            "shift" => shift = true,
+            "win" | "meta" => win = true,
+            _ => {}
         }
-
-        let (ctrl, alt, shift, win) = quick_key_display_modifier_flags();
         let mut combo_keys = Vec::<String>::new();
         if ctrl {
             combo_keys.push("Ctrl".to_owned());
@@ -6900,7 +6926,10 @@ mod windows_overlay {
         if win {
             combo_keys.push("Win".to_owned());
         }
-        combo_keys.push(key_name.to_owned());
+        if !combo_keys.iter().any(|key| key.eq_ignore_ascii_case(key_name)) {
+            combo_keys.push(key_name.to_owned());
+        }
+        combo_keys = quick_key_display_normalized_combo_keys(combo_keys);
 
         let has_modifier_combo = combo_keys
             .iter()
@@ -6982,6 +7011,55 @@ mod windows_overlay {
             .collect::<Vec<_>>();
         for identity in stale_identities {
             quick_key_display_release_entry(runtime, &identity);
+        }
+    }
+
+    fn quick_key_display_repeat_for_key_name(key_name: &str) -> bool {
+        let hook_state = HOOK_STATE.lock();
+        quick_key_display_combo_key_is_held(&hook_state, key_name)
+    }
+
+    fn quick_key_display_restore_combo_after_release(key_name: &str) {
+        if quick_key_display_is_wheel_key_name(key_name) {
+            return;
+        }
+
+        let (ctrl, alt, shift, win) = quick_key_display_modifier_flags();
+        let mut combo_keys = Vec::new();
+        if ctrl && !key_name.eq_ignore_ascii_case("Ctrl") && !key_name.eq_ignore_ascii_case("Control")
+        {
+            combo_keys.push("Ctrl".to_owned());
+        }
+        if alt && !key_name.eq_ignore_ascii_case("Alt") {
+            combo_keys.push("Alt".to_owned());
+        }
+        if shift && !key_name.eq_ignore_ascii_case("Shift") {
+            combo_keys.push("Shift".to_owned());
+        }
+        if win && !key_name.eq_ignore_ascii_case("Win") && !key_name.eq_ignore_ascii_case("Meta") {
+            combo_keys.push("Win".to_owned());
+        }
+        let combo_keys = quick_key_display_normalized_combo_keys(combo_keys);
+        if combo_keys.is_empty() {
+            return;
+        }
+
+        let labels = combo_keys
+            .iter()
+            .map(|key| quick_key_display_label(key))
+            .collect::<Vec<_>>();
+        if let Some(identity) =
+            quick_key_display_identity_for_combo_keys(&combo_keys[0], &combo_keys)
+        {
+            send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(
+                QuickKeyDisplayUpdate::Press {
+                    text: labels.join(" + "),
+                    identity,
+                    combo_keys,
+                    lane: QuickKeyDisplayLane::Keyboard,
+                    held: true,
+                },
+            ));
         }
     }
 
@@ -7224,37 +7302,74 @@ mod windows_overlay {
         }
 
         if !consecutive {
-            runtime
-                .quick_key_display_entries
-                .retain(|e| e.identity != identity);
+            runtime.quick_key_display_entries.retain(|e| e.identity != identity);
 
-            if runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal {
-                for entry in &mut runtime.quick_key_display_entries {
-                    entry.pushed_at = Some(now);
-                    entry.push_offset_rows = 1.0;
+            let upgrade_idx = if held && combo_keys.iter().any(|key| hotkey::is_modifier_key_name(key))
+            {
+                runtime
+                    .quick_key_display_entries
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, entry)| {
+                        entry.held
+                            && entry.lane == lane
+                            && entry
+                                .combo_keys
+                                .iter()
+                                .all(|key| hotkey::is_modifier_key_name(key))
+                            && entry.combo_keys.iter().all(|entry_key| {
+                                combo_keys
+                                    .iter()
+                                    .any(|combo_key| combo_key.eq_ignore_ascii_case(entry_key))
+                            })
+                    })
+                    .max_by_key(|(_, entry)| entry.last_pressed_at)
+                    .map(|(idx, _)| idx)
+            } else {
+                None
+            };
+
+            if let Some(idx) = upgrade_idx {
+                let entry = &mut runtime.quick_key_display_entries[idx];
+                entry.text = text;
+                entry.identity = identity;
+                entry.combo_keys = combo_keys;
+                entry.lane = lane;
+                entry.held = held;
+                entry.shown_at = now;
+                entry.released_at = None;
+                entry.hide_at = now + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
+                entry.last_pressed_at = now;
+                entry.press_count = 1;
+            } else {
+                if runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal {
+                    for entry in &mut runtime.quick_key_display_entries {
+                        entry.pushed_at = Some(now);
+                        entry.push_offset_rows = 1.0;
+                    }
                 }
-            }
 
-            runtime
-                .quick_key_display_entries
-                .push(QuickKeyDisplayEntry {
-                    text,
-                    identity,
-                    combo_keys,
-                    lane,
-                    row: 0,
-                    slot: 0,
-                    x_offset: 0,
-                    held,
-                    first_shown_at: now,
-                    shown_at: now,
-                    released_at: None,
-                    hide_at: now + QUICK_KEY_DISPLAY_DISPLAY_DURATION,
-                    last_pressed_at: now,
-                    press_count: 1,
-                    pushed_at: None,
-                    push_offset_rows: 0.0,
-                });
+                runtime
+                    .quick_key_display_entries
+                    .push(QuickKeyDisplayEntry {
+                        text,
+                        identity,
+                        combo_keys,
+                        lane,
+                        row: 0,
+                        slot: 0,
+                        x_offset: 0,
+                        held,
+                        first_shown_at: now,
+                        shown_at: now,
+                        released_at: None,
+                        hide_at: now + QUICK_KEY_DISPLAY_DISPLAY_DURATION,
+                        last_pressed_at: now,
+                        press_count: 1,
+                        pushed_at: None,
+                        push_offset_rows: 0.0,
+                    });
+            }
         }
 
         runtime.quick_key_display_spam_heat =
@@ -8174,6 +8289,12 @@ mod windows_overlay {
         let effective_key_name = exact_modifier.unwrap_or(key_name);
 
         if is_key_down {
+            if !quick_key_display_is_wheel_key_name(effective_key_name)
+                && quick_key_display_repeat_for_key_name(effective_key_name)
+            {
+                return;
+            }
+
             let combo_info = if mascot_active && exact_modifier.is_some() {
                 Some((
                     effective_key_name.to_owned(),
@@ -8213,6 +8334,9 @@ mod windows_overlay {
             send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(
                 QuickKeyDisplayUpdate::Release { identity },
             ));
+            if !mascot_active {
+                quick_key_display_restore_combo_after_release(effective_key_name);
+            }
         }
     }
 
@@ -23702,8 +23826,10 @@ mod windows_overlay {
                     &step.key,
                     Some(&step.if_variable_name),
                     step.vision_move_axis_lock,
-                    step.get_x(),
-                    step.get_y(),
+                    step.vision_move_offset_x,
+                    step.vision_move_offset_y,
+                    step.vision_move_passes,
+                    step.vision_move_delay_ms,
                 );
             }
 
@@ -23722,8 +23848,10 @@ mod windows_overlay {
                         Some(&step.vision_pos_var_y),
                         Some(&step.vision_found_var),
                         step.vision_move_axis_lock,
-                        step.get_x(),
-                        step.get_y(),
+                        step.vision_move_offset_x,
+                        step.vision_move_offset_y,
+                        step.vision_move_passes,
+                        step.vision_move_delay_ms,
                     ) {
                         Ok(outcome) => outcome,
                         Err(error) => {
@@ -24443,14 +24571,15 @@ mod windows_overlay {
                 MacroAction::PlaySoundPreset => {
                     let _ = play_sound_preset(&step.key);
                 }
-
-                MacroAction::StartVisionSearch => {
+                 MacroAction::StartVisionSearch => {
                     let _ = start_vision_following(
                         &step.key,
                         Some(&step.if_variable_name),
                         step.vision_move_axis_lock,
-                        step.get_x(),
-                        step.get_y(),
+                        step.vision_move_offset_x,
+                        step.vision_move_offset_y,
+                        step.vision_move_passes,
+                        step.vision_move_delay_ms,
                     );
                 }
 
@@ -24476,8 +24605,10 @@ mod windows_overlay {
                             Some(&step.vision_pos_var_y),
                             Some(&step.vision_found_var),
                             step.vision_move_axis_lock,
-                            step.get_x(),
-                            step.get_y(),
+                            step.vision_move_offset_x,
+                            step.vision_move_offset_y,
+                            step.vision_move_passes,
+                            step.vision_move_delay_ms,
                         ) {
                             Ok(outcome) => outcome,
                             Err(error) => {
@@ -25171,8 +25302,10 @@ mod windows_overlay {
                         &step.key,
                         Some(&step.if_variable_name),
                         step.vision_move_axis_lock,
-                        step.get_x(),
-                        step.get_y(),
+                        step.vision_move_offset_x,
+                        step.vision_move_offset_y,
+                        step.vision_move_passes,
+                        step.vision_move_delay_ms,
                     );
                 }
 
@@ -25191,8 +25324,10 @@ mod windows_overlay {
                             Some(&step.vision_pos_var_y),
                             Some(&step.vision_found_var),
                             step.vision_move_axis_lock,
-                            step.get_x(),
-                            step.get_y(),
+                            step.vision_move_offset_x,
+                            step.vision_move_offset_y,
+                            step.vision_move_passes,
+                            step.vision_move_delay_ms,
                         ) {
                             Ok(outcome) => outcome,
                             Err(error) => {
@@ -25890,7 +26025,9 @@ mod windows_overlay {
                             None,
                             None,
                             crate::model::VisionMoveAxisLock::None,
-                            0,
+                            x,
+                            y,
+                            1,
                             0,
                         ) {
                             return outcome.matched;
