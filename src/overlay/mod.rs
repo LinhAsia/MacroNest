@@ -2554,6 +2554,7 @@ mod windows_overlay {
         Press {
             text: String,
             identity: String,
+            source_key: String,
             combo_keys: Vec<String>,
             lane: QuickKeyDisplayLane,
             held: bool,
@@ -2573,6 +2574,7 @@ mod windows_overlay {
     struct QuickKeyDisplayEntry {
         text: String,
         identity: String,
+        source_key: String,
         combo_keys: Vec<String>,
         lane: QuickKeyDisplayLane,
         row: usize,
@@ -6955,28 +6957,18 @@ mod windows_overlay {
     }
 
     fn quick_key_display_refresh_entry_from_held_keys(entry: &mut QuickKeyDisplayEntry) -> bool {
-        let hook_state = HOOK_STATE.lock();
-        let retained_combo_keys = quick_key_display_normalized_combo_keys(
-            entry
-                .combo_keys
-                .iter()
-                .filter(|key| quick_key_display_combo_key_is_held(&hook_state, key))
-                .cloned()
-                .collect(),
-        );
-        drop(hook_state);
-        let Some(primary_key) = quick_key_display_primary_key_name(&retained_combo_keys) else {
-            return false;
-        };
-        let Some(identity) =
-            quick_key_display_identity_for_combo_keys(&primary_key, &retained_combo_keys)
+        let Some((text, combo_keys)) =
+            quick_key_display_combo_snapshot_for_key_name(&entry.source_key)
         else {
             return false;
         };
+        let Some(identity) = quick_key_display_identity_for_key_name(&entry.source_key) else {
+            return false;
+        };
         entry.identity = identity;
-        entry.combo_keys = retained_combo_keys;
-        entry.text = quick_key_display_text_for_combo_keys(&entry.combo_keys);
-        entry.lane = quick_key_display_lane_for_combo_keys(&entry.combo_keys);
+        entry.combo_keys = combo_keys;
+        entry.text = text;
+        entry.lane = quick_key_display_lane_for_key_name(&entry.source_key);
         entry.held = true;
         entry.press_count = 1;
         entry.released_at = None;
@@ -6985,8 +6977,18 @@ mod windows_overlay {
     }
 
     fn quick_key_display_identity_for_key_name(key_name: &str) -> Option<String> {
-        let (_, combo_keys) = quick_key_display_combo_snapshot_for_key_name(key_name)?;
-        quick_key_display_identity_for_combo_keys(key_name, &combo_keys)
+        let trimmed = key_name.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let lane = if quick_key_display_is_wheel_key_name(trimmed) {
+            "wheel"
+        } else if quick_key_display_is_mouse_key_name(trimmed) {
+            "mouse"
+        } else {
+            "keyboard"
+        };
+        Some(format!("{lane}:{}", trimmed.to_ascii_lowercase()))
     }
 
     fn quick_key_display_combo_snapshot_for_key_name(
@@ -7083,10 +7085,7 @@ mod windows_overlay {
 
     fn quick_key_display_combo_still_held(entry: &QuickKeyDisplayEntry) -> bool {
         let hook_state = HOOK_STATE.lock();
-        entry
-            .combo_keys
-            .iter()
-            .all(|key_name| quick_key_display_combo_key_is_held(&hook_state, key_name))
+        quick_key_display_combo_key_is_held(&hook_state, &entry.source_key)
     }
 
     fn quick_key_display_reconcile_held_entries(runtime: &mut Runtime) {
@@ -7107,50 +7106,6 @@ mod windows_overlay {
     fn quick_key_display_repeat_for_key_name(key_name: &str) -> bool {
         let hook_state = HOOK_STATE.lock();
         quick_key_display_combo_key_is_held(&hook_state, key_name)
-    }
-
-    fn quick_key_display_restore_combo_after_release(key_name: &str) {
-        if quick_key_display_is_wheel_key_name(key_name) {
-            return;
-        }
-
-        let (ctrl, alt, shift, win) = quick_key_display_modifier_flags();
-        let mut combo_keys = Vec::new();
-        if ctrl && !key_name.eq_ignore_ascii_case("Ctrl") && !key_name.eq_ignore_ascii_case("Control")
-        {
-            combo_keys.push("Ctrl".to_owned());
-        }
-        if alt && !key_name.eq_ignore_ascii_case("Alt") {
-            combo_keys.push("Alt".to_owned());
-        }
-        if shift && !key_name.eq_ignore_ascii_case("Shift") {
-            combo_keys.push("Shift".to_owned());
-        }
-        if win && !key_name.eq_ignore_ascii_case("Win") && !key_name.eq_ignore_ascii_case("Meta") {
-            combo_keys.push("Win".to_owned());
-        }
-        let combo_keys = quick_key_display_normalized_combo_keys(combo_keys);
-        if combo_keys.is_empty() {
-            return;
-        }
-
-        let labels = combo_keys
-            .iter()
-            .map(|key| quick_key_display_label(key))
-            .collect::<Vec<_>>();
-        if let Some(identity) =
-            quick_key_display_identity_for_combo_keys(&combo_keys[0], &combo_keys)
-        {
-            send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(
-                QuickKeyDisplayUpdate::Press {
-                    text: labels.join(" + "),
-                    identity,
-                    combo_keys,
-                    lane: QuickKeyDisplayLane::Keyboard,
-                    held: true,
-                },
-            ));
-        }
     }
 
     fn quick_key_display_ease_out_cubic(t: f32) -> f32 {
@@ -7360,6 +7315,7 @@ mod windows_overlay {
         runtime: &mut Runtime,
         text: String,
         identity: String,
+        source_key: String,
         combo_keys: Vec<String>,
         lane: QuickKeyDisplayLane,
         held: bool,
@@ -7380,6 +7336,7 @@ mod windows_overlay {
                 let entry = &mut runtime.quick_key_display_entries[idx];
                 entry.press_count += 1;
                 entry.text = text.clone();
+                entry.source_key = source_key.clone();
                 entry.combo_keys = combo_keys.clone();
                 entry.lane = lane;
                 entry.held = held;
@@ -7393,73 +7350,34 @@ mod windows_overlay {
 
         if !consecutive {
             runtime.quick_key_display_entries.retain(|e| e.identity != identity);
-
-            let upgrade_idx = if held && combo_keys.iter().any(|key| hotkey::is_modifier_key_name(key))
-            {
-                runtime
-                    .quick_key_display_entries
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, entry)| {
-                        entry.held
-                            && entry.lane == lane
-                            && entry
-                                .combo_keys
-                                .iter()
-                                .all(|key| hotkey::is_modifier_key_name(key))
-                            && entry.combo_keys.iter().all(|entry_key| {
-                                combo_keys
-                                    .iter()
-                                    .any(|combo_key| combo_key.eq_ignore_ascii_case(entry_key))
-                            })
-                    })
-                    .max_by_key(|(_, entry)| entry.last_pressed_at)
-                    .map(|(idx, _)| idx)
-            } else {
-                None
-            };
-
-            if let Some(idx) = upgrade_idx {
-                let entry = &mut runtime.quick_key_display_entries[idx];
-                entry.text = text;
-                entry.identity = identity;
-                entry.combo_keys = combo_keys;
-                entry.lane = lane;
-                entry.held = held;
-                entry.shown_at = now;
-                entry.released_at = None;
-                entry.hide_at = now + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
-                entry.last_pressed_at = now;
-                entry.press_count = 1;
-            } else {
-                if runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal {
-                    for entry in &mut runtime.quick_key_display_entries {
-                        entry.pushed_at = Some(now);
-                        entry.push_offset_rows = 1.0;
-                    }
+            if runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal {
+                for entry in &mut runtime.quick_key_display_entries {
+                    entry.pushed_at = Some(now);
+                    entry.push_offset_rows = 1.0;
                 }
-
-                runtime
-                    .quick_key_display_entries
-                    .push(QuickKeyDisplayEntry {
-                        text,
-                        identity,
-                        combo_keys,
-                        lane,
-                        row: 0,
-                        slot: 0,
-                        x_offset: 0,
-                        held,
-                        first_shown_at: now,
-                        shown_at: now,
-                        released_at: None,
-                        hide_at: now + QUICK_KEY_DISPLAY_DISPLAY_DURATION,
-                        last_pressed_at: now,
-                        press_count: 1,
-                        pushed_at: None,
-                        push_offset_rows: 0.0,
-                    });
             }
+
+            runtime
+                .quick_key_display_entries
+                .push(QuickKeyDisplayEntry {
+                    text,
+                    identity,
+                    source_key,
+                    combo_keys,
+                    lane,
+                    row: 0,
+                    slot: 0,
+                    x_offset: 0,
+                    held,
+                    first_shown_at: now,
+                    shown_at: now,
+                    released_at: None,
+                    hide_at: now + QUICK_KEY_DISPLAY_DISPLAY_DURATION,
+                    last_pressed_at: now,
+                    press_count: 1,
+                    pushed_at: None,
+                    push_offset_rows: 0.0,
+                });
         }
 
         runtime.quick_key_display_spam_heat =
@@ -7473,10 +7391,6 @@ mod windows_overlay {
             .iter_mut()
             .find(|entry| entry.identity == identity)
         {
-            if quick_key_display_refresh_entry_from_held_keys(entry) {
-                entry.last_pressed_at = now;
-                return;
-            }
             entry.held = false;
             if entry.released_at.is_none() {
                 entry.released_at = Some(now);
@@ -8409,6 +8323,7 @@ mod windows_overlay {
                     QuickKeyDisplayUpdate::Press {
                         text,
                         identity,
+                        source_key: effective_key_name.to_owned(),
                         combo_keys,
                         lane: quick_key_display_lane_for_key_name(effective_key_name),
                         held: !quick_key_display_is_wheel_key_name(effective_key_name),
@@ -8428,9 +8343,6 @@ mod windows_overlay {
             send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(
                 QuickKeyDisplayUpdate::Release { identity },
             ));
-            if !mascot_active {
-                quick_key_display_restore_combo_after_release(effective_key_name);
-            }
         }
     }
 
@@ -9345,6 +9257,7 @@ mod windows_overlay {
                         QuickKeyDisplayUpdate::Press {
                             text,
                             identity,
+                            source_key,
                             combo_keys,
                             lane,
                             held,
@@ -9355,6 +9268,7 @@ mod windows_overlay {
                                     runtime,
                                     trimmed.to_owned(),
                                     identity,
+                                    source_key,
                                     combo_keys,
                                     lane,
                                     held,
