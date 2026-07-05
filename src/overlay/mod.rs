@@ -2772,6 +2772,7 @@ mod windows_overlay {
         locked_mouse_masks: Vec<MouseMoveLockMask>,
         run_token: u64,
         completed: bool,
+        release_requested: bool,
     }
 
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -5798,7 +5799,7 @@ mod windows_overlay {
                 .collect::<Vec<_>>()
         };
         for preset_id in stale_ids {
-            deactivate_hold_macro(preset_id);
+            request_hold_macro_stop(preset_id);
         }
     }
 
@@ -6375,7 +6376,7 @@ mod windows_overlay {
         let had_hold_matches = !preset_ids.is_empty();
         if had_hold_matches {
             for preset_id in preset_ids {
-                deactivate_hold_macro(preset_id);
+                request_hold_macro_stop(preset_id);
             }
         }
 
@@ -23095,6 +23096,7 @@ mod windows_overlay {
                     locked_mouse_masks: Vec::new(),
                     run_token,
                     completed: false,
+                    release_requested: false,
                 },
             );
             run_token
@@ -23112,26 +23114,11 @@ mod windows_overlay {
                 match_duplicate_window_titles,
                 false,
             );
-            if matches!(flow, MacroRunFlow::Continue) {
-                let mut hook_state = HOOK_STATE.lock();
-                if let Some(active) = hook_state.active_hold_macros.get_mut(&preset.id)
-                    && active.run_token == run_token
-                {
-                    active.completed = true;
-                }
-            }
+            finish_active_hold_run(preset.id, run_token, flow);
         });
     }
 
-    fn deactivate_hold_macro(preset_id: u32) {
-        STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
-        let active = {
-            let mut hook_state = HOOK_STATE.lock();
-            let Some(active) = hook_state.active_hold_macros.remove(&preset_id) else {
-                return;
-            };
-            active
-        };
+    fn cleanup_removed_hold_macro(preset_id: u32, active: ActiveHoldMacro) {
         let ActiveHoldMacro {
             trigger: _,
             release_steps,
@@ -23141,6 +23128,7 @@ mod windows_overlay {
             locked_mouse_masks,
             run_token: _,
             completed,
+            release_requested: _,
         } = active;
         for step in release_steps {
             let _ = send_key_event(&step);
@@ -23164,6 +23152,63 @@ mod windows_overlay {
         hide_toolbox_for_owner(preset_id);
         HOOK_STATE.lock().stop_ignore_keys.remove(&preset_id);
         FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
+    }
+
+    fn finish_active_hold_run(preset_id: u32, run_token: u64, flow: MacroRunFlow) {
+        let active = {
+            let mut hook_state = HOOK_STATE.lock();
+            let Some(active) = hook_state.active_hold_macros.get(&preset_id) else {
+                return;
+            };
+            if active.run_token != run_token {
+                return;
+            }
+            let release_requested = active.release_requested;
+            if matches!(flow, MacroRunFlow::Continue) && !release_requested {
+                if let Some(active) = hook_state.active_hold_macros.get_mut(&preset_id) {
+                    active.completed = true;
+                }
+                return;
+            }
+            if !release_requested {
+                return;
+            }
+            hook_state.active_hold_macros.remove(&preset_id)
+        };
+        if let Some(active) = active {
+            cleanup_removed_hold_macro(preset_id, active);
+        }
+    }
+
+    fn request_hold_macro_stop(preset_id: u32) {
+        STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
+        let deactivate_now = {
+            let mut hook_state = HOOK_STATE.lock();
+            let Some(active) = hook_state.active_hold_macros.get_mut(&preset_id) else {
+                return;
+            };
+            if active.completed {
+                true
+            } else {
+                active.release_requested = true;
+                false
+            }
+        };
+        if deactivate_now {
+            deactivate_hold_macro(preset_id);
+        }
+    }
+
+    fn deactivate_hold_macro(preset_id: u32) {
+        STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
+        let active = {
+            let mut hook_state = HOOK_STATE.lock();
+            let Some(active) = hook_state.active_hold_macros.remove(&preset_id) else {
+                return;
+            };
+            active
+        };
+        cleanup_removed_hold_macro(preset_id, active);
     }
 
     fn cleanup_press_macro_locks(
@@ -24092,6 +24137,12 @@ mod windows_overlay {
             .flat_map(|group| group.presets.iter())
             .find(|preset| preset.id == preset_id)
             .is_some_and(|preset| preset.stop_on_retrigger_immediate)
+    }
+
+    fn macro_force_stop_requested(preset_id: u32) -> bool {
+        FORCE_STOP_REQUESTED_MACRO_PRESETS
+            .lock()
+            .contains(&preset_id)
     }
 
     fn mouse_path_playback_should_stop(
@@ -25913,6 +25964,7 @@ mod windows_overlay {
             match_duplicate_window_titles,
             bypass_enabled,
             &mut pending_macro_preset_changes,
+            false,
         )
     }
 
@@ -25927,6 +25979,7 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         bypass_enabled: bool,
         pending_macro_preset_changes: &mut HashMap<u32, bool>,
+        defer_stop_until_loop_end: bool,
     ) -> MacroRunFlow {
         let mut index = 0usize;
         'outer_hold: while index < steps.len() {
@@ -25948,7 +26001,10 @@ mod windows_overlay {
                 return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
-            if macro_stop_requested(preset_id, stop_immediately_on_retrigger) {
+            if macro_force_stop_requested(preset_id)
+                || (!defer_stop_until_loop_end
+                    && macro_stop_requested(preset_id, stop_immediately_on_retrigger))
+            {
                 return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
@@ -25980,6 +26036,7 @@ mod windows_overlay {
                 extra_target_window_titles,
                 match_duplicate_window_titles,
                 bypass_enabled,
+                defer_stop_until_loop_end,
             ) {
                 return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
@@ -25995,6 +26052,8 @@ mod windows_overlay {
                     let loop_body = &steps[index + 1..loop_end];
                     let loop_body_indices = &step_indices[index + 1..loop_end];
                     let loop_end_delay_ms = steps[loop_end].get_delay_ms();
+                    let defer_stop_for_body =
+                        defer_stop_until_loop_end || step.loop_finish_iteration_on_stop;
                     if is_infinite_loop_marker(&step.key) {
                         loop {
                             match execute_hold_macro_sequence_with_pending(
@@ -26008,6 +26067,7 @@ mod windows_overlay {
                                 match_duplicate_window_titles,
                                 bypass_enabled,
                                 pending_macro_preset_changes,
+                                defer_stop_for_body,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => {
@@ -26032,6 +26092,15 @@ mod windows_overlay {
                                 }
                             }
 
+                            if defer_stop_for_body
+                                && macro_stop_requested(preset_id, stop_immediately_on_retrigger)
+                            {
+                                return finish_macro_run(
+                                    MacroRunFlow::StopExecution,
+                                    pending_macro_preset_changes,
+                                );
+                            }
+
                             if loop_end_delay_ms > 0
                                 && sleep_for_hold_delay(
                                     preset_id,
@@ -26042,6 +26111,7 @@ mod windows_overlay {
                                     extra_target_window_titles,
                                     match_duplicate_window_titles,
                                     bypass_enabled,
+                                    defer_stop_until_loop_end,
                                 )
                             {
                                 return finish_macro_run(
@@ -26065,6 +26135,7 @@ mod windows_overlay {
                                 match_duplicate_window_titles,
                                 bypass_enabled,
                                 pending_macro_preset_changes,
+                                defer_stop_for_body,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => {
@@ -26089,6 +26160,15 @@ mod windows_overlay {
                                 }
                             }
 
+                            if defer_stop_for_body
+                                && macro_stop_requested(preset_id, stop_immediately_on_retrigger)
+                            {
+                                return finish_macro_run(
+                                    MacroRunFlow::StopExecution,
+                                    pending_macro_preset_changes,
+                                );
+                            }
+
                             if loop_end_delay_ms > 0
                                 && sleep_for_hold_delay(
                                     preset_id,
@@ -26099,6 +26179,7 @@ mod windows_overlay {
                                     extra_target_window_titles,
                                     match_duplicate_window_titles,
                                     bypass_enabled,
+                                    defer_stop_until_loop_end,
                                 )
                             {
                                 return finish_macro_run(
@@ -26579,6 +26660,7 @@ mod windows_overlay {
         extra_target_window_titles: &[String],
         match_duplicate_window_titles: bool,
         bypass_enabled: bool,
+        defer_stop_until_loop_end: bool,
     ) -> bool {
         if delay_ms == 0 {
             return !macro_runtime_target_matches(
@@ -26587,7 +26669,9 @@ mod windows_overlay {
                 match_duplicate_window_titles,
             ) || (!bypass_enabled && !is_macro_preset_enabled(preset_id))
                 || !current_hold_run_matches(preset_id, run_token)
-                || macro_stop_requested(preset_id, stop_immediately_on_retrigger);
+                || macro_force_stop_requested(preset_id)
+                || (!defer_stop_until_loop_end
+                    && macro_stop_requested(preset_id, stop_immediately_on_retrigger));
         }
 
         let mut remaining_ms = delay_ms;
@@ -26616,7 +26700,10 @@ mod windows_overlay {
                 }
             }
 
-            if macro_stop_requested(preset_id, stop_immediately_on_retrigger) {
+            if macro_force_stop_requested(preset_id)
+                || (!defer_stop_until_loop_end
+                    && macro_stop_requested(preset_id, stop_immediately_on_retrigger))
+            {
                 return true;
             }
 
@@ -26631,7 +26718,9 @@ mod windows_overlay {
             match_duplicate_window_titles,
         ) || (!bypass_enabled && !is_macro_preset_enabled(preset_id))
             || !current_hold_run_matches(preset_id, run_token)
-            || macro_stop_requested(preset_id, stop_immediately_on_retrigger)
+            || macro_force_stop_requested(preset_id)
+            || (!defer_stop_until_loop_end
+                && macro_stop_requested(preset_id, stop_immediately_on_retrigger))
     }
 
     fn sleep_for_macro_delay(
@@ -28304,6 +28393,91 @@ mod windows_overlay {
             let val = RUNTIME_VARIABLES.lock().get("count").copied();
             assert_eq!(val, Some(1.0));
 
+            RUNTIME_VARIABLES.lock().clear();
+        }
+
+        #[test]
+        fn hold_loop_stop_can_finish_current_iteration_when_requested() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let preset_id = 91;
+            let run_token = 7;
+            let steps = vec![MacroStep {
+                action: MacroAction::SetVariable,
+                if_variable_name: "count".to_string(),
+                set_variable_source: crate::model::SetVariableSource::Expression,
+                key: "{count + 1}".to_string(),
+                ..Default::default()
+            }];
+            let step_indices = vec![0];
+            let install_active = || {
+                let mut hook_state = HOOK_STATE.lock();
+                hook_state.active_hold_macros.insert(
+                    preset_id,
+                    ActiveHoldMacro {
+                        trigger: HotkeyBinding::default(),
+                        release_steps: Vec::new(),
+                        hold_stop_step: None,
+                        image_search_preset_ids: Vec::new(),
+                        locked_keys: Vec::new(),
+                        locked_mouse_masks: Vec::new(),
+                        run_token,
+                        completed: false,
+                        release_requested: true,
+                    },
+                );
+            };
+
+            STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
+            install_active();
+            RUNTIME_VARIABLES.lock().clear();
+            RUNTIME_VARIABLES
+                .lock()
+                .insert("count".to_string(), 0.0);
+            let mut pending = HashMap::new();
+            let continued = execute_hold_macro_sequence_with_pending(
+                preset_id,
+                &steps,
+                &step_indices,
+                false,
+                run_token,
+                None,
+                &[],
+                false,
+                true,
+                &mut pending,
+                true,
+            );
+            assert_eq!(continued, MacroRunFlow::Continue);
+            assert_eq!(RUNTIME_VARIABLES.lock().get("count").copied(), Some(1.0));
+
+            HOOK_STATE.lock().active_hold_macros.remove(&preset_id);
+            STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
+            RUNTIME_VARIABLES.lock().clear();
+
+            STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
+            install_active();
+            RUNTIME_VARIABLES
+                .lock()
+                .insert("count".to_string(), 0.0);
+            let mut pending = HashMap::new();
+            let stopped = execute_hold_macro_sequence_with_pending(
+                preset_id,
+                &steps,
+                &step_indices,
+                false,
+                run_token,
+                None,
+                &[],
+                false,
+                true,
+                &mut pending,
+                false,
+            );
+            assert_eq!(stopped, MacroRunFlow::StopExecution);
+            assert_eq!(RUNTIME_VARIABLES.lock().get("count").copied(), Some(0.0));
+
+            HOOK_STATE.lock().active_hold_macros.remove(&preset_id);
+            STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
             RUNTIME_VARIABLES.lock().clear();
         }
 

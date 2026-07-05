@@ -7645,6 +7645,19 @@ if supports_move_mouse || show_detection_tuning {
                                                               Self::render_variable_suggestions(ui, &response, &mut step.key, &timer_names, language);
                                                           });
                                                       }
+                                                      if preset.trigger_mode == MacroTriggerMode::Hold {
+                                                          let response = ui.checkbox(
+                                                              &mut step.loop_finish_iteration_on_stop,
+                                                              Self::tr_lang(
+                                                                  language,
+                                                                  "Finish current iteration before stop",
+                                                                  "Finish current iteration before stop",
+                                                              ),
+                                                          );
+                                                          if response.changed() {
+                                                              live_sync = true;
+                                                          }
+                                                      }
                                                 } else if step.action == MacroAction::StopIfKeyPressed {
                                                      ui.scope(|ui| {
                                                          ui.spacing_mut().item_spacing.x = 2.0;
@@ -9919,6 +9932,19 @@ if supports_move_mouse || show_detection_tuning {
                                                               live_sync |= response.changed();
                                                               Self::render_variable_suggestions(ui, &response, &mut step.key, &timer_names, language);
                                                           });
+                                                      }
+                                                      if preset.trigger_mode == MacroTriggerMode::Hold {
+                                                          let response = ui.checkbox(
+                                                              &mut step.loop_finish_iteration_on_stop,
+                                                              Self::tr_lang(
+                                                                  language,
+                                                                  "Finish current iteration before stop",
+                                                                  "Finish current iteration before stop",
+                                                              ),
+                                                          );
+                                                          if response.changed() {
+                                                              live_sync = true;
+                                                          }
                                                       }
                                                 } else if step.action == MacroAction::StopIfKeyPressed {
                                                      ui.scope(|ui| {
@@ -13211,6 +13237,19 @@ if supports_move_mouse || show_detection_tuning {
                                                               live_sync |= response.changed();
                                                               Self::render_variable_suggestions(ui, &response, &mut step.key, &timer_names, language);
                                                           });
+                                                      }
+                                                      if preset.trigger_mode == MacroTriggerMode::Hold {
+                                                          let response = ui.checkbox(
+                                                              &mut step.loop_finish_iteration_on_stop,
+                                                              Self::tr_lang(
+                                                                  language,
+                                                                  "Finish current iteration before stop",
+                                                                  "Finish current iteration before stop",
+                                                              ),
+                                                          );
+                                                          if response.changed() {
+                                                              live_sync = true;
+                                                          }
                                                       }
                                                 } else if step.action == MacroAction::StopIfKeyPressed {
                                                      ui.scope(|ui| {

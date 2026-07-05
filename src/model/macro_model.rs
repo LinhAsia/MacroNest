@@ -298,6 +298,8 @@ pub struct MacroStep {
     pub lock_mouse_move: bool,
     #[serde(default = "default_false")]
     pub toggle_enabled_on_run: bool,
+    #[serde(default = "default_false")]
+    pub loop_finish_iteration_on_stop: bool,
     #[serde(default)]
     pub if_variable_name: String,
     #[serde(default = "default_if_operator")]
@@ -429,6 +431,7 @@ impl Default for MacroStep {
             lock_mouse_x2: true,
             lock_mouse_move: true,
             toggle_enabled_on_run: false,
+            loop_finish_iteration_on_stop: false,
             if_variable_name: String::new(),
             if_operator: "==".to_string(),
             manual_mouse_sensitivity: false,
