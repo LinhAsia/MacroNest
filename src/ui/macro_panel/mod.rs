@@ -268,7 +268,7 @@ impl CrosshairApp {
             .ctx()
             .data(|data| data.get_temp::<String>(id))
             .unwrap_or_else(|| value.to_string());
-        let response = ui.add_sized([72.0, 22.0], egui::TextEdit::singleline(&mut draft));
+        let response = ui.add_sized([56.0, 22.0], egui::TextEdit::singleline(&mut draft));
         let mut changed = false;
         if response.changed() {
             if let Ok(parsed) = draft.trim().parse::<i32>() {
@@ -298,7 +298,7 @@ impl CrosshairApp {
             .ctx()
             .data(|data| data.get_temp::<String>(id))
             .unwrap_or_else(|| value.to_string());
-        let response = ui.add_sized([72.0, 22.0], egui::TextEdit::singleline(&mut draft));
+        let response = ui.add_sized([56.0, 22.0], egui::TextEdit::singleline(&mut draft));
         let mut changed = false;
         if response.changed() {
             if let Ok(parsed) = draft.trim().parse::<u64>() {
@@ -366,11 +366,11 @@ impl CrosshairApp {
             .selected_text(selected_text)
             .width(96.0)
             .show_ui(ui, |ui| {
-                ui.set_min_width(240.0);
+                ui.set_min_width(176.0);
                 if show_move_fields {
                     egui::Grid::new(ui.id().with("vision-runtime-move-grid"))
                         .num_columns(2)
-                        .spacing([10.0, 8.0])
+                        .spacing([6.0, 6.0])
                         .show(ui, |ui| {
                             ui.label(Self::tr_lang(language, "Offset X", "Offset X"));
                             *live_sync |= Self::render_temp_i32_input(
@@ -421,7 +421,7 @@ impl CrosshairApp {
                 if show_detection_tuning {
                     egui::Grid::new(ui.id().with("vision-runtime-detect-grid"))
                         .num_columns(2)
-                        .spacing([10.0, 8.0])
+                        .spacing([6.0, 6.0])
                         .show(ui, |ui| {
                             ui.label(Self::tr_lang(language, "Tolerance", "Tolerance"));
                             *live_sync |= Self::render_temp_u8_input(

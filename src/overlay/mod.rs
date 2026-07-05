@@ -4447,8 +4447,6 @@ mod windows_overlay {
                 if !is_ui_in_foreground()
                     && let Some(key_name) = key_name.as_ref()
                 {
-                    update_held_key(info.vkCode, is_key_down, is_key_up);
-                    update_modifier_state(info.vkCode, is_key_down);
                     update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
                 }
                 if let Some(key_name) = key_name.clone() {
@@ -7087,7 +7085,12 @@ mod windows_overlay {
 
     fn quick_key_display_combo_still_held(entry: &QuickKeyDisplayEntry) -> bool {
         let hook_state = HOOK_STATE.lock();
-        quick_key_display_combo_key_is_held(&hook_state, &entry.source_key)
+        if quick_key_display_combo_key_is_held(&hook_state, &entry.source_key) {
+            return true;
+        }
+        entry.released_at.is_none()
+            && Instant::now().saturating_duration_since(entry.last_pressed_at)
+                < QUICK_KEY_DISPLAY_HOLD_STATE_GRACE_DURATION
     }
 
     fn quick_key_display_reconcile_held_entries(runtime: &mut Runtime) {
@@ -14498,6 +14501,7 @@ mod windows_overlay {
     const QUICK_KEY_DISPLAY_PUSH_DURATION: Duration = Duration::from_millis(180);
     const QUICK_KEY_DISPLAY_HOLD_MIN_DURATION: Duration = Duration::from_millis(400);
     const QUICK_KEY_DISPLAY_HOLD_TRANSITION_DURATION: Duration = Duration::from_millis(80);
+    const QUICK_KEY_DISPLAY_HOLD_STATE_GRACE_DURATION: Duration = Duration::from_millis(120);
 
     unsafe fn normalize_native_focus_highlight_target(hwnd: HWND) -> HWND {
         if hwnd.0.is_null() {
