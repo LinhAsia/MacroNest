@@ -27826,6 +27826,39 @@ mod windows_overlay {
         }
 
         #[test]
+        fn test_macro_mouse_move_updates_lock_anchor() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let previous = {
+                let mut hook_state = HOOK_STATE.lock();
+                let previous = (
+                    hook_state.mouse_move_locks,
+                    hook_state.mouse_move_lock_anchor,
+                );
+                hook_state.mouse_move_locks = MouseMoveLockCounts {
+                    left: 1,
+                    right: 1,
+                    up: 1,
+                    down: 1,
+                };
+                hook_state.mouse_move_lock_anchor = Some(POINT { x: 10, y: 20 });
+                previous
+            };
+
+            update_mouse_lock_anchor_after_macro_move(POINT { x: 300, y: 400 });
+
+            let hook_state = HOOK_STATE.lock();
+            assert_eq!(
+                hook_state.mouse_move_lock_anchor,
+                Some(POINT { x: 300, y: 400 })
+            );
+            drop(hook_state);
+
+            let mut hook_state = HOOK_STATE.lock();
+            hook_state.mouse_move_locks = previous.0;
+            hook_state.mouse_move_lock_anchor = previous.1;
+        }
+
+        #[test]
         fn test_collect_macro_release_steps_only_releases_opted_in_keydowns() {
             let _guard = TEST_MUTEX.lock().unwrap();
             let steps = vec![
@@ -28805,6 +28838,13 @@ mod windows_overlay {
         }
     }
 
+    fn update_mouse_lock_anchor_after_macro_move(point: POINT) {
+        let mut hook_state = HOOK_STATE.lock();
+        if hook_state.mouse_move_locks.any() {
+            hook_state.mouse_move_lock_anchor = Some(point);
+        }
+    }
+
     fn collect_macro_release_steps(steps: &[MacroStep]) -> Vec<MacroStep> {
         let mut held_keys = HashSet::new();
         let mut held_mouse = HashSet::new();
@@ -29643,6 +29683,7 @@ mod windows_overlay {
     }
 
     fn send_mouse_move_absolute(x: i32, y: i32) -> Result<()> {
+        let target_point = POINT { x, y };
         let (use_arduino, transport, com_port) = {
             let state = HOOK_STATE.lock();
             (
@@ -29664,6 +29705,7 @@ mod windows_overlay {
             let dx = x - pos.x;
             let dy = y - pos.y;
             if send_arduino_relative_move_sequence(dx, dy).is_ok() {
+                update_mouse_lock_anchor_after_macro_move(target_point);
                 return Ok(());
             }
         }
@@ -29727,6 +29769,7 @@ mod windows_overlay {
                             destroy_fn(context);
                             if sent > 0 {
                                 set_interception_runtime_status(InterceptionRuntimeStatus::Active);
+                                update_mouse_lock_anchor_after_macro_move(target_point);
                                 return Ok(());
                             }
                         }
@@ -29762,6 +29805,7 @@ mod windows_overlay {
             let _ = SendInput(&[input], size_of::<INPUT>() as i32);
             let _ = SetCursorPos(x, y);
         }
+        update_mouse_lock_anchor_after_macro_move(target_point);
 
         Ok(())
     }
@@ -29823,6 +29867,17 @@ mod windows_overlay {
     }
 
     fn send_mouse_move_relative(dx: i32, dy: i32) -> Result<()> {
+        let target_point = {
+            let mut point = POINT::default();
+            if unsafe { GetCursorPos(&mut point) }.is_ok() {
+                Some(POINT {
+                    x: point.x + dx,
+                    y: point.y + dy,
+                })
+            } else {
+                None
+            }
+        };
         let (use_arduino, transport, com_port) = {
             let state = HOOK_STATE.lock();
             (
@@ -29838,6 +29893,9 @@ mod windows_overlay {
             };
         if arduino_ready {
             if send_arduino_relative_move_sequence(dx, dy).is_ok() {
+                if let Some(target_point) = target_point {
+                    update_mouse_lock_anchor_after_macro_move(target_point);
+                }
                 return Ok(());
             }
         }
@@ -29893,6 +29951,9 @@ mod windows_overlay {
                             destroy_fn(context);
                             if sent > 0 {
                                 set_interception_runtime_status(InterceptionRuntimeStatus::Active);
+                                if let Some(target_point) = target_point {
+                                    update_mouse_lock_anchor_after_macro_move(target_point);
+                                }
                                 return Ok(());
                             }
                         }
@@ -29925,6 +29986,9 @@ mod windows_overlay {
                 let _ = GetCursorPos(&mut point);
                 let _ = SetCursorPos(point.x + dx, point.y + dy);
             }
+        }
+        if let Some(target_point) = target_point {
+            update_mouse_lock_anchor_after_macro_move(target_point);
         }
 
         Ok(())
