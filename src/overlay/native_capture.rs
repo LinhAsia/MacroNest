@@ -1343,14 +1343,6 @@ unsafe fn draw_capture_to_dc(
     state: &CaptureState,
     dirty: Option<RECT>,
 ) -> anyhow::Result<()> {
-    if matches!(state.mode, NativeCaptureMode::PointClick { .. }) {
-        draw_point_click_capture_to_dc(hdc, state, dirty)?;
-        return Ok(());
-    }
-    if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
-        draw_region_select_capture_to_dc(hdc, state)?;
-        return Ok(());
-    }
     if matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) {
         draw_region_adjust_to_dc(hdc, state)?;
         return Ok(());

@@ -18090,8 +18090,6 @@ mod windows_overlay {
         width: i32,
         height: i32,
     ) -> Result<()> {
-        let window_x = window_x.max(0);
-        let window_y = window_y.max(0);
         let width = width.max(1);
         let height = height.max(1);
         let screen_dc = GetDC(None);
