@@ -25147,7 +25147,6 @@ mod windows_overlay {
         bypass_enabled: bool,
     ) -> MacroRunFlow {
         let mut pending_macro_preset_changes = HashMap::new();
-        let mut toggled_steps_this_run = HashSet::new();
         execute_macro_sequence_with_pending(
             preset_id,
             steps,
@@ -25160,28 +25159,7 @@ mod windows_overlay {
             match_duplicate_window_titles,
             bypass_enabled,
             &mut pending_macro_preset_changes,
-            &mut toggled_steps_this_run,
         )
-    }
-
-    fn resolve_macro_step_run_state(
-        preset_id: u32,
-        absolute_index: usize,
-        fallback_enabled: bool,
-        toggle_enabled_on_run: bool,
-        toggled_steps_this_run: &mut HashSet<usize>,
-    ) -> bool {
-        let is_enabled = is_macro_step_enabled(preset_id, absolute_index, fallback_enabled);
-        if !toggle_enabled_on_run {
-            return is_enabled;
-        }
-        if !toggled_steps_this_run.insert(absolute_index) {
-            return false;
-        }
-        if let Some(new_enabled) = toggle_macro_step_enabled(preset_id, absolute_index) {
-            return !new_enabled;
-        }
-        is_enabled
     }
 
     fn execute_macro_sequence_with_pending(
@@ -25196,7 +25174,6 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         bypass_enabled: bool,
         pending_macro_preset_changes: &mut HashMap<u32, bool>,
-        toggled_steps_this_run: &mut HashSet<usize>,
     ) -> MacroRunFlow {
         let mut index = 0usize;
         'outer: while index < steps.len() {
@@ -25223,13 +25200,13 @@ mod windows_overlay {
             if should_flush_pending_macro_preset_changes(step, pending_macro_preset_changes) {
                 let _ = flush_pending_macro_preset_enabled_changes(pending_macro_preset_changes);
             }
-            let run_step = resolve_macro_step_run_state(
-                preset_id,
-                absolute_index,
-                step.enabled,
-                step.toggle_enabled_on_run,
-                toggled_steps_this_run,
-            );
+            let is_enabled = is_macro_step_enabled(preset_id, absolute_index, step.enabled);
+            let mut run_step = is_enabled;
+            if step.toggle_enabled_on_run {
+                if let Some(new_enabled) = toggle_macro_step_enabled(preset_id, absolute_index) {
+                    run_step = !new_enabled;
+                }
+            }
 
             if !run_step {
                 index += 1;
@@ -25274,7 +25251,6 @@ mod windows_overlay {
                                 match_duplicate_window_titles,
                                 bypass_enabled,
                                 pending_macro_preset_changes,
-                                toggled_steps_this_run,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => {
@@ -25332,7 +25308,6 @@ mod windows_overlay {
                                 match_duplicate_window_titles,
                                 bypass_enabled,
                                 pending_macro_preset_changes,
-                                toggled_steps_this_run,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => {
@@ -25927,7 +25902,6 @@ mod windows_overlay {
         bypass_enabled: bool,
     ) -> MacroRunFlow {
         let mut pending_macro_preset_changes = HashMap::new();
-        let mut toggled_steps_this_run = HashSet::new();
         execute_hold_macro_sequence_with_pending(
             preset_id,
             steps,
@@ -25939,7 +25913,6 @@ mod windows_overlay {
             match_duplicate_window_titles,
             bypass_enabled,
             &mut pending_macro_preset_changes,
-            &mut toggled_steps_this_run,
         )
     }
 
@@ -25954,7 +25927,6 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         bypass_enabled: bool,
         pending_macro_preset_changes: &mut HashMap<u32, bool>,
-        toggled_steps_this_run: &mut HashSet<usize>,
     ) -> MacroRunFlow {
         let mut index = 0usize;
         'outer_hold: while index < steps.len() {
@@ -25985,13 +25957,13 @@ mod windows_overlay {
             if should_flush_pending_macro_preset_changes(step, pending_macro_preset_changes) {
                 let _ = flush_pending_macro_preset_enabled_changes(pending_macro_preset_changes);
             }
-            let run_step = resolve_macro_step_run_state(
-                preset_id,
-                absolute_index,
-                step.enabled,
-                step.toggle_enabled_on_run,
-                toggled_steps_this_run,
-            );
+            let is_enabled = is_macro_step_enabled(preset_id, absolute_index, step.enabled);
+            let mut run_step = is_enabled;
+            if step.toggle_enabled_on_run {
+                if let Some(new_enabled) = toggle_macro_step_enabled(preset_id, absolute_index) {
+                    run_step = !new_enabled;
+                }
+            }
 
             if !run_step {
                 index += 1;
@@ -26036,7 +26008,6 @@ mod windows_overlay {
                                 match_duplicate_window_titles,
                                 bypass_enabled,
                                 pending_macro_preset_changes,
-                                toggled_steps_this_run,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => {
@@ -26094,7 +26065,6 @@ mod windows_overlay {
                                 match_duplicate_window_titles,
                                 bypass_enabled,
                                 pending_macro_preset_changes,
-                                toggled_steps_this_run,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => {
@@ -28337,68 +28307,6 @@ mod windows_overlay {
             RUNTIME_VARIABLES.lock().clear();
         }
 
-        #[test]
-        fn test_toggle_enabled_on_run_only_toggles_once_per_macro_run() {
-            let _guard = TEST_MUTEX.lock().unwrap();
-            let preset_id = 77;
-            let steps = vec![
-                MacroStep {
-                    action: MacroAction::LoopStart,
-                    key: "2".to_string(),
-                    ..Default::default()
-                },
-                MacroStep {
-                    action: MacroAction::SetVariable,
-                    if_variable_name: "count".to_string(),
-                    set_variable_source: crate::model::SetVariableSource::Expression,
-                    key: "{count + 1}".to_string(),
-                    toggle_enabled_on_run: true,
-                    ..Default::default()
-                },
-                MacroStep {
-                    action: MacroAction::LoopEnd,
-                    ..Default::default()
-                },
-            ];
-            let previous_groups = {
-                let mut hook_state = HOOK_STATE.lock();
-                let previous = hook_state.macro_groups.clone();
-                let mut preset = MacroPreset::new(preset_id);
-                preset.steps = steps.clone();
-                let mut group = MacroGroup::new(1);
-                group.presets = vec![preset];
-                hook_state.macro_groups = vec![group];
-                previous
-            };
-
-            RUNTIME_VARIABLES.lock().clear();
-            RUNTIME_VARIABLES
-                .lock()
-                .insert("count".to_string(), 0.0);
-
-            let step_indices = vec![0, 1, 2];
-            let mut locked_keys = vec![];
-            let mut locked_mouse = vec![];
-            let result = execute_macro_sequence(
-                preset_id,
-                &steps,
-                &step_indices,
-                &mut locked_keys,
-                &mut locked_mouse,
-                false,
-                None,
-                &[],
-                false,
-                true,
-            );
-
-            assert_eq!(result, MacroRunFlow::Continue);
-            assert_eq!(RUNTIME_VARIABLES.lock().get("count").copied(), Some(1.0));
-            assert!(!is_macro_step_enabled(preset_id, 1, true));
-
-            RUNTIME_VARIABLES.lock().clear();
-            HOOK_STATE.lock().macro_groups = previous_groups;
-        }
     }
 
     fn is_infinite_loop_marker(value: &str) -> bool {
