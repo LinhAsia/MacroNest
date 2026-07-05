@@ -135,6 +135,10 @@ pub(crate) fn start_vision_following(
     axis_lock: VisionMoveAxisLock,
     offset_x: i32,
     offset_y: i32,
+    passes: u8,
+    delay_ms: u64,
+    tolerance: u8,
+    rate_hz: u32,
 ) -> Result<()> {
     let preset = vision_preset_by_id(spec)?;
     if image_search_following_is_active(preset.id) {
@@ -143,14 +147,20 @@ pub(crate) fn start_vision_following(
 
     let ui_tx = HOOK_STATE.lock().ui_tx.clone();
     set_image_search_following_active(preset.id, true);
-    HOOK_STATE
-        .lock()
-        .vision_following_offsets
+    let mut lock = HOOK_STATE.lock();
+    lock.vision_following_offsets
         .insert(preset.id, (offset_x, offset_y));
-    HOOK_STATE
-        .lock()
-        .vision_following_axis_locks
+    lock.vision_following_axis_locks
         .insert(preset.id, axis_lock);
+    lock.vision_following_passes
+        .insert(preset.id, passes);
+    lock.vision_following_delays
+        .insert(preset.id, delay_ms);
+    lock.vision_following_tolerances
+        .insert(preset.id, tolerance);
+    lock.vision_following_rates
+        .insert(preset.id, rate_hz.max(1));
+    drop(lock);
     let var_override = variable_override.map(|s| s.to_string());
     thread::spawn(move || run_image_search_follow_loop(preset, ui_tx, var_override));
     Ok(())
@@ -1142,7 +1152,11 @@ pub(crate) fn run_vision_once_with_options(
     axis_lock: VisionMoveAxisLock,
     step_offset_x: i32,
     step_offset_y: i32,
+    passes: u8,
+    delay_ms: u64,
+    tolerance: u8,
 ) -> Result<VisionRunOutcome> {
+    let effective_tolerance = tolerance;
     let set_found_var = |matched: bool| {
         if let Some(var_name) = found_var.filter(|s| !s.trim().is_empty()) {
             set_variable_value(var_name.trim(), if matched { 1.0 } else { 0.0 });
@@ -1180,7 +1194,7 @@ pub(crate) fn run_vision_once_with_options(
         let count = count_matching_pixels(
             &screen,
             &target_colors,
-            preset.color_tolerance,
+            effective_tolerance,
             configured_region.as_ref(),
         );
         let var_name = if let Some(over) = variable_override.filter(|s| !s.trim().is_empty()) {
@@ -1294,7 +1308,7 @@ pub(crate) fn run_vision_once_with_options(
             find_color_match_from_anchor(
                 &screen,
                 &target_colors,
-                preset.color_tolerance,
+                effective_tolerance,
                 relative_anchor_x,
                 relative_anchor_y,
                 configured_region.as_ref(),
@@ -1303,14 +1317,14 @@ pub(crate) fn run_vision_once_with_options(
             find_color_average_centroid_match(
                 &screen,
                 &target_colors,
-                preset.color_tolerance,
+                effective_tolerance,
                 configured_region.as_ref(),
             )
         } else if preset.require_connected_target_colors && target_colors.len() >= 2 {
             find_connected_color_match(
                 &screen,
                 &target_colors,
-                preset.color_tolerance,
+                effective_tolerance,
                 configured_region.as_ref(),
                 None,
             )
@@ -1318,14 +1332,14 @@ pub(crate) fn run_vision_once_with_options(
             find_dual_color_midpoint_match(
                 &screen,
                 &target_colors,
-                preset.color_tolerance,
+                effective_tolerance,
                 configured_region.as_ref(),
             )
         } else {
             find_color_match(
                 &screen,
                 &target_colors,
-                preset.color_tolerance,
+                effective_tolerance,
                 configured_region.as_ref(),
             )
         };
@@ -1340,8 +1354,8 @@ pub(crate) fn run_vision_once_with_options(
 
         let center_x = screen.screen_x + hit.x;
         let center_y = screen.screen_y + hit.y;
-        let target_x = center_x + preset.move_offset_x + step_offset_x;
-        let target_y = center_y + preset.move_offset_y + step_offset_y;
+        let target_x = center_x + step_offset_x;
+        let target_y = center_y + step_offset_y;
         let move_target =
             apply_move_axis_lock(target_x, target_y, axis_lock, current_cursor_position());
         let move_status_suffix =
@@ -1360,8 +1374,8 @@ pub(crate) fn run_vision_once_with_options(
             settle_image_search_mouse_move(
                 move_target.0,
                 move_target.1,
-                preset.non_interception_move_passes,
-                preset.non_interception_move_delay_ms,
+                passes,
+                delay_ms,
             )?;
         }
 
@@ -1375,33 +1389,33 @@ pub(crate) fn run_vision_once_with_options(
             status: if anchor.is_some() {
                 format!(
                     "Matched colors from priority point at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    preset.color_tolerance,
-                    preset.move_offset_x,
-                    preset.move_offset_y,
+                    effective_tolerance,
+                    step_offset_x,
+                    step_offset_y,
                     move_status_suffix
                 )
             } else if preset.color_scan_average_centroid {
                 format!(
                     "Matched colors centroid at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    preset.color_tolerance,
-                    preset.move_offset_x,
-                    preset.move_offset_y,
+                    effective_tolerance,
+                    step_offset_x,
+                    step_offset_y,
                     move_status_suffix
                 )
             } else if preset.require_connected_target_colors && target_colors.len() >= 2 {
                 format!(
                     "Matched connected colors at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    preset.color_tolerance,
-                    preset.move_offset_x,
-                    preset.move_offset_y,
+                    effective_tolerance,
+                    step_offset_x,
+                    step_offset_y,
                     move_status_suffix
                 )
             } else if preset.dual_color_scan_midpoint {
                 format!(
                     "Matched colors midpoint at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    preset.color_tolerance,
-                    preset.move_offset_x,
-                    preset.move_offset_y,
+                    effective_tolerance,
+                    step_offset_x,
+                    step_offset_y,
                     move_status_suffix
                 )
             } else {
@@ -1410,9 +1424,9 @@ pub(crate) fn run_vision_once_with_options(
                     hit.matched_color.r,
                     hit.matched_color.g,
                     hit.matched_color.b,
-                    preset.color_tolerance,
-                    preset.move_offset_x,
-                    preset.move_offset_y,
+                    effective_tolerance,
+                    step_offset_x,
+                    step_offset_y,
                     move_status_suffix
                 )
             },
@@ -1557,8 +1571,8 @@ pub(crate) fn run_vision_once_with_options(
     };
     let center_x = screen.screen_x + hit.x + (hit.width / 2);
     let center_y = screen.screen_y + hit.y + (hit.height / 2);
-    let target_x = center_x + preset.move_offset_x + step_offset_x;
-    let target_y = center_y + preset.move_offset_y + step_offset_y;
+    let target_x = center_x + step_offset_x;
+    let target_y = center_y + step_offset_y;
     let move_target =
         apply_move_axis_lock(target_x, target_y, axis_lock, current_cursor_position());
     let move_status_suffix =
@@ -1588,8 +1602,8 @@ pub(crate) fn run_vision_once_with_options(
         settle_image_search_mouse_move(
             move_target.0,
             move_target.1,
-            preset.non_interception_move_passes,
-            preset.non_interception_move_delay_ms,
+            passes,
+            delay_ms,
         )?;
     }
 
@@ -1604,8 +1618,8 @@ pub(crate) fn run_vision_once_with_options(
             "OpenCV matched at {target_x}, {target_y} with confidence {:.3} on {:.2}x (offset {:+}, {:+}).{}",
             hit.confidence,
             hit.scale,
-            preset.move_offset_x,
-            preset.move_offset_y,
+            step_offset_x,
+            step_offset_y,
             move_status_suffix
         ),
     })
@@ -1621,8 +1635,11 @@ pub(crate) fn run_vision_once(preset: &VisionPreset) -> Result<String> {
         None,
         None,
         VisionMoveAxisLock::None,
-        0,
-        0,
+        preset.move_offset_x,
+        preset.move_offset_y,
+        preset.non_interception_move_passes,
+        preset.non_interception_move_delay_ms,
+        preset.color_tolerance,
     )
     .map(|outcome| outcome.status)
 }
@@ -1640,26 +1657,46 @@ pub(crate) fn run_image_search_follow_loop(
     }
 
     while image_search_following_is_active(preset.id) {
-        let (offset_x, offset_y, axis_lock) = {
+        let (offset_x, offset_y, axis_lock, passes, delay_ms, tolerance, rate_hz) = {
             let state = HOOK_STATE.lock();
             (
                 state
                     .vision_following_offsets
                     .get(&preset.id)
                     .copied()
-                    .unwrap_or((0, 0))
+                    .unwrap_or((preset.move_offset_x, preset.move_offset_y))
                     .0,
                 state
                     .vision_following_offsets
                     .get(&preset.id)
                     .copied()
-                    .unwrap_or((0, 0))
+                    .unwrap_or((preset.move_offset_x, preset.move_offset_y))
                     .1,
                 state
                     .vision_following_axis_locks
                     .get(&preset.id)
                     .copied()
                     .unwrap_or(VisionMoveAxisLock::None),
+                state
+                    .vision_following_passes
+                    .get(&preset.id)
+                    .copied()
+                    .unwrap_or(preset.non_interception_move_passes),
+                state
+                    .vision_following_delays
+                    .get(&preset.id)
+                    .copied()
+                    .unwrap_or(preset.non_interception_move_delay_ms),
+                state
+                    .vision_following_tolerances
+                    .get(&preset.id)
+                    .copied()
+                    .unwrap_or(preset.color_tolerance),
+                state
+                    .vision_following_rates
+                    .get(&preset.id)
+                    .copied()
+                    .unwrap_or(preset.color_scan_rate_hz.max(1)),
             )
         };
         match run_vision_once_with_options(
@@ -1673,6 +1710,9 @@ pub(crate) fn run_image_search_follow_loop(
             axis_lock,
             offset_x,
             offset_y,
+            passes,
+            delay_ms,
+            tolerance,
         ) {
             Ok(_) => {}
 
@@ -1688,7 +1728,6 @@ pub(crate) fn run_image_search_follow_loop(
             }
         }
 
-        let rate_hz = preset.color_scan_rate_hz.max(1);
         let sleep_duration = Duration::from_nanos(1_000_000_000 / rate_hz as u64);
         thread::sleep(sleep_duration);
     }
@@ -1799,6 +1838,9 @@ pub(crate) fn trigger_vision_move_with_options(
             VisionMoveAxisLock::None,
             0,
             0,
+            preset.non_interception_move_passes,
+            preset.non_interception_move_delay_ms,
+            preset.color_tolerance,
         ) {
             Ok(outcome) => outcome,
             Err(error) => {

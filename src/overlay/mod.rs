@@ -2345,6 +2345,8 @@ mod windows_overlay {
         pub(crate) vision_following_axis_locks: HashMap<u32, crate::model::VisionMoveAxisLock>,
         pub(crate) vision_following_passes: HashMap<u32, u8>,
         pub(crate) vision_following_delays: HashMap<u32, u64>,
+        pub(crate) vision_following_tolerances: HashMap<u32, u8>,
+        pub(crate) vision_following_rates: HashMap<u32, u32>,
         vision_dir: PathBuf,
         opencv_dll_path: PathBuf,
         interception_dll_path: PathBuf,
@@ -2454,6 +2456,8 @@ mod windows_overlay {
                 vision_following_axis_locks: HashMap::new(),
                 vision_following_passes: HashMap::new(),
                 vision_following_delays: HashMap::new(),
+                vision_following_tolerances: HashMap::new(),
+                vision_following_rates: HashMap::new(),
                 vision_dir: PathBuf::new(),
                 opencv_dll_path: PathBuf::new(),
                 interception_dll_path: PathBuf::new(),
@@ -6897,6 +6901,89 @@ mod windows_overlay {
         Some(format!("{lane}:{signature}"))
     }
 
+    fn quick_key_display_primary_key_name(combo_keys: &[String]) -> Option<String> {
+        combo_keys
+            .iter()
+            .rev()
+            .find(|key| !hotkey::is_modifier_key_name(key))
+            .cloned()
+            .or_else(|| combo_keys.last().cloned())
+    }
+
+    fn quick_key_display_text_for_combo_keys(combo_keys: &[String]) -> String {
+        if combo_keys
+            .iter()
+            .any(|key| hotkey::is_modifier_key_name(key))
+        {
+            let key = quick_key_display_primary_key_name(combo_keys).unwrap_or_default();
+            let binding = HotkeyBinding {
+                ctrl: combo_keys
+                    .iter()
+                    .any(|key| key.eq_ignore_ascii_case("Ctrl") || key.eq_ignore_ascii_case("Control")),
+                alt: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Alt")),
+                shift: combo_keys
+                    .iter()
+                    .any(|key| key.eq_ignore_ascii_case("Shift")),
+                win: combo_keys
+                    .iter()
+                    .any(|key| key.eq_ignore_ascii_case("Win") || key.eq_ignore_ascii_case("Meta")),
+                key,
+                combo_keys: combo_keys.to_vec(),
+            };
+            hotkey::binding_key_names(&binding)
+                .into_iter()
+                .map(|key| quick_key_display_label(&key))
+                .collect::<Vec<_>>()
+                .join(" + ")
+        } else {
+            combo_keys
+                .last()
+                .map(|key| quick_key_display_label(key))
+                .unwrap_or_default()
+        }
+    }
+
+    fn quick_key_display_lane_for_combo_keys(combo_keys: &[String]) -> QuickKeyDisplayLane {
+        if combo_keys
+            .iter()
+            .any(|key| quick_key_display_is_mouse_key_name(key))
+        {
+            QuickKeyDisplayLane::Mouse
+        } else {
+            QuickKeyDisplayLane::Keyboard
+        }
+    }
+
+    fn quick_key_display_refresh_entry_from_held_keys(entry: &mut QuickKeyDisplayEntry) -> bool {
+        let hook_state = HOOK_STATE.lock();
+        let retained_combo_keys = quick_key_display_normalized_combo_keys(
+            entry
+                .combo_keys
+                .iter()
+                .filter(|key| quick_key_display_combo_key_is_held(&hook_state, key))
+                .cloned()
+                .collect(),
+        );
+        drop(hook_state);
+        let Some(primary_key) = quick_key_display_primary_key_name(&retained_combo_keys) else {
+            return false;
+        };
+        let Some(identity) =
+            quick_key_display_identity_for_combo_keys(&primary_key, &retained_combo_keys)
+        else {
+            return false;
+        };
+        entry.identity = identity;
+        entry.combo_keys = retained_combo_keys;
+        entry.text = quick_key_display_text_for_combo_keys(&entry.combo_keys);
+        entry.lane = quick_key_display_lane_for_combo_keys(&entry.combo_keys);
+        entry.held = true;
+        entry.press_count = 1;
+        entry.released_at = None;
+        entry.hide_at = Instant::now() + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
+        true
+    }
+
     fn quick_key_display_identity_for_key_name(key_name: &str) -> Option<String> {
         let (_, combo_keys) = quick_key_display_combo_snapshot_for_key_name(key_name)?;
         quick_key_display_identity_for_combo_keys(key_name, &combo_keys)
@@ -7003,12 +7090,15 @@ mod windows_overlay {
     }
 
     fn quick_key_display_reconcile_held_entries(runtime: &mut Runtime) {
-        let stale_identities = runtime
-            .quick_key_display_entries
-            .iter()
-            .filter(|entry| entry.held && !quick_key_display_combo_still_held(entry))
-            .map(|entry| entry.identity.clone())
-            .collect::<Vec<_>>();
+        let mut stale_identities = Vec::new();
+        for entry in runtime.quick_key_display_entries.iter_mut().filter(|entry| entry.held) {
+            if quick_key_display_combo_still_held(entry) {
+                continue;
+            }
+            if !quick_key_display_refresh_entry_from_held_keys(entry) {
+                stale_identities.push(entry.identity.clone());
+            }
+        }
         for identity in stale_identities {
             quick_key_display_release_entry(runtime, &identity);
         }
@@ -7383,6 +7473,10 @@ mod windows_overlay {
             .iter_mut()
             .find(|entry| entry.identity == identity)
         {
+            if quick_key_display_refresh_entry_from_held_keys(entry) {
+                entry.last_pressed_at = now;
+                return;
+            }
             entry.held = false;
             if entry.released_at.is_none() {
                 entry.released_at = Some(now);
@@ -23830,6 +23924,8 @@ mod windows_overlay {
                     step.vision_move_offset_y,
                     step.vision_move_passes,
                     step.vision_move_delay_ms,
+                    step.vision_color_tolerance,
+                    step.vision_color_scan_rate_hz,
                 );
             }
 
@@ -23852,6 +23948,7 @@ mod windows_overlay {
                         step.vision_move_offset_y,
                         step.vision_move_passes,
                         step.vision_move_delay_ms,
+                        step.vision_color_tolerance,
                     ) {
                         Ok(outcome) => outcome,
                         Err(error) => {
@@ -24580,6 +24677,8 @@ mod windows_overlay {
                         step.vision_move_offset_y,
                         step.vision_move_passes,
                         step.vision_move_delay_ms,
+                        step.vision_color_tolerance,
+                        step.vision_color_scan_rate_hz,
                     );
                 }
 
@@ -24609,6 +24708,7 @@ mod windows_overlay {
                             step.vision_move_offset_y,
                             step.vision_move_passes,
                             step.vision_move_delay_ms,
+                            step.vision_color_tolerance,
                         ) {
                             Ok(outcome) => outcome,
                             Err(error) => {
@@ -25306,6 +25406,8 @@ mod windows_overlay {
                         step.vision_move_offset_y,
                         step.vision_move_passes,
                         step.vision_move_delay_ms,
+                        step.vision_color_tolerance,
+                        step.vision_color_scan_rate_hz,
                     );
                 }
 
@@ -25328,6 +25430,7 @@ mod windows_overlay {
                             step.vision_move_offset_y,
                             step.vision_move_passes,
                             step.vision_move_delay_ms,
+                            step.vision_color_tolerance,
                         ) {
                             Ok(outcome) => outcome,
                             Err(error) => {
@@ -26029,6 +26132,7 @@ mod windows_overlay {
                             y,
                             1,
                             0,
+                            preset.color_tolerance,
                         ) {
                             return outcome.matched;
                         }
