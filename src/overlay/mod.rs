@@ -4445,6 +4445,7 @@ mod windows_overlay {
 
                 let key_name = hotkey::vk_to_key_name(info.vkCode).map(str::to_owned);
                 if !is_ui_in_foreground()
+                    && is_key_down
                     && let Some(key_name) = key_name.as_ref()
                 {
                     update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
@@ -4453,6 +4454,9 @@ mod windows_overlay {
                     if process_screen_draw_text_input(info.vkCode, is_key_down, is_key_up) {
                         update_held_key(info.vkCode, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
+                        if is_key_up && !is_ui_in_foreground() {
+                            update_quick_key_display_key(&key_name, info.vkCode, false, true);
+                        }
                         return LRESULT(1);
                     }
                     let screen_draw_active = {
@@ -4485,6 +4489,9 @@ mod windows_overlay {
                             screen_draw_release_trigger_latch_if_ready();
                         }
                         update_modifier_state(info.vkCode, is_key_down);
+                        if is_key_up && !is_ui_in_foreground() {
+                            update_quick_key_display_key(&key_name, info.vkCode, false, true);
+                        }
                         return LRESULT(1);
                     }
                     let binding = binding_from_trigger_event(&key_name);
@@ -4497,6 +4504,9 @@ mod windows_overlay {
                     } else if is_key_up && process_screen_draw_hotkey_release(&binding) {
                         update_held_key(info.vkCode, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
+                        if !is_ui_in_foreground() {
+                            update_quick_key_display_key(&key_name, info.vkCode, false, true);
+                        }
                         return LRESULT(1);
                     }
                 }
@@ -4507,6 +4517,9 @@ mod windows_overlay {
                 if windows_key_locked && matches!(info.vkCode, 0x5B | 0x5C) {
                     update_held_key(info.vkCode, is_key_down, is_key_up);
                     update_modifier_state(info.vkCode, is_key_down);
+                    if is_key_up && !is_ui_in_foreground() && let Some(key_name) = key_name.as_ref() {
+                        update_quick_key_display_key(key_name, info.vkCode, false, true);
+                    }
                     return LRESULT(1);
                 }
                 if is_key_down && !is_ui_in_foreground() {
@@ -4580,6 +4593,9 @@ mod windows_overlay {
                     if key_name.eq_ignore_ascii_case("Tab") && binding.alt {
                         update_held_key(info.vkCode, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
+                        if is_key_up && !is_ui_in_foreground() {
+                            update_quick_key_display_key(&key_name, info.vkCode, false, true);
+                        }
                         return CallNextHookEx(None, code, wparam, lparam);
                     }
 
@@ -4610,6 +4626,9 @@ mod windows_overlay {
 
                     swallow |= keyboard_arrow_mouse_should_swallow(&key_name);
                     update_modifier_state(info.vkCode, is_key_down);
+                    if is_key_up {
+                        update_quick_key_display_key(&key_name, info.vkCode, false, true);
+                    }
                     return if swallow {
                         LRESULT(1)
                     } else {
