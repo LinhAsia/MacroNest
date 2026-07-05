@@ -12945,8 +12945,8 @@ impl eframe::App for CrosshairApp {
         if drawing_active {
             let (screen_x, screen_y, screen_w, screen_h) =
                 crate::window_list::virtual_screen_bounds();
-            const TOOLBAR_WIDTH: f32 = 820.0;
-            const TOOLBAR_HEIGHT: f32 = 42.0;
+            const TOOLBAR_WIDTH: f32 = 844.0;
+            const TOOLBAR_HEIGHT: f32 = 44.0;
             let default_x = screen_x as f32 + (screen_w as f32 - TOOLBAR_WIDTH) / 2.0;
             let default_y = screen_y as f32 + 60.0;
             let default_pos = egui::pos2(default_x, default_y);
@@ -13019,9 +13019,10 @@ impl eframe::App for CrosshairApp {
                                 .fill(egui::Color32::from_rgba_unmultiplied(24, 28, 36, 255))
                                 .corner_radius(8.0)
                                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(220, 232, 248, 40)))
-                                .inner_margin(egui::Margin::symmetric(10, 8))
+                                .inner_margin(egui::Margin::symmetric(12, 8))
                             )
                             .show(ctx, |ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
                                 ui.horizontal(|ui| {
                                     // 1. Drag Handle - uses custom smooth manual dragging on Windows
                                     let drag_btn = ui.add(
@@ -13195,17 +13196,22 @@ impl eframe::App for CrosshairApp {
                                             }
                                             "capture" => {
                                                 let body = egui::Rect::from_min_max(
-                                                    rect.left_top() + egui::vec2(pad, pad + 3.0),
-                                                    rect.right_bottom() + egui::vec2(-pad, -pad + 1.0),
+                                                    rect.left_top() + egui::vec2(pad - 1.0, pad + 2.5),
+                                                    rect.right_bottom() + egui::vec2(-pad + 1.0, -pad + 1.0),
                                                 );
-                                                let bump = egui::Rect::from_min_max(
-                                                    egui::pos2(body.left() + 4.0, body.top() - 4.0),
-                                                    egui::pos2(body.left() + 11.0, body.top() + 1.0),
+                                                let top_hump = egui::Rect::from_min_max(
+                                                    egui::pos2(body.center().x - 4.5, body.top() - 3.5),
+                                                    egui::pos2(body.center().x + 1.5, body.top() + 1.0),
                                                 );
-                                                painter.rect_stroke(body, 3.0, stroke, egui::StrokeKind::Inside);
-                                                painter.rect_stroke(bump, 1.5, stroke, egui::StrokeKind::Inside);
-                                                painter.circle_stroke(center + egui::vec2(1.5, 1.0), 4.0, stroke);
-                                                painter.circle_filled(body.right_top() + egui::vec2(-4.0, 4.0), 1.3, color);
+                                                painter.rect_stroke(body, 3.5, stroke, egui::StrokeKind::Inside);
+                                                painter.rect_filled(body.shrink(1.4), 3.0, color.linear_multiply(0.08));
+                                                painter.rect_stroke(top_hump, 2.0, stroke, egui::StrokeKind::Inside);
+                                                painter.circle_stroke(body.center() + egui::vec2(0.0, 0.5), 4.3, stroke);
+                                                painter.circle_filled(
+                                                    egui::pos2(body.right() - 3.8, body.top() + 3.8),
+                                                    1.25,
+                                                    color,
+                                                );
                                             }
                                             "dropper" => {
                                                 let shaft_start = rect.left_bottom() + egui::vec2(pad + 2.0, -pad - 1.0);
@@ -13364,6 +13370,8 @@ impl eframe::App for CrosshairApp {
                                     if icon_btn(ui, false, "exit", "Exit Drawing Mode").clicked() {
                                         crate::overlay::screen_draw_deactivate_from_toolbar();
                                     }
+
+                                    ui.add_space(2.0);
                                 });
                             });
                     }
