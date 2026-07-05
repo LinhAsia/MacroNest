@@ -2591,6 +2591,14 @@ mod windows_overlay {
         push_offset_rows: f32,
     }
 
+    #[derive(Clone)]
+    struct QuickKeyDisplayHeldState {
+        text: String,
+        source_key: String,
+        combo_keys: Vec<String>,
+        lane: QuickKeyDisplayLane,
+    }
+
     #[derive(Clone, Copy)]
     struct QuickKeyDisplayVisual {
         alpha: f32,
@@ -2649,6 +2657,7 @@ mod windows_overlay {
         quick_key_display_mascot_styles: Vec<crate::model::MascotStyle>,
         quick_key_display_mascot_positions: HashMap<crate::model::MascotStyle, (i32, i32)>,
         quick_key_display_entries: Vec<QuickKeyDisplayEntry>,
+        quick_key_display_held_states: HashMap<String, QuickKeyDisplayHeldState>,
         quick_key_display_slot_memory: HashMap<String, usize>,
         quick_key_display_slot_labels: HashMap<(QuickKeyDisplayLane, usize), String>,
         quick_key_display_mouse_offset: (f32, f32),
@@ -3440,6 +3449,7 @@ mod windows_overlay {
                 quick_key_display_mascot_styles: vec![crate::model::MascotStyle::Hachiware],
                 quick_key_display_mascot_positions: HashMap::new(),
                 quick_key_display_entries: Vec::new(),
+                quick_key_display_held_states: HashMap::new(),
                 quick_key_display_slot_memory: HashMap::new(),
                 quick_key_display_slot_labels: HashMap::new(),
                 quick_key_display_mouse_offset: (0.0, 0.0),
@@ -6975,28 +6985,84 @@ mod windows_overlay {
         }
     }
 
-    fn quick_key_display_refresh_entry_from_held_keys(entry: &mut QuickKeyDisplayEntry) -> bool {
+    fn quick_key_display_display_text(entry: &QuickKeyDisplayEntry) -> String {
+        if entry.press_count > 1 {
+            format!("{} x{}", entry.text, entry.press_count)
+        } else {
+            entry.text.clone()
+        }
+    }
+
+    fn quick_key_display_live_held_state_for_source_key(
+        source_key: &str,
+    ) -> Option<QuickKeyDisplayHeldState> {
         let hook_state = HOOK_STATE.lock();
-        if !quick_key_display_combo_key_is_held(&hook_state, &entry.source_key) {
-            return false;
+        if !quick_key_display_combo_key_is_held(&hook_state, source_key) {
+            return None;
         }
         drop(hook_state);
-        let Some((text, combo_keys)) =
-            quick_key_display_combo_snapshot_for_key_name(&entry.source_key)
-        else {
-            return false;
-        };
-        let Some(identity) = quick_key_display_identity_for_key_name(&entry.source_key) else {
-            return false;
-        };
-        entry.identity = identity;
-        entry.combo_keys = combo_keys;
-        entry.text = text;
-        entry.lane = quick_key_display_lane_for_key_name(&entry.source_key);
+        let (text, combo_keys) = quick_key_display_combo_snapshot_for_key_name(source_key)?;
+        Some(QuickKeyDisplayHeldState {
+            text,
+            source_key: source_key.to_owned(),
+            combo_keys,
+            lane: quick_key_display_lane_for_key_name(source_key),
+        })
+    }
+
+    fn quick_key_display_apply_held_state(
+        entry: &mut QuickKeyDisplayEntry,
+        held_state: &QuickKeyDisplayHeldState,
+        now: Instant,
+    ) {
+        entry.source_key = held_state.source_key.clone();
+        entry.combo_keys = held_state.combo_keys.clone();
+        entry.text = held_state.text.clone();
+        entry.lane = held_state.lane;
         entry.held = true;
         entry.released_at = None;
-        entry.hide_at = Instant::now() + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
-        true
+        entry.hide_at = now + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
+    }
+
+    fn quick_key_display_mark_entry_released(entry: &mut QuickKeyDisplayEntry, now: Instant) {
+        entry.held = false;
+        if entry.released_at.is_none() {
+            entry.released_at = Some(now);
+        }
+        entry.hide_at = entry
+            .hide_at
+            .max(now + QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION);
+    }
+
+    fn quick_key_display_restore_live_held_state(
+        runtime: &mut Runtime,
+        identity: &str,
+        source_key: &str,
+    ) -> Option<QuickKeyDisplayHeldState> {
+        let held_state = quick_key_display_live_held_state_for_source_key(source_key)?;
+        runtime
+            .quick_key_display_held_states
+            .insert(identity.to_owned(), held_state.clone());
+        Some(held_state)
+    }
+
+    fn quick_key_display_resolve_held_state(
+        runtime: &mut Runtime,
+        identity: &str,
+        source_key: &str,
+    ) -> Option<QuickKeyDisplayHeldState> {
+        if let Some(mut held_state) = runtime.quick_key_display_held_states.remove(identity) {
+            if let Some(live_state) =
+                quick_key_display_live_held_state_for_source_key(&held_state.source_key)
+            {
+                held_state = live_state;
+                runtime
+                    .quick_key_display_held_states
+                    .insert(identity.to_owned(), held_state.clone());
+                return Some(held_state);
+            }
+        }
+        quick_key_display_restore_live_held_state(runtime, identity, source_key)
     }
 
     fn quick_key_display_identity_for_key_name(key_name: &str) -> Option<String> {
@@ -7141,20 +7207,33 @@ mod windows_overlay {
         hook_state_key_is_down(hook_state, key_name)
     }
 
-    fn quick_key_display_combo_still_held(entry: &QuickKeyDisplayEntry) -> bool {
-        let hook_state = HOOK_STATE.lock();
-        if quick_key_display_combo_key_is_held(&hook_state, &entry.source_key) {
-            return true;
-        }
-        entry.released_at.is_none()
-            && Instant::now().saturating_duration_since(entry.last_pressed_at)
-                < QUICK_KEY_DISPLAY_HOLD_STATE_GRACE_DURATION
-    }
-
     fn quick_key_display_reconcile_held_entries(runtime: &mut Runtime) {
-        for entry in runtime.quick_key_display_entries.iter_mut().filter(|entry| entry.held) {
-            if quick_key_display_combo_still_held(entry) {
-                let _ = quick_key_display_refresh_entry_from_held_keys(entry);
+        let now = Instant::now();
+        for idx in 0..runtime.quick_key_display_entries.len() {
+            let (identity, source_key, was_held, released_at, last_pressed_at) = {
+                let entry = &runtime.quick_key_display_entries[idx];
+                (
+                    entry.identity.clone(),
+                    entry.source_key.clone(),
+                    entry.held,
+                    entry.released_at,
+                    entry.last_pressed_at,
+                )
+            };
+
+            let held_state = quick_key_display_resolve_held_state(runtime, &identity, &source_key);
+            let entry = &mut runtime.quick_key_display_entries[idx];
+            if let Some(held_state) = held_state {
+                quick_key_display_apply_held_state(entry, &held_state, now);
+                continue;
+            }
+
+            if was_held
+                && released_at.is_none()
+                && now.saturating_duration_since(last_pressed_at)
+                    >= QUICK_KEY_DISPLAY_HOLD_STATE_GRACE_DURATION
+            {
+                quick_key_display_mark_entry_released(entry, now);
             }
         }
     }
@@ -7379,6 +7458,20 @@ mod windows_overlay {
         let now = Instant::now();
         quick_key_display_release_expired_entries(runtime, now);
 
+        if held {
+            runtime.quick_key_display_held_states.insert(
+                identity.clone(),
+                QuickKeyDisplayHeldState {
+                    text: text.clone(),
+                    source_key: source_key.clone(),
+                    combo_keys: combo_keys.clone(),
+                    lane,
+                },
+            );
+        } else {
+            runtime.quick_key_display_held_states.remove(&identity);
+        }
+
         let most_recent_idx = runtime
             .quick_key_display_entries
             .iter()
@@ -7442,23 +7535,26 @@ mod windows_overlay {
 
     fn quick_key_display_release_entry(runtime: &mut Runtime, identity: &str) {
         let now = Instant::now();
-        if let Some(entry) = runtime
+        runtime.quick_key_display_held_states.remove(identity);
+        let Some(idx) = runtime
             .quick_key_display_entries
-            .iter_mut()
-            .find(|entry| entry.identity == identity)
+            .iter()
+            .position(|entry| entry.identity == identity)
+        else {
+            return;
+        };
+
+        let source_key = runtime.quick_key_display_entries[idx].source_key.clone();
+        if let Some(held_state) = quick_key_display_restore_live_held_state(runtime, identity, &source_key)
         {
-            if quick_key_display_refresh_entry_from_held_keys(entry) {
-                entry.last_pressed_at = now;
-                return;
-            }
-            entry.held = false;
-            if entry.released_at.is_none() {
-                entry.released_at = Some(now);
-            }
-            entry.hide_at = entry
-                .hide_at
-                .max(now + QUICK_KEY_DISPLAY_MIN_RELEASE_DURATION);
+            let entry = &mut runtime.quick_key_display_entries[idx];
+            quick_key_display_apply_held_state(entry, &held_state, now);
+            entry.last_pressed_at = now;
+            return;
         }
+
+        let entry = &mut runtime.quick_key_display_entries[idx];
+        quick_key_display_mark_entry_released(entry, now);
     }
 
     fn quick_key_display_palette(label: &str) -> QuickKeyDisplayPalette {
@@ -7533,7 +7629,8 @@ mod windows_overlay {
                 entries
                     .iter()
                     .find(|entry| entry.lane == lane && entry.slot == slot)
-                    .map(|entry| entry.text.as_str())
+                    .map(quick_key_display_display_text)
+                    .as_deref()
                     .or_else(|| slot_labels.get(&(lane, slot)).map(|label| label.as_str()))
                     .map(|label| quick_key_display_entry_width(label, font_size, cap_height))
                     .unwrap_or(cap_height)
@@ -7563,11 +7660,7 @@ mod windows_overlay {
         let num_entries = entries.len().max(1) as i32;
         let mut max_entry_width = 0;
         for entry in entries {
-            let display_text = if entry.press_count > 1 {
-                format!("{} x{}", entry.text, entry.press_count)
-            } else {
-                entry.text.clone()
-            };
+            let display_text = quick_key_display_display_text(entry);
             let entry_width = quick_key_display_entry_width(&display_text, font_size, cap_height);
             if entry_width > max_entry_width {
                 max_entry_width = entry_width;
@@ -9267,6 +9360,7 @@ mod windows_overlay {
                     }
                     if !enabled {
                         runtime.quick_key_display_entries.clear();
+                        runtime.quick_key_display_held_states.clear();
                         runtime.quick_key_display_slot_memory.clear();
                         runtime.quick_key_display_slot_labels.clear();
                         runtime.quick_key_display_mouse_offset = (0.0, 0.0);
@@ -9518,6 +9612,7 @@ mod windows_overlay {
                         let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
                         runtime.hud_display = None;
                         runtime.quick_key_display_entries.clear();
+                        runtime.quick_key_display_held_states.clear();
                         runtime.quick_key_display_slot_memory.clear();
                         runtime.quick_key_display_slot_labels.clear();
                         hide_quick_key_display_windows(runtime);
@@ -9598,6 +9693,7 @@ mod windows_overlay {
             let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
             runtime.hud_display = None;
             runtime.quick_key_display_entries.clear();
+            runtime.quick_key_display_held_states.clear();
             runtime.quick_key_display_slot_memory.clear();
             runtime.quick_key_display_slot_labels.clear();
             hide_quick_key_display_windows(runtime);
@@ -9823,6 +9919,7 @@ mod windows_overlay {
 
         if is_ui_in_foreground() || !runtime.quick_key_display_enabled {
             runtime.quick_key_display_entries.clear();
+            runtime.quick_key_display_held_states.clear();
             runtime.quick_key_display_slot_memory.clear();
             runtime.quick_key_display_slot_labels.clear();
             runtime.quick_key_display_last_mascot_state = None;
@@ -17946,11 +18043,7 @@ mod windows_overlay {
                         entry.push_offset_rows * row_step as f32 * (1.0 - eased);
                 }
             }
-            let display_text = if entry.press_count > 1 {
-                format!("{} x{}", entry.text, entry.press_count)
-            } else {
-                entry.text.clone()
-            };
+            let display_text = quick_key_display_display_text(entry);
             let entry_width = quick_key_display_entry_width(&display_text, font_size, cap_height);
             let scaled_entry_width = (entry_width as f32 * visual.scale_x).round().max(1.0) as i32;
             let scaled_cap_height = (cap_height as f32 * visual.scale_y).round().max(1.0) as i32;
