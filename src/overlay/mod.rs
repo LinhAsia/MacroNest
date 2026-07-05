@@ -7024,6 +7024,16 @@ mod windows_overlay {
         entry.hide_at = now + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
     }
 
+    fn quick_key_display_apply_entry_identity(
+        entry: &mut QuickKeyDisplayEntry,
+        identity: String,
+        held_state: &QuickKeyDisplayHeldState,
+        now: Instant,
+    ) {
+        entry.identity = identity;
+        quick_key_display_apply_held_state(entry, held_state, now);
+    }
+
     fn quick_key_display_mark_entry_released(entry: &mut QuickKeyDisplayEntry, now: Instant) {
         entry.held = false;
         if entry.released_at.is_none() {
@@ -7063,6 +7073,42 @@ mod windows_overlay {
             }
         }
         quick_key_display_restore_live_held_state(runtime, identity, source_key)
+    }
+
+    fn quick_key_display_modifier_only(combo_keys: &[String]) -> bool {
+        !combo_keys.is_empty()
+            && combo_keys
+                .iter()
+                .all(|key| hotkey::is_modifier_key_name(key))
+    }
+
+    fn quick_key_display_combo_contains_all(combo_keys: &[String], required_keys: &[String]) -> bool {
+        required_keys.iter().all(|required| {
+            combo_keys
+                .iter()
+                .any(|key| key.eq_ignore_ascii_case(required))
+        })
+    }
+
+    fn quick_key_display_modifier_fallback_from_entry(
+        runtime: &mut Runtime,
+        entry: &QuickKeyDisplayEntry,
+    ) -> Option<(String, QuickKeyDisplayHeldState)> {
+        for key_name in &entry.combo_keys {
+            if !hotkey::is_modifier_key_name(key_name) {
+                continue;
+            }
+            let Some(identity) = quick_key_display_identity_for_combo_keys(key_name, &[key_name.clone()]) else {
+                continue;
+            };
+            let Some(held_state) =
+                quick_key_display_restore_live_held_state(runtime, &identity, key_name)
+            else {
+                continue;
+            };
+            return Some((identity, held_state));
+        }
+        None
     }
 
     fn quick_key_display_identity_for_key_name(key_name: &str) -> Option<String> {
@@ -7494,6 +7540,42 @@ mod windows_overlay {
                 entry.hide_at = now + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
                 entry.last_pressed_at = now;
                 consecutive = true;
+            } else {
+                let should_upgrade_modifier_entry = {
+                    let entry = &runtime.quick_key_display_entries[idx];
+                    entry.held
+                        && entry.lane == lane
+                        && quick_key_display_modifier_only(&entry.combo_keys)
+                        && quick_key_display_combo_contains_all(&combo_keys, &entry.combo_keys)
+                };
+                if should_upgrade_modifier_entry {
+                    let retained_press_count =
+                        runtime.quick_key_display_entries[idx].press_count.max(1);
+                    let mut target_idx = idx;
+                    if let Some(existing_idx) = runtime
+                        .quick_key_display_entries
+                        .iter()
+                        .position(|entry| entry.identity == identity)
+                    {
+                        runtime.quick_key_display_entries.remove(existing_idx);
+                        if existing_idx < target_idx {
+                            target_idx -= 1;
+                        }
+                    }
+                    let entry = &mut runtime.quick_key_display_entries[target_idx];
+                    entry.identity = identity.clone();
+                    entry.text = text.clone();
+                    entry.source_key = source_key.clone();
+                    entry.combo_keys = combo_keys.clone();
+                    entry.lane = lane;
+                    entry.held = held;
+                    entry.shown_at = now;
+                    entry.released_at = None;
+                    entry.hide_at = now + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
+                    entry.last_pressed_at = now;
+                    entry.press_count = retained_press_count;
+                    consecutive = true;
+                }
             }
         }
 
@@ -7549,6 +7631,16 @@ mod windows_overlay {
         {
             let entry = &mut runtime.quick_key_display_entries[idx];
             quick_key_display_apply_held_state(entry, &held_state, now);
+            entry.last_pressed_at = now;
+            return;
+        }
+
+        let entry_snapshot = runtime.quick_key_display_entries[idx].clone();
+        if let Some((fallback_identity, held_state)) =
+            quick_key_display_modifier_fallback_from_entry(runtime, &entry_snapshot)
+        {
+            let entry = &mut runtime.quick_key_display_entries[idx];
+            quick_key_display_apply_entry_identity(entry, fallback_identity, &held_state, now);
             entry.last_pressed_at = now;
             return;
         }
@@ -8466,13 +8558,16 @@ mod windows_overlay {
                 quick_key_display_combo_snapshot_for_key_name(effective_key_name)
             };
 
-            let identity_info = if mascot_active && exact_modifier.is_some() {
-                Some(effective_key_name.to_owned())
-            } else {
-                quick_key_display_identity_for_key_name(effective_key_name)
-            };
-
-            if let (Some((text, combo_keys)), Some(identity)) = (combo_info, identity_info) {
+            if let Some((text, combo_keys)) = combo_info {
+                let identity_info = if mascot_active && exact_modifier.is_some() {
+                    Some(effective_key_name.to_owned())
+                } else {
+                    quick_key_display_identity_for_combo_keys(effective_key_name, &combo_keys)
+                        .or_else(|| quick_key_display_identity_for_key_name(effective_key_name))
+                };
+                let Some(identity) = identity_info else {
+                    return;
+                };
                 send_overlay_command(OverlayCommand::ShowQuickKeyDisplay(
                     QuickKeyDisplayUpdate::Press {
                         text,
@@ -8487,8 +8582,20 @@ mod windows_overlay {
             return;
         }
 
+        let combo_info = if mascot_active && exact_modifier.is_some() {
+            Some((
+                effective_key_name.to_owned(),
+                vec![effective_key_name.to_owned()],
+            ))
+        } else {
+            quick_key_display_combo_snapshot_for_key_name(effective_key_name)
+        };
+
         let identity_info = if mascot_active && exact_modifier.is_some() {
             Some(effective_key_name.to_owned())
+        } else if let Some((_, combo_keys)) = combo_info {
+            quick_key_display_identity_for_combo_keys(effective_key_name, &combo_keys)
+                .or_else(|| quick_key_display_identity_for_key_name(effective_key_name))
         } else {
             quick_key_display_identity_for_key_name(effective_key_name)
         };

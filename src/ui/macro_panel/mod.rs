@@ -881,16 +881,16 @@ impl CrosshairApp {
                     1 => Self::tr_lang(
                         language,
                         "Internet route (Fast)",
-                        "Internet route (Fast)",
+                        "Tuyến mạng (Nhanh)",
                     ),
                     2 => Self::tr_lang(language, "Radio (Instant)", "Radio (Instant)"),
-                    _ => Self::tr_lang(language, "Adapter (Slow)", "Adapter (Slow)"),
+                    _ => Self::tr_lang(language, "Adapter (Slow)", "Card mạng (Chậm)"),
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut method,
                         0,
-                        Self::tr_lang(language, "Adapter (Slow)", "Adapter (Slow)"),
+                        Self::tr_lang(language, "Adapter (Slow)", "Card mạng (Chậm)"),
                     );
                     ui.selectable_value(
                         &mut method,
@@ -898,7 +898,7 @@ impl CrosshairApp {
                         Self::tr_lang(
                             language,
                             "Internet route (Fast)",
-                            "Internet route (Fast)",
+                            "Tuyến mạng (Nhanh)",
                         ),
                     );
                     // Radio (Instant) chỉ khả dụng khi chọn mạng là Wi-Fi
@@ -915,20 +915,20 @@ impl CrosshairApp {
             egui::ComboBox::from_id_salt((id_salt, "network_state"))
                 .width(72.0)
                 .selected_text(if is_enable {
-                    Self::tr_lang(language, "On", "On")
+                    Self::tr_lang(language, "On", "Bật")
                 } else {
-                    Self::tr_lang(language, "Off", "Off")
+                    Self::tr_lang(language, "Off", "Tắt")
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut is_enable,
                         false,
-                        Self::tr_lang(language, "Off", "Off"),
+                        Self::tr_lang(language, "Off", "Tắt"),
                     );
                     ui.selectable_value(
                         &mut is_enable,
                         true,
-                        Self::tr_lang(language, "On", "On"),
+                        Self::tr_lang(language, "On", "Bật"),
                     );
                 });
 
