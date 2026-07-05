@@ -25991,6 +25991,8 @@ mod windows_overlay {
     ) -> MacroRunFlow {
         let mut index = 0usize;
         'outer_hold: while index < steps.len() {
+            reconcile_active_hold_mouse_macros();
+
             if !bypass_enabled
                 && !is_macro_preset_enabled_with_pending(preset_id, pending_macro_preset_changes)
             {
@@ -26670,6 +26672,8 @@ mod windows_overlay {
         bypass_enabled: bool,
         defer_stop_until_loop_end: bool,
     ) -> bool {
+        reconcile_active_hold_mouse_macros();
+
         if delay_ms == 0 {
             return !macro_runtime_target_matches(
                 target_window_title,
@@ -26684,6 +26688,8 @@ mod windows_overlay {
 
         let mut remaining_ms = delay_ms;
         while remaining_ms > 0 {
+            reconcile_active_hold_mouse_macros();
+
             {
                 let hook_state = HOOK_STATE.lock();
                 if !hook_state.macros_master_enabled {
