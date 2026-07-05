@@ -5776,33 +5776,6 @@ mod windows_overlay {
         hotkey::binding_key_names(binding).len() == 1
     }
 
-    fn mouse_trigger_is_physically_down(trigger: &HotkeyBinding) -> bool {
-        let Some(vk) = hotkey::key_name_to_vk(&trigger.key) else {
-            return true;
-        };
-        if !hotkey::is_mouse_key_name(&trigger.key) {
-            return true;
-        }
-
-        (unsafe { GetAsyncKeyState(vk as i32) }) < 0
-    }
-
-    fn reconcile_active_hold_mouse_macros() {
-        let stale_ids = {
-            let hook_state = HOOK_STATE.lock();
-            hook_state
-                .active_hold_macros
-                .iter()
-                .filter_map(|(preset_id, active)| {
-                    (!mouse_trigger_is_physically_down(&active.trigger)).then_some(*preset_id)
-                })
-                .collect::<Vec<_>>()
-        };
-        for preset_id in stale_ids {
-            request_hold_macro_stop(preset_id);
-        }
-    }
-
     fn hold_macro_release_matches(active: &ActiveHoldMacro, binding: &HotkeyBinding) -> bool {
         active.trigger.key.eq_ignore_ascii_case(&binding.key)
     }
@@ -25991,8 +25964,6 @@ mod windows_overlay {
     ) -> MacroRunFlow {
         let mut index = 0usize;
         'outer_hold: while index < steps.len() {
-            reconcile_active_hold_mouse_macros();
-
             if !bypass_enabled
                 && !is_macro_preset_enabled_with_pending(preset_id, pending_macro_preset_changes)
             {
@@ -26672,8 +26643,6 @@ mod windows_overlay {
         bypass_enabled: bool,
         defer_stop_until_loop_end: bool,
     ) -> bool {
-        reconcile_active_hold_mouse_macros();
-
         if delay_ms == 0 {
             return !macro_runtime_target_matches(
                 target_window_title,
@@ -26688,8 +26657,6 @@ mod windows_overlay {
 
         let mut remaining_ms = delay_ms;
         while remaining_ms > 0 {
-            reconcile_active_hold_mouse_macros();
-
             {
                 let hook_state = HOOK_STATE.lock();
                 if !hook_state.macros_master_enabled {
