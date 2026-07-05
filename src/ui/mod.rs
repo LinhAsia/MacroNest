@@ -12945,9 +12945,13 @@ impl eframe::App for CrosshairApp {
         if drawing_active {
             let (screen_x, screen_y, screen_w, screen_h) =
                 crate::window_list::virtual_screen_bounds();
-            const TOOLBAR_WIDTH: f32 = 744.0;
+            const TOOLBAR_ESTIMATED_WIDTH: f32 = 780.0;
             const TOOLBAR_HEIGHT: f32 = 44.0;
-            let default_x = screen_x as f32 + (screen_w as f32 - TOOLBAR_WIDTH) / 2.0;
+            let toolbar_width = ctx.data(|d| {
+                d.get_temp::<f32>(egui::Id::new("toolbar_width"))
+                    .unwrap_or(TOOLBAR_ESTIMATED_WIDTH)
+            });
+            let default_x = screen_x as f32 + (screen_w as f32 - toolbar_width) / 2.0;
             let default_y = screen_y as f32 + 60.0;
             let default_pos = egui::pos2(default_x, default_y);
 
@@ -12968,20 +12972,20 @@ impl eframe::App for CrosshairApp {
                     .unwrap_or(default_pos)
             });
 
-            let toolbar_width = TOOLBAR_WIDTH as i32;
+            let toolbar_width_px = toolbar_width.round() as i32;
             let toolbar_height = TOOLBAR_HEIGHT as i32;
 
             crate::overlay::screen_draw_set_toolbar_rect(
                 (toolbar_pos.x - screen_x as f32) as i32,
                 (toolbar_pos.y - screen_y as f32) as i32,
-                toolbar_width,
+                toolbar_width_px,
                 toolbar_height,
             );
 
             // Build without position every frame – only set on first init
             let mut builder = egui::ViewportBuilder::default()
                 .with_title("Drawing Toolbar")
-                .with_inner_size(egui::vec2(TOOLBAR_WIDTH, TOOLBAR_HEIGHT))
+                .with_inner_size(egui::vec2(toolbar_width, TOOLBAR_HEIGHT))
                 .with_active(false)
                 .with_decorations(false)
                 .with_transparent(true)
@@ -13014,7 +13018,7 @@ impl eframe::App for CrosshairApp {
                         }
                     }
                     if class == egui::ViewportClass::Immediate {
-                        egui::CentralPanel::default()
+                        let measured_width = egui::CentralPanel::default()
                             .frame(egui::Frame::none()
                                 .fill(egui::Color32::from_rgba_unmultiplied(24, 28, 36, 255))
                                 .corner_radius(8.0)
@@ -13068,7 +13072,7 @@ impl eframe::App for CrosshairApp {
                                                     crate::overlay::screen_draw_set_toolbar_rect(
                                                         (new_pos.x - screen_x as f32) as i32,
                                                         (new_pos.y - screen_y as f32) as i32,
-                                                        toolbar_width,
+                                                        toolbar_width_px,
                                                         toolbar_height,
                                                     );
                                                 }
@@ -13196,25 +13200,25 @@ impl eframe::App for CrosshairApp {
                                             }
                                             "capture" => {
                                                 let body = egui::Rect::from_min_max(
-                                                    rect.left_top() + egui::vec2(pad - 1.0, pad + 2.5),
+                                                    rect.left_top() + egui::vec2(pad - 1.0, pad + 2.8),
                                                     rect.right_bottom() + egui::vec2(-pad + 1.0, -pad + 1.0),
                                                 );
                                                 painter.rect_stroke(body, 3.5, stroke, egui::StrokeKind::Inside);
                                                 painter.rect_filled(body.shrink(1.4), 3.0, color.linear_multiply(0.08));
-                                                let top_bar = egui::Rect::from_min_max(
-                                                    egui::pos2(body.left() + 3.0, body.top() + 1.4),
-                                                    egui::pos2(body.left() + 8.0, body.top() + 3.8),
+                                                let grip = egui::Rect::from_min_max(
+                                                    egui::pos2(body.left() + 2.8, body.top() - 2.0),
+                                                    egui::pos2(body.left() + 7.8, body.top() + 1.0),
                                                 );
-                                                painter.rect_filled(top_bar, 1.2, color);
-                                                painter.circle_stroke(body.center() + egui::vec2(0.0, 0.5), 4.5, stroke);
+                                                painter.rect_filled(grip, 1.4, color);
+                                                painter.circle_stroke(body.center() + egui::vec2(0.0, 0.6), 4.4, stroke);
                                                 painter.circle_filled(
-                                                    body.center() + egui::vec2(0.0, 0.5),
-                                                    1.45,
+                                                    body.center() + egui::vec2(0.0, 0.6),
+                                                    1.35,
                                                     color.linear_multiply(0.9),
                                                 );
                                                 painter.circle_filled(
-                                                    egui::pos2(body.right() - 3.6, body.top() + 3.7),
-                                                    1.2,
+                                                    egui::pos2(body.right() - 3.0, body.top() + 3.2),
+                                                    1.0,
                                                     color,
                                                 );
                                             }
@@ -13378,7 +13382,33 @@ impl eframe::App for CrosshairApp {
 
                                     ui.add_space(2.0);
                                 });
+                                ui.min_rect().width() + 24.0
+                            }).inner;
+                        let measured_width = measured_width.ceil().max(1.0);
+                        if (measured_width - toolbar_width).abs() > 1.0 {
+                            let recentered_pos = egui::pos2(
+                                toolbar_pos.x - (measured_width - toolbar_width) * 0.5,
+                                toolbar_pos.y,
+                            );
+                            ctx.data_mut(|d| {
+                                d.insert_temp(egui::Id::new("toolbar_width"), measured_width);
+                                d.insert_temp(egui::Id::new("toolbar_pos"), recentered_pos);
                             });
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+                                measured_width,
+                                TOOLBAR_HEIGHT,
+                            )));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(
+                                recentered_pos,
+                            ));
+                            crate::overlay::screen_draw_set_toolbar_rect(
+                                (recentered_pos.x - screen_x as f32) as i32,
+                                (recentered_pos.y - screen_y as f32) as i32,
+                                measured_width.round() as i32,
+                                toolbar_height,
+                            );
+                            ctx.request_repaint();
+                        }
                     }
                 }
             );
