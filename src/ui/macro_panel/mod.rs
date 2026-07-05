@@ -196,89 +196,320 @@ impl CrosshairApp {
         ui: &mut egui::Ui,
         step: &mut MacroStep,
         language: UiLanguage,
+        show_move_toggle: bool,
+        show_detection_tuning: bool,
         live_sync: &mut bool,
     ) {
-        ui.add_space(4.0);
-        let resp = ui.checkbox(
-            &mut step.vision_move_cursor_on_match,
-            Self::tr_lang(language, "Move Mouse", "Move Mouse"),
-        );
-        *live_sync |= resp.changed();
-        if !step.vision_move_cursor_on_match {
+        let show_move_fields = if show_move_toggle {
+            ui.add_space(4.0);
+            let resp = ui.checkbox(
+                &mut step.vision_move_cursor_on_match,
+                Self::tr_lang(language, "Move Mouse", "Move Mouse"),
+            );
+            *live_sync |= resp.changed();
+            step.vision_move_cursor_on_match
+        } else {
+            false
+        };
+        if !show_move_fields && !show_detection_tuning {
             return;
         }
-
-        Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
-        Self::render_vision_move_mouse_tuning_dropdown(ui, step, language, live_sync);
+        Self::render_vision_runtime_tuning_dropdown(
+            ui,
+            step,
+            language,
+            show_move_fields,
+            show_detection_tuning,
+            live_sync,
+        );
     }
 
     fn render_start_vision_move_mouse_controls(
         ui: &mut egui::Ui,
         step: &mut MacroStep,
         language: UiLanguage,
+        show_move_fields: bool,
+        show_detection_tuning: bool,
         live_sync: &mut bool,
     ) {
+        if !show_move_fields && !show_detection_tuning {
+            return;
+        }
         ui.add_space(4.0);
-        ui.weak(Self::tr_lang(language, "Move Mouse", "Move Mouse"));
-        Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
-        Self::render_vision_move_mouse_tuning_dropdown(ui, step, language, live_sync);
+        Self::render_vision_runtime_tuning_dropdown(
+            ui,
+            step,
+            language,
+            show_move_fields,
+            show_detection_tuning,
+            live_sync,
+        );
     }
 
-    fn render_vision_move_mouse_tuning_dropdown(
+    fn render_temp_i32_input(
+        ui: &mut egui::Ui,
+        id: egui::Id,
+        value: &mut i32,
+        min: i32,
+        max: i32,
+    ) -> bool {
+        let mut draft = ui
+            .ctx()
+            .data(|data| data.get_temp::<String>(id))
+            .unwrap_or_else(|| value.to_string());
+        let response = ui.add_sized([72.0, 22.0], egui::TextEdit::singleline(&mut draft));
+        let mut changed = false;
+        if response.changed() {
+            if let Ok(parsed) = draft.trim().parse::<i32>() {
+                let clamped = parsed.clamp(min, max);
+                if *value != clamped {
+                    *value = clamped;
+                    changed = true;
+                }
+                draft = clamped.to_string();
+            }
+            ui.ctx().data_mut(|data| data.insert_temp(id, draft.clone()));
+        } else if !response.has_focus() {
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(id, value.to_string()));
+        }
+        changed
+    }
+
+    fn render_temp_u64_input(
+        ui: &mut egui::Ui,
+        id: egui::Id,
+        value: &mut u64,
+        min: u64,
+        max: u64,
+    ) -> bool {
+        let mut draft = ui
+            .ctx()
+            .data(|data| data.get_temp::<String>(id))
+            .unwrap_or_else(|| value.to_string());
+        let response = ui.add_sized([72.0, 22.0], egui::TextEdit::singleline(&mut draft));
+        let mut changed = false;
+        if response.changed() {
+            if let Ok(parsed) = draft.trim().parse::<u64>() {
+                let clamped = parsed.clamp(min, max);
+                if *value != clamped {
+                    *value = clamped;
+                    changed = true;
+                }
+                draft = clamped.to_string();
+            }
+            ui.ctx().data_mut(|data| data.insert_temp(id, draft.clone()));
+        } else if !response.has_focus() {
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(id, value.to_string()));
+        }
+        changed
+    }
+
+    fn render_temp_u32_input(
+        ui: &mut egui::Ui,
+        id: egui::Id,
+        value: &mut u32,
+        min: u32,
+        max: u32,
+    ) -> bool {
+        let mut value_u64 = *value as u64;
+        let changed = Self::render_temp_u64_input(ui, id, &mut value_u64, min as u64, max as u64);
+        let clamped = value_u64.clamp(min as u64, max as u64) as u32;
+        if *value != clamped {
+            *value = clamped;
+            return true;
+        }
+        changed
+    }
+
+    fn render_temp_u8_input(
+        ui: &mut egui::Ui,
+        id: egui::Id,
+        value: &mut u8,
+        min: u8,
+        max: u8,
+    ) -> bool {
+        let mut value_u64 = *value as u64;
+        let changed = Self::render_temp_u64_input(ui, id, &mut value_u64, min as u64, max as u64);
+        let clamped = value_u64.clamp(min as u64, max as u64) as u8;
+        if *value != clamped {
+            *value = clamped;
+            return true;
+        }
+        changed
+    }
+
+    fn render_vision_runtime_tuning_dropdown(
         ui: &mut egui::Ui,
         step: &mut MacroStep,
         language: UiLanguage,
+        show_move_fields: bool,
+        show_detection_tuning: bool,
         live_sync: &mut bool,
     ) {
         ui.add_space(2.0);
-        let label = format!(
-            "{} ({}, {})  {}x  {}ms",
-            Self::tr_lang(language, "Move tune", "Move tune"),
-            step.vision_move_offset_x,
-            step.vision_move_offset_y,
-            step.vision_move_passes,
-            step.vision_move_delay_ms
-        );
-        ui.menu_button(label, |ui| {
-            egui::Grid::new(ui.id().with("vision-move-mouse-tuning-grid"))
-                .num_columns(2)
-                .spacing([10.0, 8.0])
-                .show(ui, |ui| {
-                    ui.label(Self::tr_lang(language, "Offset X:", "Offset X:"));
-                    *live_sync |= ui
-                        .add(
-                            egui::DragValue::new(&mut step.vision_move_offset_x)
-                                .range(-5000..=5000),
-                        )
-                        .changed();
-                    ui.end_row();
+        let mut summary_parts = Vec::new();
+        if show_move_fields {
+            let movement = match step.vision_move_axis_lock {
+                VisionMoveAxisLock::None => Self::tr_lang(language, "Free", "Free"),
+                VisionMoveAxisLock::HorizontalOnly => {
+                    Self::tr_lang(language, "Horizontal only", "Horizontal only")
+                }
+                VisionMoveAxisLock::VerticalOnly => {
+                    Self::tr_lang(language, "Vertical only", "Vertical only")
+                }
+            };
+            summary_parts.push(movement.to_owned());
+            summary_parts.push(format!(
+                "({}, {})  {}x  {}ms",
+                step.vision_move_offset_x,
+                step.vision_move_offset_y,
+                step.vision_move_passes,
+                step.vision_move_delay_ms
+            ));
+        }
+        if show_detection_tuning {
+            summary_parts.push(format!(
+                "T{}  R{}",
+                step.vision_color_tolerance, step.vision_color_scan_rate_hz
+            ));
+        }
+        let selected_text = if summary_parts.is_empty() {
+            Self::tr_lang(language, "Tune", "Tune").to_owned()
+        } else {
+            format!(
+                "{} {}",
+                Self::tr_lang(language, "Tune", "Tune"),
+                summary_parts.join("  ")
+            )
+        };
+        egui::ComboBox::from_id_salt(ui.id().with("vision-runtime-tuning"))
+            .selected_text(selected_text)
+            .width(180.0)
+            .show_ui(ui, |ui| {
+                ui.set_min_width(240.0);
+                if show_move_fields {
+                    egui::Grid::new(ui.id().with("vision-runtime-move-grid"))
+                        .num_columns(2)
+                        .spacing([10.0, 8.0])
+                        .show(ui, |ui| {
+                            ui.label(Self::tr_lang(language, "Axis", "Axis"));
+                            egui::ComboBox::from_id_salt(ui.id().with("scan-vision-move-axis-lock"))
+                                .selected_text(match step.vision_move_axis_lock {
+                                    VisionMoveAxisLock::None => {
+                                        Self::tr_lang(language, "Free", "Free")
+                                    }
+                                    VisionMoveAxisLock::HorizontalOnly => {
+                                        Self::tr_lang(language, "Horizontal only", "Horizontal only")
+                                    }
+                                    VisionMoveAxisLock::VerticalOnly => {
+                                        Self::tr_lang(language, "Vertical only", "Vertical only")
+                                    }
+                                })
+                                .width(120.0)
+                                .show_ui(ui, |ui| {
+                                    *live_sync |= ui
+                                        .selectable_value(
+                                            &mut step.vision_move_axis_lock,
+                                            VisionMoveAxisLock::None,
+                                            Self::tr_lang(language, "Free", "Free"),
+                                        )
+                                        .changed();
+                                    *live_sync |= ui
+                                        .selectable_value(
+                                            &mut step.vision_move_axis_lock,
+                                            VisionMoveAxisLock::HorizontalOnly,
+                                            Self::tr_lang(
+                                                language,
+                                                "Horizontal only",
+                                                "Horizontal only",
+                                            ),
+                                        )
+                                        .changed();
+                                    *live_sync |= ui
+                                        .selectable_value(
+                                            &mut step.vision_move_axis_lock,
+                                            VisionMoveAxisLock::VerticalOnly,
+                                            Self::tr_lang(language, "Vertical only", "Vertical only"),
+                                        )
+                                        .changed();
+                                });
+                            ui.end_row();
 
-                    ui.label(Self::tr_lang(language, "Offset Y:", "Offset Y:"));
-                    *live_sync |= ui
-                        .add(
-                            egui::DragValue::new(&mut step.vision_move_offset_y)
-                                .range(-5000..=5000),
-                        )
-                        .changed();
-                    ui.end_row();
+                            ui.label(Self::tr_lang(language, "Offset X", "Offset X"));
+                            *live_sync |= Self::render_temp_i32_input(
+                                ui,
+                                ui.id().with("vision-move-offset-x"),
+                                &mut step.vision_move_offset_x,
+                                -5000,
+                                5000,
+                            );
+                            ui.end_row();
 
-                    ui.label(Self::tr_lang(language, "Passes:", "Passes:"));
-                    *live_sync |= ui
-                        .add(egui::DragValue::new(&mut step.vision_move_passes).range(1..=10))
-                        .changed();
-                    ui.end_row();
+                            ui.label(Self::tr_lang(language, "Offset Y", "Offset Y"));
+                            *live_sync |= Self::render_temp_i32_input(
+                                ui,
+                                ui.id().with("vision-move-offset-y"),
+                                &mut step.vision_move_offset_y,
+                                -5000,
+                                5000,
+                            );
+                            ui.end_row();
 
-                    ui.label(Self::tr_lang(language, "Delay:", "Delay:"));
-                    *live_sync |= ui
-                        .add(
-                            egui::DragValue::new(&mut step.vision_move_delay_ms)
-                                .range(0..=100)
-                                .suffix(" ms"),
-                        )
-                        .changed();
-                    ui.end_row();
-                });
-        });
+                            ui.label(Self::tr_lang(language, "Passes", "Passes"));
+                            *live_sync |= Self::render_temp_u8_input(
+                                ui,
+                                ui.id().with("vision-move-passes"),
+                                &mut step.vision_move_passes,
+                                1,
+                                10,
+                            );
+                            ui.end_row();
+
+                            ui.label(Self::tr_lang(language, "Delay", "Delay"));
+                            *live_sync |= Self::render_temp_u64_input(
+                                ui,
+                                ui.id().with("vision-move-delay"),
+                                &mut step.vision_move_delay_ms,
+                                0,
+                                1000,
+                            );
+                            ui.end_row();
+                        });
+                }
+
+                if show_move_fields && show_detection_tuning {
+                    ui.separator();
+                }
+
+                if show_detection_tuning {
+                    egui::Grid::new(ui.id().with("vision-runtime-detect-grid"))
+                        .num_columns(2)
+                        .spacing([10.0, 8.0])
+                        .show(ui, |ui| {
+                            ui.label(Self::tr_lang(language, "Tolerance", "Tolerance"));
+                            *live_sync |= Self::render_temp_u8_input(
+                                ui,
+                                ui.id().with("vision-tolerance"),
+                                &mut step.vision_color_tolerance,
+                                0,
+                                255,
+                            );
+                            ui.end_row();
+
+                            ui.label(Self::tr_lang(language, "Rate", "Rate"));
+                            *live_sync |= Self::render_temp_u32_input(
+                                ui,
+                                ui.id().with("vision-rate"),
+                                &mut step.vision_color_scan_rate_hz,
+                                1,
+                                1000,
+                            );
+                            ui.end_row();
+                        });
+                }
+            });
     }
 
     fn render_vision_axis_lock_controls(
@@ -287,8 +518,6 @@ impl CrosshairApp {
         language: UiLanguage,
         live_sync: &mut bool,
     ) {
-        ui.add_space(2.0);
-        ui.label(Self::tr_lang(language, "Movement:", "Movement:"));
         egui::ComboBox::from_id_salt(ui.id().with("scan-vision-move-axis-lock"))
             .selected_text(match step.vision_move_axis_lock {
                 VisionMoveAxisLock::None => Self::tr_lang(language, "Free", "Free"),
@@ -7156,12 +7385,17 @@ impl CrosshairApp {
                                                             && preset.search_region_is_single_pixel
                                                             && !preset.is_pixel_counter
                                                     });
+                                                 let show_detection_tuning = selected_vision_preset.is_some_and(|preset| {
+                                                        preset.use_color_matching || preset.is_pixel_counter
+                                                    });
                                                  let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
-                                                    if step.action == MacroAction::StartVisionSearch && supports_move_mouse {
+                                                    if step.action == MacroAction::StartVisionSearch && (supports_move_mouse || show_detection_tuning) {
                                                         Self::render_start_vision_move_mouse_controls(
                                                             ui,
                                                             step,
                                                             language,
+                                                            supports_move_mouse,
+                                                            show_detection_tuning,
                                                             &mut live_sync,
                                                         );
                                                     } else if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
@@ -7236,11 +7470,13 @@ impl CrosshairApp {
                                                                        });
                                                                });
                                                       }
-if supports_move_mouse {
+if supports_move_mouse || show_detection_tuning {
                                                           Self::render_scan_vision_move_mouse_controls(
                                                               ui,
                                                               step,
                                                               language,
+                                                              supports_move_mouse,
+                                                              show_detection_tuning,
                                                               &mut live_sync,
                                                           );
                                                       }
@@ -9424,12 +9660,17 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             && preset.search_region_is_single_pixel
                                                             && !preset.is_pixel_counter
                                                     });
+                                                 let show_detection_tuning = selected_vision_preset.is_some_and(|preset| {
+                                                        preset.use_color_matching || preset.is_pixel_counter
+                                                    });
                                                  let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
-                                                    if step.action == MacroAction::StartVisionSearch && supports_move_mouse {
+                                                    if step.action == MacroAction::StartVisionSearch && (supports_move_mouse || show_detection_tuning) {
                                                         Self::render_start_vision_move_mouse_controls(
                                                             ui,
                                                             step,
                                                             language,
+                                                            supports_move_mouse,
+                                                            show_detection_tuning,
                                                             &mut live_sync,
                                                         );
                                                     } else if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
@@ -9504,11 +9745,13 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                        });
                                                                });
                                                       }
-if supports_move_mouse {
+if supports_move_mouse || show_detection_tuning {
                                                           Self::render_scan_vision_move_mouse_controls(
                                                               ui,
                                                               step,
                                                               language,
+                                                              supports_move_mouse,
+                                                              show_detection_tuning,
                                                               &mut live_sync,
                                                           );
                                                       }
@@ -12645,12 +12888,17 @@ if supports_move_mouse {
                                                             && preset.search_region_is_single_pixel
                                                             && !preset.is_pixel_counter
                                                     });
+                                                     let show_detection_tuning = selected_vision_preset.is_some_and(|preset| {
+                                                        preset.use_color_matching || preset.is_pixel_counter
+                                                    });
                                                      let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
-                                                    if step.action == MacroAction::StartVisionSearch && supports_move_mouse {
+                                                    if step.action == MacroAction::StartVisionSearch && (supports_move_mouse || show_detection_tuning) {
                                                         Self::render_start_vision_move_mouse_controls(
                                                             ui,
                                                             step,
                                                             language,
+                                                            supports_move_mouse,
+                                                            show_detection_tuning,
                                                             &mut live_sync,
                                                         );
                                                     } else if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
@@ -12725,11 +12973,13 @@ if supports_move_mouse {
                                                                           });
                                                                   });
                                                           }
-if supports_move_mouse {
+if supports_move_mouse || show_detection_tuning {
                                                               Self::render_scan_vision_move_mouse_controls(
                                                                   ui,
                                                                   step,
                                                                   language,
+                                                                  supports_move_mouse,
+                                                                  show_detection_tuning,
                                                                   &mut live_sync,
                                                               );
                                                           }
@@ -14027,12 +14277,17 @@ if supports_move_mouse {
                                                      });
                                                      let is_pixel = selected_preset.map(|p| p.is_pixel_counter).unwrap_or(false);
                                                      let is_single_pixel = selected_preset.map(|p| p.use_color_matching && p.search_region_is_single_pixel && !p.is_pixel_counter).unwrap_or(false);
+                                                     let show_detection_tuning = selected_preset
+                                                         .map(|p| p.use_color_matching || p.is_pixel_counter)
+                                                         .unwrap_or(false);
                                                      let supports_move_mouse = selected_preset.is_some() && !is_pixel && !is_single_pixel;
-                                                     if step.action == MacroAction::StartVisionSearch && supports_move_mouse {
+                                                     if step.action == MacroAction::StartVisionSearch && (supports_move_mouse || show_detection_tuning) {
                                                          Self::render_start_vision_move_mouse_controls(
                                                              ui,
                                                              step,
                                                              language,
+                                                             supports_move_mouse,
+                                                             show_detection_tuning,
                                                              &mut live_sync,
                                                          );
                                                      } else if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
@@ -14107,11 +14362,13 @@ if supports_move_mouse {
                                                                           });
                                                                   });
                                                           }
-if supports_move_mouse {
+if supports_move_mouse || show_detection_tuning {
                                                               Self::render_scan_vision_move_mouse_controls(
                                                                   ui,
                                                                   step,
                                                                   language,
+                                                                  supports_move_mouse,
+                                                                  show_detection_tuning,
                                                                   &mut live_sync,
                                                               );
                                                           }

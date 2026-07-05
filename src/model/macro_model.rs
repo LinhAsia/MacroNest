@@ -7,8 +7,10 @@ use super::geometry_model::{GeometrySpec, HideGeometryMode, SetVariableSource};
 use super::window_model::HotkeyBinding;
 use super::{
     default_condition_join_operator, default_false, default_if_color_tolerance,
-    default_if_operator, default_macro_step_ocr_language, default_ocr_height, default_ocr_width,
-    default_true,
+    default_if_operator, default_image_search_color_scan_rate_hz,
+    default_image_search_color_tolerance, default_image_search_move_delay_ms,
+    default_image_search_move_passes, default_macro_step_ocr_language, default_ocr_height,
+    default_ocr_width, default_true,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
@@ -238,6 +240,18 @@ pub struct MacroStep {
     pub vision_move_cursor_on_match: bool,
     #[serde(default)]
     pub vision_move_axis_lock: VisionMoveAxisLock,
+    #[serde(default)]
+    pub vision_move_offset_x: i32,
+    #[serde(default)]
+    pub vision_move_offset_y: i32,
+    #[serde(default = "default_image_search_move_passes")]
+    pub vision_move_passes: u8,
+    #[serde(default = "default_image_search_move_delay_ms")]
+    pub vision_move_delay_ms: u64,
+    #[serde(default = "default_image_search_color_tolerance")]
+    pub vision_color_tolerance: u8,
+    #[serde(default = "default_image_search_color_scan_rate_hz")]
+    pub vision_color_scan_rate_hz: u32,
     #[serde(default, alias = "image_search_wait_until_found")]
     pub vision_wait_until_found: bool,
     #[serde(default, alias = "image_search_trigger_macro_enabled")]
@@ -386,6 +400,12 @@ impl Default for MacroStep {
             mouse_speed_percent: 100,
             vision_move_cursor_on_match: false,
             vision_move_axis_lock: VisionMoveAxisLock::None,
+            vision_move_offset_x: 0,
+            vision_move_offset_y: 0,
+            vision_move_passes: 1,
+            vision_move_delay_ms: 0,
+            vision_color_tolerance: default_image_search_color_tolerance(),
+            vision_color_scan_rate_hz: 100,
             vision_wait_until_found: false,
             vision_trigger_macro_enabled: false,
             vision_trigger_macro_preset_id: None,
