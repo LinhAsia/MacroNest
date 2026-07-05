@@ -13196,16 +13196,11 @@ impl eframe::App for CrosshairApp {
                                             }
                                             "capture" => {
                                                 let body = egui::Rect::from_min_max(
-                                                    rect.left_top() + egui::vec2(pad - 1.0, pad + 2.5),
-                                                    rect.right_bottom() + egui::vec2(-pad + 1.0, -pad + 1.0),
-                                                );
-                                                let top_hump = egui::Rect::from_min_max(
-                                                    egui::pos2(body.center().x - 4.5, body.top() - 3.5),
-                                                    egui::pos2(body.center().x + 1.5, body.top() + 1.0),
+                                                    rect.left_top() + egui::vec2(pad - 0.5, pad + 2.5),
+                                                    rect.right_bottom() + egui::vec2(-pad + 0.5, -pad + 1.0),
                                                 );
                                                 painter.rect_stroke(body, 3.5, stroke, egui::StrokeKind::Inside);
                                                 painter.rect_filled(body.shrink(1.4), 3.0, color.linear_multiply(0.08));
-                                                painter.rect_stroke(top_hump, 2.0, stroke, egui::StrokeKind::Inside);
                                                 painter.circle_stroke(body.center() + egui::vec2(0.0, 0.5), 4.3, stroke);
                                                 painter.circle_filled(
                                                     egui::pos2(body.right() - 3.8, body.top() + 3.8),
@@ -13357,7 +13352,7 @@ impl eframe::App for CrosshairApp {
                                     ui.separator();
 
                                     // 6. Capture Region
-                                    if icon_btn(ui, false, "capture", "Capture Region (Chụp hình vùng)").clicked() {
+                                    if icon_btn(ui, false, "capture", self.tr("Capture Region", "Chụp hình vùng")).clicked() {
                                         crate::overlay::screen_draw_trigger_capture_region_from_toolbar();
                                     }
 
