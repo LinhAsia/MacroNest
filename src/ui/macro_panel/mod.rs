@@ -209,6 +209,7 @@ impl CrosshairApp {
         }
 
         Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
+        Self::render_vision_move_mouse_tuning_dropdown(ui, step, language, live_sync);
     }
 
     fn render_start_vision_move_mouse_controls(
@@ -220,6 +221,64 @@ impl CrosshairApp {
         ui.add_space(4.0);
         ui.weak(Self::tr_lang(language, "Move Mouse", "Move Mouse"));
         Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
+        Self::render_vision_move_mouse_tuning_dropdown(ui, step, language, live_sync);
+    }
+
+    fn render_vision_move_mouse_tuning_dropdown(
+        ui: &mut egui::Ui,
+        step: &mut MacroStep,
+        language: UiLanguage,
+        live_sync: &mut bool,
+    ) {
+        ui.add_space(2.0);
+        let label = format!(
+            "{} ({}, {})  {}x  {}ms",
+            Self::tr_lang(language, "Move tune", "Move tune"),
+            step.vision_move_offset_x,
+            step.vision_move_offset_y,
+            step.vision_move_passes,
+            step.vision_move_delay_ms
+        );
+        ui.menu_button(label, |ui| {
+            egui::Grid::new(ui.id().with("vision-move-mouse-tuning-grid"))
+                .num_columns(2)
+                .spacing([10.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label(Self::tr_lang(language, "Offset X:", "Offset X:"));
+                    *live_sync |= ui
+                        .add(
+                            egui::DragValue::new(&mut step.vision_move_offset_x)
+                                .range(-5000..=5000),
+                        )
+                        .changed();
+                    ui.end_row();
+
+                    ui.label(Self::tr_lang(language, "Offset Y:", "Offset Y:"));
+                    *live_sync |= ui
+                        .add(
+                            egui::DragValue::new(&mut step.vision_move_offset_y)
+                                .range(-5000..=5000),
+                        )
+                        .changed();
+                    ui.end_row();
+
+                    ui.label(Self::tr_lang(language, "Passes:", "Passes:"));
+                    *live_sync |= ui
+                        .add(egui::DragValue::new(&mut step.vision_move_passes).range(1..=10))
+                        .changed();
+                    ui.end_row();
+
+                    ui.label(Self::tr_lang(language, "Delay:", "Delay:"));
+                    *live_sync |= ui
+                        .add(
+                            egui::DragValue::new(&mut step.vision_move_delay_ms)
+                                .range(0..=100)
+                                .suffix(" ms"),
+                        )
+                        .changed();
+                    ui.end_row();
+                });
+        });
     }
 
     fn render_vision_axis_lock_controls(
