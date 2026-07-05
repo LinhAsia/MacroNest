@@ -7069,23 +7069,51 @@ mod windows_overlay {
             .retain(|entry| entry.held || entry.hide_at > now);
     }
 
-    fn quick_key_display_combo_key_is_held(hook_state: &HookState, key_name: &str) -> bool {
+    fn hook_state_key_is_down(hook_state: &HookState, key_name: &str) -> bool {
         if quick_key_display_is_wheel_key_name(key_name) {
             return false;
         }
-        if hotkey::is_modifier_key_name(key_name) {
-            return match key_name.to_ascii_lowercase().as_str() {
-                "ctrl" | "control" => hook_state.ctrl,
-                "alt" => hook_state.alt,
-                "shift" => hook_state.shift,
-                "win" | "meta" => hook_state.win,
-                _ => false,
-            };
-        }
         if quick_key_display_is_mouse_key_name(key_name) {
-            return hook_state.held_mouse_buttons.contains(key_name);
+            return hook_state
+                .held_mouse_buttons
+                .iter()
+                .any(|held| held.eq_ignore_ascii_case(key_name));
         }
-        hook_state.held_inputs.contains(key_name)
+        if key_name.eq_ignore_ascii_case("Ctrl") || key_name.eq_ignore_ascii_case("Control") {
+            return hook_state.ctrl
+                || hook_state.held_inputs.contains("Ctrl")
+                || hook_state.held_inputs.contains("LCtrl")
+                || hook_state.held_inputs.contains("RCtrl");
+        }
+        if key_name.eq_ignore_ascii_case("Alt") {
+            return hook_state.alt
+                || hook_state.held_inputs.contains("Alt")
+                || hook_state.held_inputs.contains("LAlt")
+                || hook_state.held_inputs.contains("RAlt");
+        }
+        if key_name.eq_ignore_ascii_case("Shift") {
+            return hook_state.shift
+                || hook_state.held_inputs.contains("Shift")
+                || hook_state.held_inputs.contains("LShift")
+                || hook_state.held_inputs.contains("RShift");
+        }
+        if key_name.eq_ignore_ascii_case("Win") || key_name.eq_ignore_ascii_case("Meta") {
+            return hook_state.win
+                || hook_state.held_inputs.contains("Win")
+                || hook_state.held_inputs.contains("Meta");
+        }
+        let held_by_hook = hook_state
+            .held_inputs
+            .iter()
+            .any(|held| held.eq_ignore_ascii_case(key_name));
+        if let Some(vk) = hotkey::key_name_to_vk(key_name) {
+            return held_by_hook || (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0;
+        }
+        held_by_hook
+    }
+
+    fn quick_key_display_combo_key_is_held(hook_state: &HookState, key_name: &str) -> bool {
+        hook_state_key_is_down(hook_state, key_name)
     }
 
     fn quick_key_display_combo_still_held(entry: &QuickKeyDisplayEntry) -> bool {
@@ -11100,34 +11128,7 @@ mod windows_overlay {
     }
 
     fn screen_draw_trigger_key_is_down(key_name: &str, hook_state: &HookState) -> bool {
-        if hotkey::is_mouse_key_name(key_name) {
-            return hook_state
-                .held_mouse_buttons
-                .iter()
-                .any(|held| held.eq_ignore_ascii_case(key_name));
-        }
-        if key_name.eq_ignore_ascii_case("Ctrl") || key_name.eq_ignore_ascii_case("Control") {
-            return hook_state.ctrl || hook_state.held_inputs.contains("Ctrl");
-        }
-        if key_name.eq_ignore_ascii_case("Alt") {
-            return hook_state.alt || hook_state.held_inputs.contains("Alt");
-        }
-        if key_name.eq_ignore_ascii_case("Shift") {
-            return hook_state.shift || hook_state.held_inputs.contains("Shift");
-        }
-        if key_name.eq_ignore_ascii_case("Win") || key_name.eq_ignore_ascii_case("Meta") {
-            return hook_state.win
-                || hook_state.held_inputs.contains("Win")
-                || hook_state.held_inputs.contains("Meta");
-        }
-        let held_by_hook = hook_state
-            .held_inputs
-            .iter()
-            .any(|held| held.eq_ignore_ascii_case(key_name));
-        if let Some(vk) = hotkey::key_name_to_vk(key_name) {
-            return held_by_hook || (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0;
-        }
-        held_by_hook
+        hook_state_key_is_down(hook_state, key_name)
     }
 
     fn screen_draw_trigger_binding_is_down(trigger: &HotkeyBinding) -> bool {
