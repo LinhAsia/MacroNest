@@ -6994,7 +6994,6 @@ mod windows_overlay {
         entry.text = text;
         entry.lane = quick_key_display_lane_for_key_name(&entry.source_key);
         entry.held = true;
-        entry.press_count = 1;
         entry.released_at = None;
         entry.hide_at = Instant::now() + QUICK_KEY_DISPLAY_DISPLAY_DURATION;
         true
