@@ -1807,6 +1807,7 @@ mod windows_overlay {
             fill: bool,
             freeze: bool,
             tool: crate::model::QuickScreenDrawTool,
+            text_border: bool,
         },
         UpdateKeySoundConfig {
             enabled: bool,
@@ -1899,6 +1900,7 @@ mod windows_overlay {
         text_box_width: i32,
         text_box_height: i32,
         text_rotation_deg: f32,
+        text_border: bool,
     }
 
     #[derive(Clone)]
@@ -2035,6 +2037,7 @@ mod windows_overlay {
         screen_color_pick_mode: bool,
         color_pick_preview: Option<ScreenDrawColorPickPreview>,
         pointer_point: POINT,
+        text_border: bool,
     }
 
     fn screen_draw_debug_log(_message: impl AsRef<str>) {}
@@ -2105,6 +2108,7 @@ mod windows_overlay {
                 screen_color_pick_mode: false,
                 color_pick_preview: None,
                 pointer_point: POINT { x: 0, y: 0 },
+                text_border: false,
             }
         }
     }
@@ -2136,6 +2140,7 @@ mod windows_overlay {
             fill: bool,
             freeze: bool,
             tool: crate::model::QuickScreenDrawTool,
+            text_border: bool,
         },
         VisionFinished(String),
         MacroStepInlineFeedback {
@@ -9088,6 +9093,7 @@ mod windows_overlay {
                 && !state.trigger_started_from_inactive
                 && !state.trigger_release_should_keep_open
                 && !state.suppress_next_trigger_hold
+                && state.text_session.is_none()
             {
                 state.trigger.clone()
             } else {
@@ -9104,6 +9110,7 @@ mod windows_overlay {
                 && !state.trigger_started_from_inactive
                 && !state.trigger_release_should_keep_open
                 && !state.suppress_next_trigger_hold
+                && state.text_session.is_none()
             {
                 let pressed_at = Instant::now();
                 state.trigger_latched = true;
@@ -9116,7 +9123,7 @@ mod windows_overlay {
         }
         let trigger = {
             let mut state = SCREEN_DRAW_STATE.lock();
-            if !state.active || state.capturing_region {
+            if !state.active || state.capturing_region || state.text_session.is_some() {
                 state.trigger_pressed_at = None;
                 return;
             }
@@ -9126,22 +9133,6 @@ mod windows_overlay {
             let hold_threshold_ms = SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS;
             let elapsed = Instant::now().duration_since(pressed_at);
             if elapsed < Duration::from_millis(hold_threshold_ms) {
-                return;
-            }
-            screen_draw_debug_log(format!(
-                "hold_check active={} capturing={} trigger_down={} elapsed_ms={} suppress={}",
-                state.active,
-                state.capturing_region,
-                state.trigger_is_down,
-                elapsed.as_millis(),
-                state.suppress_next_trigger_hold
-            ));
-            if !state.trigger_is_down {
-                state.trigger_pressed_at = None;
-                state.trigger_latched = false;
-                state.trigger_started_from_inactive = false;
-                state.trigger_release_should_keep_open = false;
-                state.suppress_next_trigger_hold = false;
                 return;
             }
             let Some(trigger) = state.trigger.clone() else {
@@ -9637,6 +9628,7 @@ mod windows_overlay {
                     fill,
                     freeze,
                     tool,
+                    text_border,
                 } => {
                     {
                         let mut state = SCREEN_DRAW_STATE.lock();
@@ -9648,6 +9640,7 @@ mod windows_overlay {
                         state.smoothing = smoothing;
                         state.smoothing_amount = smoothing_amount.clamp(0.0, 1.0);
                         state.freeze_screen = freeze;
+                        state.text_border = text_border;
                         state.tool = match tool {
                             crate::model::QuickScreenDrawTool::Brush => ScreenDrawTool::Brush,
                             crate::model::QuickScreenDrawTool::Line => ScreenDrawTool::Line,
@@ -10982,6 +10975,7 @@ mod windows_overlay {
                     | ScreenDrawHit::SmoothingAmount
                     | ScreenDrawHit::CaptureRegion
                     | ScreenDrawHit::ColorPaletteItem(_)
+                    | ScreenDrawHit::Canvas
             );
         if should_commit_text_session {
             let committed = commit_screen_draw_text_session(&mut state);
@@ -12028,7 +12022,7 @@ mod windows_overlay {
     }
 
     fn send_screen_draw_config_to_ui() {
-        let (color, brush_size, smoothing, smoothing_amount, freeze, tool) = {
+        let (color, brush_size, smoothing, smoothing_amount, freeze, tool, text_border) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
                 state.color,
@@ -12046,6 +12040,7 @@ mod windows_overlay {
                     ScreenDrawTool::Text => crate::model::QuickScreenDrawTool::Text,
                     ScreenDrawTool::Brush => crate::model::QuickScreenDrawTool::Brush,
                 },
+                state.text_border,
             )
         };
         if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
@@ -12057,6 +12052,7 @@ mod windows_overlay {
                 fill: false,
                 freeze,
                 tool,
+                text_border,
             });
         }
     }
@@ -12507,11 +12503,15 @@ mod windows_overlay {
         let above_overflow = toolbar_bottom
             .map(|bottom| (bottom - above_top).max(0.0))
             .unwrap_or_else(|| (12.0 - above_top).max(0.0));
-        let below_limit = canvas_height.map(|height| height as f32 - 12.0);
+        let below_limit = canvas_height.map(|h| h as f32 - 12.0);
         let below_overflow = below_limit
             .map(|limit| (below_bottom - limit).max(0.0))
             .unwrap_or(0.0);
-        above_overflow > 0.0 && below_overflow <= above_overflow
+        if below_overflow > 0.0 && above_overflow == 0.0 {
+            false
+        } else {
+            true
+        }
     }
 
     fn screen_draw_text_session_geometry(
@@ -12583,7 +12583,7 @@ mod windows_overlay {
                 width_f,
                 height_f,
                 rotation_deg,
-                18.0,
+                width_f * 0.5 - 32.0,
                 control_local_y,
             ),
             delete_button: screen_draw_text_local_to_world(
@@ -12592,7 +12592,7 @@ mod windows_overlay {
                 width_f,
                 height_f,
                 rotation_deg,
-                (width_f - 18.0).max(18.0),
+                width_f * 0.5 + 32.0,
                 control_local_y,
             ),
             rotate_handle: screen_draw_text_local_to_world(
@@ -12602,7 +12602,7 @@ mod windows_overlay {
                 height_f,
                 rotation_deg,
                 width_f * 0.5,
-                rotate_local_y,
+                control_local_y,
             ),
             resize_handle: screen_draw_text_local_to_world(
                 left_f,
@@ -12705,6 +12705,7 @@ mod windows_overlay {
             text_box_width: 0,
             text_box_height: 0,
             text_rotation_deg: 0.0,
+            text_border: state.text_border,
         });
         state.current_stroke_updated_at = Some(Instant::now());
         state.current_stroke_release_seen_at = None;
@@ -12849,6 +12850,10 @@ mod windows_overlay {
         let Some(session) = state.text_session.take() else {
             return false;
         };
+        state.trigger_pressed_at = None;
+        state.trigger_is_down = false;
+        state.trigger_latched = false;
+        state.suppress_next_trigger_hold = true;
         if session.stroke.text.trim().is_empty() {
             return false;
         }
@@ -12859,6 +12864,10 @@ mod windows_overlay {
     }
 
     fn cancel_screen_draw_text_session(state: &mut ScreenDrawState) -> bool {
+        state.trigger_pressed_at = None;
+        state.trigger_is_down = false;
+        state.trigger_latched = false;
+        state.suppress_next_trigger_hold = true;
         state.text_session.take().is_some()
     }
 
@@ -13036,90 +13045,101 @@ mod windows_overlay {
             1.3,
         );
 
-        for button in [
-            geometry.confirm_button,
-            geometry.delete_button,
-            geometry.rotate_handle,
-            geometry.resize_handle,
-        ] {
-            fill_screen_draw_editor_circle(pixmap, button, 10.0, handle_fill);
-            stroke_screen_draw_editor_circle(pixmap, button, 10.0, 1.4, handle_stroke);
-        }
+        // Render premium custom color-coded button backgrounds
+        // Confirm: Green
+        fill_screen_draw_editor_circle(pixmap, geometry.confirm_button, 10.0, [34, 197, 94, 240]);
+        stroke_screen_draw_editor_circle(pixmap, geometry.confirm_button, 10.0, 1.4, [240, 253, 244, 245]);
 
-        draw_screen_draw_editor_line(
-            pixmap,
-            geometry.confirm_button.0 - 3.5,
-            geometry.confirm_button.1 + 0.5,
-            geometry.confirm_button.0 - 0.6,
-            geometry.confirm_button.1 + 3.5,
-            handle_stroke,
-            1.8,
-        );
-        draw_screen_draw_editor_line(
-            pixmap,
-            geometry.confirm_button.0 - 0.6,
-            geometry.confirm_button.1 + 3.5,
-            geometry.confirm_button.0 + 4.2,
-            geometry.confirm_button.1 - 3.4,
-            handle_stroke,
-            1.8,
-        );
+        // Delete: Red
+        fill_screen_draw_editor_circle(pixmap, geometry.delete_button, 10.0, [239, 68, 68, 240]);
+        stroke_screen_draw_editor_circle(pixmap, geometry.delete_button, 10.0, 1.4, [254, 242, 242, 245]);
 
+        // Rotate: Blue
+        fill_screen_draw_editor_circle(pixmap, geometry.rotate_handle, 10.0, [59, 130, 246, 240]);
+        stroke_screen_draw_editor_circle(pixmap, geometry.rotate_handle, 10.0, 1.4, [239, 246, 255, 245]);
+
+        // Resize: Standard/Dark Grey
+        fill_screen_draw_editor_circle(pixmap, geometry.resize_handle, 10.0, handle_fill);
+        stroke_screen_draw_editor_circle(pixmap, geometry.resize_handle, 10.0, 1.4, handle_stroke);
+
+        // Confirm checkmark icon (White)
         draw_screen_draw_editor_line(
             pixmap,
-            geometry.delete_button.0 - 3.6,
-            geometry.delete_button.1 - 3.6,
-            geometry.delete_button.0 + 3.6,
-            geometry.delete_button.1 + 3.6,
-            handle_stroke,
-            1.8,
+            geometry.confirm_button.0 - 4.0,
+            geometry.confirm_button.1 + 0.0,
+            geometry.confirm_button.0 - 1.0,
+            geometry.confirm_button.1 + 3.0,
+            [255, 255, 255, 255],
+            2.0,
         );
         draw_screen_draw_editor_line(
             pixmap,
-            geometry.delete_button.0 + 3.6,
-            geometry.delete_button.1 - 3.6,
-            geometry.delete_button.0 - 3.6,
-            geometry.delete_button.1 + 3.6,
-            handle_stroke,
-            1.8,
+            geometry.confirm_button.0 - 1.0,
+            geometry.confirm_button.1 + 3.0,
+            geometry.confirm_button.0 + 5.0,
+            geometry.confirm_button.1 - 3.0,
+            [255, 255, 255, 255],
+            2.0,
         );
 
-        stroke_screen_draw_editor_circle(pixmap, geometry.rotate_handle, 4.2, 1.6, handle_stroke);
+        // Delete X cross icon (White)
         draw_screen_draw_editor_line(
             pixmap,
-            geometry.rotate_handle.0 + 3.0,
-            geometry.rotate_handle.1 - 3.4,
-            geometry.rotate_handle.0 + 6.2,
-            geometry.rotate_handle.1 - 4.2,
-            handle_stroke,
+            geometry.delete_button.0 - 3.5,
+            geometry.delete_button.1 - 3.5,
+            geometry.delete_button.0 + 3.5,
+            geometry.delete_button.1 + 3.5,
+            [255, 255, 255, 255],
+            2.0,
+        );
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.delete_button.0 + 3.5,
+            geometry.delete_button.1 - 3.5,
+            geometry.delete_button.0 - 3.5,
+            geometry.delete_button.1 + 3.5,
+            [255, 255, 255, 255],
+            2.0,
+        );
+
+        // Rotate arrow icon (White)
+        stroke_screen_draw_editor_circle(pixmap, geometry.rotate_handle, 4.0, 1.6, [255, 255, 255, 255]);
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.rotate_handle.0 + 2.5,
+            geometry.rotate_handle.1 - 3.2,
+            geometry.rotate_handle.0 + 5.5,
+            geometry.rotate_handle.1 - 3.8,
+            [255, 255, 255, 255],
             1.6,
         );
         draw_screen_draw_editor_line(
             pixmap,
-            geometry.rotate_handle.0 + 6.2,
-            geometry.rotate_handle.1 - 4.2,
-            geometry.rotate_handle.0 + 4.4,
-            geometry.rotate_handle.1 - 6.8,
-            handle_stroke,
+            geometry.rotate_handle.0 + 5.5,
+            geometry.rotate_handle.1 - 3.8,
+            geometry.rotate_handle.0 + 3.8,
+            geometry.rotate_handle.1 - 6.2,
+            [255, 255, 255, 255],
             1.6,
         );
 
+        // Resize diagonal grip lines (White)
         draw_screen_draw_editor_line(
             pixmap,
             geometry.resize_handle.0 - 4.0,
             geometry.resize_handle.1 + 0.5,
             geometry.resize_handle.0 + 0.5,
             geometry.resize_handle.1 - 4.0,
-            handle_stroke,
+            [255, 255, 255, 255],
             1.7,
         );
         draw_screen_draw_editor_line(
             pixmap,
-            geometry.resize_handle.0 - 6.2,
-            geometry.resize_handle.1 + 2.7,
-            geometry.resize_handle.0 + 2.7,
-            geometry.resize_handle.1 - 6.2,
-            handle_stroke,
+            geometry.resize_handle.0 - 6.0,
+            geometry.resize_handle.1 + 2.5,
+            geometry.resize_handle.0 + 2.5,
+            geometry.resize_handle.1 - 6.0,
+            [255, 255, 255, 255],
             1.4,
         );
     }
@@ -13170,6 +13190,7 @@ mod windows_overlay {
         color: RgbaColor,
         font_size: f32,
         rotation_deg: f32,
+        text_border: bool,
     ) {
         if text.trim().is_empty() || width == 0 || height == 0 {
             return;
@@ -13325,14 +13346,40 @@ mod windows_overlay {
                 if src_a == 0 {
                     continue;
                 }
+                if text_border {
+                    // Draw black border by blending at surrounding offsets
+                    let border_radius: i32 = ((font_size / 12.0).round() as i32).max(1).min(4);
+                    let border_offsets: &[(i32, i32)] = &[
+                        (-1, -1), (0, -1), (1, -1),
+                        (-1,  0),          (1,  0),
+                        (-1,  1), (0,  1), (1,  1),
+                    ];
+                    for (odx, ody) in border_offsets {
+                        let bx = clamped_left as i64 + px as i64 + (*odx as i64 * border_radius as i64);
+                        let by = clamped_top as i64 + py as i64 + (*ody as i64 * border_radius as i64);
+                        if bx >= 0 && by >= 0 && bx < width as i64 && by < height as i64 {
+                            let border_offset = (by as usize * width as usize + bx as usize) * 4;
+                            blend_premultiplied_rgba(
+                                &mut pixels[border_offset..border_offset + 4],
+                                0,
+                                0,
+                                0,
+                                src_a,
+                            );
+                        }
+                    }
+                }
+                let r_blend = ((color.r as u32 * src_a as u32) / 255) as u8;
+                let g_blend = ((color.g as u32 * src_a as u32) / 255) as u8;
+                let b_blend = ((color.b as u32 * src_a as u32) / 255) as u8;
                 let dst_offset =
                     (((clamped_top as usize + py) * width as usize) + clamped_left as usize + px)
                         * 4;
                 blend_premultiplied_rgba(
                     &mut pixels[dst_offset..dst_offset + 4],
-                    color.r,
-                    color.g,
-                    color.b,
+                    r_blend,
+                    g_blend,
+                    b_blend,
                     src_a,
                 );
             }
@@ -13698,6 +13745,7 @@ mod windows_overlay {
                         stroke.color,
                         font_size,
                         stroke.text_rotation_deg,
+                        stroke.text_border,
                     );
                 }
             }
@@ -13862,11 +13910,16 @@ mod windows_overlay {
         if state_guard.committed_dirty {
             rebuild_screen_draw_canvas(&mut state_guard);
         }
-        let dirty_rect = state_guard
-            .dirty_rect
-            .take()
-            .and_then(|rect| rect.normalized(width, height))
-            .unwrap_or_else(|| ScreenDrawDirtyRect::full(width, height));
+        let dirty_rect = if state_guard.text_session.is_some() {
+            state_guard.dirty_rect = None;
+            ScreenDrawDirtyRect::full(width, height)
+        } else {
+            state_guard
+                .dirty_rect
+                .take()
+                .and_then(|rect| rect.normalized(width, height))
+                .unwrap_or_else(|| ScreenDrawDirtyRect::full(width, height))
+        };
         {
             let ScreenDrawState {
                 committed_rgba,
@@ -14300,6 +14353,7 @@ mod windows_overlay {
             },
             15.0,
             0.0,
+            false,
         );
         draw_screen_draw_text_into_rgba(
             pixels,
@@ -14318,6 +14372,7 @@ mod windows_overlay {
             },
             12.0,
             0.0,
+            false,
         );
     }
 
@@ -14895,48 +14950,33 @@ mod windows_overlay {
                 [255, 255, 255, 34]
             },
         );
-        draw_skia_line(
-            &mut pixmap,
-            pick_button_x + 8.5,
-            31.5,
-            pick_button_x + 18.0,
-            22.0,
-            [240, 246, 255, 246],
-            3.2,
-        );
-        draw_skia_line(
-            &mut pixmap,
-            pick_button_x + 10.2,
-            33.2,
-            pick_button_x + 19.7,
-            23.7,
-            [166, 188, 216, 220],
-            1.1,
-        );
-        let mut dropper_head = tiny_skia::PathBuilder::new();
-        dropper_head.move_to(pick_button_x + 17.5, 21.0);
-        dropper_head.line_to(pick_button_x + 21.6, 16.9);
-        dropper_head.line_to(pick_button_x + 23.9, 19.2);
-        dropper_head.line_to(pick_button_x + 19.8, 23.3);
-        dropper_head.close();
-        if let Some(path) = dropper_head.finish() {
-            fill_skia_path(&mut pixmap, &path, [240, 246, 255, 246]);
+        // 3. Color Picker (Pipette/Dropper - 32x32 button bounds)
+        // Draw the rubber bulb
+        draw_skia_circle_fill(&mut pixmap, pick_button_x + 21.5, 17.5, 3.8, [240, 246, 255, 246]);
+
+        // Draw the collar
+        draw_skia_line(&mut pixmap, pick_button_x + 16.0, 19.0, pick_button_x + 20.0, 23.0, [240, 246, 255, 246], 2.0);
+
+        // Draw liquid inside the glass tube (using active color)
+        let mut liquid_path = tiny_skia::PathBuilder::new();
+        liquid_path.move_to(pick_button_x + 15.5, 21.5);
+        liquid_path.line_to(pick_button_x + 17.5, 23.5);
+        liquid_path.line_to(pick_button_x + 12.5, 28.5);
+        liquid_path.line_to(pick_button_x + 10.5, 26.5);
+        liquid_path.close();
+        if let Some(path) = liquid_path.finish() {
+            fill_skia_path(&mut pixmap, &path, [color.r, color.g, color.b, 255]);
         }
-        draw_skia_circle_outline(
-            &mut pixmap,
-            pick_button_x + 21.2,
-            18.7,
-            3.0,
-            [240, 246, 255, 246],
-            1.8,
-        );
-        draw_skia_circle_fill(
-            &mut pixmap,
-            pick_button_x + 8.3,
-            31.7,
-            2.1,
-            [255, 208, 96, 255],
-        );
+
+        // Draw glass tube outline
+        draw_skia_line(&mut pixmap, pick_button_x + 16.0, 21.0, pick_button_x + 10.0, 27.0, [240, 246, 255, 246], 1.2);
+        draw_skia_line(&mut pixmap, pick_button_x + 18.0, 23.0, pick_button_x + 12.0, 29.0, [240, 246, 255, 246], 1.2);
+        draw_skia_line(&mut pixmap, pick_button_x + 10.0, 27.0, pick_button_x + 7.5, 31.5, [240, 246, 255, 246], 1.2);
+        draw_skia_line(&mut pixmap, pick_button_x + 12.0, 29.0, pick_button_x + 7.5, 31.5, [240, 246, 255, 246], 1.2);
+
+        // Draw color droplet falling from the tip (using active color)
+        draw_skia_circle_fill(&mut pixmap, pick_button_x + 5.5, 33.5, 2.2, [color.r, color.g, color.b, 255]);
+        draw_skia_circle_outline(&mut pixmap, pick_button_x + 5.5, 33.5, 2.2, [240, 246, 255, 180], 0.8);
 
         // 4. Capture (Camera - 32x32 button bounds)
         let capture_x = SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32;
@@ -25107,6 +25147,7 @@ mod windows_overlay {
         bypass_enabled: bool,
     ) -> MacroRunFlow {
         let mut pending_macro_preset_changes = HashMap::new();
+        let mut toggled_steps_this_run = HashSet::new();
         execute_macro_sequence_with_pending(
             preset_id,
             steps,
@@ -25119,7 +25160,28 @@ mod windows_overlay {
             match_duplicate_window_titles,
             bypass_enabled,
             &mut pending_macro_preset_changes,
+            &mut toggled_steps_this_run,
         )
+    }
+
+    fn resolve_macro_step_run_state(
+        preset_id: u32,
+        absolute_index: usize,
+        fallback_enabled: bool,
+        toggle_enabled_on_run: bool,
+        toggled_steps_this_run: &mut HashSet<usize>,
+    ) -> bool {
+        let is_enabled = is_macro_step_enabled(preset_id, absolute_index, fallback_enabled);
+        if !toggle_enabled_on_run {
+            return is_enabled;
+        }
+        if !toggled_steps_this_run.insert(absolute_index) {
+            return false;
+        }
+        if let Some(new_enabled) = toggle_macro_step_enabled(preset_id, absolute_index) {
+            return !new_enabled;
+        }
+        is_enabled
     }
 
     fn execute_macro_sequence_with_pending(
@@ -25134,6 +25196,7 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         bypass_enabled: bool,
         pending_macro_preset_changes: &mut HashMap<u32, bool>,
+        toggled_steps_this_run: &mut HashSet<usize>,
     ) -> MacroRunFlow {
         let mut index = 0usize;
         'outer: while index < steps.len() {
@@ -25160,13 +25223,13 @@ mod windows_overlay {
             if should_flush_pending_macro_preset_changes(step, pending_macro_preset_changes) {
                 let _ = flush_pending_macro_preset_enabled_changes(pending_macro_preset_changes);
             }
-            let is_enabled = is_macro_step_enabled(preset_id, absolute_index, step.enabled);
-            let mut run_step = is_enabled;
-            if step.toggle_enabled_on_run {
-                if let Some(new_enabled) = toggle_macro_step_enabled(preset_id, absolute_index) {
-                    run_step = !new_enabled;
-                }
-            }
+            let run_step = resolve_macro_step_run_state(
+                preset_id,
+                absolute_index,
+                step.enabled,
+                step.toggle_enabled_on_run,
+                toggled_steps_this_run,
+            );
 
             if !run_step {
                 index += 1;
@@ -25211,6 +25274,7 @@ mod windows_overlay {
                                 match_duplicate_window_titles,
                                 bypass_enabled,
                                 pending_macro_preset_changes,
+                                toggled_steps_this_run,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => {
@@ -25268,6 +25332,7 @@ mod windows_overlay {
                                 match_duplicate_window_titles,
                                 bypass_enabled,
                                 pending_macro_preset_changes,
+                                toggled_steps_this_run,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => {
@@ -25862,6 +25927,7 @@ mod windows_overlay {
         bypass_enabled: bool,
     ) -> MacroRunFlow {
         let mut pending_macro_preset_changes = HashMap::new();
+        let mut toggled_steps_this_run = HashSet::new();
         execute_hold_macro_sequence_with_pending(
             preset_id,
             steps,
@@ -25873,6 +25939,7 @@ mod windows_overlay {
             match_duplicate_window_titles,
             bypass_enabled,
             &mut pending_macro_preset_changes,
+            &mut toggled_steps_this_run,
         )
     }
 
@@ -25887,6 +25954,7 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         bypass_enabled: bool,
         pending_macro_preset_changes: &mut HashMap<u32, bool>,
+        toggled_steps_this_run: &mut HashSet<usize>,
     ) -> MacroRunFlow {
         let mut index = 0usize;
         'outer_hold: while index < steps.len() {
@@ -25917,13 +25985,13 @@ mod windows_overlay {
             if should_flush_pending_macro_preset_changes(step, pending_macro_preset_changes) {
                 let _ = flush_pending_macro_preset_enabled_changes(pending_macro_preset_changes);
             }
-            let is_enabled = is_macro_step_enabled(preset_id, absolute_index, step.enabled);
-            let mut run_step = is_enabled;
-            if step.toggle_enabled_on_run {
-                if let Some(new_enabled) = toggle_macro_step_enabled(preset_id, absolute_index) {
-                    run_step = !new_enabled;
-                }
-            }
+            let run_step = resolve_macro_step_run_state(
+                preset_id,
+                absolute_index,
+                step.enabled,
+                step.toggle_enabled_on_run,
+                toggled_steps_this_run,
+            );
 
             if !run_step {
                 index += 1;
@@ -25968,6 +26036,7 @@ mod windows_overlay {
                                 match_duplicate_window_titles,
                                 bypass_enabled,
                                 pending_macro_preset_changes,
+                                toggled_steps_this_run,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => {
@@ -26025,6 +26094,7 @@ mod windows_overlay {
                                 match_duplicate_window_titles,
                                 bypass_enabled,
                                 pending_macro_preset_changes,
+                                toggled_steps_this_run,
                             ) {
                                 MacroRunFlow::BreakLoop => break,
                                 MacroRunFlow::StopExecution => {
@@ -27512,6 +27582,7 @@ mod windows_overlay {
                 text_box_width: 0,
                 text_box_height: 0,
                 text_rotation_deg: 0.0,
+                text_border: false,
             };
 
             let (left, top, width, height, font_size, text) =
@@ -27545,6 +27616,7 @@ mod windows_overlay {
                 text_box_width: 200,
                 text_box_height: 80,
                 text_rotation_deg: 35.0,
+                text_border: false,
             };
 
             let geometry = screen_draw_text_session_geometry(&stroke, "Text").unwrap();
@@ -27630,6 +27702,7 @@ mod windows_overlay {
                 text_box_width: 160,
                 text_box_height: 40,
                 text_rotation_deg: 0.0,
+                text_border: false,
             };
             let geometry = screen_draw_text_session_geometry_for_overlay(
                 &stroke,
@@ -28229,6 +28302,69 @@ mod windows_overlay {
             assert_eq!(val, Some(1.0));
 
             RUNTIME_VARIABLES.lock().clear();
+        }
+
+        #[test]
+        fn test_toggle_enabled_on_run_only_toggles_once_per_macro_run() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let preset_id = 77;
+            let steps = vec![
+                MacroStep {
+                    action: MacroAction::LoopStart,
+                    key: "2".to_string(),
+                    ..Default::default()
+                },
+                MacroStep {
+                    action: MacroAction::SetVariable,
+                    if_variable_name: "count".to_string(),
+                    set_variable_source: crate::model::SetVariableSource::Expression,
+                    key: "{count + 1}".to_string(),
+                    toggle_enabled_on_run: true,
+                    ..Default::default()
+                },
+                MacroStep {
+                    action: MacroAction::LoopEnd,
+                    ..Default::default()
+                },
+            ];
+            let previous_groups = {
+                let mut hook_state = HOOK_STATE.lock();
+                let previous = hook_state.macro_groups.clone();
+                let mut preset = MacroPreset::new(preset_id);
+                preset.steps = steps.clone();
+                let mut group = MacroGroup::new(1);
+                group.presets = vec![preset];
+                hook_state.macro_groups = vec![group];
+                previous
+            };
+
+            RUNTIME_VARIABLES.lock().clear();
+            RUNTIME_VARIABLES
+                .lock()
+                .insert("count".to_string(), 0.0);
+
+            let step_indices = vec![0, 1, 2];
+            let mut locked_keys = vec![];
+            let mut locked_mouse = vec![];
+            let result = execute_macro_sequence(
+                preset_id,
+                &steps,
+                &step_indices,
+                &mut locked_keys,
+                &mut locked_mouse,
+                false,
+                None,
+                &[],
+                false,
+                true,
+            );
+
+            assert_eq!(result, MacroRunFlow::Continue);
+            assert_eq!(RUNTIME_VARIABLES.lock().get("count").copied(), Some(1.0));
+            assert!(!is_macro_step_enabled(preset_id, 1, true));
+
+            RUNTIME_VARIABLES.lock().clear();
+            HOOK_STATE.lock().macro_groups = previous_groups;
         }
     }
 
@@ -34177,6 +34313,7 @@ mod fallback {
             fill: bool,
             freeze: bool,
             tool: crate::model::QuickScreenDrawTool,
+            text_border: bool,
         },
         SetUiVisible(bool),
         SetTrayIconVisible(bool),
@@ -34224,6 +34361,7 @@ mod fallback {
             fill: bool,
             freeze: bool,
             tool: crate::model::QuickScreenDrawTool,
+            text_border: bool,
         },
         MascotDragged {
             style: MascotStyle,
