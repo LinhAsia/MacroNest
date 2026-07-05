@@ -23229,6 +23229,14 @@ mod windows_overlay {
         current_hold_run_matches_with_guard(preset_id, run_token, &hook_state)
     }
 
+    fn current_hold_run_release_requested(preset_id: u32, run_token: u64) -> bool {
+        let hook_state = HOOK_STATE.lock();
+        hook_state
+            .active_hold_macros
+            .get(&preset_id)
+            .is_some_and(|active| active.run_token == run_token && active.release_requested)
+    }
+
     fn current_hold_run_matches_with_guard(
         preset_id: u32,
         run_token: u64,
@@ -26003,7 +26011,7 @@ mod windows_overlay {
 
             if macro_force_stop_requested(preset_id)
                 || (!defer_stop_until_loop_end
-                    && macro_stop_requested(preset_id, stop_immediately_on_retrigger))
+                    && current_hold_run_release_requested(preset_id, run_token))
             {
                 return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
@@ -26093,7 +26101,7 @@ mod windows_overlay {
                             }
 
                             if defer_stop_for_body
-                                && macro_stop_requested(preset_id, stop_immediately_on_retrigger)
+                                && current_hold_run_release_requested(preset_id, run_token)
                             {
                                 return finish_macro_run(
                                     MacroRunFlow::StopExecution,
@@ -26161,7 +26169,7 @@ mod windows_overlay {
                             }
 
                             if defer_stop_for_body
-                                && macro_stop_requested(preset_id, stop_immediately_on_retrigger)
+                                && current_hold_run_release_requested(preset_id, run_token)
                             {
                                 return finish_macro_run(
                                     MacroRunFlow::StopExecution,
@@ -26671,7 +26679,7 @@ mod windows_overlay {
                 || !current_hold_run_matches(preset_id, run_token)
                 || macro_force_stop_requested(preset_id)
                 || (!defer_stop_until_loop_end
-                    && macro_stop_requested(preset_id, stop_immediately_on_retrigger));
+                    && current_hold_run_release_requested(preset_id, run_token));
         }
 
         let mut remaining_ms = delay_ms;
@@ -26702,7 +26710,7 @@ mod windows_overlay {
 
             if macro_force_stop_requested(preset_id)
                 || (!defer_stop_until_loop_end
-                    && macro_stop_requested(preset_id, stop_immediately_on_retrigger))
+                    && current_hold_run_release_requested(preset_id, run_token))
             {
                 return true;
             }
@@ -26720,7 +26728,7 @@ mod windows_overlay {
             || !current_hold_run_matches(preset_id, run_token)
             || macro_force_stop_requested(preset_id)
             || (!defer_stop_until_loop_end
-                && macro_stop_requested(preset_id, stop_immediately_on_retrigger))
+                && current_hold_run_release_requested(preset_id, run_token))
     }
 
     fn sleep_for_macro_delay(
