@@ -7127,17 +7127,10 @@ mod windows_overlay {
     }
 
     fn quick_key_display_reconcile_held_entries(runtime: &mut Runtime) {
-        let mut stale_identities = Vec::new();
         for entry in runtime.quick_key_display_entries.iter_mut().filter(|entry| entry.held) {
             if quick_key_display_combo_still_held(entry) {
-                continue;
+                let _ = quick_key_display_refresh_entry_from_held_keys(entry);
             }
-            if !quick_key_display_refresh_entry_from_held_keys(entry) {
-                stale_identities.push(entry.identity.clone());
-            }
-        }
-        for identity in stale_identities {
-            quick_key_display_release_entry(runtime, &identity);
         }
     }
 
