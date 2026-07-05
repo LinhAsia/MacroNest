@@ -214,6 +214,9 @@ impl CrosshairApp {
         if !show_move_fields && !show_detection_tuning {
             return;
         }
+        if show_move_fields {
+            Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
+        }
         Self::render_vision_runtime_tuning_dropdown(
             ui,
             step,
@@ -236,6 +239,14 @@ impl CrosshairApp {
             return;
         }
         ui.add_space(4.0);
+        if show_move_fields {
+            ui.weak(Self::tr_lang(
+                language,
+                "Move Mouse only",
+                "Move Mouse only",
+            ));
+            Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
+        }
         Self::render_vision_runtime_tuning_dropdown(
             ui,
             step,
@@ -351,16 +362,6 @@ impl CrosshairApp {
         ui.add_space(2.0);
         let mut summary_parts = Vec::new();
         if show_move_fields {
-            let movement = match step.vision_move_axis_lock {
-                VisionMoveAxisLock::None => Self::tr_lang(language, "Free", "Free"),
-                VisionMoveAxisLock::HorizontalOnly => {
-                    Self::tr_lang(language, "Horizontal only", "Horizontal only")
-                }
-                VisionMoveAxisLock::VerticalOnly => {
-                    Self::tr_lang(language, "Vertical only", "Vertical only")
-                }
-            };
-            summary_parts.push(movement.to_owned());
             summary_parts.push(format!(
                 "({}, {})  {}x  {}ms",
                 step.vision_move_offset_x,
@@ -385,6 +386,7 @@ impl CrosshairApp {
             )
         };
         egui::ComboBox::from_id_salt(ui.id().with("vision-runtime-tuning"))
+            .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
             .selected_text(selected_text)
             .width(180.0)
             .show_ui(ui, |ui| {
@@ -394,49 +396,6 @@ impl CrosshairApp {
                         .num_columns(2)
                         .spacing([10.0, 8.0])
                         .show(ui, |ui| {
-                            ui.label(Self::tr_lang(language, "Axis", "Axis"));
-                            egui::ComboBox::from_id_salt(ui.id().with("scan-vision-move-axis-lock"))
-                                .selected_text(match step.vision_move_axis_lock {
-                                    VisionMoveAxisLock::None => {
-                                        Self::tr_lang(language, "Free", "Free")
-                                    }
-                                    VisionMoveAxisLock::HorizontalOnly => {
-                                        Self::tr_lang(language, "Horizontal only", "Horizontal only")
-                                    }
-                                    VisionMoveAxisLock::VerticalOnly => {
-                                        Self::tr_lang(language, "Vertical only", "Vertical only")
-                                    }
-                                })
-                                .width(120.0)
-                                .show_ui(ui, |ui| {
-                                    *live_sync |= ui
-                                        .selectable_value(
-                                            &mut step.vision_move_axis_lock,
-                                            VisionMoveAxisLock::None,
-                                            Self::tr_lang(language, "Free", "Free"),
-                                        )
-                                        .changed();
-                                    *live_sync |= ui
-                                        .selectable_value(
-                                            &mut step.vision_move_axis_lock,
-                                            VisionMoveAxisLock::HorizontalOnly,
-                                            Self::tr_lang(
-                                                language,
-                                                "Horizontal only",
-                                                "Horizontal only",
-                                            ),
-                                        )
-                                        .changed();
-                                    *live_sync |= ui
-                                        .selectable_value(
-                                            &mut step.vision_move_axis_lock,
-                                            VisionMoveAxisLock::VerticalOnly,
-                                            Self::tr_lang(language, "Vertical only", "Vertical only"),
-                                        )
-                                        .changed();
-                                });
-                            ui.end_row();
-
                             ui.label(Self::tr_lang(language, "Offset X", "Offset X"));
                             *live_sync |= Self::render_temp_i32_input(
                                 ui,
@@ -519,6 +478,7 @@ impl CrosshairApp {
         live_sync: &mut bool,
     ) {
         egui::ComboBox::from_id_salt(ui.id().with("scan-vision-move-axis-lock"))
+            .width(118.0)
             .selected_text(match step.vision_move_axis_lock {
                 VisionMoveAxisLock::None => Self::tr_lang(language, "Free", "Free"),
                 VisionMoveAxisLock::HorizontalOnly => {
