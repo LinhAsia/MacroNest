@@ -6957,6 +6957,11 @@ mod windows_overlay {
     }
 
     fn quick_key_display_refresh_entry_from_held_keys(entry: &mut QuickKeyDisplayEntry) -> bool {
+        let hook_state = HOOK_STATE.lock();
+        if !quick_key_display_combo_key_is_held(&hook_state, &entry.source_key) {
+            return false;
+        }
+        drop(hook_state);
         let Some((text, combo_keys)) =
             quick_key_display_combo_snapshot_for_key_name(&entry.source_key)
         else {
@@ -7396,6 +7401,10 @@ mod windows_overlay {
             .iter_mut()
             .find(|entry| entry.identity == identity)
         {
+            if quick_key_display_refresh_entry_from_held_keys(entry) {
+                entry.last_pressed_at = now;
+                return;
+            }
             entry.held = false;
             if entry.released_at.is_none() {
                 entry.released_at = Some(now);
@@ -8303,6 +8312,7 @@ mod windows_overlay {
 
         if is_key_down {
             if !quick_key_display_is_wheel_key_name(effective_key_name)
+                && !quick_key_display_is_mouse_key_name(effective_key_name)
                 && quick_key_display_repeat_for_key_name(effective_key_name)
             {
                 return;
