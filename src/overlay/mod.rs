@@ -4447,6 +4447,8 @@ mod windows_overlay {
                 if !is_ui_in_foreground()
                     && let Some(key_name) = key_name.as_ref()
                 {
+                    update_held_key(info.vkCode, is_key_down, is_key_up);
+                    update_modifier_state(info.vkCode, is_key_down);
                     update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
                 }
                 if let Some(key_name) = key_name.clone() {

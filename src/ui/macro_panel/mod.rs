@@ -360,35 +360,11 @@ impl CrosshairApp {
         live_sync: &mut bool,
     ) {
         ui.add_space(2.0);
-        let mut summary_parts = Vec::new();
-        if show_move_fields {
-            summary_parts.push(format!(
-                "({}, {})  {}x  {}ms",
-                step.vision_move_offset_x,
-                step.vision_move_offset_y,
-                step.vision_move_passes,
-                step.vision_move_delay_ms
-            ));
-        }
-        if show_detection_tuning {
-            summary_parts.push(format!(
-                "T{}  R{}",
-                step.vision_color_tolerance, step.vision_color_scan_rate_hz
-            ));
-        }
-        let selected_text = if summary_parts.is_empty() {
-            Self::tr_lang(language, "Tune", "Tune").to_owned()
-        } else {
-            format!(
-                "{} {}",
-                Self::tr_lang(language, "Tune", "Tune"),
-                summary_parts.join("  ")
-            )
-        };
+        let selected_text = Self::tr_lang(language, "Setting", "Setting").to_owned();
         egui::ComboBox::from_id_salt(ui.id().with("vision-runtime-tuning"))
             .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
             .selected_text(selected_text)
-            .width(180.0)
+            .width(96.0)
             .show_ui(ui, |ui| {
                 ui.set_min_width(240.0);
                 if show_move_fields {
