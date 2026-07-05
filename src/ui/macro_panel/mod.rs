@@ -48,6 +48,14 @@ enum TextHighlightMode {
 }
 
 impl CrosshairApp {
+    fn should_show_global_empty_macro_group_cta(
+        total_group_count: usize,
+        search_query: &str,
+        active_folder_view: Option<u32>,
+    ) -> bool {
+        total_group_count == 0 && search_query.is_empty() && active_folder_view.is_none()
+    }
+
     fn should_persist_delay_drag(
         response_dragged: bool,
         pointer_any_down: bool,
@@ -4660,6 +4668,7 @@ impl CrosshairApp {
         }
         let active_folder_view = self.resolved_active_macro_folder_view();
         let search_query = self.macro_preset_search_query.trim().to_owned();
+        let total_group_count = self.state.macro_groups.len();
         Self::sort_macro_groups(&mut self.state.macro_groups);
         let mut render_items = Vec::new();
         if self.macro_folders_panel_open {
@@ -4679,6 +4688,12 @@ impl CrosshairApp {
                 if render_items.is_empty() && search_query.is_empty() {
                     render_items.push(RenderItem::AddMacroGroup(Some(active_folder_id)));
                 }
+            } else if Self::should_show_global_empty_macro_group_cta(
+                total_group_count,
+                &search_query,
+                active_folder_view,
+            ) {
+                render_items.push(RenderItem::AddMacroGroup(None));
             } else {
                 if self.state.macro_folders.is_empty() && search_query.is_empty() {
                     render_items.push(RenderItem::AddFolder);
@@ -4729,7 +4744,7 @@ impl CrosshairApp {
                     "No macro groups match this search.",
                 ));
             } else if !self.macro_folders_panel_open {
-                if root_group_count == 0 {
+                if total_group_count == 0 {
                     let add_first_group = Self::show_preset_card(ui, false, |ui| {
                         ui.vertical_centered(|ui| {
                             ui.add_space(10.0);
@@ -4755,8 +4770,8 @@ impl CrosshairApp {
                             ui.label(
                                 RichText::new(Self::tr_lang(
                                     language,
-                                    "New users can start here.",
-                                    "New users can start here.",
+                                    "This list is empty. Start here.",
+                                    "This list is empty. Start here.",
                                 ))
                                 .small()
                                 .weak(),
@@ -20221,5 +20236,21 @@ mod tests {
             false, false, false
         ));
         assert!(CrosshairApp::should_persist_delay_drag(false, false, true));
+    }
+
+    #[test]
+    fn global_empty_macro_group_cta_depends_on_actual_group_count() {
+        assert!(CrosshairApp::should_show_global_empty_macro_group_cta(
+            0, "", None
+        ));
+        assert!(!CrosshairApp::should_show_global_empty_macro_group_cta(
+            1, "", None
+        ));
+        assert!(!CrosshairApp::should_show_global_empty_macro_group_cta(
+            0, "search", None
+        ));
+        assert!(!CrosshairApp::should_show_global_empty_macro_group_cta(
+            0, "", Some(7)
+        ));
     }
 }
