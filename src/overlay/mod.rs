@@ -87,10 +87,12 @@ mod windows_overlay {
                     ClientToScreen, CreateCompatibleDC, CreateDIBSection, CreateFontW,
                     CreateRectRgn, DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
                     DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint,
-                    FF_DONTCARE, FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW, HDC, HGDIOBJ,
+                    FF_DONTCARE, FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW,
+                    GetTextExtentPoint32W, GetTextMetricsW, HDC, HGDIOBJ,
                     MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow, OUT_DEFAULT_PRECIS,
-                    PAINTSTRUCT, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetTextColor,
-                    SetWindowRgn, StretchDIBits, TRANSPARENT,
+                    PAINTSTRUCT, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetTextAlign,
+                    SetTextColor, SetWindowRgn, StretchDIBits, TA_BASELINE, TA_CENTER,
+                    TEXTMETRICW, TRANSPARENT, TextOutW,
                 },
             },
             Media::Audio::{
@@ -1819,6 +1821,9 @@ mod windows_overlay {
         MoveToolbar,
         BrushSize,
         SmoothingAmount,
+        MoveTextSession,
+        ResizeTextSession,
+        RotateTextSession,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1843,6 +1848,11 @@ mod windows_overlay {
         SmoothingAmount,
         CaptureRegion,
         ColorPaletteItem(usize),
+        TextSessionBody,
+        TextSessionResize,
+        TextSessionRotate,
+        TextSessionConfirm,
+        TextSessionDelete,
     }
 
     #[derive(Clone)]
@@ -1888,11 +1898,28 @@ mod windows_overlay {
         text: String,
         text_box_width: i32,
         text_box_height: i32,
+        text_rotation_deg: f32,
     }
 
     #[derive(Clone)]
     struct ScreenDrawTextSession {
         stroke: ScreenDrawStroke,
+    }
+
+    #[derive(Clone, Copy)]
+    struct ScreenDrawTextSessionGeometry {
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+        center_x: f32,
+        center_y: f32,
+        rotation_deg: f32,
+        corners: [(f32, f32); 4],
+        confirm_button: (f32, f32),
+        delete_button: (f32, f32),
+        rotate_handle: (f32, f32),
+        resize_handle: (f32, f32),
     }
 
     #[derive(Clone, PartialEq)]
@@ -2002,6 +2029,8 @@ mod windows_overlay {
         freeze_frame: Option<Vec<u8>>,
         color_palette_open: bool,
         text_session: Option<ScreenDrawTextSession>,
+        text_interaction_start_point: Option<POINT>,
+        text_interaction_origin: Option<ScreenDrawStroke>,
         screen_color_pick_mode: bool,
         color_pick_preview: Option<ScreenDrawColorPickPreview>,
         pointer_point: POINT,
@@ -2070,6 +2099,8 @@ mod windows_overlay {
                 freeze_frame: None,
                 color_palette_open: false,
                 text_session: None,
+                text_interaction_start_point: None,
+                text_interaction_origin: None,
                 screen_color_pick_mode: false,
                 color_pick_preview: None,
                 pointer_point: POINT { x: 0, y: 0 },
@@ -7111,6 +7142,10 @@ mod windows_overlay {
         None
     }
 
+    fn quick_key_display_should_fallback_to_modifier(mode: QuickKeyDisplayMode) -> bool {
+        mode != QuickKeyDisplayMode::Normal
+    }
+
     fn quick_key_display_identity_for_key_name(key_name: &str) -> Option<String> {
         let trimmed = key_name.trim();
         if trimmed.is_empty() {
@@ -7635,14 +7670,16 @@ mod windows_overlay {
             return;
         }
 
-        let entry_snapshot = runtime.quick_key_display_entries[idx].clone();
-        if let Some((fallback_identity, held_state)) =
-            quick_key_display_modifier_fallback_from_entry(runtime, &entry_snapshot)
-        {
-            let entry = &mut runtime.quick_key_display_entries[idx];
-            quick_key_display_apply_entry_identity(entry, fallback_identity, &held_state, now);
-            entry.last_pressed_at = now;
-            return;
+        if quick_key_display_should_fallback_to_modifier(runtime.quick_key_display_mode) {
+            let entry_snapshot = runtime.quick_key_display_entries[idx].clone();
+            if let Some((fallback_identity, held_state)) =
+                quick_key_display_modifier_fallback_from_entry(runtime, &entry_snapshot)
+            {
+                let entry = &mut runtime.quick_key_display_entries[idx];
+                quick_key_display_apply_entry_identity(entry, fallback_identity, &held_state, now);
+                entry.last_pressed_at = now;
+                return;
+            }
         }
 
         let entry = &mut runtime.quick_key_display_entries[idx];
@@ -8642,10 +8679,11 @@ mod windows_overlay {
 
     fn screen_draw_text_input_char(vk_code: u32) -> Option<String> {
         let mut keyboard_state = [0u8; 256];
-        for vk in [0x10, 0x11, 0x12, 0x14] {
-            if unsafe { GetAsyncKeyState(vk) } < 0 {
-                keyboard_state[vk as usize] = 0x80;
-            }
+        if unsafe { GetKeyboardState(&mut keyboard_state) }.is_err() {
+            return None;
+        }
+        if (vk_code as usize) < keyboard_state.len() {
+            keyboard_state[vk_code as usize] |= 0x80;
         }
         let scan_code = unsafe { MapVirtualKeyW(vk_code, MAPVK_VK_TO_VSC) };
         let mut buffer = [0u16; 8];
@@ -8674,14 +8712,6 @@ mod windows_overlay {
         {
             return false;
         }
-        if state
-            .trigger
-            .as_ref()
-            .is_some_and(|t| hotkey::key_name_to_vk(&t.key).is_some_and(|vk| vk == vk_code))
-        {
-            return false;
-        }
-
         if is_key_up {
             return true;
         }
@@ -8721,6 +8751,7 @@ mod windows_overlay {
                         .to_owned();
                     if !sanitized.is_empty() {
                         session.stroke.text.push_str(&sanitized);
+                        autofit_screen_draw_text_session(&mut session.stroke);
                         changed = true;
                     }
                 }
@@ -8729,6 +8760,7 @@ mod windows_overlay {
                 if let Some(fragment) = screen_draw_text_input_char(vk_code) {
                     if let Some(session) = state.text_session.as_mut() {
                         session.stroke.text.push_str(&fragment);
+                        autofit_screen_draw_text_session(&mut session.stroke);
                         changed = true;
                     }
                 } else {
@@ -10286,6 +10318,8 @@ mod windows_overlay {
             state.current_stroke_updated_at = None;
             state.current_stroke_release_seen_at = None;
             state.text_session = None;
+            state.text_interaction_start_point = None;
+            state.text_interaction_origin = None;
             state.active_control = ScreenDrawControl::None;
             state.live_stroke_rect = None;
             reset_screen_draw_buffers(&mut state);
@@ -10705,6 +10739,8 @@ mod windows_overlay {
         state.current_stroke_updated_at = None;
         state.current_stroke_release_seen_at = None;
         state.active_control = ScreenDrawControl::None;
+        state.text_interaction_start_point = None;
+        state.text_interaction_origin = None;
         state.capturing_region = false;
         state.capture_trigger = None;
         state.trigger_latched = false;
@@ -10725,6 +10761,8 @@ mod windows_overlay {
         request_ui_repaint();
         state.freeze_frame = None;
         state.text_session = None;
+        state.text_interaction_start_point = None;
+        state.text_interaction_origin = None;
         state.screen_color_pick_mode = false;
         state.color_pick_preview = None;
     }
@@ -10745,6 +10783,9 @@ mod windows_overlay {
         state.tool = ScreenDrawTool::Brush;
         state.eraser = false;
         state.active_control = ScreenDrawControl::None;
+        state.text_session = None;
+        state.text_interaction_start_point = None;
+        state.text_interaction_origin = None;
         state.pending_repaint = true;
         state.dirty_rect = Some(ScreenDrawDirtyRect::full(
             state.canvas_width.max(1),
@@ -10770,6 +10811,8 @@ mod windows_overlay {
         state.capture_trigger_release_point = None;
         state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
         state.active_control = ScreenDrawControl::None;
+        state.text_interaction_start_point = None;
+        state.text_interaction_origin = None;
         state.current_stroke = None;
         state.pending_repaint = false;
         request_ui_repaint();
@@ -10871,15 +10914,37 @@ mod windows_overlay {
         }
         state.pointer_point = point;
         if right_button {
+            if state.text_session.is_some() {
+                return true;
+            }
             start_screen_draw_stroke(&mut state, point, true);
             sync_screen_draw_live_stroke_dirty(&mut state);
             mark_screen_draw_repaint_pending(&mut state);
             return true;
         }
         let hit = screen_draw_hit(&state, point);
-        if state.text_session.is_some()
-            && !matches!(hit, ScreenDrawHit::ToolbarBody | ScreenDrawHit::DragHandle)
-        {
+        let should_commit_text_session = state.text_session.is_some()
+            && matches!(
+                hit,
+                ScreenDrawHit::Close
+                    | ScreenDrawHit::Color
+                    | ScreenDrawHit::BrushSize
+                    | ScreenDrawHit::ToolBrush
+                    | ScreenDrawHit::ToolLine
+                    | ScreenDrawHit::ToolArrow
+                    | ScreenDrawHit::ToolRectangle
+                    | ScreenDrawHit::ToolEllipse
+                    | ScreenDrawHit::ToolCircle
+                    | ScreenDrawHit::ToolPolygon
+                    | ScreenDrawHit::ToolText
+                    | ScreenDrawHit::PickScreenColor
+                    | ScreenDrawHit::Eraser
+                    | ScreenDrawHit::Smoothing
+                    | ScreenDrawHit::SmoothingAmount
+                    | ScreenDrawHit::CaptureRegion
+                    | ScreenDrawHit::ColorPaletteItem(_)
+            );
+        if should_commit_text_session {
             let committed = commit_screen_draw_text_session(&mut state);
             let canvas_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
             mark_screen_draw_dirty(&mut state, canvas_rect);
@@ -11067,6 +11132,37 @@ mod windows_overlay {
                     capture_mode = Some(ScreenDrawCaptureMode::MouseDrag);
                 }
             }
+            ScreenDrawHit::TextSessionConfirm => {
+                let committed = commit_screen_draw_text_session(&mut state);
+                if !committed {
+                    cancel_screen_draw_text_session(&mut state);
+                }
+                state.text_interaction_start_point = None;
+                state.text_interaction_origin = None;
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
+                mark_screen_draw_dirty(&mut state, full_rect);
+                should_sync_config = committed;
+            }
+            ScreenDrawHit::TextSessionDelete => {
+                cancel_screen_draw_text_session(&mut state);
+                state.text_interaction_start_point = None;
+                state.text_interaction_origin = None;
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
+                mark_screen_draw_dirty(&mut state, full_rect);
+            }
+            ScreenDrawHit::TextSessionBody
+            | ScreenDrawHit::TextSessionResize
+            | ScreenDrawHit::TextSessionRotate => {
+                state.active_control = match hit {
+                    ScreenDrawHit::TextSessionBody => ScreenDrawControl::MoveTextSession,
+                    ScreenDrawHit::TextSessionResize => ScreenDrawControl::ResizeTextSession,
+                    ScreenDrawHit::TextSessionRotate => ScreenDrawControl::RotateTextSession,
+                    _ => ScreenDrawControl::None,
+                };
+                state.text_interaction_start_point = Some(point);
+                state.text_interaction_origin =
+                    state.text_session.as_ref().map(|session| session.stroke.clone());
+            }
             ScreenDrawHit::ToolbarBody => {
                 state.active_control = ScreenDrawControl::MoveToolbar;
                 state.drag_offset_x = point.x - state.toolbar_x;
@@ -11090,7 +11186,7 @@ mod windows_overlay {
                     }
                     let toolbar_rect = screen_draw_toolbar_rect(&state);
                     mark_screen_draw_dirty(&mut state, toolbar_rect);
-                } else {
+                } else if state.text_session.is_none() {
                     let eraser = state.eraser && state.tool != ScreenDrawTool::Text;
                     start_screen_draw_stroke(&mut state, point, eraser);
                     sync_screen_draw_live_stroke_dirty(&mut state);
@@ -11139,6 +11235,10 @@ mod windows_overlay {
     ) -> bool {
         if state.trigger_release_should_keep_open {
             state.trigger_release_should_keep_open = false;
+            state.trigger_pressed_at = None;
+            return false;
+        }
+        if state.text_session.is_some() {
             state.trigger_pressed_at = None;
             return false;
         }
@@ -11661,6 +11761,116 @@ mod windows_overlay {
                 mark_screen_draw_repaint_pending(&mut state);
                 true
             }
+            ScreenDrawControl::MoveTextSession => {
+                let Some(origin) = state.text_interaction_origin.clone() else {
+                    return false;
+                };
+                let Some(start_point) = state.text_interaction_start_point else {
+                    return false;
+                };
+                let Some(session) = state.text_session.as_mut() else {
+                    return false;
+                };
+                let Some(geometry) = screen_draw_text_session_geometry(&origin, "Text") else {
+                    return false;
+                };
+                let dx = point.x - start_point.x;
+                let dy = point.y - start_point.y;
+                let new_left = geometry.left + dx;
+                let new_top = geometry.top + dy;
+                session.stroke.points = vec![
+                    POINT {
+                        x: new_left,
+                        y: new_top,
+                    },
+                    POINT {
+                        x: new_left + geometry.width,
+                        y: new_top + geometry.height,
+                    },
+                ];
+                session.stroke.text_box_width = geometry.width;
+                session.stroke.text_box_height = geometry.height;
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
+                mark_screen_draw_dirty(&mut state, full_rect);
+                mark_screen_draw_repaint_pending(&mut state);
+                true
+            }
+            ScreenDrawControl::ResizeTextSession => {
+                let Some(origin) = state.text_interaction_origin.clone() else {
+                    return false;
+                };
+                let Some(session) = state.text_session.as_mut() else {
+                    return false;
+                };
+                let Some(geometry) = screen_draw_text_session_geometry(&origin, "Text") else {
+                    return false;
+                };
+                let top_left = geometry.corners[0];
+                let top_right = geometry.corners[1];
+                let bottom_left = geometry.corners[3];
+                let axis_x = (
+                    top_right.0 - top_left.0,
+                    top_right.1 - top_left.1,
+                );
+                let axis_y = (
+                    bottom_left.0 - top_left.0,
+                    bottom_left.1 - top_left.1,
+                );
+                let axis_x_len = (axis_x.0 * axis_x.0 + axis_x.1 * axis_x.1).sqrt().max(1.0);
+                let axis_y_len = (axis_y.0 * axis_y.0 + axis_y.1 * axis_y.1).sqrt().max(1.0);
+                let axis_x_unit = (axis_x.0 / axis_x_len, axis_x.1 / axis_x_len);
+                let axis_y_unit = (axis_y.0 / axis_y_len, axis_y.1 / axis_y_len);
+                let pointer_vec = (point.x as f32 - top_left.0, point.y as f32 - top_left.1);
+                let projected_width =
+                    pointer_vec.0 * axis_x_unit.0 + pointer_vec.1 * axis_x_unit.1;
+                let projected_height =
+                    pointer_vec.0 * axis_y_unit.0 + pointer_vec.1 * axis_y_unit.1;
+                let min_width = screen_draw_text_min_box_width(screen_draw_text_font_size(origin.brush_size));
+                let min_height =
+                    screen_draw_text_default_box_height(screen_draw_text_font_size(origin.brush_size));
+                let new_width = projected_width.round() as i32;
+                let new_height = projected_height.round() as i32;
+                session.stroke.points = vec![
+                    POINT {
+                        x: geometry.left,
+                        y: geometry.top,
+                    },
+                    POINT {
+                        x: geometry.left + new_width.max(min_width),
+                        y: geometry.top + new_height.max(min_height),
+                    },
+                ];
+                session.stroke.text_box_width = new_width.max(min_width);
+                session.stroke.text_box_height = new_height.max(min_height);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
+                mark_screen_draw_dirty(&mut state, full_rect);
+                mark_screen_draw_repaint_pending(&mut state);
+                true
+            }
+            ScreenDrawControl::RotateTextSession => {
+                let Some(origin) = state.text_interaction_origin.clone() else {
+                    return false;
+                };
+                let Some(start_point) = state.text_interaction_start_point else {
+                    return false;
+                };
+                let Some(session) = state.text_session.as_mut() else {
+                    return false;
+                };
+                let Some(geometry) = screen_draw_text_session_geometry(&origin, "Text") else {
+                    return false;
+                };
+                let start_angle = (start_point.y as f32 - geometry.center_y)
+                    .atan2(start_point.x as f32 - geometry.center_x);
+                let current_angle =
+                    (point.y as f32 - geometry.center_y).atan2(point.x as f32 - geometry.center_x);
+                session.stroke.text_rotation_deg =
+                    origin.text_rotation_deg + (current_angle - start_angle).to_degrees();
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
+                mark_screen_draw_dirty(&mut state, full_rect);
+                mark_screen_draw_repaint_pending(&mut state);
+                true
+            }
             ScreenDrawControl::BrushSize => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 update_screen_draw_brush_slider(&mut state, point.x);
@@ -11727,7 +11937,7 @@ mod windows_overlay {
             state.current_stroke_release_seen_at = None;
             if !stroke.points.is_empty() {
                 if stroke.tool == ScreenDrawTool::Text && !stroke.eraser {
-                    state.text_session = Some(ScreenDrawTextSession { stroke });
+                    state.text_session = finalize_screen_draw_text_stroke(stroke);
                 } else if state.canvas_width > 0
                     && state.canvas_height > 0
                     && !state.committed_rgba.is_empty()
@@ -11754,6 +11964,8 @@ mod windows_overlay {
             }
         }
         state.active_control = ScreenDrawControl::None;
+        state.text_interaction_start_point = None;
+        state.text_interaction_origin = None;
         if state.active {
             mark_screen_draw_repaint_pending(&mut state);
         }
@@ -11993,6 +12205,9 @@ mod windows_overlay {
     }
 
     fn screen_draw_hit(state: &ScreenDrawState, point: POINT) -> ScreenDrawHit {
+        if let Some(hit) = screen_draw_text_session_hit(state, point) {
+            return hit;
+        }
         let x = point.x - state.toolbar_x;
         let y = point.y - state.toolbar_y;
 
@@ -12119,6 +12334,148 @@ mod windows_overlay {
         brush_size.clamp(14.0, 72.0)
     }
 
+    fn screen_draw_text_min_box_width(font_size: f32) -> i32 {
+        ((font_size * 6.0).round() as i32).max(160)
+    }
+
+    fn screen_draw_text_default_box_height(font_size: f32) -> i32 {
+        ((font_size * 1.55).ceil() as i32 + 12).max(28)
+    }
+
+    fn screen_draw_text_estimated_box_width(font_size: f32, text: &str) -> i32 {
+        if text.trim().is_empty() {
+            (font_size * 9.0).round() as i32
+        } else {
+            ((text.chars().count() as f32 * font_size * 0.64).ceil() as i32 + 24)
+                .max(screen_draw_text_min_box_width(font_size))
+        }
+    }
+
+    fn rotate_screen_draw_point(
+        x: f32,
+        y: f32,
+        center_x: f32,
+        center_y: f32,
+        angle_rad: f32,
+    ) -> (f32, f32) {
+        let dx = x - center_x;
+        let dy = y - center_y;
+        let sin = angle_rad.sin();
+        let cos = angle_rad.cos();
+        (
+            center_x + dx * cos - dy * sin,
+            center_y + dx * sin + dy * cos,
+        )
+    }
+
+    fn screen_draw_text_local_to_world(
+        left: f32,
+        top: f32,
+        width: f32,
+        height: f32,
+        rotation_deg: f32,
+        local_x: f32,
+        local_y: f32,
+    ) -> (f32, f32) {
+        let center_x = left + width * 0.5;
+        let center_y = top + height * 0.5;
+        rotate_screen_draw_point(
+            left + local_x,
+            top + local_y,
+            center_x,
+            center_y,
+            rotation_deg.to_radians(),
+        )
+    }
+
+    fn screen_draw_text_world_to_local(
+        left: f32,
+        top: f32,
+        width: f32,
+        height: f32,
+        rotation_deg: f32,
+        world_x: f32,
+        world_y: f32,
+    ) -> (f32, f32) {
+        let center_x = left + width * 0.5;
+        let center_y = top + height * 0.5;
+        let (unrotated_x, unrotated_y) = rotate_screen_draw_point(
+            world_x,
+            world_y,
+            center_x,
+            center_y,
+            -rotation_deg.to_radians(),
+        );
+        (unrotated_x - left, unrotated_y - top)
+    }
+
+    fn screen_draw_text_session_geometry(
+        stroke: &ScreenDrawStroke,
+        fallback_text: &str,
+    ) -> Option<ScreenDrawTextSessionGeometry> {
+        let (left, top, width, height, _, text) = screen_draw_text_layout(stroke, fallback_text)?;
+        let _ = text;
+        let left_f = left as f32;
+        let top_f = top as f32;
+        let width_f = width as f32;
+        let height_f = height as f32;
+        let center_x = left_f + width_f * 0.5;
+        let center_y = top_f + height_f * 0.5;
+        let rotation_deg = stroke.text_rotation_deg;
+        let corners = [
+            screen_draw_text_local_to_world(left_f, top_f, width_f, height_f, rotation_deg, 0.0, 0.0),
+            screen_draw_text_local_to_world(left_f, top_f, width_f, height_f, rotation_deg, width_f, 0.0),
+            screen_draw_text_local_to_world(left_f, top_f, width_f, height_f, rotation_deg, width_f, height_f),
+            screen_draw_text_local_to_world(left_f, top_f, width_f, height_f, rotation_deg, 0.0, height_f),
+        ];
+        Some(ScreenDrawTextSessionGeometry {
+            left,
+            top,
+            width,
+            height,
+            center_x,
+            center_y,
+            rotation_deg,
+            corners,
+            confirm_button: screen_draw_text_local_to_world(
+                left_f,
+                top_f,
+                width_f,
+                height_f,
+                rotation_deg,
+                18.0,
+                -28.0,
+            ),
+            delete_button: screen_draw_text_local_to_world(
+                left_f,
+                top_f,
+                width_f,
+                height_f,
+                rotation_deg,
+                (width_f - 18.0).max(18.0),
+                -28.0,
+            ),
+            rotate_handle: screen_draw_text_local_to_world(
+                left_f,
+                top_f,
+                width_f,
+                height_f,
+                rotation_deg,
+                width_f * 0.5,
+                -32.0,
+            ),
+            resize_handle: screen_draw_text_local_to_world(
+                left_f,
+                top_f,
+                width_f,
+                height_f,
+                rotation_deg,
+                width_f,
+                height_f,
+            ),
+        })
+    }
+
     fn screen_draw_text_layout(
         stroke: &ScreenDrawStroke,
         fallback_text: &str,
@@ -12126,7 +12483,7 @@ mod windows_overlay {
         let anchor = stroke.points.first().copied()?;
         let last = stroke.points.last().copied().unwrap_or(anchor);
         let font_size = screen_draw_text_font_size(stroke.brush_size);
-        let default_height = (font_size * 1.55).ceil() as i32 + 12;
+        let default_height = screen_draw_text_default_box_height(font_size);
         if stroke.tool == ScreenDrawTool::Text
             && stroke.text_box_width <= 0
             && stroke.text_box_height <= 0
@@ -12136,15 +12493,11 @@ mod windows_overlay {
             } else {
                 stroke.text.clone()
             };
-            let estimated_text_width = if stroke.text.is_empty() {
-                (font_size * 9.0).round() as i32
-            } else {
-                ((text.chars().count() as f32 * font_size * 0.64).ceil() as i32 + 24).max(160)
-            };
+            let estimated_text_width = screen_draw_text_estimated_box_width(font_size, &text);
             return Some((
                 last.x,
                 last.y,
-                estimated_text_width.max(160),
+                estimated_text_width.max(screen_draw_text_min_box_width(font_size)),
                 default_height.max(28),
                 font_size,
                 text,
@@ -12155,8 +12508,7 @@ mod windows_overlay {
         let width = stroke
             .text_box_width
             .max(drag_width)
-            .max((font_size * 9.0).round() as i32)
-            .max(160);
+            .max(screen_draw_text_min_box_width(font_size));
         let height = stroke
             .text_box_height
             .max(drag_height)
@@ -12180,6 +12532,33 @@ mod windows_overlay {
         Some((left, top, width, height, font_size, text))
     }
 
+    fn finalize_screen_draw_text_stroke(stroke: ScreenDrawStroke) -> Option<ScreenDrawTextSession> {
+        let (left, top, width, height, _, _) = screen_draw_text_layout(&stroke, "Text")?;
+        Some(ScreenDrawTextSession {
+            stroke: ScreenDrawStroke {
+                points: vec![
+                    POINT { x: left, y: top },
+                    POINT {
+                        x: left + width,
+                        y: top + height,
+                    },
+                ],
+                text_box_width: width,
+                text_box_height: height,
+                ..stroke
+            },
+        })
+    }
+
+    fn autofit_screen_draw_text_session(stroke: &mut ScreenDrawStroke) {
+        let font_size = screen_draw_text_font_size(stroke.brush_size);
+        let min_width = screen_draw_text_estimated_box_width(font_size, &stroke.text);
+        stroke.text_box_width = stroke.text_box_width.max(min_width);
+        stroke.text_box_height = stroke
+            .text_box_height
+            .max(screen_draw_text_default_box_height(font_size));
+    }
+
     fn start_screen_draw_stroke(state: &mut ScreenDrawState, point: POINT, force_eraser: bool) {
         let tool = if (force_eraser || state.eraser) && state.tool == ScreenDrawTool::Text {
             ScreenDrawTool::Brush
@@ -12198,6 +12577,7 @@ mod windows_overlay {
             text: String::new(),
             text_box_width: 0,
             text_box_height: 0,
+            text_rotation_deg: 0.0,
         });
         state.current_stroke_updated_at = Some(Instant::now());
         state.current_stroke_release_seen_at = None;
@@ -12355,6 +12735,260 @@ mod windows_overlay {
         state.text_session.take().is_some()
     }
 
+    fn screen_draw_point_hits_circle(
+        point: POINT,
+        center: (f32, f32),
+        radius: f32,
+    ) -> bool {
+        let dx = point.x as f32 - center.0;
+        let dy = point.y as f32 - center.1;
+        dx * dx + dy * dy <= radius * radius
+    }
+
+    fn screen_draw_point_in_text_session_body(
+        point: POINT,
+        geometry: ScreenDrawTextSessionGeometry,
+    ) -> bool {
+        let (local_x, local_y) = screen_draw_text_world_to_local(
+            geometry.left as f32,
+            geometry.top as f32,
+            geometry.width as f32,
+            geometry.height as f32,
+            geometry.rotation_deg,
+            point.x as f32,
+            point.y as f32,
+        );
+        local_x >= 0.0
+            && local_y >= 0.0
+            && local_x <= geometry.width as f32
+            && local_y <= geometry.height as f32
+    }
+
+    fn screen_draw_text_session_hit(
+        state: &ScreenDrawState,
+        point: POINT,
+    ) -> Option<ScreenDrawHit> {
+        let session = state.text_session.as_ref()?;
+        let geometry = screen_draw_text_session_geometry(&session.stroke, "Text")?;
+        if screen_draw_point_hits_circle(point, geometry.confirm_button, 12.0) {
+            return Some(ScreenDrawHit::TextSessionConfirm);
+        }
+        if screen_draw_point_hits_circle(point, geometry.delete_button, 12.0) {
+            return Some(ScreenDrawHit::TextSessionDelete);
+        }
+        if screen_draw_point_hits_circle(point, geometry.rotate_handle, 12.0) {
+            return Some(ScreenDrawHit::TextSessionRotate);
+        }
+        if screen_draw_point_hits_circle(point, geometry.resize_handle, 12.0) {
+            return Some(ScreenDrawHit::TextSessionResize);
+        }
+        if screen_draw_point_in_text_session_body(point, geometry) {
+            return Some(ScreenDrawHit::TextSessionBody);
+        }
+        None
+    }
+
+    fn draw_screen_draw_editor_line(
+        pixmap: &mut tiny_skia::PixmapMut<'_>,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        color: [u8; 4],
+        stroke_width: f32,
+    ) {
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.move_to(x0, y0);
+        pb.line_to(x1, y1);
+        if let Some(path) = pb.finish() {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color(tiny_skia::Color::from_rgba8(
+                color[0], color[1], color[2], color[3],
+            ));
+            paint.anti_alias = true;
+            let stroke = tiny_skia::Stroke {
+                width: stroke_width,
+                ..Default::default()
+            };
+            pixmap.stroke_path(
+                &path,
+                &paint,
+                &stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    }
+
+    fn fill_screen_draw_editor_circle(
+        pixmap: &mut tiny_skia::PixmapMut<'_>,
+        center: (f32, f32),
+        radius: f32,
+        color: [u8; 4],
+    ) {
+        if let Some(path) = tiny_skia::PathBuilder::from_circle(center.0, center.1, radius) {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color(tiny_skia::Color::from_rgba8(
+                color[0], color[1], color[2], color[3],
+            ));
+            paint.anti_alias = true;
+            pixmap.fill_path(
+                &path,
+                &paint,
+                tiny_skia::FillRule::Winding,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    }
+
+    fn stroke_screen_draw_editor_circle(
+        pixmap: &mut tiny_skia::PixmapMut<'_>,
+        center: (f32, f32),
+        radius: f32,
+        stroke_width: f32,
+        color: [u8; 4],
+    ) {
+        if let Some(path) = tiny_skia::PathBuilder::from_circle(center.0, center.1, radius) {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color(tiny_skia::Color::from_rgba8(
+                color[0], color[1], color[2], color[3],
+            ));
+            paint.anti_alias = true;
+            let stroke = tiny_skia::Stroke {
+                width: stroke_width,
+                ..Default::default()
+            };
+            pixmap.stroke_path(
+                &path,
+                &paint,
+                &stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    }
+
+    fn draw_screen_draw_text_editor_overlay(
+        pixmap: &mut tiny_skia::PixmapMut<'_>,
+        session: &ScreenDrawTextSession,
+    ) {
+        let Some(geometry) = screen_draw_text_session_geometry(&session.stroke, "Text") else {
+            return;
+        };
+        let border = [102, 203, 255, 235];
+        let guide = [102, 203, 255, 130];
+        let handle_fill = [18, 24, 34, 235];
+        let handle_stroke = [235, 245, 255, 240];
+
+        for idx in 0..4 {
+            let (x0, y0) = geometry.corners[idx];
+            let (x1, y1) = geometry.corners[(idx + 1) % 4];
+            draw_screen_draw_editor_line(pixmap, x0, y0, x1, y1, border, 1.7);
+        }
+
+        let top_mid = (
+            (geometry.corners[0].0 + geometry.corners[1].0) * 0.5,
+            (geometry.corners[0].1 + geometry.corners[1].1) * 0.5,
+        );
+        draw_screen_draw_editor_line(
+            pixmap,
+            top_mid.0,
+            top_mid.1,
+            geometry.rotate_handle.0,
+            geometry.rotate_handle.1,
+            guide,
+            1.3,
+        );
+
+        for button in [
+            geometry.confirm_button,
+            geometry.delete_button,
+            geometry.rotate_handle,
+            geometry.resize_handle,
+        ] {
+            fill_screen_draw_editor_circle(pixmap, button, 10.0, handle_fill);
+            stroke_screen_draw_editor_circle(pixmap, button, 10.0, 1.4, handle_stroke);
+        }
+
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.confirm_button.0 - 3.5,
+            geometry.confirm_button.1 + 0.5,
+            geometry.confirm_button.0 - 0.6,
+            geometry.confirm_button.1 + 3.5,
+            handle_stroke,
+            1.8,
+        );
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.confirm_button.0 - 0.6,
+            geometry.confirm_button.1 + 3.5,
+            geometry.confirm_button.0 + 4.2,
+            geometry.confirm_button.1 - 3.4,
+            handle_stroke,
+            1.8,
+        );
+
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.delete_button.0 - 3.6,
+            geometry.delete_button.1 - 3.6,
+            geometry.delete_button.0 + 3.6,
+            geometry.delete_button.1 + 3.6,
+            handle_stroke,
+            1.8,
+        );
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.delete_button.0 + 3.6,
+            geometry.delete_button.1 - 3.6,
+            geometry.delete_button.0 - 3.6,
+            geometry.delete_button.1 + 3.6,
+            handle_stroke,
+            1.8,
+        );
+
+        stroke_screen_draw_editor_circle(pixmap, geometry.rotate_handle, 4.2, 1.6, handle_stroke);
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.rotate_handle.0 + 3.0,
+            geometry.rotate_handle.1 - 3.4,
+            geometry.rotate_handle.0 + 6.2,
+            geometry.rotate_handle.1 - 4.2,
+            handle_stroke,
+            1.6,
+        );
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.rotate_handle.0 + 6.2,
+            geometry.rotate_handle.1 - 4.2,
+            geometry.rotate_handle.0 + 4.4,
+            geometry.rotate_handle.1 - 6.8,
+            handle_stroke,
+            1.6,
+        );
+
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.resize_handle.0 - 4.0,
+            geometry.resize_handle.1 + 0.5,
+            geometry.resize_handle.0 + 0.5,
+            geometry.resize_handle.1 - 4.0,
+            handle_stroke,
+            1.7,
+        );
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.resize_handle.0 - 6.2,
+            geometry.resize_handle.1 + 2.7,
+            geometry.resize_handle.0 + 2.7,
+            geometry.resize_handle.1 - 6.2,
+            handle_stroke,
+            1.4,
+        );
+    }
+
     fn screen_draw_color_pick_panel_rect(state: &ScreenDrawState) -> Option<ScreenDrawDirtyRect> {
         if !state.screen_color_pick_mode {
             return None;
@@ -12400,6 +13034,7 @@ mod windows_overlay {
         text: &str,
         color: RgbaColor,
         font_size: f32,
+        rotation_deg: f32,
     ) {
         if text.trim().is_empty() || width == 0 || height == 0 {
             return;
@@ -12468,11 +13103,12 @@ mod windows_overlay {
                 .encode_utf16()
                 .chain(std::iter::once(0))
                 .collect::<Vec<_>>();
+            let rotation_tenths = (-rotation_deg * 10.0).round() as i32;
             let font = CreateFontW(
                 -((font_size * supersample_scale as f32).round() as i32).max(1),
                 0,
-                0,
-                0,
+                rotation_tenths,
+                rotation_tenths,
                 FW_MEDIUM.0 as i32,
                 0,
                 0,
@@ -12488,18 +13124,35 @@ mod windows_overlay {
             let _ = SetBkMode(mem_dc, TRANSPARENT);
             let _ = SetTextColor(mem_dc, COLORREF(0x00FF_FFFF));
 
-            let mut rect = RECT {
-                left: 0,
-                top: 0,
-                right: supersampled_width as i32,
-                bottom: supersampled_height as i32,
-            };
-            if rect.left < rect.right && rect.top < rect.bottom {
-                let mut wide = text
-                    .encode_utf16()
-                    .chain(std::iter::once(0))
-                    .collect::<Vec<_>>();
-                let _ = DrawTextW(mem_dc, &mut wide, &mut rect, DT_SINGLELINE | DT_VCENTER);
+            let mut wide = text
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let text_utf16 = &wide[..wide.len().saturating_sub(1)];
+            if rotation_deg.abs() < f32::EPSILON {
+                let mut rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: supersampled_width as i32,
+                    bottom: supersampled_height as i32,
+                };
+                if rect.left < rect.right && rect.top < rect.bottom {
+                    let _ = DrawTextW(mem_dc, &mut wide, &mut rect, DT_SINGLELINE | DT_VCENTER);
+                }
+            } else {
+                let mut text_size = SIZE { cx: 0, cy: 0 };
+                let _ = GetTextExtentPoint32W(mem_dc, text_utf16, &mut text_size);
+                let mut metrics = TEXTMETRICW::default();
+                let _ = GetTextMetricsW(mem_dc, &mut metrics);
+                let center_x = supersampled_width as i32 / 2;
+                let center_y = supersampled_height as i32 / 2;
+                let baseline_y = center_y + ((metrics.tmAscent - metrics.tmDescent) / 2);
+                let old_align = SetTextAlign(mem_dc, TA_CENTER | TA_BASELINE);
+                let _ = TextOutW(mem_dc, center_x, baseline_y, text_utf16);
+                let _ = SetTextAlign(
+                    mem_dc,
+                    windows::Win32::Graphics::Gdi::TEXT_ALIGN_OPTIONS(old_align),
+                );
             }
 
             if !bits.is_null() {
@@ -12909,6 +13562,7 @@ mod windows_overlay {
                         &text,
                         stroke.color,
                         font_size,
+                        stroke.text_rotation_deg,
                     );
                 }
             }
@@ -13108,6 +13762,7 @@ mod windows_overlay {
             )
         {
             render_screen_draw_stroke_skia(&mut pixmap, &session.stroke);
+            draw_screen_draw_text_editor_overlay(&mut pixmap, &session);
         }
         let toolbar_color_pick_mode = state_guard.screen_color_pick_mode;
         let color_pick_preview = state_guard.color_pick_preview.clone();
@@ -13502,6 +14157,7 @@ mod windows_overlay {
                 a: 255,
             },
             15.0,
+            0.0,
         );
         draw_screen_draw_text_into_rgba(
             pixels,
@@ -13519,6 +14175,7 @@ mod windows_overlay {
                 a: 220,
             },
             12.0,
+            0.0,
         );
     }
 
@@ -26712,6 +27369,7 @@ mod windows_overlay {
                 text: String::new(),
                 text_box_width: 0,
                 text_box_height: 0,
+                text_rotation_deg: 0.0,
             };
 
             let (left, top, width, height, font_size, text) =
@@ -26726,10 +27384,60 @@ mod windows_overlay {
         }
 
         #[test]
+        fn screen_draw_text_session_geometry_tracks_controls_after_rotation() {
+            let stroke = ScreenDrawStroke {
+                tool: ScreenDrawTool::Text,
+                points: vec![POINT { x: 120, y: 140 }, POINT { x: 320, y: 220 }],
+                color: RgbaColor {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                    a: 255,
+                },
+                brush_size: 24.0,
+                eraser: false,
+                smoothing: false,
+                smoothing_amount: 0.0,
+                filled: false,
+                text: "hello".to_owned(),
+                text_box_width: 200,
+                text_box_height: 80,
+                text_rotation_deg: 35.0,
+            };
+
+            let geometry = screen_draw_text_session_geometry(&stroke, "Text").unwrap();
+            assert!(screen_draw_point_in_text_session_body(
+                POINT {
+                    x: geometry.center_x.round() as i32,
+                    y: geometry.center_y.round() as i32,
+                },
+                geometry,
+            ));
+            assert!(screen_draw_point_hits_circle(
+                POINT {
+                    x: geometry.rotate_handle.0.round() as i32,
+                    y: geometry.rotate_handle.1.round() as i32,
+                },
+                geometry.rotate_handle,
+                12.0,
+            ));
+        }
+
+        #[test]
         fn screen_draw_text_mask_alpha_uses_glyph_coverage() {
             assert_eq!(screen_draw_text_mask_alpha(0, 0, 0, 255), 0);
             assert_eq!(screen_draw_text_mask_alpha(255, 255, 255, 255), 255);
             assert_eq!(screen_draw_text_mask_alpha(128, 96, 32, 200), 100);
+        }
+
+        #[test]
+        fn quick_key_display_modifier_fallback_is_disabled_in_normal_mode() {
+            assert!(!quick_key_display_should_fallback_to_modifier(
+                QuickKeyDisplayMode::Normal
+            ));
+            assert!(quick_key_display_should_fallback_to_modifier(
+                QuickKeyDisplayMode::Mascot
+            ));
         }
 
         #[test]
