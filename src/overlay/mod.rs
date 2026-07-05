@@ -5776,6 +5776,37 @@ mod windows_overlay {
         hotkey::binding_key_names(binding).len() == 1
     }
 
+    fn mouse_trigger_is_still_held_with_guard(
+        trigger: &HotkeyBinding,
+        hook_state: &HookState,
+    ) -> bool {
+        if !hotkey::is_mouse_key_name(&trigger.key) {
+            return true;
+        }
+
+        hook_state
+            .held_mouse_buttons
+            .iter()
+            .any(|held| held.eq_ignore_ascii_case(&trigger.key))
+    }
+
+    fn reconcile_active_hold_mouse_macros() {
+        let stale_ids = {
+            let hook_state = HOOK_STATE.lock();
+            hook_state
+                .active_hold_macros
+                .iter()
+                .filter_map(|(preset_id, active)| {
+                    (!mouse_trigger_is_still_held_with_guard(&active.trigger, &hook_state))
+                        .then_some(*preset_id)
+                })
+                .collect::<Vec<_>>()
+        };
+        for preset_id in stale_ids {
+            request_hold_macro_stop(preset_id);
+        }
+    }
+
     fn hold_macro_release_matches(active: &ActiveHoldMacro, binding: &HotkeyBinding) -> bool {
         active.trigger.key.eq_ignore_ascii_case(&binding.key)
     }
@@ -25964,6 +25995,8 @@ mod windows_overlay {
     ) -> MacroRunFlow {
         let mut index = 0usize;
         'outer_hold: while index < steps.len() {
+            reconcile_active_hold_mouse_macros();
+
             if !bypass_enabled
                 && !is_macro_preset_enabled_with_pending(preset_id, pending_macro_preset_changes)
             {
@@ -26643,6 +26676,8 @@ mod windows_overlay {
         bypass_enabled: bool,
         defer_stop_until_loop_end: bool,
     ) -> bool {
+        reconcile_active_hold_mouse_macros();
+
         if delay_ms == 0 {
             return !macro_runtime_target_matches(
                 target_window_title,
@@ -26657,6 +26692,8 @@ mod windows_overlay {
 
         let mut remaining_ms = delay_ms;
         while remaining_ms > 0 {
+            reconcile_active_hold_mouse_macros();
+
             {
                 let hook_state = HOOK_STATE.lock();
                 if !hook_state.macros_master_enabled {
@@ -28460,6 +28497,49 @@ mod windows_overlay {
             HOOK_STATE.lock().active_hold_macros.remove(&preset_id);
             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
             RUNTIME_VARIABLES.lock().clear();
+        }
+
+        #[test]
+        fn reconcile_active_hold_mouse_macros_requests_stop_after_release() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let preset_id = 92;
+            let run_token = 8;
+            STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
+            FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
+            {
+                let mut hook_state = HOOK_STATE.lock();
+                hook_state.held_mouse_buttons.clear();
+                hook_state.active_hold_macros.insert(
+                    preset_id,
+                    ActiveHoldMacro {
+                        trigger: HotkeyBinding {
+                            key: "MouseX1".to_string(),
+                            ..Default::default()
+                        },
+                        release_steps: Vec::new(),
+                        hold_stop_step: None,
+                        image_search_preset_ids: Vec::new(),
+                        locked_keys: Vec::new(),
+                        locked_mouse_masks: Vec::new(),
+                        run_token,
+                        completed: false,
+                        release_requested: false,
+                    },
+                );
+            }
+
+            reconcile_active_hold_mouse_macros();
+
+            assert!(STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id));
+            assert!(HOOK_STATE
+                .lock()
+                .active_hold_macros
+                .get(&preset_id)
+                .is_some_and(|active| active.release_requested));
+
+            HOOK_STATE.lock().active_hold_macros.remove(&preset_id);
+            STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
+            FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
         }
 
     }
