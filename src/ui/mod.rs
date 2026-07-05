@@ -619,6 +619,7 @@ pub struct CrosshairApp {
         bool,
         bool,
         QuickScreenDrawTool,
+        bool,
     )>,
     last_synced_quick_key_sound_config: Option<(bool, u32, f32)>,
     last_synced_macro_master_hotkey: Option<Option<HotkeyBinding>>,
@@ -11763,7 +11764,7 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::SyncMacroGroups(groups, status) => {
                     self.state.macro_groups = groups;
-                    self.persist_macro_presets();
+                    self.persist();
                     self.status = status;
                 }
                 UiCommand::SyncCrosshairProfiles(profiles, status) => {
@@ -12008,6 +12009,7 @@ impl eframe::App for CrosshairApp {
                     fill,
                     freeze,
                     tool,
+                    text_border,
                 } => {
                     self.state.quick_screen_draw_color = color;
                     self.state.quick_screen_draw_brush_size = brush_size;
@@ -12016,6 +12018,7 @@ impl eframe::App for CrosshairApp {
                     self.state.quick_screen_draw_fill = fill;
                     self.state.quick_screen_draw_freeze = freeze;
                     self.state.quick_screen_draw_tool = tool;
+                    self.state.quick_screen_draw_text_border = text_border;
                     self.persist();
                 }
 
