@@ -1441,7 +1441,7 @@ impl CrosshairApp {
                     *live_sync = true;
                     ui.close();
                 }
-                let _popup_response = egui::Popup::from_response(&response)
+                let popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
                     .align(egui::RectAlign::TOP_START)
@@ -1449,9 +1449,6 @@ impl CrosshairApp {
                     .width(140.0)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
                     .show(|ui| {
-                        let rect = ui.max_rect();
-                        ui.ctx()
-                            .data_mut(|data| data.insert_temp(popup_rect_id, rect));
                         egui::Grid::new((id_source, popup_key, "grid"))
                             .num_columns(2)
                             .spacing([6.0, 6.0])
@@ -1470,6 +1467,10 @@ impl CrosshairApp {
                                 );
                             });
                     });
+                if let Some(popup) = &popup_response {
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(popup_rect_id, popup.response.rect));
+                }
                 let popup_rect: Option<egui::Rect> =
                     ui.ctx().data(|data| data.get_temp(popup_rect_id));
                 if open {
@@ -1727,9 +1728,6 @@ impl CrosshairApp {
                     .width(372.0)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
                     .show(|ui| {
-                        let rect = ui.max_rect();
-                        ui.ctx()
-                            .data_mut(|data| data.insert_temp(popup_rect_id, rect));
                         egui::Grid::new((id_source, "mouse-action-grid"))
                             .num_columns(6)
                             .spacing([6.0, 6.0])
@@ -1784,6 +1782,10 @@ impl CrosshairApp {
                                 }
                             });
                     });
+                if let Some(popup) = &popup_response {
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(popup_rect_id, popup.response.rect));
+                }
                 let active_mouse_click_popup_key = ui
                     .ctx()
                     .data(|data| {
