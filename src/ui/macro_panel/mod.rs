@@ -11287,7 +11287,7 @@ if supports_move_mouse || show_detection_tuning {
                                               }
                                           }
                                          let is_recording_this = self.active_macro_record_preset_id == Some(preset.id);
-                                         let (rect, _) = ui.allocate_exact_size(egui::vec2(32.0, 20.0), egui::Sense::hover());
+                                         let (rect, _) = ui.allocate_exact_size(egui::vec2(54.0, 20.0), egui::Sense::hover());
                                          let mut child_ui = ui.new_child(
                                              egui::UiBuilder::new()
                                                  .max_rect(rect)
@@ -11306,7 +11306,7 @@ if supports_move_mouse || show_detection_tuning {
                                              )).on_hover_text(Self::tr_lang(language, "Macro recording is active", ""));
                                          }
                                          ui.add_sized(
-                                             [18.0, 18.0],
+                                             [20.0, 20.0],
                                              egui::Label::new(RichText::new("#").strong())
                                                  .halign(egui::Align::Center),
                                          );
@@ -11318,7 +11318,14 @@ if supports_move_mouse || show_detection_tuning {
                                              )
                                              .halign(egui::Align::Center),
                                          );
-                                         ui.add_sized([148.0, 20.0], egui::Label::new(RichText::new(Self::tr_lang(language, "Action", "Action")).strong()));
+                                         ui.add_sized(
+                                             [146.0, 20.0],
+                                             egui::Label::new(
+                                                 RichText::new(Self::tr_lang(language, "Action", "Action"))
+                                                     .strong(),
+                                             )
+                                             .halign(egui::Align::Center),
+                                         );
                                          ui.add_sized([146.0, 21.0], egui::Label::new(""));
                                         let has_selected_steps = selected_steps_snapshot.iter().any(|(g_id, p_id, _)| *g_id == group.id && *p_id == preset.id);
                                         let selected_copy_feedback_active =
