@@ -252,10 +252,10 @@ fn point_click_panel_origin(state: &CaptureState, point: (i32, i32)) -> (i32, i3
     candidates
         .into_iter()
         .find(|(x, y)| {
-            !(*x + panel_w < safe_left
+            *x + panel_w < safe_left
                 || *x > safe_right
                 || *y + panel_h < safe_top
-                || *y > safe_bottom)
+                || *y > safe_bottom
         })
         .unwrap_or(candidates[0])
 }
@@ -1622,40 +1622,9 @@ unsafe fn draw_capture_to_dc(
 
         let panel_w = 200.0f32;
         let panel_h = 246.0f32;
-        let margin = 18.0f32;
-
-        let pointer_x = curr.0 as f32;
-        let pointer_y = curr.1 as f32;
-        let safe_r = 40.0f32;
-        let safe_left = pointer_x - safe_r;
-        let safe_right = pointer_x + safe_r;
-        let safe_top = pointer_y - safe_r;
-        let safe_bottom = pointer_y + safe_r;
-
-        panel_x = state.width as f32 - panel_w - margin;
-        panel_y = margin;
-
-        let candidates = [
-            (state.width as f32 - panel_w - margin, margin),
-            (margin, margin),
-            (
-                state.width as f32 - panel_w - margin,
-                state.height as f32 - panel_h - margin,
-            ),
-            (margin, state.height as f32 - panel_h - margin),
-        ];
-
-        for &(cx, cy) in &candidates {
-            let intersects = !(cx + panel_w < safe_left
-                || cx > safe_right
-                || cy + panel_h < safe_top
-                || cy > safe_bottom);
-            if !intersects {
-                panel_x = cx;
-                panel_y = cy;
-                break;
-            }
-        }
+        let (panel_origin_x, panel_origin_y) = point_click_panel_origin(state, curr);
+        panel_x = panel_origin_x as f32;
+        panel_y = panel_origin_y as f32;
 
         // Draw background
         let mut bg_paint = Paint::default();
