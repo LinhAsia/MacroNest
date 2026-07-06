@@ -1415,6 +1415,7 @@ impl CrosshairApp {
             vec2(58.0, 42.0),
             egui::Layout::top_down(egui::Align::Center),
             |ui| {
+                let tile_rect = ui.max_rect();
                 let label_color = if selected {
                     ui.visuals().strong_text_color()
                 } else {
@@ -1424,7 +1425,11 @@ impl CrosshairApp {
                     [34.0, 24.0],
                     Button::new(Self::macro_action_icon_text(base_action)).selected(selected),
                 );
-                if response.hovered() || response.clicked() {
+                let tile_hovered = ui
+                    .ctx()
+                    .pointer_hover_pos()
+                    .is_some_and(|pos| tile_rect.contains(pos));
+                if tile_hovered || response.clicked() {
                     Self::clear_mouse_click_submenus(ui, id_source);
                     open = true;
                     ui.ctx().data_mut(|data| {
@@ -1470,17 +1475,17 @@ impl CrosshairApp {
                 if open {
                     if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
                         let mut keep_open_rect =
-                            response.rect.expand2(egui::vec2(24.0, 20.0));
+                            tile_rect.expand2(egui::vec2(28.0, 22.0));
                         if let Some(rect) = popup_rect {
                             keep_open_rect =
                                 keep_open_rect.union(rect.expand2(egui::vec2(18.0, 16.0)));
                             let bridge_min = egui::pos2(
-                                response.rect.min.x.min(rect.min.x) - 14.0,
-                                response.rect.min.y.min(rect.max.y) - 14.0,
+                                tile_rect.min.x.min(rect.min.x) - 18.0,
+                                tile_rect.min.y.min(rect.max.y) - 18.0,
                             );
                             let bridge_max = egui::pos2(
-                                response.rect.max.x.max(rect.max.x) + 14.0,
-                                response.rect.max.y.max(rect.min.y) + 14.0,
+                                tile_rect.max.x.max(rect.max.x) + 18.0,
+                                tile_rect.max.y.max(rect.min.y) + 18.0,
                             );
                             keep_open_rect = keep_open_rect
                                 .union(egui::Rect::from_min_max(bridge_min, bridge_max));
@@ -1678,20 +1683,12 @@ impl CrosshairApp {
         let active_owner = ui
             .ctx()
             .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
-        let top_level_hovered = ui
-            .ctx()
-            .data(|data| data.get_temp::<bool>(action_hover_id))
-            .unwrap_or(false);
         let mut open = ui
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
             .unwrap_or(false);
         if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::Mouse) {
             open = false;
-        }
-        if top_level_hovered {
-            open = false;
-            Self::clear_macro_action_submenus(ui, id_source);
         }
         if open {
             let parent_layer = ui.layer_id();
@@ -1703,11 +1700,16 @@ impl CrosshairApp {
             vec2(58.0, 42.0),
             egui::Layout::top_down(egui::Align::Center),
             |ui| {
+                let tile_rect = ui.max_rect();
                 let response = ui.add_sized(
                     [34.0, 24.0],
                     Button::new(Self::material_icon_text(0xe323, 18.0)).selected(selected),
                 );
-                if response.hovered() || response.clicked() {
+                let tile_hovered = ui
+                    .ctx()
+                    .pointer_hover_pos()
+                    .is_some_and(|pos| tile_rect.contains(pos));
+                if tile_hovered || response.clicked() {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
                     ui.ctx()
@@ -1798,7 +1800,7 @@ impl CrosshairApp {
                 if open {
                     if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
                         let mut keep_open_rect =
-                            response.rect.expand2(egui::vec2(18.0, 16.0));
+                            tile_rect.expand2(egui::vec2(22.0, 18.0));
                         if let Some(rect) = popup_rect {
                             keep_open_rect =
                                 keep_open_rect.union(rect.expand2(egui::vec2(16.0, 14.0)));
@@ -11164,7 +11166,7 @@ if supports_move_mouse || show_detection_tuning {
                                         let capture_target = CaptureRequest::MacroPresetRecordHotkey(group.id, preset.id);
                                         let has_rec_hotkey = preset.record_hotkey.is_some();
                                         let capture_active = self.capture_target.as_ref() == Some(&capture_target);
-                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(118.0, 20.0), egui::Sense::hover());
+                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(132.0, 20.0), egui::Sense::hover());
                                          let mut child_ui = ui.new_child(
                                              egui::UiBuilder::new()
                                                  .max_rect(rect)
@@ -11287,14 +11289,14 @@ if supports_move_mouse || show_detection_tuning {
                                               }
                                           }
                                          let is_recording_this = self.active_macro_record_preset_id == Some(preset.id);
-                                         let (rect, _) = ui.allocate_exact_size(egui::vec2(54.0, 20.0), egui::Sense::hover());
+                                         if is_recording_this {
+                                             let (rect, _) = ui.allocate_exact_size(egui::vec2(54.0, 20.0), egui::Sense::hover());
                                          let mut child_ui = ui.new_child(
                                              egui::UiBuilder::new()
                                                  .max_rect(rect)
                                                  .layout(egui::Layout::left_to_right(egui::Align::Center))
                                          );
                                          child_ui.spacing_mut().item_spacing.x = 2.0;
-                                         if is_recording_this {
                                              let label_color = Color32::from_rgb(255, 96, 96);
                                              let is_even = (std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap_or_default().as_millis() / 500) % 2 == 0;
                                              let dot_color = if is_even { label_color } else { label_color.linear_multiply(0.3) };
@@ -11795,14 +11797,22 @@ if supports_move_mouse || show_detection_tuning {
                                                     .on_hover_cursor(egui::CursorIcon::Grab);
                                                 drag_handle.dnd_set_drag_payload(row_drag_payload.clone());
                                             });
-                                            let (rect, _) = ui.allocate_exact_size(egui::vec2(54.0, 20.0), egui::Sense::hover());
-                                            let mut child_ui = ui.new_child(
-                                                egui::UiBuilder::new()
-                                                    .max_rect(rect)
-                                                    .layout(egui::Layout::left_to_right(egui::Align::Center))
-                                            );
-                                            child_ui.spacing_mut().item_spacing.x = 2.0;
-                                            if has_infinite_loop_warning || has_step_vision_leak || has_step_audio_leak || has_step_break_loop_warning {
+                                            let has_step_status_icons =
+                                                has_infinite_loop_warning
+                                                    || has_step_vision_leak
+                                                    || has_step_audio_leak
+                                                    || has_step_break_loop_warning
+                                                    || is_active
+                                                    || is_timer_active;
+                                            if has_step_status_icons {
+                                                let (rect, _) = ui.allocate_exact_size(egui::vec2(54.0, 20.0), egui::Sense::hover());
+                                                let mut child_ui = ui.new_child(
+                                                    egui::UiBuilder::new()
+                                                        .max_rect(rect)
+                                                        .layout(egui::Layout::left_to_right(egui::Align::Center))
+                                                );
+                                                child_ui.spacing_mut().item_spacing.x = 2.0;
+                                                if has_infinite_loop_warning || has_step_vision_leak || has_step_audio_leak || has_step_break_loop_warning {
                                                 let warn_color = if has_infinite_loop_warning || has_step_vision_leak || has_step_audio_leak {
                                                     Color32::from_rgb(255, 90, 0)
                                                 } else {
@@ -11840,11 +11850,11 @@ if supports_move_mouse || show_detection_tuning {
                                             } else {
                                                 child_ui.add_sized([18.0, 18.0], egui::Label::new(""));
                                             }
-                                            if is_timer_active {
-                                                child_ui
-                                                    .add_sized(
-                                                        [18.0, 18.0],
-                                                        egui::Label::new(
+                                             if is_timer_active {
+                                                 child_ui
+                                                     .add_sized(
+                                                         [18.0, 18.0],
+                                                         egui::Label::new(
                                                             Self::material_icon_text(0xe8b5, 13.0)
                                                             .color(Color32::from_rgb(255, 196, 0)),
                                                         ),
@@ -11852,8 +11862,9 @@ if supports_move_mouse || show_detection_tuning {
                                                     .on_hover_text(Self::tr_lang(
                                                         language,
                                                         "This timer is currently running.",
-                                                        "This timer is currently running.",
-                                                    ));
+                                                         "This timer is currently running.",
+                                                     ));
+                                             }
                                             }
                                             let step_num_text = format!("{}", display_index + 1);
                                             let label_width = if has_infinite_loop_warning || has_step_vision_leak || has_step_audio_leak || has_step_break_loop_warning { 20.0 } else { 20.0 };
