@@ -1469,16 +1469,18 @@ impl CrosshairApp {
                     ui.ctx().data(|data| data.get_temp(popup_rect_id));
                 if open {
                     if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
-                        let mut keep_open_rect = response.rect.expand(16.0);
+                        let mut keep_open_rect =
+                            response.rect.expand2(egui::vec2(24.0, 20.0));
                         if let Some(rect) = popup_rect {
-                            keep_open_rect = keep_open_rect.union(rect.expand(12.0));
+                            keep_open_rect =
+                                keep_open_rect.union(rect.expand2(egui::vec2(18.0, 16.0)));
                             let bridge_min = egui::pos2(
-                                response.rect.min.x.min(rect.min.x) - 6.0,
-                                response.rect.min.y.min(rect.max.y) - 8.0,
+                                response.rect.min.x.min(rect.min.x) - 14.0,
+                                response.rect.min.y.min(rect.max.y) - 14.0,
                             );
                             let bridge_max = egui::pos2(
-                                response.rect.max.x.max(rect.max.x) + 6.0,
-                                response.rect.max.y.max(rect.min.y) + 8.0,
+                                response.rect.max.x.max(rect.max.x) + 14.0,
+                                response.rect.max.y.max(rect.min.y) + 14.0,
                             );
                             keep_open_rect = keep_open_rect
                                 .union(egui::Rect::from_min_max(bridge_min, bridge_max));
@@ -1795,9 +1797,11 @@ impl CrosshairApp {
                     ui.ctx().data(|data| data.get_temp(popup_rect_id));
                 if open {
                     if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
-                        let mut keep_open_rect = response.rect.expand(10.0);
+                        let mut keep_open_rect =
+                            response.rect.expand2(egui::vec2(18.0, 16.0));
                         if let Some(rect) = popup_rect {
-                            keep_open_rect = keep_open_rect.union(rect.expand(10.0));
+                            keep_open_rect =
+                                keep_open_rect.union(rect.expand2(egui::vec2(16.0, 14.0)));
                             if rect.contains(pointer_pos) {
                                 ui.ctx().data_mut(|data| {
                                     data.insert_temp(owner_id, MacroActionSubmenuKind::Mouse)
@@ -1813,7 +1817,22 @@ impl CrosshairApp {
                                 .ctx()
                                 .data(|data| data.get_temp::<egui::Rect>(child_popup_rect_id))
                             {
-                                keep_open_rect = keep_open_rect.union(rect.expand(10.0));
+                                keep_open_rect =
+                                    keep_open_rect.union(rect.expand2(egui::vec2(16.0, 14.0)));
+                                if let Some(parent_rect) = popup_rect {
+                                    keep_open_rect = keep_open_rect.union(
+                                        egui::Rect::from_min_max(
+                                            egui::pos2(
+                                                parent_rect.min.x.min(rect.min.x) - 12.0,
+                                                parent_rect.min.y.min(rect.min.y) - 12.0,
+                                            ),
+                                            egui::pos2(
+                                                parent_rect.max.x.max(rect.max.x) + 12.0,
+                                                parent_rect.max.y.max(rect.max.y) + 12.0,
+                                            ),
+                                        ),
+                                    );
+                                }
                             }
                         }
                         if !keep_open_rect.contains(pointer_pos) {
@@ -11291,16 +11310,14 @@ if supports_move_mouse || show_detection_tuning {
                                              egui::Label::new(RichText::new("#").strong())
                                                  .halign(egui::Align::Center),
                                          );
-                                          let (rect, _) = ui.allocate_exact_size(egui::vec2(120.0, 20.0), egui::Sense::hover());
-                                          let mut child_ui = ui.new_child(
-                                              egui::UiBuilder::new()
-                                                  .max_rect(rect)
-                                                  .layout(egui::Layout::top_down(egui::Align::Center))
-                                          );
-                                          child_ui.horizontal(|ui| {
-                                               ui.add_space(26.0);
-                                               ui.label(RichText::new(Self::tr_lang(language, "Delay", "Delay")).strong());
-                                           });
+                                         ui.add_sized(
+                                             [120.0, 20.0],
+                                             egui::Label::new(
+                                                 RichText::new(Self::tr_lang(language, "Delay", "Delay"))
+                                                     .strong(),
+                                             )
+                                             .halign(egui::Align::Center),
+                                         );
                                          ui.add_sized([148.0, 20.0], egui::Label::new(RichText::new(Self::tr_lang(language, "Action", "Action")).strong()));
                                          ui.add_sized([146.0, 21.0], egui::Label::new(""));
                                         let has_selected_steps = selected_steps_snapshot.iter().any(|(g_id, p_id, _)| *g_id == group.id && *p_id == preset.id);
