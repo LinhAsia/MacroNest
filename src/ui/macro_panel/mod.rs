@@ -524,6 +524,7 @@ impl CrosshairApp {
             vec2(58.0, 42.0),
             egui::Layout::top_down(egui::Align::Center),
             |ui| {
+                let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
                 let label_color = if *current == candidate {
                     ui.visuals().strong_text_color()
                 } else {
@@ -534,7 +535,7 @@ impl CrosshairApp {
                     Button::new(Self::macro_action_icon_text(candidate))
                         .selected(*current == candidate),
                 );
-                if !is_submenu_item && (response.hovered() || response.clicked()) {
+                if !is_submenu_item && !hover_blocked && (response.hovered() || response.clicked()) {
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(action_hover_id, true));
                 }
@@ -557,6 +558,30 @@ impl CrosshairApp {
             ),
         );
         response
+    }
+
+    fn macro_action_hover_blocked(ui: &egui::Ui, action_hover_id: egui::Id) -> bool {
+        ui.ctx()
+            .data(|data| data.get_temp::<bool>(action_hover_id.with("submenu-hover-block")))
+            .unwrap_or(false)
+    }
+
+    fn pointer_in_mouse_click_child_popup(
+        ui: &egui::Ui,
+        id_source: impl std::hash::Hash + Copy,
+    ) -> bool {
+        let Some(pointer_pos) = ui.ctx().pointer_hover_pos() else {
+            return false;
+        };
+        Self::mouse_click_action_groups()
+            .iter()
+            .copied()
+            .any(|(_, _, _, popup_key)| {
+                let popup_rect_id = ui.make_persistent_id((id_source, popup_key, "rect"));
+                ui.ctx()
+                    .data(|data| data.get_temp::<egui::Rect>(popup_rect_id))
+                    .is_some_and(|rect| rect.expand2(egui::vec2(6.0, 6.0)).contains(pointer_pos))
+            })
     }
 
     fn render_macro_action_option(
@@ -1544,6 +1569,7 @@ impl CrosshairApp {
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = matches!(
             *current,
             MacroAction::IfStart | MacroAction::Else | MacroAction::IfEnd
@@ -1584,7 +1610,7 @@ impl CrosshairApp {
                     Button::new(Self::macro_action_icon_text(MacroAction::IfStart))
                         .selected(selected),
                 );
-                if response.hovered() || response.clicked() {
+                if response.clicked() || (!hover_blocked && response.hovered()) {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
                     ui.ctx()
@@ -1674,6 +1700,7 @@ impl CrosshairApp {
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_mouse(*current);
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let active_mouse_click_popup_key_id =
@@ -1710,7 +1737,7 @@ impl CrosshairApp {
                     .ctx()
                     .pointer_hover_pos()
                     .is_some_and(|pos| tile_rect.contains(pos));
-                if tile_hovered || response.clicked() {
+                if response.clicked() || (!hover_blocked && tile_hovered) {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
                     ui.ctx()
@@ -1907,6 +1934,7 @@ impl CrosshairApp {
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_network(*current);
         let inner = ui.allocate_ui_with_layout(
             vec2(58.0, 42.0),
@@ -1916,7 +1944,7 @@ impl CrosshairApp {
                     [34.0, 24.0],
                     Button::new(Self::material_icon_text(0xe1ba, 18.0)).selected(selected),
                 );
-                if response.hovered() {
+                if !hover_blocked && response.hovered() {
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(action_hover_id, true));
                 }
@@ -1960,6 +1988,7 @@ impl CrosshairApp {
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_image_search(*current);
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
@@ -1998,7 +2027,7 @@ impl CrosshairApp {
                     [34.0, 24.0],
                     Button::new(Self::material_icon_text(0xe8b6, 18.0)).selected(selected),
                 );
-                if response.hovered() || response.clicked() {
+                if response.clicked() || (!hover_blocked && response.hovered()) {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
                     ui.ctx().data_mut(|data| {
@@ -2146,6 +2175,7 @@ impl CrosshairApp {
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_timer(*current);
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "timer-submenu-popup"));
@@ -2184,7 +2214,7 @@ impl CrosshairApp {
                     [34.0, 24.0],
                     Button::new(Self::material_icon_text(0xe425, 18.0)).selected(selected),
                 );
-                if response.hovered() || response.clicked() {
+                if response.clicked() || (!hover_blocked && response.hovered()) {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
                     ui.ctx()
@@ -6614,8 +6644,19 @@ impl CrosshairApp {
                                                     preset.id,
                                                     "hold-stop-action-hover",
                                                 ));
+                                                let mouse_group_id =
+                                                    (group.id, preset.id, "hold-stop-mouse-group");
+                                                let block_top_level_hover =
+                                                    Self::pointer_in_mouse_click_child_popup(
+                                                        ui,
+                                                        mouse_group_id,
+                                                    );
                                                 ui.ctx().data_mut(|data| {
                                                     data.insert_temp(action_hover_id, false);
+                                                    data.insert_temp(
+                                                        action_hover_id.with("submenu-hover-block"),
+                                                        block_top_level_hover,
+                                                    );
                                                 });
                                                 egui::Grid::new((group.id, preset.id, "hold-stop-action-grid"))
                                                     .num_columns(8)
@@ -6671,7 +6712,7 @@ impl CrosshairApp {
                                                         Self::render_mouse_action_group_option(
                                                             ui,
                                                             language,
-                                                            (group.id, preset.id, "hold-stop-mouse-group"),
+                                                            mouse_group_id,
                                                             &mut step.action,
                                                             &mut live_sync,
                                                             action_hover_id,
@@ -8903,8 +8944,19 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     preset.id,
                                                     "press-stop-action-hover",
                                                 ));
+                                                let mouse_group_id =
+                                                    (group.id, preset.id, "press-stop-mouse-group");
+                                                let block_top_level_hover =
+                                                    Self::pointer_in_mouse_click_child_popup(
+                                                        ui,
+                                                        mouse_group_id,
+                                                    );
                                                 ui.ctx().data_mut(|data| {
                                                     data.insert_temp(action_hover_id, false);
+                                                    data.insert_temp(
+                                                        action_hover_id.with("submenu-hover-block"),
+                                                        block_top_level_hover,
+                                                    );
                                                 });
                                                 egui::Grid::new((group.id, preset.id, "press-stop-action-grid"))
                                                     .num_columns(8)
@@ -8960,7 +9012,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         Self::render_mouse_action_group_option(
                                                             ui,
                                                             language,
-                                                            (group.id, preset.id, "press-stop-mouse-group"),
+                                                            mouse_group_id,
                                                             &mut step.action,
                                                             &mut live_sync,
                                                             action_hover_id,
@@ -12066,8 +12118,23 @@ if supports_move_mouse || show_detection_tuning {
                                                         step_index,
                                                         "action-hover",
                                                     ));
+                                                    let mouse_group_id = (
+                                                        group.id,
+                                                        preset.id,
+                                                        step_index,
+                                                        "mouse-group",
+                                                    );
+                                                    let block_top_level_hover =
+                                                        Self::pointer_in_mouse_click_child_popup(
+                                                            ui,
+                                                            mouse_group_id,
+                                                        );
                                                     ui.ctx().data_mut(|data| {
                                                         data.insert_temp(action_hover_id, false);
+                                                        data.insert_temp(
+                                                            action_hover_id.with("submenu-hover-block"),
+                                                            block_top_level_hover,
+                                                        );
                                                     });
                                                     egui::Grid::new((group.id, preset.id, step_index, "action-grid"))
                                                         .num_columns(8)
@@ -12122,7 +12189,7 @@ if supports_move_mouse || show_detection_tuning {
                                                             Self::render_mouse_action_group_option(
                                                                 ui,
                                                                 language,
-                                                                (group.id, preset.id, step_index, "mouse-group"),
+                                                                mouse_group_id,
                                                                 &mut step.action,
                                                                 &mut live_sync,
                                                                 action_hover_id,
@@ -16634,6 +16701,7 @@ if supports_move_mouse || show_detection_tuning {
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_trigger_macro(*current);
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "macro-submenu-popup"));
@@ -16670,7 +16738,7 @@ if supports_move_mouse || show_detection_tuning {
                     [34.0, 24.0],
                     Button::new(Self::material_icon_text(0xe037, 18.0)).selected(selected),
                 );
-                if response.hovered() || response.clicked() {
+                if response.clicked() || (!hover_blocked && response.hovered()) {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
                     ui.ctx()
@@ -16786,6 +16854,7 @@ if supports_move_mouse || show_detection_tuning {
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_geometry(*current);
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "geometry-submenu-popup"));
@@ -16822,7 +16891,7 @@ if supports_move_mouse || show_detection_tuning {
                     [34.0, 24.0],
                     Button::new(Self::material_icon_text(0xe8f4, 18.0)).selected(selected),
                 );
-                if response.hovered() || response.clicked() {
+                if response.clicked() || (!hover_blocked && response.hovered()) {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
                     ui.ctx().data_mut(|data| {
@@ -16924,6 +16993,7 @@ if supports_move_mouse || show_detection_tuning {
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_audio_sense(*current);
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "audiosense-submenu-popup"));
@@ -16960,7 +17030,7 @@ if supports_move_mouse || show_detection_tuning {
                     [34.0, 24.0],
                     Button::new(Self::material_icon_text(0xe050, 18.0)).selected(selected),
                 );
-                if response.hovered() || response.clicked() {
+                if response.clicked() || (!hover_blocked && response.hovered()) {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
                     ui.ctx().data_mut(|data| {
@@ -17216,6 +17286,7 @@ if supports_move_mouse || show_detection_tuning {
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_funny(*current);
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "funny-submenu-popup"));
@@ -17252,7 +17323,7 @@ if supports_move_mouse || show_detection_tuning {
                     [34.0, 24.0],
                     Button::new(Self::material_icon_text(0xe420, 18.0)).selected(selected),
                 );
-                if response.hovered() || response.clicked() {
+                if response.clicked() || (!hover_blocked && response.hovered()) {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
                     ui.ctx()
