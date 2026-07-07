@@ -34481,6 +34481,16 @@ mod windows_overlay {
         }
 
         let hook_state = HOOK_STATE.lock();
+        if hook_state.timer_presets.iter().any(|preset| {
+            preset.show_overlay
+                && hook_state
+                    .active_timers
+                    .get(&preset.id)
+                    .is_some_and(|state| state.running || state.elapsed_ms > 0)
+        }) {
+            return true;
+        }
+
         !hook_state.active_geometry_preset_ids.is_empty()
             || !hook_state.active_geometry_steps.is_empty()
     }

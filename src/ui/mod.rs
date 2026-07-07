@@ -13922,6 +13922,14 @@ impl eframe::App for CrosshairApp {
             }
         }
 
+        let app_focused = ctx.input(|input| input.viewport().focused != Some(false));
+        let audio_panel_active =
+            matches!(self.state.active_panel, AppPanel::Sound | AppPanel::Media);
+        if !app_focused || !audio_panel_active {
+            audio::stop_preview();
+            audio::stop_video_audio_preview();
+        }
+
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
