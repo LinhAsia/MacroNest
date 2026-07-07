@@ -645,6 +645,7 @@ pub struct CrosshairApp {
     last_synced_native_focus_highlight_enabled: Option<bool>,
     last_synced_vietnamese_input_enabled: Option<bool>,
     screen_draw_color_picker_open: bool,
+    screen_draw_color_pick_pending_at: Option<Instant>,
     last_synced_active_macro_folder_scope: Option<crate::overlay::MacroFolderScope>,
     last_synced_protractor_enabled: Option<bool>,
     last_synced_protractor_config: Option<(f32, f32, f32, i32, i32, f32, bool, UiLanguage)>,
@@ -922,6 +923,7 @@ impl CrosshairApp {
             last_synced_native_focus_highlight_enabled: None,
             last_synced_vietnamese_input_enabled: None,
             screen_draw_color_picker_open: false,
+            screen_draw_color_pick_pending_at: None,
             last_synced_active_macro_folder_scope: None,
             last_synced_protractor_enabled: None,
             last_synced_protractor_config: None,
@@ -12869,44 +12871,28 @@ impl eframe::App for CrosshairApp {
         let drawing_active = crate::overlay::screen_draw_active();
         let capturing_region = crate::overlay::screen_draw_get_capturing_region();
         let mut color_pick_mode = crate::overlay::screen_draw_get_color_pick_mode();
-        let mut color_pick_pending = ctx.data(|d| {
-            d.get_temp::<bool>(egui::Id::new("screen_draw_color_pick_pending"))
-                .unwrap_or(false)
-        });
+        let mut color_pick_pending = self.screen_draw_color_pick_pending_at.is_some();
         if drawing_active {
-            if color_pick_mode && color_pick_pending {
+            if color_pick_mode {
+                self.screen_draw_color_pick_pending_at = None;
                 color_pick_pending = false;
-                ctx.data_mut(|d| {
-                    d.remove::<bool>(egui::Id::new("screen_draw_color_pick_pending"));
-                    d.remove::<usize>(egui::Id::new("screen_draw_color_pick_pending_frames"));
-                });
-            } else if color_pick_pending {
+            } else if let Some(pending_at) = self.screen_draw_color_pick_pending_at {
                 ctx.send_viewport_cmd_to(
                     egui::ViewportId::from_hash_of("screen_draw_toolbar"),
                     egui::ViewportCommand::Visible(false),
                 );
-                let frames = ctx.data(|d| {
-                    d.get_temp::<usize>(egui::Id::new("screen_draw_color_pick_pending_frames"))
-                        .unwrap_or(0)
-                });
-                if frames >= 2 {
-                    ctx.data_mut(|d| {
-                        d.remove::<bool>(egui::Id::new("screen_draw_color_pick_pending"));
-                        d.remove::<usize>(egui::Id::new("screen_draw_color_pick_pending_frames"));
-                    });
+                if pending_at.elapsed() >= Duration::from_millis(50) {
+                    self.screen_draw_color_pick_pending_at = None;
                     color_pick_pending = false;
                     crate::overlay::screen_draw_toggle_color_pick_mode();
                     color_pick_mode = true;
                 } else {
-                    ctx.data_mut(|d| {
-                        d.insert_temp(
-                            egui::Id::new("screen_draw_color_pick_pending_frames"),
-                            frames + 1,
-                        );
-                    });
                     ctx.request_repaint_after(Duration::from_millis(16));
                 }
             }
+        } else {
+            self.screen_draw_color_pick_pending_at = None;
+            color_pick_pending = false;
         }
         let toolbar_visible = !capturing_region && !color_pick_mode && !color_pick_pending;
         let was_active = ctx.data(|d| {
@@ -13377,10 +13363,7 @@ impl eframe::App for CrosshairApp {
                                     }
 
                                     if icon_btn(ui, crate::overlay::screen_draw_get_color_pick_mode(), "dropper", "Pick color from screen").clicked() {
-                                        ui.ctx().data_mut(|d| {
-                                            d.insert_temp(egui::Id::new("screen_draw_color_pick_pending"), true);
-                                            d.insert_temp(egui::Id::new("screen_draw_color_pick_pending_frames"), 0usize);
-                                        });
+                                        self.screen_draw_color_pick_pending_at = Some(Instant::now());
                                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
                                         ui.ctx().request_repaint_after(Duration::from_millis(16));
                                     }
