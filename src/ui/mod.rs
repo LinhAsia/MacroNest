@@ -13349,21 +13349,12 @@ impl eframe::App for CrosshairApp {
                                     ui.add(egui::Label::new("Size:"));
                                     ui.style_mut().spacing.slider_width = 80.0;
                                     let slider_resp = ui.add(egui::Slider::new(&mut brush_size, 2.0..=80.0).show_value(false));
-                                    let pointer_primary_down =
-                                        ui.ctx().input(|input| input.pointer.primary_down());
-                                    let slider_drag_active =
-                                        slider_resp.dragged() && pointer_primary_down;
                                     if slider_resp.changed() {
                                         crate::overlay::screen_draw_set_brush_size(brush_size);
                                     }
-                                    if slider_drag_active || slider_resp.clicked() {
+                                    if slider_resp.dragged() || slider_resp.clicked() {
                                         slider_resp.surrender_focus();
                                         ui.ctx().memory_mut(|memory| memory.stop_text_input());
-                                    }
-                                    // Control the screen draw overlay's own built-in brush size preview
-                                    crate::overlay::screen_draw_set_brush_size_active(slider_drag_active);
-                                    if !pointer_primary_down {
-                                        crate::overlay::screen_draw_set_brush_size_active(false);
                                     }
                                     ui.add(egui::Label::new(format!("{:.0}", brush_size)));
 

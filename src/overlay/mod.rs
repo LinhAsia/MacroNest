@@ -230,7 +230,7 @@ mod windows_overlay {
     const SCREEN_DRAW_TIMER_ID: usize = 3;
     const SCREEN_DRAW_REFRESH_INTERVAL_MS: u32 = 16;
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 4;
-    const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 260;
+    const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 420;
     const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
     const SCREEN_DRAW_ORPHAN_STROKE_RELEASE_MS: u64 = 90;
     const SCREEN_DRAW_TOOLBAR_BRUSH_SVG: &str = r##"<svg viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -9096,42 +9096,6 @@ mod windows_overlay {
             state.trigger_started_from_inactive = false;
             state.trigger_release_should_keep_open = false;
         }
-        let trigger_to_poll = {
-            let state = SCREEN_DRAW_STATE.lock();
-            if state.active
-                && !state.capturing_region
-                && state.trigger_pressed_at.is_none()
-                && !state.trigger_started_from_inactive
-                && !state.trigger_release_should_keep_open
-                && !state.suppress_next_trigger_hold
-                && state.text_session.is_none()
-            {
-                state.trigger.clone()
-            } else {
-                None
-            }
-        };
-        if let Some(trigger) = trigger_to_poll
-            && screen_draw_trigger_binding_is_down(&trigger)
-        {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            if state.active
-                && !state.capturing_region
-                && state.trigger_pressed_at.is_none()
-                && !state.trigger_started_from_inactive
-                && !state.trigger_release_should_keep_open
-                && !state.suppress_next_trigger_hold
-                && state.text_session.is_none()
-            {
-                let pressed_at = Instant::now();
-                state.trigger_latched = true;
-                state.trigger_is_down = true;
-                state.trigger_pressed_at = Some(pressed_at);
-                state.trigger_started_from_inactive = false;
-                state.trigger_release_should_keep_open = false;
-                screen_draw_debug_log(format!("poll_down key={}", trigger.key));
-            }
-        }
         let trigger = {
             let mut state = SCREEN_DRAW_STATE.lock();
             if !state.active || state.capturing_region || state.text_session.is_some() {
@@ -9141,12 +9105,7 @@ mod windows_overlay {
             let Some(pressed_at) = state.trigger_pressed_at else {
                 return;
             };
-            let hold_threshold_ms = SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS;
-            let elapsed = Instant::now().duration_since(pressed_at);
-            if elapsed < Duration::from_millis(hold_threshold_ms) {
-                return;
-            }
-            let Some(trigger) = state.trigger.clone() else {
+            let Some(configured_trigger) = state.trigger.clone() else {
                 state.trigger_pressed_at = None;
                 state.trigger_latched = false;
                 state.trigger_is_down = false;
@@ -9154,7 +9113,20 @@ mod windows_overlay {
                 state.trigger_release_should_keep_open = false;
                 return;
             };
-            trigger
+            if !state.trigger_is_down || !screen_draw_trigger_binding_is_down(&configured_trigger) {
+                state.trigger_pressed_at = None;
+                state.trigger_latched = false;
+                state.trigger_is_down = false;
+                state.trigger_started_from_inactive = false;
+                state.trigger_release_should_keep_open = false;
+                return;
+            }
+            let hold_threshold_ms = SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS;
+            let elapsed = Instant::now().duration_since(pressed_at);
+            if elapsed < Duration::from_millis(hold_threshold_ms) {
+                return;
+            }
+            configured_trigger
         };
         {
             let mut state = SCREEN_DRAW_STATE.lock();
@@ -10447,20 +10419,19 @@ mod windows_overlay {
         let mut state = SCREEN_DRAW_STATE.lock();
         state.brush_size = size.clamp(2.0, 80.0);
         if state.active_control == ScreenDrawControl::BrushSize {
-            state.pending_repaint = true;
+            state.active_control = ScreenDrawControl::None;
+            mark_screen_draw_repaint_pending(&mut state);
         }
     }
 
     pub fn screen_draw_set_brush_size_active(active: bool) {
+        if active {
+            return;
+        }
         let mut state = SCREEN_DRAW_STATE.lock();
-        let target_control = if active {
-            ScreenDrawControl::BrushSize
-        } else {
-            ScreenDrawControl::None
-        };
-        if state.active_control != target_control {
+        if state.active_control == ScreenDrawControl::BrushSize {
             let previous_rect = screen_draw_toolbar_rect(&state);
-            state.active_control = target_control;
+            state.active_control = ScreenDrawControl::None;
             mark_screen_draw_toolbar_dirty(&mut state, previous_rect);
             mark_screen_draw_repaint_pending(&mut state);
             let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
