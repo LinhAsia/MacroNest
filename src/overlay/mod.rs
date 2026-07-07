@@ -4796,7 +4796,6 @@ mod windows_overlay {
                 }
                 if message == WM_MOUSEMOVE && screen_draw_color_pick_mode_active() {
                     set_screen_draw_color_pick_cursor();
-                    return LRESULT(1);
                 }
             }
 
