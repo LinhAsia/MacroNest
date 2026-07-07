@@ -5634,15 +5634,6 @@ impl CrosshairApp {
                                         self.persist();
                                     }
 
-                                    if self.state.quick_screen_draw_tool
-                                        != QuickScreenDrawTool::Brush
-                                    {
-                                        self.state.quick_screen_draw_tool =
-                                            QuickScreenDrawTool::Brush;
-                                        self.sync_quick_screen_draw_config();
-                                        self.persist();
-                                    }
-
                                     if false {
                                     ui.add_space(4.0);
                                     ui.label(
@@ -12867,6 +12858,9 @@ impl eframe::App for CrosshairApp {
         }
 
         let drawing_active = crate::overlay::screen_draw_active();
+        let capturing_region = crate::overlay::screen_draw_get_capturing_region();
+        let color_pick_mode = crate::overlay::screen_draw_get_color_pick_mode();
+        let toolbar_visible = !capturing_region && !color_pick_mode;
         let was_active = ctx.data(|d| {
             d.get_temp::<bool>(egui::Id::new("screen_draw_active"))
                 .unwrap_or(false)
@@ -12884,9 +12878,15 @@ impl eframe::App for CrosshairApp {
                         d.insert_temp(egui::Id::new("main_window_hidden_for_drawing"), true)
                     });
                 }
+                ctx.data_mut(|d| {
+                    d.insert_temp(egui::Id::new("screen_draw_capturing"), capturing_region);
+                    d.insert_temp(egui::Id::new("screen_draw_color_pick_mode"), color_pick_mode);
+                    d.insert_temp(egui::Id::new("toolbar_no_activate_done"), false);
+                    d.insert_temp(egui::Id::new("toolbar_no_activate_search_counter"), 0usize);
+                });
                 ctx.send_viewport_cmd_to(
                     egui::ViewportId::from_hash_of("screen_draw_toolbar"),
-                    egui::ViewportCommand::Visible(true),
+                    egui::ViewportCommand::Visible(toolbar_visible),
                 );
             } else {
                 let hidden_for_drawing = ctx.data(|d| {
@@ -12908,6 +12908,34 @@ impl eframe::App for CrosshairApp {
                     d.insert_temp(egui::Id::new("toolbar_inited"), false);
                     d.insert_temp(egui::Id::new("toolbar_no_activate_done"), false);
                 });
+            }
+        } else if drawing_active {
+            let was_capturing = ctx.data(|d| {
+                d.get_temp::<bool>(egui::Id::new("screen_draw_capturing"))
+                    .unwrap_or(false)
+            });
+            let was_color_pick_mode = ctx.data(|d| {
+                d.get_temp::<bool>(egui::Id::new("screen_draw_color_pick_mode"))
+                    .unwrap_or(false)
+            });
+            if capturing_region != was_capturing || color_pick_mode != was_color_pick_mode {
+                ctx.data_mut(|d| {
+                    d.insert_temp(egui::Id::new("screen_draw_capturing"), capturing_region);
+                    d.insert_temp(
+                        egui::Id::new("screen_draw_color_pick_mode"),
+                        color_pick_mode,
+                    );
+                });
+                ctx.send_viewport_cmd_to(
+                    egui::ViewportId::from_hash_of("screen_draw_toolbar"),
+                    egui::ViewportCommand::Visible(toolbar_visible),
+                );
+                if toolbar_visible {
+                    ctx.data_mut(|d| {
+                        d.insert_temp(egui::Id::new("toolbar_no_activate_done"), false);
+                        d.insert_temp(egui::Id::new("toolbar_no_activate_search_counter"), 0usize);
+                    });
+                }
             }
         }
 
@@ -13235,6 +13263,7 @@ impl eframe::App for CrosshairApp {
                                         if response.clicked() {
                                             response.surrender_focus();
                                             ui.ctx().memory_mut(|memory| memory.stop_text_input());
+                                            crate::overlay::screen_draw_toolbar_interacted();
                                         }
                                         response
                                     };
@@ -13299,6 +13328,7 @@ impl eframe::App for CrosshairApp {
                                             resp.surrender_focus();
                                             ui.ctx().memory_mut(|memory| memory.stop_text_input());
                                             crate::overlay::screen_draw_set_color(*rgba);
+                                            crate::overlay::screen_draw_toolbar_interacted();
                                         }
                                         resp.on_hover_text(*name);
                                     }
@@ -13315,15 +13345,21 @@ impl eframe::App for CrosshairApp {
                                     ui.add(egui::Label::new("Size:"));
                                     ui.style_mut().spacing.slider_width = 80.0;
                                     let slider_resp = ui.add(egui::Slider::new(&mut brush_size, 2.0..=80.0).show_value(false));
+                                    let pointer_primary_down =
+                                        ui.ctx().input(|input| input.pointer.primary_down());
+                                    let slider_drag_active =
+                                        slider_resp.dragged() && pointer_primary_down;
                                     if slider_resp.changed() {
                                         crate::overlay::screen_draw_set_brush_size(brush_size);
+                                        crate::overlay::screen_draw_toolbar_interacted();
                                     }
-                                    if slider_resp.dragged() || slider_resp.clicked() {
+                                    if slider_drag_active || slider_resp.clicked() {
                                         slider_resp.surrender_focus();
                                         ui.ctx().memory_mut(|memory| memory.stop_text_input());
+                                        crate::overlay::screen_draw_toolbar_interacted();
                                     }
                                     // Control the screen draw overlay's own built-in brush size preview
-                                    crate::overlay::screen_draw_set_brush_size_active(slider_resp.dragged());
+                                    crate::overlay::screen_draw_set_brush_size_active(slider_drag_active);
                                     ui.add(egui::Label::new(format!("{:.0}", brush_size)));
 
                                     // Inline size preview circle (small, in toolbar)
