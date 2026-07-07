@@ -757,11 +757,30 @@ impl CrosshairApp {
         let language = self.state.ui_language;
         Self::show_settings_card_at_width(ui, card_width, |ui| {
             ui.vertical(|ui| {
-                ui.label(
-                    RichText::new(Self::tr_lang(language, "Update", ""))
-                        .strong()
-                        .size(14.0),
-                );
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(Self::tr_lang(language, "Update", ""))
+                            .strong()
+                            .size(14.0),
+                    );
+                    let badge_count = self.pending_update_badge_count();
+                    if badge_count > 0 {
+                        let (badge_rect, _) =
+                            ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::hover());
+                        ui.painter().circle_filled(
+                            badge_rect.center(),
+                            8.0,
+                            Color32::from_rgb(255, 60, 60),
+                        );
+                        ui.painter().text(
+                            badge_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            badge_count.to_string(),
+                            egui::FontId::proportional(9.0),
+                            Color32::WHITE,
+                        );
+                    }
+                });
                 ui.add_space(8.0);
                 match &self.update_status {
                     UpdateStatus::Idle => {
@@ -790,7 +809,7 @@ impl CrosshairApp {
                         }
                         if Self::settings_action_button(
                             ui,
-                            Self::tr_lang(language, "Download and Update", ""),
+                            Self::tr_lang(language, "Download new version", "Tai ban moi"),
                         )
                         .clicked()
                         {
@@ -808,7 +827,12 @@ impl CrosshairApp {
                         let path = path.clone();
                         if Self::settings_action_button(
                             ui,
-                            RichText::new(Self::tr_lang(language, "Restart App", "")).strong(),
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "Restart app to update",
+                                "Khoi dong lai de cap nhat",
+                            ))
+                            .strong(),
                         )
                         .clicked()
                         {
@@ -1474,12 +1498,17 @@ impl CrosshairApp {
     }
 
     pub(crate) fn check_for_update(&mut self, ctx: &egui::Context) {
+        self.check_for_update_with_origin(ctx, false);
+    }
+
+    pub(crate) fn check_for_update_with_origin(&mut self, ctx: &egui::Context, automatic: bool) {
         if matches!(
             self.update_status,
             UpdateStatus::Checking | UpdateStatus::Downloading
         ) {
             return;
         }
+        self.update_check_was_automatic = automatic;
         self.update_status = UpdateStatus::Checking;
         let ui_tx = self.ui_tx.clone();
         let ctx = ctx.clone();
