@@ -134,9 +134,9 @@ mod windows_overlay {
                     EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA,
                     GetAncestor, GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow,
                     GetMessageW, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW,
-                    GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTCLIENT,
-                    HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IMAGE_ICON, IsZoomed,
-                    KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LoadCursorW, LoadImageW,
+                    GetWindowRect, GetWindowThreadProcessId, FindWindowW, HC_ACTION, HHOOK, HMENU,
+                    HTCLIENT, HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IMAGE_ICON,
+                    IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LoadCursorW, LoadImageW,
                     MA_NOACTIVATE,
                     MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage,
                     RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN,
@@ -10448,8 +10448,27 @@ mod windows_overlay {
         }
     }
 
+    unsafe fn hide_screen_draw_toolbar_for_snapshot() {
+        let title: Vec<u16> = "Drawing Toolbar"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        if let Ok(hwnd) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()))
+            && !hwnd.0.is_null()
+        {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+
     fn begin_screen_draw_color_pick_mode(state: &mut ScreenDrawState) {
         if !state.freeze_screen {
+            unsafe {
+                hide_screen_draw_toolbar_for_snapshot();
+                let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
+                if hwnd_raw != 0 {
+                    let _ = clear_screen_draw_overlay_window(HWND(hwnd_raw as *mut c_void));
+                }
+            }
             let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
             if screen_w > 0 && screen_h > 0 {
                 state.freeze_frame = window_list::capture_virtual_screen_region(
