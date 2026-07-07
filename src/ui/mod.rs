@@ -12953,6 +12953,17 @@ impl eframe::App for CrosshairApp {
                     .unwrap_or(false)
             });
             if capturing_region != was_capturing || color_pick_mode != was_color_pick_mode {
+                if toolbar_visible {
+                    let toolbar_pos = ctx.data(|d| {
+                        d.get_temp::<egui::Pos2>(egui::Id::new("toolbar_pos"))
+                    });
+                    if let Some(toolbar_pos) = toolbar_pos {
+                        ctx.send_viewport_cmd_to(
+                            egui::ViewportId::from_hash_of("screen_draw_toolbar"),
+                            egui::ViewportCommand::OuterPosition(toolbar_pos),
+                        );
+                    }
+                }
                 ctx.data_mut(|d| {
                     d.insert_temp(egui::Id::new("screen_draw_capturing"), capturing_region);
                     d.insert_temp(egui::Id::new("screen_draw_color_pick_mode"), color_pick_mode);
