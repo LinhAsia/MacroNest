@@ -4759,6 +4759,18 @@ mod windows_overlay {
 
             let mouse_data = ((info.mouseData >> 16) & 0xFFFF) as u16;
             let screen_draw_event_key = mouse_binding_name_from_message(message, mouse_data);
+            if matches!(
+                message,
+                WM_LBUTTONUP
+                    | WM_RBUTTONUP
+                    | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
+                    | WM_XBUTTONUP
+            ) {
+                let captured = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetCapture() };
+                if !captured.0.is_null() && should_bypass_mouse_event_for_app_window(captured) {
+                    return CallNextHookEx(None, code, wparam, lparam);
+                }
+            }
             if screen_draw_active() {
                 if screen_draw_event_key.is_some() {
                     update_held_mouse_button(message, mouse_data);
@@ -12168,8 +12180,12 @@ mod windows_overlay {
                 (false, repaint)
             }
             WM_LBUTTONUP | WM_RBUTTONUP => {
-                let handled = screen_draw_handle_button_up();
-                (handled, handled)
+                if finishing_interaction {
+                    let handled = screen_draw_handle_button_up();
+                    (handled, handled)
+                } else {
+                    (false, false)
+                }
             }
             WM_MBUTTONDOWN
             | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
