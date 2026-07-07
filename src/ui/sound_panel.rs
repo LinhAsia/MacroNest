@@ -890,6 +890,7 @@ impl CrosshairApp {
         for index in 0..self.state.audio_settings.presets.len() {
             let mut choose_file_for = None;
             let mut open_editor_target = None;
+            let mut activate_preview_target = None;
             let preset_id = self.state.audio_settings.presets[index].id;
             let waveform_path = self.state.audio_settings.presets[index]
                 .clip
@@ -945,6 +946,10 @@ impl CrosshairApp {
                         .clicked()
                         {
                             preset.collapsed = !preset.collapsed;
+                            if !preset.collapsed {
+                                activate_preview_target =
+                                    Some((AudioEditorTarget::Preset(preset.id), preset.clip.start_ms));
+                            }
                         }
                     });
                 });
@@ -983,6 +988,9 @@ impl CrosshairApp {
             }
             if let Some(preset_id) = choose_file_for {
                 self.choose_audio_file_for_target(AudioEditorTarget::Preset(preset_id));
+            }
+            if let Some((target, cursor_ms)) = activate_preview_target {
+                self.preview_cursor = Some((target, cursor_ms));
             }
             if let Some(target) = open_editor_target {
                 self.open_audio_editor(target);
