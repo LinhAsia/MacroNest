@@ -232,7 +232,7 @@ mod windows_overlay {
     const SCREEN_DRAW_TIMER_ID: usize = 3;
     const SCREEN_DRAW_REFRESH_INTERVAL_MS: u32 = 16;
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 4;
-    const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 420;
+    const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 210;
     const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
     const SCREEN_DRAW_ORPHAN_STROKE_RELEASE_MS: u64 = 90;
     const SCREEN_DRAW_TOOLBAR_BRUSH_SVG: &str = r##"<svg viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -4954,7 +4954,7 @@ mod windows_overlay {
                         };
                         drop(hook_state);
                         if refresh_preview {
-                            send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+                            force_refresh_search_area_overlay();
                         }
                         if let Some(ui_tx) = ui_tx {
                             let _ = ui_tx.send(UiCommand::VisionCaptureMouseMove {
@@ -4986,7 +4986,7 @@ mod windows_overlay {
 
                         let ui_tx = hook_state.ui_tx.clone();
                         drop(hook_state);
-                        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+                        force_refresh_search_area_overlay();
                         if let Some(ui_tx) = ui_tx {
                             let _ = ui_tx.send(UiCommand::VisionCaptureMouseDown {
                                 screen_x: info.pt.x,
@@ -5020,7 +5020,7 @@ mod windows_overlay {
                         hook_state.vision_preview_source = None;
                         let ui_tx = hook_state.ui_tx.clone();
                         drop(hook_state);
-                        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+                        force_refresh_search_area_overlay();
                         if let Some(ui_tx) = ui_tx {
                             let _ = ui_tx.send(UiCommand::VisionCaptureMouseUp {
                                 screen_x: info.pt.x,
@@ -11748,7 +11748,7 @@ mod windows_overlay {
         if hook_state.vision_capture_preview_regions.get(0) != Some(&region) {
             hook_state.vision_capture_preview_regions = vec![region];
             drop(hook_state);
-            send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+            force_refresh_search_area_overlay();
         }
     }
 
@@ -11761,7 +11761,7 @@ mod windows_overlay {
         hook_state.vision_capture_preview_regions = Vec::new();
         hook_state.vision_preview_source = None;
         drop(hook_state);
-        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+        force_refresh_search_area_overlay();
         request_ui_repaint();
     }
 
@@ -23440,6 +23440,11 @@ mod windows_overlay {
         if is_refresh {
             SEARCH_AREA_OVERLAY_REFRESH_PENDING.store(false, Ordering::Release);
         }
+    }
+
+    fn force_refresh_search_area_overlay() {
+        SEARCH_AREA_OVERLAY_REFRESH_PENDING.store(false, Ordering::Release);
+        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
     fn send_ui_command(command: UiCommand) {
