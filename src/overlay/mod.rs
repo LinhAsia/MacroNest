@@ -4813,6 +4813,13 @@ mod windows_overlay {
                 if message == WM_MOUSEMOVE && screen_draw_color_pick_mode_active() {
                     set_screen_draw_color_pick_cursor();
                 }
+                if let Some(swallow) = process_screen_draw_mouse_hotkey_event(message, mouse_data) {
+                    return if swallow {
+                        LRESULT(1)
+                    } else {
+                        CallNextHookEx(None, code, wparam, lparam)
+                    };
+                }
             }
 
             if handle_mascot_global_drag(message, info.pt) {
@@ -5084,40 +5091,11 @@ mod windows_overlay {
                     message,
                     ((info.mouseData >> 16) & 0xFFFF) as u16,
                 );
-                if let Some(key_name) = event_key_name
-                    && consume_suppressed_mouse_trigger(key_name)
-                {
-                    return CallNextHookEx(None, code, wparam, lparam);
-                }
-
-                update_held_mouse_button(message, ((info.mouseData >> 16) & 0xFFFF) as u16);
-                if let Some(key_name) = event_key_name
-                    && screen_draw_capture_should_swallow_key_name(key_name)
-                {
-                    if !is_down {
-                        mark_screen_draw_capture_trigger_released();
-                        let _ = process_screen_draw_hotkey_release(&binding);
-                        screen_draw_release_trigger_latch_if_ready();
+                if let Some(swallow) = process_screen_draw_mouse_hotkey_event(message, mouse_data) {
+                    if swallow {
+                        return LRESULT(1);
                     }
-                    return LRESULT(1);
-                }
-                if !is_down && process_screen_draw_hotkey_release(&binding) {
-                    return LRESULT(1);
-                }
-                if matches!(
-                    message,
-                    WM_LBUTTONUP
-                        | WM_RBUTTONUP
-                        | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
-                        | WM_XBUTTONUP
-                ) {
-                    screen_draw_release_trigger_latch_if_ready();
-                }
-                if screen_draw_capture_should_swallow_binding(&binding) {
-                    return LRESULT(1);
-                }
-                if is_down && process_screen_draw_hotkey(&binding, false) {
-                    return LRESULT(1);
+                    return CallNextHookEx(None, code, wparam, lparam);
                 }
                 if !is_ui_in_foreground()
                     && let Some(key_name) = event_key_name
@@ -8776,6 +8754,60 @@ mod windows_overlay {
             .trigger
             .as_ref()
             .is_some_and(|trigger| hotkey::binding_matches(trigger, &binding))
+    }
+
+    fn process_screen_draw_mouse_hotkey_event(message: u32, mouse_data: u16) -> Option<bool> {
+        let key_name = mouse_binding_name_from_message(message, mouse_data)?;
+        if consume_suppressed_mouse_trigger(key_name) {
+            return Some(false);
+        }
+
+        let binding = binding_from_trigger_event(key_name);
+        let is_down = matches!(
+            message,
+            WM_LBUTTONDOWN
+                | WM_RBUTTONDOWN
+                | WM_MBUTTONDOWN
+                | WM_XBUTTONDOWN
+                | WM_MOUSEWHEEL
+        );
+        let matches_trigger = screen_draw_mouse_event_matches_trigger(message, mouse_data);
+
+        update_held_mouse_button(message, mouse_data);
+
+        if screen_draw_capture_should_swallow_key_name(key_name) {
+            if !is_down {
+                mark_screen_draw_capture_trigger_released();
+                let _ = process_screen_draw_hotkey_release(&binding);
+                screen_draw_release_trigger_latch_if_ready();
+            }
+            return Some(true);
+        }
+
+        let released = !is_down && process_screen_draw_hotkey_release(&binding);
+        if matches!(
+            message,
+            WM_LBUTTONUP
+                | WM_RBUTTONUP
+                | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
+                | WM_XBUTTONUP
+        ) {
+            screen_draw_release_trigger_latch_if_ready();
+        }
+        if released {
+            return Some(true);
+        }
+
+        if screen_draw_capture_should_swallow_binding(&binding) {
+            return Some(true);
+        }
+
+        let pressed = is_down && process_screen_draw_hotkey(&binding, false);
+        if pressed {
+            return Some(true);
+        }
+
+        matches_trigger.then_some(false)
     }
 
     fn screen_draw_text_input_char(vk_code: u32) -> Option<String> {
