@@ -2046,16 +2046,7 @@ mod windows_overlay {
         text_border: bool,
     }
 
-    fn screen_draw_debug_log(message: impl AsRef<str>) {
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("C:\\Users\\Admin\\.gemini\\antigravity\\brain\\312c757c-c0fb-4d5d-a46a-f2dd2f6aa86b\\screen_draw_debug.log")
-        {
-            use std::io::Write;
-            let _ = writeln!(file, "[{}] {}", chrono::Local::now().format("%H:%M:%S%.3f"), message.as_ref());
-        }
-    }
+    fn screen_draw_debug_log(_message: impl AsRef<str>) {}
 
     impl Default for ScreenDrawState {
         fn default() -> Self {
@@ -4528,14 +4519,9 @@ mod windows_overlay {
                         state.active && state.text_session.is_none()
                     };
                     if screen_draw_active && is_key_down {
-                        let (ctrl_down, shift_down) = {
-                            let hook_state = HOOK_STATE.lock();
-                            (
-                                hook_state.ctrl || hook_state.held_inputs.contains("Ctrl") || hook_state.held_inputs.contains("LCtrl") || hook_state.held_inputs.contains("RCtrl"),
-                                hook_state.shift || hook_state.held_inputs.contains("Shift") || hook_state.held_inputs.contains("LShift") || hook_state.held_inputs.contains("RShift"),
-                            )
-                        };
+                        let ctrl_down = unsafe { GetAsyncKeyState(0x11) } < 0;
                         if ctrl_down && matches!(info.vkCode, 0x5A | 0x59) {
+                            let shift_down = unsafe { GetAsyncKeyState(0x10) } < 0;
                             let is_redo =
                                 info.vkCode == 0x59 || (info.vkCode == 0x5A && shift_down);
                             if is_redo {
@@ -4773,20 +4759,6 @@ mod windows_overlay {
 
             let mouse_data = ((info.mouseData >> 16) & 0xFFFF) as u16;
             let screen_draw_event_key = mouse_binding_name_from_message(message, mouse_data);
-            // Let egui-owned windows finish mouse captures before the draw hook sees button-up.
-            // This prevents toolbar sliders from staying stuck after the cursor leaves the thumb.
-            if matches!(
-                message,
-                WM_LBUTTONUP
-                    | WM_RBUTTONUP
-                    | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
-                    | WM_XBUTTONUP
-            ) {
-                let captured = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetCapture() };
-                if !captured.0.is_null() && should_bypass_mouse_event_for_app_window(captured) {
-                    return CallNextHookEx(None, code, wparam, lparam);
-                }
-            }
             if screen_draw_active() {
                 if screen_draw_event_key.is_some() {
                     update_held_mouse_button(message, mouse_data);
@@ -5156,17 +5128,21 @@ mod windows_overlay {
     }
 
     fn binding_from_event(key_name: &str) -> HotkeyBinding {
-        let mut combo_keys = Vec::new();
-        let (ctrl_down, alt_down, shift_down, win_down) = {
+        let ctrl_down = unsafe { GetAsyncKeyState(0x11) } < 0;
+        let alt_down = unsafe { GetAsyncKeyState(0x12) } < 0;
+        let shift_down = unsafe { GetAsyncKeyState(0x10) } < 0;
+        let win_down =
+            unsafe { GetAsyncKeyState(0x5B) } < 0 || unsafe { GetAsyncKeyState(0x5C) } < 0;
+        let mut combo_keys = {
             let hook_state = HOOK_STATE.lock();
-            let ctrl = hook_state.ctrl || hook_state.held_inputs.contains("Ctrl") || hook_state.held_inputs.contains("LCtrl") || hook_state.held_inputs.contains("RCtrl");
-            let alt = hook_state.alt || hook_state.held_inputs.contains("Alt") || hook_state.held_inputs.contains("LAlt") || hook_state.held_inputs.contains("RAlt");
-            let shift = hook_state.shift || hook_state.held_inputs.contains("Shift") || hook_state.held_inputs.contains("LShift") || hook_state.held_inputs.contains("RShift");
-            let win = hook_state.win || hook_state.held_inputs.contains("Win") || hook_state.held_inputs.contains("Meta");
-            combo_keys.extend(hook_state.held_inputs.iter().cloned());
-            combo_keys.extend(hook_state.held_mouse_buttons.iter().cloned());
-            combo_keys.push(key_name.to_owned());
-            (ctrl, alt, shift, win)
+            let mut keys = hook_state
+                .held_inputs
+                .iter()
+                .cloned()
+                .chain(hook_state.held_mouse_buttons.iter().cloned())
+                .collect::<Vec<_>>();
+            keys.push(key_name.to_owned());
+            keys
         };
         combo_keys.retain(|key| !key.trim().is_empty());
         combo_keys.sort_by(|a, b| {
@@ -5188,28 +5164,28 @@ mod windows_overlay {
     }
 
     fn binding_from_trigger_event(key_name: &str) -> HotkeyBinding {
-        let (ctrl_down, alt_down, shift_down, win_down) = {
-            let hook_state = HOOK_STATE.lock();
-            (
-                hook_state.ctrl || hook_state.held_inputs.contains("Ctrl") || hook_state.held_inputs.contains("LCtrl") || hook_state.held_inputs.contains("RCtrl"),
-                hook_state.alt || hook_state.held_inputs.contains("Alt") || hook_state.held_inputs.contains("LAlt") || hook_state.held_inputs.contains("RAlt"),
-                hook_state.shift || hook_state.held_inputs.contains("Shift") || hook_state.held_inputs.contains("LShift") || hook_state.held_inputs.contains("RShift"),
-                hook_state.win || hook_state.held_inputs.contains("Win") || hook_state.held_inputs.contains("Meta"),
-            )
-        };
+        let ctrl_down = unsafe { GetAsyncKeyState(0x11) } < 0;
+        let alt_down = unsafe { GetAsyncKeyState(0x12) } < 0;
+        let shift_down = unsafe { GetAsyncKeyState(0x10) } < 0;
+        let win_down =
+            unsafe { GetAsyncKeyState(0x5B) } < 0 || unsafe { GetAsyncKeyState(0x5C) } < 0;
         let mut combo_keys = vec![key_name.to_owned()];
         if ctrl_down {
             combo_keys.push("Ctrl".to_owned());
         }
+
         if alt_down {
             combo_keys.push("Alt".to_owned());
         }
+
         if shift_down {
             combo_keys.push("Shift".to_owned());
         }
+
         if win_down {
             combo_keys.push("Win".to_owned());
         }
+
         combo_keys.sort_by(|a, b| {
             let rank_a = hotkey_binding_rank(a);
             let rank_b = hotkey_binding_rank(b);
@@ -7336,7 +7312,14 @@ mod windows_overlay {
     }
 
     fn hook_state_key_is_down_or_async(hook_state: &HookState, key_name: &str) -> bool {
-        hook_state_key_is_down(hook_state, key_name)
+        let held_by_hook = hook_state_key_is_down(hook_state, key_name);
+        if held_by_hook || hotkey::is_modifier_key_name(key_name) || hotkey::is_mouse_key_name(key_name) {
+            return held_by_hook;
+        }
+        if let Some(vk) = hotkey::key_name_to_vk(key_name) {
+            return held_by_hook || (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0;
+        }
+        held_by_hook
     }
 
     fn quick_key_display_combo_key_is_held(hook_state: &HookState, key_name: &str) -> bool {
@@ -8778,10 +8761,7 @@ mod windows_overlay {
             return true;
         }
 
-        let ctrl_down = {
-            let hook_state = HOOK_STATE.lock();
-            hook_state.ctrl || hook_state.held_inputs.contains("Ctrl") || hook_state.held_inputs.contains("LCtrl") || hook_state.held_inputs.contains("RCtrl")
-        };
+        let ctrl_down = unsafe { GetAsyncKeyState(0x11) } < 0;
         let mut changed = false;
         let mut committed = false;
         let mut cancelled = false;
@@ -8940,8 +8920,7 @@ mod windows_overlay {
                 if capturing_region {
                     if !is_repeat {
                         state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
-                        state.capturing_region = false;
-                        state.suppress_next_trigger_hold = true;
+                        deactivate_screen_draw(&mut state);
                     }
                 } else {
                     state.suppress_next_trigger_hold = false;
@@ -9028,6 +9007,12 @@ mod windows_overlay {
                 state.trigger_release_should_keep_open = false;
                 state.suppress_next_trigger_hold = false;
                 state.trigger_pressed_at = None;
+                // Only cancel if this is a mouse-drag capture (no capture_trigger means camera button)
+                if state.capture_trigger.is_none() {
+                    state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
+                    deactivate_screen_draw(&mut state);
+                    should_sync = true;
+                }
             }
             if should_sync {
                 request_screen_draw_overlay_sync();
@@ -10306,9 +10291,9 @@ mod windows_overlay {
     }
 
     unsafe fn sync_screen_draw_overlay_window(hwnd: HWND) -> Result<()> {
-        let active = {
+        let (active, interactive) = {
             let state = SCREEN_DRAW_STATE.lock();
-            state.active
+            (state.active, state.active && !state.capturing_region)
         };
         if active {
             let mut style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
@@ -10324,21 +10309,9 @@ mod windows_overlay {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
             );
 
-            set_screen_draw_refresh_timer(hwnd, true);
+            set_screen_draw_refresh_timer(hwnd, interactive);
             paint_screen_draw_overlay(hwnd)
         } else {
-            let mut style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            style |= WS_EX_TRANSPARENT.0;
-            let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, style as i32);
-            let _ = SetWindowPos(
-                hwnd,
-                None,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
-            );
             set_screen_draw_refresh_timer(hwnd, false);
             let _ = clear_screen_draw_overlay_window(hwnd);
             let _ = ShowWindow(hwnd, SW_HIDE);
@@ -10358,6 +10331,13 @@ mod windows_overlay {
     pub fn screen_draw_get_capturing_region() -> bool {
         let state = SCREEN_DRAW_STATE.lock();
         state.active && state.capturing_region
+    }
+
+    pub fn screen_draw_hwnd() -> Option<windows::Win32::Foundation::HWND> {
+        let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
+        (hwnd_raw != 0).then_some(windows::Win32::Foundation::HWND(
+            hwnd_raw as *mut std::ffi::c_void,
+        ))
     }
 
     pub fn screen_draw_undo() {
@@ -10407,14 +10387,11 @@ mod windows_overlay {
     }
 
     pub fn screen_draw_set_eraser(enabled: bool) {
-        {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            if state.text_session.is_some() {
-                commit_screen_draw_text_session(&mut state);
-            }
-            state.eraser = enabled;
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if state.text_session.is_some() {
+            commit_screen_draw_text_session(&mut state);
         }
-        send_screen_draw_config_to_ui();
+        state.eraser = enabled;
     }
 
     pub fn screen_draw_get_eraser() -> bool {
@@ -10432,16 +10409,13 @@ mod windows_overlay {
     }
 
     pub fn screen_draw_set_color(color: crate::model::RgbaColor) {
-        {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            state.color = RgbaColor {
-                r: color.r,
-                g: color.g,
-                b: color.b,
-                a: color.a,
-            };
-        }
-        send_screen_draw_config_to_ui();
+        let mut state = SCREEN_DRAW_STATE.lock();
+        state.color = RgbaColor {
+            r: color.r,
+            g: color.g,
+            b: color.b,
+            a: color.a,
+        };
     }
 
     pub fn screen_draw_get_color_pick_mode() -> bool {
@@ -10470,14 +10444,11 @@ mod windows_overlay {
     }
 
     pub fn screen_draw_set_brush_size(size: f32) {
-        {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            state.brush_size = size.clamp(2.0, 80.0);
-            if state.active_control == ScreenDrawControl::BrushSize {
-                state.pending_repaint = true;
-            }
+        let mut state = SCREEN_DRAW_STATE.lock();
+        state.brush_size = size.clamp(2.0, 80.0);
+        if state.active_control == ScreenDrawControl::BrushSize {
+            state.pending_repaint = true;
         }
-        send_screen_draw_config_to_ui();
     }
 
     pub fn screen_draw_set_brush_size_active(active: bool) {
@@ -10488,8 +10459,10 @@ mod windows_overlay {
             ScreenDrawControl::None
         };
         if state.active_control != target_control {
+            let previous_rect = screen_draw_toolbar_rect(&state);
             state.active_control = target_control;
-            state.pending_repaint = true;
+            mark_screen_draw_toolbar_dirty(&mut state, previous_rect);
+            mark_screen_draw_repaint_pending(&mut state);
             let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
             if hwnd_raw != 0 {
                 unsafe {
@@ -10518,23 +10491,20 @@ mod windows_overlay {
     }
 
     pub fn screen_draw_set_tool(tool: crate::model::QuickScreenDrawTool) {
-        {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            if state.text_session.is_some() {
-                commit_screen_draw_text_session(&mut state);
-            }
-            state.tool = match tool {
-                crate::model::QuickScreenDrawTool::Brush => ScreenDrawTool::Brush,
-                crate::model::QuickScreenDrawTool::Line => ScreenDrawTool::Line,
-                crate::model::QuickScreenDrawTool::Arrow => ScreenDrawTool::Arrow,
-                crate::model::QuickScreenDrawTool::Rectangle => ScreenDrawTool::Rectangle,
-                crate::model::QuickScreenDrawTool::Ellipse => ScreenDrawTool::Ellipse,
-                crate::model::QuickScreenDrawTool::Circle => ScreenDrawTool::Circle,
-                crate::model::QuickScreenDrawTool::Polygon => ScreenDrawTool::Polygon,
-                crate::model::QuickScreenDrawTool::Text => ScreenDrawTool::Text,
-            };
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if state.text_session.is_some() {
+            commit_screen_draw_text_session(&mut state);
         }
-        send_screen_draw_config_to_ui();
+        state.tool = match tool {
+            crate::model::QuickScreenDrawTool::Brush => ScreenDrawTool::Brush,
+            crate::model::QuickScreenDrawTool::Line => ScreenDrawTool::Line,
+            crate::model::QuickScreenDrawTool::Arrow => ScreenDrawTool::Arrow,
+            crate::model::QuickScreenDrawTool::Rectangle => ScreenDrawTool::Rectangle,
+            crate::model::QuickScreenDrawTool::Ellipse => ScreenDrawTool::Ellipse,
+            crate::model::QuickScreenDrawTool::Circle => ScreenDrawTool::Circle,
+            crate::model::QuickScreenDrawTool::Polygon => ScreenDrawTool::Polygon,
+            crate::model::QuickScreenDrawTool::Text => ScreenDrawTool::Text,
+        };
     }
 
     pub fn screen_draw_get_smoothing() -> bool {
@@ -10542,11 +10512,8 @@ mod windows_overlay {
     }
 
     pub fn screen_draw_set_smoothing(enabled: bool) {
-        {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            state.smoothing = enabled;
-        }
-        send_screen_draw_config_to_ui();
+        let mut state = SCREEN_DRAW_STATE.lock();
+        state.smoothing = enabled;
     }
 
     pub fn screen_draw_get_smoothing_amount() -> f32 {
@@ -10554,14 +10521,11 @@ mod windows_overlay {
     }
 
     pub fn screen_draw_set_smoothing_amount(amount: f32) {
-        {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            state.smoothing_amount = amount.clamp(0.0, 1.0);
-            if state.active_control == ScreenDrawControl::SmoothingAmount {
-                state.pending_repaint = true;
-            }
+        let mut state = SCREEN_DRAW_STATE.lock();
+        state.smoothing_amount = amount.clamp(0.0, 1.0);
+        if state.active_control == ScreenDrawControl::SmoothingAmount {
+            state.pending_repaint = true;
         }
-        send_screen_draw_config_to_ui();
     }
 
     pub fn screen_draw_deactivate() {
@@ -10839,7 +10803,6 @@ mod windows_overlay {
         state.trigger_pressed_at = None;
         state.trigger_started_from_inactive = false;
         state.trigger_release_should_keep_open = false;
-        state.suppress_next_trigger_hold = false;
         state.capture_trigger_release_point = None;
         state.strokes.clear();
         state.redo_strokes.clear();
@@ -10852,8 +10815,6 @@ mod windows_overlay {
         // The surface will be safely released on the overlay thread inside sync_screen_draw_overlay_window.
         request_ui_repaint();
         state.freeze_frame = None;
-        state.canvas_width = 0;
-        state.canvas_height = 0;
         state.text_session = None;
         state.text_interaction_start_point = None;
         state.text_interaction_origin = None;
@@ -10874,6 +10835,8 @@ mod windows_overlay {
         state.redo_strokes.clear();
         reset_screen_draw_buffers(state);
         state.committed_dirty = true;
+        state.tool = ScreenDrawTool::Brush;
+        state.eraser = false;
         state.active_control = ScreenDrawControl::None;
         state.text_session = None;
         state.text_interaction_start_point = None;
@@ -11192,6 +11155,7 @@ mod windows_overlay {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 let preview_rect = screen_draw_color_pick_panel_rect(&state);
                 state.screen_color_pick_mode = !state.screen_color_pick_mode;
+                state.active_control = ScreenDrawControl::None;
                 state.color_pick_preview = None;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
                 if let Some(rect) =
@@ -11477,8 +11441,7 @@ mod windows_overlay {
                 return false;
             }
             state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
-            state.capturing_region = false;
-            state.suppress_next_trigger_hold = true;
+            deactivate_screen_draw(&mut state);
         }
         if let Some(trigger) = trigger_to_sync.as_ref() {
             sync_trigger_binding_input_state(trigger);
@@ -11567,24 +11530,16 @@ mod windows_overlay {
     }
 
     fn sync_trigger_binding_input_state(binding: &HotkeyBinding) {
-        let mut hook_state = HOOK_STATE.lock();
-        let ctrl_down = hook_state.ctrl || hook_state.held_inputs.contains("Ctrl") || hook_state.held_inputs.contains("LCtrl") || hook_state.held_inputs.contains("RCtrl");
-        let alt_down = hook_state.alt || hook_state.held_inputs.contains("Alt") || hook_state.held_inputs.contains("LAlt") || hook_state.held_inputs.contains("RAlt");
-        let shift_down = hook_state.shift || hook_state.held_inputs.contains("Shift") || hook_state.held_inputs.contains("LShift") || hook_state.held_inputs.contains("RShift");
-        let win_down = hook_state.win || hook_state.held_inputs.contains("Win") || hook_state.held_inputs.contains("Meta");
+        let ctrl_down = unsafe { GetAsyncKeyState(0x11) } < 0;
+        let alt_down = unsafe { GetAsyncKeyState(0x12) } < 0;
+        let shift_down = unsafe { GetAsyncKeyState(0x10) } < 0;
+        let win_down =
+            unsafe { GetAsyncKeyState(0x5B) } < 0 || unsafe { GetAsyncKeyState(0x5C) } < 0;
         let keys = hotkey::binding_key_names(binding);
+        let mut hook_state = HOOK_STATE.lock();
         for key in keys {
-            let is_down = if key.eq_ignore_ascii_case("Ctrl") || key.eq_ignore_ascii_case("Control") {
-                ctrl_down
-            } else if key.eq_ignore_ascii_case("Alt") {
-                alt_down
-            } else if key.eq_ignore_ascii_case("Shift") {
-                shift_down
-            } else if key.eq_ignore_ascii_case("Win") || key.eq_ignore_ascii_case("Meta") {
-                win_down
-            } else {
-                hook_state.held_inputs.iter().any(|h| h.eq_ignore_ascii_case(&key))
-            };
+            let is_down = hotkey::key_name_to_vk(&key)
+                .is_some_and(|vk| (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0);
             if is_down {
                 continue;
             }
@@ -12242,16 +12197,8 @@ mod windows_overlay {
                 (false, repaint)
             }
             WM_LBUTTONUP | WM_RBUTTONUP => {
-                let has_stroke_or_control = {
-                    let state = SCREEN_DRAW_STATE.lock();
-                    state.current_stroke.is_some() || state.active_control != ScreenDrawControl::None
-                };
-                if has_stroke_or_control {
-                    let handled = screen_draw_handle_button_up();
-                    (handled, handled)
-                } else {
-                    (false, false)
-                }
+                let handled = screen_draw_handle_button_up();
+                (handled, handled)
             }
             WM_MBUTTONDOWN
             | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
@@ -13925,7 +13872,6 @@ mod windows_overlay {
         dst: &mut [u8],
         width: usize,
         rect: ScreenDrawDirtyRect,
-        freeze_screen: bool,
     ) {
         // Fast R/B swap: treat every 4 bytes as a u32, mask-and-shift to swap channels.
         // RGBA bytes in little-endian u32: bits [31:24]=A, [23:16]=B, [15:8]=G, [7:0]=R
@@ -13943,10 +13889,7 @@ mod windows_overlay {
                 let r = (pixel) & 0xFF;
                 let g = (pixel >> 8) & 0xFF;
                 let b = (pixel >> 16) & 0xFF;
-                let mut a = (pixel >> 24) & 0xFF;
-                if !freeze_screen && a == 0 {
-                    a = 1;
-                }
+                let a = (pixel >> 24) & 0xFF;
                 // Write as BGRA
                 let bgra = b | (g << 8) | (r << 16) | (a << 24);
                 let out = bgra.to_ne_bytes();
@@ -13974,7 +13917,12 @@ mod windows_overlay {
         ensure_screen_draw_canvas(&mut state_guard, width, height);
         ensure_screen_draw_surface(&mut state_guard, width, height)?;
 
-        let has_visual_content = true;
+        let has_visual_content = !state_guard.strokes.is_empty()
+            || state_guard.current_stroke.is_some()
+            || state_guard.text_session.is_some()
+            || state_guard.screen_color_pick_mode
+            || matches!(state_guard.active_control, ScreenDrawControl::BrushSize)
+            || state_guard.capturing_region;
         if !has_visual_content {
             state_guard.pending_repaint = false;
             state_guard.dirty_rect = None;
@@ -14134,13 +14082,11 @@ mod windows_overlay {
                 state_guard.surface_bits as *mut u8,
                 state_guard.surface_bits_len,
             );
-            let freeze = state_guard.freeze_screen;
             copy_screen_draw_rgba_to_bgra_region(
                 state_guard.frame_rgba.as_slice(),
                 pixels,
                 width,
                 dirty_rect,
-                freeze,
             );
         }
         let surface_dc = HDC(state_guard.surface_dc as *mut c_void);
@@ -31352,15 +31298,6 @@ mod windows_overlay {
 
     pub fn find_app_ui_window_for_ui_thread() -> Option<windows::Win32::Foundation::HWND> {
         unsafe { find_app_ui_window() }
-    }
-
-    pub fn screen_draw_hwnd() -> Option<windows::Win32::Foundation::HWND> {
-        let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
-        if hwnd_raw != 0 {
-            Some(windows::Win32::Foundation::HWND(hwnd_raw as *mut std::ffi::c_void))
-        } else {
-            None
-        }
     }
 
     pub fn update_ui_window_metrics(
