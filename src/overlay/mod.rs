@@ -10731,6 +10731,7 @@ mod windows_overlay {
             capture_session_id = begin_screen_draw_capture_session(&mut state, None);
         }
         if let Some(capture_session_id) = capture_session_id {
+            reset_screen_draw_capture_overlay_state();
             request_screen_draw_overlay_sync();
             begin_screen_draw_region_capture(ScreenDrawCaptureMode::MouseDrag, capture_session_id);
         }
@@ -11397,6 +11398,7 @@ mod windows_overlay {
             return;
         };
 
+        reset_screen_draw_capture_overlay_state();
         request_screen_draw_overlay_sync();
         begin_screen_draw_region_capture(ScreenDrawCaptureMode::HoldTrigger(trigger), session_id);
     }
@@ -11750,6 +11752,16 @@ mod windows_overlay {
             drop(hook_state);
             force_refresh_search_area_overlay();
         }
+    }
+
+    fn reset_screen_draw_capture_overlay_state() {
+        let mut hook_state = HOOK_STATE.lock();
+        hook_state.vision_capture_anchor = None;
+        hook_state.vision_capture_completed_region = None;
+        hook_state.vision_capture_preview_regions.clear();
+        hook_state.vision_preview_source = None;
+        drop(hook_state);
+        force_refresh_search_area_overlay();
     }
 
     fn set_screen_draw_region_capture_mouse_blocked(blocked: bool, is_region_mode: bool) {
