@@ -1661,17 +1661,23 @@ impl CrosshairApp {
                                 ctx, group_id, preset_id, step_index, x, y, width, height,
                             );
                         }
-                        VisionCaptureTarget::GeometryColor => {
-                            self.cancel_image_search_capture_with_status(
-                                ctx,
-                                "Geometry color picking does not support area captures.",
-                            );
-                        }
-                        VisionCaptureTarget::MacroStepGeometryColor { .. } => {
-                            self.cancel_image_search_capture_with_status(
-                                ctx,
-                                "Geometry color picking does not support area captures.",
-                            );
+                    VisionCaptureTarget::GeometryColor => {
+                        self.cancel_image_search_capture_with_status(
+                            ctx,
+                            "Geometry color picking does not support area captures.",
+                        );
+                    }
+                    VisionCaptureTarget::CrosshairProfileColor { .. } => {
+                        self.cancel_image_search_capture_with_status(
+                            ctx,
+                            "Crosshair color picking does not support area captures.",
+                        );
+                    }
+                    VisionCaptureTarget::MacroStepGeometryColor { .. } => {
+                        self.cancel_image_search_capture_with_status(
+                            ctx,
+                            "Geometry color picking does not support area captures.",
+                        );
                         }
                         VisionCaptureTarget::QuickActionsCoordinates
                         | VisionCaptureTarget::QuickActionsColor
@@ -1732,6 +1738,9 @@ impl CrosshairApp {
                         );
                     }
                     VisionCaptureTarget::GeometryColor => {
+                        self.finish_image_search_color_pick_from_screen(ctx, screen_x, screen_y);
+                    }
+                    VisionCaptureTarget::CrosshairProfileColor { .. } => {
                         self.finish_image_search_color_pick_from_screen(ctx, screen_x, screen_y);
                     }
                     VisionCaptureTarget::MacroStepGeometryColor { .. } => {
@@ -2228,6 +2237,9 @@ impl CrosshairApp {
             VisionCaptureTarget::GeometryColor => {
                 "Geometry color picking does not support search regions.".to_owned()
             }
+            VisionCaptureTarget::CrosshairProfileColor { .. } => {
+                "Crosshair color picking does not support search regions.".to_owned()
+            }
             VisionCaptureTarget::MacroStepGeometryColor { .. } => {
                 "Geometry color picking does not support search regions.".to_owned()
             }
@@ -2331,6 +2343,40 @@ impl CrosshairApp {
                     "Picked geometry color #{:02X}{:02X}{:02X}.",
                     color.r, color.g, color.b
                 )
+            }
+            VisionCaptureTarget::CrosshairProfileColor {
+                profile_index,
+                target,
+            } => {
+                let mut profile_name = None;
+                let mut enabled = false;
+                if let Some(profile) = self.state.profiles.get_mut(profile_index) {
+                    match target {
+                        crate::ui::CrosshairColorTarget::Main => profile.style.color = color,
+                        crate::ui::CrosshairColorTarget::Outline => {
+                            profile.style.outline_color = color;
+                        }
+                        crate::ui::CrosshairColorTarget::Ring => profile.style.ring_color = color,
+                    }
+                    profile_name = Some(profile.name.clone());
+                    enabled = profile.enabled;
+                }
+                if let Some(name) = profile_name {
+                    if self.state.selected_profile.as_deref() == Some(name.as_str())
+                        && let Some(profile) = self.state.profiles.get(profile_index)
+                    {
+                        self.state.active_style = profile.style.clone();
+                        self.state.active_style.enabled = enabled;
+                    }
+                    self.mark_crosshair_profile_dirty(profile_index);
+                    self.flush_crosshair_profile_dirty(true);
+                    format!(
+                        "Picked crosshair color #{:02X}{:02X}{:02X}.",
+                        color.r, color.g, color.b
+                    )
+                } else {
+                    "Crosshair profile no longer exists.".to_owned()
+                }
             }
             VisionCaptureTarget::MacroStepGeometryColor {
                 group_id,
@@ -2461,6 +2507,9 @@ impl CrosshairApp {
             }
             VisionCaptureTarget::GeometryColor => {
                 "Geometry color picking does not support priority anchors.".to_owned()
+            }
+            VisionCaptureTarget::CrosshairProfileColor { .. } => {
+                "Crosshair color picking does not support priority anchors.".to_owned()
             }
             VisionCaptureTarget::MacroStepGeometryColor { .. } => {
                 "Geometry color picking does not support priority anchors.".to_owned()

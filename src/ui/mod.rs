@@ -144,8 +144,19 @@ pub(crate) enum VisionCaptureMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CrosshairColorTarget {
+    Main,
+    Outline,
+    Ring,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VisionCaptureTarget {
     Preset(u32),
+    CrosshairProfileColor {
+        profile_index: usize,
+        target: CrosshairColorTarget,
+    },
     GeometryColor,
     OcrPreset(u32),
     /// Custom OCR region directly on a macro step (no separate OcrPreset needed)
@@ -12145,6 +12156,7 @@ impl eframe::App for CrosshairApp {
                                     }
                                 }
                                 VisionCaptureTarget::GeometryColor
+                                | VisionCaptureTarget::CrosshairProfileColor { .. }
                                 | VisionCaptureTarget::MacroStepGeometryColor { .. }
                                 | VisionCaptureTarget::PinPresetColor(_) => {
                                     if let Some(col) = color {

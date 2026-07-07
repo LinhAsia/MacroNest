@@ -1,5 +1,5 @@
 use crate::model::*;
-use crate::ui::CrosshairApp;
+use crate::ui::{CrosshairApp, CrosshairColorTarget, VisionCaptureTarget};
 use eframe::egui::{self, *};
 use std::time::Duration;
 
@@ -8,12 +8,45 @@ impl CrosshairApp {
         self.render_crosshair_presets_panel(ui);
     }
 
+    fn render_crosshair_color_control(
+        ui: &mut egui::Ui,
+        color: &mut RgbaColor,
+        target: VisionCaptureTarget,
+        language: UiLanguage,
+        active_color_pick_target: Option<VisionCaptureTarget>,
+        pending_color_pick_target: &mut Option<VisionCaptureTarget>,
+    ) -> (bool, bool) {
+        let mut changed = false;
+        let mut dragging = false;
+        ui.horizontal(|ui| {
+            let response = Self::edit_rgba_color(ui, color);
+            changed |= response.changed();
+            dragging |= response.dragged();
+
+            let picking_active = active_color_pick_target == Some(target);
+            if ui
+                .add_sized(
+                    [24.0, 21.0],
+                    Button::new(Self::material_icon_text(0xe3b8, 16.0)).selected(picking_active),
+                )
+                .on_hover_text(Self::tr_lang(language, "Pick from screen", "Pick from screen"))
+                .clicked()
+            {
+                *pending_color_pick_target = Some(target);
+            }
+        });
+        (changed, dragging)
+    }
+
     fn render_crosshair_style_editor<H: std::hash::Hash>(
         ui: &mut egui::Ui,
         language: UiLanguage,
+        profile_index: usize,
         grid_id: H,
         style: &mut CrosshairStyle,
         link_lengths: &mut bool,
+        active_color_pick_target: Option<VisionCaptureTarget>,
+        pending_color_pick_target: &mut Option<VisionCaptureTarget>,
     ) -> (bool, bool) {
         let mut changed = false;
         let mut dragging = false;
@@ -253,24 +286,54 @@ impl CrosshairApp {
                     "Crosshair color",
                     "Crosshair color",
                 ));
-                let response = Self::edit_rgba_color(ui, &mut style.color);
-                changed |= response.changed();
-                dragging |= response.dragged();
+                let (color_changed, color_dragging) = Self::render_crosshair_color_control(
+                    ui,
+                    &mut style.color,
+                    VisionCaptureTarget::CrosshairProfileColor {
+                        profile_index,
+                        target: CrosshairColorTarget::Main,
+                    },
+                    language,
+                    active_color_pick_target,
+                    pending_color_pick_target,
+                );
+                changed |= color_changed;
+                dragging |= color_dragging;
                 ui.end_row();
 
                 if style.outline_enabled {
                     ui.label(Self::tr_lang(language, "Outline color", "Outline color"));
-                    let response = Self::edit_rgba_color(ui, &mut style.outline_color);
-                    changed |= response.changed();
-                    dragging |= response.dragged();
+                    let (color_changed, color_dragging) = Self::render_crosshair_color_control(
+                        ui,
+                        &mut style.outline_color,
+                        VisionCaptureTarget::CrosshairProfileColor {
+                            profile_index,
+                            target: CrosshairColorTarget::Outline,
+                        },
+                        language,
+                        active_color_pick_target,
+                        pending_color_pick_target,
+                    );
+                    changed |= color_changed;
+                    dragging |= color_dragging;
                     ui.end_row();
                 }
 
                 if style.ring_enabled {
                     ui.label(Self::tr_lang(language, "Circle color", "Circle color"));
-                    let response = Self::edit_rgba_color(ui, &mut style.ring_color);
-                    changed |= response.changed();
-                    dragging |= response.dragged();
+                    let (color_changed, color_dragging) = Self::render_crosshair_color_control(
+                        ui,
+                        &mut style.ring_color,
+                        VisionCaptureTarget::CrosshairProfileColor {
+                            profile_index,
+                            target: CrosshairColorTarget::Ring,
+                        },
+                        language,
+                        active_color_pick_target,
+                        pending_color_pick_target,
+                    );
+                    changed |= color_changed;
+                    dragging |= color_dragging;
                     ui.end_row();
                 }
                 ui.label(Self::tr_lang(language, "Custom pixels", "Custom pixels"));
@@ -333,8 +396,19 @@ impl CrosshairApp {
                     // ---- Paint color picker (edits style.color directly so the render matches) ----
                     ui.horizontal(|ui| {
                         ui.label(Self::tr_lang(language, "Paint color", "Paint color"));
-                        let response = Self::edit_rgba_color(ui, &mut style.color);
-                        changed |= response.changed();
+                        let (color_changed, color_dragging) = Self::render_crosshair_color_control(
+                            ui,
+                            &mut style.color,
+                            VisionCaptureTarget::CrosshairProfileColor {
+                                profile_index,
+                                target: CrosshairColorTarget::Main,
+                            },
+                            language,
+                            active_color_pick_target,
+                            pending_color_pick_target,
+                        );
+                        changed |= color_changed;
+                        dragging |= color_dragging;
                     });
 
                     let paint_egui_color = Color32::from_rgba_unmultiplied(
@@ -529,6 +603,14 @@ impl CrosshairApp {
 
         let mut any_dragging = false;
         let mut remove_index = None;
+        let active_color_pick_target = if self.vision_capture_active
+            && self.vision_capture_mode == Some(crate::ui::VisionCaptureMode::ColorSample)
+        {
+            self.vision_capture_target
+        } else {
+            None
+        };
+        let mut pending_color_pick_target = None;
 
         let mut copy_crosshair_profile = None;
         let mut paste_crosshair_profile_after = None;
@@ -537,6 +619,7 @@ impl CrosshairApp {
         for index in 0..self.state.profiles.len() {
             let mut remove = false;
             let mut preset_changed = false;
+            let mut pending_color_pick_target_for_preset = None;
             let is_selected = self.state.selected_profile.as_deref()
                 == Some(self.state.profiles[index].name.as_str());
             let preset_snapshot = self.state.profiles[index].clone();
@@ -621,9 +704,12 @@ impl CrosshairApp {
                         let (style_changed, style_dragging) = Self::render_crosshair_style_editor(
                             ui,
                             language,
+                            index,
                             (index, "crosshair-style-grid"),
                             &mut preset.style,
                             &mut self.crosshair_link_lengths,
+                            active_color_pick_target,
+                            &mut pending_color_pick_target_for_preset,
                         );
                         preset_changed |= style_changed;
                         any_dragging |= style_dragging;
@@ -647,6 +733,9 @@ impl CrosshairApp {
                 }
                 self.mark_crosshair_profile_dirty(index);
             }
+            if pending_color_pick_target.is_none() {
+                pending_color_pick_target = pending_color_pick_target_for_preset;
+            }
         }
 
         if let Some(profile) = copy_crosshair_profile {
@@ -654,6 +743,9 @@ impl CrosshairApp {
         }
         if let Some(index) = paste_crosshair_profile_after {
             self.paste_crosshair_profile_after(index);
+        }
+        if let Some(target) = pending_color_pick_target {
+            self.begin_color_pick_capture(ui.ctx(), target);
         }
         if refresh_crosshair_profiles {
             self.persist_after_sync(Self::sync_crosshair);
