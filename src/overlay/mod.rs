@@ -4439,13 +4439,6 @@ mod windows_overlay {
     ) -> LRESULT {
         match msg {
             WM_NCHITTEST => {
-                let active = {
-                    let state = SCREEN_DRAW_STATE.lock();
-                    state.active && !state.capturing_region
-                };
-                if active {
-                    return LRESULT(HTCLIENT as isize);
-                }
                 return LRESULT(HTTRANSPARENT as isize);
             }
             WM_MOUSEACTIVATE => {
@@ -4780,6 +4773,20 @@ mod windows_overlay {
 
             let mouse_data = ((info.mouseData >> 16) & 0xFFFF) as u16;
             let screen_draw_event_key = mouse_binding_name_from_message(message, mouse_data);
+            // Let egui-owned windows finish mouse captures before the draw hook sees button-up.
+            // This prevents toolbar sliders from staying stuck after the cursor leaves the thumb.
+            if matches!(
+                message,
+                WM_LBUTTONUP
+                    | WM_RBUTTONUP
+                    | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
+                    | WM_XBUTTONUP
+            ) {
+                let captured = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetCapture() };
+                if !captured.0.is_null() && should_bypass_mouse_event_for_app_window(captured) {
+                    return CallNextHookEx(None, code, wparam, lparam);
+                }
+            }
             if screen_draw_active() {
                 if screen_draw_event_key.is_some() {
                     update_held_mouse_button(message, mouse_data);
@@ -4801,22 +4808,6 @@ mod windows_overlay {
                     && process_screen_draw_mouse_event(message, info.pt)
                 {
                     return LRESULT(1);
-                }
-            }
-
-            // If an app-owned egui window (e.g., toolbar) has mouse capture from a slider drag,
-            // pass button-up events directly through so egui can release the drag.
-            // Without this, the event may be swallowed by macro processing and the slider stays stuck.
-            if matches!(
-                message,
-                WM_LBUTTONUP
-                    | WM_RBUTTONUP
-                    | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
-                    | WM_XBUTTONUP
-            ) {
-                let captured = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetCapture() };
-                if !captured.0.is_null() && should_bypass_mouse_event_for_app_window(captured) {
-                    return CallNextHookEx(None, code, wparam, lparam);
                 }
             }
 
@@ -10315,17 +10306,13 @@ mod windows_overlay {
     }
 
     unsafe fn sync_screen_draw_overlay_window(hwnd: HWND) -> Result<()> {
-        let (active, interactive) = {
+        let active = {
             let state = SCREEN_DRAW_STATE.lock();
-            (state.active, state.active && !state.capturing_region)
+            state.active
         };
         if active {
             let mut style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            if interactive {
-                style &= !WS_EX_TRANSPARENT.0;
-            } else {
-                style |= WS_EX_TRANSPARENT.0;
-            }
+            style |= WS_EX_TRANSPARENT.0;
             let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, style as i32);
             let _ = SetWindowPos(
                 hwnd,
@@ -10337,7 +10324,7 @@ mod windows_overlay {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
             );
 
-            set_screen_draw_refresh_timer(hwnd, interactive);
+            set_screen_draw_refresh_timer(hwnd, true);
             paint_screen_draw_overlay(hwnd)
         } else {
             let mut style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
@@ -11281,14 +11268,16 @@ mod windows_overlay {
             }
             ScreenDrawHit::Canvas => {
                 if state.screen_color_pick_mode {
+                    let previous_preview_rect = screen_draw_color_pick_panel_rect(&state);
                     if let Some(sampled) = sample_screen_draw_color_at_local_point(point) {
                         state.color = sampled;
                         state.screen_color_pick_mode = false;
-                        if let Some(preview_rect) = screen_draw_color_pick_panel_rect(&state) {
+                        if let Some(preview_rect) = previous_preview_rect {
                             mark_screen_draw_dirty(&mut state, preview_rect);
                         }
                         state.color_pick_preview = None;
                         should_sync_config = true;
+                        request_ui_repaint();
                     }
                     let toolbar_rect = screen_draw_toolbar_rect(&state);
                     mark_screen_draw_dirty(&mut state, toolbar_rect);
@@ -12232,11 +12221,11 @@ mod windows_overlay {
                 && point.y >= state.toolbar_y
                 && point.y <= state.toolbar_y + state.toolbar_h
         };
-        let finishing_stroke = matches!(message, WM_LBUTTONUP | WM_RBUTTONUP) && {
+        let finishing_interaction = matches!(message, WM_LBUTTONUP | WM_RBUTTONUP) && {
             let state = SCREEN_DRAW_STATE.lock();
-            state.current_stroke.is_some()
+            state.current_stroke.is_some() || state.active_control != ScreenDrawControl::None
         };
-        if is_over_toolbar && !finishing_stroke {
+        if is_over_toolbar && !finishing_interaction {
             return false;
         }
         let (handled, repaint) = match message {

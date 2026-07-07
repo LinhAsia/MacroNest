@@ -13360,6 +13360,9 @@ impl eframe::App for CrosshairApp {
                                     }
                                     // Control the screen draw overlay's own built-in brush size preview
                                     crate::overlay::screen_draw_set_brush_size_active(slider_drag_active);
+                                    if !pointer_primary_down {
+                                        crate::overlay::screen_draw_set_brush_size_active(false);
+                                    }
                                     ui.add(egui::Label::new(format!("{:.0}", brush_size)));
 
                                     // Inline size preview circle (small, in toolbar)
