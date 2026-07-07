@@ -27,8 +27,8 @@ use crate::{
         MacroTriggerMode, MascotStyle, MasterMacroGroupState, MasterMacroPresetState, MasterPreset,
         MasterWindowFocusPresetState, MasterWindowPresetState, MasterZoomPresetState,
         MousePathEvent, MousePathEventKind, ProfileRecord, QuickKeyDisplayMode,
-        QuickScreenDrawTool, RgbaColor, SoundLibraryItem, TimerPreset, UiLanguage, UiThemeMode,
-        VietnameseInputMode, VisionSettings, WindowAnchor, WindowExpandDirection, WindowPreset,
+        QuickScreenDrawTool, RgbaColor, TimerPreset, UiLanguage, UiThemeMode, VietnameseInputMode,
+        VisionSettings, WindowAnchor, WindowExpandDirection, WindowPreset,
     },
     overlay::{OverlayCommand, UiCommand},
     storage::AppPaths,
@@ -2227,10 +2227,6 @@ impl CrosshairApp {
         audio::stop_preview();
     }
 
-    fn capture_is_active(&self, target: &CaptureRequest) -> bool {
-        self.capture_target.as_ref() == Some(target)
-    }
-
     fn allocate_next_id<T, F>(items: &[T], next_hint: &mut u32, id_of: F) -> u32
     where
         F: Fn(&T) -> u32,
@@ -2491,14 +2487,6 @@ impl CrosshairApp {
         }
     }
 
-    fn allocate_next_sound_library_item_id(&mut self) -> u32 {
-        Self::allocate_next_id(
-            &self.state.audio_settings.library,
-            &mut self.state.audio_settings.next_library_item_id,
-            |item| item.id,
-        )
-    }
-
     #[cfg(windows)]
     fn current_mouse_speed() -> Option<u32> {
         let mut speed = 10u32;
@@ -2691,32 +2679,6 @@ impl CrosshairApp {
         self.apply_audio_file_to_target(target, &path_str, duration);
     }
 
-    fn replace_sound_preset_audio_file(&mut self, preset_id: u32, path: PathBuf) {
-        let path_str =
-            match self.import_audio_file_to_app_data(&path, &format!("preset-{preset_id}")) {
-                Ok(path_str) => path_str,
-                Err(error) => {
-                    self.status = format!("Failed to import audio file: {error}");
-                    return;
-                }
-            };
-        let duration = audio::load_duration_ms(&path_str).ok();
-        if let Some(preset) = self
-            .state
-            .audio_settings
-            .presets
-            .iter_mut()
-            .find(|preset| preset.id == preset_id)
-        {
-            Self::apply_audio_clip_file(&mut preset.clip, &path_str, duration);
-            self.finish_audio_file_assignment(
-                AudioEditorTarget::Preset(preset_id),
-                &path_str,
-                duration,
-            );
-        }
-    }
-
     fn pick_and_import_audio_file(&mut self, prefix: &str) -> Option<(String, Option<u64>)> {
         let path = rfd::FileDialog::new()
             .add_filter("Audio", &["mp3", "wav", "flac", "ogg", "m4a"])
@@ -2858,42 +2820,6 @@ impl CrosshairApp {
         let target_path = audio_dir.join(file_name);
         fs::copy(source_path, &target_path)?;
         Ok(target_path.to_string_lossy().to_string())
-    }
-
-    fn save_clip_to_library(&mut self, name_prefix: &str, clip: &AudioClipSettings) {
-        if clip.file_path.trim().is_empty() {
-            self.status = "Choose a sound file before saving it to the library.".to_owned();
-            return;
-        }
-        let id = self.allocate_next_sound_library_item_id();
-        let mut item = SoundLibraryItem::new(id);
-        item.name = format!("{name_prefix} {id}");
-        item.clip = clip.clone();
-        item.clip.enabled = true;
-        self.state.audio_settings.library.push(item);
-        self.library_clip_duration_ms
-            .insert(id, audio_duration(clip));
-        self.show_library_audio_editor.insert(id);
-        self.sync_and_persist_audio_settings();
-        self.status = format!("Saved sound into library item {id}.");
-    }
-
-    fn refresh_audio_waveform(&mut self, startup: bool) {
-        let clip = if startup {
-            &self.state.audio_settings.startup
-        } else {
-            &self.state.audio_settings.exit
-        };
-        let path = clip.file_path.trim();
-        if path.is_empty() {
-            return;
-        }
-        if self.audio_waveforms.contains_key(path) {
-            return;
-        }
-        if let Ok(waveform) = audio::load_waveform(path, 320) {
-            self.audio_waveforms.insert(path.to_owned(), waveform);
-        }
     }
 
     fn refresh_audio_waveform_for_path(&mut self, path: &str) {
@@ -8809,12 +8735,6 @@ impl CrosshairApp {
             || self.state.selected_master_preset_id != before_selected
     }
 
-    fn ensure_master_presets(&mut self) {
-        if self.ensure_master_presets_without_persist() {
-            self.persist();
-        }
-    }
-
     fn reconcile_master_presets(&mut self) {
         let window_lookup = self
             .state
@@ -10297,34 +10217,6 @@ impl CrosshairApp {
         }
     }
 
-    #[cfg(windows)]
-    #[cfg(not(windows))]
-    fn spawn_image_search_point_capture_thread(
-        ui_tx: Sender<UiCommand>,
-        ctx: egui::Context,
-        _preset_id: u32,
-        _priority_anchor: bool,
-    ) {
-        let _ = ui_tx.send(UiCommand::VisionPointCaptureCancelled(
-            "Image point capture is only supported on Windows.".to_owned(),
-        ));
-        ctx.request_repaint_after(Duration::from_millis(33));
-    }
-
-    #[cfg(windows)]
-    #[cfg(not(windows))]
-    fn spawn_image_search_region_capture_thread(
-        ui_tx: Sender<UiCommand>,
-        ctx: egui::Context,
-        _preset_id: u32,
-        _template_mode: bool,
-    ) {
-        let _ = ui_tx.send(UiCommand::VisionPointCaptureCancelled(
-            "Image area capture is only supported on Windows.".to_owned(),
-        ));
-        ctx.request_repaint();
-    }
-
     fn apply_captured_input(&mut self, target: CaptureRequest, captured: CapturedInput) -> bool {
         let target_clone = target.clone();
         let keep_capture_open = self.capture_request_keeps_open(&target);
@@ -11331,8 +11223,6 @@ impl CrosshairApp {
             });
     }
 
-    fn refresh_macro_ai_debug_text_from_trace(&mut self) {}
-
     fn render_custom_window_resize_handles(&self, ctx: &egui::Context) {
         if ctx.input(|input| input.viewport().maximized.unwrap_or(false)) {
             return;
@@ -11641,36 +11531,6 @@ impl CrosshairApp {
             });
             egui_ctx.request_repaint();
         });
-    }
-
-    fn cancel_protractor_calibration(&mut self) {
-        self.protractor_picking_active = false;
-        self.protractor_calibration_points = None;
-        self.captured_freeze_texture = None;
-        self.captured_freeze_frame = None;
-        self.status = Self::tr_lang(
-            self.state.ui_language,
-            "Protractor calibration cancelled.",
-            "Protractor calibration cancelled.",
-        )
-        .to_owned();
-    }
-
-    pub(crate) fn cancel_protractor_calibration_freeze(&mut self, ctx: &egui::Context) {
-        self.protractor_picking_active = false;
-        self.protractor_calibration_points = None;
-        self.captured_freeze_texture = None;
-        self.captured_freeze_frame = None;
-        self.restore_mouse_move_absolute_capture_window(ctx);
-        self.mouse_move_absolute_capture_raise_window = true;
-        self.status = Self::tr_lang(
-            self.state.ui_language,
-            "Protractor calibration cancelled.",
-            "Protractor calibration cancelled.",
-        )
-        .to_owned();
-        self.sync_protractor_state();
-        ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 
     pub(crate) fn finish_protractor_calibration_freeze(
@@ -14302,13 +14162,5 @@ impl eframe::App for CrosshairApp {
         self.sync_vietnamese_input_enabled();
         let _ = self.overlay_tx.send(OverlayCommand::Exit);
         self.persist_blocking();
-    }
-}
-
-pub(crate) fn audio_duration(clip: &AudioClipSettings) -> Option<u64> {
-    if clip.file_path.trim().is_empty() {
-        None
-    } else {
-        audio::load_duration_ms(&clip.file_path).ok()
     }
 }
