@@ -1529,7 +1529,7 @@ impl CrosshairApp {
                 }
 
                 if !resp.status().is_success() {
-                    return Err(format!("GitHub API error: {}", resp.status()));
+                    return Err(Self::github_update_error_message(resp));
                 }
 
                 let json: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
@@ -1572,6 +1572,57 @@ impl CrosshairApp {
             }
             ctx.request_repaint();
         });
+    }
+
+    fn github_update_error_message(resp: reqwest::blocking::Response) -> String {
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let body = resp.text().unwrap_or_default();
+        let api_message = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|json| json["message"].as_str().map(str::to_owned));
+        let remaining = headers
+            .get("x-ratelimit-remaining")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let reset = headers
+            .get("x-ratelimit-reset")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let retry_after = headers
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+
+        if status == reqwest::StatusCode::FORBIDDEN {
+            if remaining == Some("0") {
+                let mut details = Vec::new();
+                if let Some(message) = api_message.as_deref() {
+                    details.push(message.to_owned());
+                }
+                if let Some(retry_after) = retry_after {
+                    details.push(format!("Retry after {retry_after}s."));
+                } else if let Some(reset) = reset {
+                    details.push(format!("Rate limit reset at Unix time {reset}."));
+                }
+                if details.is_empty() {
+                    "GitHub rate limit reached. Try again later.".to_owned()
+                } else {
+                    format!("GitHub rate limit reached. {}", details.join(" "))
+                }
+            } else if let Some(message) = api_message {
+                format!("GitHub denied the update check (403). {message}")
+            } else {
+                "GitHub denied the update check (403 Forbidden). Try again later.".to_owned()
+            }
+        } else if let Some(message) = api_message {
+            format!("GitHub API error ({}). {}", status, message)
+        } else {
+            format!("GitHub API error: {}", status)
+        }
     }
 
     pub(crate) fn start_download_update(&mut self, ctx: &egui::Context, download_url: String) {
