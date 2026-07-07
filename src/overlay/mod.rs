@@ -2043,6 +2043,7 @@ mod windows_overlay {
         text_interaction_start_point: Option<POINT>,
         text_interaction_origin: Option<ScreenDrawStroke>,
         screen_color_pick_mode: bool,
+        color_pick_restore_freeze_screen: Option<bool>,
         color_pick_preview: Option<ScreenDrawColorPickPreview>,
         pointer_point: POINT,
         text_border: bool,
@@ -2114,6 +2115,7 @@ mod windows_overlay {
                 text_interaction_start_point: None,
                 text_interaction_origin: None,
                 screen_color_pick_mode: false,
+                color_pick_restore_freeze_screen: None,
                 color_pick_preview: None,
                 pointer_point: POINT { x: 0, y: 0 },
                 text_border: false,
@@ -10446,13 +10448,43 @@ mod windows_overlay {
         }
     }
 
+    fn begin_screen_draw_color_pick_mode(state: &mut ScreenDrawState) {
+        if !state.freeze_screen {
+            let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+            if screen_w > 0 && screen_h > 0 {
+                state.freeze_frame = window_list::capture_virtual_screen_region(
+                    screen_x, screen_y, screen_w, screen_h,
+                )
+                .map(|frame| frame.rgba);
+            }
+            state.color_pick_restore_freeze_screen = Some(false);
+            state.freeze_screen = true;
+        }
+        state.screen_color_pick_mode = true;
+        state.color_pick_preview = None;
+    }
+
+    fn end_screen_draw_color_pick_mode(state: &mut ScreenDrawState) {
+        state.screen_color_pick_mode = false;
+        state.color_pick_preview = None;
+        if let Some(previous_freeze_screen) = state.color_pick_restore_freeze_screen.take() {
+            state.freeze_screen = previous_freeze_screen;
+            if !previous_freeze_screen {
+                state.freeze_frame = None;
+            }
+        }
+    }
+
     pub fn screen_draw_toggle_color_pick_mode() {
         let mut state = SCREEN_DRAW_STATE.lock();
         let toolbar_rect = screen_draw_toolbar_rect(&state);
         let preview_rect = screen_draw_color_pick_panel_rect(&state);
-        state.screen_color_pick_mode = !state.screen_color_pick_mode;
+        if state.screen_color_pick_mode {
+            end_screen_draw_color_pick_mode(&mut state);
+        } else {
+            begin_screen_draw_color_pick_mode(&mut state);
+        }
         state.active_control = ScreenDrawControl::None;
-        state.color_pick_preview = None;
         mark_screen_draw_dirty(&mut state, toolbar_rect);
         if let Some(rect) = preview_rect.or_else(|| screen_draw_color_pick_panel_rect(&state)) {
             mark_screen_draw_dirty(&mut state, rect);
@@ -10842,6 +10874,7 @@ mod windows_overlay {
         state.text_interaction_start_point = None;
         state.text_interaction_origin = None;
         state.screen_color_pick_mode = false;
+        state.color_pick_restore_freeze_screen = None;
         state.color_pick_preview = None;
     }
 
@@ -11177,9 +11210,12 @@ mod windows_overlay {
             ScreenDrawHit::PickScreenColor => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 let preview_rect = screen_draw_color_pick_panel_rect(&state);
-                state.screen_color_pick_mode = !state.screen_color_pick_mode;
+                if state.screen_color_pick_mode {
+                    end_screen_draw_color_pick_mode(&mut state);
+                } else {
+                    begin_screen_draw_color_pick_mode(&mut state);
+                }
                 state.active_control = ScreenDrawControl::None;
-                state.color_pick_preview = None;
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
                 if let Some(rect) =
                     preview_rect.or_else(|| screen_draw_color_pick_panel_rect(&state))
@@ -11256,13 +11292,12 @@ mod windows_overlay {
             ScreenDrawHit::Canvas => {
                 if state.screen_color_pick_mode {
                     let previous_preview_rect = screen_draw_color_pick_panel_rect(&state);
-                    if let Some(sampled) = sample_screen_draw_color_at_local_point(point) {
+                    if let Some(sampled) = sample_screen_draw_color_at_local_point(&state, point) {
                         state.color = sampled;
-                        state.screen_color_pick_mode = false;
+                        end_screen_draw_color_pick_mode(&mut state);
                         if let Some(preview_rect) = previous_preview_rect {
                             mark_screen_draw_dirty(&mut state, preview_rect);
                         }
-                        state.color_pick_preview = None;
                         should_sync_config = true;
                         request_ui_repaint();
                     }
@@ -12818,7 +12853,26 @@ mod windows_overlay {
         PALETTE[(index + 1) % PALETTE.len()]
     }
 
-    fn sample_screen_draw_color_at_local_point(point: POINT) -> Option<RgbaColor> {
+    fn sample_screen_draw_color_at_local_point(
+        state: &ScreenDrawState,
+        point: POINT,
+    ) -> Option<RgbaColor> {
+        if state.freeze_screen
+            && let Some(freeze) = state.freeze_frame.as_ref()
+            && (0..state.canvas_width as i32).contains(&point.x)
+            && (0..state.canvas_height as i32).contains(&point.y)
+        {
+            let offset = ((point.y as usize * state.canvas_width) + point.x as usize) * 4;
+            if offset + 3 < freeze.len() {
+                return Some(RgbaColor {
+                    r: freeze[offset],
+                    g: freeze[offset + 1],
+                    b: freeze[offset + 2],
+                    a: 255,
+                });
+            }
+        }
+
         let (screen_x, screen_y, _, _) = window_list::virtual_screen_bounds();
         let capture = window_list::capture_virtual_screen_region(
             screen_x + point.x,
