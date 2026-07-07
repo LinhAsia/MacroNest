@@ -135,15 +135,16 @@ mod windows_overlay {
                     GetAncestor, GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow,
                     GetMessageW, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW,
                     GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTCLIENT,
-                    HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IMAGE_ICON, IsZoomed, KBDLLHOOKSTRUCT,
-                    KillTimer, LR_LOADFROMFILE, LoadCursorW, LoadImageW, MA_NOACTIVATE,
+                    HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IMAGE_ICON, IsZoomed,
+                    KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LoadCursorW, LoadImageW,
+                    MA_NOACTIVATE,
                     MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage,
                     RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN,
                     SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SPI_GETMOUSESPEED,
                     SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOWNA, SWP_FRAMECHANGED,
                     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-                    SetCursorPos, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowLongW,
-                    SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
+                    SetCursor, SetCursorPos, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
+                    SetWindowLongW, SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
                     TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
                     UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
                     WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
@@ -4791,6 +4792,10 @@ mod windows_overlay {
                 if screen_draw_should_process_mouse_message(message)
                     && process_screen_draw_mouse_event(message, info.pt)
                 {
+                    return LRESULT(1);
+                }
+                if message == WM_MOUSEMOVE && screen_draw_color_pick_mode_active() {
+                    set_screen_draw_color_pick_cursor();
                     return LRESULT(1);
                 }
             }
@@ -10411,6 +10416,16 @@ mod windows_overlay {
 
     pub fn screen_draw_get_color_pick_mode() -> bool {
         SCREEN_DRAW_STATE.lock().screen_color_pick_mode
+    }
+
+    fn screen_draw_color_pick_mode_active() -> bool {
+        SCREEN_DRAW_STATE.lock().screen_color_pick_mode
+    }
+
+    unsafe fn set_screen_draw_color_pick_cursor() {
+        if let Ok(cursor) = LoadCursorW(None, IDC_CROSS) {
+            SetCursor(Some(cursor));
+        }
     }
 
     pub fn screen_draw_toggle_color_pick_mode() {
