@@ -2737,6 +2737,7 @@ mod windows_overlay {
         cached_search_overlay_regions: Vec<VisionRegion>,
         cached_search_overlay_preview_regions: Vec<VisionRegion>,
         cached_search_overlay_static_geometry: Vec<GeometryRenderShape>,
+        cached_search_overlay_capture_region_mode: bool,
         search_area_overlay_visible: bool,
         dynamic_geometry_overlay_visible: bool,
     }
@@ -3535,6 +3536,7 @@ mod windows_overlay {
                 cached_search_overlay_regions: Vec::new(),
                 cached_search_overlay_preview_regions: Vec::new(),
                 cached_search_overlay_static_geometry: Vec::new(),
+                cached_search_overlay_capture_region_mode: false,
                 search_area_overlay_visible: false,
                 dynamic_geometry_overlay_visible: false,
             });
@@ -15487,7 +15489,13 @@ mod windows_overlay {
     }
 
     fn refresh_search_area_overlay(runtime: &mut Runtime) -> Result<()> {
-        let (regions, preview_regions, static_geometry_shapes, dynamic_geometry_shapes) = {
+        let (
+            regions,
+            preview_regions,
+            static_geometry_shapes,
+            dynamic_geometry_shapes,
+            capture_region_preview_active,
+        ) = {
             let mut hook_state = HOOK_STATE.lock();
             // Clear expired geometries
             let now = Instant::now();
@@ -15528,6 +15536,7 @@ mod windows_overlay {
                 hook_state.vision_capture_preview_regions.clone(),
                 geometry_overlay_static_shapes(&mut hook_state),
                 geometry_overlay_dynamic_shapes(&mut hook_state),
+                hook_state.vision_capture_mouse_blocked && hook_state.vision_capture_is_region_mode,
             )
         };
         // Check active crosshair expiration
@@ -15566,8 +15575,10 @@ mod windows_overlay {
             disable_pin_overlay();
         }
 
-        let search_layer_is_empty =
-            regions.is_empty() && preview_regions.is_empty() && static_geometry_shapes.is_empty();
+        let search_layer_is_empty = regions.is_empty()
+            && preview_regions.is_empty()
+            && static_geometry_shapes.is_empty()
+            && !capture_region_preview_active;
         let dynamic_layer_is_empty = dynamic_geometry_shapes.is_empty();
 
         if search_layer_is_empty {
@@ -15580,11 +15591,14 @@ mod windows_overlay {
             runtime.cached_search_overlay_regions.clear();
             runtime.cached_search_overlay_preview_regions.clear();
             runtime.cached_search_overlay_static_geometry.clear();
+            runtime.cached_search_overlay_capture_region_mode = false;
         } else {
             let static_changed = !runtime.search_area_overlay_visible
                 || runtime.cached_search_overlay_regions != regions
                 || runtime.cached_search_overlay_preview_regions != preview_regions
-                || runtime.cached_search_overlay_static_geometry != static_geometry_shapes;
+                || runtime.cached_search_overlay_static_geometry != static_geometry_shapes
+                || runtime.cached_search_overlay_capture_region_mode
+                    != capture_region_preview_active;
             if static_changed {
                 unsafe {
                     paint_search_area_overlay(
@@ -15593,11 +15607,13 @@ mod windows_overlay {
                         &preview_regions,
                         &static_geometry_shapes,
                         &[],
+                        capture_region_preview_active,
                     )?;
                 }
                 runtime.cached_search_overlay_regions = regions.clone();
                 runtime.cached_search_overlay_preview_regions = preview_regions.clone();
                 runtime.cached_search_overlay_static_geometry = static_geometry_shapes.clone();
+                runtime.cached_search_overlay_capture_region_mode = capture_region_preview_active;
                 runtime.search_area_overlay_visible = true;
             }
         }
@@ -15617,6 +15633,7 @@ mod windows_overlay {
                     &[],
                     &[],
                     &dynamic_geometry_shapes,
+                    false,
                 )?;
             }
             runtime.dynamic_geometry_overlay_visible = true;
@@ -33172,11 +33189,23 @@ mod windows_overlay {
         preview_regions: &[VisionRegion],
         static_geometry_shapes: &[GeometryRenderShape],
         dynamic_geometry_shapes: &[GeometryRenderShape],
+        capture_region_preview_active: bool,
     ) -> Result<()> {
         let mut min_x = i32::MAX;
         let mut min_y = i32::MAX;
         let mut max_x = i32::MIN;
         let mut max_y = i32::MIN;
+        if capture_region_preview_active {
+            let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+            if screen_w <= 0 || screen_h <= 0 {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                return Ok(());
+            }
+            min_x = screen_x;
+            min_y = screen_y;
+            max_x = screen_x + screen_w;
+            max_y = screen_y + screen_h;
+        }
         for region in regions {
             let r_left = region.left - 2;
             let r_top = region.top - 2;
@@ -33267,6 +33296,20 @@ mod windows_overlay {
         pixels.fill(0);
 
         let mut pixmap = tiny_skia::Pixmap::new(width as u32, height as u32).unwrap();
+        if capture_region_preview_active {
+            let mut dim_paint = tiny_skia::Paint::default();
+            dim_paint.set_color(tiny_skia::Color::from_rgba8(0, 0, 0, 148));
+            dim_paint.anti_alias = false;
+            if let Some(full_rect) = tiny_skia::Rect::from_xywh(0.0, 0.0, width as f32, height as f32)
+            {
+                pixmap.fill_rect(
+                    full_rect,
+                    &dim_paint,
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
+            }
+        }
 
         for region in regions {
             let rel_left = region.left - min_x;
@@ -33391,30 +33434,87 @@ mod windows_overlay {
             let rel_left = region.left - min_x;
             let rel_top = region.top - min_y;
             let outline = [255, 216, 96, 230];
-            let rect = tiny_skia::Rect::from_xywh(
-                rel_left as f32,
-                rel_top as f32,
-                region.width as f32,
-                region.height as f32,
-            )
-            .unwrap();
-            let path = tiny_skia::PathBuilder::from_rect(rect);
             let mut paint = tiny_skia::Paint::default();
             paint.set_color(tiny_skia::Color::from_rgba8(
                 outline[0], outline[1], outline[2], outline[3],
             ));
             paint.anti_alias = true;
-            let stroke = tiny_skia::Stroke {
-                width: 1.0,
-                ..Default::default()
+            let shadow = tiny_skia::Color::from_rgba8(0, 0, 0, 180);
+            let draw_dashed_edge = |pixmap: &mut tiny_skia::Pixmap,
+                                    x1: f32,
+                                    y1: f32,
+                                    x2: f32,
+                                    y2: f32,
+                                    color: tiny_skia::Color,
+                                    width_px: f32| {
+                let mut pb = tiny_skia::PathBuilder::new();
+                pb.move_to(x1, y1);
+                pb.line_to(x2, y2);
+                if let Some(path) = pb.finish() {
+                    let mut edge_paint = tiny_skia::Paint::default();
+                    edge_paint.set_color(color);
+                    edge_paint.anti_alias = true;
+                    let mut edge_stroke = tiny_skia::Stroke {
+                        width: width_px,
+                        ..Default::default()
+                    };
+                    edge_stroke.dash = tiny_skia::StrokeDash::new(vec![10.0, 8.0], 0.0);
+                    pixmap.stroke_path(
+                        &path,
+                        &edge_paint,
+                        &edge_stroke,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
             };
-            pixmap.stroke_path(
-                &path,
-                &paint,
-                &stroke,
-                tiny_skia::Transform::identity(),
-                None,
+            let left = rel_left as f32;
+            let top = rel_top as f32;
+            let right = left + region.width as f32;
+            let bottom = top + region.height as f32;
+            draw_dashed_edge(
+                &mut pixmap,
+                left,
+                top,
+                right,
+                top,
+                shadow,
+                3.0,
             );
+            draw_dashed_edge(
+                &mut pixmap,
+                right,
+                top,
+                right,
+                bottom,
+                shadow,
+                3.0,
+            );
+            draw_dashed_edge(
+                &mut pixmap,
+                right,
+                bottom,
+                left,
+                bottom,
+                shadow,
+                3.0,
+            );
+            draw_dashed_edge(
+                &mut pixmap,
+                left,
+                bottom,
+                left,
+                top,
+                shadow,
+                3.0,
+            );
+            let color = tiny_skia::Color::from_rgba8(
+                outline[0], outline[1], outline[2], outline[3],
+            );
+            draw_dashed_edge(&mut pixmap, left, top, right, top, color, 1.8);
+            draw_dashed_edge(&mut pixmap, right, top, right, bottom, color, 1.8);
+            draw_dashed_edge(&mut pixmap, right, bottom, left, bottom, color, 1.8);
+            draw_dashed_edge(&mut pixmap, left, bottom, left, top, color, 1.8);
         }
 
         let mut geometry_texts = Vec::new();
@@ -33694,6 +33794,26 @@ mod windows_overlay {
             pixels[offset + 1] = g;
             pixels[offset + 2] = r;
             pixels[offset + 3] = a;
+        }
+        if capture_region_preview_active {
+            for region in preview_regions {
+                if region.width < 4 || region.height < 4 {
+                    continue;
+                }
+                let clear_left = (region.left - min_x + 2).clamp(0, width);
+                let clear_top = (region.top - min_y + 2).clamp(0, height);
+                let clear_right = (region.left - min_x + region.width - 2).clamp(0, width);
+                let clear_bottom = (region.top - min_y + region.height - 2).clamp(0, height);
+                for py in clear_top..clear_bottom {
+                    for px in clear_left..clear_right {
+                        let offset = ((py as usize) * (width as usize) + px as usize) * 4;
+                        pixels[offset] = 0;
+                        pixels[offset + 1] = 0;
+                        pixels[offset + 2] = 0;
+                        pixels[offset + 3] = 0;
+                    }
+                }
+            }
         }
 
         // Draw SVG images directly on top of pixels
