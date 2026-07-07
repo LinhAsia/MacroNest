@@ -13272,9 +13272,7 @@ mod windows_overlay {
         let pointer_in_right = (right_rect.left as i32..right_rect.right as i32)
             .contains(&pointer.x)
             && (right_rect.top as i32..right_rect.bottom as i32).contains(&pointer.y);
-        let pointer_in_left = (left_rect.left as i32..left_rect.right as i32).contains(&pointer.x)
-            && (left_rect.top as i32..left_rect.bottom as i32).contains(&pointer.y);
-        Some(if pointer_in_right || pointer_in_left {
+        Some(if pointer_in_right {
             left_rect
         } else {
             right_rect
