@@ -4839,7 +4839,10 @@ mod windows_overlay {
 
             // 2. If MacroNest UI is in the foreground, bypass all mouse events.
 
-            if UI_WINDOW_FOREGROUND.load(Ordering::Relaxed) && !is_vision_capture_mouse_blocked() {
+            if UI_WINDOW_FOREGROUND.load(Ordering::Relaxed)
+                && !is_vision_capture_mouse_blocked()
+                && !screen_draw_mouse_event_matches_trigger(message, mouse_data)
+            {
                 return CallNextHookEx(None, code, wparam, lparam);
             }
 
