@@ -1611,6 +1611,12 @@ mod windows_overlay {
         request_ui_repaint();
     }
 
+    pub fn clear_timer_overlays_now() {
+        HOOK_STATE.lock().active_timers.clear();
+        wake_command_queue();
+        request_ui_repaint();
+    }
+
     static OVERLAY_COMMAND_TX: Lazy<Mutex<Option<Sender<OverlayCommand>>>> =
         Lazy::new(|| Mutex::new(None));
     static RANDOM_STATE: Lazy<std::sync::atomic::AtomicU64> = Lazy::new(|| {
@@ -23041,7 +23047,11 @@ mod windows_overlay {
                 false,
             );
             if matches!(flow, MacroRunFlow::StopExecution) && preset.press_stop_step_enabled {
-                execute_hold_abort_step(preset.id, &preset.press_stop_step);
+                execute_hold_abort_step(
+                    preset.id,
+                    &preset.press_stop_step,
+                    AbortStepKind::PressStop,
+                );
             }
             for step in cleanup_steps {
                 let _ = send_key_event(&step);
@@ -23148,7 +23158,7 @@ mod windows_overlay {
 
         if !completed {
             if let Some(step) = hold_stop_step {
-                execute_hold_abort_step(preset_id, &step);
+                execute_hold_abort_step(preset_id, &step, AbortStepKind::HoldStop);
             }
         }
 
@@ -24837,8 +24847,49 @@ mod windows_overlay {
         bail!("Macro preset was not found")
     }
 
-    fn execute_hold_abort_step(preset_id: u32, step: &MacroStep) {
-        if !step.enabled {
+    enum AbortStepKind {
+        HoldStop,
+        PressStop,
+    }
+
+    fn toggle_abort_step_enabled(preset_id: u32, step_kind: AbortStepKind) -> Option<bool> {
+        let mut hook_state = HOOK_STATE.lock();
+        for group in &mut hook_state.macro_groups {
+            if let Some(preset) = group
+                .presets
+                .iter_mut()
+                .find(|preset| preset.id == preset_id)
+            {
+                let (step, label) = match step_kind {
+                    AbortStepKind::HoldStop => (&mut preset.hold_stop_step, "hold-stop"),
+                    AbortStepKind::PressStop => (&mut preset.press_stop_step, "press-stop"),
+                };
+                step.enabled = !step.enabled;
+                let new_enabled = step.enabled;
+                let updated_groups = hook_state.macro_groups.clone();
+                let status = format!(
+                    "Toggled {label} step in macro preset {} to {}.",
+                    preset_id,
+                    if new_enabled { "Enabled" } else { "Disabled" }
+                );
+                if let Some(tx) = hook_state.ui_tx.clone() {
+                    let _ = tx.send(UiCommand::SyncMacroGroups(updated_groups, status));
+                }
+                return Some(new_enabled);
+            }
+        }
+        None
+    }
+
+    fn execute_hold_abort_step(preset_id: u32, step: &MacroStep, step_kind: AbortStepKind) {
+        let mut run_step = step.enabled;
+        if step.toggle_enabled_on_run {
+            if let Some(new_enabled) = toggle_abort_step_enabled(preset_id, step_kind) {
+                run_step = !new_enabled;
+            }
+        }
+
+        if !run_step {
             return;
         }
 
@@ -34334,7 +34385,11 @@ mod windows_overlay {
                     bypass_enabled,
                 );
                 if matches!(flow, MacroRunFlow::StopExecution) && preset.press_stop_step_enabled {
-                    execute_hold_abort_step(preset.id, &preset.press_stop_step);
+                    execute_hold_abort_step(
+                        preset.id,
+                        &preset.press_stop_step,
+                        AbortStepKind::PressStop,
+                    );
                 }
                 for step in cleanup_steps {
                     let _ = send_key_event(&step);
@@ -34611,6 +34666,8 @@ mod fallback {
     }
 
     pub fn stop_timer_preset(_t_id: Option<u32>) {}
+
+    pub fn clear_timer_overlays_now() {}
 
     pub(crate) fn is_geometry_active(_preset_id: u32, _step_index: usize) -> bool {
         false
