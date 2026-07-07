@@ -13042,18 +13042,17 @@ impl eframe::App for CrosshairApp {
                     {
                         // Apply WS_EX_NOACTIVATE to the toolbar viewport window (found by title)
                         // so clicking toolbar buttons doesn't steal focus from the drawing canvas.
-                        // We cache this state in egui memory and throttle the search to once every 60 frames,
-                        // completely eliminating any system API lookup overhead even if it takes a few frames to initialize.
+                        // ponytail: keep retrying every frame until the style sticks; the lookup is cheap
+                        // and this avoids the "clicked before the 60-frame retry" focus bug.
                         let done = ctx.data(|d| d.get_temp::<bool>(egui::Id::new("toolbar_no_activate_done")).unwrap_or(false));
                         if !done {
-                            let mut search_counter = ctx.data(|d| d.get_temp::<usize>(egui::Id::new("toolbar_no_activate_search_counter")).unwrap_or(0));
-                            if search_counter % 60 == 0 {
-                                if crate::platform::make_window_title_no_activate("Drawing Toolbar") {
-                                    ctx.data_mut(|d| d.insert_temp(egui::Id::new("toolbar_no_activate_done"), true));
-                                }
+                            if crate::platform::make_window_title_no_activate("Drawing Toolbar") {
+                                ctx.data_mut(|d| {
+                                    d.insert_temp(egui::Id::new("toolbar_no_activate_done"), true);
+                                });
+                            } else {
+                                ctx.request_repaint_after(Duration::from_millis(16));
                             }
-                            search_counter = search_counter.wrapping_add(1);
-                            ctx.data_mut(|d| d.insert_temp(egui::Id::new("toolbar_no_activate_search_counter"), search_counter));
                         }
                     }
                     if class == egui::ViewportClass::Immediate {
@@ -13303,6 +13302,12 @@ impl eframe::App for CrosshairApp {
                                         draw_toolbar_icon(ui.painter(), rect, icon_type, color);
                                         let response = response.on_hover_text(tooltip);
                                         if response.clicked() {
+                                            #[cfg(windows)]
+                                            {
+                                                let _ = crate::platform::make_window_title_no_activate(
+                                                    "Drawing Toolbar",
+                                                );
+                                            }
                                             response.surrender_focus();
                                             ui.ctx().memory_mut(|memory| memory.stop_text_input());
                                             crate::overlay::screen_draw_toolbar_interacted();
@@ -13367,6 +13372,12 @@ impl eframe::App for CrosshairApp {
                                             ui.painter().circle_stroke(rect.center(), 9.0, egui::Stroke::new(1.0, egui::Color32::LIGHT_GRAY));
                                         }
                                         if resp.clicked() {
+                                            #[cfg(windows)]
+                                            {
+                                                let _ = crate::platform::make_window_title_no_activate(
+                                                    "Drawing Toolbar",
+                                                );
+                                            }
                                             resp.surrender_focus();
                                             ui.ctx().memory_mut(|memory| memory.stop_text_input());
                                             crate::overlay::screen_draw_set_color(*rgba);
@@ -13416,6 +13427,12 @@ impl eframe::App for CrosshairApp {
                                         crate::overlay::screen_draw_set_brush_size(brush_size);
                                     }
                                     if slider_resp.dragged() || slider_resp.clicked() {
+                                        #[cfg(windows)]
+                                        {
+                                            let _ = crate::platform::make_window_title_no_activate(
+                                                "Drawing Toolbar",
+                                            );
+                                        }
                                         slider_resp.surrender_focus();
                                         ui.ctx().memory_mut(|memory| memory.stop_text_input());
                                     }
