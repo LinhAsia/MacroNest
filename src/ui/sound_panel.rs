@@ -13,6 +13,21 @@ struct AudioTrimTimelineOutcome {
 }
 
 impl CrosshairApp {
+    fn ensure_audio_editor_preview_cursor(
+        preview_cursor: &mut Option<(AudioEditorTarget, u64)>,
+        target: AudioEditorTarget,
+        clip: &AudioClipSettings,
+    ) {
+        if preview_cursor
+            .as_ref()
+            .is_some_and(|(cursor_target, _)| *cursor_target == target)
+        {
+            return;
+        }
+
+        Self::set_preview_cursor_ms(preview_cursor, target, clip.start_ms, clip);
+    }
+
     fn render_audio_trim_bar(
         ui: &mut egui::Ui,
         id_source: impl std::hash::Hash + Copy,
@@ -1288,6 +1303,11 @@ impl CrosshairApp {
                     .find(|preset| preset.id == preset_id)
                 {
                     let preset_id = preset.id;
+                    Self::ensure_audio_editor_preview_cursor(
+                        &mut preview_cursor,
+                        AudioEditorTarget::Preset(preset_id),
+                        &preset.clip,
+                    );
                     let outcome = Self::render_audio_media_editor(
                         ui,
                         language,
@@ -1341,6 +1361,11 @@ impl CrosshairApp {
                     .find(|item| item.id == item_id)
                 {
                     let item_id = item.id;
+                    Self::ensure_audio_editor_preview_cursor(
+                        &mut preview_cursor,
+                        AudioEditorTarget::Library(item_id),
+                        &item.clip,
+                    );
                     let outcome = Self::render_audio_media_editor(
                         ui,
                         language,
@@ -1373,6 +1398,11 @@ impl CrosshairApp {
                 let startup_path = self.state.audio_settings.startup.file_path.clone();
                 let waveform = self.prepare_audio_editor_waveform(&startup_path);
                 let mut duration = self.startup_clip_duration_ms;
+                Self::ensure_audio_editor_preview_cursor(
+                    &mut preview_cursor,
+                    AudioEditorTarget::Startup,
+                    &self.state.audio_settings.startup,
+                );
                 let outcome = Self::render_audio_media_editor(
                     ui,
                     language,
@@ -1394,6 +1424,11 @@ impl CrosshairApp {
                 let exit_path = self.state.audio_settings.exit.file_path.clone();
                 let waveform = self.prepare_audio_editor_waveform(&exit_path);
                 let mut duration = self.exit_clip_duration_ms;
+                Self::ensure_audio_editor_preview_cursor(
+                    &mut preview_cursor,
+                    AudioEditorTarget::Exit,
+                    &self.state.audio_settings.exit,
+                );
                 let outcome = Self::render_audio_media_editor(
                     ui,
                     language,
