@@ -231,6 +231,7 @@ impl CrosshairApp {
             language,
             show_move_fields,
             show_detection_tuning,
+            false,
             live_sync,
         );
     }
@@ -261,6 +262,7 @@ impl CrosshairApp {
             language,
             show_move_fields,
             show_detection_tuning,
+            true,
             live_sync,
         );
     }
@@ -365,6 +367,7 @@ impl CrosshairApp {
         language: UiLanguage,
         show_move_fields: bool,
         show_detection_tuning: bool,
+        show_detection_rate: bool,
         live_sync: &mut bool,
     ) {
         ui.add_space(2.0);
@@ -372,9 +375,9 @@ impl CrosshairApp {
         egui::ComboBox::from_id_salt(ui.id().with("vision-runtime-tuning"))
             .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
             .selected_text(selected_text)
-            .width(96.0)
+            .width(84.0)
             .show_ui(ui, |ui| {
-                ui.set_min_width(176.0);
+                ui.set_min_width(152.0);
                 if show_move_fields {
                     egui::Grid::new(ui.id().with("vision-runtime-move-grid"))
                         .num_columns(2)
@@ -441,18 +444,35 @@ impl CrosshairApp {
                             );
                             ui.end_row();
 
-                            ui.label(Self::tr_lang(language, "Rate", "Rate"));
-                            *live_sync |= Self::render_temp_u32_input(
-                                ui,
-                                ui.id().with("vision-rate"),
-                                &mut step.vision_color_scan_rate_hz,
-                                1,
-                                1000,
-                            );
-                            ui.end_row();
+                            if show_detection_rate {
+                                ui.label(Self::tr_lang(language, "Rate", "Rate"));
+                                *live_sync |= Self::render_temp_u32_input(
+                                    ui,
+                                    ui.id().with("vision-rate"),
+                                    &mut step.vision_color_scan_rate_hz,
+                                    1,
+                                    1000,
+                                );
+                                ui.end_row();
+                            }
                         });
                 }
             });
+    }
+
+    fn sync_step_vision_runtime_from_preset(step: &mut MacroStep, preset: &VisionPreset) {
+        step.vision_color_tolerance = preset.color_tolerance;
+        step.vision_color_scan_rate_hz = preset.color_scan_rate_hz.max(1);
+    }
+
+    fn apply_vision_step_preset_selection(
+        step: &mut MacroStep,
+        preset: &VisionPreset,
+        live_sync: &mut bool,
+    ) {
+        step.key = preset.id.to_string();
+        Self::sync_step_vision_runtime_from_preset(step, preset);
+        *live_sync = true;
     }
 
     fn render_vision_axis_lock_controls(
@@ -7355,8 +7375,7 @@ impl CrosshairApp {
                         ui.separator();
                         for p in &image_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }
@@ -7368,8 +7387,7 @@ impl CrosshairApp {
                         ui.separator();
                         for p in &color_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }
@@ -7382,8 +7400,7 @@ impl CrosshairApp {
                         ui.separator();
                         for p in &pixel_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }
@@ -9654,8 +9671,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                         ui.separator();
                         for p in &image_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }
@@ -9667,8 +9683,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                         ui.separator();
                         for p in &color_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }
@@ -9681,8 +9696,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                         ui.separator();
                         for p in &pixel_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }
@@ -11598,7 +11612,8 @@ if supports_move_mouse || show_detection_tuning {
                                         false
                                     }
                                 };
-                                let is_active = is_step_executing || is_vision_active || is_timer_active || is_loop_end_active;
+                                let is_active =
+                                    is_step_executing || is_vision_active || is_loop_end_active;
                                 let has_stop_audio = preset.steps.iter().any(|s| {
                                     matches!(
                                         s.action,
@@ -12924,8 +12939,7 @@ if supports_move_mouse || show_detection_tuning {
                         ui.separator();
                         for p in &image_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }
@@ -12937,8 +12951,7 @@ if supports_move_mouse || show_detection_tuning {
                         ui.separator();
                         for p in &color_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }
@@ -12951,8 +12964,7 @@ if supports_move_mouse || show_detection_tuning {
                         ui.separator();
                         for p in &pixel_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }
@@ -14332,8 +14344,7 @@ if supports_move_mouse || show_detection_tuning {
                         ui.separator();
                         for p in &image_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }
@@ -14345,8 +14356,7 @@ if supports_move_mouse || show_detection_tuning {
                         ui.separator();
                         for p in &color_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }
@@ -14359,8 +14369,7 @@ if supports_move_mouse || show_detection_tuning {
                         ui.separator();
                         for p in &pixel_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                step.key = p.id.to_string();
-                                live_sync = true;
+                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
                             }
                         }
                     }

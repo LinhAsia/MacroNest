@@ -4515,6 +4515,9 @@ impl CrosshairApp {
         self.disable_hud_preview_modes();
         crate::overlay::hide_hud_now();
 
+        self.disable_timer_preview_modes();
+        crate::overlay::clear_timer_overlays_now();
+
         self.disable_pin_preview_modes();
         crate::overlay::clear_pin_overlay_now();
 
