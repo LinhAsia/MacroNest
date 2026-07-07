@@ -13356,10 +13356,13 @@ impl eframe::App for CrosshairApp {
                                     }
 
                                     if icon_btn(ui, crate::overlay::screen_draw_get_color_pick_mode(), "dropper", "Pick color from screen").clicked() {
+                                        const SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS: u64 = 160;
                                         self.screen_draw_color_pick_pending_at = Some(Instant::now());
                                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
                                         std::thread::spawn(|| {
-                                            std::thread::sleep(Duration::from_millis(80));
+                                            std::thread::sleep(Duration::from_millis(
+                                                SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS,
+                                            ));
                                             if crate::overlay::screen_draw_active()
                                                 && !crate::overlay::screen_draw_get_color_pick_mode()
                                             {
