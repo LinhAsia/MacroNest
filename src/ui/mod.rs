@@ -13250,16 +13250,47 @@ impl eframe::App for CrosshairApp {
                                                 painter.circle_stroke(body.center() + egui::vec2(0.0, 0.2), 3.7, stroke);
                                             }
                                             "dropper" => {
-                                                let shaft_start = rect.left_bottom() + egui::vec2(pad + 2.0, -pad - 1.0);
-                                                let shaft_end = rect.right_top() + egui::vec2(-pad - 4.0, pad + 4.0);
-                                                painter.line_segment([shaft_start, shaft_end], egui::Stroke::new(3.0, color));
-                                                painter.line_segment([shaft_start + egui::vec2(1.3, 1.3), shaft_end + egui::vec2(1.3, 1.3)], egui::Stroke::new(1.1, color.linear_multiply(0.6)));
-                                                let head = egui::Rect::from_center_size(
-                                                    shaft_end + egui::vec2(3.0, -3.0),
-                                                    egui::vec2(7.0, 7.0),
+                                                let body_start =
+                                                    rect.left_bottom() + egui::vec2(pad + 2.8, -pad - 1.2);
+                                                let body_end =
+                                                    rect.right_top() + egui::vec2(-pad - 5.2, pad + 5.4);
+                                                painter.line_segment(
+                                                    [body_start, body_end],
+                                                    egui::Stroke::new(3.2, color),
                                                 );
-                                                painter.rect_stroke(head, 1.5, stroke, egui::StrokeKind::Inside);
-                                                painter.circle_filled(shaft_start, 2.0, egui::Color32::from_rgb(255, 208, 96));
+                                                painter.line_segment(
+                                                    [
+                                                        body_start + egui::vec2(1.1, 1.1),
+                                                        body_end + egui::vec2(1.1, 1.1),
+                                                    ],
+                                                    egui::Stroke::new(
+                                                        1.0,
+                                                        color.linear_multiply(0.55),
+                                                    ),
+                                                );
+
+                                                let bulb = egui::Rect::from_center_size(
+                                                    body_start + egui::vec2(1.2, -0.8),
+                                                    egui::vec2(6.0, 6.0),
+                                                );
+                                                painter.rect_filled(bulb, 1.8, color);
+
+                                                let head_center = body_end + egui::vec2(1.8, -1.8);
+                                                let tip_top = head_center + egui::vec2(-1.4, -3.0);
+                                                let tip_right = head_center + egui::vec2(3.0, 1.4);
+                                                let tip_bottom = head_center + egui::vec2(1.4, 3.0);
+                                                let tip_left = head_center + egui::vec2(-3.0, -1.4);
+                                                painter.add(egui::Shape::convex_polygon(
+                                                    vec![tip_top, tip_right, tip_bottom, tip_left],
+                                                    egui::Color32::TRANSPARENT,
+                                                    egui::Stroke::new(1.6, color),
+                                                ));
+
+                                                painter.circle_filled(
+                                                    head_center + egui::vec2(2.2, 2.2),
+                                                    1.5,
+                                                    egui::Color32::from_rgb(255, 208, 96),
+                                                );
                                             }
                                             _ => {}
                                         }
