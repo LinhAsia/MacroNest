@@ -151,9 +151,10 @@ mod windows_overlay {
                     WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
                     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
                     WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE,
-                    WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
-                    WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION, WS_EX_LAYERED,
-                    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
+                    WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SYSKEYDOWN,
+                    WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION,
+                    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                    WS_EX_TRANSPARENT,
                     WS_OVERLAPPEDWINDOW, WS_POPUP, WindowFromPoint,
                 },
             },
@@ -4431,7 +4432,17 @@ mod windows_overlay {
     ) -> LRESULT {
         match msg {
             WM_NCHITTEST => {
+                if screen_draw_color_pick_mode_active() {
+                    return LRESULT(1);
+                }
                 return LRESULT(HTTRANSPARENT as isize);
+            }
+            WM_SETCURSOR => {
+                if screen_draw_color_pick_mode_active() {
+                    set_screen_draw_color_pick_cursor();
+                    return LRESULT(1);
+                }
+                return DefWindowProcW(hwnd, msg, _wparam, _lparam);
             }
             WM_MOUSEACTIVATE => {
                 return LRESULT(MA_NOACTIVATE as isize);
@@ -10286,13 +10297,21 @@ mod windows_overlay {
     }
 
     unsafe fn sync_screen_draw_overlay_window(hwnd: HWND) -> Result<()> {
-        let (active, interactive) = {
+        let (active, interactive, color_pick_mode) = {
             let state = SCREEN_DRAW_STATE.lock();
-            (state.active, state.active && !state.capturing_region)
+            (
+                state.active,
+                state.active && !state.capturing_region,
+                state.screen_color_pick_mode,
+            )
         };
         if active {
             let mut style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            style |= WS_EX_TRANSPARENT.0;
+            if color_pick_mode {
+                style &= !WS_EX_TRANSPARENT.0;
+            } else {
+                style |= WS_EX_TRANSPARENT.0;
+            }
             let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, style as i32);
             let _ = SetWindowPos(
                 hwnd,
