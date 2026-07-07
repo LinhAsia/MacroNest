@@ -33265,15 +33265,6 @@ mod windows_overlay {
 
         let width = (max_x - min_x).max(1);
         let height = (max_y - min_y).max(1);
-        let _ = SetWindowPos(
-            hwnd,
-            Some(HWND_TOPMOST),
-            min_x,
-            min_y,
-            width,
-            height,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        );
         let screen_dc = GetDC(None);
         if screen_dc.0.is_null() {
             bail!("Failed to acquire the screen DC");
@@ -34210,6 +34201,7 @@ mod windows_overlay {
             }
         }
 
+        let destination = POINT { x: min_x, y: min_y };
         let source = POINT { x: 0, y: 0 };
         let size = SIZE {
             cx: width,
@@ -34224,7 +34216,7 @@ mod windows_overlay {
         let _ = UpdateLayeredWindow(
             hwnd,
             Some(screen_dc),
-            None,
+            Some(&destination),
             Some(&size),
             Some(mem_dc),
             Some(&source),
@@ -34232,6 +34224,7 @@ mod windows_overlay {
             Some(&blend),
             ULW_ALPHA,
         );
+        let _ = ShowWindow(hwnd, SW_SHOWNA);
         let _ = SelectObject(mem_dc, old_bitmap);
         let _ = DeleteObject(HGDIOBJ(bitmap.0));
         let _ = DeleteDC(mem_dc);
