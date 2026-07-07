@@ -4805,6 +4805,16 @@ mod windows_overlay {
                         update_quick_key_display_key(key_name, 0, is_key_down, is_key_up);
                     }
                 }
+                if screen_draw_mouse_event_matches_trigger(message, mouse_data)
+                    && let Some(swallow) =
+                        process_screen_draw_mouse_hotkey_event(message, mouse_data)
+                {
+                    return if swallow {
+                        LRESULT(1)
+                    } else {
+                        CallNextHookEx(None, code, wparam, lparam)
+                    };
+                }
                 if screen_draw_should_process_mouse_message(message)
                     && process_screen_draw_mouse_event(message, info.pt)
                 {
@@ -4812,13 +4822,6 @@ mod windows_overlay {
                 }
                 if message == WM_MOUSEMOVE && screen_draw_color_pick_mode_active() {
                     set_screen_draw_color_pick_cursor();
-                }
-                if let Some(swallow) = process_screen_draw_mouse_hotkey_event(message, mouse_data) {
-                    return if swallow {
-                        LRESULT(1)
-                    } else {
-                        CallNextHookEx(None, code, wparam, lparam)
-                    };
                 }
             }
 
