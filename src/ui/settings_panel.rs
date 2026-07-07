@@ -1599,20 +1599,8 @@ impl CrosshairApp {
 
         if status == reqwest::StatusCode::FORBIDDEN {
             if remaining == Some("0") {
-                let mut details = Vec::new();
-                if let Some(message) = api_message.as_deref() {
-                    details.push(message.to_owned());
-                }
-                if let Some(retry_after) = retry_after {
-                    details.push(format!("Retry after {retry_after}s."));
-                } else if let Some(reset) = reset {
-                    details.push(format!("Rate limit reset at Unix time {reset}."));
-                }
-                if details.is_empty() {
-                    "GitHub rate limit reached. Try again later.".to_owned()
-                } else {
-                    format!("GitHub rate limit reached. {}", details.join(" "))
-                }
+                let _ = (api_message, retry_after, reset);
+                "GitHub rate limit reached. Please try again later.".to_owned()
             } else if let Some(message) = api_message {
                 format!("GitHub denied the update check (403). {message}")
             } else {
