@@ -12870,25 +12870,18 @@ impl eframe::App for CrosshairApp {
 
         let drawing_active = crate::overlay::screen_draw_active();
         let capturing_region = crate::overlay::screen_draw_get_capturing_region();
-        let mut color_pick_mode = crate::overlay::screen_draw_get_color_pick_mode();
+        let color_pick_mode = crate::overlay::screen_draw_get_color_pick_mode();
         let mut color_pick_pending = self.screen_draw_color_pick_pending_at.is_some();
         if drawing_active {
             if color_pick_mode {
                 self.screen_draw_color_pick_pending_at = None;
                 color_pick_pending = false;
-            } else if let Some(pending_at) = self.screen_draw_color_pick_pending_at {
+            } else if color_pick_pending {
                 ctx.send_viewport_cmd_to(
                     egui::ViewportId::from_hash_of("screen_draw_toolbar"),
                     egui::ViewportCommand::Visible(false),
                 );
-                if pending_at.elapsed() >= Duration::from_millis(50) {
-                    self.screen_draw_color_pick_pending_at = None;
-                    color_pick_pending = false;
-                    crate::overlay::screen_draw_toggle_color_pick_mode();
-                    color_pick_mode = true;
-                } else {
-                    ctx.request_repaint_after(Duration::from_millis(16));
-                }
+                ctx.request_repaint_after(Duration::from_millis(16));
             }
         } else {
             self.screen_draw_color_pick_pending_at = None;
@@ -12971,7 +12964,6 @@ impl eframe::App for CrosshairApp {
         if drawing_active {
             let (screen_x, screen_y, screen_w, screen_h) =
                 crate::window_list::virtual_screen_bounds();
-            let root_ctx = ctx.clone();
             const TOOLBAR_ESTIMATED_WIDTH: f32 = 780.0;
             const TOOLBAR_HEIGHT: f32 = 44.0;
             let toolbar_width = ctx.data(|d| {
@@ -13366,8 +13358,14 @@ impl eframe::App for CrosshairApp {
                                     if icon_btn(ui, crate::overlay::screen_draw_get_color_pick_mode(), "dropper", "Pick color from screen").clicked() {
                                         self.screen_draw_color_pick_pending_at = Some(Instant::now());
                                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                                        ui.ctx().request_repaint_after(Duration::from_millis(16));
-                                        root_ctx.request_repaint_after(Duration::from_millis(16));
+                                        std::thread::spawn(|| {
+                                            std::thread::sleep(Duration::from_millis(80));
+                                            if crate::overlay::screen_draw_active()
+                                                && !crate::overlay::screen_draw_get_color_pick_mode()
+                                            {
+                                                crate::overlay::screen_draw_toggle_color_pick_mode();
+                                            }
+                                        });
                                     }
 
                                     ui.separator();
