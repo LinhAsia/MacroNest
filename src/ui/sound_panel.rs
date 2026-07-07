@@ -240,6 +240,7 @@ impl CrosshairApp {
         let trim_adjusting_id = egui::Id::new((id_source, "trim-adjusting"));
         let trim_hotkey_adjusting_id = egui::Id::new((id_source, "trim-hotkey-adjusting"));
         let playhead_drag_id = egui::Id::new((id_source, "trim-playhead-drag"));
+        let timeline_hotkeys_armed_id = egui::Id::new((id_source, "trim-hotkeys-armed"));
         let stored_zoom_scroll_offset = ui
             .ctx()
             .data(|data| data.get_temp::<f32>(zoom_scroll_offset_id));
@@ -406,11 +407,17 @@ impl CrosshairApp {
                     let keyboard_panning = pan_left ^ pan_right;
                     let timeline_hovered =
                         interactive && (response.hovered() || hovered_pointer_pos.is_some());
+                    let timeline_hotkeys_armed = ui
+                        .ctx()
+                        .data(|data| data.get_temp::<bool>(timeline_hotkeys_armed_id))
+                        .unwrap_or(false);
+                    let timeline_hotkeys_active =
+                        (timeline_hovered || timeline_hotkeys_armed) && !keyboard_panning;
                     outcome.hovered = timeline_hovered && !keyboard_panning;
-                    outcome.preview_at_playhead = outcome.hovered
+                    outcome.preview_at_playhead = timeline_hotkeys_active
                         && !ui.ctx().wants_keyboard_input()
                         && ui.input(|input| input.key_pressed(egui::Key::Space));
-                    outcome.preview_from_trim_start = outcome.hovered
+                    outcome.preview_from_trim_start = timeline_hotkeys_active
                         && !ui.ctx().wants_keyboard_input()
                         && ui.input(|input| input.key_pressed(egui::Key::S));
                     let showing_hover_preview = hovered_pointer_pos.is_some()
@@ -620,6 +627,8 @@ impl CrosshairApp {
                             let next_ms = (ratio * total_ms_f32).round() as u64;
                             *preview_cursor_ms = next_ms.clamp(clip.start_ms, clip.end_ms);
                             outcome.playhead_changed = true;
+                            ui.ctx()
+                                .data_mut(|data| data.insert_temp(timeline_hotkeys_armed_id, true));
                             if primary_pressed || response.dragged() {
                                 ui.ctx()
                                     .data_mut(|data| data.insert_temp(playhead_drag_id, true));
@@ -660,6 +669,16 @@ impl CrosshairApp {
                             ui.ctx()
                                 .data_mut(|data| data.remove::<bool>(trim_adjusting_id));
                         }
+                    }
+
+                    if timeline_hovered {
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(timeline_hotkeys_armed_id, true));
+                    } else if let Some(pointer) = pointer_pos
+                        && !viewport_rect.contains(pointer)
+                    {
+                        ui.ctx()
+                            .data_mut(|data| data.remove::<bool>(timeline_hotkeys_armed_id));
                     }
 
                     *preview_cursor_ms = (*preview_cursor_ms).clamp(clip.start_ms, clip.end_ms);
