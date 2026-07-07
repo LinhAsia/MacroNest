@@ -15170,48 +15170,32 @@ mod windows_overlay {
             1.0,
             [255, 255, 255, 34],
         );
-        // Draw camera body inside 32x32 (centered)
+        // Draw a minimal camera glyph: top bump, body, lens.
         fill_skia_rounded_rect(
             &mut pixmap,
-            capture_x + 6.0,
-            capture_y + 11.0,
-            20.0,
-            14.0,
+            capture_x + 11.0,
+            capture_y + 8.0,
+            10.0,
+            4.0,
+            1.6,
+            [240, 246, 255, 246],
+        );
+        fill_skia_rounded_rect(
+            &mut pixmap,
+            capture_x + 7.0,
+            capture_y + 11.5,
+            18.0,
+            12.5,
             3.0,
             [240, 246, 255, 246],
-        );
-        draw_skia_line(
-            &mut pixmap,
-            capture_x + 11.5,
-            capture_y + 11.0,
-            capture_x + 14.5,
-            capture_y + 7.0,
-            [240, 246, 255, 246],
-            2.0,
-        );
-        draw_skia_line(
-            &mut pixmap,
-            capture_x + 14.5,
-            capture_y + 7.0,
-            capture_x + 18.5,
-            capture_y + 7.0,
-            [240, 246, 255, 246],
-            2.0,
-        );
-        draw_skia_circle_fill(
-            &mut pixmap,
-            capture_x + 16.0,
-            capture_y + 18.0,
-            4.0,
-            [74, 98, 128, 255],
         );
         draw_skia_circle_outline(
             &mut pixmap,
             capture_x + 16.0,
-            capture_y + 18.0,
-            4.0,
-            [255, 255, 255, 196],
-            1.0,
+            capture_y + 17.75,
+            3.35,
+            [74, 98, 128, 255],
+            1.35,
         );
 
         // 5. Close (X - 32x32 button bounds)
