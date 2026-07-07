@@ -376,8 +376,14 @@ impl CrosshairApp {
                         .flatten();
                     let hovered_pointer_pos =
                         pointer_pos.filter(|pos| viewport_rect.contains(*pos));
+                    let scroll_content_offset_x = (viewport_rect.left() - rect.left()).max(0.0);
+                    let pointer_content_x = |pointer: egui::Pos2| {
+                        ((pointer.x - viewport_rect.left()) + scroll_content_offset_x)
+                            .clamp(0.0, rect.width())
+                    };
                     let pointer_time_ms = hovered_pointer_pos.map(|pointer| {
-                        let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                        let ratio =
+                            (pointer_content_x(pointer) / rect.width().max(1.0)).clamp(0.0, 1.0);
                         (ratio * total_ms_f32).round() as u64
                     });
                     let playhead_outline = if dark_theme {
@@ -508,7 +514,7 @@ impl CrosshairApp {
                                 })
                                 .unwrap_or(viewport_rect.width() * cursor_ratio.clamp(0.0, 1.0));
                             let anchor_content_x = hovered_pointer_pos
-                                .map(|pointer| (pointer.x - rect.left()).clamp(0.0, rect.width()))
+                                .map(pointer_content_x)
                                 .unwrap_or((cursor_ratio * rect.width()).clamp(0.0, rect.width()));
                             let factor = if zoom_delta > 0.0 { 1.12 } else { 1.0 / 1.12 };
                             *trim_timeline_zoom = (*trim_timeline_zoom * factor).clamp(1.0, 8.0);
@@ -562,7 +568,8 @@ impl CrosshairApp {
                         && let Some(pointer) = start_response.interact_pointer_pos()
                         && (start_response.clicked() || start_response.dragged())
                     {
-                        let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                        let ratio =
+                            (pointer_content_x(pointer) / rect.width().max(1.0)).clamp(0.0, 1.0);
                         let next_ms = (ratio * total_ms_f32).round() as u64;
                         clip.start_ms = next_ms.min(clip.end_ms.saturating_sub(50));
                         Self::trim_audio_bounds(clip, total_ms);
@@ -577,7 +584,8 @@ impl CrosshairApp {
                         && let Some(pointer) = end_response.interact_pointer_pos()
                         && (end_response.clicked() || end_response.dragged())
                     {
-                        let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                        let ratio =
+                            (pointer_content_x(pointer) / rect.width().max(1.0)).clamp(0.0, 1.0);
                         let next_ms = (ratio * total_ms_f32).round() as u64;
                         clip.end_ms = next_ms.max(clip.start_ms + 50);
                         Self::trim_audio_bounds(clip, total_ms);
@@ -607,7 +615,8 @@ impl CrosshairApp {
                                 || response.dragged());
 
                         if should_update_playhead && let Some(pointer) = pointer_in_timeline {
-                            let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                            let ratio = (pointer_content_x(pointer) / rect.width().max(1.0))
+                                .clamp(0.0, 1.0);
                             let next_ms = (ratio * total_ms_f32).round() as u64;
                             *preview_cursor_ms = next_ms.clamp(clip.start_ms, clip.end_ms);
                             outcome.playhead_changed = true;
