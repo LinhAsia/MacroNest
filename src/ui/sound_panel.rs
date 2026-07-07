@@ -590,19 +590,26 @@ impl CrosshairApp {
                         && !start_response.is_pointer_button_down_on()
                         && !end_response.is_pointer_button_down_on()
                         && total_ms > 0
-                        && let Some(pointer) = response
-                            .interact_pointer_pos()
-                            .or(pointer_pos)
-                            .filter(|pos| viewport_rect.contains(*pos))
                     {
-                        let primary_clicked =
-                            response.hovered() && ui.input(|input| input.pointer.primary_clicked());
-                        let primary_dragged = response.dragged();
-                        if primary_clicked || primary_dragged {
+                        let pointer_in_timeline =
+                            pointer_pos.filter(|pos| viewport_rect.contains(*pos));
+                        let playhead_dragging = ui
+                            .ctx()
+                            .data(|data| data.get_temp::<bool>(playhead_drag_id))
+                            .unwrap_or(false);
+                        let primary_pressed = ui.input(|input| input.pointer.primary_pressed());
+                        let primary_down = ui.input(|input| input.pointer.primary_down());
+                        let should_update_playhead = pointer_in_timeline.is_some()
+                            && ((primary_pressed && response.hovered())
+                                || (playhead_dragging && primary_down)
+                                || response.clicked()
+                                || response.dragged());
+
+                        if should_update_playhead && let Some(pointer) = pointer_in_timeline {
                             let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                             let next_ms = (ratio * total_ms_f32).round() as u64;
                             *preview_cursor_ms = next_ms.clamp(clip.start_ms, clip.end_ms);
-                            if primary_dragged {
+                            if primary_pressed || response.dragged() {
                                 ui.ctx()
                                     .data_mut(|data| data.insert_temp(playhead_drag_id, true));
                             }
