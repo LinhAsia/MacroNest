@@ -63,6 +63,7 @@ pub use theme::{configure_fonts, text_has_cjk};
 #[cfg(windows)]
 pub(crate) use windows::Win32::{
     Foundation::POINT,
+    Graphics::Dwm::DwmFlush,
     UI::{
         Input::KeyboardAndMouse::GetAsyncKeyState,
         WindowsAndMessaging::{GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN},
@@ -13358,8 +13359,20 @@ impl eframe::App for CrosshairApp {
                                     if icon_btn(ui, crate::overlay::screen_draw_get_color_pick_mode(), "dropper", "Pick color from screen").clicked() {
                                         const SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS: u64 = 160;
                                         self.screen_draw_color_pick_pending_at = Some(Instant::now());
+                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(
+                                            egui::pos2(-10000.0, -10000.0),
+                                        ));
                                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
                                         std::thread::spawn(|| {
+                                            #[cfg(windows)]
+                                            unsafe {
+                                                let _ = DwmFlush();
+                                            }
+                                            std::thread::sleep(Duration::from_millis(32));
+                                            #[cfg(windows)]
+                                            unsafe {
+                                                let _ = DwmFlush();
+                                            }
                                             std::thread::sleep(Duration::from_millis(
                                                 SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS,
                                             ));
