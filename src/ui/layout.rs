@@ -1,9 +1,6 @@
-use std::cmp::Ordering;
+use eframe::egui::{self, vec2};
 
-use eframe::egui::{self, pos2, vec2};
-
-use crate::window_list;
-use crate::window_list::WindowInfo;
+use crate::window_list::{self, WindowInfo};
 
 use super::CrosshairApp;
 
@@ -73,74 +70,5 @@ impl CrosshairApp {
         } else {
             simplified
         }
-    }
-
-    pub(crate) fn capture_info_window_placement(
-        ctx: &egui::Context,
-        pointer: Option<egui::Pos2>,
-    ) -> (egui::Pos2, egui::Vec2) {
-        let (left, top, width, height) = window_list::virtual_screen_bounds();
-        let ppp = ctx.pixels_per_point().max(0.5);
-        let size = vec2(240.0, 288.0);
-        let margin = 18.0;
-        let viewport_rect = egui::Rect::from_min_max(
-            pos2(left as f32 / ppp, top as f32 / ppp),
-            pos2(
-                (left as f32 + width as f32) / ppp,
-                (top as f32 + height as f32) / ppp,
-            ),
-        );
-        let candidates = [
-            egui::Rect::from_min_size(
-                viewport_rect.right_top() - vec2(size.x + margin, -margin),
-                size,
-            ),
-            egui::Rect::from_min_size(viewport_rect.left_top() + vec2(margin, margin), size),
-            egui::Rect::from_min_size(
-                viewport_rect.right_bottom() - vec2(size.x + margin, size.y + margin),
-                size,
-            ),
-            egui::Rect::from_min_size(
-                viewport_rect.left_bottom() + vec2(margin, -(size.y + margin)),
-                size,
-            ),
-        ];
-        let pos = if let Some(pointer) = pointer {
-            let pointer_safe_zone = egui::Rect::from_center_size(pointer, vec2(320.0, 320.0));
-            candidates
-                .into_iter()
-                .find(|candidate| !candidate.intersects(pointer_safe_zone))
-                .unwrap_or_else(|| {
-                    candidates
-                        .into_iter()
-                        .max_by(|a, b| {
-                            let a_dist = a.center().distance_sq(pointer);
-                            let b_dist = b.center().distance_sq(pointer);
-                            a_dist.partial_cmp(&b_dist).unwrap_or(Ordering::Equal)
-                        })
-                        .unwrap_or(candidates[0])
-                })
-                .min
-        } else {
-            candidates[0].min
-        };
-        (pos, size)
-    }
-
-    pub(crate) fn refresh_capture_info_window(&mut self, ctx: &egui::Context) {
-        let pointer = Self::current_screen_cursor_pos().map(|(x, y)| {
-            let ppp = ctx.pixels_per_point().max(0.5);
-            egui::pos2(x as f32 / ppp, y as f32 / ppp)
-        });
-        let (pos, size) = Self::capture_info_window_placement(ctx, pointer);
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
-    }
-
-    pub(crate) fn show_capture_info_window(&mut self, ctx: &egui::Context) {
-        self.refresh_capture_info_window(ctx);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
 }

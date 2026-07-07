@@ -1659,5 +1659,4 @@ impl CrosshairApp {
             }
         }
     }
-    pub(crate) fn open_ai_debug_folder(&mut self) {}
 }

@@ -8983,111 +8983,6 @@ impl CrosshairApp {
         }
     }
 
-    fn add_master_preset_from_current(&mut self) {
-        let id = self.allocate_next_master_preset_id();
-        let preset = self.capture_master_preset_snapshot(id, format!("Mode {id}"));
-        self.state.master_presets.push(preset);
-        self.state.selected_master_preset_id = Some(id);
-        self.persist();
-        self.status = format!("Captured current hotkey setup into mode {id}.");
-    }
-
-    fn update_master_preset_from_current(&mut self, preset_id: u32) {
-        let replacement = self
-            .state
-            .master_presets
-            .iter()
-            .find(|preset| preset.id == preset_id)
-            .map(|preset| (preset.collapsed, preset.name.clone()));
-        let Some((collapsed, name)) = replacement else {
-            return;
-        };
-        let mut snapshot = self.capture_master_preset_snapshot(preset_id, name);
-        snapshot.collapsed = collapsed;
-        if let Some(existing) = self
-            .state
-            .master_presets
-            .iter_mut()
-            .find(|preset| preset.id == preset_id)
-        {
-            *existing = snapshot;
-        }
-        self.persist();
-        self.status = format!("Updated mode {preset_id} from current toggles.");
-    }
-
-    fn apply_master_preset(&mut self, preset_id: u32) {
-        let Some(preset) = self
-            .state
-            .master_presets
-            .iter()
-            .find(|preset| preset.id == preset_id)
-            .cloned()
-        else {
-            return;
-        };
-        self.state.selected_master_preset_id = Some(preset_id);
-        self.state.macros_master_enabled = preset.macros_master_enabled;
-        self.state.window_expand_controls.enabled = preset.window_expand_controls_enabled;
-
-        for item in &preset.window_presets {
-            if let Some(window_preset) = self
-                .state
-                .window_presets
-                .iter_mut()
-                .find(|preset| preset.id == item.id)
-            {
-                window_preset.enabled = item.enabled;
-                window_preset.animate_enabled = item.animate_enabled;
-                window_preset.restore_titlebar_enabled = item.restore_titlebar_enabled;
-            }
-        }
-        for item in &preset.window_focus_presets {
-            if let Some(focus_preset) = self
-                .state
-                .window_focus_presets
-                .iter_mut()
-                .find(|preset| preset.id == item.id)
-            {
-                focus_preset.enabled = item.enabled;
-            }
-        }
-        for item in &preset.zoom_presets {
-            if let Some(zoom_preset) = self
-                .state
-                .zoom_presets
-                .iter_mut()
-                .find(|preset| preset.id == item.id)
-            {
-                zoom_preset.enabled = item.enabled;
-            }
-        }
-        for group_state in &preset.macro_groups {
-            if let Some(group) = self
-                .state
-                .macro_groups
-                .iter_mut()
-                .find(|group| group.id == group_state.id)
-            {
-                group.enabled = group_state.enabled;
-                for preset_state in &group_state.presets {
-                    if let Some(macro_preset) = group
-                        .presets
-                        .iter_mut()
-                        .find(|preset| preset.id == preset_state.id)
-                    {
-                        macro_preset.enabled = preset_state.enabled;
-                    }
-                }
-            }
-        }
-        self.sync_window_presets();
-        self.sync_macro_presets();
-        self.sync_macro_master_enabled();
-        self.persist();
-        self.status = format!("Applied mode: {}.", preset.name);
-    }
-
     fn add_macro_group(&mut self) {
         let id = Self::allocate_next_id(
             &self.state.macro_groups,
@@ -10391,10 +10286,6 @@ impl CrosshairApp {
         self.capture_mouse_guard_until = None;
         self.status = "Capture cancelled.".to_owned();
     }
-
-    #[cfg(windows)]
-    #[cfg(not(windows))]
-    fn poll_mouse_move_absolute_capture(&mut self, _ctx: &egui::Context) {}
 
     fn pick_point_button_text(language: UiLanguage, active: bool) -> RichText {
         if active {
@@ -11846,8 +11737,10 @@ impl eframe::App for CrosshairApp {
             self.startup_shell_frames_remaining -= 1;
             ctx.request_repaint();
         }
-        if matches!(self.state.active_panel, AppPanel::Zoom | AppPanel::Modes) {
+        if self.state.active_panel == AppPanel::Zoom {
             self.state.active_panel = AppPanel::Pin;
+        } else if self.state.active_panel == AppPanel::Modes {
+            self.state.active_panel = AppPanel::Macros;
         }
         crate::overlay::set_ui_context(ctx.clone());
         self.apply_theme(ctx);
@@ -14220,7 +14113,7 @@ impl eframe::App for CrosshairApp {
                                 AppPanel::Ocr => self.render_ocr_panel(ui),
                                 AppPanel::Geometry => self.render_geometry_panel(ui),
                                 AppPanel::Zoom => self.render_pin_panel(ui),
-                                AppPanel::Modes => unreachable!(),
+                                AppPanel::Modes => self.render_macro_panel(ui),
                                 AppPanel::Macros => unreachable!(),
                                 AppPanel::Commands => self.render_commands_panel(ui),
                                 AppPanel::Sound => self.render_sound_panel(ui),

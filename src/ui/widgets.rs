@@ -217,15 +217,6 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn add_with_show_hover(
-        ui: &mut egui::Ui,
-        widget: impl egui::Widget,
-    ) -> egui::Response {
-        let response = ui.add(widget);
-        Self::paint_show_hover_outline(ui, &response);
-        response
-    }
-
     pub(crate) fn add_with_show_hover_radius(
         ui: &mut egui::Ui,
         radius: u8,
@@ -342,28 +333,6 @@ impl CrosshairApp {
 
     pub(crate) fn sound_style_icon_button(ui: &mut egui::Ui, icon: RichText) -> egui::Response {
         Self::with_emphasized_button_hover(ui, |ui| ui.add_sized([36.0, 24.0], Button::new(icon)))
-    }
-
-    pub(crate) fn enabled_icon_button(ui: &mut egui::Ui, enabled: bool) -> egui::Response {
-        let icon = if enabled { 0xe5ca } else { 0xe835 };
-        let fill = if enabled {
-            Color32::from_rgba_premultiplied(72, 156, 116, 120)
-        } else {
-            ui.visuals().faint_bg_color
-        };
-        let stroke = if enabled {
-            Color32::from_rgb(126, 224, 182)
-        } else {
-            ui.visuals().widgets.noninteractive.bg_stroke.color
-        };
-        Self::with_emphasized_button_hover(ui, |ui| {
-            ui.add_sized(
-                [36.0, 24.0],
-                Button::new(Self::material_icon_text(icon, 18.0))
-                    .fill(fill)
-                    .stroke(egui::Stroke::new(1.0, stroke)),
-            )
-        })
     }
 
     pub(crate) fn with_emphasized_button_hover(

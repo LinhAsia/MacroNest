@@ -7,8 +7,8 @@ use crate::ui::{
 use crate::window_list;
 use crossbeam_channel::Sender;
 use eframe::egui::{
-    self, Button, Color32, ColorImage, DragValue, Frame, Margin, RichText, Sense, Slider,
-    TextBuffer, TextEdit, TextureOptions, pos2, vec2,
+    self, Button, Color32, ColorImage, DragValue, RichText, Sense, Slider, TextBuffer, TextEdit,
+    TextureOptions, pos2, vec2,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -346,10 +346,16 @@ impl CrosshairApp {
                         .spacing([14.0, 8.0])
                         .min_col_width(110.0)
                         .show(ui, |ui| {
-
                             if !preset.use_color_matching && !self.opencv_installed {
                                 ui.label("");
-                                ui.label(egui::RichText::new(Self::tr_lang(language, "[!] OpenCV library not installed! Check Settings.", "[!] OpenCV library not installed! Check Settings.")).color(egui::Color32::from_rgb(255, 110, 110)));
+                                ui.label(
+                                    egui::RichText::new(Self::tr_lang(
+                                        language,
+                                        "[!] OpenCV library not installed! Check Settings.",
+                                        "[!] OpenCV library not installed! Check Settings.",
+                                    ))
+                                    .color(egui::Color32::from_rgb(255, 110, 110)),
+                                );
                                 ui.end_row();
                             }
 
@@ -357,13 +363,21 @@ impl CrosshairApp {
                                 ui.label(Self::tr_lang(language, "Template", "Template"));
                                 ui.horizontal_wrapped(|ui| {
                                     if ui
-                                        .button(Self::tr_lang(language, "Pick from screen", "Pick from screen"))
+                                        .button(Self::tr_lang(
+                                            language,
+                                            "Pick from screen",
+                                            "Pick from screen",
+                                        ))
                                         .clicked()
                                     {
                                         start_image_search_capture = Some(preset.id);
                                     }
                                     if ui
-                                        .button(Self::tr_lang(language, "Clear template", "Clear template"))
+                                        .button(Self::tr_lang(
+                                            language,
+                                            "Clear template",
+                                            "Clear template",
+                                        ))
                                         .clicked()
                                     {
                                         let _ = fs::remove_file(&template_file);
@@ -383,7 +397,10 @@ impl CrosshairApp {
                                 let mut is_single = preset.search_region_is_single_pixel;
                                 if preset.use_color_matching && !preset.is_pixel_counter {
                                     if ui
-                                        .checkbox(&mut is_single, Self::tr_lang(language, "1 pixel", "1 pixel"))
+                                        .checkbox(
+                                            &mut is_single,
+                                            Self::tr_lang(language, "1 pixel", "1 pixel"),
+                                        )
                                         .changed()
                                     {
                                         preset.search_region_is_single_pixel = is_single;
@@ -453,7 +470,8 @@ impl CrosshairApp {
                                         })
                                         .clicked()
                                     {
-                                        preset.show_search_region_overlay = !preset.show_search_region_overlay;
+                                        preset.show_search_region_overlay =
+                                            !preset.show_search_region_overlay;
                                         live_sync = true;
                                     }
                                 }
@@ -475,7 +493,8 @@ impl CrosshairApp {
                                             .min_col_width(0.0)
                                             .spacing([ui.spacing().item_spacing.x, 4.0])
                                             .show(ui, |ui| {
-                                                for (index, color) in colors.iter().copied().enumerate()
+                                                for (index, color) in
+                                                    colors.iter().copied().enumerate()
                                                 {
                                                     if Self::image_search_color_tile(ui, color)
                                                         .clicked()
@@ -509,21 +528,31 @@ impl CrosshairApp {
                                     }
                                     ui.add_space(4.0);
                                     ui.horizontal(|ui| {
-                                        if Self::image_search_add_color_button(ui, language).clicked() {
+                                        if Self::image_search_add_color_button(ui, language)
+                                            .clicked()
+                                        {
                                             start_color_pick_capture = Some(preset.id);
                                         }
 
-                                        let popup_id = ui.make_persistent_id((preset.id, "vision-manual-color-popup"));
+                                        let popup_id = ui.make_persistent_id((
+                                            preset.id,
+                                            "vision-manual-color-popup",
+                                        ));
                                         let mut popup_open = ui
                                             .ctx()
                                             .data(|data| data.get_temp::<bool>(popup_id))
                                             .unwrap_or(false);
 
-                                        let manual_button = ui.add_sized(
-                                            [24.0, 21.0],
-                                            Button::new(Self::material_icon_text(0xe40a, 18.0)),
-                                        )
-                                        .on_hover_text(Self::tr_lang(language, "Manual color input", "Manual color input"));
+                                        let manual_button = ui
+                                            .add_sized(
+                                                [24.0, 21.0],
+                                                Button::new(Self::material_icon_text(0xe40a, 18.0)),
+                                            )
+                                            .on_hover_text(Self::tr_lang(
+                                                language,
+                                                "Manual color input",
+                                                "Manual color input",
+                                            ));
 
                                         if manual_button.clicked() {
                                             popup_open = true;
@@ -531,36 +560,52 @@ impl CrosshairApp {
 
                                         let mut added_color = false;
 
-                                        let popup_response = egui::Popup::from_response(&manual_button)
-                                            .id(popup_id)
-                                            .open_bool(&mut popup_open)
-                                            .align(egui::RectAlign::BOTTOM_START)
-                                            .layout(egui::Layout::top_down_justified(egui::Align::Min))
-                                            .width(260.0)
-                                            .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                                            .show(|ui| {
-                                                ui.set_min_width(260.0);
-                                                ui.label(Self::tr_lang(language, "Manual color", "Manual color"));
-                                                ui.separator();
+                                        let popup_response =
+                                            egui::Popup::from_response(&manual_button)
+                                                .id(popup_id)
+                                                .open_bool(&mut popup_open)
+                                                .align(egui::RectAlign::BOTTOM_START)
+                                                .layout(egui::Layout::top_down_justified(
+                                                    egui::Align::Min,
+                                                ))
+                                                .width(260.0)
+                                                .close_behavior(
+                                                    egui::PopupCloseBehavior::IgnoreClicks,
+                                                )
+                                                .show(|ui| {
+                                                    ui.set_min_width(260.0);
+                                                    ui.label(Self::tr_lang(
+                                                        language,
+                                                        "Manual color",
+                                                        "Manual color",
+                                                    ));
+                                                    ui.separator();
 
-                                                if Self::render_premium_color_picker(
-                                                    ui,
-                                                    &mut self.vision_manual_color,
-                                                    egui::color_picker::Alpha::Opaque,
-                                                ) {
-                                                    self.vision_manual_color_hex = format!(
-                                                        "{:02X}{:02X}{:02X}",
-                                                        self.vision_manual_color.r,
-                                                        self.vision_manual_color.g,
-                                                        self.vision_manual_color.b
-                                                    );
-                                                }
-                                                ui.add_space(8.0);
+                                                    if Self::render_premium_color_picker(
+                                                        ui,
+                                                        &mut self.vision_manual_color,
+                                                        egui::color_picker::Alpha::Opaque,
+                                                    ) {
+                                                        self.vision_manual_color_hex = format!(
+                                                            "{:02X}{:02X}{:02X}",
+                                                            self.vision_manual_color.r,
+                                                            self.vision_manual_color.g,
+                                                            self.vision_manual_color.b
+                                                        );
+                                                    }
+                                                    ui.add_space(8.0);
 
-                                                if ui.button(Self::tr_lang(language, "Add color", "Add color")).clicked() {
-                                                    added_color = true;
-                                                }
-                                            });
+                                                    if ui
+                                                        .button(Self::tr_lang(
+                                                            language,
+                                                            "Add color",
+                                                            "Add color",
+                                                        ))
+                                                        .clicked()
+                                                    {
+                                                        added_color = true;
+                                                    }
+                                                });
 
                                         if added_color {
                                             if preset.target_colors.is_empty() {
@@ -569,7 +614,8 @@ impl CrosshairApp {
                                                 }
                                             }
                                             preset.target_colors.push(self.vision_manual_color);
-                                            preset.target_color = preset.target_colors.first().copied();
+                                            preset.target_color =
+                                                preset.target_colors.first().copied();
                                             live_sync = true;
                                             popup_open = false;
                                         }
@@ -577,10 +623,11 @@ impl CrosshairApp {
                                         if popup_open
                                             && let Some(pointer_pos) = ui.ctx().pointer_hover_pos()
                                         {
-                                            let mut keep_open_rect = manual_button.rect.expand(10.0);
+                                            let mut keep_open_rect =
+                                                manual_button.rect.expand(10.0);
                                             if let Some(popup) = &popup_response {
-                                                keep_open_rect =
-                                                    keep_open_rect.union(popup.response.rect.expand(10.0));
+                                                keep_open_rect = keep_open_rect
+                                                    .union(popup.response.rect.expand(10.0));
                                             }
                                             if !keep_open_rect.contains(pointer_pos) {
                                                 popup_open = false;
@@ -599,93 +646,22 @@ impl CrosshairApp {
                                 ui.horizontal_wrapped(|ui| {
                                     live_sync |= ui
                                         .add(
-                                            Slider::new(&mut preset.confidence_threshold, 0.35..=0.99)
-                                                .fixed_decimals(2)
-                                                .show_value(true),
+                                            Slider::new(
+                                                &mut preset.confidence_threshold,
+                                                0.35..=0.99,
+                                            )
+                                            .fixed_decimals(2)
+                                            .show_value(true),
                                         )
                                         .changed();
                                 });
                                 ui.end_row();
                             }
 
-                            if !preset.is_pixel_counter && !preset.search_region_is_single_pixel {
-                                ui.label(Self::tr_lang(language, "Mouse", "Mouse"));
-                                ui.horizontal_wrapped(|ui| {
-                                    if Self::sized_button(
-                                        ui,
-                                        96.0,
-                                        Self::tr_lang(
-                                            language,
-                                            if preset.image_search_move_advanced_open {
-                                                "Hide"
-                                            } else {
-                                                "Show"
-                                            },
-                                            if preset.image_search_move_advanced_open {
-                                                "Hide"
-                                            } else {
-                                                "Show"
-                                            },
-                                        ),
-                                    )
-                                    .clicked()
-                                    {
-                                        preset.image_search_move_advanced_open =
-                                            !preset.image_search_move_advanced_open;
-                                        live_sync = true;
-                                    }
-                                });
-                                ui.end_row();
-                            }
-
-                            if !preset.is_pixel_counter && !preset.search_region_is_single_pixel && preset.image_search_move_advanced_open {
-                                ui.horizontal(|ui| {
-                                    ui.label(Self::tr_lang(language, "Offset", "Offset"));
-                                    let help_btn = ui.small_button("❓");
-                                    if help_btn.hovered() {
-                                        egui::show_tooltip_text(
-                                            ui.ctx(),
-                                            ui.layer_id(),
-                                            help_btn.id,
-                                            Self::tr_lang(language, "Click offset from the center of the detected object (image or color).\nThe cursor will move to the center plus this offset (X, Y) before clicking.", "Click offset from the center of the detected object (image or color).\nThe cursor will move to the center plus this offset (X, Y) before clicking.")
-                                        );
-                                    }
-                                });
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label("X");
-                                    live_sync |= ui
-                                        .add(DragValue::new(&mut preset.move_offset_x).range(-5000..=5000))
-                                        .changed();
-                                    ui.label("Y");
-                                    live_sync |= ui
-                                        .add(DragValue::new(&mut preset.move_offset_y).range(-5000..=5000))
-                                        .changed();
-                                });
-                                ui.end_row();
-
-                                ui.label(Self::tr_lang(language, "Move timing", "Move timing"));
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label(Self::tr_lang(language, "Passes", "Passes"));
-                                    live_sync |= ui
-                                        .add(
-                                            DragValue::new(&mut preset.non_interception_move_passes)
-                                                .range(1..=10),
-                                        )
-                                        .changed();
-                                    ui.add_space(8.0);
-                                    ui.label(Self::tr_lang(language, "Delay", "Delay"));
-                                    live_sync |= ui
-                                        .add(
-                                            DragValue::new(&mut preset.non_interception_move_delay_ms)
-                                                .range(0..=100)
-                                                .suffix(" ms"),
-                                        )
-                                        .changed();
-                                });
-                                ui.end_row();
-                            }
-
-                            if preset.use_color_matching && !preset.is_pixel_counter && !preset.search_region_is_single_pixel {
+                            if preset.use_color_matching
+                                && !preset.is_pixel_counter
+                                && !preset.search_region_is_single_pixel
+                            {
                                 ui.label(Self::tr_lang(language, "Color scan", "Color scan"));
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label(Self::tr_lang(language, "Tolerance", "Tolerance"));
@@ -706,12 +682,20 @@ impl CrosshairApp {
                                 });
                                 ui.end_row();
 
-                                ui.label(Self::tr_lang(language, "Scan condition", "Điều kiện quét"));
+                                ui.label(Self::tr_lang(
+                                    language,
+                                    "Scan condition",
+                                    "Điều kiện quét",
+                                ));
                                 ui.horizontal_wrapped(|ui| {
                                     if ui
                                         .checkbox(
                                             &mut preset.require_connected_target_colors,
-                                            Self::tr_lang(language, "Connected colors", "Các màu phải chạm nhau"),
+                                            Self::tr_lang(
+                                                language,
+                                                "Connected colors",
+                                                "Các màu phải chạm nhau",
+                                            ),
                                         )
                                         .changed()
                                     {
@@ -722,17 +706,29 @@ impl CrosshairApp {
                                         live_sync = true;
                                     }
                                     if preset.target_colors.len() < 2 {
-                                        ui.weak(Self::tr_lang(language, "Needs 2+ colors", "Cần 2 màu trở lên"));
+                                        ui.weak(Self::tr_lang(
+                                            language,
+                                            "Needs 2+ colors",
+                                            "Cần 2 màu trở lên",
+                                        ));
                                     }
                                 });
                                 ui.end_row();
 
-                                ui.label(Self::tr_lang(language, "Target position", "Vị trí di chuột"));
+                                ui.label(Self::tr_lang(
+                                    language,
+                                    "Target position",
+                                    "Vị trí di chuột",
+                                ));
                                 ui.horizontal_wrapped(|ui| {
                                     if ui
                                         .checkbox(
                                             &mut preset.color_scan_average_centroid,
-                                            Self::tr_lang(language, "Average centroid", "Lấy điểm ở giữa các pixel"),
+                                            Self::tr_lang(
+                                                language,
+                                                "Average centroid",
+                                                "Lấy điểm ở giữa các pixel",
+                                            ),
                                         )
                                         .changed()
                                     {
@@ -746,7 +742,11 @@ impl CrosshairApp {
                                     if ui
                                         .checkbox(
                                             &mut preset.dual_color_scan_midpoint,
-                                            Self::tr_lang(language, "Midpoint between colors", "Trung điểm các màu"),
+                                            Self::tr_lang(
+                                                language,
+                                                "Midpoint between colors",
+                                                "Trung điểm các màu",
+                                            ),
                                         )
                                         .changed()
                                     {
@@ -764,7 +764,11 @@ impl CrosshairApp {
                                     live_sync |= ui
                                         .checkbox(
                                             &mut preset.color_priority_from_anchor,
-                                            Self::tr_lang(language, "Near target point", "Gần điểm chỉ định"),
+                                            Self::tr_lang(
+                                                language,
+                                                "Near target point",
+                                                "Gần điểm chỉ định",
+                                            ),
                                         )
                                         .changed();
                                     let anchor = preset
@@ -774,7 +778,11 @@ impl CrosshairApp {
                                         ui.monospace(format!("{x}, {y}"));
                                         if ui
                                             .small_button(Self::tr_lang(language, "x", "x"))
-                                            .on_hover_text(Self::tr_lang(language, "Clear priority point", "Clear priority point"))
+                                            .on_hover_text(Self::tr_lang(
+                                                language,
+                                                "Clear priority point",
+                                                "Clear priority point",
+                                            ))
                                             .clicked()
                                         {
                                             preset.color_priority_anchor_screen_x = None;
@@ -784,7 +792,11 @@ impl CrosshairApp {
                                     }
                                     if preset.color_priority_from_anchor
                                         && ui
-                                            .button(Self::tr_lang(language, "Pick point", "Pick point"))
+                                            .button(Self::tr_lang(
+                                                language,
+                                                "Pick point",
+                                                "Pick point",
+                                            ))
                                             .clicked()
                                     {
                                         start_color_priority_anchor_capture = Some(preset.id);
@@ -807,7 +819,10 @@ impl CrosshairApp {
                                 ui.end_row();
                             }
 
-                            if preset.is_pixel_counter || (preset.use_color_matching && preset.search_region_is_single_pixel) {
+                            if preset.is_pixel_counter
+                                || (preset.use_color_matching
+                                    && preset.search_region_is_single_pixel)
+                            {
                                 ui.label(Self::tr_lang(language, "Variable", "Variable"));
                                 ui.horizontal_wrapped(|ui| {
                                     let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
@@ -821,14 +836,15 @@ impl CrosshairApp {
                                     } else {
                                         format!("color_var (e.g. color_code_{})", preset.id)
                                     };
-                                    let text_edit = egui::TextEdit::singleline(&mut preset.pixel_counter_variable_name)
-                                        .desired_width(120.0)
-                                        .hint_text(RichText::new(hint_text).color(hint_color).weak());
+                                    let text_edit = egui::TextEdit::singleline(
+                                        &mut preset.pixel_counter_variable_name,
+                                    )
+                                    .desired_width(120.0)
+                                    .hint_text(RichText::new(hint_text).color(hint_color).weak());
                                     live_sync |= ui.add(text_edit).changed();
                                 });
                                 ui.end_row();
                             }
-
                         });
 
                     if let Some(preview) = preview.as_ref() {
@@ -1790,17 +1806,6 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn spawn_image_search_point_capture(
-        ui_tx: Sender<UiCommand>,
-        ctx: egui::Context,
-        target: VisionCaptureTarget,
-        priority_anchor: bool,
-    ) {
-        if let VisionCaptureTarget::Preset(preset_id) = target {
-            Self::spawn_image_search_point_capture_thread(ui_tx, ctx, preset_id, priority_anchor);
-        }
-    }
-
     pub(crate) fn spawn_image_search_point_capture_thread(
         ui_tx: Sender<UiCommand>,
         ctx: egui::Context,
@@ -1861,17 +1866,6 @@ impl CrosshairApp {
             }
             ctx.request_repaint();
         });
-    }
-
-    pub(crate) fn spawn_image_search_region_capture(
-        ui_tx: Sender<UiCommand>,
-        ctx: egui::Context,
-        target: VisionCaptureTarget,
-        template_mode: bool,
-    ) {
-        if let VisionCaptureTarget::Preset(preset_id) = target {
-            Self::spawn_image_search_region_capture_thread(ui_tx, ctx, preset_id, template_mode);
-        }
     }
 
     pub(crate) fn spawn_image_search_region_capture_thread(
@@ -1966,183 +1960,12 @@ impl CrosshairApp {
         ctx.request_repaint();
     }
 
-    pub(crate) fn vision_capture_target_name(&self, target: VisionCaptureTarget) -> Option<String> {
-        match target {
-            VisionCaptureTarget::Preset(preset_id) => Self::named_item_name_by_id(
-                &self.state.vision_presets,
-                Some(preset_id),
-                |preset| preset.id,
-                |preset| &preset.name,
-            ),
-            VisionCaptureTarget::OcrPreset(preset_id) => Self::named_item_name_by_id(
-                &self.state.ocr_presets,
-                Some(preset_id),
-                |preset| preset.id,
-                |preset| &preset.name,
-            ),
-            VisionCaptureTarget::GeometryColor => Some("Geometry Color".to_owned()),
-            VisionCaptureTarget::OcrStepRegion { .. } => Some("Custom OCR".to_owned()),
-            VisionCaptureTarget::MacroStepGeometryColor { .. } => {
-                Some("Macro Step Geometry Color".to_owned())
-            }
-            VisionCaptureTarget::QuickActionsCoordinates => {
-                Some("Quick Actions Coordinates".to_owned())
-            }
-            VisionCaptureTarget::QuickActionsColor => Some("Quick Actions Color".to_owned()),
-            VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
-                Some("Quick Actions Key Display Position".to_owned())
-            }
-            VisionCaptureTarget::PinPresetColor(preset_id) => {
-                Some(format!("Pin Preset Color #{preset_id}"))
-            }
-            VisionCaptureTarget::PinPresetRegion(preset_id) => {
-                Some(format!("Pin Preset Region #{preset_id}"))
-            }
-            VisionCaptureTarget::PinPresetSourceCrop(preset_id) => {
-                Some(format!("Pin Preset Source Crop #{preset_id}"))
-            }
-            VisionCaptureTarget::HudPresetRegion(preset_id) => {
-                Some(format!("HUD Preset Region #{preset_id}"))
-            }
-        }
-    }
-
-    pub(crate) fn vision_capture_target_is_circle(&self, target: VisionCaptureTarget) -> bool {
-        match target {
-            VisionCaptureTarget::Preset(preset_id) => {
-                Self::vision_preset_by_id(&self.state.vision_presets, Some(preset_id))
-                    .is_some_and(|preset| preset.search_region_is_circle)
-            }
-            VisionCaptureTarget::GeometryColor => false,
-            VisionCaptureTarget::OcrPreset(_) => false,
-            VisionCaptureTarget::OcrStepRegion { .. } => false,
-            VisionCaptureTarget::MacroStepGeometryColor { .. } => false,
-            VisionCaptureTarget::QuickActionsCoordinates => false,
-            VisionCaptureTarget::QuickActionsColor => false,
-            VisionCaptureTarget::QuickActionsKeyDisplayPosition => false,
-            VisionCaptureTarget::PinPresetColor(_) => false,
-            VisionCaptureTarget::PinPresetRegion(_) => false,
-            VisionCaptureTarget::PinPresetSourceCrop(_) => false,
-            VisionCaptureTarget::HudPresetRegion(_) => false,
-        }
-    }
-
     pub(crate) fn restore_image_search_viewport(&mut self, ctx: &egui::Context) {
         if let Some(size) = self.vision_restore_inner_size.take() {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
         }
         if let Some(pos) = self.vision_restore_outer_pos.take() {
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
-        }
-    }
-
-    pub(crate) fn finish_image_search_capture(&mut self, ctx: &egui::Context, rect: egui::Rect) {
-        let Some(target) = self.vision_capture_target_or_cancel(ctx) else {
-            return;
-        };
-        let mode = self
-            .vision_capture_mode
-            .unwrap_or(VisionCaptureMode::Template);
-
-        self.clear_image_search_capture_state();
-        match mode {
-            VisionCaptureMode::Template => {
-                self.hide_image_search_capture_window(ctx, 70);
-                let capture =
-                    self.capture_screen_region_from_rect(ctx, rect, ctx.pixels_per_point());
-                self.restore_image_search_viewport(ctx);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-                let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
-
-                let Some(capture) = capture else {
-                    self.status = "Failed to capture the selected screen area.".to_owned();
-                    ctx.request_repaint();
-                    return;
-                };
-
-                let (status, sync_required) = match target {
-                    VisionCaptureTarget::Preset(preset_id) => {
-                        let template_file = self.vision_template_file_for_preset(preset_id);
-                        if let Some(parent) = template_file.parent() {
-                            let _ = fs::create_dir_all(parent);
-                        }
-                        let save_result = image::save_buffer(
-                            &template_file,
-                            &capture.rgba,
-                            capture.width as u32,
-                            capture.height as u32,
-                            image::ColorType::Rgba8,
-                        );
-
-                        (
-                            self.finish_vision_template_capture(preset_id, &capture, save_result),
-                            false,
-                        )
-                    }
-                    VisionCaptureTarget::GeometryColor => (
-                        "Geometry color picking does not support template captures.".to_owned(),
-                        false,
-                    ),
-                    VisionCaptureTarget::OcrPreset(_) => (
-                        "OCR presets do not support template captures.".to_owned(),
-                        false,
-                    ),
-                    VisionCaptureTarget::OcrStepRegion { .. } => (
-                        "OCR steps do not support template captures.".to_owned(),
-                        false,
-                    ),
-                    VisionCaptureTarget::MacroStepGeometryColor { .. } => (
-                        "Geometry color picking does not support template captures.".to_owned(),
-                        false,
-                    ),
-                    VisionCaptureTarget::QuickActionsCoordinates
-                    | VisionCaptureTarget::QuickActionsColor
-                    | VisionCaptureTarget::QuickActionsKeyDisplayPosition
-                    | VisionCaptureTarget::PinPresetColor(_)
-                    | VisionCaptureTarget::PinPresetRegion(_)
-                    | VisionCaptureTarget::PinPresetSourceCrop(_)
-                    | VisionCaptureTarget::HudPresetRegion(_) => (
-                        "Pin/HUD presets do not support template captures.".to_owned(),
-                        false,
-                    ),
-                };
-                if sync_required {
-                    self.persist_vision_presets();
-                }
-                self.status = status;
-                ctx.request_repaint();
-            }
-            VisionCaptureMode::SearchRegion => {
-                let region = self.screen_region_from_rect(ctx, rect, ctx.pixels_per_point());
-                self.restore_image_search_viewport(ctx);
-                if let Some((screen_x, screen_y, width, height)) = region {
-                    self.status = self
-                        .apply_image_search_region(ctx, target, screen_x, screen_y, width, height);
-                } else {
-                    self.status = "Failed to save the selected search area.".to_owned();
-                }
-                ctx.request_repaint();
-            }
-            VisionCaptureMode::ColorSample => {
-                let center = rect.center();
-                self.finish_image_search_color_pick(ctx, center);
-            }
-            VisionCaptureMode::ColorPriorityAnchor => {
-                let center = rect.center();
-                self.finish_image_search_color_priority_anchor_pick(ctx, center);
-            }
-            VisionCaptureMode::SinglePixel => {
-                let center = rect.center();
-                let screen_x = center.x.round() as i32;
-                let screen_y = center.y.round() as i32;
-                if let Some(VisionCaptureTarget::Preset(preset_id)) = self.vision_capture_target {
-                    self.finish_image_search_single_pixel_capture_from_screen(
-                        ctx, preset_id, screen_x, screen_y,
-                    );
-                }
-            }
-            VisionCaptureMode::RegionAdjust => {}
         }
     }
 
