@@ -2044,6 +2044,7 @@ mod windows_overlay {
         text_interaction_origin: Option<ScreenDrawStroke>,
         screen_color_pick_mode: bool,
         color_pick_restore_freeze_screen: Option<bool>,
+        color_pick_restore_freeze_frame: Option<Option<Vec<u8>>>,
         color_pick_preview: Option<ScreenDrawColorPickPreview>,
         pointer_point: POINT,
         text_border: bool,
@@ -2116,6 +2117,7 @@ mod windows_overlay {
                 text_interaction_origin: None,
                 screen_color_pick_mode: false,
                 color_pick_restore_freeze_screen: None,
+                color_pick_restore_freeze_frame: None,
                 color_pick_preview: None,
                 pointer_point: POINT { x: 0, y: 0 },
                 text_border: false,
@@ -10515,15 +10517,16 @@ mod windows_overlay {
     }
 
     fn begin_screen_draw_color_pick_mode(state: &mut ScreenDrawState) {
-        if !state.freeze_screen {
-            let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
-            if screen_w > 0 && screen_h > 0 {
-                state.freeze_frame = window_list::capture_virtual_screen_region(
-                    screen_x, screen_y, screen_w, screen_h,
-                )
-                .map(|frame| frame.rgba);
-            }
-            state.color_pick_restore_freeze_screen = Some(false);
+        let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+        if screen_w > 0
+            && screen_h > 0
+            && let Some(frame) =
+                window_list::capture_virtual_screen_region(screen_x, screen_y, screen_w, screen_h)
+                    .map(|capture| capture.rgba)
+        {
+            state.color_pick_restore_freeze_screen = Some(state.freeze_screen);
+            state.color_pick_restore_freeze_frame = Some(state.freeze_frame.take());
+            state.freeze_frame = Some(frame);
             state.freeze_screen = true;
         }
         state.screen_color_pick_mode = true;
@@ -10535,9 +10538,7 @@ mod windows_overlay {
         state.color_pick_preview = None;
         if let Some(previous_freeze_screen) = state.color_pick_restore_freeze_screen.take() {
             state.freeze_screen = previous_freeze_screen;
-            if !previous_freeze_screen {
-                state.freeze_frame = None;
-            }
+            state.freeze_frame = state.color_pick_restore_freeze_frame.take().flatten();
         }
     }
 
@@ -10931,6 +10932,7 @@ mod windows_overlay {
         state.text_interaction_origin = None;
         state.screen_color_pick_mode = false;
         state.color_pick_restore_freeze_screen = None;
+        state.color_pick_restore_freeze_frame = None;
         state.color_pick_preview = None;
     }
 
@@ -27867,6 +27869,22 @@ mod windows_overlay {
             assert!(!should_cancel_screen_draw_mouse_capture_from_trigger_press(
                 true, false, false,
             ));
+        }
+
+        #[test]
+        fn screen_draw_color_pick_end_restores_prior_freeze_state() {
+            let mut state = ScreenDrawState::default();
+            state.freeze_screen = true;
+            state.freeze_frame = Some(vec![1, 2, 3, 4]);
+            state.screen_color_pick_mode = true;
+            state.color_pick_restore_freeze_screen = Some(false);
+            state.color_pick_restore_freeze_frame = Some(None);
+
+            end_screen_draw_color_pick_mode(&mut state);
+
+            assert!(!state.freeze_screen);
+            assert_eq!(state.freeze_frame, None);
+            assert!(!state.screen_color_pick_mode);
         }
 
         #[test]
