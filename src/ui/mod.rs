@@ -12877,12 +12877,20 @@ impl eframe::App for CrosshairApp {
             if color_pick_mode {
                 self.screen_draw_color_pick_pending_at = None;
                 color_pick_pending = false;
-            } else if color_pick_pending {
-                ctx.send_viewport_cmd_to(
-                    egui::ViewportId::from_hash_of("screen_draw_toolbar"),
-                    egui::ViewportCommand::Visible(false),
-                );
-                ctx.request_repaint_after(Duration::from_millis(16));
+            } else if let Some(pending_at) = self.screen_draw_color_pick_pending_at {
+                const SCREEN_DRAW_COLOR_PICK_PENDING_RESET_MS: u64 = 450;
+                if pending_at.elapsed()
+                    >= Duration::from_millis(SCREEN_DRAW_COLOR_PICK_PENDING_RESET_MS)
+                {
+                    self.screen_draw_color_pick_pending_at = None;
+                    color_pick_pending = false;
+                } else {
+                    ctx.send_viewport_cmd_to(
+                        egui::ViewportId::from_hash_of("screen_draw_toolbar"),
+                        egui::ViewportCommand::Visible(false),
+                    );
+                    ctx.request_repaint_after(Duration::from_millis(16));
+                }
             }
         } else {
             self.screen_draw_color_pick_pending_at = None;
@@ -13359,6 +13367,7 @@ impl eframe::App for CrosshairApp {
                                     if icon_btn(ui, crate::overlay::screen_draw_get_color_pick_mode(), "dropper", "Pick color from screen").clicked() {
                                         const SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS: u64 = 160;
                                         self.screen_draw_color_pick_pending_at = Some(Instant::now());
+                                        crate::overlay::screen_draw_set_color_pick_cursor();
                                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(
                                             egui::pos2(-10000.0, -10000.0),
                                         ));

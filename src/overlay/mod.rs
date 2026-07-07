@@ -10448,6 +10448,12 @@ mod windows_overlay {
         }
     }
 
+    pub fn screen_draw_set_color_pick_cursor() {
+        unsafe {
+            set_screen_draw_color_pick_cursor();
+        }
+    }
+
     fn begin_screen_draw_color_pick_mode(state: &mut ScreenDrawState) {
         if !state.freeze_screen {
             let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
@@ -34826,6 +34832,7 @@ mod fallback {
     pub fn screen_draw_get_color_pick_mode() -> bool {
         false
     }
+    pub fn screen_draw_set_color_pick_cursor() {}
     pub fn screen_draw_toggle_color_pick_mode() {}
     pub fn take_latest_vision_capture_mouse_move() -> Option<(i32, i32)> {
         None
