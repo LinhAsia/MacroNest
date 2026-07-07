@@ -1073,7 +1073,7 @@ impl CrosshairApp {
                         );
                     }
                     if trim_timeline_outcome.playhead_changed && !clip.file_path.trim().is_empty() {
-                        if previewing {
+                        if previewing || audio::is_preview_active() {
                             audio::stop_preview();
                             previewing = false;
                             outcome.status = Some("Stopped preview.".to_owned());

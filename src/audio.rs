@@ -410,6 +410,21 @@ pub fn is_previewing(clip: &AudioClipSettings) -> bool {
         .is_previewing(clip)
 }
 
+pub fn is_preview_active() -> bool {
+    let Ok(mut state) = preview_state() else {
+        return false;
+    };
+    state
+        .as_mut()
+        .expect("preview state should be initialized")
+        .cleanup();
+    state
+        .as_ref()
+        .expect("preview state should be initialized")
+        .sink
+        .is_some()
+}
+
 pub fn preview_position_ms(clip: &AudioClipSettings) -> Option<u64> {
     let Ok(mut state) = preview_state() else {
         return None;
