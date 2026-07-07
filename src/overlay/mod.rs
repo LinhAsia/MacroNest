@@ -4781,7 +4781,10 @@ mod windows_overlay {
                     | WM_XBUTTONUP
             ) {
                 let captured = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetCapture() };
-                if !captured.0.is_null() && should_bypass_mouse_event_for_app_window(captured) {
+                if !captured.0.is_null()
+                    && should_bypass_mouse_event_for_app_window(captured)
+                    && !screen_draw_mouse_event_matches_trigger(message, mouse_data)
+                {
                     return CallNextHookEx(None, code, wparam, lparam);
                 }
             }
@@ -4849,7 +4852,9 @@ mod windows_overlay {
             let hwnd_at_point = WindowFromPoint(info.pt);
             if !hwnd_at_point.0.is_null() && !is_vision_capture_mouse_blocked() {
                 let root = GetAncestor(hwnd_at_point, GA_ROOT);
-                if should_bypass_mouse_event_for_app_window(root) {
+                if should_bypass_mouse_event_for_app_window(root)
+                    && !screen_draw_mouse_event_matches_trigger(message, mouse_data)
+                {
                     return CallNextHookEx(None, code, wparam, lparam);
                 }
             }
@@ -8753,6 +8758,21 @@ mod windows_overlay {
                 .into_iter()
                 .any(|part| part.eq_ignore_ascii_case(key_name))
         })
+    }
+
+    fn screen_draw_mouse_event_matches_trigger(message: u32, mouse_data: u16) -> bool {
+        if !screen_draw_active() {
+            return false;
+        }
+        let Some(key_name) = mouse_binding_name_from_message(message, mouse_data) else {
+            return false;
+        };
+        let binding = binding_from_trigger_event(key_name);
+        let state = SCREEN_DRAW_STATE.lock();
+        state
+            .trigger
+            .as_ref()
+            .is_some_and(|trigger| hotkey::binding_matches(trigger, &binding))
     }
 
     fn screen_draw_text_input_char(vk_code: u32) -> Option<String> {
