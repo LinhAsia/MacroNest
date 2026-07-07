@@ -33296,24 +33296,97 @@ mod windows_overlay {
         let pixel_len = (width as usize) * (height as usize) * 4;
         let pixels = std::slice::from_raw_parts_mut(bits as *mut u8, pixel_len);
         pixels.fill(0);
-
-        let mut pixmap = tiny_skia::Pixmap::new(width as u32, height as u32).unwrap();
-        if capture_region_preview_active {
-            let mut dim_paint = tiny_skia::Paint::default();
-            dim_paint.set_color(tiny_skia::Color::from_rgba8(0, 0, 0, 148));
-            dim_paint.anti_alias = false;
-            if let Some(full_rect) = tiny_skia::Rect::from_xywh(0.0, 0.0, width as f32, height as f32)
-            {
-                pixmap.fill_rect(
-                    full_rect,
-                    &dim_paint,
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
+        let capture_fast_path = capture_region_preview_active
+            && regions.is_empty()
+            && static_geometry_shapes.is_empty()
+            && dynamic_geometry_shapes.is_empty();
+        let mut geometry_texts = Vec::new();
+        let mut rects_to_fix: Vec<RECT> = Vec::new();
+        if capture_fast_path {
+            for chunk in pixels.chunks_exact_mut(4) {
+                chunk[0] = 0;
+                chunk[1] = 0;
+                chunk[2] = 0;
+                chunk[3] = 148;
             }
-        }
+            for region in preview_regions {
+                let clear_left = (region.left - min_x).clamp(0, width);
+                let clear_top = (region.top - min_y).clamp(0, height);
+                let clear_right = (region.left - min_x + region.width).clamp(0, width);
+                let clear_bottom = (region.top - min_y + region.height).clamp(0, height);
+                for py in clear_top..clear_bottom {
+                    for px in clear_left..clear_right {
+                        let offset = ((py as usize) * (width as usize) + px as usize) * 4;
+                        pixels[offset] = 0;
+                        pixels[offset + 1] = 0;
+                        pixels[offset + 2] = 0;
+                        pixels[offset + 3] = 0;
+                    }
+                }
 
-        for region in regions {
+                let border_b = ((96u32 * 230) / 255) as u8;
+                let border_g = ((216u32 * 230) / 255) as u8;
+                let border_r = ((255u32 * 230) / 255) as u8;
+                let dash_on = 8i32;
+                let dash_cycle = 14i32;
+                let left = clear_left;
+                let top = clear_top;
+                let right = clear_right.saturating_sub(1);
+                let bottom = clear_bottom.saturating_sub(1);
+
+                for px in left..=right {
+                    let dash = (px - left).rem_euclid(dash_cycle);
+                    if dash >= dash_on {
+                        continue;
+                    }
+                    let top_offset = ((top as usize) * (width as usize) + px as usize) * 4;
+                    let bottom_offset =
+                        ((bottom as usize) * (width as usize) + px as usize) * 4;
+                    pixels[top_offset] = border_b;
+                    pixels[top_offset + 1] = border_g;
+                    pixels[top_offset + 2] = border_r;
+                    pixels[top_offset + 3] = 230;
+                    pixels[bottom_offset] = border_b;
+                    pixels[bottom_offset + 1] = border_g;
+                    pixels[bottom_offset + 2] = border_r;
+                    pixels[bottom_offset + 3] = 230;
+                }
+                for py in top..=bottom {
+                    let dash = (py - top).rem_euclid(dash_cycle);
+                    if dash >= dash_on {
+                        continue;
+                    }
+                    let left_offset = ((py as usize) * (width as usize) + left as usize) * 4;
+                    let right_offset = ((py as usize) * (width as usize) + right as usize) * 4;
+                    pixels[left_offset] = border_b;
+                    pixels[left_offset + 1] = border_g;
+                    pixels[left_offset + 2] = border_r;
+                    pixels[left_offset + 3] = 230;
+                    pixels[right_offset] = border_b;
+                    pixels[right_offset + 1] = border_g;
+                    pixels[right_offset + 2] = border_r;
+                    pixels[right_offset + 3] = 230;
+                }
+            }
+        } else {
+            let mut pixmap = tiny_skia::Pixmap::new(width as u32, height as u32).unwrap();
+            if capture_region_preview_active {
+                let mut dim_paint = tiny_skia::Paint::default();
+                dim_paint.set_color(tiny_skia::Color::from_rgba8(0, 0, 0, 148));
+                dim_paint.anti_alias = false;
+                if let Some(full_rect) =
+                    tiny_skia::Rect::from_xywh(0.0, 0.0, width as f32, height as f32)
+                {
+                    pixmap.fill_rect(
+                        full_rect,
+                        &dim_paint,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
+            }
+
+            for region in regions {
             let rel_left = region.left - min_x;
             let rel_top = region.top - min_y;
             let outline = [92, 220, 255, 210];
@@ -33432,7 +33505,7 @@ mod windows_overlay {
             }
         }
 
-        for region in preview_regions {
+            for region in preview_regions {
             let rel_left = region.left - min_x;
             let rel_top = region.top - min_y;
             let outline = [255, 216, 96, 230];
@@ -33441,7 +33514,7 @@ mod windows_overlay {
                 outline[0], outline[1], outline[2], outline[3],
             ));
             paint.anti_alias = true;
-            let shadow = tiny_skia::Color::from_rgba8(0, 0, 0, 180);
+            let shadow = tiny_skia::Color::from_rgba8(0, 0, 0, 140);
             let draw_dashed_edge = |pixmap: &mut tiny_skia::Pixmap,
                                     x1: f32,
                                     y1: f32,
@@ -33481,7 +33554,7 @@ mod windows_overlay {
                 right,
                 top,
                 shadow,
-                3.0,
+                2.0,
             );
             draw_dashed_edge(
                 &mut pixmap,
@@ -33490,7 +33563,7 @@ mod windows_overlay {
                 right,
                 bottom,
                 shadow,
-                3.0,
+                2.0,
             );
             draw_dashed_edge(
                 &mut pixmap,
@@ -33499,7 +33572,7 @@ mod windows_overlay {
                 left,
                 bottom,
                 shadow,
-                3.0,
+                2.0,
             );
             draw_dashed_edge(
                 &mut pixmap,
@@ -33508,22 +33581,21 @@ mod windows_overlay {
                 left,
                 top,
                 shadow,
-                3.0,
+                2.0,
             );
             let color = tiny_skia::Color::from_rgba8(
                 outline[0], outline[1], outline[2], outline[3],
             );
-            draw_dashed_edge(&mut pixmap, left, top, right, top, color, 1.8);
-            draw_dashed_edge(&mut pixmap, right, top, right, bottom, color, 1.8);
-            draw_dashed_edge(&mut pixmap, right, bottom, left, bottom, color, 1.8);
-            draw_dashed_edge(&mut pixmap, left, bottom, left, top, color, 1.8);
+            draw_dashed_edge(&mut pixmap, left, top, right, top, color, 1.15);
+            draw_dashed_edge(&mut pixmap, right, top, right, bottom, color, 1.15);
+            draw_dashed_edge(&mut pixmap, right, bottom, left, bottom, color, 1.15);
+            draw_dashed_edge(&mut pixmap, left, bottom, left, top, color, 1.15);
         }
 
-        let mut geometry_texts = Vec::new();
-        for shape in static_geometry_shapes
-            .iter()
-            .chain(dynamic_geometry_shapes.iter())
-        {
+            for shape in static_geometry_shapes
+                .iter()
+                .chain(dynamic_geometry_shapes.iter())
+            {
             match &shape.draw {
                 GeometryRenderDraw::Point { x, y, radius, fill } => {
                     let left = x - min_x - radius;
@@ -33783,46 +33855,26 @@ mod windows_overlay {
             }
         }
 
-        // Copy Skia pixmap to DIB section pixels buffer
-        let pixmap_data = pixmap.data();
-        let total_pixels = width as usize * height as usize;
-        for i in 0..total_pixels {
-            let offset = i * 4;
-            let r = pixmap_data[offset];
-            let g = pixmap_data[offset + 1];
-            let b = pixmap_data[offset + 2];
-            let a = pixmap_data[offset + 3];
-            pixels[offset] = b;
-            pixels[offset + 1] = g;
-            pixels[offset + 2] = r;
-            pixels[offset + 3] = a;
-        }
-        if capture_region_preview_active {
-            for region in preview_regions {
-                if region.width < 4 || region.height < 4 {
-                    continue;
-                }
-                let clear_left = (region.left - min_x + 2).clamp(0, width);
-                let clear_top = (region.top - min_y + 2).clamp(0, height);
-                let clear_right = (region.left - min_x + region.width - 2).clamp(0, width);
-                let clear_bottom = (region.top - min_y + region.height - 2).clamp(0, height);
-                for py in clear_top..clear_bottom {
-                    for px in clear_left..clear_right {
-                        let offset = ((py as usize) * (width as usize) + px as usize) * 4;
-                        pixels[offset] = 0;
-                        pixels[offset + 1] = 0;
-                        pixels[offset + 2] = 0;
-                        pixels[offset + 3] = 0;
-                    }
-                }
+            // Copy Skia pixmap to DIB section pixels buffer
+            let pixmap_data = pixmap.data();
+            let total_pixels = width as usize * height as usize;
+            for i in 0..total_pixels {
+                let offset = i * 4;
+                let r = pixmap_data[offset];
+                let g = pixmap_data[offset + 1];
+                let b = pixmap_data[offset + 2];
+                let a = pixmap_data[offset + 3];
+                pixels[offset] = b;
+                pixels[offset + 1] = g;
+                pixels[offset + 2] = r;
+                pixels[offset + 3] = a;
             }
-        }
 
-        // Draw SVG images directly on top of pixels
-        for shape in static_geometry_shapes
-            .iter()
-            .chain(dynamic_geometry_shapes.iter())
-        {
+            // Draw SVG images directly on top of pixels
+            for shape in static_geometry_shapes
+                .iter()
+                .chain(dynamic_geometry_shapes.iter())
+            {
             if let GeometryRenderDraw::Svg {
                 x,
                 y,
@@ -33914,6 +33966,8 @@ mod windows_overlay {
             }
         }
 
+        }
+
         use windows::Win32::Foundation::RECT;
         use windows::Win32::Graphics::Gdi::{
             DT_LEFT, DT_SINGLELINE, DT_VCENTER, DrawTextW, GetTextExtentPoint32W, GetTextMetricsW,
@@ -33980,7 +34034,7 @@ mod windows_overlay {
             occupied_label_rects.push(text_rect);
         }
 
-        let rects_to_fix = occupied_label_rects.clone();
+        rects_to_fix = occupied_label_rects.clone();
         let font_name = "Segoe UI"
             .encode_utf16()
             .chain(std::iter::once(0))
