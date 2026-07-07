@@ -5,6 +5,18 @@ use super::{
     default_y_offset,
 };
 
+fn default_crosshair_ring_radius() -> f32 {
+    18.0
+}
+
+fn default_crosshair_ring_thickness() -> f32 {
+    2.0
+}
+
+fn default_crosshair_ring_color() -> RgbaColor {
+    RgbaColor::WHITE
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RgbaColor {
     pub r: u8,
@@ -52,6 +64,14 @@ pub struct CrosshairStyle {
     pub outline_enabled: bool,
     pub outline_thickness: f32,
     pub outline_color: RgbaColor,
+    #[serde(default)]
+    pub ring_enabled: bool,
+    #[serde(default = "default_crosshair_ring_radius")]
+    pub ring_radius: f32,
+    #[serde(default = "default_crosshair_ring_thickness")]
+    pub ring_thickness: f32,
+    #[serde(default = "default_crosshair_ring_color")]
+    pub ring_color: RgbaColor,
     pub center_dot: bool,
     pub center_dot_size: f32,
     pub opacity: f32,
@@ -78,6 +98,10 @@ impl Default for CrosshairStyle {
             outline_enabled: true,
             outline_thickness: 2.0,
             outline_color: RgbaColor::BLACK,
+            ring_enabled: false,
+            ring_radius: default_crosshair_ring_radius(),
+            ring_thickness: default_crosshair_ring_thickness(),
+            ring_color: default_crosshair_ring_color(),
             center_dot: false,
             center_dot_size: 4.0,
             opacity: 0.95,
