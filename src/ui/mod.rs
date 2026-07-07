@@ -102,6 +102,12 @@ pub(crate) enum UpdateStatus {
     UpToDate,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct UpdateNotice {
+    message: String,
+    expires_at: Instant,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum AudioEditorTarget {
     Startup,
@@ -745,6 +751,9 @@ pub struct CrosshairApp {
     panel_warmup_frames_remaining: u8,
     warmed_panels: Vec<AppPanel>,
     update_status: UpdateStatus,
+    startup_update_check_pending: bool,
+    update_check_was_automatic: bool,
+    update_notice: Option<UpdateNotice>,
     interception_status: String,
     opencv_download_job: Option<JoinHandle<Result<()>>>,
     opencv_download_progress: Arc<AtomicU32>,
@@ -1023,6 +1032,9 @@ impl CrosshairApp {
             background_panel_preload_index: 0,
             startup_gate: Some(startup_gate),
             update_status: UpdateStatus::Idle,
+            startup_update_check_pending: true,
+            update_check_was_automatic: false,
+            update_notice: None,
             interception_status: "Interception: Unavailable".to_owned(),
             opencv_download_job: None,
             opencv_download_progress: Arc::new(AtomicU32::new(0)),
@@ -7389,6 +7401,84 @@ impl CrosshairApp {
         Stroke::new(1.0, Color32::from_rgb(90, 190, 255))
     }
 
+    pub(crate) fn pending_update_badge_count(&self) -> u32 {
+        match self.update_status {
+            UpdateStatus::Available(_, _, _)
+            | UpdateStatus::Downloading
+            | UpdateStatus::ReadyToRestart(_) => 1,
+            _ => 0,
+        }
+    }
+
+    fn show_update_notice(&mut self, message: impl Into<String>) {
+        self.update_notice = Some(UpdateNotice {
+            message: message.into(),
+            expires_at: Instant::now() + Duration::from_secs(6),
+        });
+    }
+
+    fn render_update_notice(&mut self, ctx: &egui::Context) {
+        let Some(notice) = self.update_notice.clone() else {
+            return;
+        };
+        if Instant::now() >= notice.expires_at {
+            self.update_notice = None;
+            return;
+        }
+
+        ctx.request_repaint_after(Duration::from_millis(200));
+
+        egui::Area::new(egui::Id::new("update_notice"))
+            .order(Order::Foreground)
+            .anchor(egui::Align2::RIGHT_TOP, vec2(-18.0, 54.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                let fill = if self.state.ui_theme == UiThemeMode::Dark {
+                    Color32::from_rgba_premultiplied(20, 24, 32, 246)
+                } else {
+                    Color32::from_rgba_premultiplied(250, 251, 253, 246)
+                };
+
+                Frame::new()
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(255, 92, 92)))
+                    .corner_radius(12.0)
+                    .shadow(Shadow {
+                        offset: [0, 8],
+                        blur: 24,
+                        spread: 0,
+                        color: Color32::from_rgba_premultiplied(0, 0, 0, 72),
+                    })
+                    .inner_margin(Margin::symmetric(12, 10))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let (badge_rect, _) =
+                                ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                            ui.painter().circle_filled(
+                                badge_rect.center(),
+                                8.0,
+                                Color32::from_rgb(255, 60, 60),
+                            );
+                            ui.painter().text(
+                                badge_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "1",
+                                egui::FontId::proportional(9.0),
+                                Color32::WHITE,
+                            );
+                            ui.add_space(4.0);
+                            ui.label(RichText::new(notice.message).strong().color(
+                                if self.state.ui_theme == UiThemeMode::Dark {
+                                    Color32::WHITE
+                                } else {
+                                    Color32::from_rgb(16, 24, 40)
+                                },
+                            ));
+                        });
+                    });
+            });
+    }
+
     fn shell_toggle_button(
         ui: &mut egui::Ui,
         selected: bool,
@@ -11773,6 +11863,10 @@ impl eframe::App for CrosshairApp {
             self.native_transitions_disabled_applied = true;
         }
         self.run_deferred_startup_tasks(ctx);
+        if self.startup_update_check_pending {
+            self.startup_update_check_pending = false;
+            self.check_for_update_with_origin(ctx, true);
+        }
 
         while let Ok(command) = self.ui_rx.try_recv() {
             match command {
@@ -12555,19 +12649,26 @@ impl eframe::App for CrosshairApp {
                     self.update_status = UpdateStatus::Checking;
                 }
                 UiCommand::UpdateAvailable(version, body, url) => {
+                    if self.update_check_was_automatic {
+                        self.show_update_notice(format!("New version v{version} is available."));
+                    }
                     self.update_status = UpdateStatus::Available(version, body, url);
+                    self.update_check_was_automatic = false;
                 }
                 UiCommand::UpdateDownloadStarted => {
                     self.update_status = UpdateStatus::Downloading;
                 }
                 UiCommand::UpdateDownloadFinished(new_exe_path) => {
                     self.update_status = UpdateStatus::ReadyToRestart(new_exe_path);
+                    self.update_check_was_automatic = false;
                 }
                 UiCommand::UpdateError(e) => {
                     self.update_status = UpdateStatus::Error(e);
+                    self.update_check_was_automatic = false;
                 }
                 UiCommand::UpdateUpToDate => {
                     self.update_status = UpdateStatus::UpToDate;
+                    self.update_check_was_automatic = false;
                 }
                 UiCommand::SetInterceptionStatus(status) => {
                     self.interception_status = status;
@@ -13890,6 +13991,27 @@ impl eframe::App for CrosshairApp {
                             show_icon_tooltips,
                             Self::tr_lang(self.state.ui_language, "Settings", "Settings"),
                         );
+                        let update_badge_count = self.pending_update_badge_count();
+                        if update_badge_count > 0 {
+                            let badge_center = settings_response.rect.right_top() + vec2(-8.0, 8.0);
+                            ui.painter().circle_filled(
+                                badge_center,
+                                7.5,
+                                Color32::from_rgb(255, 60, 60),
+                            );
+                            ui.painter().circle_stroke(
+                                badge_center,
+                                7.5,
+                                egui::Stroke::new(1.0, Color32::WHITE),
+                            );
+                            ui.painter().text(
+                                badge_center,
+                                egui::Align2::CENTER_CENTER,
+                                update_badge_count.to_string(),
+                                egui::FontId::proportional(9.0),
+                                Color32::WHITE,
+                            );
+                        }
                         if settings_response.clicked() {
                             self.settings_popup_open = !self.settings_popup_open;
                         }
@@ -14198,6 +14320,7 @@ impl eframe::App for CrosshairApp {
         }
 
         self.render_custom_ai_modal(ctx);
+        self.render_update_notice(ctx);
 
         if self.variable_inspector_open {
             let mut open = self.variable_inspector_open;
