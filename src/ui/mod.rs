@@ -9787,6 +9787,105 @@ impl CrosshairApp {
         );
     }
 
+    fn copy_macro_group_to_clipboard(&mut self, group_id: u32) {
+        if self
+            .state
+            .macro_groups
+            .iter()
+            .any(|group| group.id == group_id)
+        {
+            self.macro_group_clipboard = vec![group_id];
+            self.macro_group_clipboard_is_cut = false;
+            self.macro_group_clipboard_feedback = Some(MacroGroupClipboardFeedback::Copy);
+            self.macro_group_clipboard_feedback_until =
+                Some(Instant::now() + Duration::from_secs(1));
+            self.status = "Copied 1 macro group.".to_owned();
+        } else {
+            self.status = "Macro group was not found.".to_owned();
+        }
+    }
+
+    fn paste_macro_groups_after(&mut self, anchor_group_id: u32) {
+        if self.macro_group_clipboard.is_empty() {
+            self.status = "No macro groups in clipboard.".to_owned();
+            return;
+        }
+
+        let Some(anchor_index) = self
+            .state
+            .macro_groups
+            .iter()
+            .position(|group| group.id == anchor_group_id)
+        else {
+            self.status = "Target macro group was not found.".to_owned();
+            return;
+        };
+        let target_folder_id = self.state.macro_groups[anchor_index].folder_id;
+        let clipboard_ids = self.macro_group_clipboard.clone();
+
+        if self.macro_group_clipboard_is_cut {
+            if clipboard_ids.contains(&anchor_group_id) {
+                self.status = "Cannot paste a cut macro group after itself.".to_owned();
+                return;
+            }
+
+            let clipboard_id_set = clipboard_ids.iter().copied().collect::<HashSet<_>>();
+            let mut moved_groups = Vec::new();
+            self.state.macro_groups.retain(|group| {
+                if clipboard_id_set.contains(&group.id) {
+                    moved_groups.push(group.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            for group in &mut moved_groups {
+                group.folder_id = target_folder_id;
+            }
+
+            let insert_index = self
+                .state
+                .macro_groups
+                .iter()
+                .position(|group| group.id == anchor_group_id)
+                .map(|index| index + 1)
+                .unwrap_or(self.state.macro_groups.len());
+            self.state
+                .macro_groups
+                .splice(insert_index..insert_index, moved_groups);
+
+            self.macro_group_clipboard.clear();
+            self.macro_group_clipboard_is_cut = false;
+            self.macro_group_clipboard_feedback = Some(MacroGroupClipboardFeedback::Paste);
+            self.macro_group_clipboard_feedback_until =
+                Some(Instant::now() + Duration::from_secs(1));
+            self.status = "Moved macro group selection.".to_owned();
+        } else {
+            let sources = clipboard_ids
+                .iter()
+                .filter_map(|group_id| {
+                    self.state
+                        .macro_groups
+                        .iter()
+                        .find(|group| group.id == *group_id)
+                        .cloned()
+                })
+                .collect::<Vec<_>>();
+            let mut insert_index = anchor_index + 1;
+            for source in &sources {
+                let copied_group = self.clone_macro_group_with_new_ids(source, target_folder_id);
+                self.state.macro_groups.insert(insert_index, copied_group);
+                insert_index += 1;
+            }
+            self.macro_group_clipboard_feedback = Some(MacroGroupClipboardFeedback::Paste);
+            self.macro_group_clipboard_feedback_until =
+                Some(Instant::now() + Duration::from_secs(1));
+            self.status = format!("Pasted {} macro group copy(s).", sources.len());
+        }
+
+        self.persist_reconciled_macro_presets();
+    }
+
     fn open_groq_api_settings(&mut self) {
         self.settings_popup_open = true;
         self.state.groq_settings.details_open = true;

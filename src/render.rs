@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
 use image::{DynamicImage, GenericImageView, ImageReader, imageops::FilterType};
-use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
+use tiny_skia::{Color, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 use crate::model::{CrosshairStyle, RgbaColor};
 
@@ -135,10 +135,15 @@ fn render_builtin(style: &CrosshairStyle) -> Result<RenderedCrosshair> {
     };
     let horizontal_length = style.horizontal_length.max(0.0);
     let vertical_length = style.vertical_length.max(0.0);
+    let ring_extent = if style.ring_enabled {
+        style.ring_radius.max(0.0) + (style.ring_thickness.max(0.0) / 2.0) + outline
+    } else {
+        0.0
+    };
     let extent = style.gap.max(0.0)
         + horizontal_length.max(vertical_length)
         + style.thickness.max(1.0)
-        + outline
+        + outline.max(ring_extent)
         + style.center_dot_size.max(0.0);
     let canvas_size = ((extent * 2.0) + 24.0).ceil().max(64.0) as u32;
     let mut pixmap = Pixmap::new(canvas_size, canvas_size).context("Failed to create a pixmap")?;
@@ -183,6 +188,31 @@ fn render_builtin(style: &CrosshairStyle) -> Result<RenderedCrosshair> {
 
     for (x, y, w, h) in arms {
         fill_rect(&mut pixmap, x, y, w, h, fill_color, true)?;
+    }
+
+    if style.ring_enabled {
+        let ring_radius = style.ring_radius.max(0.0);
+        let ring_thickness = style.ring_thickness.max(0.5);
+        if ring_radius > 0.0 {
+            if style.outline_enabled && outline > 0.0 {
+                stroke_circle(
+                    &mut pixmap,
+                    cx,
+                    cy,
+                    ring_radius,
+                    ring_thickness + outline * 2.0,
+                    outline_color,
+                )?;
+            }
+            stroke_circle(
+                &mut pixmap,
+                cx,
+                cy,
+                ring_radius,
+                ring_thickness,
+                style.ring_color.with_alpha(style.opacity),
+            )?;
+        }
     }
 
     if style.center_dot {
@@ -301,6 +331,31 @@ fn fill_rect(
     Ok(())
 }
 
+fn stroke_circle(
+    pixmap: &mut Pixmap,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    stroke_width: f32,
+    color: RgbaColor,
+) -> Result<()> {
+    if radius <= 0.0 || stroke_width <= 0.0 {
+        return Ok(());
+    }
+
+    let path = PathBuilder::from_circle(center_x, center_y, radius)
+        .context("Invalid circle dimensions")?;
+    let mut paint = Paint::default();
+    paint.set_color(to_skia_color(color));
+    paint.anti_alias = true;
+    let stroke = Stroke {
+        width: stroke_width,
+        ..Default::default()
+    };
+    pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+    Ok(())
+}
+
 fn to_skia_color(color: RgbaColor) -> Color {
     Color::from_rgba8(color.r, color.g, color.b, color.a)
 }
@@ -309,6 +364,27 @@ fn apply_global_alpha(rgba: &mut [u8], alpha: f32) {
     let factor = alpha.clamp(0.0, 1.0);
     for pixel in rgba.chunks_exact_mut(4) {
         pixel[3] = (pixel[3] as f32 * factor).round() as u8;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_builtin_supports_ring_only_crosshair() {
+        let style = CrosshairStyle {
+            horizontal_length: 0.0,
+            vertical_length: 0.0,
+            center_dot: false,
+            ring_enabled: true,
+            ring_radius: 14.0,
+            ring_thickness: 3.0,
+            ..CrosshairStyle::default()
+        };
+
+        let rendered = render_crosshair(&style, None).expect("render ring crosshair");
+        assert!(rendered.rgba.chunks_exact(4).any(|px| px[3] > 0));
     }
 }
 

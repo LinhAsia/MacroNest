@@ -5266,6 +5266,8 @@ impl CrosshairApp {
                     let mut import_preset_to_group: Option<(u32, Option<u32>)> = None; // (group_id, Option<insert_after_preset_id>)
                     let mut export_group: Option<u32> = None;
                     let mut import_group_after: Option<u32> = None; // insert_after_group_id
+                    let mut copy_group_to_clipboard: Option<u32> = None;
+                    let mut paste_groups_after: Option<u32> = None;
                     let selected_steps_snapshot = self.selected_macro_steps.clone();
                 let render_preset_indices = {
                     let group = &self.state.macro_groups[group_index];
@@ -5490,6 +5492,37 @@ impl CrosshairApp {
                                     }
                                     if Self::sound_style_remove_button(ui).clicked() {
                                         remove_group = Some(group.id);
+                                    }
+                                    if Self::with_emphasized_button_hover(ui, |ui| {
+                                        ui.add_sized(
+                                            [24.0, 24.0],
+                                            Button::new(Self::material_icon_text(0xe14d, 17.0)),
+                                        )
+                                    })
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Copy this macro group",
+                                        "Copy this macro group",
+                                    ))
+                                    .clicked()
+                                    {
+                                        copy_group_to_clipboard = Some(group.id);
+                                    }
+                                    if Self::with_emphasized_button_hover(ui, |ui| {
+                                        ui.add_enabled(
+                                            !self.macro_group_clipboard.is_empty(),
+                                            Button::new(Self::material_icon_text(0xe14f, 17.0))
+                                                .min_size(egui::vec2(24.0, 24.0)),
+                                        )
+                                    })
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Paste macro group after this one",
+                                        "Paste macro group after this one",
+                                    ))
+                                    .clicked()
+                                    {
+                                        paste_groups_after = Some(group.id);
                                     }
                                     if Self::sound_style_toggle_button(
                                         ui,
@@ -15099,7 +15132,35 @@ if supports_move_mouse || show_detection_tuning {
                                         });
                                     })
                                     .response;
-                                let is_row_hovered = row_response.hovered();
+                                let row_hover_rect = row_response.rect.expand2(egui::vec2(8.0, 4.0));
+                                let is_row_hovered = row_response.hovered()
+                                    || ui
+                                        .ctx()
+                                        .pointer_hover_pos()
+                                        .is_some_and(|pointer| row_hover_rect.contains(pointer));
+                                if is_row_hovered && !step_is_being_dragged {
+                                    let hover_fill = if self.state.ui_theme == UiThemeMode::Dark {
+                                        Color32::from_rgba_unmultiplied(255, 255, 255, 14)
+                                    } else {
+                                        Color32::from_rgba_unmultiplied(24, 64, 104, 18)
+                                    };
+                                    let hover_stroke = if self.state.ui_theme == UiThemeMode::Dark {
+                                        Color32::from_rgba_unmultiplied(155, 220, 255, 92)
+                                    } else {
+                                        Color32::from_rgba_unmultiplied(42, 106, 166, 110)
+                                    };
+                                    ui.painter().rect_filled(
+                                        row_hover_rect,
+                                        egui::CornerRadius::same(6),
+                                        hover_fill,
+                                    );
+                                    ui.painter().rect_stroke(
+                                        row_hover_rect,
+                                        egui::CornerRadius::same(6),
+                                        egui::Stroke::new(1.0, hover_stroke),
+                                        egui::StrokeKind::Middle,
+                                    );
+                                }
                                 let mut hover_regions = Vec::new();
                                  let mut has_hover_support = false;
                                  match step.action {
@@ -15814,6 +15875,12 @@ if supports_move_mouse || show_detection_tuning {
                         if let Some(group) = group_opt {
                             self.export_macro_group(group_id, &group);
                         }
+                    }
+                    if let Some(group_id) = copy_group_to_clipboard {
+                        self.copy_macro_group_to_clipboard(group_id);
+                    }
+                    if let Some(group_id) = paste_groups_after {
+                        self.paste_macro_groups_after(group_id);
                     }
                     if let Some(group_id) = import_group_after {
                         ui.ctx().data_mut(|data| {

@@ -185,6 +185,43 @@ impl CrosshairApp {
                     ui.end_row();
                 }
 
+                ui.label(Self::tr_lang(language, "Circle", "Circle"));
+                changed |= ui
+                    .checkbox(
+                        &mut style.ring_enabled,
+                        Self::tr_lang(language, "Enabled", "Enabled"),
+                    )
+                    .changed();
+                ui.end_row();
+
+                if style.ring_enabled {
+                    ui.label(Self::tr_lang(language, "Circle radius", "Circle radius"));
+                    let response = ui.add_sized(
+                        [340.0, 20.0],
+                        DragValue::new(&mut style.ring_radius)
+                            .range(0.0..=96.0)
+                            .speed(0.1),
+                    );
+                    changed |= response.changed();
+                    dragging |= response.dragged();
+                    ui.end_row();
+
+                    ui.label(Self::tr_lang(
+                        language,
+                        "Circle thickness",
+                        "Circle thickness",
+                    ));
+                    let response = ui.add_sized(
+                        [340.0, 20.0],
+                        DragValue::new(&mut style.ring_thickness)
+                            .range(0.0..=32.0)
+                            .speed(0.1),
+                    );
+                    changed |= response.changed();
+                    dragging |= response.dragged();
+                    ui.end_row();
+                }
+
                 ui.label(Self::tr_lang(language, "Center dot", "Center dot"));
                 changed |= ui
                     .checkbox(
@@ -224,6 +261,14 @@ impl CrosshairApp {
                 if style.outline_enabled {
                     ui.label(Self::tr_lang(language, "Outline color", "Outline color"));
                     let response = Self::edit_rgba_color(ui, &mut style.outline_color);
+                    changed |= response.changed();
+                    dragging |= response.dragged();
+                    ui.end_row();
+                }
+
+                if style.ring_enabled {
+                    ui.label(Self::tr_lang(language, "Circle color", "Circle color"));
+                    let response = Self::edit_rgba_color(ui, &mut style.ring_color);
                     changed |= response.changed();
                     dragging |= response.dragged();
                     ui.end_row();
