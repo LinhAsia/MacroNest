@@ -1045,21 +1045,8 @@ impl CrosshairApp {
                     Self::set_preview_cursor_ms(preview_cursor, target, preview_cursor_ms, clip);
                     if trim_timeline_outcome.playhead_changed && !clip.file_path.trim().is_empty() {
                         if previewing {
-                            match audio::start_preview_from_ms(clip.clone(), preview_cursor_ms) {
-                                Ok(()) => {
-                                    ui.ctx().request_repaint();
-                                }
-                                Err(error) => {
-                                    outcome.status = Some(format!("Preview failed: {error}"));
-                                }
-                            }
-                        } else {
-                            Self::set_preview_cursor_ms(
-                                preview_cursor,
-                                target,
-                                preview_cursor_ms,
-                                clip,
-                            );
+                            audio::stop_preview();
+                            outcome.status = Some("Stopped preview.".to_owned());
                         }
                     }
                     ui.add_space(1.0);
