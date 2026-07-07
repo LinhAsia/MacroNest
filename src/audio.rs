@@ -157,14 +157,6 @@ impl PreviewState {
         let start_sample = start_frame.saturating_mul(channels as usize);
         let end_frame = ((clip_end_ms as f32 / 1000.0) * sample_rate as f32).ceil() as usize;
         let end_sample = (end_frame.saturating_mul(channels as usize)).min(cached.samples.len());
-        let total_duration_ms = ((end_sample.saturating_sub(start_sample)) as f32
-            / channels as f32
-            / sample_rate as f32
-            * 1000.0)
-            .round()
-            .max(0.0) as u64;
-        let start_position_ms =
-            start_position_ms.min(clip_start_ms.saturating_add(total_duration_ms));
         let source = SharedSamplesSource {
             samples: Arc::clone(&cached.samples),
             index: start_sample.min(end_sample),
