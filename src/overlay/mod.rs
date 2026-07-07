@@ -15536,7 +15536,9 @@ mod windows_overlay {
                 hook_state.vision_capture_preview_regions.clone(),
                 geometry_overlay_static_shapes(&mut hook_state),
                 geometry_overlay_dynamic_shapes(&mut hook_state),
-                hook_state.vision_capture_mouse_blocked && hook_state.vision_capture_is_region_mode,
+                hook_state.vision_capture_mouse_blocked
+                    && (hook_state.vision_capture_is_region_mode
+                        || !hook_state.vision_capture_preview_regions.is_empty()),
             )
         };
         // Check active crosshair expiration
