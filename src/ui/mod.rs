@@ -13238,27 +13238,16 @@ impl eframe::App for CrosshairApp {
                                             }
                                             "capture" => {
                                                 let body = egui::Rect::from_min_max(
-                                                    rect.left_top() + egui::vec2(pad - 1.0, pad + 2.8),
-                                                    rect.right_bottom() + egui::vec2(-pad + 1.0, -pad + 1.0),
+                                                    rect.left_top() + egui::vec2(pad - 0.5, pad + 3.2),
+                                                    rect.right_bottom() + egui::vec2(-pad + 0.5, -pad + 0.6),
                                                 );
-                                                painter.rect_stroke(body, 3.5, stroke, egui::StrokeKind::Inside);
-                                                painter.rect_filled(body.shrink(1.4), 3.0, color.linear_multiply(0.08));
-                                                let grip = egui::Rect::from_min_max(
-                                                    egui::pos2(body.left() + 2.8, body.top() - 2.0),
-                                                    egui::pos2(body.left() + 7.8, body.top() + 1.0),
+                                                painter.rect_stroke(body, 2.8, stroke, egui::StrokeKind::Inside);
+                                                let top = egui::Rect::from_min_max(
+                                                    egui::pos2(body.left() + 3.2, body.top() - 2.4),
+                                                    egui::pos2(body.left() + 8.4, body.top() + 0.2),
                                                 );
-                                                painter.rect_filled(grip, 1.4, color);
-                                                painter.circle_stroke(body.center() + egui::vec2(0.0, 0.6), 4.4, stroke);
-                                                painter.circle_filled(
-                                                    body.center() + egui::vec2(0.0, 0.6),
-                                                    1.35,
-                                                    color.linear_multiply(0.9),
-                                                );
-                                                painter.circle_filled(
-                                                    egui::pos2(body.right() - 3.0, body.top() + 3.2),
-                                                    1.0,
-                                                    color,
-                                                );
+                                                painter.rect_filled(top, 1.4, color);
+                                                painter.circle_stroke(body.center() + egui::vec2(0.0, 0.2), 3.7, stroke);
                                             }
                                             "dropper" => {
                                                 let shaft_start = rect.left_bottom() + egui::vec2(pad + 2.0, -pad - 1.0);
