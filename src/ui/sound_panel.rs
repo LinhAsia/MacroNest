@@ -1020,12 +1020,17 @@ impl CrosshairApp {
     ) -> AudioCardOutcome {
         let mut outcome = AudioCardOutcome::default();
         let mut previewing = audio::is_previewing(clip);
+        let mut claim_preview_cursor = previewing
+            || preview_cursor
+                .as_ref()
+                .is_some_and(|(cursor_target, _)| *cursor_target == target);
         let previous_item_spacing = ui.spacing().item_spacing;
         ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
         let mut trim_timeline_outcome = AudioTrimTimelineOutcome::default();
         let mut preview_cursor_ms = Self::preview_cursor_ms_for(preview_cursor, target, clip);
         if previewing && let Some(position_ms) = audio::preview_position_ms(clip) {
             preview_cursor_ms = position_ms;
+            claim_preview_cursor = true;
             ui.ctx().request_repaint();
         }
 
@@ -1070,7 +1075,17 @@ impl CrosshairApp {
                         112.0,
                     );
                     outcome.changed |= trim_timeline_outcome.changed;
-                    Self::set_preview_cursor_ms(preview_cursor, target, preview_cursor_ms, clip);
+                    if trim_timeline_outcome.playhead_changed {
+                        claim_preview_cursor = true;
+                    }
+                    if claim_preview_cursor {
+                        Self::set_preview_cursor_ms(
+                            preview_cursor,
+                            target,
+                            preview_cursor_ms,
+                            clip,
+                        );
+                    }
                     if trim_timeline_outcome.playhead_changed && !clip.file_path.trim().is_empty() {
                         if previewing {
                             audio::stop_preview();
@@ -1092,6 +1107,7 @@ impl CrosshairApp {
                     if !clip.file_path.trim().is_empty() {
                         if trim_timeline_outcome.preview_from_trim_start {
                             let preview_start_ms = clip.start_ms;
+                            claim_preview_cursor = true;
                             Self::set_preview_cursor_ms(
                                 preview_cursor,
                                 target,
@@ -1113,6 +1129,7 @@ impl CrosshairApp {
                                 let stopped_at =
                                     audio::preview_position_ms(clip).unwrap_or(preview_cursor_ms);
                                 preview_cursor_ms = stopped_at.clamp(clip.start_ms, clip.end_ms);
+                                claim_preview_cursor = true;
                                 Self::set_preview_cursor_ms(
                                     preview_cursor,
                                     target,
@@ -1126,6 +1143,7 @@ impl CrosshairApp {
                                 let preview_start_ms =
                                     preview_cursor_ms.clamp(clip.start_ms, clip.end_ms);
                                 preview_cursor_ms = preview_start_ms;
+                                claim_preview_cursor = true;
                                 Self::set_preview_cursor_ms(
                                     preview_cursor,
                                     target,
@@ -1169,6 +1187,7 @@ impl CrosshairApp {
                 if previewing {
                     let stopped_at = audio::preview_position_ms(clip).unwrap_or(preview_cursor_ms);
                     preview_cursor_ms = stopped_at.clamp(clip.start_ms, clip.end_ms);
+                    claim_preview_cursor = true;
                     Self::set_preview_cursor_ms(preview_cursor, target, preview_cursor_ms, clip);
                     audio::stop_preview();
                     previewing = false;
@@ -1180,6 +1199,7 @@ impl CrosshairApp {
                 } else {
                     let preview_start_ms = preview_cursor_ms.clamp(clip.start_ms, clip.end_ms);
                     preview_cursor_ms = preview_start_ms;
+                    claim_preview_cursor = true;
                     Self::set_preview_cursor_ms(preview_cursor, target, preview_start_ms, clip);
                     match audio::start_preview_from_ms(clip.clone(), preview_start_ms) {
                         Ok(()) => {
@@ -1220,9 +1240,13 @@ impl CrosshairApp {
                 .changed();
         });
 
-        if clip.file_path.trim().is_empty() {
+        if clip.file_path.trim().is_empty()
+            && preview_cursor
+                .as_ref()
+                .is_some_and(|(cursor_target, _)| *cursor_target == target)
+        {
             *preview_cursor = None;
-        } else {
+        } else if claim_preview_cursor {
             *preview_cursor = Some((target, preview_cursor_ms));
         }
         ui.spacing_mut().item_spacing = previous_item_spacing;
