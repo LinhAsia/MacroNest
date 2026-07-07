@@ -7,6 +7,7 @@ use eframe::egui::{self, *};
 struct AudioTrimTimelineOutcome {
     changed: bool,
     hovered: bool,
+    playhead_changed: bool,
     preview_at_playhead: bool,
     preview_from_trim_start: bool,
 }
@@ -609,6 +610,7 @@ impl CrosshairApp {
                             let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                             let next_ms = (ratio * total_ms_f32).round() as u64;
                             *preview_cursor_ms = next_ms.clamp(clip.start_ms, clip.end_ms);
+                            outcome.playhead_changed = true;
                             if primary_pressed || response.dragged() {
                                 ui.ctx()
                                     .data_mut(|data| data.insert_temp(playhead_drag_id, true));
@@ -1040,6 +1042,26 @@ impl CrosshairApp {
                         112.0,
                     );
                     outcome.changed |= trim_timeline_outcome.changed;
+                    Self::set_preview_cursor_ms(preview_cursor, target, preview_cursor_ms, clip);
+                    if trim_timeline_outcome.playhead_changed && !clip.file_path.trim().is_empty() {
+                        if previewing {
+                            match audio::start_preview_from_ms(clip.clone(), preview_cursor_ms) {
+                                Ok(()) => {
+                                    ui.ctx().request_repaint();
+                                }
+                                Err(error) => {
+                                    outcome.status = Some(format!("Preview failed: {error}"));
+                                }
+                            }
+                        } else {
+                            Self::set_preview_cursor_ms(
+                                preview_cursor,
+                                target,
+                                preview_cursor_ms,
+                                clip,
+                            );
+                        }
+                    }
                     ui.add_space(1.0);
                     ui.horizontal(|ui| {
                         ui.label(Self::tr_lang(language, "Start", "Start"));
