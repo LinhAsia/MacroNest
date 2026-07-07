@@ -4881,6 +4881,7 @@ mod windows_overlay {
                 match message {
                     WM_MOUSEMOVE => {
                         let mut hook_state = HOOK_STATE.lock();
+                        let mut refresh_preview = false;
                         let left_held = hook_state.held_mouse_buttons.contains("MouseLeft");
                         if left_held {
                             if let Some((start_x, start_y)) = hook_state.vision_capture_anchor {
@@ -4900,6 +4901,7 @@ mod windows_overlay {
                                 if hook_state.vision_capture_preview_regions.get(0) != Some(&region)
                                 {
                                     hook_state.vision_capture_preview_regions = vec![region];
+                                    refresh_preview = true;
                                 }
                             }
                         }
@@ -4914,6 +4916,9 @@ mod windows_overlay {
                             None
                         };
                         drop(hook_state);
+                        if refresh_preview {
+                            send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+                        }
                         if let Some(ui_tx) = ui_tx {
                             let _ = ui_tx.send(UiCommand::VisionCaptureMouseMove {
                                 screen_x: info.pt.x,
@@ -4944,6 +4949,7 @@ mod windows_overlay {
 
                         let ui_tx = hook_state.ui_tx.clone();
                         drop(hook_state);
+                        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
                         if let Some(ui_tx) = ui_tx {
                             let _ = ui_tx.send(UiCommand::VisionCaptureMouseDown {
                                 screen_x: info.pt.x,
@@ -4977,6 +4983,7 @@ mod windows_overlay {
                         hook_state.vision_preview_source = None;
                         let ui_tx = hook_state.ui_tx.clone();
                         drop(hook_state);
+                        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
                         if let Some(ui_tx) = ui_tx {
                             let _ = ui_tx.send(UiCommand::VisionCaptureMouseUp {
                                 screen_x: info.pt.x,
