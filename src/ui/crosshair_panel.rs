@@ -682,7 +682,11 @@ impl CrosshairApp {
             let pointer_down = ui.input(|i| i.pointer.any_down());
             self.flush_crosshair_profile_dirty(!pointer_down);
             if self.crosshair_editor_dirty {
-                ui.ctx().request_repaint_after(Duration::from_millis(16));
+                if any_dragging {
+                    ui.ctx().request_repaint();
+                } else {
+                    ui.ctx().request_repaint_after(Duration::from_millis(16));
+                }
             }
         }
     }

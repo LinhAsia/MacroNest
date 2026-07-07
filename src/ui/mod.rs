@@ -1182,6 +1182,7 @@ impl CrosshairApp {
     }
 
     fn flush_crosshair_profile_dirty(&mut self, force: bool) {
+        const CROSSHAIR_PREVIEW_SYNC_INTERVAL: Duration = Duration::from_millis(16);
         let Some(index) = self.crosshair_preview_dirty_index else {
             return;
         };
@@ -1191,7 +1192,7 @@ impl CrosshairApp {
                 return;
             }
             if let Some(last_sync_at) = self.crosshair_preview_last_sync_at {
-                if last_sync_at.elapsed() < Duration::from_millis(70) {
+                if last_sync_at.elapsed() < CROSSHAIR_PREVIEW_SYNC_INTERVAL {
                     return;
                 }
             }
