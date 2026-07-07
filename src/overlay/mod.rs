@@ -10614,30 +10614,19 @@ mod windows_overlay {
             state.last_toolbar_interaction_at = Some(Instant::now());
         }
         let handled_button_up = screen_draw_handle_button_up();
-        let trigger_to_sync = {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            screen_draw_debug_log(format!(
-                "toolbar_interacted source={} handled_button_up={} active={} capturing={} active_control={:?} stroke_present={} trigger_down={} suppress={}",
-                source,
-                handled_button_up,
-                state.active,
-                state.capturing_region,
-                state.active_control,
-                state.current_stroke.is_some(),
-                state.trigger_is_down,
-                state.suppress_next_trigger_hold
-            ));
-            state.trigger_latched = false;
-            state.trigger_is_down = false;
-            state.trigger_pressed_at = None;
-            state.trigger_started_from_inactive = false;
-            state.trigger_release_should_keep_open = false;
-            state.suppress_next_trigger_hold = false;
-            state.trigger.clone()
-        };
-        if let Some(trigger) = trigger_to_sync.as_ref() {
-            sync_trigger_binding_input_state(trigger);
-        }
+        let state = SCREEN_DRAW_STATE.lock();
+        screen_draw_debug_log(format!(
+            "toolbar_interacted source={} handled_button_up={} active={} capturing={} active_control={:?} stroke_present={} trigger_down={} suppress={}",
+            source,
+            handled_button_up,
+            state.active,
+            state.capturing_region,
+            state.active_control,
+            state.current_stroke.is_some(),
+            state.trigger_is_down,
+            state.suppress_next_trigger_hold
+        ));
+        drop(state);
         request_screen_draw_overlay_sync();
         request_ui_repaint();
     }
