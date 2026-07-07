@@ -12971,6 +12971,7 @@ impl eframe::App for CrosshairApp {
         if drawing_active {
             let (screen_x, screen_y, screen_w, screen_h) =
                 crate::window_list::virtual_screen_bounds();
+            let root_ctx = ctx.clone();
             const TOOLBAR_ESTIMATED_WIDTH: f32 = 780.0;
             const TOOLBAR_HEIGHT: f32 = 44.0;
             let toolbar_width = ctx.data(|d| {
@@ -13366,6 +13367,7 @@ impl eframe::App for CrosshairApp {
                                         self.screen_draw_color_pick_pending_at = Some(Instant::now());
                                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
                                         ui.ctx().request_repaint_after(Duration::from_millis(16));
+                                        root_ctx.request_repaint_after(Duration::from_millis(16));
                                     }
 
                                     ui.separator();
