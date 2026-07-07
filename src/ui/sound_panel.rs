@@ -590,11 +590,9 @@ impl CrosshairApp {
                         && !start_response.is_pointer_button_down_on()
                         && !end_response.is_pointer_button_down_on()
                         && total_ms > 0
-                        && let Some(pointer) = response.interact_pointer_pos()
+                        && let Some(next_ms) = pointer_time_ms
                         && (response.clicked() || response.dragged())
                     {
-                        let ratio = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-                        let next_ms = (ratio * total_ms_f32).round() as u64;
                         *preview_cursor_ms = next_ms.clamp(clip.start_ms, clip.end_ms);
                         if response.dragged() {
                             ui.ctx()
@@ -1057,6 +1055,15 @@ impl CrosshairApp {
                             }
                         } else if trim_timeline_outcome.preview_at_playhead {
                             if previewing {
+                                let stopped_at =
+                                    audio::preview_position_ms(clip).unwrap_or(preview_cursor_ms);
+                                preview_cursor_ms = stopped_at.clamp(clip.start_ms, clip.end_ms);
+                                Self::set_preview_cursor_ms(
+                                    preview_cursor,
+                                    target,
+                                    preview_cursor_ms,
+                                    clip,
+                                );
                                 audio::stop_preview();
                                 outcome.status = Some("Stopped preview.".to_owned());
                             } else {
@@ -1067,12 +1074,8 @@ impl CrosshairApp {
                                     preview_start_ms,
                                     clip,
                                 );
-                                match audio::toggle_preview_from_ms(clip.clone(), preview_start_ms)
-                                {
-                                    Ok(true) => outcome.status = Some("Previewing.".to_owned()),
-                                    Ok(false) => {
-                                        outcome.status = Some("Stopped preview.".to_owned())
-                                    }
+                                match audio::start_preview_from_ms(clip.clone(), preview_start_ms) {
+                                    Ok(()) => outcome.status = Some("Previewing.".to_owned()),
                                     Err(error) => {
                                         outcome.status = Some(format!("Preview failed: {error}"))
                                     }
@@ -1102,27 +1105,34 @@ impl CrosshairApp {
                 })
                 .clicked()
             {
-                match audio::toggle_preview(clip.clone()) {
-                    Ok(true) => {
-                        outcome.status = Some(
-                            crate::lang::translate(language, "Previewing {}.")
-                                .unwrap_or("Previewing {}.")
-                                .replace("{}", &title),
-                        )
-                    }
-                    Ok(false) => {
-                        outcome.status = Some(
-                            crate::lang::translate(language, "Stopped {} preview.")
-                                .unwrap_or("Stopped {} preview.")
-                                .replace("{}", &title),
-                        )
-                    }
-                    Err(error) => {
-                        outcome.status = Some(
-                            crate::lang::translate(language, "Preview failed: {}")
-                                .unwrap_or("Preview failed: {}")
-                                .replace("{}", &error.to_string()),
-                        )
+                if previewing {
+                    let stopped_at = audio::preview_position_ms(clip).unwrap_or(preview_cursor_ms);
+                    preview_cursor_ms = stopped_at.clamp(clip.start_ms, clip.end_ms);
+                    Self::set_preview_cursor_ms(preview_cursor, target, preview_cursor_ms, clip);
+                    audio::stop_preview();
+                    outcome.status = Some(
+                        crate::lang::translate(language, "Stopped {} preview.")
+                            .unwrap_or("Stopped {} preview.")
+                            .replace("{}", &title),
+                    );
+                } else {
+                    let preview_start_ms = preview_cursor_ms;
+                    Self::set_preview_cursor_ms(preview_cursor, target, preview_start_ms, clip);
+                    match audio::start_preview_from_ms(clip.clone(), preview_start_ms) {
+                        Ok(()) => {
+                            outcome.status = Some(
+                                crate::lang::translate(language, "Previewing {}.")
+                                    .unwrap_or("Previewing {}.")
+                                    .replace("{}", &title),
+                            )
+                        }
+                        Err(error) => {
+                            outcome.status = Some(
+                                crate::lang::translate(language, "Preview failed: {}")
+                                    .unwrap_or("Preview failed: {}")
+                                    .replace("{}", &error.to_string()),
+                            )
+                        }
                     }
                 }
             }
