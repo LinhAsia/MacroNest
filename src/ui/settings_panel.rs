@@ -1576,38 +1576,9 @@ impl CrosshairApp {
 
     fn github_update_error_message(resp: reqwest::blocking::Response) -> String {
         let status = resp.status();
-        let headers = resp.headers().clone();
-        let body = resp.text().unwrap_or_default();
-        let api_message = serde_json::from_str::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|json| json["message"].as_str().map(str::to_owned));
-        let remaining = headers
-            .get("x-ratelimit-remaining")
-            .and_then(|value| value.to_str().ok())
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        let reset = headers
-            .get("x-ratelimit-reset")
-            .and_then(|value| value.to_str().ok())
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        let retry_after = headers
-            .get("retry-after")
-            .and_then(|value| value.to_str().ok())
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
 
         if status == reqwest::StatusCode::FORBIDDEN {
-            if remaining == Some("0") {
-                let _ = (api_message, retry_after, reset);
-                "GitHub rate limit reached. Please try again later.".to_owned()
-            } else if let Some(message) = api_message {
-                format!("GitHub denied the update check (403). {message}")
-            } else {
-                "GitHub denied the update check (403 Forbidden). Try again later.".to_owned()
-            }
-        } else if let Some(message) = api_message {
-            format!("GitHub API error ({}). {}", status, message)
+            "GitHub rate limit reached. Please try again later.".to_owned()
         } else {
             format!("GitHub API error: {}", status)
         }
