@@ -10028,6 +10028,7 @@ mod windows_overlay {
 
     unsafe fn refresh_overlay(runtime: &mut Runtime) -> Result<()> {
         if SCREEN_DRAW_STATE.lock().crosshair_draw_target.is_some() {
+            let _ = clear_screen_draw_overlay_window(runtime.overlay_hwnd);
             let _ = ShowWindow(runtime.overlay_hwnd, SW_HIDE);
             return Ok(());
         }
@@ -10079,9 +10080,38 @@ mod windows_overlay {
         let height = (max_y - min_y).max(1) as u32;
         let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
         for active in actives {
-            let rel_left = (active.left - min_x) as i64;
-            let rel_top = (active.top - min_y) as i64;
-            image::imageops::overlay(&mut canvas, &active.layer, rel_left, rel_top);
+            let rel_left = (active.left - min_x).max(0) as usize;
+            let rel_top = (active.top - min_y).max(0) as usize;
+            let layer_width = active.layer.width() as usize;
+            let layer_height = active.layer.height() as usize;
+            let canvas_width = canvas.width() as usize;
+            let canvas_height = canvas.height() as usize;
+            let copy_width = layer_width.min(canvas_width.saturating_sub(rel_left));
+            let copy_height = layer_height.min(canvas_height.saturating_sub(rel_top));
+            if copy_width == 0 || copy_height == 0 {
+                continue;
+            }
+            let src = active.layer.as_raw();
+            let dst = canvas.as_mut();
+            for row in 0..copy_height {
+                let src_row = row * layer_width * 4;
+                let dst_row = ((rel_top + row) * canvas_width + rel_left) * 4;
+                for col in 0..copy_width {
+                    let src_offset = src_row + col * 4;
+                    let dst_offset = dst_row + col * 4;
+                    let src_a = src[src_offset + 3];
+                    if src_a == 0 {
+                        continue;
+                    }
+                    blend_premultiplied_rgba(
+                        &mut dst[dst_offset..dst_offset + 4],
+                        src[src_offset],
+                        src[src_offset + 1],
+                        src[src_offset + 2],
+                        src_a,
+                    );
+                }
+            }
         }
 
         paint_crosshair_canvas(runtime.overlay_hwnd, canvas, min_x, min_y)?;
@@ -10505,6 +10535,7 @@ mod windows_overlay {
 
         send_screen_draw_config_to_ui();
         request_screen_draw_overlay_sync();
+        let _ = unsafe { clear_screen_draw_overlay_window(runtime.overlay_hwnd) };
         let _ = unsafe { ShowWindow(runtime.overlay_hwnd, SW_HIDE) };
         request_ui_repaint();
     }

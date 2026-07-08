@@ -13500,7 +13500,7 @@ impl eframe::App for CrosshairApp {
                                     // 8. Exit Drawing Mode
                                     let exit_resp = icon_btn(ui, false, "exit", "Exit Drawing Mode");
                                     if exit_resp.is_pointer_button_down_on() {
-                                        crate::overlay::screen_draw_toolbar_interacted_from("exit_button_down");
+                                        crate::overlay::screen_draw_deactivate_from_toolbar();
                                     }
                                     if exit_resp.clicked() {
                                         crate::overlay::screen_draw_deactivate_from_toolbar();
