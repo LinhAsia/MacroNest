@@ -128,7 +128,7 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | `substr(text, start, len)` | Lấy một chuỗi con (hỗ trợ số, chữ hoặc kết hợp) | 1. `substr(banana, 2, 3)` (chữ)<br>2. `substr(HP: 100, 4, 3)` (kết hợp)<br>3. `substr(123456, 1, 4)` (số) | 1. `nan`<br>2. `100`<br>3. `2345` |
 | `len(text)` | Đếm số ký tự (hỗ trợ số, chữ hoặc kết hợp) | 1. `len(apple)` (chữ)<br>2. `len(HP: 100)` (kết hợp)<br>3. `len(453454)` (số) | 1. `5`<br>2. `7`<br>3. `6` |
 | `myVar.toNumber` | Trích xuất các chữ số từ biến văn bản và chuyển thành số (bỏ qua ký tự khác) | Nếu biến `A` là `"HP: 120"` (văn bản):<br>`A.toNumber + 5` | `125` (dạng số) |
-| `myVar.toString` | Chuyển một biến dạng số thành văn bản | Nếu biến `A` là `123` (số):<br>`A.toString` | `"123"` (văn bản) |
+| `myVar.toString` | Lọc bỏ toàn bộ chữ số và giữ lại các ký tự khác để chuyển thành văn bản | 1. Nếu `A` là `123` (số): `A.toString`<br>2. Nếu `A` là `"123abc"` (văn bản): `A.toString` | 1. `"123"` (văn bản)<br>2. `"abc"` (văn bản) |
 
 ### Biến Hệ thống Có sẵn (Dạng Số)
 

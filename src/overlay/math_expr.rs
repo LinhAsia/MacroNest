@@ -1071,9 +1071,19 @@ fn get_object_property_text_value(token: &str) -> Option<String> {
             return Some(s);
         }
 
-        let text_vars = TEXT_VARIABLES.lock();
-        if let Some(val) = text_vars.get(obj_name_raw) {
-            return Some(val.clone());
+        let mut found_str = None;
+        {
+            let text_vars = TEXT_VARIABLES.lock();
+            if let Some(val) = text_vars.get(obj_name_raw) {
+                found_str = Some(val.clone());
+            }
+        }
+
+        if let Some(s) = found_str {
+            let filtered: String = s.chars().filter(|c| !c.is_ascii_digit()).collect();
+            let mut text_vars = TEXT_VARIABLES.lock();
+            text_vars.insert(obj_name_raw.to_string(), filtered.clone());
+            return Some(filtered);
         }
 
         return Some(String::new());

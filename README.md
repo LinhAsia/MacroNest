@@ -128,7 +128,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | `substr(text, start, len)` | Get part of a string (supports numbers, text, or a mix) | 1. `substr(banana, 2, 3)` (text)<br>2. `substr(HP: 100, 4, 3)` (mixed)<br>3. `substr(123456, 1, 4)` (numbers) | 1. `nan`<br>2. `100`<br>3. `2345` |
 | `len(text)` | Count characters (supports numbers, text, or a mix) | 1. `len(apple)` (text)<br>2. `len(HP: 100)` (mixed)<br>3. `len(453454)` (numbers) | 1. `5`<br>2. `7`<br>3. `6` |
 | `myVar.toNumber` | Extract digits from a text variable and convert them to a number (ignores non-digits) | If variable `A` is `"HP: 120"` (text):<br>`A.toNumber + 5` | `125` (numeric) |
-| `myVar.toString` | Convert a numeric variable to a text variable | If variable `A` is `123` (numeric):<br>`A.toString` | `"123"` (text) |
+| `myVar.toString` | Convert a variable to text by filtering out all digits (keeps only non-digits) | 1. If `A` is `123` (numeric): `A.toString`<br>2. If `A` is `"123abc"` (text): `A.toString` | 1. `"123"` (text)<br>2. `"abc"` (text) |
 
 ### Built-in Variables (Numeric)
 
