@@ -14288,17 +14288,43 @@ impl eframe::App for CrosshairApp {
         }
 
         if self.titlebar_guides_open {
-            let screen_center = ctx.screen_rect().center();
-            egui::Window::new("")
-                .title_bar(false)
-                .fixed_pos(screen_center)
-                .pivot(egui::Align2::CENTER_CENTER)
-                .fixed_size(egui::vec2(800.0, 800.0))
-                .resizable(false)
-                .movable(false)
-                .collapsible(false)
+            self.render_modal_backdrop(ctx, true);
+            let (panel_size, panel_pos) =
+                Self::centered_modal_placement(ctx, vec2(800.0, 800.0), vec2(500.0, 500.0));
+            let inner_margin = 16.0;
+            let content_size = vec2(
+                (panel_size.x - inner_margin * 2.0).max(0.0),
+                (panel_size.y - inner_margin * 2.0).max(0.0),
+            );
+            egui::Area::new(egui::Id::new("expression_guides_modal"))
+                .order(Order::Foreground)
+                .fixed_pos(panel_pos)
+                .interactable(true)
                 .show(ctx, |ui| {
-                    self.render_expression_guides_content(ui, ctx);
+                    Frame::new()
+                        .fill(if self.state.ui_theme == UiThemeMode::Dark {
+                            Color32::from_rgba_premultiplied(24, 26, 32, 248)
+                        } else {
+                            Color32::from_rgba_premultiplied(248, 248, 250, 248)
+                        })
+                        .stroke(Stroke::new(
+                            1.0,
+                            Color32::from_rgba_premultiplied(90, 94, 108, 180),
+                        ))
+                        .shadow(Shadow {
+                            offset: [0, 14],
+                            blur: 32,
+                            spread: 0,
+                            color: Color32::from_rgba_premultiplied(12, 12, 16, 72),
+                        })
+                        .corner_radius(16.0)
+                        .inner_margin(Margin::same(inner_margin as i8))
+                        .show(ui, |ui| {
+                            ui.set_min_size(content_size);
+                            ui.set_width(content_size.x);
+                            ui.set_max_width(content_size.x);
+                            self.render_expression_guides_content(ui, ctx);
+                        });
                 });
         }
 
