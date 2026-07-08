@@ -1329,6 +1329,7 @@ impl CrosshairApp {
                                     ui.label(egui::RichText::new("- degrees(rad) / radians(deg)").monospace());
                                     ui.label(egui::RichText::new("- pi / e").monospace());
                                     ui.label(egui::RichText::new("- myVar.toNumber").monospace());
+                                    ui.label(egui::RichText::new("- myVar.toString").monospace());
                                 });
                                 ui.vertical(|ui| {
                                     ui.label(
@@ -16299,6 +16300,7 @@ if supports_move_mouse || show_detection_tuning {
                 | "perm"
                 | "pi"
                 | "tonumber"
+                | "tostring"
         )
     }
 
@@ -16808,7 +16810,7 @@ if supports_move_mouse || show_detection_tuning {
                 "centerY", "cx", "cy",
             ]),
             "clipboard" => Some(&["text"]),
-            _ => Some(&["toNumber"]),
+            _ => Some(&["toNumber", "toString"]),
         }
     }
 

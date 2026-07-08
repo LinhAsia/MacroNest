@@ -1042,6 +1042,43 @@ fn get_object_property_text_value(token: &str) -> Option<String> {
         return Some(text);
     }
 
+    if prop_name == "tostring" {
+        let mut found_num = None;
+        let mut is_runtime_var = false;
+        let obj_name_raw = parts[0].trim();
+        {
+            let vars = RUNTIME_VARIABLES.lock();
+            if let Some(val) = vars.get(obj_name_raw) {
+                found_num = Some(*val);
+                is_runtime_var = true;
+            }
+        }
+
+        if let Some(num) = found_num {
+            let s = if num.fract() == 0.0 {
+                (num as i64).to_string()
+            } else {
+                num.to_string()
+            };
+
+            if is_runtime_var {
+                let mut vars = RUNTIME_VARIABLES.lock();
+                vars.remove(obj_name_raw);
+            }
+
+            let mut text_vars = TEXT_VARIABLES.lock();
+            text_vars.insert(obj_name_raw.to_string(), s.clone());
+            return Some(s);
+        }
+
+        let text_vars = TEXT_VARIABLES.lock();
+        if let Some(val) = text_vars.get(obj_name_raw) {
+            return Some(val.clone());
+        }
+
+        return Some(String::new());
+    }
+
     None
 }
 
