@@ -13520,7 +13520,6 @@ impl eframe::App for CrosshairApp {
                                         brush_size = brush_size.round().clamp(2.0, 80.0);
                                         crate::overlay::screen_draw_set_brush_size(brush_size);
                                     }
-                                    ui.add(egui::Label::new(format!("{:.0}", brush_size)));
 
                                     ui.separator();
 
