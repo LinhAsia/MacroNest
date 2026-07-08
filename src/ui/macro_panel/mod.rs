@@ -1226,218 +1226,20 @@ impl CrosshairApp {
         let language = self.state.ui_language;
         let fill = Color32::from_rgba_unmultiplied(0, 170, 255, 18);
         let stroke = egui::Stroke::new(1.0, Color32::from_rgb(0, 170, 255));
-        ui.horizontal(|ui| {
-            if let Some(texture) = self.guides_author_logo_texture(ctx) {
-                ui.add(egui::Image::new((texture.id(), vec2(34.0, 34.0))).sense(Sense::hover()));
-            }
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(Self::tr_lang(language, "App made by", "App made by"))
-                    .strong()
-                    .size(14.0),
-            );
-            ui.hyperlink_to(
-                "LinhAsia",
-                "https://github.com/LinhAsia/MacroNest/releases/latest",
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let close_btn = egui::Button::new(
-                    Self::material_icon_text(0xe5cd, 16.0)
-                )
-                .frame(false);
-                if ui.add(close_btn).clicked() {
-                    self.titlebar_guides_open = false;
-                }
-                ui.add_space(16.0);
-                ui.hyperlink_to(
-                    Self::tr_lang(language, "Star this repo", "Star repo này"),
-                    "https://github.com/LinhAsia/MacroNest",
-                );
-                ui.hyperlink_to(
-                    Self::material_icon_text(0xe838, 13.0),
-                    "https://github.com/LinhAsia/MacroNest",
-                );
-            });
-        });
-        ui.add_space(4.0);
-        let full_width = ui.available_width();
-        ui.allocate_ui_with_layout(
-            vec2(full_width, 0.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.set_min_width(full_width);
-                egui::Frame::group(ui.style())
-                    .fill(fill)
-                    .stroke(stroke)
-                    .inner_margin(egui::Margin::symmetric(10, 8))
-                    .show(ui, |ui| {
-                        ui.set_min_width((full_width - 22.0).max(0.0));
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                Self::material_icon_text(0xe88f, 14.0)
-                                    .color(Color32::from_rgb(0, 170, 255)),
-                            );
-                            ui.label(
-                                egui::RichText::new(Self::tr_lang(language, "EXPRESSION HELP", "EXPRESSION HELP"))
-                                .strong()
-                                .color(Color32::from_rgb(0, 170, 255)),
-                            );
-                        });
-                        ui.add_space(4.0);
-                        ui.label(Self::tr_lang(language, "To return a value, put variables or math inside {}. Plain text outside {} stays as normal text.", "To return a value, put variables or math inside {}. Plain text outside {} stays as normal text."));
-                        ui.label(
-                            egui::RichText::new(Self::tr_lang(language, "Examples: {A}, {100 + B}, HP: {player_hp}", "Examples: {A}, {100 + B}, HP: {player_hp}"))
-                            .monospace(),
-                        );
-                        ui.add_space(2.0);
-                        ui.label(
-                            egui::RichText::new(Self::tr_lang(
-                                language,
-                                "* Note: Any math errors or division by zero (e.g. 5/0) will return 0.",
-                                "* Lưu ý: Mọi lỗi tính toán hoặc phép chia cho 0 (ví dụ: 5/0) đều trả về 0."
-                            ))
-                            .small()
-                            .weak()
-                        );
-                        ui.add_space(4.0);
-                        ui.label(
-                            egui::RichText::new(Self::tr_lang(language, "Supported math and values", "Supported math and values"))
-                            .strong(),
-                        );
-                        egui::ScrollArea::vertical()
-                            .max_height(450.0)
-                            .show(ui, |ui| {
-                                egui::Grid::new("expression-help-columns")
-                                    .num_columns(3)
-                                    .min_col_width(220.0)
-                                    .spacing([18.0, 0.0])
-                                    .show(ui, |ui| {
-                                        ui.vertical(|ui| {
-                                            egui::Frame::none()
-                                                .fill(ui.style().visuals.widgets.noninteractive.bg_fill)
-                                                .stroke(ui.style().visuals.widgets.noninteractive.bg_stroke)
-                                                .rounding(6.0)
-                                                .inner_margin(8.0)
-                                                .show(ui, |ui| {
-                                                    ui.set_width(220.0);
-                                                    ui.vertical(|ui| {
-                                                        ui.label(
-                                                            egui::RichText::new(Self::tr_lang(language, "Functions", "Functions"))
-                                                                .strong(),
-                                                        );
-                                                        ui.add_space(4.0);
-                                                        ui.label(egui::RichText::new("- a + b / a - b").monospace());
-                                                        ui.label(egui::RichText::new("- a * b / a / b").monospace());
-                                                        ui.label(egui::RichText::new("- a ^ b").monospace());
-                                                        ui.label(egui::RichText::new("- random(min, max)").monospace());
-                                                        ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
-                                                        ui.label(egui::RichText::new("- contains(a, b)").monospace());
-                                                        ui.label(egui::RichText::new("- substr(text, start, len)").monospace());
-                                                        ui.label(egui::RichText::new("- len(text)").monospace());
-                                                        ui.label(egui::RichText::new("- div(a, b) / mod(a, b)").monospace());
-                                                        ui.label(egui::RichText::new("- min(a, b) / max(a, b)").monospace());
-                                                        ui.label(egui::RichText::new("- abs(a) / sqrt(a)").monospace());
-                                                        ui.label(egui::RichText::new("- sin(a) / cos(a) / tan(a)").monospace());
-                                                        ui.label(egui::RichText::new("- asin(a) / acos(a) / atan(a)").monospace());
-                                                        ui.label(egui::RichText::new("- sinh(a) / cosh(a) / tanh(a)").monospace());
-                                                        ui.label(egui::RichText::new("- atan2(y, x)").monospace());
-                                                        ui.label(egui::RichText::new("- ln(a) / log(a) / log10(a)").monospace());
-                                                        ui.label(egui::RichText::new("- exp(a) / pow(a, b)").monospace());
-                                                        ui.label(egui::RichText::new("- round(a, digits)").monospace());
-                                                        ui.label(egui::RichText::new("- ceil(a) / floor(a)").monospace());
-                                                        ui.label(egui::RichText::new("- factorial(n)").monospace());
-                                                        ui.label(egui::RichText::new("- gcd(a,b,...) / lcm(a,b,...)").monospace());
-                                                        ui.label(egui::RichText::new("- isqrt(n)").monospace());
-                                                        ui.label(egui::RichText::new("- comb(n, k) / perm(n, k)").monospace());
-                                                        ui.label(egui::RichText::new("- degrees(rad) / radians(deg)").monospace());
-                                                        ui.label(egui::RichText::new("- pi / e").monospace());
-                                                        ui.label(egui::RichText::new("- myVar.toNumber").monospace());
-                                                        ui.label(egui::RichText::new("- myVar.toString").monospace());
-                                                    });
-                                                });
-                                        });
-                                        ui.vertical(|ui| {
-                                            egui::Frame::none()
-                                                .fill(ui.style().visuals.widgets.noninteractive.bg_fill)
-                                                .stroke(ui.style().visuals.widgets.noninteractive.bg_stroke)
-                                                .rounding(6.0)
-                                                .inner_margin(8.0)
-                                                .show(ui, |ui| {
-                                                    ui.set_width(220.0);
-                                                    ui.vertical(|ui| {
-                                                        ui.label(
-                                                            egui::RichText::new(Self::tr_lang(language, "Numeric values", "Numeric values"))
-                                                                .strong(),
-                                                        );
-                                                        ui.add_space(4.0);
-                                                        ui.label(egui::RichText::new("- screen.width / w").monospace());
-                                                        ui.label(egui::RichText::new("- screen.height / h").monospace());
-                                                        ui.label(egui::RichText::new("- mouse.x / y").monospace());
-                                                        ui.label(egui::RichText::new("- mouse.sensitivity").monospace());
-                                                        ui.label(egui::RichText::new("- volume.level / percent / value").monospace());
-                                                        ui.label(egui::RichText::new("- system.year / month / day").monospace());
-                                                        ui.label(egui::RichText::new("- system.hour / minute / second").monospace());
-                                                        ui.label(egui::RichText::new("- system.millisecond / ms").monospace());
-                                                        ui.label(egui::RichText::new("- window.x / left").monospace());
-                                                        ui.label(egui::RichText::new("- window.y / top").monospace());
-                                                        ui.label(egui::RichText::new("- window.right / bottom").monospace());
-                                                        ui.label(egui::RichText::new("- window.width / w").monospace());
-                                                        ui.label(egui::RichText::new("- window.height / h").monospace());
-                                                        ui.label(egui::RichText::new("- window.centerx / cx").monospace());
-                                                        ui.label(egui::RichText::new("- window.centery / cy").monospace());
-                                                        ui.label(egui::RichText::new("- timer1.hour / minute / second").monospace());
-                                                        ui.label(egui::RichText::new("- timer1.millisecond / ms").monospace());
-                                                        ui.label(egui::RichText::new("- timer1.total_sec / total_ms").monospace());
-                                                    });
-                                                });
-                                        });
-                                        ui.vertical(|ui| {
-                                            egui::Frame::none()
-                                                .fill(ui.style().visuals.widgets.noninteractive.bg_fill)
-                                                .stroke(ui.style().visuals.widgets.noninteractive.bg_stroke)
-                                                .rounding(6.0)
-                                                .inner_margin(8.0)
-                                                .show(ui, |ui| {
-                                                    ui.set_width(220.0);
-                                                    ui.vertical(|ui| {
-                                                        ui.label(
-                                                            egui::RichText::new(Self::tr_lang(language, "System and text", "System and text"))
-                                                                .strong(),
-                                                        );
-                                                        ui.add_space(4.0);
-                                                        ui.label(egui::RichText::new("- system.date").monospace());
-                                                        ui.label(egui::RichText::new("- system.time").monospace());
-                                                        ui.label(egui::RichText::new("- window.title").monospace());
-                                                        ui.label(egui::RichText::new("- clipboard.text").monospace());
-                                                    });
-                                                });
-                                        });
-                                        ui.end_row();
-                                    });
-                            });
-                    });
-            },
-        );
-        let note_fill = Color32::from_rgba_unmultiplied(255, 194, 70, 16);
-        let note_stroke = egui::Stroke::new(1.0, Color32::from_rgb(255, 194, 70));
-        let note_height = 80.0;
-        let available_space = ui.available_height();
-        if available_space > note_height {
-            ui.add_space(available_space - note_height);
-        } else {
-            ui.add_space(10.0);
-        }
-        ui.allocate_ui_with_layout(
-            vec2(full_width, 0.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.set_min_width(full_width);
+
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+            // 1. Draw IMPORTANT NOTE (goes to the absolute bottom)
+            let note_fill = Color32::from_rgba_unmultiplied(255, 194, 70, 16);
+            let note_stroke = egui::Stroke::new(1.0, Color32::from_rgb(255, 194, 70));
+            ui.add_space(8.0);
+            ui.vertical(|ui| {
+                ui.set_min_width(ui.available_width());
                 egui::Frame::group(ui.style())
                     .fill(note_fill)
                     .stroke(note_stroke)
                     .inner_margin(egui::Margin::symmetric(10, 8))
                     .show(ui, |ui| {
-                        ui.set_min_width((full_width - 22.0).max(0.0));
+                        ui.set_min_width((ui.available_width() - 22.0).max(0.0));
                         ui.horizontal(|ui| {
                             ui.label(
                                 Self::material_icon_text(0xe002, 14.0)
@@ -1452,8 +1254,207 @@ impl CrosshairApp {
                         ui.add_space(4.0);
                         ui.label(Self::tr_lang(language, "When the MacroNest window is currently focused, some macros, triggers, or actions may not behave the same as they do in your target app. This is intentional so the editor stays easier and safer to use while you are configuring things inside MacroNest.", "When the MacroNest window is currently focused, some macros, triggers, or actions may not behave the same as they do in your target app. This is intentional so the editor stays easier and safer to use while you are configuring things inside MacroNest."));
                     });
-            },
-        );
+            });
+
+            // 2. Draw the rest of the content (Header & Expression Help Box) from top down in the remaining space above the note
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.horizontal(|ui| {
+                    if let Some(texture) = self.guides_author_logo_texture(ctx) {
+                        ui.add(egui::Image::new((texture.id(), vec2(34.0, 34.0))).sense(Sense::hover()));
+                    }
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(Self::tr_lang(language, "App made by", "App made by"))
+                            .strong()
+                            .size(14.0),
+                    );
+                    ui.hyperlink_to(
+                        "LinhAsia",
+                        "https://github.com/LinhAsia/MacroNest/releases/latest",
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let close_btn = egui::Button::new(
+                            Self::material_icon_text(0xe5cd, 16.0)
+                        )
+                        .frame(false);
+                        if ui.add(close_btn).clicked() {
+                            self.titlebar_guides_open = false;
+                        }
+                        ui.add_space(16.0);
+                        ui.hyperlink_to(
+                            Self::tr_lang(language, "Star this repo", "Star repo này"),
+                            "https://github.com/LinhAsia/MacroNest",
+                        );
+                        ui.hyperlink_to(
+                            Self::material_icon_text(0xe838, 13.0),
+                            "https://github.com/LinhAsia/MacroNest",
+                        );
+                    });
+                });
+                ui.add_space(8.0);
+
+                let full_width = ui.available_width();
+                let remaining_height = ui.available_height() - 10.0;
+                ui.vertical(|ui| {
+                    ui.set_min_width(full_width);
+                    egui::Frame::group(ui.style())
+                        .fill(fill)
+                        .stroke(stroke)
+                        .inner_margin(egui::Margin::symmetric(10, 8))
+                        .show(ui, |ui| {
+                            ui.set_min_width((full_width - 22.0).max(0.0));
+                            ui.set_height(remaining_height - 16.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    Self::material_icon_text(0xe88f, 14.0)
+                                        .color(Color32::from_rgb(0, 170, 255)),
+                                );
+                                ui.label(
+                                    egui::RichText::new(Self::tr_lang(language, "EXPRESSION HELP", "EXPRESSION HELP"))
+                                        .strong()
+                                        .color(Color32::from_rgb(0, 170, 255)),
+                                );
+                            });
+                            ui.add_space(4.0);
+                            ui.label(Self::tr_lang(language, "To return a value, put variables or math inside {}. Plain text outside {} stays as normal text.", "To return a value, put variables or math inside {}. Plain text outside {} stays as normal text."));
+                            ui.label(
+                                egui::RichText::new(Self::tr_lang(language, "Examples: {A}, {100 + B}, HP: {player_hp}", "Examples: {A}, {100 + B}, HP: {player_hp}"))
+                                    .monospace(),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                egui::RichText::new(Self::tr_lang(
+                                    language,
+                                    "* Note: Any math errors or division by zero (e.g. 5/0) will return 0.",
+                                    "* Lưu ý: Mọi lỗi tính toán hoặc phép chia cho 0 (ví dụ: 5/0) đều trả về 0."
+                                ))
+                                .small()
+                                .weak()
+                            );
+                            ui.add_space(6.0);
+                            ui.label(
+                                egui::RichText::new(Self::tr_lang(language, "Supported math and values", "Supported math and values"))
+                                    .strong(),
+                            );
+                            ui.add_space(4.0);
+
+                            let scroll_height = ui.available_height() - 20.0;
+                            egui::ScrollArea::vertical()
+                                .max_height(scroll_height.max(100.0))
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    egui::Grid::new("expression-help-columns")
+                                        .num_columns(3)
+                                        .min_col_width(220.0)
+                                        .spacing([18.0, 0.0])
+                                        .show(ui, |ui| {
+                                            ui.vertical(|ui| {
+                                                egui::Frame::none()
+                                                    .fill(ui.style().visuals.widgets.noninteractive.bg_fill)
+                                                    .stroke(ui.style().visuals.widgets.noninteractive.bg_stroke)
+                                                    .rounding(6.0)
+                                                    .inner_margin(8.0)
+                                                    .show(ui, |ui| {
+                                                        ui.set_width(220.0);
+                                                        ui.vertical(|ui| {
+                                                            ui.label(
+                                                                egui::RichText::new(Self::tr_lang(language, "Functions", "Functions"))
+                                                                    .strong(),
+                                                            );
+                                                            ui.add_space(4.0);
+                                                            ui.label(egui::RichText::new("- a + b / a - b").monospace());
+                                                            ui.label(egui::RichText::new("- a * b / a / b").monospace());
+                                                            ui.label(egui::RichText::new("- a ^ b").monospace());
+                                                            ui.label(egui::RichText::new("- random(min, max)").monospace());
+                                                            ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
+                                                            ui.label(egui::RichText::new("- contains(a, b)").monospace());
+                                                            ui.label(egui::RichText::new("- substr(text, start, len)").monospace());
+                                                            ui.label(egui::RichText::new("- len(text)").monospace());
+                                                            ui.label(egui::RichText::new("- div(a, b) / mod(a, b)").monospace());
+                                                            ui.label(egui::RichText::new("- min(a, b) / max(a, b)").monospace());
+                                                            ui.label(egui::RichText::new("- abs(a) / sqrt(a)").monospace());
+                                                            ui.label(egui::RichText::new("- sin(a) / cos(a) / tan(a)").monospace());
+                                                            ui.label(egui::RichText::new("- asin(a) / acos(a) / atan(a)").monospace());
+                                                            ui.label(egui::RichText::new("- sinh(a) / cosh(a) / tanh(a)").monospace());
+                                                            ui.label(egui::RichText::new("- atan2(y, x)").monospace());
+                                                            ui.label(egui::RichText::new("- ln(a) / log(a) / log10(a)").monospace());
+                                                            ui.label(egui::RichText::new("- exp(a) / pow(a, b)").monospace());
+                                                            ui.label(egui::RichText::new("- round(a, digits)").monospace());
+                                                            ui.label(egui::RichText::new("- ceil(a) / floor(a)").monospace());
+                                                            ui.label(egui::RichText::new("- factorial(n)").monospace());
+                                                            ui.label(egui::RichText::new("- gcd(a,b,...) / lcm(a,b,...)").monospace());
+                                                            ui.label(egui::RichText::new("- isqrt(n)").monospace());
+                                                            ui.label(egui::RichText::new("- comb(n, k) / perm(n, k)").monospace());
+                                                            ui.label(egui::RichText::new("- degrees(rad) / radians(deg)").monospace());
+                                                            ui.label(egui::RichText::new("- pi / e").monospace());
+                                                            ui.label(egui::RichText::new("- myVar.toNumber").monospace());
+                                                            ui.label(egui::RichText::new("- myVar.toString").monospace());
+                                                        });
+                                                    });
+                                            });
+                                            ui.vertical(|ui| {
+                                                egui::Frame::none()
+                                                    .fill(ui.style().visuals.widgets.noninteractive.bg_fill)
+                                                    .stroke(ui.style().visuals.widgets.noninteractive.bg_stroke)
+                                                    .rounding(6.0)
+                                                    .inner_margin(8.0)
+                                                    .show(ui, |ui| {
+                                                        ui.set_width(220.0);
+                                                        ui.vertical(|ui| {
+                                                            ui.label(
+                                                                egui::RichText::new(Self::tr_lang(language, "Numeric values", "Numeric values"))
+                                                                    .strong(),
+                                                            );
+                                                            ui.add_space(4.0);
+                                                            ui.label(egui::RichText::new("- screen.width / w").monospace());
+                                                            ui.label(egui::RichText::new("- screen.height / h").monospace());
+                                                            ui.label(egui::RichText::new("- mouse.x / y").monospace());
+                                                            ui.label(egui::RichText::new("- mouse.sensitivity").monospace());
+                                                            ui.label(egui::RichText::new("- volume.level / percent / value").monospace());
+                                                            ui.label(egui::RichText::new("- system.year / month / day").monospace());
+                                                            ui.label(egui::RichText::new("- system.hour / minute / second").monospace());
+                                                            ui.label(egui::RichText::new("- system.millisecond / ms").monospace());
+                                                            ui.label(egui::RichText::new("- window.x / left").monospace());
+                                                            ui.label(egui::RichText::new("- window.y / top").monospace());
+                                                            ui.label(egui::RichText::new("- window.right / bottom").monospace());
+                                                            ui.label(egui::RichText::new("- window.width / w").monospace());
+                                                            ui.label(egui::RichText::new("- window.height / h").monospace());
+                                                            ui.label(egui::RichText::new("- window.centerx / cx").monospace());
+                                                            ui.label(egui::RichText::new("- window.centery / cy").monospace());
+                                                            ui.label(egui::RichText::new("- timer1.hour / minute / second").monospace());
+                                                            ui.label(egui::RichText::new("- timer1.millisecond / ms").monospace());
+                                                            ui.label(egui::RichText::new("- timer1.total_sec / total_ms").monospace());
+                                                        });
+                                                    });
+                                            });
+                                            ui.vertical(|ui| {
+                                                egui::Frame::none()
+                                                    .fill(ui.style().visuals.widgets.noninteractive.bg_fill)
+                                                    .stroke(ui.style().visuals.widgets.noninteractive.bg_stroke)
+                                                    .rounding(6.0)
+                                                    .inner_margin(8.0)
+                                                    .show(ui, |ui| {
+                                                        ui.set_width(220.0);
+                                                        ui.vertical(|ui| {
+                                                            ui.label(
+                                                                egui::RichText::new(Self::tr_lang(language, "System and text", "System and text"))
+                                                                    .strong(),
+                                                            );
+                                                            ui.add_space(4.0);
+                                                            ui.label(egui::RichText::new("- system.date").monospace());
+                                                            ui.label(egui::RichText::new("- system.time").monospace());
+                                                            ui.label(egui::RichText::new("- window.title").monospace());
+                                                            ui.label(egui::RichText::new("- clipboard.text").monospace());
+                                                        });
+                                                    });
+                                            });
+                                            ui.end_row();
+                                        });
+                                });
+                        });
+                });
+            });
+        });
     }
 
     fn sanitize_legacy_ocr_target_text(value: &mut String) -> bool {
