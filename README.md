@@ -129,6 +129,38 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | `len(text)` | Count characters | `len(453454)` | `6` |
 | `myVar.toNumber` | Convert text to a number | `A.toNumber + 5` | numeric result |
 
+### Built-in Variables (Numeric)
+
+| Variable | Meaning | Example / Notes |
+| :--- | :--- | :--- |
+| `screen.width` | Width of the primary screen in pixels | `screen.width` |
+| `screen.height` | Height of the primary screen in pixels | `screen.height` |
+| `mouse.x` | Current X coordinate of the mouse | `mouse.x` |
+| `mouse.y` | Current Y coordinate of the mouse | `mouse.y` |
+| `mouse.sensitivity` | Current system mouse sensitivity speed | `mouse.sensitivity` |
+| `volume.level` | Current system volume level (0 to 100) | `volume.level` |
+| `window.x` or `left` | X coordinate of target window's left edge | `window.x` |
+| `window.y` or `top` | Y coordinate of target window's top edge | `window.y` |
+| `window.right` | X coordinate of target window's right edge | `window.right` |
+| `window.bottom` | Y coordinate of target window's bottom edge | `window.bottom` |
+| `window.width` | Width of the target window | `window.width` |
+| `window.height` | Height of the target window | `window.height` |
+| `window.centerX` | X coordinate of the target window's center | `window.centerX` |
+| `window.centerY` | Y coordinate of the target window's center | `window.centerY` |
+
+### Built-in Variables (System and Text)
+
+| Variable / Property | Meaning | Example / Notes |
+| :--- | :--- | :--- |
+| `system.year` / `month` / `day` | Current calendar year, month, or day | `system.year` |
+| `system.hour` / `minute` / `second` | Current system time components | `system.hour` |
+| `system.millisecond` | Current system millisecond | `system.millisecond` |
+| `system.date` | Current system date | e.g. `2026-07-09` |
+| `system.time` | Current system time | e.g. `04:24:00` |
+| `window.title` | Title text of the target window | `window.title` |
+| `clipboard.text` | Current text content in the clipboard | `clipboard.text` |
+| `timer1.hour` / `minute` / `second` / `total_sec` | Built-in timer/stopwatch values | e.g. `timer1.total_sec`. Replace `timer1` with custom timer name if configured |
+
 ### Notes
 
 - Expression fields evaluate variables and functions directly.

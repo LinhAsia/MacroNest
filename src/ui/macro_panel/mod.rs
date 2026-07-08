@@ -90,12 +90,12 @@ impl CrosshairApp {
             TextHighlightMode::VariableTokens => Some(Self::tr_lang(
                 language,
                 "Expression field. Variables and functions work directly here. Example: count + 1 or contains(name, \"boss\").",
-                "Ô bi?u th?c. Bi?n và hàm dùng tr?c ti?p ? dây. Ví d?: count + 1 ho?c contains(name, \"boss\").",
+                "ï¿½ bi?u th?c. Bi?n vï¿½ hï¿½m dï¿½ng tr?c ti?p ? dï¿½y. Vï¿½ d?: count + 1 ho?c contains(name, \"boss\").",
             )),
             TextHighlightMode::Interpolations => Some(Self::tr_lang(
                 language,
                 "Text field. Plain text stays as-is. Put variables or math inside {} to show values. Example: HP: {player_hp}.",
-                "Ô van b?n. Ch? thu?ng s? du?c gi? nguyên. Hãy d?t bi?n ho?c phép tính trong {} d? hi?n giá tr?. Ví d?: HP: {player_hp}.",
+                "ï¿½ van b?n. Ch? thu?ng s? du?c gi? nguyï¿½n. Hï¿½y d?t bi?n ho?c phï¿½p tï¿½nh trong {} d? hi?n giï¿½ tr?. Vï¿½ d?: HP: {player_hp}.",
             )),
             TextHighlightMode::None => None,
         }
@@ -1287,7 +1287,10 @@ impl CrosshairApp {
                             egui::RichText::new(Self::tr_lang(language, "Supported math and values", "Supported math and values"))
                             .strong(),
                         );
-                        egui::Grid::new("expression-help-columns")
+                        egui::ScrollArea::vertical()
+                            .max_height(200.0)
+                            .show(ui, |ui| {
+                                egui::Grid::new("expression-help-columns")
                             .num_columns(3)
                             .min_col_width(220.0)
                             .spacing([18.0, 0.0])
@@ -1371,6 +1374,7 @@ impl CrosshairApp {
                                 });
                                 ui.end_row();
                             });
+                        });
                     });
             },
         );

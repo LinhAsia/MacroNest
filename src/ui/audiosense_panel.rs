@@ -131,7 +131,18 @@ impl CrosshairApp {
                             )
                             .changed();
                     });
+                ui.label("Hz");
+                let hz_changed = ui
+                    .add(
+                        DragValue::new(&mut self.audio_sense_test_settings.updates_per_second)
+                            .range(1..=60)
+                            .speed(0.2),
+                    )
+                    .changed();
                 if source_changed && self.audio_sense_test_active {
+                    self.restart_audio_sense_test();
+                }
+                if hz_changed && self.audio_sense_test_active {
                     self.restart_audio_sense_test();
                 }
             });
@@ -150,23 +161,10 @@ impl CrosshairApp {
                         egui::RichText::new(Self::tr_lang(
                             language,
                             "Live input preview",
-                            "Live input preview",
+                    "Live input preview",
                         ))
                         .strong(),
                     );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(format!(
-                            "{} {:.2}",
-                            Self::tr_lang(language, "Level", "Level"),
-                            test_snapshot.level
-                        ));
-                        ui.separator();
-                        ui.label(format!(
-                            "{} {}",
-                            Self::tr_lang(language, "Note", "Note"),
-                            test_snapshot.note
-                        ));
-                    });
                 });
                 ui.add_space(4.0);
                 Self::render_audio_sense_live_waveform(ui, &test_snapshot.waveform);
@@ -176,6 +174,7 @@ impl CrosshairApp {
                     language,
                     &mut self.audio_sense_test_pitch_settings,
                     &test_snapshot,
+                    true,
                 );
                 if test_settings_changed && self.audio_sense_test_active {
                     self.restart_audio_sense_test();
@@ -357,6 +356,7 @@ impl CrosshairApp {
                         language,
                         &mut preset.pitch,
                         &self.pitch_monitor.snapshot(),
+                        false,
                     );
                 }
             });
@@ -401,7 +401,7 @@ impl CrosshairApp {
     ) -> crate::model::AudioSenseMonitorSettings {
         let mut monitor = settings.clone();
         monitor.permanent = true;
-        monitor.updates_per_second = monitor.updates_per_second.max(60);
+        monitor.updates_per_second = monitor.updates_per_second.clamp(1, 60);
         monitor
     }
 
@@ -455,6 +455,7 @@ fn render_pitch_settings_ui(
     language: UiLanguage,
     settings: &mut PitchAudioSenseSettings,
     snapshot: &crate::audiosense::PitchSnapshot,
+    show_live_readout: bool,
 ) -> bool {
     let mut changed = false;
     changed |= ui
@@ -485,15 +486,17 @@ fn render_pitch_settings_ui(
             .changed();
     });
 
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.label(format!(
-            "{}: {}",
-            CrosshairApp::tr_lang(language, "Current note", "Current note"),
-            snapshot.note
-        ));
-        ui.label(format!("conf {:.2}", snapshot.confidence));
-        ui.label(format!("level {:.2}", snapshot.level));
-    });
+    if show_live_readout {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(format!(
+                "{}: {}",
+                CrosshairApp::tr_lang(language, "Current note", "Current note"),
+                snapshot.note
+            ));
+            ui.label(format!("conf {:.2}", snapshot.confidence));
+            ui.label(format!("level {:.2}", snapshot.level));
+        });
+    }
     changed
 }

@@ -383,7 +383,7 @@ impl CrosshairApp {
                         let overlay_changed = ui
                             .checkbox(
                                 &mut preset.show_overlay,
-                                Self::tr_lang(language, "Show overlay", "Show overlay"),
+                                Self::tr_lang(language, "Show overlay", "Hiện overlay"),
                             )
                             .changed();
                         if overlay_changed && !preset.show_overlay {

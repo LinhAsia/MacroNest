@@ -152,10 +152,8 @@ pub(crate) fn start_vision_following(
         .insert(preset.id, (offset_x, offset_y));
     lock.vision_following_axis_locks
         .insert(preset.id, axis_lock);
-    lock.vision_following_passes
-        .insert(preset.id, passes);
-    lock.vision_following_delays
-        .insert(preset.id, delay_ms);
+    lock.vision_following_passes.insert(preset.id, passes);
+    lock.vision_following_delays.insert(preset.id, delay_ms);
     lock.vision_following_tolerances
         .insert(preset.id, tolerance);
     lock.vision_following_rates
@@ -1371,12 +1369,7 @@ pub(crate) fn run_vision_once_with_options(
         set_found_var(true);
 
         if move_cursor {
-            settle_image_search_mouse_move(
-                move_target.0,
-                move_target.1,
-                passes,
-                delay_ms,
-            )?;
+            settle_image_search_mouse_move(move_target.0, move_target.1, passes, delay_ms)?;
         }
 
         if fire_click {
@@ -1389,34 +1382,22 @@ pub(crate) fn run_vision_once_with_options(
             status: if anchor.is_some() {
                 format!(
                     "Matched colors from priority point at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    effective_tolerance,
-                    step_offset_x,
-                    step_offset_y,
-                    move_status_suffix
+                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
                 )
             } else if preset.color_scan_average_centroid {
                 format!(
                     "Matched colors centroid at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    effective_tolerance,
-                    step_offset_x,
-                    step_offset_y,
-                    move_status_suffix
+                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
                 )
             } else if preset.require_connected_target_colors && target_colors.len() >= 2 {
                 format!(
                     "Matched connected colors at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    effective_tolerance,
-                    step_offset_x,
-                    step_offset_y,
-                    move_status_suffix
+                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
                 )
             } else if preset.dual_color_scan_midpoint {
                 format!(
                     "Matched colors midpoint at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    effective_tolerance,
-                    step_offset_x,
-                    step_offset_y,
-                    move_status_suffix
+                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
                 )
             } else {
                 format!(
@@ -1599,12 +1580,7 @@ pub(crate) fn run_vision_once_with_options(
     set_found_var(true);
 
     if move_cursor {
-        settle_image_search_mouse_move(
-            move_target.0,
-            move_target.1,
-            passes,
-            delay_ms,
-        )?;
+        settle_image_search_mouse_move(move_target.0, move_target.1, passes, delay_ms)?;
     }
 
     if fire_click {
@@ -1616,11 +1592,7 @@ pub(crate) fn run_vision_once_with_options(
         matched: true,
         status: format!(
             "OpenCV matched at {target_x}, {target_y} with confidence {:.3} on {:.2}x (offset {:+}, {:+}).{}",
-            hit.confidence,
-            hit.scale,
-            step_offset_x,
-            step_offset_y,
-            move_status_suffix
+            hit.confidence, hit.scale, step_offset_x, step_offset_y, move_status_suffix
         ),
     })
 }

@@ -66,14 +66,30 @@ mod windows_platform {
         }
     }
 
+    struct SendHandle(HANDLE);
+    unsafe impl Send for SendHandle {}
+    unsafe impl Sync for SendHandle {}
+
+    static SINGLE_INSTANCE_HANDLE: OnceLock<std::sync::Mutex<Option<SendHandle>>> = OnceLock::new();
+
     pub struct SingleInstanceGuard {
         handle: HANDLE,
     }
 
     impl Drop for SingleInstanceGuard {
         fn drop(&mut self) {
-            unsafe {
-                let _ = CloseHandle(self.handle);
+            release_single_instance();
+        }
+    }
+
+    pub fn release_single_instance() {
+        if let Some(cell) = SINGLE_INSTANCE_HANDLE.get() {
+            if let Ok(mut lock) = cell.lock() {
+                if let Some(send_handle) = lock.take() {
+                    unsafe {
+                        let _ = CloseHandle(send_handle.0);
+                    }
+                }
             }
         }
     }
@@ -94,6 +110,11 @@ mod windows_platform {
                 let _ = CloseHandle(handle);
             }
             return Ok(None);
+        }
+
+        let cell = SINGLE_INSTANCE_HANDLE.get_or_init(|| std::sync::Mutex::new(None));
+        if let Ok(mut lock) = cell.lock() {
+            *lock = Some(SendHandle(handle));
         }
 
         Ok(Some(SingleInstanceGuard { handle }))
@@ -461,6 +482,13 @@ mod windows_platform {
                     SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE,
                 );
             }
+            if let Some(overlay_hwnd) = crate::overlay::screen_draw_hwnd() {
+                let _ = windows::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW(
+                    hwnd,
+                    windows::Win32::UI::WindowsAndMessaging::GWL_HWNDPARENT,
+                    overlay_hwnd.0 as isize,
+                );
+            }
         }
         true
     }
@@ -722,6 +750,8 @@ mod fallback {
     pub fn acquire_single_instance() -> Result<Option<SingleInstanceGuard>> {
         Ok(Some(SingleInstanceGuard))
     }
+
+    pub fn release_single_instance() {}
 
     pub fn set_high_priority() {}
 

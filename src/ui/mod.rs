@@ -5915,7 +5915,7 @@ impl CrosshairApp {
                         let clear_label = Self::tr_lang(
                             self.state.ui_language,
                             "Clear overlays",
-                            "Clear overlays",
+                            "Xóa overlay",
                         );
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 28.0),
@@ -13384,17 +13384,17 @@ impl eframe::App for CrosshairApp {
                                         }
                                     };
 
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Brush, "brush", "Brush");
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Line, "line", "Line");
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Arrow, "arrow", "Arrow");
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Rectangle, "rect", "Rectangle");
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Ellipse, "oval", "Ellipse");
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Circle, "circle", "Circle");
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Polygon, "poly", "Polygon");
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Text, "text", "Text");
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Brush, "brush", self.tr("Brush", "Cọ"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Line, "line", self.tr("Line", "Đường"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Arrow, "arrow", self.tr("Arrow", "Mũi tên"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Rectangle, "rect", self.tr("Rectangle", "Hình chữ nhật"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Ellipse, "oval", self.tr("Ellipse", "Elip"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Circle, "circle", self.tr("Circle", "Hình tròn"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Polygon, "poly", self.tr("Polygon", "Đa giác"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Text, "text", self.tr("Text", "Chữ"));
 
                                     // Eraser
-                                    if icon_btn(ui, eraser_active, "eraser", "Eraser").1 {
+                                    if icon_btn(ui, eraser_active, "eraser", self.tr("Eraser", "Tẩy")).1 {
                                         crate::overlay::screen_draw_set_eraser(!eraser_active);
                                     }
 
@@ -13402,11 +13402,11 @@ impl eframe::App for CrosshairApp {
 
                                     // 4. Color Presets (No clipping popups)
                                     let color_presets = [
-                                        ("Red", egui::Color32::from_rgb(255, 80, 80), crate::model::RgbaColor { r: 255, g: 80, b: 80, a: 255 }),
-                                        ("Green", egui::Color32::from_rgb(80, 220, 100), crate::model::RgbaColor { r: 80, g: 220, b: 100, a: 255 }),
-                                        ("Blue", egui::Color32::from_rgb(80, 150, 255), crate::model::RgbaColor { r: 80, g: 150, b: 255, a: 255 }),
-                                        ("Yellow", egui::Color32::from_rgb(255, 220, 50), crate::model::RgbaColor { r: 255, g: 220, b: 50, a: 255 }),
-                                        ("White", egui::Color32::WHITE, crate::model::RgbaColor { r: 255, g: 255, b: 255, a: 255 }),
+                                        (self.tr("Red", "Đỏ"), egui::Color32::from_rgb(255, 80, 80), crate::model::RgbaColor { r: 255, g: 80, b: 80, a: 255 }),
+                                        (self.tr("Green", "Xanh lá"), egui::Color32::from_rgb(80, 220, 100), crate::model::RgbaColor { r: 80, g: 220, b: 100, a: 255 }),
+                                        (self.tr("Blue", "Xanh dương"), egui::Color32::from_rgb(80, 150, 255), crate::model::RgbaColor { r: 80, g: 150, b: 255, a: 255 }),
+                                        (self.tr("Yellow", "Vàng"), egui::Color32::from_rgb(255, 220, 50), crate::model::RgbaColor { r: 255, g: 220, b: 50, a: 255 }),
+                                        (self.tr("White", "Trắng"), egui::Color32::WHITE, crate::model::RgbaColor { r: 255, g: 255, b: 255, a: 255 }),
                                     ];
                                     let active_color = crate::overlay::screen_draw_get_color();
                                     for (name, c32, rgba) in color_presets.iter() {
@@ -13437,7 +13437,7 @@ impl eframe::App for CrosshairApp {
                                         ui,
                                         crate::overlay::screen_draw_get_color_pick_mode(),
                                         "dropper",
-                                        "Pick color from screen",
+                                        self.tr("Pick color from screen", "Lấy màu từ màn hình"),
                                     );
                                     if (crosshair_draw_mode && pick_color_resp.clicked())
                                         || (!crosshair_draw_mode && pick_color_activated)
@@ -13479,7 +13479,7 @@ impl eframe::App for CrosshairApp {
                                     // 5. Brush Size Slider
                                     let mut brush_size = crate::overlay::screen_draw_get_brush_size();
                                     ui.add_space(4.0);
-                                    ui.add(egui::Label::new("Size:"));
+                                    ui.add(egui::Label::new(self.tr("Size:", "Cỡ:")));
                                     let slider_resp = ui.add_sized(
                                         [56.0, 20.0],
                                         egui::DragValue::new(&mut brush_size)
@@ -13500,17 +13500,18 @@ impl eframe::App for CrosshairApp {
 
                                     // 6. Capture Region
                                     if !crosshair_draw_mode {
-                                        if icon_btn(ui, false, "capture", self.tr("Capture Region", "Chụp hình vùng")).1 {
+                                        if icon_btn(ui, false, "capture", self.tr("Capture Region", "Chụp vùng")).1 {
                                             crate::overlay::screen_draw_trigger_capture_region_from_toolbar();
                                         }
                                     }
                                     // 7. Clear Canvas
-                                    if icon_btn(ui, false, "clear", "Clear Canvas").1 {
+                                    if icon_btn(ui, false, "clear", self.tr("Clear Canvas", "Xóa nét vẽ")).1 {
                                         crate::overlay::screen_draw_clear();
                                     }
 
                                     // 8. Exit Drawing Mode
-                                    let (exit_resp, exit_activated) = icon_btn(ui, false, "exit", "Exit Drawing Mode");
+                                    let (exit_resp, exit_activated) =
+                                        icon_btn(ui, false, "exit", self.tr("Exit Drawing Mode", "Thoát chế độ vẽ"));
                                     if exit_resp.is_pointer_button_down_on() {
                                         crate::overlay::screen_draw_deactivate_from_toolbar();
                                     }
@@ -14340,8 +14341,8 @@ impl eframe::App for CrosshairApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.state.reset_session_preset_visibility();
         let _ = crate::platform::show_taskbar();
+        self.state.reset_session_preset_visibility();
         self.sync_window_presets();
         self.sync_macro_presets();
         self.sync_macro_master_enabled();

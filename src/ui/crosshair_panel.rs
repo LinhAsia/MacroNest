@@ -114,7 +114,7 @@ impl CrosshairApp {
                     if ui
                         .add_sized(
                             side_button_size,
-                            Button::new(Self::tr_lang(language, "Link", "Link"))
+                            Button::new(Self::tr_lang(language, "Link", "Liên kết"))
                                 .selected(*link_lengths),
                         )
                         .clicked()
@@ -512,7 +512,7 @@ impl CrosshairApp {
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             if ui
-                                .button(Self::tr_lang(language, "Draw crosshair", "Draw crosshair"))
+                                .button(Self::tr_lang(language, "Draw crosshair", "Vẽ tâm ngắm"))
                                 .clicked()
                             {
                                 pending_crosshair_draw_request = Some((
@@ -526,7 +526,7 @@ impl CrosshairApp {
                                     .button(Self::tr_lang(
                                         language,
                                         "Clear custom draw",
-                                        "Clear custom draw",
+                                        "Xóa nét vẽ tùy chỉnh",
                                     ))
                                     .clicked()
                             {
@@ -538,7 +538,7 @@ impl CrosshairApp {
                         if preset.style.custom_asset.is_some() {
                             ui.add_space(6.0);
                             ui.horizontal(|ui| {
-                                ui.label(Self::tr_lang(language, "Asset scale", "Asset scale"));
+                                ui.label(Self::tr_lang(language, "Asset scale", "Tỷ lệ asset"));
                                 let response = ui.add_sized(
                                     [180.0, 20.0],
                                     DragValue::new(&mut preset.style.custom_scale)
@@ -548,7 +548,7 @@ impl CrosshairApp {
                                 preset_changed |= response.changed();
                                 any_dragging |= response.dragged();
                                 if ui
-                                    .button(Self::tr_lang(language, "Reset", "Reset"))
+                                    .button(Self::tr_lang(language, "Reset", "Đặt lại"))
                                     .clicked()
                                     && let Some(asset_name) = preset.style.custom_asset.as_deref()
                                     && let Some(native_scale) =

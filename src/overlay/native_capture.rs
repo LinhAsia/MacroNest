@@ -3,24 +3,25 @@
 use windows::Win32::{
     Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleDC, CreateDIBSection,
-        CreateFontW, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
-        DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint, FONT_CHARSET,
-        FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_BOLD, FillRect, GetDC, HDC,
-        HFONT, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, ReleaseDC, SRCCOPY,
-        SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, StretchDIBits, TRANSPARENT, UpdateWindow,
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleDC,
+        CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DT_CALCRECT,
+        DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint,
+        FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_BOLD, FillRect,
+        GetDC, HDC, HFONT, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, ReleaseDC,
+        SRCCOPY, SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, StretchDIBits,
+        TRANSPARENT, UpdateWindow,
     },
     UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN},
     UI::WindowsAndMessaging::{
         CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
         DispatchMessageW, GWLP_USERDATA, GetCursorPos, GetMessageW, GetWindowLongPtrW, HCURSOR,
-        HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS,
-        IDC_SIZENWSE, IDC_SIZEWE, IMAGE_CURSOR, LR_SHARED, LoadCursorW, LoadImageW, MSG,
-        PostMessageW, PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW, SW_SHOWNORMAL,
-        SWP_NOACTIVATE, SWP_SHOWWINDOW, SetCursor, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-        TranslateMessage, WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINDOW_STYLE, WM_CREATE,
-        WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT,
-        WM_RBUTTONUP, WM_SETCURSOR, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+        HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE,
+        IDC_SIZEWE, IMAGE_CURSOR, LR_SHARED, LoadCursorW, LoadImageW, MSG, PostMessageW,
+        PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW, SW_SHOWNORMAL, SWP_NOACTIVATE,
+        SWP_SHOWWINDOW, SetCursor, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
+        WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINDOW_STYLE, WM_CREATE, WM_DESTROY, WM_KEYDOWN,
+        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT, WM_RBUTTONUP,
+        WM_SETCURSOR, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     },
 };
 use windows::core::w;
@@ -246,7 +247,10 @@ fn point_click_panel_origin(state: &CaptureState, point: (i32, i32)) -> (i32, i3
     let candidates = [
         (state.width - panel_w - margin, margin),
         (margin, margin),
-        (state.width - panel_w - margin, state.height - panel_h - margin),
+        (
+            state.width - panel_w - margin,
+            state.height - panel_h - margin,
+        ),
         (margin, state.height - panel_h - margin),
     ];
     candidates
@@ -1160,7 +1164,17 @@ unsafe fn draw_point_click_capture_to_dc(
     let _ = SetViewportOrgEx(draw_hdc, -dirty.left, -dirty.top, None);
 
     let Some(curr) = state.current_point else {
-        let _ = BitBlt(hdc, dirty.left, dirty.top, dirty_w, dirty_h, Some(draw_hdc), 0, 0, SRCCOPY);
+        let _ = BitBlt(
+            hdc,
+            dirty.left,
+            dirty.top,
+            dirty_w,
+            dirty_h,
+            Some(draw_hdc),
+            0,
+            0,
+            SRCCOPY,
+        );
         let _ = SelectObject(draw_hdc, old_bitmap);
         let _ = DeleteObject(HGDIOBJ(dib.0));
         let _ = DeleteDC(draw_hdc);
@@ -1221,7 +1235,13 @@ unsafe fn draw_point_click_capture_to_dc(
     let null_brush =
         windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH);
     let old_brush = SelectObject(draw_hdc, null_brush);
-    let _ = Rectangle(draw_hdc, preview_x, preview_y, preview_x + 17 * cell, preview_y + 17 * cell);
+    let _ = Rectangle(
+        draw_hdc,
+        preview_x,
+        preview_y,
+        preview_x + 17 * cell,
+        preview_y + 17 * cell,
+    );
     let _ = Rectangle(
         draw_hdc,
         preview_x + 8 * cell,
@@ -1274,7 +1294,12 @@ unsafe fn draw_point_click_capture_to_dc(
         right: panel_x + 192,
         bottom: panel_y + 194,
     };
-    let _ = DrawTextW(draw_hdc, &mut hex_u16, &mut hex_rect, DT_SINGLELINE | DT_VCENTER);
+    let _ = DrawTextW(
+        draw_hdc,
+        &mut hex_u16,
+        &mut hex_rect,
+        DT_SINGLELINE | DT_VCENTER,
+    );
 
     let mut coord_u16: Vec<u16> = format!("X: {}  Y: {}", curr.0 + state.left, curr.1 + state.top)
         .encode_utf16()
@@ -1286,7 +1311,12 @@ unsafe fn draw_point_click_capture_to_dc(
         bottom: panel_y + 220,
     };
     let _ = SetTextColor(draw_hdc, rgb(188, 206, 230));
-    let _ = DrawTextW(draw_hdc, &mut coord_u16, &mut coord_rect, DT_SINGLELINE | DT_VCENTER);
+    let _ = DrawTextW(
+        draw_hdc,
+        &mut coord_u16,
+        &mut coord_rect,
+        DT_SINGLELINE | DT_VCENTER,
+    );
 
     let mut tip_u16: Vec<u16> = format!("X: {}, Y: {}", curr.0 + state.left, curr.1 + state.top)
         .encode_utf16()
@@ -1317,7 +1347,12 @@ unsafe fn draw_point_click_capture_to_dc(
         right: tooltip_x + 144,
         bottom: tooltip_y + 25,
     };
-    let _ = DrawTextW(draw_hdc, &mut tip_u16, &mut tip_rect, DT_SINGLELINE | DT_VCENTER);
+    let _ = DrawTextW(
+        draw_hdc,
+        &mut tip_u16,
+        &mut tip_rect,
+        DT_SINGLELINE | DT_VCENTER,
+    );
 
     let _ = SelectObject(draw_hdc, old_font);
     let _ = DeleteObject(HGDIOBJ(font.0));

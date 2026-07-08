@@ -49,6 +49,126 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | Clear Overlays | Xóa nhanh tất cả hình vẽ hình học, HUD và các lớp ghim nổi đang hiển thị |
 | Key Sound | Phát âm thanh gõ phím giả lập cơ học với nhiều loại switch và âm lượng |
 
+## Trợ giúp Công thức
+
+<details>
+  <summary>Xem chi tiết cú pháp biểu thức và các ví dụ</summary>
+
+### Toán tử
+
+| Cú pháp | Ý nghĩa | Ví dụ | Kết quả |
+| :--- | :--- | :--- | :--- |
+| `a + b` | Cộng | `2 + 3` | `5` |
+| `a - b` | Trừ | `10 - 4` | `6` |
+| `a * b` | Nhân | `3 * 4` | `12` |
+| `a / b` | Chia | `5 / 2` | `2.5` |
+| `a ^ b` | Lũy thừa | `5^2` | `25` |
+
+### Hằng số
+
+| Cú pháp | Ý nghĩa | Ví dụ | Kết quả |
+| :--- | :--- | :--- | :--- |
+| `pi` | Hằng số Pi | `degrees(pi)` | `180` |
+| `e` | Số Euler | `round(e, 3)` | `2.718` |
+
+### Hàm Cơ bản
+
+| Hàm | Ý nghĩa | Ví dụ | Kết quả |
+| :--- | :--- | :--- | :--- |
+| `random(min, max)` | Số nguyên ngẫu nhiên trong khoảng | `random(10, 20)` | `10..20` |
+| `choice(a, b, ...)` | Chọn ngẫu nhiên một giá trị | `choice(10, 20, 30)` | `10` hoặc `20` hoặc `30` |
+| `min(a, b)` | Giá trị nhỏ hơn | `min(20, 50)` | `20` |
+| `max(a, b)` | Giá trị lớn hơn | `max(20, 50)` | `50` |
+| `abs(a)` | Giá trị tuyệt đối | `abs(-50)` | `50` |
+| `div(a, b)` | Chia lấy phần nguyên (làm tròn xuống) | `div(5, 2)` | `2` |
+| `mod(a, b)` | Chia lấy phần dư | `mod(5, 2)` | `1` |
+| `round(a, digits)` | Làm tròn tới số chữ số thập phân | `round(863.6897, 2)` | `863.69` |
+| `ceil(a)` | Làm tròn lên | `ceil(pi)` | `4` |
+| `floor(a)` | Làm tròn xuống | `floor(pi)` | `3` |
+| `sqrt(a)` | Căn bậc hai | `sqrt(9)` | `3` |
+| `pow(a, b)` | Hàm lũy thừa | `pow(2, 3)` | `8` |
+| `factorial(n)` | Giai thừa | `factorial(5)` | `120` |
+| `gcd(a, b, ...)` | Ước chung lớn nhất | `gcd(24, 36, 48)` | `12` |
+| `lcm(a, b, ...)` | Bội chung nhỏ nhất | `lcm(4, 6, 8)` | `24` |
+| `isqrt(n)` | Căn bậc hai lấy phần nguyên | `isqrt(17)` | `4` |
+| `comb(n, k)` | Tổ hợp chập k của n | `comb(5, 2)` | `10` |
+| `perm(n, k)` | Chỉnh hợp chập k của n | `perm(5, 2)` | `20` |
+
+### Lượng giác và Góc
+
+| Hàm | Ý nghĩa | Ví dụ | Kết quả |
+| :--- | :--- | :--- | :--- |
+| `sin(a)` | Sin | `sin(radians(30)) * 1000` | `500` |
+| `cos(a)` | Cos | `cos(radians(60)) * 1000` | `500` |
+| `tan(a)` | Tan | `tan(45)` | phụ thuộc đơn vị đầu vào |
+| `asin(a)` | Arc sin | `asin(0.5)` | góc tính bằng radian |
+| `acos(a)` | Arc cos | `acos(0.5)` | góc tính bằng radian |
+| `atan(a)` | Arc tan | `degrees(atan(1))` | `45` |
+| `atan2(y, x)` | Arc tan 2 tham số | `degrees(atan2(1, 1))` | `45` |
+| `sinh(a)` | Sin hyperbolic | `sinh(1)` | kết quả số |
+| `cosh(a)` | Cos hyperbolic | `cosh(1)` | kết quả số |
+| `tanh(a)` | Tan hyperbolic | `tanh(1)` | kết quả số |
+| `degrees(rad)` | Radian sang độ | `degrees(pi)` | `180` |
+| `radians(deg)` | Độ sang radian | `radians(180)` | khoảng `3.14159` |
+
+### Logarit và Mũ
+
+| Hàm | Ý nghĩa | Ví dụ | Kết quả |
+| :--- | :--- | :--- | :--- |
+| `ln(a)` | Logarit tự nhiên | `ln(e)` | `1` |
+| `log(a)` | Logarit tự nhiên | `log(e)` | `1` |
+| `log10(a)` | Logarit cơ số 10 | `log10(1000)` | `3` |
+| `exp(a)` | Hàm mũ `e^a` | `exp(1)` | khoảng `2.71828` |
+
+### Trợ giúp Văn bản
+
+| Hàm | Ý nghĩa | Ví dụ | Kết quả |
+| :--- | :--- | :--- | :--- |
+| `contains(a, b)` | Kiểm tra chuỗi `a` có chứa chuỗi `b` hay không | `contains(player_name, boss)` | `1` hoặc `0` |
+| `substr(text, start, len)` | Lấy một chuỗi con | `substr(player_name, 0, 4)` | 4 ký tự đầu tiên |
+| `len(text)` | Đếm số ký tự | `len(453454)` | `6` |
+| `myVar.toNumber` | Chuyển văn bản thành số | `A.toNumber + 5` | kết quả số |
+
+### Biến Hệ thống Có sẵn (Dạng Số)
+
+| Biến số | Ý nghĩa | Ví dụ / Ghi chú |
+| :--- | :--- | :--- |
+| `screen.width` | Chiều rộng của màn hình chính (pixel) | `screen.width` |
+| `screen.height` | Chiều cao của màn hình chính (pixel) | `screen.height` |
+| `mouse.x` | Tọa độ X hiện tại của con trỏ chuột | `mouse.x` |
+| `mouse.y` | Tọa độ Y hiện tại của con trỏ chuột | `mouse.y` |
+| `mouse.sensitivity` | Tốc độ nhạy của chuột hệ thống | `mouse.sensitivity` |
+| `volume.level` | Mức âm lượng hệ thống hiện tại (0 đến 100) | `volume.level` |
+| `window.x` hoặc `left` | Tọa độ X cạnh trái của cửa sổ mục tiêu | `window.x` |
+| `window.y` hoặc `top` | Tọa độ Y cạnh trên của cửa sổ mục tiêu | `window.y` |
+| `window.right` | Tọa độ X cạnh phải của cửa sổ mục tiêu | `window.right` |
+| `window.bottom` | Tọa độ Y cạnh dưới của cửa sổ mục tiêu | `window.bottom` |
+| `window.width` | Chiều rộng của cửa sổ mục tiêu | `window.width` |
+| `window.height` | Chiều cao của cửa sổ mục tiêu | `window.height` |
+| `window.centerX` | Tọa độ X tâm của cửa sổ mục tiêu | `window.centerX` |
+| `window.centerY` | Tọa độ Y tâm của cửa sổ mục tiêu | `window.centerY` |
+
+### Biến Hệ thống Có sẵn (Thời gian và Chữ)
+
+| Biến / Thuộc tính | Ý nghĩa | Ví dụ / Ghi chú |
+| :--- | :--- | :--- |
+| `system.year` / `month` / `day` | Năm, tháng, hoặc ngày hiện tại của hệ thống | `system.year` |
+| `system.hour` / `minute` / `second` | Giờ, phút, hoặc giây hiện tại của hệ thống | `system.hour` |
+| `system.millisecond` | Mili-giây hiện tại của hệ thống | `system.millisecond` |
+| `system.date` | Ngày hệ thống hiện tại dưới dạng chuỗi | ví dụ `2026-07-09` |
+| `system.time` | Giờ hệ thống hiện tại dưới dạng chuỗi | ví dụ `04:24:00` |
+| `window.title` | Tiêu đề của cửa sổ mục tiêu | `window.title` |
+| `clipboard.text` | Nội dung văn bản hiện tại trong clipboard | `clipboard.text` |
+| `timer1.hour` / `minute` / `second` / `total_sec` | Giá trị của bộ đếm thời gian tích hợp sẵn | ví dụ `timer1.total_sec`. Thay `timer1` bằng tên timer tùy chỉnh của bạn nếu có |
+
+### Ghi chú
+
+- Các trường biểu thức tính toán trực tiếp các biến và hàm số.
+- Các trường văn bản thuần sẽ giữ nguyên chữ thường; dùng `{...}` để truyền biến hoặc phép toán vào văn bản.
+- Một số trường macro lưu giá trị cuối cùng dạng số nguyên, vì vậy kết quả thập phân có thể bị làm tròn tại đó.
+
+</details>
+
 ## Bắt đầu Sử dụng
 
 ### Yêu cầu Hệ thống

@@ -95,7 +95,7 @@ impl CrosshairApp {
                                         ui.label("");
                                         if Self::settings_action_button_fixed(
                                             ui,
-                                            "Get API key",
+                                            Self::tr_lang(language, "Get API key", "Lấy API key"),
                                             action_width,
                                         )
                                         .clicked()
@@ -422,7 +422,8 @@ impl CrosshairApp {
         let driver_installed = self.interception_driver_installed;
         let restart_required = self.interception_driver_needs_restart;
         let action_width = Self::settings_tool_action_width();
-        let package_size_label = Self::tool_size_label(&self.paths.interception_zip, 389_119);
+        let package_size_label =
+            Self::tool_size_label(language, &self.paths.interception_zip, 389_119);
 
         ui.vertical(|ui| {
             if downloading_progress.is_some() {
@@ -589,7 +590,7 @@ impl CrosshairApp {
                     RichText::new(Self::tr_lang(
                         language,
                         "Installed. Restart your PC to take effect.",
-                        "",
+                        "Đã cài đặt. Hãy khởi động lại máy để áp dụng.",
                     ))
                     .color(Color32::from_rgb(126, 224, 182)),
                 );
@@ -609,15 +610,20 @@ impl CrosshairApp {
             let has_assets = crate::ocr::has_any_ocr_assets();
             let current_size = crate::ocr::ocr_assets_disk_usage_bytes();
             let state_label = if all_installed {
-                Self::tr_lang(language, "Installed", "Installed")
+                Self::tr_lang(language, "Installed", "Đã cài đặt")
             } else {
-                Self::tr_lang(language, "Not installed", "")
+                Self::tr_lang(language, "Not installed", "Chưa cài đặt")
             };
             let size_label = if has_assets {
-                format!("Size: {}", Self::format_file_size(current_size))
+                format!(
+                    "{}: {}",
+                    Self::tr_lang(language, "Size", "Dung lượng"),
+                    Self::format_file_size(current_size)
+                )
             } else {
                 format!(
-                    "Expected size: ~{}",
+                    "{}: ~{}",
+                    Self::tr_lang(language, "Expected size", "Dung lượng dự kiến"),
                     Self::format_file_size(crate::ocr::expected_ocr_assets_archive_size())
                 )
             };
@@ -642,7 +648,7 @@ impl CrosshairApp {
                                 RichText::new(Self::tr_lang(
                                     language,
                                     "All OCR language packs",
-                                    "",
+                                    "Tất cả gói ngôn ngữ OCR",
                                 ))
                                 .small()
                                 .weak(),
@@ -709,7 +715,11 @@ impl CrosshairApp {
                         ui.add_sized(
                             [details_width, 0.0],
                             egui::Label::new(
-                                RichText::new(Self::tool_size_label(path, expected_size_bytes))
+                                RichText::new(Self::tool_size_label(
+                                    language,
+                                    path,
+                                    expected_size_bytes,
+                                ))
                                     .small()
                                     .weak(),
                             )
@@ -1176,7 +1186,14 @@ impl CrosshairApp {
                                 ui.horizontal(|ui| {
                                     ui.set_min_width(ui.available_width());
                                     ui.vertical(|ui| {
-                                        ui.label(RichText::new("AI Custom").strong());
+                                        ui.label(
+                                            RichText::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "AI Custom",
+                                                "AI tùy chỉnh",
+                                            ))
+                                            .strong(),
+                                        );
                                         ui.label(
                                             RichText::new(preset_name.clone())
                                                 .small()
@@ -1246,7 +1263,11 @@ impl CrosshairApp {
                                 if generating {
                                     ui.horizontal(|ui| {
                                         ui.spinner();
-                                        ui.label("Generating...");
+                                        ui.label(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Generating...",
+                                            "Đang tạo...",
+                                        ));
                                     });
                                 } else if let Some(feedback) = self.command_ai_feedback.as_ref() {
                                     ui.label(
@@ -1262,7 +1283,12 @@ impl CrosshairApp {
                                     if ui
                                         .add_enabled(
                                             can_generate,
-                                            Button::new("Generate").min_size(vec2(100.0, 28.0)),
+                                            Button::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Generate",
+                                                "Tạo",
+                                            ))
+                                            .min_size(vec2(100.0, 28.0)),
                                         )
                                         .clicked()
                                     {
@@ -1271,7 +1297,12 @@ impl CrosshairApp {
                                     if ui
                                         .add_enabled(
                                             true,
-                                            Button::new("Close").min_size(vec2(100.0, 28.0)),
+                                            Button::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Close",
+                                                "Đóng",
+                                            ))
+                                            .min_size(vec2(100.0, 28.0)),
                                         )
                                         .clicked()
                                     {
@@ -1494,11 +1525,16 @@ impl CrosshairApp {
         self.status = "Launching Interception driver uninstaller...".to_owned();
     }
 
-    fn tool_size_label(path: &Path, expected_size_bytes: u64) -> String {
+    fn tool_size_label(language: UiLanguage, path: &Path, expected_size_bytes: u64) -> String {
         match fs::metadata(path) {
-            Ok(metadata) => format!("Size: {}", Self::format_file_size(metadata.len())),
+            Ok(metadata) => format!(
+                "{}: {}",
+                Self::tr_lang(language, "Size", "Dung lượng"),
+                Self::format_file_size(metadata.len())
+            ),
             Err(_) => format!(
-                "Expected size: ~{}",
+                "{}: ~{}",
+                Self::tr_lang(language, "Expected size", "Dung lượng dự kiến"),
                 Self::format_file_size(expected_size_bytes)
             ),
         }

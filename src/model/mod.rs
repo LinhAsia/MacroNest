@@ -181,11 +181,11 @@ fn default_key_sound_volume() -> f32 {
     1.0
 }
 
-fn default_image_search_move_passes() -> u8 {
+pub(crate) fn default_image_search_move_passes() -> u8 {
     3
 }
 
-fn default_image_search_move_delay_ms() -> u64 {
+pub(crate) fn default_image_search_move_delay_ms() -> u64 {
     10
 }
 
