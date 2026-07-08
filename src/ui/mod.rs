@@ -13427,29 +13427,10 @@ impl eframe::App for CrosshairApp {
                                     ui.add(egui::Label::new("Size:"));
                                     ui.style_mut().spacing.slider_width = 80.0;
                                     let slider_resp = ui.add(egui::Slider::new(&mut brush_size, 2.0..=80.0).show_value(false));
-                                    crate::overlay::screen_draw_set_brush_size_active(
-                                        slider_resp.dragged() || slider_resp.clicked(),
-                                    );
                                     if slider_resp.changed() {
                                         crate::overlay::screen_draw_set_brush_size(brush_size);
                                     }
-                                    if slider_resp.dragged() || slider_resp.clicked() {
-                                        #[cfg(windows)]
-                                        {
-                                            let _ = crate::platform::make_window_title_no_activate(
-                                                "Drawing Toolbar",
-                                            );
-                                        }
-                                        slider_resp.surrender_focus();
-                                        ui.ctx().memory_mut(|memory| memory.stop_text_input());
-                                    }
                                     ui.add(egui::Label::new(format!("{:.0}", brush_size)));
-
-                                    // Inline size preview circle (small, in toolbar)
-                                    let (preview_rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
-                                    let preview_color = egui::Color32::from_rgba_unmultiplied(active_color.r, active_color.g, active_color.b, active_color.a);
-                                    let radius = (brush_size * 0.5).clamp(1.0, 8.0);
-                                    ui.painter().circle_filled(preview_rect.center(), radius, preview_color);
 
                                     ui.separator();
 

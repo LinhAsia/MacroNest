@@ -10574,34 +10574,6 @@ mod windows_overlay {
         }
     }
 
-    pub fn screen_draw_set_brush_size_active(active: bool) {
-        let mut state = SCREEN_DRAW_STATE.lock();
-        if active {
-            if state.active_control != ScreenDrawControl::BrushSize {
-                state.active_control = ScreenDrawControl::BrushSize;
-                mark_screen_draw_repaint_pending(&mut state);
-            }
-            return;
-        }
-        if state.active_control == ScreenDrawControl::BrushSize {
-            let previous_rect = screen_draw_toolbar_rect(&state);
-            state.active_control = ScreenDrawControl::None;
-            mark_screen_draw_toolbar_dirty(&mut state, previous_rect);
-            mark_screen_draw_repaint_pending(&mut state);
-            let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
-            if hwnd_raw != 0 {
-                unsafe {
-                    let _ = PostMessageW(
-                        Some(HWND(hwnd_raw as *mut c_void)),
-                        WMAPP_SCREEN_DRAW_SYNC,
-                        WPARAM(0),
-                        LPARAM(0),
-                    );
-                }
-            }
-        }
-    }
-
     pub fn screen_draw_get_tool() -> crate::model::QuickScreenDrawTool {
         match SCREEN_DRAW_STATE.lock().tool {
             ScreenDrawTool::Brush => crate::model::QuickScreenDrawTool::Brush,
@@ -35075,7 +35047,6 @@ mod fallback {
         5.0
     }
     pub fn screen_draw_set_brush_size(_size: f32) {}
-    pub fn screen_draw_set_brush_size_active(_active: bool) {}
     pub fn screen_draw_get_tool() -> crate::model::QuickScreenDrawTool {
         crate::model::QuickScreenDrawTool::Brush
     }
