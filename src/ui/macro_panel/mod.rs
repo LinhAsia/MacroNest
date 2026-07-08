@@ -20308,6 +20308,7 @@ if supports_move_mouse || show_detection_tuning {
         ui.visuals_mut().override_text_color = prev_override;
         let now_focused = response.has_focus();
         if now_focused
+            && response.hovered()
             && let Some(help_text) = Self::text_edit_field_tooltip(ui, highlight_mode)
         {
             Self::show_text_edit_focus_help(ui, response.id, textbox_rect, help_text);
