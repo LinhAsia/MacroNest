@@ -10700,7 +10700,7 @@ mod windows_overlay {
         }
 
         ensure_screen_draw_canvas(state, screen_w as usize, screen_h as usize);
-        if state.committed_dirty {
+        if state.crosshair_draw_target.is_some() || state.committed_dirty {
             rebuild_screen_draw_canvas(state);
         }
 
@@ -12637,6 +12637,7 @@ mod windows_overlay {
         if !state.active || state.capturing_region {
             return false;
         }
+        let is_crosshair_draw_session = state.crosshair_draw_target.is_some();
         let should_sync_config = matches!(
             state.active_control,
             ScreenDrawControl::BrushSize | ScreenDrawControl::SmoothingAmount
@@ -12650,6 +12651,9 @@ mod windows_overlay {
             if !stroke.points.is_empty() {
                 if stroke.tool == ScreenDrawTool::Text && !stroke.eraser {
                     state.text_session = finalize_screen_draw_text_stroke(stroke);
+                } else if is_crosshair_draw_session {
+                    state.strokes.push(stroke);
+                    state.redo_strokes.clear();
                 } else if state.canvas_width > 0
                     && state.canvas_height > 0
                     && !state.committed_rgba.is_empty()
@@ -14616,6 +14620,24 @@ mod windows_overlay {
                 width,
                 dirty_rect,
             );
+        }
+        let crosshair_preview_strokes = if state_guard.crosshair_draw_target.is_some()
+            && !state_guard.strokes.is_empty()
+        {
+            Some(state_guard.strokes.clone())
+        } else {
+            None
+        };
+        if let Some(strokes) = crosshair_preview_strokes
+            && let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
+                state_guard.frame_rgba.as_mut_slice(),
+                width as u32,
+                height as u32,
+            )
+        {
+            for stroke in &strokes {
+                render_screen_draw_stroke_skia(&mut pixmap, stroke);
+            }
         }
         if screen_draw_should_block_background_interaction(&state_guard) {
             screen_draw_apply_input_blocker_alpha(
