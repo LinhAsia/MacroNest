@@ -2369,7 +2369,7 @@ impl CrosshairApp {
                         self.state.active_style.enabled = enabled;
                     }
                     self.mark_crosshair_profile_dirty(profile_index);
-                    self.flush_crosshair_profile_dirty(true);
+                    self.flush_crosshair_profile_dirty(true, true);
                     format!(
                         "Picked crosshair color #{:02X}{:02X}{:02X}.",
                         color.r, color.g, color.b
