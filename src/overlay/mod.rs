@@ -27893,6 +27893,7 @@ mod windows_overlay {
                     let math_funcs = [
                         "choice(",
                         "contains(",
+                        "len(",
                         "random(",
                         "min(",
                         "max(",

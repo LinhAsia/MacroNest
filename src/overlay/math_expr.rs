@@ -94,7 +94,9 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
             if !func_name.is_empty() {
                 let args = split_expression_arguments(sub_expr);
                 let func_name_lower = func_name.to_ascii_lowercase();
-                let result_val = match func_name_lower.as_str() {
+                let replacement = match func_name_lower.as_str() {
+                    "substr" => quote_expression_text(&evaluate_substr_expression(&args)),
+                    "len" => evaluate_len_expression(&args).to_string(),
                     "contains" => {
                         let left = args
                             .first()
@@ -104,7 +106,7 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                             .get(1)
                             .map(|arg| resolve_expression_argument_text(arg))
                             .unwrap_or_default();
-                        if left.contains(&right) { 1.0 } else { 0.0 }
+                        if left.contains(&right) { 1.0 } else { 0.0 }.to_string()
                     }
                     "random" => {
                         let resolved_args: Vec<f64> =
@@ -114,12 +116,12 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                         let max_val = clamp_f64_to_i32(
                             resolved_args.get(1).copied().unwrap_or(min_val as f64),
                         );
-                        get_pseudo_random(min_val, max_val) as f64
+                        (get_pseudo_random(min_val, max_val) as f64).to_string()
                     }
                     _ => {
                         let resolved_args: Vec<f64> =
                             args.iter().map(|arg| evaluate_math_expression_f64(arg)).collect();
-                        match func_name_lower.as_str() {
+                        let result_val = match func_name_lower.as_str() {
                             "min" => resolved_args
                                 .first()
                                 .copied()
@@ -233,10 +235,11 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                         }
                     }
                             _ => 0.0,
-                        }
+                        };
+                        result_val.to_string()
                     }
                 };
-                expr_str.replace_range(func_start_idx..=close_idx, &result_val.to_string());
+                expr_str.replace_range(func_start_idx..=close_idx, &replacement);
             } else {
                 let sub_value = evaluate_math_expression_f64(sub_expr);
                 expr_str.replace_range(open_idx..=close_idx, &sub_value.to_string());
@@ -382,6 +385,10 @@ pub(crate) fn resolve_text_variable_value(token: &str) -> Option<String> {
     let trimmed = token.trim();
     if trimmed.is_empty() {
         return None;
+    }
+
+    if let Some(value) = evaluate_text_function_expression(trimmed) {
+        return Some(value);
     }
 
     if let Some(text) = get_object_property_text_value(trimmed) {
@@ -550,6 +557,9 @@ pub(crate) fn smart_set_variable_from_expression(target_var: &str, expr_raw: &st
         if let Ok(val) = expr_trimmed.parse::<f64>() {
             set_variable_value(target_trimmed, val);
             TEXT_VARIABLES.lock().remove(target_trimmed);
+        } else if let Some(text_val) = evaluate_text_function_expression(&expr_trimmed) {
+            set_text_variable_value(target_trimmed, &text_val);
+            RUNTIME_VARIABLES.lock().remove(target_trimmed);
         } else if looks_like_math_expression_text(&expr_trimmed) {
             let val = evaluate_math_expression_f64(&expr_trimmed);
             set_variable_value(target_trimmed, val);
@@ -564,7 +574,10 @@ pub(crate) fn smart_set_variable_from_expression(target_var: &str, expr_raw: &st
             set_variable_value(target_trimmed, val);
             TEXT_VARIABLES.lock().remove(target_trimmed);
         } else {
-            if looks_like_math_expression_text(&interpolated) {
+            if let Some(text_val) = evaluate_text_function_expression(&interpolated) {
+                set_text_variable_value(target_trimmed, &text_val);
+                RUNTIME_VARIABLES.lock().remove(target_trimmed);
+            } else if looks_like_math_expression_text(&interpolated) {
                 let val = evaluate_math_expression_f64(&interpolated);
                 set_variable_value(target_trimmed, val);
                 TEXT_VARIABLES.lock().remove(target_trimmed);
@@ -580,6 +593,7 @@ fn looks_like_math_expression_text(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     text.chars().any(|c| "+-*/()".contains(c))
         || lower == "pi"
+        || lower.contains("len(")
         || lower.contains("contains(")
         || lower.contains("random(")
         || lower.contains("choice(")
@@ -632,7 +646,9 @@ pub(crate) fn resolve_choice_expression_value(expr: &str) -> Option<String> {
         return Some(String::new());
     }
 
-    if looks_like_math_expression_text(resolved) {
+    if let Some(text_val) = evaluate_text_function_expression(resolved) {
+        Some(text_val)
+    } else if looks_like_math_expression_text(resolved) {
         Some(evaluate_math_expression_f64(resolved).to_string())
     } else {
         Some(resolved.to_string())
@@ -674,6 +690,61 @@ fn resolve_expression_argument_text(arg: &str) -> String {
     }
 
     interpolate_variables(trimmed)
+}
+
+fn evaluate_text_function_expression(expr: &str) -> Option<String> {
+    let (func_name, args) = parse_expression_function_call(expr)?;
+    match func_name.to_ascii_lowercase().as_str() {
+        "substr" => Some(evaluate_substr_expression(&args)),
+        _ => None,
+    }
+}
+
+fn parse_expression_function_call(expr: &str) -> Option<(String, Vec<String>)> {
+    let trimmed = expr.trim();
+    let open_idx = trimmed.find('(')?;
+    let func_name = trimmed[..open_idx].trim();
+    let inner = trimmed[open_idx + 1..].strip_suffix(')')?;
+    if func_name.is_empty()
+        || !func_name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        return None;
+    }
+    Some((func_name.to_string(), split_expression_arguments(inner)))
+}
+
+fn evaluate_substr_expression(args: &[String]) -> String {
+    let source = args
+        .first()
+        .map(|arg| resolve_expression_argument_text(arg))
+        .unwrap_or_default();
+    let start = args
+        .get(1)
+        .map(|arg| clamp_f64_to_i32(evaluate_math_expression_f64(arg)).max(0) as usize)
+        .unwrap_or(0);
+    let len = args
+        .get(2)
+        .map(|arg| clamp_f64_to_i32(evaluate_math_expression_f64(arg)).max(0) as usize);
+
+    match len {
+        Some(len) => source.chars().skip(start).take(len).collect(),
+        None => source.chars().skip(start).collect(),
+    }
+}
+
+fn evaluate_len_expression(args: &[String]) -> usize {
+    args.first()
+        .map(|arg| resolve_expression_argument_text(arg).chars().count())
+        .unwrap_or(0)
+}
+
+fn quote_expression_text(text: &str) -> String {
+    format!(
+        "\"{}\"",
+        text.replace('\\', "\\\\").replace('"', "\\\"")
+    )
 }
 
 fn split_expression_arguments(expr: &str) -> Vec<String> {
@@ -1011,4 +1082,53 @@ fn combination_u128(n: u64, k: u64) -> u128 {
         result = result.saturating_mul(numerator) / denominator;
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RUNTIME_VARIABLES, TEXT_VARIABLES, evaluate_math_expression, resolve_text_variable_value,
+        smart_set_variable_from_expression,
+    };
+
+    #[test]
+    fn substr_and_len_support_text_variables() {
+        {
+            let mut runtime_vars = RUNTIME_VARIABLES.lock();
+            runtime_vars.clear();
+        }
+        {
+            let mut text_vars = TEXT_VARIABLES.lock();
+            text_vars.clear();
+            text_vars.insert("player_name".to_string(), "DungeonBoss".to_string());
+        }
+
+        assert_eq!(
+            resolve_text_variable_value("substr(player_name, 0, 7)").as_deref(),
+            Some("Dungeon")
+        );
+        assert_eq!(evaluate_math_expression("len(player_name)"), 11);
+        assert_eq!(evaluate_math_expression("contains(substr(player_name, 7, 4), Boss)"), 1);
+
+        smart_set_variable_from_expression("name_head", "substr(player_name, 0, 4)");
+        smart_set_variable_from_expression("name_len", "len(player_name)");
+
+        {
+            let text_vars = TEXT_VARIABLES.lock();
+            assert_eq!(text_vars.get("name_head").map(String::as_str), Some("Dung"));
+        }
+        {
+            let runtime_vars = RUNTIME_VARIABLES.lock();
+            assert_eq!(runtime_vars.get("name_len").copied(), Some(11.0));
+        }
+
+        {
+            let mut runtime_vars = RUNTIME_VARIABLES.lock();
+            runtime_vars.clear();
+        }
+        {
+            let mut text_vars = TEXT_VARIABLES.lock();
+            text_vars.clear();
+        }
+    }
 }

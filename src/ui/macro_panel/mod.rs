@@ -1299,6 +1299,9 @@ impl CrosshairApp {
                                     );
                                     ui.label(egui::RichText::new("- random(min, max)").monospace());
                                     ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
+                                    ui.label(egui::RichText::new("- contains(a, b)").monospace());
+                                    ui.label(egui::RichText::new("- substr(text, start, len)").monospace());
+                                    ui.label(egui::RichText::new("- len(text)").monospace());
                                     ui.label(egui::RichText::new("- min(a, b)").monospace());
                                     ui.label(egui::RichText::new("- max(a, b)").monospace());
                                     ui.label(egui::RichText::new("- abs(a)").monospace());
@@ -16725,6 +16728,8 @@ if supports_move_mouse || show_detection_tuning {
         &[
             "abs()",
             "contains()",
+            "substr()",
+            "len()",
             "min()",
             "max()",
             "random()",
@@ -16837,6 +16842,8 @@ if supports_move_mouse || show_detection_tuning {
         match suggestion {
             "abs()" => "abs(a)".to_string(),
             "contains()" => "contains(a, b)".to_string(),
+            "substr()" => "substr(text, start, len)".to_string(),
+            "len()" => "len(text)".to_string(),
             "min()" => "min(a, b)".to_string(),
             "max()" => "max(a, b)".to_string(),
             "random()" => "random(min, max)".to_string(),
