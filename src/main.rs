@@ -54,6 +54,9 @@ fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool, bool)> {
     if normalize_legacy_active_window_targets(&mut state) {
         state_changed = true;
     }
+    if state.reset_session_preset_visibility() {
+        state_changed = true;
+    }
     state.show_window = true;
     Ok((state, state_changed, startup_state_needs_cjk_fallback))
 }

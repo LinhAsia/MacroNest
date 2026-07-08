@@ -14340,6 +14340,7 @@ impl eframe::App for CrosshairApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.state.reset_session_preset_visibility();
         let _ = crate::platform::show_taskbar();
         self.sync_window_presets();
         self.sync_macro_presets();

@@ -531,6 +531,195 @@ pub struct AppState {
     pub quick_key_sound_volume: f32,
 }
 
+impl AppState {
+    pub fn reset_session_preset_visibility(&mut self) -> bool {
+        let mut changed = false;
+
+        for profile in &mut self.profiles {
+            if !profile.collapsed {
+                profile.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.window_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+            if preset.preview_enabled {
+                preset.preview_enabled = false;
+                changed = true;
+            }
+        }
+
+        for layout in &mut self.window_layouts {
+            if !layout.collapsed {
+                layout.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.window_focus_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.pin_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+            if preset.preview_enabled {
+                preset.preview_enabled = false;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.mouse_path_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.mouse_sensitivity_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.zoom_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+            if preset.preview_enabled {
+                preset.preview_enabled = false;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.hud_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+            if preset.preview_enabled {
+                preset.preview_enabled = false;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.command_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.master_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for folder in &mut self.macro_folders {
+            if !folder.collapsed {
+                folder.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for group in &mut self.macro_groups {
+            if !group.collapsed {
+                group.collapsed = true;
+                changed = true;
+            }
+            for preset in &mut group.presets {
+                if !preset.collapsed {
+                    preset.collapsed = true;
+                    changed = true;
+                }
+            }
+        }
+
+        for preset in &mut self.macro_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.geometry_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.vision_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+            if preset.show_search_region_overlay {
+                preset.show_search_region_overlay = false;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.audio_sense_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.timer_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+            if preset.preview_enabled {
+                preset.preview_enabled = false;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.ocr_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+            if preset.preview_enabled {
+                preset.preview_enabled = false;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.audio_settings.library {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+
+        for preset in &mut self.audio_settings.presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+
+        changed
+    }
+}
+
 impl Default for AppState {
     fn default() -> Self {
         Self {
@@ -684,5 +873,134 @@ mod tests {
             state.focus_highlight_decoration,
             super::FocusHighlightDecoration::Plain
         );
+    }
+
+    #[test]
+    fn reset_session_preset_visibility_collapses_and_hides_session_previews() {
+        let mut state = AppState::default();
+        state.profiles.push(super::ProfileRecord {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.window_presets.push(super::WindowPreset {
+            collapsed: false,
+            preview_enabled: true,
+            ..Default::default()
+        });
+        state.window_layouts.push(super::WindowLayout {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.window_focus_presets.push(super::WindowFocusPreset {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.pin_presets.push(super::PinPreset {
+            collapsed: false,
+            preview_enabled: true,
+            ..Default::default()
+        });
+        state.mouse_path_presets.push(super::MousePathPreset {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.mouse_sensitivity_presets.push(super::MouseSensitivityPreset {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.zoom_presets.push(super::ZoomPreset {
+            collapsed: false,
+            preview_enabled: true,
+            ..Default::default()
+        });
+        state.hud_presets.push(super::HudPreset {
+            collapsed: false,
+            preview_enabled: true,
+            ..Default::default()
+        });
+        state.command_presets.push(super::CommandPreset {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.master_presets.push(super::MasterPreset {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.macro_folders.push(super::MacroFolder {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.macro_groups.push(super::MacroGroup {
+            collapsed: false,
+            presets: vec![super::MacroPreset {
+                collapsed: false,
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        state.macro_presets.push(super::MacroPreset {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.geometry_presets.push(super::GeometryPreset {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.vision_presets.push(super::VisionPreset {
+            collapsed: false,
+            show_search_region_overlay: true,
+            ..Default::default()
+        });
+        state.audio_sense_presets.push(super::AudioSensePreset {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.timer_presets.push(super::TimerPreset {
+            collapsed: false,
+            preview_enabled: true,
+            ..Default::default()
+        });
+        state.ocr_presets.push(super::OcrPreset {
+            collapsed: false,
+            preview_enabled: true,
+            ..Default::default()
+        });
+        state.audio_settings.library.push(super::SoundLibraryItem {
+            collapsed: false,
+            ..Default::default()
+        });
+        state.audio_settings.presets.push(super::SoundPreset {
+            collapsed: false,
+            ..Default::default()
+        });
+
+        assert!(state.reset_session_preset_visibility());
+
+        assert!(state.profiles.iter().all(|preset| preset.collapsed));
+        assert!(state.window_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
+        assert!(state.window_layouts.iter().all(|preset| preset.collapsed));
+        assert!(state.window_focus_presets.iter().all(|preset| preset.collapsed));
+        assert!(state.pin_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
+        assert!(state.mouse_path_presets.iter().all(|preset| preset.collapsed));
+        assert!(state.mouse_sensitivity_presets.iter().all(|preset| preset.collapsed));
+        assert!(state.zoom_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
+        assert!(state.hud_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
+        assert!(state.command_presets.iter().all(|preset| preset.collapsed));
+        assert!(state.master_presets.iter().all(|preset| preset.collapsed));
+        assert!(state.macro_folders.iter().all(|preset| preset.collapsed));
+        assert!(state.macro_groups.iter().all(|preset| {
+            preset.collapsed && preset.presets.iter().all(|macro_preset| macro_preset.collapsed)
+        }));
+        assert!(state.macro_presets.iter().all(|preset| preset.collapsed));
+        assert!(state.geometry_presets.iter().all(|preset| preset.collapsed));
+        assert!(state
+            .vision_presets
+            .iter()
+            .all(|preset| preset.collapsed && !preset.show_search_region_overlay));
+        assert!(state.audio_sense_presets.iter().all(|preset| preset.collapsed));
+        assert!(state.timer_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
+        assert!(state.ocr_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
+        assert!(state.audio_settings.library.iter().all(|preset| preset.collapsed));
+        assert!(state.audio_settings.presets.iter().all(|preset| preset.collapsed));
     }
 }
