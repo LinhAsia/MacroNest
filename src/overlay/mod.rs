@@ -10543,22 +10543,21 @@ mod windows_overlay {
     fn load_crosshair_draw_background(
         runtime: &Runtime,
         asset_name: &str,
-        asset_scale: f32,
+        _asset_scale: f32,
     ) -> Option<ScreenDrawCanvasBackground> {
         let asset_path = runtime.paths.asset_path(asset_name);
         if !asset_path.exists() {
             return None;
         }
 
-        let style = CrosshairStyle {
-            opacity: 1.0,
-            custom_scale: asset_scale.clamp(16.0, 512.0),
-            ..CrosshairStyle::default()
-        };
-        let rendered = render_crosshair(&style, Some(asset_path.as_path())).ok()?;
-        if rendered.width == 0 || rendered.height == 0 {
+        let image = image::open(&asset_path).ok()?.to_rgba8();
+        let width = image.width();
+        let height = image.height();
+        if width == 0 || height == 0 {
             return None;
         }
+        let mut rgba = image.into_raw();
+        premultiply_rgba_in_place(&mut rgba);
 
         let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
         if screen_w <= 0 || screen_h <= 0 {
@@ -10566,11 +10565,11 @@ mod windows_overlay {
         }
 
         Some(ScreenDrawCanvasBackground {
-            rgba: rendered.rgba,
-            width: rendered.width as usize,
-            height: rendered.height as usize,
-            left: ((screen_w - rendered.width as i32) / 2).max(0) as usize,
-            top: ((screen_h - rendered.height as i32) / 2).max(0) as usize,
+            rgba,
+            width: width as usize,
+            height: height as usize,
+            left: ((screen_w - width as i32) / 2).max(0) as usize,
+            top: ((screen_h - height as i32) / 2).max(0) as usize,
         })
     }
 
@@ -10690,6 +10689,24 @@ mod windows_overlay {
         }
     }
 
+    fn premultiply_rgba_in_place(rgba: &mut [u8]) {
+        for pixel in rgba.chunks_exact_mut(4) {
+            let alpha = pixel[3] as u32;
+            if alpha == 255 {
+                continue;
+            }
+            if alpha == 0 {
+                pixel[0] = 0;
+                pixel[1] = 0;
+                pixel[2] = 0;
+                continue;
+            }
+            pixel[0] = ((pixel[0] as u32 * alpha) / 255) as u8;
+            pixel[1] = ((pixel[1] as u32 * alpha) / 255) as u8;
+            pixel[2] = ((pixel[2] as u32 * alpha) / 255) as u8;
+        }
+    }
+
     fn export_crosshair_draw_asset(
         state: &mut ScreenDrawState,
         target: &ScreenDrawCrosshairDrawTarget,
@@ -10700,7 +10717,7 @@ mod windows_overlay {
         }
 
         ensure_screen_draw_canvas(state, screen_w as usize, screen_h as usize);
-        if state.crosshair_draw_target.is_some() || state.committed_dirty {
+        if state.committed_dirty {
             rebuild_screen_draw_canvas(state);
         }
 
@@ -12637,7 +12654,6 @@ mod windows_overlay {
         if !state.active || state.capturing_region {
             return false;
         }
-        let is_crosshair_draw_session = state.crosshair_draw_target.is_some();
         let should_sync_config = matches!(
             state.active_control,
             ScreenDrawControl::BrushSize | ScreenDrawControl::SmoothingAmount
@@ -12651,9 +12667,6 @@ mod windows_overlay {
             if !stroke.points.is_empty() {
                 if stroke.tool == ScreenDrawTool::Text && !stroke.eraser {
                     state.text_session = finalize_screen_draw_text_stroke(stroke);
-                } else if is_crosshair_draw_session {
-                    state.strokes.push(stroke);
-                    state.redo_strokes.clear();
                 } else if state.canvas_width > 0
                     && state.canvas_height > 0
                     && !state.committed_rgba.is_empty()
@@ -14632,24 +14645,6 @@ mod windows_overlay {
                 width,
                 dirty_rect,
             );
-        }
-        let crosshair_preview_strokes = if state_guard.crosshair_draw_target.is_some()
-            && !state_guard.strokes.is_empty()
-        {
-            Some(state_guard.strokes.clone())
-        } else {
-            None
-        };
-        if let Some(strokes) = crosshair_preview_strokes
-            && let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
-                state_guard.frame_rgba.as_mut_slice(),
-                width as u32,
-                height as u32,
-            )
-        {
-            for stroke in &strokes {
-                render_screen_draw_stroke_skia(&mut pixmap, stroke);
-            }
         }
         if screen_draw_should_block_background_interaction(&state_guard) {
             screen_draw_apply_input_blocker_alpha(
