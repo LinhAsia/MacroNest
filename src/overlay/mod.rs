@@ -10496,11 +10496,13 @@ mod windows_overlay {
         asset_name: Option<String>,
         asset_scale: f32,
     ) {
+        let background = asset_name
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .and_then(|name| load_crosshair_draw_background(runtime, name, asset_scale));
         let selected_asset_name = asset_name
             .filter(|name| !name.trim().is_empty())
             .unwrap_or_else(|| default_crosshair_asset_name(&profile_name));
-        let background =
-            load_crosshair_draw_background(runtime, &selected_asset_name, asset_scale);
 
         {
             let mut state = SCREEN_DRAW_STATE.lock();
@@ -10619,6 +10621,65 @@ mod windows_overlay {
                     src_a,
                 );
             }
+        }
+    }
+
+    fn draw_crosshair_draw_guides(
+        pixmap: &mut tiny_skia::PixmapMut<'_>,
+        canvas_width: usize,
+        canvas_height: usize,
+    ) {
+        if canvas_width == 0 || canvas_height == 0 {
+            return;
+        }
+
+        let center_x = canvas_width as f32 * 0.5;
+        let center_y = canvas_height as f32 * 0.5;
+        let mut paint = tiny_skia::Paint::default();
+        paint.set_color(tiny_skia::Color::from_rgba8(120, 220, 255, 92));
+        paint.anti_alias = true;
+        let stroke = tiny_skia::Stroke {
+            width: 1.0,
+            ..Default::default()
+        };
+
+        let mut horizontal = tiny_skia::PathBuilder::new();
+        horizontal.move_to(0.0, center_y);
+        horizontal.line_to(canvas_width as f32, center_y);
+        if let Some(path) = horizontal.finish() {
+            pixmap.stroke_path(
+                &path,
+                &paint,
+                &stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+
+        let mut vertical = tiny_skia::PathBuilder::new();
+        vertical.move_to(center_x, 0.0);
+        vertical.line_to(center_x, canvas_height as f32);
+        if let Some(path) = vertical.finish() {
+            pixmap.stroke_path(
+                &path,
+                &paint,
+                &stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+
+        if let Some(path) = tiny_skia::PathBuilder::from_circle(center_x, center_y, 3.0) {
+            let mut center_paint = tiny_skia::Paint::default();
+            center_paint.set_color(tiny_skia::Color::from_rgba8(160, 236, 255, 168));
+            center_paint.anti_alias = true;
+            pixmap.fill_path(
+                &path,
+                &center_paint,
+                tiny_skia::FillRule::Winding,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
     }
 
@@ -14727,6 +14788,15 @@ mod windows_overlay {
                 width,
                 dirty_rect,
             );
+        }
+        if state_guard.crosshair_draw_target.is_some()
+            && let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
+                state_guard.frame_rgba.as_mut_slice(),
+                width as u32,
+                height as u32,
+            )
+        {
+            draw_crosshair_draw_guides(&mut pixmap, width, height);
         }
         if let Some(stroke) = state_guard.current_stroke.clone()
             && let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(

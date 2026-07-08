@@ -4,6 +4,29 @@ use eframe::egui::{self, *};
 use std::time::Duration;
 
 impl CrosshairApp {
+    fn crosshair_asset_native_scale_for_paths(
+        paths: &crate::storage::AppPaths,
+        asset_name: &str,
+    ) -> Option<f32> {
+        let asset_path = paths.asset_path(asset_name);
+        let ext = asset_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .unwrap_or_default();
+
+        if ext == "svg" {
+            let bytes = std::fs::read(&asset_path).ok()?;
+            let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default())
+                .ok()?;
+            let size = tree.size();
+            return Some(size.width().max(size.height()).round().clamp(16.0, 4096.0));
+        }
+
+        let (width, height) = image::image_dimensions(&asset_path).ok()?;
+        Some((width.max(height) as f32).clamp(16.0, 4096.0))
+    }
+
     pub(crate) fn render_crosshair_panel(&mut self, ui: &mut egui::Ui) {
         self.render_crosshair_presets_panel(ui);
     }
@@ -375,6 +398,7 @@ impl CrosshairApp {
         let mut pending_crosshair_draw_request: Option<(String, Option<String>, f32)> = None;
         let mut refresh_crosshair_profiles = false;
         let can_paste_crosshair = self.crosshair_profile_clipboard.is_some();
+        let asset_paths = self.paths.clone();
         for index in 0..self.state.profiles.len() {
             let mut remove = false;
             let mut preset_changed = false;
@@ -511,6 +535,19 @@ impl CrosshairApp {
                                 );
                                 preset_changed |= response.changed();
                                 any_dragging |= response.dragged();
+                                if ui
+                                    .button(Self::tr_lang(language, "Reset", "Reset"))
+                                    .clicked()
+                                    && let Some(asset_name) = preset.style.custom_asset.as_deref()
+                                    && let Some(native_scale) =
+                                        Self::crosshair_asset_native_scale_for_paths(
+                                            &asset_paths,
+                                            asset_name,
+                                        )
+                                {
+                                    preset.style.custom_scale = native_scale;
+                                    preset_changed = true;
+                                }
                             });
                         }
                     }
