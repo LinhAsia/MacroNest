@@ -76,7 +76,7 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | Hàm | Ý nghĩa | Ví dụ | Kết quả |
 | :--- | :--- | :--- | :--- |
 | `random(min, max)` | Số nguyên ngẫu nhiên trong khoảng | `random(10, 20)` | `10..20` |
-| `choice(a, b, ...)` | Chọn ngẫu nhiên một giá trị | `choice(10, 20, 30)` | `10` hoặc `20` hoặc `30` |
+| `choice(a, b, ...)` | Chọn ngẫu nhiên một giá trị (hỗ trợ số, chữ hoặc kết hợp) | 1. `choice(10, 20, 30)` (số)<br>2. `choice(apple, banana, cherry)` (chữ)<br>3. `choice(HP: 100, 20, low)` (kết hợp) | 1. `10` hoặc `20` hoặc `30`<br>2. `apple` hoặc `banana` hoặc `cherry`<br>3. `HP: 100` hoặc `20` hoặc `low` |
 | `min(a, b)` | Giá trị nhỏ hơn | `min(20, 50)` | `20` |
 | `max(a, b)` | Giá trị lớn hơn | `max(20, 50)` | `50` |
 | `abs(a)` | Giá trị tuyệt đối | `abs(-50)` | `50` |
@@ -124,9 +124,9 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 
 | Hàm | Ý nghĩa | Ví dụ | Kết quả |
 | :--- | :--- | :--- | :--- |
-| `contains(a, b)` | Kiểm tra chuỗi `a` có chứa chuỗi `b` hay không | `contains(player_name, boss)` | `1` hoặc `0` |
-| `substr(text, start, len)` | Lấy một chuỗi con | `substr(player_name, 0, 4)` | 4 ký tự đầu tiên |
-| `len(text)` | Đếm số ký tự | `len(453454)` | `6` |
+| `contains(a, b)` | Kiểm tra chuỗi `a` có chứa chuỗi `b` hay không (hỗ trợ số, chữ hoặc kết hợp) | 1. `contains(hello, el)` (chữ)<br>2. `contains(HP: 100, 100)` (kết hợp)<br>3. `contains(12345, 34)` (số) | 1. `1` (đúng)<br>2. `1` (đúng)<br>3. `1` (đúng) |
+| `substr(text, start, len)` | Lấy một chuỗi con (hỗ trợ số, chữ hoặc kết hợp) | 1. `substr(banana, 2, 3)` (chữ)<br>2. `substr(HP: 100, 4, 3)` (kết hợp)<br>3. `substr(123456, 1, 4)` (số) | 1. `nan`<br>2. `100`<br>3. `2345` |
+| `len(text)` | Đếm số ký tự (hỗ trợ số, chữ hoặc kết hợp) | 1. `len(apple)` (chữ)<br>2. `len(HP: 100)` (kết hợp)<br>3. `len(453454)` (số) | 1. `5`<br>2. `7`<br>3. `6` |
 | `myVar.toNumber` | Chuyển văn bản thành số | `A.toNumber + 5` | kết quả số |
 
 ### Biến Hệ thống Có sẵn (Dạng Số)

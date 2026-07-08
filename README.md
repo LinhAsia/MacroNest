@@ -76,7 +76,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | Function | Meaning | Example | Result |
 | :--- | :--- | :--- | :--- |
 | `random(min, max)` | Random integer in range | `random(10, 20)` | `10..20` |
-| `choice(a, b, ...)` | Pick one value at random | `choice(10, 20, 30)` | `10` or `20` or `30` |
+| `choice(a, b, ...)` | Pick one value at random (supports numbers, text, or a mix) | 1. `choice(10, 20, 30)` (numbers)<br>2. `choice(apple, banana, cherry)` (text)<br>3. `choice(HP: 100, 20, low)` (mixed) | 1. `10` or `20` or `30`<br>2. `apple` or `banana` or `cherry`<br>3. `HP: 100` or `20` or `low` |
 | `min(a, b)` | Smaller value | `min(20, 50)` | `20` |
 | `max(a, b)` | Larger value | `max(20, 50)` | `50` |
 | `abs(a)` | Absolute value | `abs(-50)` | `50` |
@@ -124,9 +124,9 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 
 | Function | Meaning | Example | Result |
 | :--- | :--- | :--- | :--- |
-| `contains(a, b)` | Check whether text `a` contains text `b` | `contains(player_name, boss)` | `1` or `0` |
-| `substr(text, start, len)` | Get part of a string | `substr(player_name, 0, 4)` | first 4 characters |
-| `len(text)` | Count characters | `len(453454)` | `6` |
+| `contains(a, b)` | Check whether text `a` contains text `b` (supports numbers, text, or a mix) | 1. `contains(hello, el)` (text)<br>2. `contains(HP: 100, 100)` (mixed)<br>3. `contains(12345, 34)` (numbers) | 1. `1` (true)<br>2. `1` (true)<br>3. `1` (true) |
+| `substr(text, start, len)` | Get part of a string (supports numbers, text, or a mix) | 1. `substr(banana, 2, 3)` (text)<br>2. `substr(HP: 100, 4, 3)` (mixed)<br>3. `substr(123456, 1, 4)` (numbers) | 1. `nan`<br>2. `100`<br>3. `2345` |
+| `len(text)` | Count characters (supports numbers, text, or a mix) | 1. `len(apple)` (text)<br>2. `len(HP: 100)` (mixed)<br>3. `len(453454)` (numbers) | 1. `5`<br>2. `7`<br>3. `6` |
 | `myVar.toNumber` | Convert text to a number | `A.toNumber + 5` | numeric result |
 
 ### Built-in Variables (Numeric)
