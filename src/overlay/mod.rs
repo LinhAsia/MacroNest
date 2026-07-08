@@ -4440,10 +4440,11 @@ mod windows_overlay {
     ) -> LRESULT {
         match msg {
             WM_NCHITTEST => {
-                if screen_draw_color_pick_mode_active() {
-                    return LRESULT(1);
-                }
-                return LRESULT(HTTRANSPARENT as isize);
+                let point = POINT {
+                    x: (_lparam.0 & 0xFFFF) as i16 as i32,
+                    y: ((_lparam.0 >> 16) & 0xFFFF) as i16 as i32,
+                };
+                return LRESULT(screen_draw_overlay_hit_test(Some(point)));
             }
             WM_SETCURSOR => {
                 if screen_draw_color_pick_mode_active() {
@@ -10362,18 +10363,67 @@ mod windows_overlay {
         }
     }
 
+    fn screen_draw_should_block_background_interaction(state: &ScreenDrawState) -> bool {
+        state.active
+    }
+
+    fn screen_draw_toolbar_visible(state: &ScreenDrawState) -> bool {
+        state.active && !state.capturing_region && !state.screen_color_pick_mode
+    }
+
+    fn screen_draw_toolbar_contains_screen_point(state: &ScreenDrawState, point: POINT) -> bool {
+        if !screen_draw_toolbar_visible(state) {
+            return false;
+        }
+        let (screen_x, screen_y, _, _) = window_list::virtual_screen_bounds();
+        let left = screen_x + state.toolbar_x;
+        let top = screen_y + state.toolbar_y;
+        let right = left + state.toolbar_w.max(SCREEN_DRAW_TOOLBAR_WIDTH);
+        let bottom = top + state.toolbar_h.max(SCREEN_DRAW_TOOLBAR_HEIGHT);
+        point.x >= left && point.x < right && point.y >= top && point.y < bottom
+    }
+
+    fn screen_draw_overlay_hit_test(point: Option<POINT>) -> isize {
+        let state = SCREEN_DRAW_STATE.lock();
+        if !screen_draw_should_block_background_interaction(&state) {
+            return HTTRANSPARENT as isize;
+        }
+        if let Some(point) = point
+            && screen_draw_toolbar_contains_screen_point(&state, point)
+        {
+            return HTTRANSPARENT as isize;
+        }
+        1
+    }
+
+    fn screen_draw_apply_input_blocker_alpha(
+        frame_rgba: &mut [u8],
+        width: usize,
+        dirty_rect: ScreenDrawDirtyRect,
+    ) {
+        for y in dirty_rect.top..dirty_rect.bottom {
+            let row_start = y.saturating_mul(width).saturating_mul(4);
+            for x in dirty_rect.left..dirty_rect.right {
+                let alpha_index = row_start + x.saturating_mul(4) + 3;
+                if alpha_index < frame_rgba.len() && frame_rgba[alpha_index] == 0 {
+                    frame_rgba[alpha_index] = 1;
+                }
+            }
+        }
+    }
+
     unsafe fn sync_screen_draw_overlay_window(hwnd: HWND) -> Result<()> {
-        let (active, interactive, color_pick_mode) = {
+        let (active, interactive, block_background) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
                 state.active,
                 state.active && !state.capturing_region,
-                state.screen_color_pick_mode,
+                screen_draw_should_block_background_interaction(&state),
             )
         };
         if active {
             let mut style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            if color_pick_mode {
+            if block_background {
                 style &= !WS_EX_TRANSPARENT.0;
             } else {
                 style |= WS_EX_TRANSPARENT.0;
@@ -14062,19 +14112,6 @@ mod windows_overlay {
         ensure_screen_draw_canvas(&mut state_guard, width, height);
         ensure_screen_draw_surface(&mut state_guard, width, height)?;
 
-        let has_visual_content = !state_guard.strokes.is_empty()
-            || state_guard.current_stroke.is_some()
-            || state_guard.text_session.is_some()
-            || state_guard.screen_color_pick_mode
-            || state_guard.brush_size_preview_active
-            || matches!(state_guard.active_control, ScreenDrawControl::BrushSize)
-            || state_guard.capturing_region;
-        if !has_visual_content {
-            state_guard.pending_repaint = false;
-            state_guard.dirty_rect = None;
-            let _ = ShowWindow(hwnd, SW_HIDE);
-            return Ok(());
-        }
         if state_guard.committed_dirty {
             rebuild_screen_draw_canvas(&mut state_guard);
         }
@@ -14097,6 +14134,13 @@ mod windows_overlay {
             copy_screen_draw_rgba_region(
                 committed_rgba.as_slice(),
                 frame_rgba.as_mut_slice(),
+                width,
+                dirty_rect,
+            );
+        }
+        if screen_draw_should_block_background_interaction(&state_guard) {
+            screen_draw_apply_input_blocker_alpha(
+                state_guard.frame_rgba.as_mut_slice(),
                 width,
                 dirty_rect,
             );
@@ -27866,6 +27910,24 @@ mod windows_overlay {
             assert!(!state.freeze_screen);
             assert_eq!(state.freeze_frame, None);
             assert!(!state.screen_color_pick_mode);
+        }
+
+        #[test]
+        fn screen_draw_input_blocker_alpha_marks_transparent_pixels() {
+            let mut rgba = vec![0u8; 4 * 4 * 4];
+            let dirty = ScreenDrawDirtyRect {
+                left: 1,
+                top: 1,
+                right: 3,
+                bottom: 3,
+            };
+
+            screen_draw_apply_input_blocker_alpha(&mut rgba, 4, dirty);
+
+            assert_eq!(rgba[((1 * 4 + 1) * 4) + 3], 1);
+            assert_eq!(rgba[((2 * 4 + 2) * 4) + 3], 1);
+            assert_eq!(rgba[((0 * 4 + 0) * 4) + 3], 0);
+            assert_eq!(rgba[((3 * 4 + 3) * 4) + 3], 0);
         }
 
         #[test]
