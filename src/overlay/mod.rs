@@ -12824,6 +12824,18 @@ mod windows_overlay {
             let state = SCREEN_DRAW_STATE.lock();
             state.current_stroke.is_some() || state.active_control != ScreenDrawControl::None
         };
+        let begin_toolbar_interaction = is_over_toolbar
+            && matches!(message, WM_LBUTTONDOWN | WM_RBUTTONDOWN)
+            && {
+                let state = SCREEN_DRAW_STATE.lock();
+                state.current_stroke.is_some() || state.active_control != ScreenDrawControl::None
+            };
+        if begin_toolbar_interaction {
+            if screen_draw_handle_button_up() {
+                request_screen_draw_overlay_sync();
+            }
+            return false;
+        }
         if is_over_toolbar && !finishing_interaction {
             return false;
         }
