@@ -11041,6 +11041,17 @@ mod windows_overlay {
         }
     }
 
+    fn refresh_screen_draw_pointer_point_from_cursor(state: &mut ScreenDrawState) {
+        let mut cursor = POINT::default();
+        if unsafe { GetCursorPos(&mut cursor).is_ok() } {
+            let (screen_x, screen_y, _, _) = window_list::virtual_screen_bounds();
+            state.pointer_point = POINT {
+                x: cursor.x - screen_x,
+                y: cursor.y - screen_y,
+            };
+        }
+    }
+
     fn begin_screen_draw_color_pick_mode(state: &mut ScreenDrawState) {
         let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
         if screen_w > 0
@@ -11055,7 +11066,9 @@ mod windows_overlay {
             state.freeze_screen = true;
         }
         state.screen_color_pick_mode = true;
-        state.color_pick_preview = None;
+        refresh_screen_draw_pointer_point_from_cursor(state);
+        state.color_pick_preview =
+            sample_screen_draw_color_preview_at_local_point(state, state.pointer_point);
     }
 
     fn end_screen_draw_color_pick_mode(state: &mut ScreenDrawState) {
@@ -11075,6 +11088,9 @@ mod windows_overlay {
             end_screen_draw_color_pick_mode(&mut state);
         } else {
             begin_screen_draw_color_pick_mode(&mut state);
+            unsafe {
+                set_screen_draw_color_pick_cursor();
+            }
         }
         state.active_control = ScreenDrawControl::None;
         mark_screen_draw_dirty(&mut state, toolbar_rect);
