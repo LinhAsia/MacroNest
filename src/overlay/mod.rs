@@ -2002,6 +2002,7 @@ mod windows_overlay {
         toolbar_w: i32,
         toolbar_h: i32,
         active_control: ScreenDrawControl,
+        brush_size_preview_active: bool,
         drag_offset_x: i32,
         drag_offset_y: i32,
         current_stroke: Option<ScreenDrawStroke>,
@@ -2075,6 +2076,7 @@ mod windows_overlay {
                 toolbar_w: 640,
                 toolbar_h: 42,
                 active_control: ScreenDrawControl::None,
+                brush_size_preview_active: false,
                 drag_offset_x: 0,
                 drag_offset_y: 0,
                 current_stroke: None,
@@ -10569,9 +10571,28 @@ mod windows_overlay {
     pub fn screen_draw_set_brush_size(size: f32) {
         let mut state = SCREEN_DRAW_STATE.lock();
         state.brush_size = size.clamp(2.0, 80.0);
-        if state.active_control == ScreenDrawControl::BrushSize {
+        let should_sync = state.active_control == ScreenDrawControl::BrushSize
+            || state.brush_size_preview_active;
+        if should_sync {
             mark_screen_draw_repaint_pending(&mut state);
         }
+        drop(state);
+        if should_sync {
+            request_screen_draw_overlay_sync();
+        }
+    }
+
+    pub fn screen_draw_set_brush_size_preview_active(active: bool) {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        if state.brush_size_preview_active == active {
+            return;
+        }
+        let previous_rect = screen_draw_toolbar_rect(&state);
+        state.brush_size_preview_active = active;
+        mark_screen_draw_toolbar_dirty(&mut state, previous_rect);
+        mark_screen_draw_repaint_pending(&mut state);
+        drop(state);
+        request_screen_draw_overlay_sync();
     }
 
     pub fn screen_draw_get_tool() -> crate::model::QuickScreenDrawTool {
@@ -10753,7 +10774,7 @@ mod windows_overlay {
             base_rect.bottom = (state.toolbar_y + SCREEN_DRAW_TOOLBAR_HEIGHT + 40).max(0) as usize;
         }
 
-        if state.active_control == ScreenDrawControl::BrushSize {
+        if state.active_control == ScreenDrawControl::BrushSize || state.brush_size_preview_active {
             let center_x = state.canvas_width / 2;
             let center_y = state.canvas_height / 2;
             let preview_rect = ScreenDrawDirtyRect {
@@ -10881,6 +10902,7 @@ mod windows_overlay {
         state.current_stroke_updated_at = None;
         state.current_stroke_release_seen_at = None;
         state.active_control = ScreenDrawControl::None;
+        state.brush_size_preview_active = false;
         state.text_interaction_start_point = None;
         state.text_interaction_origin = None;
         state.capturing_region = false;
@@ -14044,6 +14066,7 @@ mod windows_overlay {
             || state_guard.current_stroke.is_some()
             || state_guard.text_session.is_some()
             || state_guard.screen_color_pick_mode
+            || state_guard.brush_size_preview_active
             || matches!(state_guard.active_control, ScreenDrawControl::BrushSize)
             || state_guard.capturing_region;
         if !has_visual_content {
@@ -14121,7 +14144,10 @@ mod windows_overlay {
                 );
             }
         }
-        if state_guard.active_control == ScreenDrawControl::BrushSize && !capturing_region {
+        if (state_guard.active_control == ScreenDrawControl::BrushSize
+            || state_guard.brush_size_preview_active)
+            && !capturing_region
+        {
             let brush_size = state_guard.brush_size;
             let brush_color = state_guard.color;
             if let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
@@ -35047,6 +35073,7 @@ mod fallback {
         5.0
     }
     pub fn screen_draw_set_brush_size(_size: f32) {}
+    pub fn screen_draw_set_brush_size_preview_active(_active: bool) {}
     pub fn screen_draw_get_tool() -> crate::model::QuickScreenDrawTool {
         crate::model::QuickScreenDrawTool::Brush
     }

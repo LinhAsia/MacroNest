@@ -13427,6 +13427,10 @@ impl eframe::App for CrosshairApp {
                                     ui.add(egui::Label::new("Size:"));
                                     ui.style_mut().spacing.slider_width = 80.0;
                                     let slider_resp = ui.add(egui::Slider::new(&mut brush_size, 2.0..=80.0).show_value(false));
+                                    crate::overlay::screen_draw_set_brush_size_preview_active(
+                                        slider_resp.dragged()
+                                            || slider_resp.is_pointer_button_down_on(),
+                                    );
                                     if slider_resp.changed() {
                                         crate::overlay::screen_draw_set_brush_size(brush_size);
                                     }
