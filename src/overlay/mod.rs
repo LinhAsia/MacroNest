@@ -10819,6 +10819,19 @@ mod windows_overlay {
         }) else {
             return Ok(None);
         };
+        let center_x = state.canvas_width / 2;
+        let center_y = state.canvas_height / 2;
+        let radius = center_x
+            .saturating_sub(export_rect.left)
+            .max(export_rect.right.saturating_sub(center_x + 1))
+            .max(center_y.saturating_sub(export_rect.top))
+            .max(export_rect.bottom.saturating_sub(center_y + 1));
+        let export_rect = ScreenDrawDirtyRect {
+            left: center_x.saturating_sub(radius),
+            top: center_y.saturating_sub(radius),
+            right: (center_x + radius + 1).min(state.canvas_width),
+            bottom: (center_y + radius + 1).min(state.canvas_height),
+        };
 
         let width = export_rect.right.saturating_sub(export_rect.left);
         let height = export_rect.bottom.saturating_sub(export_rect.top);
