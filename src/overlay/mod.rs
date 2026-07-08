@@ -1630,6 +1630,7 @@ mod windows_overlay {
         std::sync::atomic::AtomicU64::new(seed ^ 0x9E37_79B9_7F4A_7C15)
     });
     static SEARCH_AREA_OVERLAY_REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
+    static SCREEN_DRAW_OVERLAY_SYNC_PENDING: AtomicBool = AtomicBool::new(false);
     static VISION_CAPTURE_MOUSE_MOVE_PENDING: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
     static VISION_CAPTURE_MOUSE_MOVE_X: std::sync::atomic::AtomicI32 =
@@ -4519,7 +4520,7 @@ mod windows_overlay {
                     let should_paint = {
                         let state = SCREEN_DRAW_STATE.lock();
                         state.active && state.pending_repaint
-                    };
+                    } && !screen_draw_cursor_over_toolbar();
                     if should_paint {
                         let _ = paint_screen_draw_overlay(hwnd);
                     }
@@ -4528,6 +4529,7 @@ mod windows_overlay {
                 DefWindowProcW(hwnd, msg, _wparam, _lparam)
             }
             WMAPP_SCREEN_DRAW_SYNC => {
+                SCREEN_DRAW_OVERLAY_SYNC_PENDING.store(false, Ordering::Release);
                 let _ = sync_screen_draw_overlay_window(hwnd);
                 LRESULT(0)
             }
@@ -10449,16 +10451,22 @@ mod windows_overlay {
 
     fn request_screen_draw_overlay_sync() {
         let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
-        if hwnd_raw == 0 {
+        if hwnd_raw == 0
+            || SCREEN_DRAW_OVERLAY_SYNC_PENDING.swap(true, Ordering::AcqRel)
+        {
             return;
         }
         unsafe {
-            let _ = PostMessageW(
+            if PostMessageW(
                 Some(HWND(hwnd_raw as *mut c_void)),
                 WMAPP_SCREEN_DRAW_SYNC,
                 WPARAM(0),
                 LPARAM(0),
-            );
+            )
+            .is_err()
+            {
+                SCREEN_DRAW_OVERLAY_SYNC_PENDING.store(false, Ordering::Release);
+            }
         }
     }
 
@@ -10831,6 +10839,15 @@ mod windows_overlay {
         let right = left + state.toolbar_w.max(SCREEN_DRAW_TOOLBAR_WIDTH);
         let bottom = top + state.toolbar_h.max(SCREEN_DRAW_TOOLBAR_HEIGHT);
         point.x >= left && point.x < right && point.y >= top && point.y < bottom
+    }
+
+    fn screen_draw_cursor_over_toolbar() -> bool {
+        let mut point = POINT::default();
+        if unsafe { GetCursorPos(&mut point).is_err() } {
+            return false;
+        }
+        let state = SCREEN_DRAW_STATE.lock();
+        screen_draw_toolbar_contains_screen_point(&state, point)
     }
 
     fn screen_draw_overlay_hit_test(point: Option<POINT>) -> isize {
