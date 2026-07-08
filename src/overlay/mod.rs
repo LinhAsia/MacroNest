@@ -10027,6 +10027,11 @@ mod windows_overlay {
     }
 
     unsafe fn refresh_overlay(runtime: &mut Runtime) -> Result<()> {
+        if SCREEN_DRAW_STATE.lock().crosshair_draw_target.is_some() {
+            let _ = ShowWindow(runtime.overlay_hwnd, SW_HIDE);
+            return Ok(());
+        }
+
         let visible_profiles = {
             let hook_state = HOOK_STATE.lock();
             hook_state
@@ -10605,7 +10610,9 @@ mod windows_overlay {
                         )
                     })?;
                 }
-                let image = RgbaImage::from_raw(job.width, job.height, job.rgba)
+                let mut rgba = job.rgba;
+                unpremultiply_rgba_in_place(&mut rgba);
+                let image = RgbaImage::from_raw(job.width, job.height, rgba)
                     .context("Failed to build custom crosshair image")?;
                 image.save(&job.asset_path).with_context(|| {
                     format!(
@@ -10631,6 +10638,25 @@ mod windows_overlay {
                 }),
             }
         });
+    }
+
+    fn unpremultiply_rgba_in_place(rgba: &mut [u8]) {
+        for pixel in rgba.chunks_exact_mut(4) {
+            let alpha = pixel[3];
+            if alpha == 0 {
+                pixel[0] = 0;
+                pixel[1] = 0;
+                pixel[2] = 0;
+                continue;
+            }
+            if alpha == 255 {
+                continue;
+            }
+            let alpha_scale = 255.0 / alpha as f32;
+            pixel[0] = (pixel[0] as f32 * alpha_scale).round().clamp(0.0, 255.0) as u8;
+            pixel[1] = (pixel[1] as f32 * alpha_scale).round().clamp(0.0, 255.0) as u8;
+            pixel[2] = (pixel[2] as f32 * alpha_scale).round().clamp(0.0, 255.0) as u8;
+        }
     }
 
     fn export_crosshair_draw_asset(
