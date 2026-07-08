@@ -1870,6 +1870,17 @@ mod windows_overlay {
         top: usize,
     }
 
+    #[derive(Debug)]
+    struct PendingCrosshairAssetSave {
+        profile_name: String,
+        asset_name: String,
+        asset_path: PathBuf,
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+        asset_scale: f32,
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum ScreenDrawHit {
         Canvas,
@@ -10489,6 +10500,7 @@ mod windows_overlay {
 
         send_screen_draw_config_to_ui();
         request_screen_draw_overlay_sync();
+        let _ = unsafe { ShowWindow(runtime.overlay_hwnd, SW_HIDE) };
         request_ui_repaint();
     }
 
@@ -10567,10 +10579,64 @@ mod windows_overlay {
         }
     }
 
+    fn crosshair_draw_background_rect(
+        background: &ScreenDrawCanvasBackground,
+    ) -> Option<ScreenDrawDirtyRect> {
+        ScreenDrawDirtyRect {
+            left: background.left,
+            top: background.top,
+            right: background.left.saturating_add(background.width),
+            bottom: background.top.saturating_add(background.height),
+        }
+        .normalized(
+            background.left.saturating_add(background.width),
+            background.top.saturating_add(background.height),
+        )
+    }
+
+    fn spawn_crosshair_asset_save(job: PendingCrosshairAssetSave) {
+        thread::spawn(move || {
+            let result = (|| -> Result<()> {
+                if let Some(parent) = job.asset_path.parent() {
+                    fs::create_dir_all(parent).with_context(|| {
+                        format!(
+                            "Failed to create custom crosshair folder {}",
+                            parent.display()
+                        )
+                    })?;
+                }
+                let image = RgbaImage::from_raw(job.width, job.height, job.rgba)
+                    .context("Failed to build custom crosshair image")?;
+                image.save(&job.asset_path).with_context(|| {
+                    format!(
+                        "Failed to save custom crosshair {}",
+                        job.asset_path.display()
+                    )
+                })?;
+                Ok(())
+            })();
+
+            match result {
+                Ok(()) => send_ui_command(UiCommand::CrosshairDrawFinished {
+                    profile_name: job.profile_name,
+                    asset_name: Some(job.asset_name),
+                    asset_scale: Some(job.asset_scale),
+                    status: "Saved custom crosshair drawing.".to_owned(),
+                }),
+                Err(error) => send_ui_command(UiCommand::CrosshairDrawFinished {
+                    profile_name: job.profile_name,
+                    asset_name: None,
+                    asset_scale: None,
+                    status: format!("Failed to save custom crosshair drawing: {error}"),
+                }),
+            }
+        });
+    }
+
     fn export_crosshair_draw_asset(
         state: &mut ScreenDrawState,
         target: &ScreenDrawCrosshairDrawTarget,
-    ) -> Result<Option<f32>> {
+    ) -> Result<Option<PendingCrosshairAssetSave>> {
         let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
         if screen_w <= 0 || screen_h <= 0 {
             return Ok(None);
@@ -10581,78 +10647,62 @@ mod windows_overlay {
             rebuild_screen_draw_canvas(state);
         }
 
-        let mut rgba = state.committed_rgba.clone();
-        if rgba.is_empty() || state.canvas_width == 0 || state.canvas_height == 0 {
+        if state.committed_rgba.is_empty() || state.canvas_width == 0 || state.canvas_height == 0 {
             return Ok(None);
         }
 
-        if let Some(stroke) = state.current_stroke.clone()
-            && let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
-                rgba.as_mut_slice(),
-                state.canvas_width as u32,
-                state.canvas_height as u32,
-            )
-        {
-            render_screen_draw_stroke_skia(&mut pixmap, &stroke);
-        }
-
-        let mut min_x = state.canvas_width;
-        let mut min_y = state.canvas_height;
-        let mut max_x = 0usize;
-        let mut max_y = 0usize;
-        let mut has_visible_pixel = false;
-
-        for y in 0..state.canvas_height {
-            for x in 0..state.canvas_width {
-                let offset = (y * state.canvas_width + x) * 4;
-                if rgba.get(offset + 3).copied().unwrap_or_default() == 0 {
-                    continue;
-                }
-                has_visible_pixel = true;
-                min_x = min_x.min(x);
-                min_y = min_y.min(y);
-                max_x = max_x.max(x + 1);
-                max_y = max_y.max(y + 1);
+        let mut export_rect = state
+            .canvas_background
+            .as_ref()
+            .and_then(crosshair_draw_background_rect);
+        for stroke in &state.strokes {
+            if let Some(rect) = current_screen_draw_stroke_rect(stroke) {
+                export_rect = Some(match export_rect {
+                    Some(existing) => existing.union(rect),
+                    None => rect,
+                });
             }
         }
+        if let Some(stroke) = state.current_stroke.as_ref()
+            && let Some(rect) = current_screen_draw_stroke_rect(stroke)
+        {
+            export_rect = Some(match export_rect {
+                Some(existing) => existing.union(rect),
+                None => rect,
+            });
+        }
+        let Some(export_rect) = export_rect.and_then(|rect| {
+            rect.normalized(state.canvas_width, state.canvas_height)
+        }) else {
+            return Ok(None);
+        };
 
-        if !has_visible_pixel {
+        let width = export_rect.right.saturating_sub(export_rect.left);
+        let height = export_rect.bottom.saturating_sub(export_rect.top);
+        if width == 0 || height == 0 {
             return Ok(None);
         }
 
-        let pad = 2usize;
-        min_x = min_x.saturating_sub(pad);
-        min_y = min_y.saturating_sub(pad);
-        max_x = (max_x + pad).min(state.canvas_width);
-        max_y = (max_y + pad).min(state.canvas_height);
-
-        let full = RgbaImage::from_raw(state.canvas_width as u32, state.canvas_height as u32, rgba)
-            .context("Failed to build custom crosshair image")?;
-        let cropped = image::imageops::crop_imm(
-            &full,
-            min_x as u32,
-            min_y as u32,
-            (max_x - min_x) as u32,
-            (max_y - min_y) as u32,
-        )
-        .to_image();
-
-        if let Some(parent) = target.asset_path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "Failed to create custom crosshair folder {}",
-                    parent.display()
-                )
-            })?;
+        let mut cropped_rgba = vec![0u8; width.saturating_mul(height).saturating_mul(4)];
+        for row in 0..height {
+            let src_start =
+                ((export_rect.top + row) * state.canvas_width + export_rect.left) * 4;
+            let src_end = src_start + width * 4;
+            let dst_start = row * width * 4;
+            let dst_end = dst_start + width * 4;
+            cropped_rgba[dst_start..dst_end]
+                .copy_from_slice(&state.committed_rgba[src_start..src_end]);
         }
-        cropped.save(&target.asset_path).with_context(|| {
-            format!(
-                "Failed to save custom crosshair {}",
-                target.asset_path.display()
-            )
-        })?;
 
-        Ok(Some(cropped.width().max(cropped.height()) as f32))
+        Ok(Some(PendingCrosshairAssetSave {
+            profile_name: target.profile_name.clone(),
+            asset_name: target.asset_name.clone(),
+            asset_path: target.asset_path.clone(),
+            rgba: cropped_rgba,
+            width: width as u32,
+            height: height as u32,
+            asset_scale: width.max(height) as f32,
+        }))
     }
 
     fn finish_crosshair_draw_session(state: &mut ScreenDrawState) -> Option<UiCommand> {
@@ -10670,12 +10720,10 @@ mod windows_overlay {
         state.text_border = target.restore.text_border;
 
         match result {
-            Ok(Some(asset_scale)) => Some(UiCommand::CrosshairDrawFinished {
-                profile_name: target.profile_name,
-                asset_name: Some(target.asset_name),
-                asset_scale: Some(asset_scale),
-                status: "Saved custom crosshair drawing.".to_owned(),
-            }),
+            Ok(Some(job)) => {
+                spawn_crosshair_asset_save(job);
+                None
+            }
             Ok(None) => Some(UiCommand::CrosshairDrawFinished {
                 profile_name: target.profile_name,
                 asset_name: None,

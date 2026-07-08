@@ -11989,6 +11989,8 @@ impl eframe::App for CrosshairApp {
                             asset_name,
                             asset_scale,
                         );
+                    } else {
+                        self.sync_crosshair();
                     }
                     self.status = status;
                     ctx.request_repaint();
