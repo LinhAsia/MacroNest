@@ -561,7 +561,7 @@ impl CrosshairApp {
             self.persist_after_sync(Self::sync_crosshair);
         }
         if let Some(index) = remove_index {
-            self.flush_crosshair_profile_dirty(true, true);
+            self.flush_crosshair_profile_dirty(true);
             let remove_name = self.state.profiles[index].name.clone();
             self.state.profiles.remove(index);
             self.status = format!("Deleted crosshair preset: {remove_name}");
@@ -582,8 +582,7 @@ impl CrosshairApp {
 
         if self.crosshair_editor_dirty {
             let pointer_down = ui.input(|i| i.pointer.any_down());
-            let app_focused = ui.input(|i| i.viewport().focused != Some(false));
-            self.flush_crosshair_profile_dirty(!pointer_down, !app_focused);
+            self.flush_crosshair_profile_dirty(!pointer_down);
             if self.crosshair_editor_dirty {
                 if any_dragging {
                     ui.ctx().request_repaint();

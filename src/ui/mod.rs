@@ -1195,15 +1195,12 @@ impl CrosshairApp {
         self.crosshair_editor_dirty = true;
     }
 
-    fn flush_crosshair_profile_dirty(&mut self, force: bool, allow_live_preview: bool) {
+    fn flush_crosshair_profile_dirty(&mut self, force: bool) {
         const CROSSHAIR_PREVIEW_SYNC_INTERVAL: Duration = Duration::from_millis(16);
         let Some(index) = self.crosshair_preview_dirty_index else {
             return;
         };
         if !force {
-            if !allow_live_preview {
-                return;
-            }
             if self.crosshair_preview_applied_generation == self.crosshair_preview_dirty_generation
             {
                 return;
@@ -1274,7 +1271,7 @@ impl CrosshairApp {
         }
 
         self.mark_crosshair_profile_dirty(index);
-        self.flush_crosshair_profile_dirty(true, true);
+        self.flush_crosshair_profile_dirty(true);
     }
 
     fn find_named_item_by_spec<'a, T>(

@@ -224,6 +224,7 @@ fn render_custom_asset(style: &CrosshairStyle, path: &Path) -> Result<RenderedCr
     } else {
         render_raster(path, target_size)?
     };
+    let pixmap = center_pixmap_on_square_canvas(&pixmap, target_size)?;
 
     let mut rgba = pixmap.data().to_vec();
     apply_global_alpha(&mut rgba, style.opacity);
@@ -235,6 +236,32 @@ fn render_custom_asset(style: &CrosshairStyle, path: &Path) -> Result<RenderedCr
         center_y: (pixmap.height() / 2) as i32,
         rgba,
     })
+}
+
+fn center_pixmap_on_square_canvas(source: &Pixmap, canvas_size: u32) -> Result<Pixmap> {
+    let canvas_size = canvas_size.max(source.width()).max(source.height()).max(1);
+    if source.width() == canvas_size && source.height() == canvas_size {
+        return Ok(source.clone());
+    }
+
+    let mut canvas =
+        Pixmap::new(canvas_size, canvas_size).context("Failed to create centered asset canvas")?;
+    let offset_x = ((canvas_size - source.width()) / 2) as usize;
+    let offset_y = ((canvas_size - source.height()) / 2) as usize;
+    let src_stride = source.width() as usize * 4;
+    let dst_stride = canvas.width() as usize * 4;
+    let src = source.data();
+    let dst = canvas.data_mut();
+
+    for row in 0..source.height() as usize {
+        let src_start = row * src_stride;
+        let src_end = src_start + src_stride;
+        let dst_start = (row + offset_y) * dst_stride + offset_x * 4;
+        let dst_end = dst_start + src_stride;
+        dst[dst_start..dst_end].copy_from_slice(&src[src_start..src_end]);
+    }
+
+    Ok(canvas)
 }
 
 fn render_svg(path: &Path, target_size: u32) -> Result<Pixmap> {
