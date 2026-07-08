@@ -1,10 +1,66 @@
-use std::{fs, path::Path};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
+    time::UNIX_EPOCH,
+};
 
 use anyhow::{Context, Result};
 use image::{DynamicImage, GenericImageView, ImageReader, imageops::FilterType};
 use tiny_skia::{Color, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 use crate::model::{CrosshairStyle, RgbaColor};
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct RasterAssetCacheKey {
+    path: PathBuf,
+    modified_at_nanos: u128,
+    len: u64,
+}
+
+fn raster_asset_cache() -> &'static Mutex<HashMap<RasterAssetCacheKey, Arc<DynamicImage>>> {
+    static CACHE: OnceLock<Mutex<HashMap<RasterAssetCacheKey, Arc<DynamicImage>>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn raster_asset_cache_key(path: &Path) -> Result<RasterAssetCacheKey> {
+    let metadata =
+        fs::metadata(path).with_context(|| format!("Failed to read image metadata {}", path.display()))?;
+    let modified_at_nanos = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    Ok(RasterAssetCacheKey {
+        path: path.to_path_buf(),
+        modified_at_nanos,
+        len: metadata.len(),
+    })
+}
+
+fn load_cached_raster_asset(path: &Path) -> Result<Arc<DynamicImage>> {
+    let key = raster_asset_cache_key(path)?;
+    if let Some(image) = raster_asset_cache().lock().unwrap().get(&key).cloned() {
+        return Ok(image);
+    }
+
+    let image = Arc::new(
+        ImageReader::open(path)
+            .with_context(|| format!("Failed to open image {}", path.display()))?
+            .decode()
+            .with_context(|| format!("Failed to decode image {}", path.display()))?,
+    );
+
+    let mut cache = raster_asset_cache().lock().unwrap();
+    // ponytail: Keep only the latest decoded source per path; if cache growth ever matters,
+    // replace this with a small LRU keyed by (path, modified_at_nanos, len).
+    cache.retain(|existing_key, _| existing_key.path != key.path);
+    cache.insert(key, image.clone());
+    Ok(image)
+}
 
 pub struct RenderedCrosshair {
     pub width: u32,
@@ -197,12 +253,8 @@ fn render_svg(path: &Path, target_size: u32) -> Result<Pixmap> {
 }
 
 fn render_raster(path: &Path, target_size: u32) -> Result<Pixmap> {
-    let image = ImageReader::open(path)
-        .with_context(|| format!("Failed to open image {}", path.display()))?
-        .decode()
-        .with_context(|| format!("Failed to decode image {}", path.display()))?;
-
-    let resized = fit_image(image, target_size);
+    let image = load_cached_raster_asset(path)?;
+    let resized = fit_image(image.as_ref(), target_size);
     let mut rgba = resized.to_rgba8();
     premultiply_rgba(rgba.as_mut());
     let (width, height) = resized.dimensions();
@@ -211,7 +263,7 @@ fn render_raster(path: &Path, target_size: u32) -> Result<Pixmap> {
     Ok(pixmap)
 }
 
-fn fit_image(image: DynamicImage, target_size: u32) -> DynamicImage {
+fn fit_image(image: &DynamicImage, target_size: u32) -> DynamicImage {
     let (width, height) = image.dimensions();
     let scale = (target_size as f32 / width.max(1) as f32)
         .min(target_size as f32 / height.max(1) as f32)
