@@ -127,8 +127,8 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | `contains(a, b)` | Kiểm tra chuỗi `a` có chứa chuỗi `b` hay không (hỗ trợ số, chữ hoặc kết hợp) | 1. `contains(hello, el)` (chữ)<br>2. `contains(Gold: 5000, 5000)` (kết hợp)<br>3. `contains(12345, 34)` (số) | 1. `1` (đúng)<br>2. `1` (đúng)<br>3. `1` (đúng) |
 | `substr(text, start, len)` | Lấy một chuỗi con (hỗ trợ số, chữ hoặc kết hợp) | 1. `substr(banana, 2, 3)` (chữ)<br>2. `substr(Rank #1: Player, 9, 6)` (kết hợp)<br>3. `substr(123456, 1, 4)` (số) | 1. `nan`<br>2. `Player`<br>3. `2345` |
 | `len(text)` | Đếm số ký tự (hỗ trợ số, chữ hoặc kết hợp) | 1. `len(apple)` (chữ)<br>2. `len(Score: 9999)` (kết hợp)<br>3. `len(453454)` (số) | 1. `5`<br>2. `11`<br>3. `6` |
-| `myVar.toNumber` | Trích xuất các chữ số từ biến văn bản và chuyển thành số (bỏ qua ký tự khác) | Nếu biến `A` là `"Gold: 500"` (văn bản):<br>`A.toNumber + 100` | `600` (dạng số) |
-| `myVar.toString` | Lọc bỏ toàn bộ chữ số và giữ lại các ký tự khác để chuyển thành văn bản | 1. Nếu `A` là `123` (số): `A.toString`<br>2. Nếu `A` là `"Wave #10"` (văn bản): `A.toString` | 1. `""` (văn bản)<br>2. `"Wave #"` (văn bản) |
+| `myVar.toNumber` | Trích xuất các chữ số từ biến văn bản và chuyển thành số (bỏ qua ký tự khác) | Nếu biến `A` là `"Gold: 500"` (văn bản):<br>`A.toNumber` | `500` (dạng số) |
+| `myVar.toString` | Lọc bỏ toàn bộ chữ số và giữ lại các ký tự khác để chuyển thành văn bản | Nếu biến `A` là `"Wave #10"` (văn bản):<br>`A.toString` | `"Wave #"` (văn bản) |
 
 ### Biến Hệ thống Có sẵn (Dạng Số)
 
