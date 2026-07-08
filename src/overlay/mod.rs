@@ -235,7 +235,7 @@ mod windows_overlay {
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 4;
     const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 210;
     const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
-    const SCREEN_DRAW_ORPHAN_STROKE_RELEASE_MS: u64 = 24;
+    const SCREEN_DRAW_ORPHAN_STROKE_RELEASE_MS: u64 = 5000;
     const SCREEN_DRAW_TOOLBAR_BRUSH_SVG: &str = r##"<svg viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M131 270.102C136.931 258.193 142.915 246.327 149.193 234.617C156.453 221.081 163.971 206.401 168.564 191.528C169.122 189.716 170.145 181.169 172.084 180.124C192.331 169.193 205.553 185.969 222.056 150.34C224.854 144.301 253.912 74.3274 265.506 96.2309C282.774 128.856 211.761 175.888 237.023 209.979" stroke="#F0F6FF" stroke-opacity="0.96" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M236.842 221.187C227.518 251.443 209.099 279.783 199.623 307.729" stroke="#F0F6FF" stroke-opacity="0.96" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
@@ -10826,7 +10826,9 @@ mod windows_overlay {
     }
 
     fn screen_draw_toolbar_visible(state: &ScreenDrawState) -> bool {
-        state.active && !state.capturing_region && !state.screen_color_pick_mode
+        state.active
+            && !state.capturing_region
+            && (!state.screen_color_pick_mode || state.crosshair_draw_target.is_some())
     }
 
     fn screen_draw_toolbar_contains_screen_point(state: &ScreenDrawState, point: POINT) -> bool {
@@ -11017,6 +11019,10 @@ mod windows_overlay {
 
     pub fn screen_draw_get_color_pick_mode() -> bool {
         SCREEN_DRAW_STATE.lock().screen_color_pick_mode
+    }
+
+    pub fn screen_draw_is_crosshair_draw() -> bool {
+        SCREEN_DRAW_STATE.lock().crosshair_draw_target.is_some()
     }
 
     fn screen_draw_color_pick_mode_active() -> bool {

@@ -12905,6 +12905,7 @@ impl eframe::App for CrosshairApp {
         let drawing_active = crate::overlay::screen_draw_active();
         let capturing_region = crate::overlay::screen_draw_get_capturing_region();
         let color_pick_mode = crate::overlay::screen_draw_get_color_pick_mode();
+        let crosshair_draw_mode = crate::overlay::screen_draw_is_crosshair_draw();
         if drawing_active {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
@@ -12932,7 +12933,9 @@ impl eframe::App for CrosshairApp {
             self.screen_draw_color_pick_pending_at = None;
             color_pick_pending = false;
         }
-        let toolbar_visible = !capturing_region && !color_pick_mode && !color_pick_pending;
+        let toolbar_visible = !capturing_region
+            && (!color_pick_mode || crosshair_draw_mode)
+            && !(color_pick_pending && !crosshair_draw_mode);
         let was_active = ctx.data(|d| {
             d.get_temp::<bool>(egui::Id::new("screen_draw_active"))
                 .unwrap_or(false)
@@ -13456,32 +13459,36 @@ impl eframe::App for CrosshairApp {
                                     }
 
                                     if icon_btn(ui, crate::overlay::screen_draw_get_color_pick_mode(), "dropper", "Pick color from screen").1 {
-                                        const SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS: u64 = 160;
-                                        self.screen_draw_color_pick_pending_at = Some(Instant::now());
-                                        crate::overlay::screen_draw_set_color_pick_cursor();
-                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(
-                                            egui::pos2(-10000.0, -10000.0),
-                                        ));
-                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                                        std::thread::spawn(|| {
-                                            #[cfg(windows)]
-                                            unsafe {
-                                                let _ = DwmFlush();
-                                            }
-                                            std::thread::sleep(Duration::from_millis(32));
-                                            #[cfg(windows)]
-                                            unsafe {
-                                                let _ = DwmFlush();
-                                            }
-                                            std::thread::sleep(Duration::from_millis(
-                                                SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS,
+                                        if crosshair_draw_mode {
+                                            crate::overlay::screen_draw_toggle_color_pick_mode();
+                                        } else {
+                                            const SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS: u64 = 160;
+                                            self.screen_draw_color_pick_pending_at = Some(Instant::now());
+                                            crate::overlay::screen_draw_set_color_pick_cursor();
+                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(
+                                                egui::pos2(-10000.0, -10000.0),
                                             ));
-                                            if crate::overlay::screen_draw_active()
-                                                && !crate::overlay::screen_draw_get_color_pick_mode()
-                                            {
-                                                crate::overlay::screen_draw_toggle_color_pick_mode();
-                                            }
-                                        });
+                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                                            std::thread::spawn(|| {
+                                                #[cfg(windows)]
+                                                unsafe {
+                                                    let _ = DwmFlush();
+                                                }
+                                                std::thread::sleep(Duration::from_millis(32));
+                                                #[cfg(windows)]
+                                                unsafe {
+                                                    let _ = DwmFlush();
+                                                }
+                                                std::thread::sleep(Duration::from_millis(
+                                                    SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS,
+                                                ));
+                                                if crate::overlay::screen_draw_active()
+                                                    && !crate::overlay::screen_draw_get_color_pick_mode()
+                                                {
+                                                    crate::overlay::screen_draw_toggle_color_pick_mode();
+                                                }
+                                            });
+                                        }
                                     }
 
                                     ui.separator();
@@ -13504,8 +13511,10 @@ impl eframe::App for CrosshairApp {
                                     ui.separator();
 
                                     // 6. Capture Region
-                                    if icon_btn(ui, false, "capture", self.tr("Capture Region", "Chụp hình vùng")).1 {
-                                        crate::overlay::screen_draw_trigger_capture_region_from_toolbar();
+                                    if !crosshair_draw_mode {
+                                        if icon_btn(ui, false, "capture", self.tr("Capture Region", "Chụp hình vùng")).1 {
+                                            crate::overlay::screen_draw_trigger_capture_region_from_toolbar();
+                                        }
                                     }
 
                                     // 7. Clear Canvas
