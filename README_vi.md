@@ -127,7 +127,7 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | `contains(a, b)` | Kiểm tra chuỗi `a` có chứa chuỗi `b` hay không (hỗ trợ số, chữ hoặc kết hợp) | 1. `contains(hello, el)` (chữ)<br>2. `contains(HP: 100, 100)` (kết hợp)<br>3. `contains(12345, 34)` (số) | 1. `1` (đúng)<br>2. `1` (đúng)<br>3. `1` (đúng) |
 | `substr(text, start, len)` | Lấy một chuỗi con (hỗ trợ số, chữ hoặc kết hợp) | 1. `substr(banana, 2, 3)` (chữ)<br>2. `substr(HP: 100, 4, 3)` (kết hợp)<br>3. `substr(123456, 1, 4)` (số) | 1. `nan`<br>2. `100`<br>3. `2345` |
 | `len(text)` | Đếm số ký tự (hỗ trợ số, chữ hoặc kết hợp) | 1. `len(apple)` (chữ)<br>2. `len(HP: 100)` (kết hợp)<br>3. `len(453454)` (số) | 1. `5`<br>2. `7`<br>3. `6` |
-| `myVar.toNumber` | Chuyển một biến dạng văn bản thành số | Nếu biến `A` là `"10"` (văn bản):<br>`A.toNumber + 5` | `15` (dạng số) |
+| `myVar.toNumber` | Trích xuất các chữ số từ biến văn bản và chuyển thành số (bỏ qua ký tự khác) | Nếu biến `A` là `"HP: 120"` (văn bản):<br>`A.toNumber + 5` | `125` (dạng số) |
 | `myVar.toString` | Chuyển một biến dạng số thành văn bản | Nếu biến `A` là `123` (số):<br>`A.toString` | `"123"` (văn bản) |
 
 ### Biến Hệ thống Có sẵn (Dạng Số)

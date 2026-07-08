@@ -127,7 +127,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | `contains(a, b)` | Check whether text `a` contains text `b` (supports numbers, text, or a mix) | 1. `contains(hello, el)` (text)<br>2. `contains(HP: 100, 100)` (mixed)<br>3. `contains(12345, 34)` (numbers) | 1. `1` (true)<br>2. `1` (true)<br>3. `1` (true) |
 | `substr(text, start, len)` | Get part of a string (supports numbers, text, or a mix) | 1. `substr(banana, 2, 3)` (text)<br>2. `substr(HP: 100, 4, 3)` (mixed)<br>3. `substr(123456, 1, 4)` (numbers) | 1. `nan`<br>2. `100`<br>3. `2345` |
 | `len(text)` | Count characters (supports numbers, text, or a mix) | 1. `len(apple)` (text)<br>2. `len(HP: 100)` (mixed)<br>3. `len(453454)` (numbers) | 1. `5`<br>2. `7`<br>3. `6` |
-| `myVar.toNumber` | Convert a text variable to a number | If variable `A` is `"10"` (text):<br>`A.toNumber + 5` | `15` (numeric) |
+| `myVar.toNumber` | Extract digits from a text variable and convert them to a number (ignores non-digits) | If variable `A` is `"HP: 120"` (text):<br>`A.toNumber + 5` | `125` (numeric) |
 | `myVar.toString` | Convert a numeric variable to a text variable | If variable `A` is `123` (numeric):<br>`A.toString` | `"123"` (text) |
 
 ### Built-in Variables (Numeric)
