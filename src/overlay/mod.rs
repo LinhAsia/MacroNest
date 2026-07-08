@@ -10570,16 +10570,19 @@ mod windows_overlay {
         let mut state = SCREEN_DRAW_STATE.lock();
         state.brush_size = size.clamp(2.0, 80.0);
         if state.active_control == ScreenDrawControl::BrushSize {
-            state.active_control = ScreenDrawControl::None;
             mark_screen_draw_repaint_pending(&mut state);
         }
     }
 
     pub fn screen_draw_set_brush_size_active(active: bool) {
+        let mut state = SCREEN_DRAW_STATE.lock();
         if active {
+            if state.active_control != ScreenDrawControl::BrushSize {
+                state.active_control = ScreenDrawControl::BrushSize;
+                mark_screen_draw_repaint_pending(&mut state);
+            }
             return;
         }
-        let mut state = SCREEN_DRAW_STATE.lock();
         if state.active_control == ScreenDrawControl::BrushSize {
             let previous_rect = screen_draw_toolbar_rect(&state);
             state.active_control = ScreenDrawControl::None;
@@ -16691,7 +16694,6 @@ mod windows_overlay {
     ) -> (i32, u32) {
         match decoration {
             crate::model::FocusHighlightDecoration::FloralWood => (0, 14),
-            crate::model::FocusHighlightDecoration::CyberMech => (0, 6),
             crate::model::FocusHighlightDecoration::Plain
             | crate::model::FocusHighlightDecoration::Rainbow => (0, 4),
         }
@@ -17981,9 +17983,6 @@ mod windows_overlay {
             }
             crate::model::FocusHighlightDecoration::FloralWood => {
                 draw_focus_highlight_floral_wood(&mut canvas, thickness, accent);
-            }
-            crate::model::FocusHighlightDecoration::CyberMech => {
-                draw_focus_highlight_cyber_mech(&mut canvas, margin, thickness, accent);
             }
         }
 

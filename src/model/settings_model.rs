@@ -99,10 +99,10 @@ pub enum UiThemeMode {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FocusHighlightDecoration {
     #[default]
+    #[serde(alias = "CyberMech")]
     Plain,
     Rainbow,
     FloralWood,
-    CyberMech,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -671,5 +671,18 @@ mod tests {
         assert_eq!(state.command_presets[0].id, 9);
         assert_eq!(state.next_command_preset_id, 10);
         assert!(state.focus_highlight_rainbow_legacy);
+    }
+
+    #[test]
+    fn app_state_maps_legacy_cyber_mech_focus_highlight_to_plain() {
+        let state: AppState = serde_json::from_value(json!({
+            "focus_highlight_decoration": "CyberMech"
+        }))
+        .expect("legacy CyberMech decoration should deserialize");
+
+        assert_eq!(
+            state.focus_highlight_decoration,
+            super::FocusHighlightDecoration::Plain
+        );
     }
 }

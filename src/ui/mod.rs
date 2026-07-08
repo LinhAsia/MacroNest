@@ -4873,11 +4873,6 @@ impl CrosshairApp {
                                             "Floral Wood",
                                             "Floral Wood",
                                         ),
-                                        FocusHighlightDecoration::CyberMech => Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Cyber Mech",
-                                            "Cyber Mech",
-                                        ),
                                     };
 
                                     let decoration_changed =
@@ -4916,17 +4911,6 @@ impl CrosshairApp {
                                                             self.state.ui_language,
                                                             "Floral Wood",
                                                             "Floral Wood",
-                                                        ),
-                                                    )
-                                                    .clicked();
-                                                changed |= ui
-                                                    .selectable_value(
-                                                        &mut self.state.focus_highlight_decoration,
-                                                        FocusHighlightDecoration::CyberMech,
-                                                        Self::tr_lang(
-                                                            self.state.ui_language,
-                                                            "Cyber Mech",
-                                                            "Cyber Mech",
                                                         ),
                                                     )
                                                     .clicked();
@@ -13443,6 +13427,9 @@ impl eframe::App for CrosshairApp {
                                     ui.add(egui::Label::new("Size:"));
                                     ui.style_mut().spacing.slider_width = 80.0;
                                     let slider_resp = ui.add(egui::Slider::new(&mut brush_size, 2.0..=80.0).show_value(false));
+                                    crate::overlay::screen_draw_set_brush_size_active(
+                                        slider_resp.dragged() || slider_resp.clicked(),
+                                    );
                                     if slider_resp.changed() {
                                         crate::overlay::screen_draw_set_brush_size(brush_size);
                                     }
