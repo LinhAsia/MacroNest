@@ -12905,6 +12905,9 @@ impl eframe::App for CrosshairApp {
         let drawing_active = crate::overlay::screen_draw_active();
         let capturing_region = crate::overlay::screen_draw_get_capturing_region();
         let color_pick_mode = crate::overlay::screen_draw_get_color_pick_mode();
+        if drawing_active {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
         let mut color_pick_pending = self.screen_draw_color_pick_pending_at.is_some();
         if drawing_active {
             if color_pick_mode {
