@@ -1241,7 +1241,14 @@ impl CrosshairApp {
                 "https://github.com/LinhAsia/MacroNest/releases/latest",
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(8.0);
+                let close_btn = egui::Button::new(
+                    Self::material_icon_text(0xe5cd, 16.0)
+                )
+                .frame(false);
+                if ui.add(close_btn).clicked() {
+                    self.titlebar_guides_open = false;
+                }
+                ui.add_space(16.0);
                 ui.hyperlink_to(
                     Self::tr_lang(language, "Star this repo", "Star repo này"),
                     "https://github.com/LinhAsia/MacroNest",
@@ -1298,7 +1305,7 @@ impl CrosshairApp {
                             .strong(),
                         );
                         egui::ScrollArea::vertical()
-                            .max_height(200.0)
+                            .max_height(500.0)
                             .show(ui, |ui| {
                                 egui::Grid::new("expression-help-columns")
                             .num_columns(3)
