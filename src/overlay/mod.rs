@@ -14600,6 +14600,46 @@ mod windows_overlay {
         }
     }
 
+    fn extract_screen_draw_rgba_region(
+        src: &[u8],
+        width: usize,
+        rect: ScreenDrawDirtyRect,
+    ) -> Vec<u8> {
+        let row_bytes = rect.right.saturating_sub(rect.left).saturating_mul(4);
+        let height = rect.bottom.saturating_sub(rect.top);
+        let mut out = vec![0u8; row_bytes.saturating_mul(height)];
+        for (row_index, y) in (rect.top..rect.bottom).enumerate() {
+            let src_start = (y * width + rect.left) * 4;
+            let src_end = src_start + row_bytes;
+            let dst_start = row_index * row_bytes;
+            let dst_end = dst_start + row_bytes;
+            out[dst_start..dst_end].copy_from_slice(&src[src_start..src_end]);
+        }
+        out
+    }
+
+    fn convert_rgba_buffer_to_bgra_in_place(buffer: &mut [u8]) {
+        for pixel in buffer.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+    }
+
+    fn copy_compact_bgra_region_to_surface(
+        src: &[u8],
+        dst: &mut [u8],
+        width: usize,
+        rect: ScreenDrawDirtyRect,
+    ) {
+        let row_bytes = rect.right.saturating_sub(rect.left).saturating_mul(4);
+        for (row_index, y) in (rect.top..rect.bottom).enumerate() {
+            let dst_start = (y * width + rect.left) * 4;
+            let dst_end = dst_start + row_bytes;
+            let src_start = row_index * row_bytes;
+            let src_end = src_start + row_bytes;
+            dst[dst_start..dst_end].copy_from_slice(&src[src_start..src_end]);
+        }
+    }
+
     unsafe fn paint_screen_draw_overlay(hwnd: HWND) -> Result<()> {
         let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
         if screen_w <= 0 || screen_h <= 0 {
@@ -14770,26 +14810,36 @@ mod windows_overlay {
             }
         }
 
-        // Perform BGRA pixel conversion directly from state_guard.frame_rgba to surface bits
-        // while holding the lock. This is extremely fast (approx 0.5-1.5ms for a 2560x1440 screen)
-        // and avoids allocating a massive temporary Vec snapshot buffer on every single frame,
-        // which was causing memory pressure and lag when resizing shapes.
-        if state_guard.surface_bits_len > 0 && state_guard.surface_bits != 0 {
+        let mut dirty_snapshot =
+            extract_screen_draw_rgba_region(state_guard.frame_rgba.as_slice(), width, dirty_rect);
+        state_guard.pending_repaint = false;
+        state_guard.last_present_at = Some(Instant::now());
+        drop(state_guard);
+
+        convert_rgba_buffer_to_bgra_in_place(&mut dirty_snapshot);
+
+        let surface_dc = {
+            let state_guard = SCREEN_DRAW_STATE.lock();
+            if !state_guard.active
+                || state_guard.surface_bits_len == 0
+                || state_guard.surface_bits == 0
+                || state_guard.surface_width != width
+                || state_guard.surface_height != height
+            {
+                return Ok(());
+            }
             let pixels = std::slice::from_raw_parts_mut(
                 state_guard.surface_bits as *mut u8,
                 state_guard.surface_bits_len,
             );
-            copy_screen_draw_rgba_to_bgra_region(
-                state_guard.frame_rgba.as_slice(),
+            copy_compact_bgra_region_to_surface(
+                dirty_snapshot.as_slice(),
                 pixels,
                 width,
                 dirty_rect,
             );
-        }
-        let surface_dc = HDC(state_guard.surface_dc as *mut c_void);
-        state_guard.pending_repaint = false;
-        state_guard.last_present_at = Some(Instant::now());
-        drop(state_guard); // Release lock BEFORE the expensive UpdateLayeredWindow call
+            HDC(state_guard.surface_dc as *mut c_void)
+        };
 
         // SetWindowPos to HWND_TOPMOST: only needed once when window is first shown/positioned.
         // Check current window position to avoid calling it every frame (expensive DWM op).
