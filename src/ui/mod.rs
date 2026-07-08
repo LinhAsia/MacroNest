@@ -629,7 +629,6 @@ pub struct CrosshairApp {
     last_synced_quick_screen_draw_config: Option<(
         bool,
         Option<HotkeyBinding>,
-        bool,
         RgbaColor,
         f32,
         bool,
@@ -5610,41 +5609,15 @@ impl CrosshairApp {
                             TitlebarQuickActionKind::ScreenDraw,
                             &mut |ui| {
                                 ui.vertical(|ui| {
-                                    let pass_changed = ui
+                                    let freeze_changed = ui
                                         .checkbox(
-                                            &mut self.state.quick_screen_draw_pass_trigger_through,
+                                            &mut self.state.quick_screen_draw_freeze,
                                             RichText::new(Self::tr_lang(
                                                 self.state.ui_language,
-                                                "Pass through",
-                                                "Xuyên qua",
+                                                "Freeze screen",
+                                                "Đóng băng màn hình",
                                             ))
                                             .size(10.0),
-                                        )
-                                        .changed();
-                                    if pass_changed {
-                                        self.sync_quick_screen_draw_config();
-                                        self.persist();
-                                    }
-
-                                    ui.add_space(4.0);
-                                    let is_pass_through =
-                                        self.state.quick_screen_draw_pass_trigger_through;
-                                    if is_pass_through && self.state.quick_screen_draw_freeze {
-                                        self.state.quick_screen_draw_freeze = false;
-                                        self.sync_quick_screen_draw_config();
-                                    }
-                                    let freeze_changed = ui
-                                        .add_enabled(
-                                            !is_pass_through,
-                                            egui::Checkbox::new(
-                                                &mut self.state.quick_screen_draw_freeze,
-                                                RichText::new(Self::tr_lang(
-                                                    self.state.ui_language,
-                                                    "Freeze screen",
-                                                    "Đóng băng màn hình",
-                                                ))
-                                                .size(10.0),
-                                            ),
                                         )
                                         .changed();
                                     if freeze_changed {
@@ -13529,7 +13502,6 @@ impl eframe::App for CrosshairApp {
                                             crate::overlay::screen_draw_trigger_capture_region_from_toolbar();
                                         }
                                     }
-
                                     // 7. Clear Canvas
                                     if icon_btn(ui, false, "clear", "Clear Canvas").1 {
                                         crate::overlay::screen_draw_clear();

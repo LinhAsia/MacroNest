@@ -1814,7 +1814,6 @@ mod windows_overlay {
         UpdateScreenDrawConfig {
             enabled: bool,
             trigger: Option<HotkeyBinding>,
-            pass_trigger_through: bool,
             color: RgbaColor,
             brush_size: f32,
             smoothing: bool,
@@ -2037,7 +2036,6 @@ mod windows_overlay {
         enabled: bool,
         active: bool,
         trigger: Option<HotkeyBinding>,
-        pass_trigger_through: bool,
         color: RgbaColor,
         brush_size: f32,
         eraser: bool,
@@ -2110,7 +2108,6 @@ mod windows_overlay {
                 enabled: false,
                 active: false,
                 trigger: None,
-                pass_trigger_through: false,
                 color: RgbaColor {
                     r: 0,
                     g: 255,
@@ -9002,7 +8999,6 @@ mod windows_overlay {
         }
         let (
             matches_trigger,
-            pass_trigger_through,
             active,
             capturing_region,
             trigger_latched,
@@ -9016,7 +9012,6 @@ mod windows_overlay {
                         .trigger
                         .as_ref()
                         .is_some_and(|trigger| hotkey::binding_matches(trigger, binding)),
-                state.pass_trigger_through,
                 state.active,
                 state.capturing_region,
                 state.trigger_latched,
@@ -9041,7 +9036,7 @@ mod windows_overlay {
         ));
         if trigger_latched {
             if is_repeat {
-                return !pass_trigger_through;
+                return true;
             }
             let mut state = SCREEN_DRAW_STATE.lock();
             if state
@@ -9110,13 +9105,12 @@ mod windows_overlay {
         schedule_screen_draw_trigger_capture_check(press_started_at);
         request_screen_draw_overlay_sync();
         request_ui_repaint();
-        !pass_trigger_through
+        true
     }
 
     fn process_screen_draw_hotkey_release(binding: &HotkeyBinding) -> bool {
         let (
             matches_trigger_key,
-            pass_trigger_through,
             active,
             capturing_region,
             had_trigger_press,
@@ -9129,7 +9123,6 @@ mod windows_overlay {
                         .trigger
                         .as_ref()
                         .is_some_and(|trigger| trigger.key.eq_ignore_ascii_case(&binding.key)),
-                state.pass_trigger_through,
                 state.active,
                 state.capturing_region,
                 state.trigger_latched
@@ -9156,7 +9149,7 @@ mod windows_overlay {
             state.trigger_started_from_inactive = false;
             state.trigger_release_should_keep_open = false;
             screen_draw_debug_log(format!("up_orphan_ignored key={}", binding.key));
-            return !pass_trigger_through;
+            return true;
         }
         if capturing_region {
             // Trigger key released while in region capture mode (from camera button click).
@@ -9180,7 +9173,7 @@ mod windows_overlay {
             if should_sync {
                 request_screen_draw_overlay_sync();
             }
-            return !pass_trigger_through;
+            return true;
         }
 
         let mut should_sync = false;
@@ -9201,7 +9194,7 @@ mod windows_overlay {
         if should_sync {
             request_screen_draw_overlay_sync();
         }
-        should_toggle_off || !pass_trigger_through
+        true
     }
 
     fn screen_draw_release_trigger_latch_if_ready() {
@@ -9774,7 +9767,6 @@ mod windows_overlay {
                 OverlayCommand::UpdateScreenDrawConfig {
                     enabled,
                     trigger,
-                    pass_trigger_through,
                     color,
                     brush_size,
                     smoothing,
@@ -9788,7 +9780,6 @@ mod windows_overlay {
                         let mut state = SCREEN_DRAW_STATE.lock();
                         state.enabled = enabled;
                         state.trigger = trigger;
-                        state.pass_trigger_through = pass_trigger_through;
                         state.color = color;
                         state.brush_size = brush_size.clamp(2.0, 80.0);
                         state.smoothing = smoothing;
@@ -35681,7 +35672,6 @@ mod fallback {
         UpdateScreenDrawConfig {
             enabled: bool,
             trigger: Option<HotkeyBinding>,
-            pass_trigger_through: bool,
             color: RgbaColor,
             brush_size: f32,
             smoothing: bool,

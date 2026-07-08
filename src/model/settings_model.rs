@@ -507,8 +507,6 @@ pub struct AppState {
     pub quick_screen_draw_enabled: bool,
     #[serde(default)]
     pub quick_screen_draw_hotkey: Option<HotkeyBinding>,
-    #[serde(default)]
-    pub quick_screen_draw_pass_trigger_through: bool,
     #[serde(default = "default_screen_draw_color")]
     pub quick_screen_draw_color: RgbaColor,
     #[serde(default = "default_screen_draw_brush_size")]
@@ -523,6 +521,8 @@ pub struct AppState {
     pub quick_screen_draw_freeze: bool,
     #[serde(default)]
     pub quick_screen_draw_tool: QuickScreenDrawTool,
+    #[serde(default)]
+    pub quick_screen_draw_text_border: bool,
     #[serde(default)]
     pub quick_key_sound_enabled: bool,
     #[serde(default)]
@@ -632,7 +632,6 @@ impl Default for AppState {
             quick_key_display_mascot_positions: Vec::new(),
             quick_screen_draw_enabled: false,
             quick_screen_draw_hotkey: None,
-            quick_screen_draw_pass_trigger_through: false,
             quick_screen_draw_color: default_screen_draw_color(),
             quick_screen_draw_brush_size: default_screen_draw_brush_size(),
             quick_screen_draw_smoothing: false,
@@ -640,6 +639,7 @@ impl Default for AppState {
             quick_screen_draw_fill: false,
             quick_screen_draw_freeze: default_screen_draw_freeze(),
             quick_screen_draw_tool: QuickScreenDrawTool::Brush,
+            quick_screen_draw_text_border: false,
             quick_key_sound_enabled: false,
             quick_key_sound_style: 2,
             quick_key_sound_volume: default_key_sound_volume(),

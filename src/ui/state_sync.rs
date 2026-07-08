@@ -302,7 +302,6 @@ impl CrosshairApp {
         let config = (
             self.state.quick_screen_draw_enabled,
             self.state.quick_screen_draw_hotkey.clone(),
-            self.state.quick_screen_draw_pass_trigger_through,
             self.state.quick_screen_draw_color,
             self.state.quick_screen_draw_brush_size,
             self.state.quick_screen_draw_smoothing,
@@ -310,6 +309,7 @@ impl CrosshairApp {
             self.state.quick_screen_draw_fill,
             self.state.quick_screen_draw_freeze,
             self.state.quick_screen_draw_tool,
+            self.state.quick_screen_draw_text_border,
         );
         Self::sync_overlay_command_with_state_if_changed(
             &self.overlay_tx,
@@ -318,14 +318,14 @@ impl CrosshairApp {
             |config| OverlayCommand::UpdateScreenDrawConfig {
                 enabled: config.0,
                 trigger: config.1.clone(),
-                pass_trigger_through: config.2,
-                color: config.3,
-                brush_size: config.4,
-                smoothing: config.5,
-                smoothing_amount: config.6,
-                fill: config.7,
-                freeze: config.8,
-                tool: config.9,
+                color: config.2,
+                brush_size: config.3,
+                smoothing: config.4,
+                smoothing_amount: config.5,
+                fill: config.6,
+                freeze: config.7,
+                tool: config.8,
+                text_border: config.9,
             },
         );
     }
