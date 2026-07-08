@@ -203,7 +203,8 @@ fn render_raster(path: &Path, target_size: u32) -> Result<Pixmap> {
         .with_context(|| format!("Failed to decode image {}", path.display()))?;
 
     let resized = fit_image(image, target_size);
-    let rgba = resized.to_rgba8();
+    let mut rgba = resized.to_rgba8();
+    premultiply_rgba(rgba.as_mut());
     let (width, height) = resized.dimensions();
     let mut pixmap = Pixmap::new(width, height).context("Failed to create a raster pixmap")?;
     pixmap.data_mut().copy_from_slice(rgba.as_raw());
@@ -269,7 +270,19 @@ fn to_skia_color(color: RgbaColor) -> Color {
 fn apply_global_alpha(rgba: &mut [u8], alpha: f32) {
     let factor = alpha.clamp(0.0, 1.0);
     for pixel in rgba.chunks_exact_mut(4) {
+        pixel[0] = (pixel[0] as f32 * factor).round() as u8;
+        pixel[1] = (pixel[1] as f32 * factor).round() as u8;
+        pixel[2] = (pixel[2] as f32 * factor).round() as u8;
         pixel[3] = (pixel[3] as f32 * factor).round() as u8;
+    }
+}
+
+fn premultiply_rgba(rgba: &mut [u8]) {
+    for pixel in rgba.chunks_exact_mut(4) {
+        let alpha = pixel[3] as f32 / 255.0;
+        pixel[0] = (pixel[0] as f32 * alpha).round() as u8;
+        pixel[1] = (pixel[1] as f32 * alpha).round() as u8;
+        pixel[2] = (pixel[2] as f32 * alpha).round() as u8;
     }
 }
 
@@ -291,6 +304,13 @@ mod tests {
 
         let rendered = render_crosshair(&style, None).expect("render ring crosshair");
         assert!(rendered.rgba.chunks_exact(4).any(|px| px[3] > 0));
+    }
+
+    #[test]
+    fn apply_global_alpha_scales_rgb_and_alpha() {
+        let mut rgba = vec![200, 100, 50, 128];
+        apply_global_alpha(&mut rgba, 0.25);
+        assert_eq!(rgba, vec![50, 25, 13, 32]);
     }
 }
 

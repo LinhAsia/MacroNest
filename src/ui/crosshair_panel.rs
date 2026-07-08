@@ -372,7 +372,7 @@ impl CrosshairApp {
 
         let mut copy_crosshair_profile = None;
         let mut paste_crosshair_profile_after = None;
-        let mut pending_crosshair_draw_request: Option<(String, Option<String>)> = None;
+        let mut pending_crosshair_draw_request: Option<(String, Option<String>, f32)> = None;
         let mut refresh_crosshair_profiles = false;
         let can_paste_crosshair = self.crosshair_profile_clipboard.is_some();
         for index in 0..self.state.profiles.len() {
@@ -479,8 +479,11 @@ impl CrosshairApp {
                                 .button(Self::tr_lang(language, "Draw crosshair", "Draw crosshair"))
                                 .clicked()
                             {
-                                pending_crosshair_draw_request =
-                                    Some((preset.name.clone(), preset.style.custom_asset.clone()));
+                                pending_crosshair_draw_request = Some((
+                                    preset.name.clone(),
+                                    preset.style.custom_asset.clone(),
+                                    preset.style.custom_scale,
+                                ));
                             }
                             if preset.style.custom_asset.is_some()
                                 && ui
@@ -538,12 +541,13 @@ impl CrosshairApp {
         if let Some(profile) = copy_crosshair_profile {
             self.copy_crosshair_profile(&profile);
         }
-        if let Some((profile_name, asset_name)) = pending_crosshair_draw_request {
+        if let Some((profile_name, asset_name, asset_scale)) = pending_crosshair_draw_request {
             let _ = self
                 .overlay_tx
                 .send(crate::overlay::OverlayCommand::BeginCrosshairDraw {
                     profile_name: profile_name.clone(),
                     asset_name,
+                    asset_scale,
                 });
             self.status = format!("Opened crosshair draw for {profile_name}.");
         }

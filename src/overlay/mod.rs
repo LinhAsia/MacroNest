@@ -1720,6 +1720,7 @@ mod windows_overlay {
         BeginCrosshairDraw {
             profile_name: String,
             asset_name: Option<String>,
+            asset_scale: f32,
         },
         UpdateWindowPresets(Vec<WindowPreset>),
         UpdateWindowFocusPresets(Vec<WindowFocusPreset>),
@@ -1858,6 +1859,15 @@ mod windows_overlay {
         asset_name: String,
         asset_path: PathBuf,
         restore: ScreenDrawConfigSnapshot,
+    }
+
+    #[derive(Debug, Clone)]
+    struct ScreenDrawCanvasBackground {
+        rgba: Vec<u8>,
+        width: usize,
+        height: usize,
+        left: usize,
+        top: usize,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2069,6 +2079,7 @@ mod windows_overlay {
         text_interaction_start_point: Option<POINT>,
         text_interaction_origin: Option<ScreenDrawStroke>,
         crosshair_draw_target: Option<ScreenDrawCrosshairDrawTarget>,
+        canvas_background: Option<ScreenDrawCanvasBackground>,
         screen_color_pick_mode: bool,
         color_pick_restore_freeze_screen: Option<bool>,
         color_pick_restore_freeze_frame: Option<Option<Vec<u8>>>,
@@ -2144,6 +2155,7 @@ mod windows_overlay {
                 text_interaction_start_point: None,
                 text_interaction_origin: None,
                 crosshair_draw_target: None,
+                canvas_background: None,
                 screen_color_pick_mode: false,
                 color_pick_restore_freeze_screen: None,
                 color_pick_restore_freeze_frame: None,
@@ -9331,8 +9343,9 @@ mod windows_overlay {
                 OverlayCommand::BeginCrosshairDraw {
                     profile_name,
                     asset_name,
+                    asset_scale,
                 } => {
-                    begin_crosshair_draw_session(runtime, profile_name, asset_name);
+                    begin_crosshair_draw_session(runtime, profile_name, asset_name, asset_scale);
                 }
 
                 OverlayCommand::UpdateWindowPresets(presets) => {
@@ -10427,10 +10440,13 @@ mod windows_overlay {
         runtime: &Runtime,
         profile_name: String,
         asset_name: Option<String>,
+        asset_scale: f32,
     ) {
         let selected_asset_name = asset_name
             .filter(|name| !name.trim().is_empty())
             .unwrap_or_else(|| default_crosshair_asset_name(&profile_name));
+        let background =
+            load_crosshair_draw_background(runtime, &selected_asset_name, asset_scale);
 
         {
             let mut state = SCREEN_DRAW_STATE.lock();
@@ -10467,11 +10483,88 @@ mod windows_overlay {
             state.freeze_frame = None;
             state.text_border = false;
             activate_screen_draw(&mut state, None);
+            state.canvas_background = background;
+            state.committed_dirty = true;
         }
 
         send_screen_draw_config_to_ui();
         request_screen_draw_overlay_sync();
         request_ui_repaint();
+    }
+
+    fn load_crosshair_draw_background(
+        runtime: &Runtime,
+        asset_name: &str,
+        asset_scale: f32,
+    ) -> Option<ScreenDrawCanvasBackground> {
+        let asset_path = runtime.paths.asset_path(asset_name);
+        if !asset_path.exists() {
+            return None;
+        }
+
+        let style = CrosshairStyle {
+            opacity: 1.0,
+            custom_scale: asset_scale.clamp(16.0, 512.0),
+            ..CrosshairStyle::default()
+        };
+        let rendered = render_crosshair(&style, Some(asset_path.as_path())).ok()?;
+        if rendered.width == 0 || rendered.height == 0 {
+            return None;
+        }
+
+        let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
+        if screen_w <= 0 || screen_h <= 0 {
+            return None;
+        }
+
+        Some(ScreenDrawCanvasBackground {
+            rgba: rendered.rgba,
+            width: rendered.width as usize,
+            height: rendered.height as usize,
+            left: ((screen_w - rendered.width as i32) / 2).max(0) as usize,
+            top: ((screen_h - rendered.height as i32) / 2).max(0) as usize,
+        })
+    }
+
+    fn blend_screen_draw_background_layer(
+        dst: &mut [u8],
+        canvas_width: usize,
+        canvas_height: usize,
+        background: &ScreenDrawCanvasBackground,
+    ) {
+        if background.rgba.is_empty() || canvas_width == 0 || canvas_height == 0 {
+            return;
+        }
+
+        let copy_width = background
+            .width
+            .min(canvas_width.saturating_sub(background.left));
+        let copy_height = background
+            .height
+            .min(canvas_height.saturating_sub(background.top));
+        if copy_width == 0 || copy_height == 0 {
+            return;
+        }
+
+        for row in 0..copy_height {
+            let src_row = row * background.width * 4;
+            let dst_row = ((background.top + row) * canvas_width + background.left) * 4;
+            for col in 0..copy_width {
+                let src_offset = src_row + col * 4;
+                let dst_offset = dst_row + col * 4;
+                let src_a = background.rgba[src_offset + 3];
+                if src_a == 0 {
+                    continue;
+                }
+                blend_premultiplied_rgba(
+                    &mut dst[dst_offset..dst_offset + 4],
+                    background.rgba[src_offset],
+                    background.rgba[src_offset + 1],
+                    background.rgba[src_offset + 2],
+                    src_a,
+                );
+            }
+        }
     }
 
     fn export_crosshair_draw_asset(
@@ -10990,6 +11083,7 @@ mod windows_overlay {
     }
 
     fn deactivate_screen_draw_from_toolbar() {
+        let _ = screen_draw_handle_button_up();
         let trigger_to_sync = {
             let state = SCREEN_DRAW_STATE.lock();
             state.trigger.clone()
@@ -11213,6 +11307,7 @@ mod windows_overlay {
         state.text_session = None;
         state.text_interaction_start_point = None;
         state.text_interaction_origin = None;
+        state.canvas_background = None;
         state.screen_color_pick_mode = false;
         state.color_pick_restore_freeze_screen = None;
         state.color_pick_restore_freeze_frame = None;
@@ -11263,6 +11358,7 @@ mod windows_overlay {
         state.text_session = None;
         state.text_interaction_start_point = None;
         state.text_interaction_origin = None;
+        state.canvas_background = None;
         state.pending_repaint = true;
         state.dirty_rect = Some(ScreenDrawDirtyRect::full(
             state.canvas_width.max(1),
@@ -13881,16 +13977,21 @@ mod windows_overlay {
         state.canvas_width = width;
         state.canvas_height = height;
         state.committed_rgba.clear();
-        if (state.freeze_screen && state.freeze_frame.is_some()) {
+        if let Some(background) = state.canvas_background.as_ref() {
+            state.committed_rgba.resize(byte_len, 0);
+            blend_screen_draw_background_layer(&mut state.committed_rgba, width, height, background);
+            state.committed_dirty = false;
+        } else if state.freeze_screen && state.freeze_frame.is_some() {
             if let Some(ref bg) = state.freeze_frame {
                 state.committed_rgba.extend_from_slice(bg);
             }
+            state.committed_dirty = true;
         } else {
             state.committed_rgba.resize(byte_len, 0);
+            state.committed_dirty = true;
         }
         state.frame_rgba.clear();
         state.frame_rgba.resize(byte_len, 0);
-        state.committed_dirty = true;
         state.dirty_rect = Some(ScreenDrawDirtyRect::full(width, height));
         state.live_stroke_rect = None;
         release_screen_draw_surface(state);
@@ -14234,7 +14335,15 @@ mod windows_overlay {
         if state.canvas_width == 0 || state.canvas_height == 0 || state.committed_rgba.is_empty() {
             return;
         }
-        if (state.freeze_screen && state.freeze_frame.is_some()) {
+        if let Some(background) = state.canvas_background.as_ref() {
+            state.committed_rgba.fill(0);
+            blend_screen_draw_background_layer(
+                &mut state.committed_rgba,
+                state.canvas_width,
+                state.canvas_height,
+                background,
+            );
+        } else if state.freeze_screen && state.freeze_frame.is_some() {
             if let Some(ref bg) = state.freeze_frame {
                 state.committed_rgba.copy_from_slice(bg);
             }
@@ -35205,6 +35314,7 @@ mod fallback {
         BeginCrosshairDraw {
             profile_name: String,
             asset_name: Option<String>,
+            asset_scale: f32,
         },
         UpdateWindowPresets(Vec<WindowPreset>),
         UpdateWindowFocusPresets(Vec<WindowFocusPreset>),
