@@ -124,7 +124,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 
 | Function | Meaning | Example | Result |
 | :--- | :--- | :--- | :--- |
-| `contains(a, b)` | Check whether text `a` contains text `b` (supports numbers, text, or a mix) | 1. `contains(hello, el)` (text)<br>2. `contains(Gold: 5000, 5000)` (mixed)<br>3. `contains(12345, 34)` (numbers) | 1. `1` (true)<br>2. `1` (true)<br>3. `1` (true) |
+| `contains(a, b)` | Check whether text `a` contains text `b` (supports numbers, text, or a mix) | 1. `contains(hello, world)` (text)<br>2. `contains(Gold: 5000, 5000)` (mixed)<br>3. `contains(12345, 99)` (numbers) | 1. `0` (false)<br>2. `1` (true)<br>3. `0` (false) |
 | `substr(text, start, len)` | Get part of a string (supports numbers, text, or a mix) | 1. `substr(banana, 2, 3)` (text)<br>2. `substr(Rank #1: Player, 9, 6)` (mixed)<br>3. `substr(123456, 1, 4)` (numbers) | 1. `nan`<br>2. `Player`<br>3. `2345` |
 | `len(text)` | Count characters (supports numbers, text, or a mix) | 1. `len(apple)` (text)<br>2. `len(Score: 9999)` (mixed)<br>3. `len(453454)` (numbers) | 1. `5`<br>2. `11`<br>3. `6` |
 | `myVar.toNumber` | Extract digits from a text variable and convert them to a number (ignores non-digits) | If variable `A` is `"Gold: 500"` (text):<br>`A.toNumber` | `500` (numeric) |
