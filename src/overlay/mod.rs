@@ -58,6 +58,7 @@ mod windows_overlay {
         borrow::Cow,
         collections::{HashMap, HashSet},
         ffi::{CString, c_void},
+        fs,
         mem::size_of,
         os::windows::process::CommandExt,
         path::PathBuf,
@@ -1716,6 +1717,10 @@ mod windows_overlay {
             index: usize,
             profile: ProfileRecord,
         },
+        BeginCrosshairDraw {
+            profile_name: String,
+            asset_name: Option<String>,
+        },
         UpdateWindowPresets(Vec<WindowPreset>),
         UpdateWindowFocusPresets(Vec<WindowFocusPreset>),
         UpdateWindowLayouts(Vec<crate::model::WindowLayout>),
@@ -1833,6 +1838,26 @@ mod windows_overlay {
         MoveTextSession,
         ResizeTextSession,
         RotateTextSession,
+    }
+
+    #[derive(Debug, Clone)]
+    struct ScreenDrawConfigSnapshot {
+        color: RgbaColor,
+        brush_size: f32,
+        smoothing: bool,
+        smoothing_amount: f32,
+        freeze_screen: bool,
+        tool: ScreenDrawTool,
+        text_border: bool,
+        eraser: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    struct ScreenDrawCrosshairDrawTarget {
+        profile_name: String,
+        asset_name: String,
+        asset_path: PathBuf,
+        restore: ScreenDrawConfigSnapshot,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2043,6 +2068,7 @@ mod windows_overlay {
         text_session: Option<ScreenDrawTextSession>,
         text_interaction_start_point: Option<POINT>,
         text_interaction_origin: Option<ScreenDrawStroke>,
+        crosshair_draw_target: Option<ScreenDrawCrosshairDrawTarget>,
         screen_color_pick_mode: bool,
         color_pick_restore_freeze_screen: Option<bool>,
         color_pick_restore_freeze_frame: Option<Option<Vec<u8>>>,
@@ -2117,6 +2143,7 @@ mod windows_overlay {
                 text_session: None,
                 text_interaction_start_point: None,
                 text_interaction_origin: None,
+                crosshair_draw_target: None,
                 screen_color_pick_mode: false,
                 color_pick_restore_freeze_screen: None,
                 color_pick_restore_freeze_frame: None,
@@ -2146,6 +2173,12 @@ mod windows_overlay {
         MousePathRecordingFinished(u32, Vec<MousePathEvent>, String),
         MousePathDrawCaptureCancelled(String),
         ScreenDrawCaptureStatus(String),
+        CrosshairDrawFinished {
+            profile_name: String,
+            asset_name: Option<String>,
+            asset_scale: Option<f32>,
+            status: String,
+        },
         UpdateScreenDrawConfig {
             color: RgbaColor,
             brush_size: f32,
@@ -9295,6 +9328,13 @@ mod windows_overlay {
                     let _ = refresh_overlay(runtime);
                 }
 
+                OverlayCommand::BeginCrosshairDraw {
+                    profile_name,
+                    asset_name,
+                } => {
+                    begin_crosshair_draw_session(runtime, profile_name, asset_name);
+                }
+
                 OverlayCommand::UpdateWindowPresets(presets) => {
                     runtime.window_presets = presets;
                     let _ = sync_window_hotkeys(hwnd, runtime);
@@ -10363,6 +10403,201 @@ mod windows_overlay {
         }
     }
 
+    fn sanitize_crosshair_asset_stem(name: &str) -> String {
+        let cleaned: String = name
+            .chars()
+            .map(|ch| match ch {
+                'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => ch,
+                _ => '_',
+            })
+            .collect();
+        let trimmed = cleaned.trim_matches('_');
+        if trimmed.is_empty() {
+            "crosshair".to_owned()
+        } else {
+            trimmed.to_owned()
+        }
+    }
+
+    fn default_crosshair_asset_name(profile_name: &str) -> String {
+        format!("drawn-{}.png", sanitize_crosshair_asset_stem(profile_name))
+    }
+
+    fn begin_crosshair_draw_session(
+        runtime: &Runtime,
+        profile_name: String,
+        asset_name: Option<String>,
+    ) {
+        let selected_asset_name = asset_name
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| default_crosshair_asset_name(&profile_name));
+
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            if state.active {
+                deactivate_screen_draw(&mut state);
+            }
+            state.crosshair_draw_target = Some(ScreenDrawCrosshairDrawTarget {
+                profile_name: profile_name.clone(),
+                asset_path: runtime.paths.asset_path(&selected_asset_name),
+                asset_name: selected_asset_name,
+                restore: ScreenDrawConfigSnapshot {
+                    color: state.color,
+                    brush_size: state.brush_size,
+                    smoothing: state.smoothing,
+                    smoothing_amount: state.smoothing_amount,
+                    freeze_screen: state.freeze_screen,
+                    tool: state.tool,
+                    text_border: state.text_border,
+                    eraser: state.eraser,
+                },
+            });
+            state.color = RgbaColor {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            };
+            state.brush_size = state.brush_size.clamp(2.0, 80.0).max(3.0);
+            state.eraser = false;
+            state.smoothing = false;
+            state.smoothing_amount = 0.45;
+            state.tool = ScreenDrawTool::Brush;
+            state.freeze_screen = false;
+            state.freeze_frame = None;
+            state.text_border = false;
+            activate_screen_draw(&mut state, None);
+        }
+
+        send_screen_draw_config_to_ui();
+        request_screen_draw_overlay_sync();
+        request_ui_repaint();
+    }
+
+    fn export_crosshair_draw_asset(
+        state: &mut ScreenDrawState,
+        target: &ScreenDrawCrosshairDrawTarget,
+    ) -> Result<Option<f32>> {
+        let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
+        if screen_w <= 0 || screen_h <= 0 {
+            return Ok(None);
+        }
+
+        ensure_screen_draw_canvas(state, screen_w as usize, screen_h as usize);
+        if state.committed_dirty {
+            rebuild_screen_draw_canvas(state);
+        }
+
+        let mut rgba = state.committed_rgba.clone();
+        if rgba.is_empty() || state.canvas_width == 0 || state.canvas_height == 0 {
+            return Ok(None);
+        }
+
+        if let Some(stroke) = state.current_stroke.clone()
+            && let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
+                rgba.as_mut_slice(),
+                state.canvas_width as u32,
+                state.canvas_height as u32,
+            )
+        {
+            render_screen_draw_stroke_skia(&mut pixmap, &stroke);
+        }
+
+        let mut min_x = state.canvas_width;
+        let mut min_y = state.canvas_height;
+        let mut max_x = 0usize;
+        let mut max_y = 0usize;
+        let mut has_visible_pixel = false;
+
+        for y in 0..state.canvas_height {
+            for x in 0..state.canvas_width {
+                let offset = (y * state.canvas_width + x) * 4;
+                if rgba.get(offset + 3).copied().unwrap_or_default() == 0 {
+                    continue;
+                }
+                has_visible_pixel = true;
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x + 1);
+                max_y = max_y.max(y + 1);
+            }
+        }
+
+        if !has_visible_pixel {
+            return Ok(None);
+        }
+
+        let pad = 2usize;
+        min_x = min_x.saturating_sub(pad);
+        min_y = min_y.saturating_sub(pad);
+        max_x = (max_x + pad).min(state.canvas_width);
+        max_y = (max_y + pad).min(state.canvas_height);
+
+        let full = RgbaImage::from_raw(state.canvas_width as u32, state.canvas_height as u32, rgba)
+            .context("Failed to build custom crosshair image")?;
+        let cropped = image::imageops::crop_imm(
+            &full,
+            min_x as u32,
+            min_y as u32,
+            (max_x - min_x) as u32,
+            (max_y - min_y) as u32,
+        )
+        .to_image();
+
+        if let Some(parent) = target.asset_path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create custom crosshair folder {}",
+                    parent.display()
+                )
+            })?;
+        }
+        cropped.save(&target.asset_path).with_context(|| {
+            format!(
+                "Failed to save custom crosshair {}",
+                target.asset_path.display()
+            )
+        })?;
+
+        Ok(Some(cropped.width().max(cropped.height()) as f32))
+    }
+
+    fn finish_crosshair_draw_session(state: &mut ScreenDrawState) -> Option<UiCommand> {
+        let target = state.crosshair_draw_target.take()?;
+        let result = export_crosshair_draw_asset(state, &target);
+
+        state.color = target.restore.color;
+        state.brush_size = target.restore.brush_size;
+        state.eraser = target.restore.eraser;
+        state.smoothing = target.restore.smoothing;
+        state.smoothing_amount = target.restore.smoothing_amount;
+        state.tool = target.restore.tool;
+        state.freeze_screen = target.restore.freeze_screen;
+        state.freeze_frame = None;
+        state.text_border = target.restore.text_border;
+
+        match result {
+            Ok(Some(asset_scale)) => Some(UiCommand::CrosshairDrawFinished {
+                profile_name: target.profile_name,
+                asset_name: Some(target.asset_name),
+                asset_scale: Some(asset_scale),
+                status: "Saved custom crosshair drawing.".to_owned(),
+            }),
+            Ok(None) => Some(UiCommand::CrosshairDrawFinished {
+                profile_name: target.profile_name,
+                asset_name: None,
+                asset_scale: None,
+                status: "Closed crosshair drawing without visible pixels.".to_owned(),
+            }),
+            Err(error) => Some(UiCommand::CrosshairDrawFinished {
+                profile_name: target.profile_name,
+                asset_name: None,
+                asset_scale: None,
+                status: format!("Failed to save custom crosshair drawing: {error}"),
+            }),
+        }
+    }
+
     fn screen_draw_should_block_background_interaction(state: &ScreenDrawState) -> bool {
         state.active
     }
@@ -10947,6 +11182,7 @@ mod windows_overlay {
         if state.text_session.is_some() {
             commit_screen_draw_text_session(state);
         }
+        let crosshair_draw_finished = finish_crosshair_draw_session(state);
         state.active = false;
         state.current_stroke = None;
         state.current_stroke_updated_at = None;
@@ -10981,6 +11217,31 @@ mod windows_overlay {
         state.color_pick_restore_freeze_screen = None;
         state.color_pick_restore_freeze_frame = None;
         state.color_pick_preview = None;
+        if state.crosshair_draw_target.is_some() {
+            state.crosshair_draw_target = None;
+        }
+        if let Some(command) = crosshair_draw_finished {
+            send_ui_command(UiCommand::UpdateScreenDrawConfig {
+                color: state.color,
+                brush_size: state.brush_size,
+                smoothing: state.smoothing,
+                smoothing_amount: state.smoothing_amount,
+                fill: false,
+                freeze: state.freeze_screen,
+                tool: match state.tool {
+                    ScreenDrawTool::Brush => crate::model::QuickScreenDrawTool::Brush,
+                    ScreenDrawTool::Line => crate::model::QuickScreenDrawTool::Line,
+                    ScreenDrawTool::Arrow => crate::model::QuickScreenDrawTool::Arrow,
+                    ScreenDrawTool::Rectangle => crate::model::QuickScreenDrawTool::Rectangle,
+                    ScreenDrawTool::Ellipse => crate::model::QuickScreenDrawTool::Ellipse,
+                    ScreenDrawTool::Circle => crate::model::QuickScreenDrawTool::Circle,
+                    ScreenDrawTool::Polygon => crate::model::QuickScreenDrawTool::Polygon,
+                    ScreenDrawTool::Text => crate::model::QuickScreenDrawTool::Text,
+                },
+                text_border: state.text_border,
+            });
+            send_ui_command(command);
+        }
     }
 
     fn activate_screen_draw(state: &mut ScreenDrawState, captured_frame: Option<Vec<u8>>) {
@@ -27931,6 +28192,14 @@ mod windows_overlay {
         }
 
         #[test]
+        fn default_crosshair_asset_name_sanitizes_profile_name() {
+            assert_eq!(
+                default_crosshair_asset_name("My Crosshair/01"),
+                "drawn-My_Crosshair_01.png"
+            );
+        }
+
+        #[test]
         fn screen_draw_text_layout_tracks_latest_pointer_for_text_preview() {
             let stroke = ScreenDrawStroke {
                 tool: ScreenDrawTool::Text,
@@ -34933,6 +35202,10 @@ mod fallback {
             index: usize,
             profile: ProfileRecord,
         },
+        BeginCrosshairDraw {
+            profile_name: String,
+            asset_name: Option<String>,
+        },
         UpdateWindowPresets(Vec<WindowPreset>),
         UpdateWindowFocusPresets(Vec<WindowFocusPreset>),
         UpdateWindowLayouts(Vec<WindowLayout>),
@@ -34996,6 +35269,12 @@ mod fallback {
             startup_state_needs_cjk_fallback: bool,
         },
         VisionFinished(String),
+        CrosshairDrawFinished {
+            profile_name: String,
+            asset_name: Option<String>,
+            asset_scale: Option<f32>,
+            status: String,
+        },
         MacroStepInlineFeedback {
             preset_id: u32,
             step_index: usize,

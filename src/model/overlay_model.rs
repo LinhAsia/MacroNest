@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    default_crosshair_length, default_custom_pixels_grid_size, default_true, default_x_offset,
-    default_y_offset,
+    default_crosshair_length, default_true, default_x_offset, default_y_offset,
 };
 
 fn default_crosshair_ring_radius() -> f32 {
@@ -78,10 +77,6 @@ pub struct CrosshairStyle {
     pub color: RgbaColor,
     pub custom_asset: Option<String>,
     pub custom_scale: f32,
-    #[serde(default)]
-    pub custom_pixels: Option<String>,
-    #[serde(default = "default_custom_pixels_grid_size")]
-    pub custom_pixels_grid_size: u8,
 }
 
 impl Default for CrosshairStyle {
@@ -108,8 +103,6 @@ impl Default for CrosshairStyle {
             color: RgbaColor::WHITE,
             custom_asset: None,
             custom_scale: 96.0,
-            custom_pixels: None,
-            custom_pixels_grid_size: default_custom_pixels_grid_size(),
         }
     }
 }

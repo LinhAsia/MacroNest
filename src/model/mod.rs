@@ -29,10 +29,6 @@ fn default_crosshair_length() -> f32 {
     10.0
 }
 
-fn default_custom_pixels_grid_size() -> u8 {
-    15
-}
-
 fn default_true() -> bool {
     true
 }

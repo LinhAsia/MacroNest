@@ -1243,6 +1243,37 @@ impl CrosshairApp {
         self.status = format!("Pasted crosshair preset: {}.", name);
     }
 
+    fn apply_drawn_crosshair_asset(
+        &mut self,
+        profile_name: &str,
+        asset_name: Option<String>,
+        asset_scale: Option<f32>,
+    ) {
+        let Some(index) = self
+            .state
+            .profiles
+            .iter()
+            .position(|profile| profile.name == profile_name)
+        else {
+            return;
+        };
+
+        if let Some(asset_name) = asset_name {
+            self.state.profiles[index].style.custom_asset = Some(asset_name);
+            if let Some(asset_scale) = asset_scale {
+                self.state.profiles[index].style.custom_scale = asset_scale.clamp(16.0, 512.0);
+            }
+        }
+
+        if self.state.selected_profile.as_deref() == Some(profile_name) {
+            self.state.active_style = self.state.profiles[index].style.clone();
+            self.state.active_style.enabled = self.state.profiles[index].enabled;
+        }
+
+        self.mark_crosshair_profile_dirty(index);
+        self.flush_crosshair_profile_dirty(true);
+    }
+
     fn find_named_item_by_spec<'a, T>(
         items: &'a [T],
         spec: &str,
@@ -11943,6 +11974,22 @@ impl eframe::App for CrosshairApp {
                     ctx.request_repaint();
                 }
                 UiCommand::ScreenDrawCaptureStatus(status) => {
+                    self.status = status;
+                    ctx.request_repaint();
+                }
+                UiCommand::CrosshairDrawFinished {
+                    profile_name,
+                    asset_name,
+                    asset_scale,
+                    status,
+                } => {
+                    if asset_name.is_some() {
+                        self.apply_drawn_crosshair_asset(
+                            &profile_name,
+                            asset_name,
+                            asset_scale,
+                        );
+                    }
                     self.status = status;
                     ctx.request_repaint();
                 }
