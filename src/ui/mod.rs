@@ -13458,7 +13458,15 @@ impl eframe::App for CrosshairApp {
                                         resp.on_hover_text(*name);
                                     }
 
-                                    if icon_btn(ui, crate::overlay::screen_draw_get_color_pick_mode(), "dropper", "Pick color from screen").1 {
+                                    let (pick_color_resp, pick_color_activated) = icon_btn(
+                                        ui,
+                                        crate::overlay::screen_draw_get_color_pick_mode(),
+                                        "dropper",
+                                        "Pick color from screen",
+                                    );
+                                    if (crosshair_draw_mode && pick_color_resp.clicked())
+                                        || (!crosshair_draw_mode && pick_color_activated)
+                                    {
                                         if crosshair_draw_mode {
                                             crate::overlay::screen_draw_toggle_color_pick_mode();
                                         } else {
