@@ -122,6 +122,21 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                         let resolved_args: Vec<f64> =
                             args.iter().map(|arg| evaluate_math_expression_f64(arg)).collect();
                         let result_val = match func_name_lower.as_str() {
+                            "mod" => {
+                                let dividend = resolved_args.first().copied().unwrap_or(0.0);
+                                let divisor = resolved_args.get(1).copied().unwrap_or(0.0);
+                                if divisor == 0.0 {
+                                    0.0
+                                } else {
+                                    dividend % divisor
+                                }
+                            }
+                            "div" => {
+                                let dividend = resolved_args.first().copied().unwrap_or(0.0);
+                                let divisor = resolved_args.get(1).copied().unwrap_or(1.0);
+                                let safe_divisor = if divisor == 0.0 { 1.0 } else { divisor };
+                                (dividend / safe_divisor).trunc()
+                            }
                             "min" => resolved_args
                                 .first()
                                 .copied()
@@ -269,7 +284,7 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                 tokens.push(current_token.clone());
                 current_token.clear();
             }
-        } else if c == '+' || c == '*' || c == '/' {
+        } else if c == '+' || c == '*' || c == '/' || c == '^' {
             if !current_token.is_empty() {
                 tokens.push(current_token.clone());
                 current_token.clear();
@@ -280,7 +295,7 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                 && (tokens.is_empty()
                     || matches!(
                         tokens.last().map(|s| s.as_str()),
-                        Some("+") | Some("-") | Some("*") | Some("/")
+                        Some("+") | Some("-") | Some("*") | Some("/") | Some("^")
                     ));
             if is_unary {
                 current_token.push(c);
@@ -322,7 +337,14 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
     let mut i = 0;
     while i < tokens.len() {
         let token = &tokens[i];
-        if token == "+" || token == "-" || token == "*" || token == "/" {
+        if token == "+" || token == "-" || token == "*" || token == "/" || token == "^" {
+            while operators.last().copied().is_some_and(|stack_op| {
+                should_apply_operator_before(stack_op, token)
+            }) {
+                if let Some(stack_op) = operators.pop() {
+                    apply_numeric_operator(&mut values, stack_op);
+                }
+            }
             operators.push(token.as_str());
         } else {
             values.push(get_value(token));
@@ -334,51 +356,11 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
         return 0.0;
     }
 
-    let mut val_stack = Vec::new();
-    let mut op_stack = Vec::new();
-    val_stack.push(values[0]);
-    let mut val_idx = 1;
-    for op in operators {
-        let next_val = if val_idx < values.len() {
-            values[val_idx]
-        } else {
-            0.0
-        };
-        val_idx += 1;
-        if op == "*" {
-            if let Some(prev) = val_stack.pop() {
-                val_stack.push(prev * next_val);
-            } else {
-                val_stack.push(0.0);
-            }
-        } else if op == "/" {
-            if let Some(prev) = val_stack.pop() {
-                let divisor = if next_val == 0.0 { 1.0 } else { next_val };
-                val_stack.push(prev / divisor);
-            } else {
-                val_stack.push(0.0);
-            }
-        } else {
-            op_stack.push(op);
-            val_stack.push(next_val);
-        }
+    while let Some(op) = operators.pop() {
+        apply_numeric_operator(&mut values, op);
     }
 
-    let mut result = val_stack[0];
-    for (idx, op) in op_stack.into_iter().enumerate() {
-        let next_val = if idx + 1 < val_stack.len() {
-            val_stack[idx + 1]
-        } else {
-            0.0
-        };
-        if op == "+" {
-            result += next_val;
-        } else if op == "-" {
-            result -= next_val;
-        }
-    }
-
-    result
+    values.pop().unwrap_or(0.0)
 }
 
 pub(crate) fn resolve_text_variable_value(token: &str) -> Option<String> {
@@ -591,10 +573,12 @@ pub(crate) fn smart_set_variable_from_expression(target_var: &str, expr_raw: &st
 
 fn looks_like_math_expression_text(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
-    text.chars().any(|c| "+-*/()".contains(c))
+    text.chars().any(|c| "+-*/^()".contains(c))
         || lower == "pi"
         || lower.contains("len(")
         || lower.contains("contains(")
+        || lower.contains("mod(")
+        || lower.contains("div(")
         || lower.contains("random(")
         || lower.contains("choice(")
         || lower.contains("min(")
@@ -745,6 +729,41 @@ fn quote_expression_text(text: &str) -> String {
         "\"{}\"",
         text.replace('\\', "\\\\").replace('"', "\\\"")
     )
+}
+
+fn operator_precedence(op: &str) -> u8 {
+    match op {
+        "+" | "-" => 1,
+        "*" | "/" => 2,
+        "^" => 3,
+        _ => 0,
+    }
+}
+
+fn should_apply_operator_before(stack_op: &str, incoming_op: &str) -> bool {
+    let stack_prec = operator_precedence(stack_op);
+    let incoming_prec = operator_precedence(incoming_op);
+    stack_prec > incoming_prec || (stack_prec == incoming_prec && incoming_op != "^")
+}
+
+fn apply_numeric_operator(values: &mut Vec<f64>, op: &str) {
+    let right = values.pop().unwrap_or(0.0);
+    let left = values.pop().unwrap_or(0.0);
+    let result = match op {
+        "+" => left + right,
+        "-" => left - right,
+        "*" => left * right,
+        "/" => {
+            let divisor = if right == 0.0 { 1.0 } else { right };
+            left / divisor
+        }
+        "^" => {
+            let value = left.powf(right);
+            if value.is_finite() { value } else { 0.0 }
+        }
+        _ => 0.0,
+    };
+    values.push(result);
 }
 
 fn split_expression_arguments(expr: &str) -> Vec<String> {
@@ -1130,5 +1149,14 @@ mod tests {
             let mut text_vars = TEXT_VARIABLES.lock();
             text_vars.clear();
         }
+    }
+
+    #[test]
+    fn div_mod_and_power_work() {
+        assert_eq!(evaluate_math_expression("5^2"), 25);
+        assert_eq!(evaluate_math_expression("2^3^2"), 512);
+        assert_eq!(evaluate_math_expression("div(5, 2)"), 2);
+        assert_eq!(evaluate_math_expression("mod(5, 2)"), 1);
+        assert_eq!(evaluate_math_expression("3 + 2^3 * 2"), 19);
     }
 }

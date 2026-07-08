@@ -27881,6 +27881,7 @@ mod windows_overlay {
                             || c == '-'
                             || c == '*'
                             || c == '/'
+                            || c == '^'
                             || c == '('
                             || c == ')'
                             || c == ','
@@ -27893,6 +27894,8 @@ mod windows_overlay {
                     let math_funcs = [
                         "choice(",
                         "contains(",
+                        "mod(",
+                        "div(",
                         "len(",
                         "random(",
                         "min(",
