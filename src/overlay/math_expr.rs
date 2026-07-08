@@ -149,6 +149,19 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                                 .max(resolved_args.get(1).copied().unwrap_or(0.0)),
                             "abs" => resolved_args.first().copied().unwrap_or(0.0).abs(),
                             "atan" => resolved_args.first().copied().unwrap_or(0.0).atan(),
+                    "ln" | "log" => {
+                        let value = resolved_args.first().copied().unwrap_or(0.0);
+                        if value > 0.0 { value.ln() } else { 0.0 }
+                    }
+                    "log10" => {
+                        let value = resolved_args.first().copied().unwrap_or(0.0);
+                        if value > 0.0 { value.log10() } else { 0.0 }
+                    }
+                    "exp" => {
+                        let value = resolved_args.first().copied().unwrap_or(0.0);
+                        let exp = value.exp();
+                        if exp.is_finite() { exp } else { 0.0 }
+                    }
                     "atan2" => {
                         let y = resolved_args.first().copied().unwrap_or(0.0);
                         let x = resolved_args.get(1).copied().unwrap_or(0.0);
@@ -324,6 +337,8 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
         let normalized = token.trim();
         if normalized.eq_ignore_ascii_case("pi") {
             std::f64::consts::PI
+        } else if normalized.eq_ignore_ascii_case("e") {
+            std::f64::consts::E
         } else if let Ok(num) = normalized.parse::<f64>() {
             num
         } else if let Some(obj_val) = get_object_property_value(normalized) {
@@ -575,6 +590,7 @@ fn looks_like_math_expression_text(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     text.chars().any(|c| "+-*/^()".contains(c))
         || lower == "pi"
+        || lower == "e"
         || lower.contains("len(")
         || lower.contains("contains(")
         || lower.contains("mod(")
@@ -586,6 +602,10 @@ fn looks_like_math_expression_text(text: &str) -> bool {
         || lower.contains("abs(")
         || lower.contains("atan(")
         || lower.contains("atan2(")
+        || lower.contains("ln(")
+        || lower.contains("log(")
+        || lower.contains("log10(")
+        || lower.contains("exp(")
         || lower.contains("sin(")
         || lower.contains("cos(")
         || lower.contains("tan(")
@@ -1158,5 +1178,14 @@ mod tests {
         assert_eq!(evaluate_math_expression("div(5, 2)"), 2);
         assert_eq!(evaluate_math_expression("mod(5, 2)"), 1);
         assert_eq!(evaluate_math_expression("3 + 2^3 * 2"), 19);
+    }
+
+    #[test]
+    fn e_and_log_functions_work() {
+        assert!((evaluate_math_expression_f64("e") - std::f64::consts::E).abs() < 0.000001);
+        assert!((evaluate_math_expression_f64("exp(1)") - std::f64::consts::E).abs() < 0.000001);
+        assert!((evaluate_math_expression_f64("log(e)") - 1.0).abs() < 0.000001);
+        assert!((evaluate_math_expression_f64("ln(e)") - 1.0).abs() < 0.000001);
+        assert!((evaluate_math_expression_f64("log10(1000)") - 3.0).abs() < 0.000001);
     }
 }

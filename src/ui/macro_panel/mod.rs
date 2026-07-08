@@ -1297,16 +1297,22 @@ impl CrosshairApp {
                                         egui::RichText::new(Self::tr_lang(language, "Functions", "Functions"))
                                             .strong(),
                                     );
+                                    ui.label(egui::RichText::new("- a + b / a - b").monospace());
+                                    ui.label(egui::RichText::new("- a * b / a / b").monospace());
+                                    ui.label(egui::RichText::new("- a ^ b").monospace());
                                     ui.label(egui::RichText::new("- random(min, max)").monospace());
                                     ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
                                     ui.label(egui::RichText::new("- contains(a, b)").monospace());
                                     ui.label(egui::RichText::new("- substr(text, start, len)").monospace());
                                     ui.label(egui::RichText::new("- len(text)").monospace());
+                                    ui.label(egui::RichText::new("- div(a, b) / mod(a, b)").monospace());
                                     ui.label(egui::RichText::new("- min(a, b)").monospace());
                                     ui.label(egui::RichText::new("- max(a, b)").monospace());
                                     ui.label(egui::RichText::new("- abs(a)").monospace());
                                     ui.label(egui::RichText::new("- atan(a)").monospace());
                                     ui.label(egui::RichText::new("- atan2(y, x)").monospace());
+                                    ui.label(egui::RichText::new("- ln(a) / log(a) / log10(a)").monospace());
+                                    ui.label(egui::RichText::new("- exp(a)").monospace());
                                     ui.label(egui::RichText::new("- sqrt(a)").monospace());
                                     ui.label(egui::RichText::new("- pow(a, b)").monospace());
                                     ui.label(egui::RichText::new("- round(a, digits)").monospace());
@@ -1318,7 +1324,7 @@ impl CrosshairApp {
                                     ui.label(egui::RichText::new("- sin(angleDeg) * 1000").monospace());
                                     ui.label(egui::RichText::new("- cos(angleDeg) * 1000").monospace());
                                     ui.label(egui::RichText::new("- degrees(rad) / radians(deg)").monospace());
-                                    ui.label(egui::RichText::new("- pi").monospace());
+                                    ui.label(egui::RichText::new("- pi / e").monospace());
                                     ui.label(egui::RichText::new("- myVar.toNumber").monospace());
                                 });
                                 ui.vertical(|ui| {
@@ -16730,12 +16736,18 @@ if supports_move_mouse || show_detection_tuning {
             "contains()",
             "substr()",
             "len()",
+            "div()",
+            "mod()",
             "min()",
             "max()",
             "random()",
             "choice()",
             "atan()",
             "atan2()",
+            "ln()",
+            "log()",
+            "log10()",
+            "exp()",
             "sin()",
             "cos()",
             "tan()",
@@ -16758,6 +16770,7 @@ if supports_move_mouse || show_detection_tuning {
             "comb()",
             "perm()",
             "pi",
+            "e",
         ]
     }
 
@@ -16844,12 +16857,18 @@ if supports_move_mouse || show_detection_tuning {
             "contains()" => "contains(a, b)".to_string(),
             "substr()" => "substr(text, start, len)".to_string(),
             "len()" => "len(text)".to_string(),
+            "div()" => "div(a, b)".to_string(),
+            "mod()" => "mod(a, b)".to_string(),
             "min()" => "min(a, b)".to_string(),
             "max()" => "max(a, b)".to_string(),
             "random()" => "random(min, max)".to_string(),
             "choice()" => "choice(val1, val2, ...)".to_string(),
             "atan()" => "atan(a)".to_string(),
             "atan2()" => "atan2(y, x)".to_string(),
+            "ln()" => "ln(a)".to_string(),
+            "log()" => "log(a)".to_string(),
+            "log10()" => "log10(a)".to_string(),
+            "exp()" => "exp(a)".to_string(),
             "sin()" => "sin(angleDeg) * 1000".to_string(),
             "cos()" => "cos(angleDeg) * 1000".to_string(),
             "tan()" => "tan(a)".to_string(),
@@ -16872,6 +16891,7 @@ if supports_move_mouse || show_detection_tuning {
             "comb()" => "comb(n, k)".to_string(),
             "perm()" => "perm(n, k)".to_string(),
             "pi" => "pi".to_string(),
+            "e" => "e".to_string(),
             _ => Self::timer_suggestion_label(suggestion, timer_names),
         }
     }

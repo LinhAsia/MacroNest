@@ -27891,6 +27891,9 @@ mod windows_overlay {
                         return true;
                     }
                     let s_lower = s_trimmed.to_lowercase();
+                    if s_lower == "pi" || s_lower == "e" {
+                        return true;
+                    }
                     let math_funcs = [
                         "choice(",
                         "contains(",
@@ -27903,12 +27906,14 @@ mod windows_overlay {
                         "abs(",
                         "atan(",
                         "atan2(",
+                        "ln(",
+                        "log(",
+                        "log10(",
+                        "exp(",
                         "sin(",
                         "cos(",
                         "tan(",
                         "sqrt(",
-                        "ln(",
-                        "log(",
                         "asin(",
                         "acos(",
                         "sinh(",

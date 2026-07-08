@@ -49,6 +49,94 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | Clear Overlays | Clear active geometry, HUD, and pin overlays from the screen |
 | Key Sound | Play keyboard sound effects with selectable switch style and volume |
 
+## Expression Help
+
+<details>
+  <summary>Expand expression syntax and examples</summary>
+
+### Operators
+
+| Syntax | Meaning | Example | Result |
+| :--- | :--- | :--- | :--- |
+| `a + b` | Add | `2 + 3` | `5` |
+| `a - b` | Subtract | `10 - 4` | `6` |
+| `a * b` | Multiply | `3 * 4` | `12` |
+| `a / b` | Divide | `5 / 2` | `2.5` |
+| `a ^ b` | Power | `5^2` | `25` |
+
+### Constants
+
+| Syntax | Meaning | Example | Result |
+| :--- | :--- | :--- | :--- |
+| `pi` | Pi constant | `degrees(pi)` | `180` |
+| `e` | Euler's number | `round(e, 3)` | `2.718` |
+
+### Core Functions
+
+| Function | Meaning | Example | Result |
+| :--- | :--- | :--- | :--- |
+| `random(min, max)` | Random integer in range | `random(10, 20)` | `10..20` |
+| `choice(a, b, ...)` | Pick one value at random | `choice(10, 20, 30)` | `10` or `20` or `30` |
+| `min(a, b)` | Smaller value | `min(20, 50)` | `20` |
+| `max(a, b)` | Larger value | `max(20, 50)` | `50` |
+| `abs(a)` | Absolute value | `abs(-50)` | `50` |
+| `div(a, b)` | Integer division using truncation | `div(5, 2)` | `2` |
+| `mod(a, b)` | Remainder | `mod(5, 2)` | `1` |
+| `round(a, digits)` | Round to digits | `round(863.6897, 2)` | `863.69` |
+| `ceil(a)` | Round up | `ceil(pi)` | `4` |
+| `floor(a)` | Round down | `floor(pi)` | `3` |
+| `sqrt(a)` | Square root | `sqrt(9)` | `3` |
+| `pow(a, b)` | Power function | `pow(2, 3)` | `8` |
+| `factorial(n)` | Factorial | `factorial(5)` | `120` |
+| `gcd(a, b, ...)` | Greatest common divisor | `gcd(24, 36, 48)` | `12` |
+| `lcm(a, b, ...)` | Least common multiple | `lcm(4, 6, 8)` | `24` |
+| `isqrt(n)` | Integer square root | `isqrt(17)` | `4` |
+| `comb(n, k)` | Combination | `comb(5, 2)` | `10` |
+| `perm(n, k)` | Permutation | `perm(5, 2)` | `20` |
+
+### Trigonometry and Angles
+
+| Function | Meaning | Example | Result |
+| :--- | :--- | :--- | :--- |
+| `sin(a)` | Sine | `sin(radians(30)) * 1000` | `500` |
+| `cos(a)` | Cosine | `cos(radians(60)) * 1000` | `500` |
+| `tan(a)` | Tangent | `tan(45)` | depends on input unit |
+| `asin(a)` | Arc sine | `asin(0.5)` | angle in radians |
+| `acos(a)` | Arc cosine | `acos(0.5)` | angle in radians |
+| `atan(a)` | Arc tangent | `degrees(atan(1))` | `45` |
+| `atan2(y, x)` | 2-argument arc tangent | `degrees(atan2(1, 1))` | `45` |
+| `sinh(a)` | Hyperbolic sine | `sinh(1)` | numeric result |
+| `cosh(a)` | Hyperbolic cosine | `cosh(1)` | numeric result |
+| `tanh(a)` | Hyperbolic tangent | `tanh(1)` | numeric result |
+| `degrees(rad)` | Radians to degrees | `degrees(pi)` | `180` |
+| `radians(deg)` | Degrees to radians | `radians(180)` | about `3.14159` |
+
+### Logarithms and Exponents
+
+| Function | Meaning | Example | Result |
+| :--- | :--- | :--- | :--- |
+| `ln(a)` | Natural log | `ln(e)` | `1` |
+| `log(a)` | Natural log | `log(e)` | `1` |
+| `log10(a)` | Base-10 log | `log10(1000)` | `3` |
+| `exp(a)` | `e^a` | `exp(1)` | about `2.71828` |
+
+### Text Helpers
+
+| Function | Meaning | Example | Result |
+| :--- | :--- | :--- | :--- |
+| `contains(a, b)` | Check whether text `a` contains text `b` | `contains(player_name, boss)` | `1` or `0` |
+| `substr(text, start, len)` | Get part of a string | `substr(player_name, 0, 4)` | first 4 characters |
+| `len(text)` | Count characters | `len(453454)` | `6` |
+| `myVar.toNumber` | Convert text to a number | `A.toNumber + 5` | numeric result |
+
+### Notes
+
+- Expression fields evaluate variables and functions directly.
+- Text fields keep plain text as-is; use `{...}` to inject variables or math into text.
+- Some macro fields store final values as integers, so decimal results may be rounded there.
+
+</details>
+
 ## Getting Started
 
 ### System Requirements
