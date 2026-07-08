@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
+const GITHUB_RELEASES_PAGE_URL: &str = "https://github.com/LinhAsia/MacroNest/releases/latest";
+
 impl CrosshairApp {
     pub(crate) fn render_settings_popup(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
@@ -852,7 +854,11 @@ impl CrosshairApp {
                         }
                     }
                     UpdateStatus::Error(e) => {
-                        ui.label(RichText::new(format!("Error: {}", e)).color(Color32::RED));
+                        let error_text = e.clone();
+                        let is_rate_limit = error_text.to_ascii_lowercase().contains("rate limit");
+                        ui.label(
+                            RichText::new(format!("Error: {}", error_text)).color(Color32::RED),
+                        );
                         ui.add_space(4.0);
                         if Self::settings_action_button(
                             ui,
@@ -861,6 +867,23 @@ impl CrosshairApp {
                         .clicked()
                         {
                             self.check_for_update(ctx);
+                        }
+                        if is_rate_limit {
+                            ui.add_space(4.0);
+                            if Self::settings_action_button(
+                                ui,
+                                Self::tr_lang(
+                                    language,
+                                    "Open Releases page",
+                                    "Mo trang Releases",
+                                ),
+                            )
+                            .clicked()
+                            {
+                                let _ = crate::platform::open_url_in_browser(
+                                    GITHUB_RELEASES_PAGE_URL,
+                                );
+                            }
                         }
                     }
                 }
