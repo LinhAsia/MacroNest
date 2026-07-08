@@ -45,6 +45,18 @@ impl CrosshairApp {
             let response = Self::edit_rgba_color(ui, color);
             changed |= response.changed();
             dragging |= response.dragged();
+            ui.label(
+                RichText::new("#")
+                    .strong()
+                    .color(ui.visuals().weak_text_color()),
+            );
+            changed |= Self::render_rgba_hex_input(
+                ui,
+                ui.make_persistent_id(color as *const RgbaColor as usize),
+                color,
+                egui::color_picker::Alpha::BlendOrAdditive,
+                92.0,
+            );
 
             let picking_active = active_color_pick_target == Some(target);
             if ui

@@ -434,66 +434,118 @@ impl CrosshairApp {
                         .strong()
                         .color(ui.visuals().weak_text_color()),
                 );
-                let mut hex_string = match alpha_mode {
-                    egui::color_picker::Alpha::Opaque => {
-                        format!("{:02X}{:02X}{:02X}", color.r, color.g, color.b)
-                    }
-                    _ => {
-                        format!(
-                            "{:02X}{:02X}{:02X}{:02X}",
-                            color.r, color.g, color.b, color.a
-                        )
-                    }
-                };
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut hex_string)
-                        .font(egui::TextStyle::Monospace.resolve(ui.style()))
-                        .desired_width(120.0),
+                changed |= Self::render_rgba_hex_input(
+                    ui,
+                    ui.id().with("premium-color-hex"),
+                    color,
+                    alpha_mode,
+                    120.0,
                 );
-                if response.changed() {
-                    let cleaned: String = hex_string
-                        .chars()
-                        .filter(|c| c.is_ascii_hexdigit())
-                        .collect();
-                    if cleaned.len() == 6 && alpha_mode == egui::color_picker::Alpha::Opaque {
-                        if let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
-                            && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
-                            && let Ok(b) = u8::from_str_radix(&cleaned[4..6], 16)
-                        {
-                            color.r = r;
-                            color.g = g;
-                            color.b = b;
-                            changed = true;
-                        }
-                    } else if cleaned.len() == 8 {
-                        if let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
-                            && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
-                            && let Ok(b) = u8::from_str_radix(&cleaned[4..6], 16)
-                            && let Ok(a) = u8::from_str_radix(&cleaned[6..8], 16)
-                        {
-                            color.r = r;
-                            color.g = g;
-                            color.b = b;
-                            color.a = a;
-                            changed = true;
-                        }
-                    } else if cleaned.len() == 6 && alpha_mode != egui::color_picker::Alpha::Opaque
-                    {
-                        if let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
-                            && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
-                            && let Ok(b) = u8::from_str_radix(&cleaned[4..6], 16)
-                        {
-                            color.r = r;
-                            color.g = g;
-                            color.b = b;
-                            changed = true;
-                        }
-                    }
-                }
             });
         });
 
         changed
+    }
+
+    pub(crate) fn render_rgba_hex_input(
+        ui: &mut egui::Ui,
+        id: egui::Id,
+        color: &mut crate::model::RgbaColor,
+        alpha_mode: egui::color_picker::Alpha,
+        desired_width: f32,
+    ) -> bool {
+        let fallback = Self::rgba_hex_string(*color, alpha_mode);
+        let mut draft = ui
+            .ctx()
+            .data(|data| data.get_temp::<String>(id))
+            .unwrap_or_else(|| fallback.clone());
+
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut draft)
+                .font(egui::TextStyle::Monospace.resolve(ui.style()))
+                .desired_width(desired_width),
+        );
+
+        let max_len = match alpha_mode {
+            egui::color_picker::Alpha::Opaque => 6,
+            _ => 8,
+        };
+        let mut cleaned: String = draft
+            .chars()
+            .filter(|c| c.is_ascii_hexdigit())
+            .map(|c| c.to_ascii_uppercase())
+            .collect();
+        cleaned.truncate(max_len);
+        if cleaned != draft {
+            draft = cleaned.clone();
+        }
+
+        let changed = if response.changed() {
+            Self::apply_rgba_hex_string(color, alpha_mode, &cleaned)
+        } else {
+            false
+        };
+
+        let stored_value = if response.has_focus() {
+            draft
+        } else {
+            Self::rgba_hex_string(*color, alpha_mode)
+        };
+        ui.ctx().data_mut(|data| data.insert_temp(id, stored_value));
+
+        changed
+    }
+
+    fn rgba_hex_string(
+        color: crate::model::RgbaColor,
+        alpha_mode: egui::color_picker::Alpha,
+    ) -> String {
+        match alpha_mode {
+            egui::color_picker::Alpha::Opaque => {
+                format!("{:02X}{:02X}{:02X}", color.r, color.g, color.b)
+            }
+            _ => {
+                format!(
+                    "{:02X}{:02X}{:02X}{:02X}",
+                    color.r, color.g, color.b, color.a
+                )
+            }
+        }
+    }
+
+    fn apply_rgba_hex_string(
+        color: &mut crate::model::RgbaColor,
+        alpha_mode: egui::color_picker::Alpha,
+        cleaned: &str,
+    ) -> bool {
+        let before = (color.r, color.g, color.b, color.a);
+
+        if cleaned.len() == 6 {
+            if let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
+                && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
+                && let Ok(b) = u8::from_str_radix(&cleaned[4..6], 16)
+            {
+                color.r = r;
+                color.g = g;
+                color.b = b;
+                if matches!(alpha_mode, egui::color_picker::Alpha::Opaque) {
+                    color.a = 255;
+                }
+            }
+        } else if cleaned.len() == 8
+            && !matches!(alpha_mode, egui::color_picker::Alpha::Opaque)
+            && let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
+            && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
+            && let Ok(b) = u8::from_str_radix(&cleaned[4..6], 16)
+            && let Ok(a) = u8::from_str_radix(&cleaned[6..8], 16)
+        {
+            color.r = r;
+            color.g = g;
+            color.b = b;
+            color.a = a;
+        }
+
+        before != (color.r, color.g, color.b, color.a)
     }
 
     fn premium_color_slider_2d(ui: &mut egui::Ui, h: f32, s: &mut f32, v: &mut f32) -> bool {
