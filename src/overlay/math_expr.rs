@@ -133,9 +133,12 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                             }
                             "div" => {
                                 let dividend = resolved_args.first().copied().unwrap_or(0.0);
-                                let divisor = resolved_args.get(1).copied().unwrap_or(1.0);
-                                let safe_divisor = if divisor == 0.0 { 1.0 } else { divisor };
-                                (dividend / safe_divisor).trunc()
+                                let divisor = resolved_args.get(1).copied().unwrap_or(0.0);
+                                if divisor == 0.0 {
+                                    0.0
+                                } else {
+                                    (dividend / divisor).trunc()
+                                }
                             }
                             "min" => resolved_args
                                 .first()
@@ -774,8 +777,11 @@ fn apply_numeric_operator(values: &mut Vec<f64>, op: &str) {
         "-" => left - right,
         "*" => left * right,
         "/" => {
-            let divisor = if right == 0.0 { 1.0 } else { right };
-            left / divisor
+            if right == 0.0 {
+                0.0
+            } else {
+                left / right
+            }
         }
         "^" => {
             let value = left.powf(right);
@@ -1043,36 +1049,24 @@ fn get_object_property_text_value(token: &str) -> Option<String> {
     }
 
     if prop_name == "tostring" {
-        let mut found_num = None;
+        let mut found_str = None;
         let mut is_runtime_var = false;
         let obj_name_raw = parts[0].trim();
         {
             let vars = RUNTIME_VARIABLES.lock();
             if let Some(val) = vars.get(obj_name_raw) {
-                found_num = Some(*val);
+                let num = *val;
+                let s = if num.fract() == 0.0 {
+                    (num as i64).to_string()
+                } else {
+                    num.to_string()
+                };
+                found_str = Some(s);
                 is_runtime_var = true;
             }
         }
 
-        if let Some(num) = found_num {
-            let s = if num.fract() == 0.0 {
-                (num as i64).to_string()
-            } else {
-                num.to_string()
-            };
-
-            if is_runtime_var {
-                let mut vars = RUNTIME_VARIABLES.lock();
-                vars.remove(obj_name_raw);
-            }
-
-            let mut text_vars = TEXT_VARIABLES.lock();
-            text_vars.insert(obj_name_raw.to_string(), s.clone());
-            return Some(s);
-        }
-
-        let mut found_str = None;
-        {
+        if found_str.is_none() {
             let text_vars = TEXT_VARIABLES.lock();
             if let Some(val) = text_vars.get(obj_name_raw) {
                 found_str = Some(val.clone());
@@ -1081,6 +1075,10 @@ fn get_object_property_text_value(token: &str) -> Option<String> {
 
         if let Some(s) = found_str {
             let filtered: String = s.chars().filter(|c| !c.is_ascii_digit()).collect();
+            if is_runtime_var {
+                let mut vars = RUNTIME_VARIABLES.lock();
+                vars.remove(obj_name_raw);
+            }
             let mut text_vars = TEXT_VARIABLES.lock();
             text_vars.insert(obj_name_raw.to_string(), filtered.clone());
             return Some(filtered);

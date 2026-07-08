@@ -1282,6 +1282,16 @@ impl CrosshairApp {
                             egui::RichText::new(Self::tr_lang(language, "Examples: {A}, {100 + B}, HP: {player_hp}", "Examples: {A}, {100 + B}, HP: {player_hp}"))
                             .monospace(),
                         );
+                        ui.add_space(2.0);
+                        ui.label(
+                            egui::RichText::new(Self::tr_lang(
+                                language,
+                                "* Note: Any math errors or division by zero (e.g. 5/0) will return 0.",
+                                "* Lưu ý: Mọi lỗi tính toán hoặc phép chia cho 0 (ví dụ: 5/0) đều trả về 0."
+                            ))
+                            .small()
+                            .weak()
+                        );
                         ui.add_space(4.0);
                         ui.label(
                             egui::RichText::new(Self::tr_lang(language, "Supported math and values", "Supported math and values"))

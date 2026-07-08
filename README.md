@@ -128,7 +128,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | `substr(text, start, len)` | Get part of a string (supports numbers, text, or a mix) | 1. `substr(banana, 2, 3)` (text)<br>2. `substr(Rank #1: Player, 9, 6)` (mixed)<br>3. `substr(123456, 1, 4)` (numbers) | 1. `nan`<br>2. `Player`<br>3. `2345` |
 | `len(text)` | Count characters (supports numbers, text, or a mix) | 1. `len(apple)` (text)<br>2. `len(Score: 9999)` (mixed)<br>3. `len(453454)` (numbers) | 1. `5`<br>2. `11`<br>3. `6` |
 | `myVar.toNumber` | Extract digits from a text variable and convert them to a number (ignores non-digits) | If variable `A` is `"Gold: 500"` (text):<br>`A.toNumber + 100` | `600` (numeric) |
-| `myVar.toString` | Convert a variable to text by filtering out all digits (keeps only non-digits) | 1. If `A` is `123` (numeric): `A.toString`<br>2. If `A` is `"Wave #10"` (text): `A.toString` | 1. `"123"` (text)<br>2. `"Wave #"` (text) |
+| `myVar.toString` | Convert a variable to text by filtering out all digits (keeps only non-digits) | 1. If `A` is `123` (numeric): `A.toString`<br>2. If `A` is `"Wave #10"` (text): `A.toString` | 1. `""` (text)<br>2. `"Wave #"` (text) |
 
 ### Built-in Variables (Numeric)
 
@@ -167,6 +167,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 - Expression fields evaluate variables and functions directly.
 - Text fields keep plain text as-is; use `{...}` to inject variables or math into text.
 - Some macro fields store final values as integers, so decimal results may be rounded there.
+- Any math evaluation errors or division by zero (e.g. `5/0`) will return `0`.
 
 </details>
 
