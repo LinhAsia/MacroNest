@@ -14321,8 +14321,11 @@ impl eframe::App for CrosshairApp {
                         .inner_margin(Margin::same(inner_margin as i8))
                         .show(ui, |ui| {
                             ui.set_min_size(content_size);
+                            ui.set_max_size(content_size);
                             ui.set_width(content_size.x);
                             ui.set_max_width(content_size.x);
+                            ui.set_height(content_size.y);
+                            ui.set_max_height(content_size.y);
                             self.render_expression_guides_content(ui, ctx);
                         });
                 });
