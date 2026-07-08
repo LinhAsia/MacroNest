@@ -2050,6 +2050,8 @@ mod windows_overlay {
         toolbar_h: i32,
         active_control: ScreenDrawControl,
         brush_size_preview_active: bool,
+        brush_slider_drag_start_x: i32,
+        brush_slider_drag_start_value: f32,
         drag_offset_x: i32,
         drag_offset_y: i32,
         current_stroke: Option<ScreenDrawStroke>,
@@ -2126,6 +2128,8 @@ mod windows_overlay {
                 toolbar_h: 42,
                 active_control: ScreenDrawControl::None,
                 brush_size_preview_active: false,
+                brush_slider_drag_start_x: 0,
+                brush_slider_drag_start_value: 10.0,
                 drag_offset_x: 0,
                 drag_offset_y: 0,
                 current_stroke: None,
@@ -10530,7 +10534,7 @@ mod windows_overlay {
                 b: 255,
                 a: 255,
             };
-            state.brush_size = state.brush_size.clamp(2.0, 80.0).max(3.0);
+            state.brush_size = state.brush_size.clamp(2.0, 80.0);
             state.eraser = false;
             state.smoothing = false;
             state.smoothing_amount = 0.45;
@@ -11518,6 +11522,8 @@ mod windows_overlay {
         state.current_stroke_release_seen_at = None;
         state.active_control = ScreenDrawControl::None;
         state.brush_size_preview_active = false;
+        state.brush_slider_drag_start_x = 0;
+        state.brush_slider_drag_start_value = state.brush_size.round().clamp(2.0, 80.0);
         state.text_interaction_start_point = None;
         state.text_interaction_origin = None;
         state.capturing_region = false;
@@ -11852,7 +11858,7 @@ mod windows_overlay {
             ScreenDrawHit::BrushSize => {
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 state.active_control = ScreenDrawControl::BrushSize;
-                update_screen_draw_brush_slider(&mut state, point.x);
+                begin_screen_draw_brush_slider_drag(&mut state, point.x);
                 mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
                 should_sync_config = true;
             }
@@ -13170,10 +13176,14 @@ mod windows_overlay {
         ScreenDrawHit::ToolbarBody
     }
 
+    fn begin_screen_draw_brush_slider_drag(state: &mut ScreenDrawState, x: i32) {
+        state.brush_slider_drag_start_x = x;
+        state.brush_slider_drag_start_value = state.brush_size.round().clamp(2.0, 80.0);
+    }
+
     fn update_screen_draw_brush_slider(state: &mut ScreenDrawState, x: i32) {
-        let left = state.toolbar_x + 74;
-        let t = ((x - left) as f32 / 64.0).clamp(0.0, 1.0);
-        state.brush_size = (2.0 + t * 78.0).clamp(2.0, 80.0);
+        let delta = x - state.brush_slider_drag_start_x;
+        state.brush_size = (state.brush_slider_drag_start_value + delta as f32).clamp(2.0, 80.0);
     }
 
     fn update_screen_draw_smoothing_slider(state: &mut ScreenDrawState, x: i32) {
