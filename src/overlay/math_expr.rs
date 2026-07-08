@@ -92,11 +92,23 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
             let close_idx = open_idx + close_offset;
             let sub_expr = &expr_str[open_idx + 1..close_idx];
             if !func_name.is_empty() {
-                let args: Vec<&str> = sub_expr.split(',').map(|s| s.trim()).collect();
-                let resolved_args: Vec<f64> =
-                    args.into_iter().map(evaluate_math_expression_f64).collect();
-                let result_val = match func_name.to_ascii_lowercase().as_str() {
+                let args = split_expression_arguments(sub_expr);
+                let func_name_lower = func_name.to_ascii_lowercase();
+                let result_val = match func_name_lower.as_str() {
+                    "contains" => {
+                        let left = args
+                            .first()
+                            .map(|arg| resolve_expression_argument_text(arg))
+                            .unwrap_or_default();
+                        let right = args
+                            .get(1)
+                            .map(|arg| resolve_expression_argument_text(arg))
+                            .unwrap_or_default();
+                        if left.contains(&right) { 1.0 } else { 0.0 }
+                    }
                     "random" => {
+                        let resolved_args: Vec<f64> =
+                            args.iter().map(|arg| evaluate_math_expression_f64(arg)).collect();
                         let min_val =
                             clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
                         let max_val = clamp_f64_to_i32(
@@ -104,18 +116,22 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                         );
                         get_pseudo_random(min_val, max_val) as f64
                     }
-                    "min" => resolved_args
-                        .first()
-                        .copied()
-                        .unwrap_or(0.0)
-                        .min(resolved_args.get(1).copied().unwrap_or(0.0)),
-                    "max" => resolved_args
-                        .first()
-                        .copied()
-                        .unwrap_or(0.0)
-                        .max(resolved_args.get(1).copied().unwrap_or(0.0)),
-                    "abs" => resolved_args.first().copied().unwrap_or(0.0).abs(),
-                    "atan" => resolved_args.first().copied().unwrap_or(0.0).atan(),
+                    _ => {
+                        let resolved_args: Vec<f64> =
+                            args.iter().map(|arg| evaluate_math_expression_f64(arg)).collect();
+                        match func_name_lower.as_str() {
+                            "min" => resolved_args
+                                .first()
+                                .copied()
+                                .unwrap_or(0.0)
+                                .min(resolved_args.get(1).copied().unwrap_or(0.0)),
+                            "max" => resolved_args
+                                .first()
+                                .copied()
+                                .unwrap_or(0.0)
+                                .max(resolved_args.get(1).copied().unwrap_or(0.0)),
+                            "abs" => resolved_args.first().copied().unwrap_or(0.0).abs(),
+                            "atan" => resolved_args.first().copied().unwrap_or(0.0).atan(),
                     "atan2" => {
                         let y = resolved_args.first().copied().unwrap_or(0.0);
                         let x = resolved_args.get(1).copied().unwrap_or(0.0);
@@ -216,7 +232,9 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                             resolved_args.get(idx).copied().unwrap_or(0.0)
                         }
                     }
-                    _ => 0.0,
+                            _ => 0.0,
+                        }
+                    }
                 };
                 expr_str.replace_range(func_start_idx..=close_idx, &result_val.to_string());
             } else {
@@ -562,6 +580,7 @@ fn looks_like_math_expression_text(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     text.chars().any(|c| "+-*/()".contains(c))
         || lower == "pi"
+        || lower.contains("contains(")
         || lower.contains("random(")
         || lower.contains("choice(")
         || lower.contains("min(")
@@ -618,6 +637,43 @@ pub(crate) fn resolve_choice_expression_value(expr: &str) -> Option<String> {
     } else {
         Some(resolved.to_string())
     }
+}
+
+fn resolve_expression_argument_text(arg: &str) -> String {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if let Some(unquoted) = trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            trimmed
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+    {
+        return unquoted.to_string();
+    }
+
+    if let Some(value) = resolve_text_variable_value(trimmed) {
+        return value;
+    }
+
+    if let Some(value) = get_object_property_value(trimmed) {
+        return value.to_string();
+    }
+
+    if trimmed.parse::<f64>().is_ok() || looks_like_math_expression_text(trimmed) {
+        let value = evaluate_math_expression_f64(trimmed);
+        if value.fract() == 0.0 {
+            return (value as i64).to_string();
+        }
+        return value.to_string();
+    }
+
+    interpolate_variables(trimmed)
 }
 
 fn split_expression_arguments(expr: &str) -> Vec<String> {

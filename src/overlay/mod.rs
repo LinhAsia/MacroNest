@@ -27814,8 +27814,6 @@ mod windows_overlay {
         expression: &str,
         ocr_preset_id: Option<u32>,
         ocr_target_text: &str,
-        if_contain_case_sensitive: bool,
-        if_contain_isolated: bool,
         key: &str,
         x: i32,
         y: i32,
@@ -27868,184 +27866,119 @@ mod windows_overlay {
 
             IfConditionType::Variable => {
                 let op = operator.trim().to_lowercase();
-                let evaluate_contain =
-                    |left: &str, right: &str, case_sensitive: bool, isolated: bool| -> bool {
-                        let (l, r) = if case_sensitive {
-                            (left.to_string(), right.to_string())
-                        } else {
-                            (left.to_lowercase(), right.to_lowercase())
-                        };
-                        if r.is_empty() {
+                let is_math_expression_or_numeric = |s: &str| -> bool {
+                    let s_trimmed = s.trim();
+                    if s_trimmed.is_empty() {
+                        return false;
+                    }
+                    if s_trimmed.parse::<f64>().is_ok() {
+                        return true;
+                    }
+                    let allowed_chars = |c: char| {
+                        c.is_ascii_digit()
+                            || c == '.'
+                            || c == '+'
+                            || c == '-'
+                            || c == '*'
+                            || c == '/'
+                            || c == '('
+                            || c == ')'
+                            || c == ','
+                            || c.is_whitespace()
+                    };
+                    if s_trimmed.chars().all(allowed_chars) {
+                        return true;
+                    }
+                    let s_lower = s_trimmed.to_lowercase();
+                    let math_funcs = [
+                        "choice(",
+                        "contains(",
+                        "random(",
+                        "min(",
+                        "max(",
+                        "abs(",
+                        "atan(",
+                        "atan2(",
+                        "sin(",
+                        "cos(",
+                        "tan(",
+                        "sqrt(",
+                        "ln(",
+                        "log(",
+                        "asin(",
+                        "acos(",
+                        "sinh(",
+                        "cosh(",
+                        "tanh(",
+                        "ceil(",
+                        "floor(",
+                        "round(",
+                        "pow(",
+                        "degrees(",
+                        "radians(",
+                        "gcd(",
+                        "lcm(",
+                        "isqrt(",
+                        "comb(",
+                        "perm(",
+                        "factorial(",
+                    ];
+                    for func in &math_funcs {
+                        if s_lower.contains(func) {
                             return true;
                         }
+                    }
+                    false
+                };
 
-                        if isolated {
-                            let mut start = 0;
-                            while let Some(pos) = l[start..].find(&r) {
-                                let absolute_pos = start + pos;
-                                let before_char_ok = if absolute_pos == 0 {
-                                    true
-                                } else {
-                                    let prev_char = l.chars().nth(absolute_pos - 1).unwrap_or(' ');
-                                    !prev_char.is_alphanumeric()
-                                };
-                                let after_char_ok = if absolute_pos + r.len() >= l.len() {
-                                    true
-                                } else {
-                                    let next_char =
-                                        l.chars().nth(absolute_pos + r.len()).unwrap_or(' ');
-                                    !next_char.is_alphanumeric()
-                                };
-                                if before_char_ok && after_char_ok {
-                                    return true;
-                                }
-
-                                start = absolute_pos + 1;
-                            }
-
-                            false
-                        } else {
-                            l.contains(&r)
-                        }
-                    };
-                if op == "contain" || op == "contains" {
-                    let left_str = {
-                        let vars = RUNTIME_VARIABLES.lock();
-                        let trimmed = variable_name.trim();
-                        if let Some(val) = vars.get(trimmed) {
-                            val.to_string()
-                        } else {
-                            interpolate_variables(trimmed)
-                        }
-                    };
-                    let right_expr = if expression.is_empty() && !key.is_empty() {
-                        key
+                let left_str = {
+                    let trimmed = variable_name.trim();
+                    if let Some(val) = RUNTIME_VARIABLES.lock().get(trimmed) {
+                        val.to_string()
+                    } else if let Some(val) = resolve_text_variable_value(trimmed) {
+                        val
                     } else {
-                        expression
-                    };
-                    let right_str = interpolate_variables(right_expr.trim());
-                    evaluate_contain(
-                        &left_str,
-                        &right_str,
-                        if_contain_case_sensitive,
-                        if_contain_isolated,
-                    )
+                        interpolate_variables(trimmed)
+                    }
+                };
+                let right_expr = if expression.is_empty() && !key.is_empty() {
+                    key
                 } else {
-                    let is_math_expression_or_numeric = |s: &str| -> bool {
-                        let s_trimmed = s.trim();
-                        if s_trimmed.is_empty() {
-                            return false;
-                        }
-                        if s_trimmed.parse::<f64>().is_ok() {
-                            return true;
-                        }
-                        let allowed_chars = |c: char| {
-                            c.is_ascii_digit()
-                                || c == '.'
-                                || c == '+'
-                                || c == '-'
-                                || c == '*'
-                                || c == '/'
-                                || c == '('
-                                || c == ')'
-                                || c == ','
-                                || c.is_whitespace()
-                        };
-                        if s_trimmed.chars().all(allowed_chars) {
-                            return true;
-                        }
-                        let s_lower = s_trimmed.to_lowercase();
-                        let math_funcs = [
-                            "choice(",
-                            "random(",
-                            "min(",
-                            "max(",
-                            "abs(",
-                            "atan(",
-                            "atan2(",
-                            "sin(",
-                            "cos(",
-                            "tan(",
-                            "sqrt(",
-                            "ln(",
-                            "log(",
-                            "asin(",
-                            "acos(",
-                            "sinh(",
-                            "cosh(",
-                            "tanh(",
-                            "ceil(",
-                            "floor(",
-                            "round(",
-                            "pow(",
-                            "degrees(",
-                            "radians(",
-                            "gcd(",
-                            "lcm(",
-                            "isqrt(",
-                            "comb(",
-                            "perm(",
-                            "factorial(",
-                        ];
-                        for func in &math_funcs {
-                            if s_lower.contains(func) {
-                                return true;
-                            }
-                        }
-                        false
-                    };
+                    expression
+                };
+                let right_str = interpolate_variables(right_expr.trim());
 
-                    let left_str = {
-                        let trimmed = variable_name.trim();
-                        if let Some(val) = RUNTIME_VARIABLES.lock().get(trimmed) {
-                            val.to_string()
-                        } else if let Some(val) = resolve_text_variable_value(trimmed) {
-                            val
+                if is_math_expression_or_numeric(&left_str) && is_math_expression_or_numeric(&right_str)
+                {
+                    let evaluate_operand = |expr: &str, fallback: f64| -> f64 {
+                        if expr.trim().is_empty() {
+                            fallback
                         } else {
-                            interpolate_variables(trimmed)
+                            let interpolated = interpolate_variables(expr);
+                            evaluate_math_expression_f64(&interpolated)
                         }
                     };
-                    let right_expr = if expression.is_empty() && !key.is_empty() {
-                        key
-                    } else {
-                        expression
+                    let compare_values = |value: f64, operator: &str, comp: f64| match operator {
+                        ">" => value > comp,
+                        "<" => value < comp,
+                        "=" | "==" => (value - comp).abs() < 1e-9,
+                        ">=" => value >= comp,
+                        "<=" => value <= comp,
+                        "!=" => (value - comp).abs() >= 1e-9,
+                        _ => false,
                     };
-                    let right_str = interpolate_variables(right_expr.trim());
-
-                    if is_math_expression_or_numeric(&left_str)
-                        && is_math_expression_or_numeric(&right_str)
-                    {
-                        let evaluate_operand = |expr: &str, fallback: f64| -> f64 {
-                            if expr.trim().is_empty() {
-                                fallback
-                            } else {
-                                let interpolated = interpolate_variables(expr);
-                                evaluate_math_expression_f64(&interpolated)
-                            }
-                        };
-                        let compare_values = |value: f64, operator: &str, comp: f64| match operator
-                        {
-                            ">" => value > comp,
-                            "<" => value < comp,
-                            "=" | "==" => (value - comp).abs() < 1e-9,
-                            ">=" => value >= comp,
-                            "<=" => value <= comp,
-                            "!=" => (value - comp).abs() >= 1e-9,
-                            _ => false,
-                        };
-                        let cond_left = evaluate_operand(variable_name, compare_value as f64);
-                        let cond_right = evaluate_operand(right_expr, compare_value as f64);
-                        compare_values(cond_left, operator, cond_right)
-                    } else {
-                        match operator.trim() {
-                            ">" => left_str > right_str,
-                            "<" => left_str < right_str,
-                            "=" | "==" => left_str == right_str,
-                            ">=" => left_str >= right_str,
-                            "<=" => left_str <= right_str,
-                            "!=" => left_str != right_str,
-                            _ => false,
-                        }
+                    let cond_left = evaluate_operand(variable_name, compare_value as f64);
+                    let cond_right = evaluate_operand(right_expr, compare_value as f64);
+                    compare_values(cond_left, operator, cond_right)
+                } else {
+                    match operator.trim() {
+                        ">" => left_str > right_str,
+                        "<" => left_str < right_str,
+                        "=" | "==" => left_str == right_str,
+                        ">=" => left_str >= right_str,
+                        "<=" => left_str <= right_str,
+                        "!=" => left_str != right_str,
+                        _ => false,
                     }
                 }
             }
@@ -28233,8 +28166,6 @@ mod windows_overlay {
             "",
             step.if_ocr_preset_id,
             &step.ocr_target_text,
-            step.if_contain_case_sensitive,
-            step.if_contain_isolated,
             &step.key,
             step.x,
             step.y,
@@ -28253,8 +28184,6 @@ mod windows_overlay {
                 &cond.expression,
                 cond.ocr_preset_id,
                 &cond.ocr_target_text,
-                cond.if_contain_case_sensitive,
-                cond.if_contain_isolated,
                 if cond.condition_type == IfConditionType::KeyHeld {
                     &cond.key_held_name
                 } else if cond.condition_type == IfConditionType::MouseHeld {
@@ -28521,6 +28450,8 @@ mod windows_overlay {
             assert_eq!(evaluate_math_expression("min(20, 50)"), 20);
             assert_eq!(evaluate_math_expression("max(20, 50)"), 50);
             assert_eq!(evaluate_math_expression("min(max(-10, 0), 100)"), 0);
+            assert_eq!(evaluate_math_expression("contains(\"MacroNest\", Nest)"), 1);
+            assert_eq!(evaluate_math_expression("contains(\"MacroNest\", \"Discord\")"), 0);
             let rnd = evaluate_math_expression("random(10, 20)");
             assert!(rnd >= 10 && rnd <= 20);
             let val = evaluate_math_expression("choice(10, 20, 30)");
@@ -28536,11 +28467,21 @@ mod windows_overlay {
             assert_eq!(evaluate_math_expression("x + 1"), 11);
             assert_eq!(evaluate_math_expression("player_mana - 10"), 90);
             assert_eq!(evaluate_math_expression("player_mana * x / 5"), 200);
+            {
+                let mut text_vars = TEXT_VARIABLES.lock();
+                text_vars.insert("player_name".to_string(), "DungeonBoss".to_string());
+            }
+            assert_eq!(evaluate_math_expression("contains(player_name, boss)"), 1);
+            assert_eq!(evaluate_math_expression("contains(player_name, Mage)"), 0);
             // Clean up
 
             {
                 let mut vars = RUNTIME_VARIABLES.lock();
                 vars.clear();
+            }
+            {
+                let mut text_vars = TEXT_VARIABLES.lock();
+                text_vars.clear();
             }
         }
 

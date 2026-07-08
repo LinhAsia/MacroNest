@@ -48,6 +48,98 @@ enum TextHighlightMode {
 }
 
 impl CrosshairApp {
+    fn remember_macro_panel_language(ui: &mut egui::Ui, language: UiLanguage) {
+        ui.memory_mut(|mem| {
+            mem.data
+                .insert_temp(egui::Id::new("macro_panel_ui_language"), language);
+        });
+    }
+
+    fn macro_panel_language(ui: &egui::Ui) -> UiLanguage {
+        ui.memory(|mem| {
+            mem.data
+                .get_temp::<UiLanguage>(egui::Id::new("macro_panel_ui_language"))
+        })
+        .unwrap_or(UiLanguage::English)
+    }
+
+    fn text_edit_field_chrome(
+        highlight_mode: TextHighlightMode,
+    ) -> Option<(Color32, Color32, egui::Stroke)> {
+        match highlight_mode {
+            TextHighlightMode::VariableTokens => Some((
+                Color32::from_rgb(17, 38, 52),
+                Color32::from_rgb(30, 64, 86),
+                egui::Stroke::new(1.0, Color32::from_rgb(88, 182, 255)),
+            )),
+            TextHighlightMode::Interpolations => Some((
+                Color32::from_rgb(52, 35, 17),
+                Color32::from_rgb(74, 48, 22),
+                egui::Stroke::new(1.0, Color32::from_rgb(255, 191, 92)),
+            )),
+            TextHighlightMode::None => None,
+        }
+    }
+
+    fn text_edit_field_tooltip(
+        ui: &egui::Ui,
+        highlight_mode: TextHighlightMode,
+    ) -> Option<&'static str> {
+        let language = Self::macro_panel_language(ui);
+        match highlight_mode {
+            TextHighlightMode::VariableTokens => Some(Self::tr_lang(
+                language,
+                "Expression field. Variables and functions work directly here. Example: count + 1 or contains(name, \"boss\").",
+                "Ô bi?u th?c. Bi?n và hàm dùng tr?c ti?p ? dây. Ví d?: count + 1 ho?c contains(name, \"boss\").",
+            )),
+            TextHighlightMode::Interpolations => Some(Self::tr_lang(
+                language,
+                "Text field. Plain text stays as-is. Put variables or math inside {} to show values. Example: HP: {player_hp}.",
+                "Ô van b?n. Ch? thu?ng s? du?c gi? nguyên. Hãy d?t bi?n ho?c phép tính trong {} d? hi?n giá tr?. Ví d?: HP: {player_hp}.",
+            )),
+            TextHighlightMode::None => None,
+        }
+    }
+
+    fn show_text_edit_focus_help(
+        ui: &egui::Ui,
+        id: egui::Id,
+        anchor_rect: egui::Rect,
+        help_text: &str,
+    ) {
+        if help_text.is_empty() {
+            return;
+        }
+        let content_rect = ui.ctx().content_rect();
+        let popup_width = 300.0;
+        let popup_height_hint = 72.0;
+        let mut popup_pos = anchor_rect.right_top() + egui::vec2(10.0, -2.0);
+        if popup_pos.x + popup_width > content_rect.right() - 8.0 {
+            popup_pos.x = (anchor_rect.left() - popup_width - 10.0).max(content_rect.left() + 8.0);
+        }
+        if popup_pos.y < content_rect.top() + 8.0 {
+            popup_pos.y = (anchor_rect.left_bottom().y + 6.0)
+                .min(content_rect.bottom() - popup_height_hint);
+        }
+        popup_pos.y = popup_pos
+            .y
+            .clamp(content_rect.top() + 8.0, content_rect.bottom() - popup_height_hint);
+        egui::Area::new(id.with("focus-help"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(popup_pos)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style())
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        Color32::from_rgba_premultiplied(160, 208, 255, 180),
+                    ))
+                    .show(ui, |ui| {
+                        ui.set_max_width(popup_width);
+                        ui.label(help_text);
+                    });
+            });
+    }
+
     fn should_show_global_empty_macro_group_cta(
         total_group_count: usize,
         search_query: &str,
@@ -3469,6 +3561,7 @@ impl CrosshairApp {
 
     pub(crate) fn render_macro_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
+        Self::remember_macro_panel_language(ui, language);
         self.prime_open_windows_if_empty();
         let should_prime_audio_sense_devices = self.audio_sense_devices.is_empty()
             && self.state.macro_groups.iter().any(|group| {
@@ -16322,6 +16415,7 @@ if supports_move_mouse || show_detection_tuning {
 
     pub(crate) fn render_variable_inspector(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
+        Self::remember_macro_panel_language(ui, language);
         ui.vertical(|ui| {
             ui.add_space(4.0);
             let constant_names: std::collections::HashSet<&str> = self
@@ -16630,6 +16724,7 @@ if supports_move_mouse || show_detection_tuning {
     fn builtin_expression_function_suggestions() -> &'static [&'static str] {
         &[
             "abs()",
+            "contains()",
             "min()",
             "max()",
             "random()",
@@ -16638,6 +16733,12 @@ if supports_move_mouse || show_detection_tuning {
             "atan2()",
             "sin()",
             "cos()",
+            "tan()",
+            "asin()",
+            "acos()",
+            "sinh()",
+            "cosh()",
+            "tanh()",
             "sqrt()",
             "pow()",
             "round()",
@@ -16735,6 +16836,7 @@ if supports_move_mouse || show_detection_tuning {
     fn expression_suggestion_label(suggestion: &str, timer_names: &[String]) -> String {
         match suggestion {
             "abs()" => "abs(a)".to_string(),
+            "contains()" => "contains(a, b)".to_string(),
             "min()" => "min(a, b)".to_string(),
             "max()" => "max(a, b)".to_string(),
             "random()" => "random(min, max)".to_string(),
@@ -16743,6 +16845,12 @@ if supports_move_mouse || show_detection_tuning {
             "atan2()" => "atan2(y, x)".to_string(),
             "sin()" => "sin(angleDeg) * 1000".to_string(),
             "cos()" => "cos(angleDeg) * 1000".to_string(),
+            "tan()" => "tan(a)".to_string(),
+            "asin()" => "asin(a)".to_string(),
+            "acos()" => "acos(a)".to_string(),
+            "sinh()" => "sinh(a)".to_string(),
+            "cosh()" => "cosh(a)".to_string(),
+            "tanh()" => "tanh(a)".to_string(),
             "sqrt()" => "sqrt(a)".to_string(),
             "pow()" => "pow(a, b)".to_string(),
             "round()" => "round(a, digits)".to_string(),
@@ -20142,6 +20250,23 @@ if supports_move_mouse || show_detection_tuning {
         ui.spacing_mut().interact_size.y = animated_height;
         let font_size = 16.0;
         ui.spacing_mut().button_padding.y = ((animated_height - font_size) / 2.0 - 0.5).max(0.0);
+        let prev_inactive = ui.visuals().widgets.inactive;
+        let prev_hovered = ui.visuals().widgets.hovered;
+        let prev_active = ui.visuals().widgets.active;
+        if let Some((bg_fill, weak_bg_fill, bg_stroke)) =
+            Self::text_edit_field_chrome(highlight_mode)
+        {
+            let visuals = ui.visuals_mut();
+            for widget in [
+                &mut visuals.widgets.inactive,
+                &mut visuals.widgets.hovered,
+                &mut visuals.widgets.active,
+            ] {
+                widget.bg_fill = bg_fill;
+                widget.weak_bg_fill = weak_bg_fill;
+                widget.bg_stroke = bg_stroke;
+            }
+        }
         let response = match highlight_mode {
             TextHighlightMode::None => ui.put(textbox_rect, text_edit),
             TextHighlightMode::VariableTokens => {
@@ -20175,10 +20300,18 @@ if supports_move_mouse || show_detection_tuning {
                 ui.put(textbox_rect, text_edit.layouter(&mut layouter))
             }
         };
+        ui.visuals_mut().widgets.inactive = prev_inactive;
+        ui.visuals_mut().widgets.hovered = prev_hovered;
+        ui.visuals_mut().widgets.active = prev_active;
         ui.spacing_mut().interact_size.y = prev_interact_y;
         ui.spacing_mut().button_padding = prev_padding;
         ui.visuals_mut().override_text_color = prev_override;
         let now_focused = response.has_focus();
+        if now_focused
+            && let Some(help_text) = Self::text_edit_field_tooltip(ui, highlight_mode)
+        {
+            Self::show_text_edit_focus_help(ui, response.id, textbox_rect, help_text);
+        }
         if now_focused != has_focus {
             ui.memory_mut(|mem| mem.data.insert_temp(focus_key, now_focused));
         }

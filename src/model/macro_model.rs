@@ -151,10 +151,6 @@ pub struct ExtraCondition {
     pub compare_value: i32,
     pub expression: String,
     #[serde(default)]
-    pub if_contain_case_sensitive: bool,
-    #[serde(default)]
-    pub if_contain_isolated: bool,
-    #[serde(default)]
     pub ocr_preset_id: Option<u32>,
     #[serde(default)]
     pub ocr_target_text: String,
@@ -189,8 +185,6 @@ impl Default for ExtraCondition {
             operator: "==".to_string(),
             compare_value: 0,
             expression: String::new(),
-            if_contain_case_sensitive: false,
-            if_contain_isolated: false,
             ocr_preset_id: None,
             ocr_target_text: String::new(),
             x: 0,
@@ -372,9 +366,6 @@ pub struct MacroStep {
     pub geometry_spec: GeometrySpec,
     #[serde(default = "default_true")]
     pub geometry_collapsed: bool,
-    pub if_contain_case_sensitive: bool,
-    #[serde(default)]
-    pub if_contain_isolated: bool,
     #[serde(default)]
     pub trigger_macro_group_id: Option<u32>,
 }
@@ -468,8 +459,6 @@ impl Default for MacroStep {
             geometry_preset_modify_initialized: false,
             geometry_spec: GeometrySpec::default(),
             geometry_collapsed: true,
-            if_contain_case_sensitive: false,
-            if_contain_isolated: false,
             trigger_macro_group_id: None,
         }
     }
