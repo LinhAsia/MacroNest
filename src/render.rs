@@ -161,7 +161,7 @@ fn render_custom_asset(style: &CrosshairStyle, path: &Path) -> Result<RenderedCr
         .map(|ext| ext.to_ascii_lowercase())
         .unwrap_or_default();
 
-    let target_size = style.custom_scale.clamp(16.0, 512.0) as u32;
+    let target_size = style.custom_scale.clamp(16.0, 4096.0) as u32;
 
     let pixmap = if ext == "svg" {
         render_svg(path, target_size)?

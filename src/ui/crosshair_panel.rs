@@ -506,7 +506,7 @@ impl CrosshairApp {
                                 let response = ui.add_sized(
                                     [180.0, 20.0],
                                     DragValue::new(&mut preset.style.custom_scale)
-                                        .range(16.0..=512.0)
+                                        .range(16.0..=4096.0)
                                         .speed(1.0),
                                 );
                                 preset_changed |= response.changed();

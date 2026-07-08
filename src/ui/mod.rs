@@ -1261,7 +1261,7 @@ impl CrosshairApp {
         if let Some(asset_name) = asset_name {
             self.state.profiles[index].style.custom_asset = Some(asset_name);
             if let Some(asset_scale) = asset_scale {
-                self.state.profiles[index].style.custom_scale = asset_scale.clamp(16.0, 512.0);
+                self.state.profiles[index].style.custom_scale = asset_scale.clamp(16.0, 4096.0);
             }
         }
 
