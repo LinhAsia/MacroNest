@@ -76,7 +76,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | Function | Meaning | Example | Result |
 | :--- | :--- | :--- | :--- |
 | `random(min, max)` | Random integer in range | `random(10, 20)` | `10..20` |
-| `choice(a, b, ...)` | Pick one value at random (supports numbers, text, or a mix) | 1. `choice(10, 20, 30)` (numbers)<br>2. `choice(apple, banana, cherry)` (text)<br>3. `choice(HP: 100, 20, low)` (mixed) | 1. `10` or `20` or `30`<br>2. `apple` or `banana` or `cherry`<br>3. `HP: 100` or `20` or `low` |
+| `choice(a, b, ...)` | Pick one value at random (supports numbers, text, or a mix) | 1. `choice(10, 20, 30)` (numbers)<br>2. `choice(apple, banana, cherry)` (text)<br>3. `choice(Level: 5, 50, critical)` (mixed) | 1. `10` or `20` or `30`<br>2. `apple` or `banana` or `cherry`<br>3. `Level: 5` or `50` or `critical` |
 | `min(a, b)` | Smaller value | `min(20, 50)` | `20` |
 | `max(a, b)` | Larger value | `max(20, 50)` | `50` |
 | `abs(a)` | Absolute value | `abs(-50)` | `50` |
@@ -124,11 +124,11 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 
 | Function | Meaning | Example | Result |
 | :--- | :--- | :--- | :--- |
-| `contains(a, b)` | Check whether text `a` contains text `b` (supports numbers, text, or a mix) | 1. `contains(hello, el)` (text)<br>2. `contains(HP: 100, 100)` (mixed)<br>3. `contains(12345, 34)` (numbers) | 1. `1` (true)<br>2. `1` (true)<br>3. `1` (true) |
-| `substr(text, start, len)` | Get part of a string (supports numbers, text, or a mix) | 1. `substr(banana, 2, 3)` (text)<br>2. `substr(HP: 100, 4, 3)` (mixed)<br>3. `substr(123456, 1, 4)` (numbers) | 1. `nan`<br>2. `100`<br>3. `2345` |
-| `len(text)` | Count characters (supports numbers, text, or a mix) | 1. `len(apple)` (text)<br>2. `len(HP: 100)` (mixed)<br>3. `len(453454)` (numbers) | 1. `5`<br>2. `7`<br>3. `6` |
-| `myVar.toNumber` | Extract digits from a text variable and convert them to a number (ignores non-digits) | If variable `A` is `"HP: 120"` (text):<br>`A.toNumber + 5` | `125` (numeric) |
-| `myVar.toString` | Convert a variable to text by filtering out all digits (keeps only non-digits) | 1. If `A` is `123` (numeric): `A.toString`<br>2. If `A` is `"123abc"` (text): `A.toString` | 1. `"123"` (text)<br>2. `"abc"` (text) |
+| `contains(a, b)` | Check whether text `a` contains text `b` (supports numbers, text, or a mix) | 1. `contains(hello, el)` (text)<br>2. `contains(Gold: 5000, 5000)` (mixed)<br>3. `contains(12345, 34)` (numbers) | 1. `1` (true)<br>2. `1` (true)<br>3. `1` (true) |
+| `substr(text, start, len)` | Get part of a string (supports numbers, text, or a mix) | 1. `substr(banana, 2, 3)` (text)<br>2. `substr(Rank #1: Player, 9, 6)` (mixed)<br>3. `substr(123456, 1, 4)` (numbers) | 1. `nan`<br>2. `Player`<br>3. `2345` |
+| `len(text)` | Count characters (supports numbers, text, or a mix) | 1. `len(apple)` (text)<br>2. `len(Score: 9999)` (mixed)<br>3. `len(453454)` (numbers) | 1. `5`<br>2. `11`<br>3. `6` |
+| `myVar.toNumber` | Extract digits from a text variable and convert them to a number (ignores non-digits) | If variable `A` is `"Gold: 500"` (text):<br>`A.toNumber + 100` | `600` (numeric) |
+| `myVar.toString` | Convert a variable to text by filtering out all digits (keeps only non-digits) | 1. If `A` is `123` (numeric): `A.toString`<br>2. If `A` is `"Wave #10"` (text): `A.toString` | 1. `"123"` (text)<br>2. `"Wave #"` (text) |
 
 ### Built-in Variables (Numeric)
 
