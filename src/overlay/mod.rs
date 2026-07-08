@@ -31885,13 +31885,28 @@ mod windows_overlay {
         }
     }
 
+    fn internal_app_window_title(hwnd: HWND) -> Option<String> {
+        unsafe {
+            let len = windows::Win32::UI::WindowsAndMessaging::GetWindowTextLengthW(hwnd);
+            if len <= 0 {
+                return None;
+            }
+            let mut buffer = vec![0u16; (len + 1) as usize];
+            let copied = windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(hwnd, &mut buffer);
+            if copied <= 0 {
+                return None;
+            }
+            Some(String::from_utf16_lossy(&buffer[..copied as usize]))
+        }
+    }
+
     fn is_internal_app_window(hwnd: HWND) -> bool {
         internal_app_window_class(hwnd).is_some_and(|class_name| {
             matches!(
                 class_name.as_str(),
                 "CrosshairController" | "CrosshairOverlay" | "CrosshairToolbox" | "Magnifier"
             )
-        })
+        }) || internal_app_window_title(hwnd).as_deref() == Some("Drawing Toolbar")
     }
 
     fn should_bypass_mouse_event_for_app_window_flags(
