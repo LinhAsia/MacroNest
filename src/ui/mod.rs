@@ -13333,7 +13333,7 @@ impl eframe::App for CrosshairApp {
                                     }
 
                                     // Helper closure for custom icon button instantiation
-                                    let mut icon_btn = |ui: &mut egui::Ui, selected: bool, icon_type: &str, tooltip: &str| -> egui::Response {
+                                    let mut icon_btn = |ui: &mut egui::Ui, selected: bool, icon_type: &str, tooltip: &str| -> (egui::Response, bool) {
                                         let button_size = egui::vec2(22.0, 22.0);
                                         let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
                                         let visuals = if selected {
@@ -13357,7 +13357,20 @@ impl eframe::App for CrosshairApp {
                                         };
                                         draw_toolbar_icon(ui.painter(), rect, icon_type, color);
                                         let response = response.on_hover_text(tooltip);
-                                        if response.clicked() {
+                                        let pressed_now = response.is_pointer_button_down_on();
+                                        let press_id = response.id.with("press_edge");
+                                        let was_pressed = ui.ctx().data(|d| {
+                                            d.get_temp::<bool>(press_id).unwrap_or(false)
+                                        });
+                                        ui.ctx().data_mut(|d| {
+                                            if pressed_now {
+                                                d.insert_temp(press_id, true);
+                                            } else {
+                                                d.remove::<bool>(press_id);
+                                            }
+                                        });
+                                        let activated = response.clicked() || (pressed_now && !was_pressed);
+                                        if activated {
                                             #[cfg(windows)]
                                             {
                                                 let _ = crate::platform::make_window_title_no_activate(
@@ -13368,14 +13381,14 @@ impl eframe::App for CrosshairApp {
                                             ui.ctx().memory_mut(|memory| memory.stop_text_input());
                                             crate::overlay::screen_draw_toolbar_interacted();
                                         }
-                                        response
+                                        (response, activated)
                                     };
 
                                     // 2. Undo / Redo
-                                    if icon_btn(ui, false, "undo", "Undo (Ctrl+Z)").clicked() {
+                                    if icon_btn(ui, false, "undo", "Undo (Ctrl+Z)").1 {
                                         crate::overlay::screen_draw_undo();
                                     }
-                                    if icon_btn(ui, false, "redo", "Redo (Ctrl+Shift+Z / Ctrl+Y)").clicked() {
+                                    if icon_btn(ui, false, "redo", "Redo (Ctrl+Shift+Z / Ctrl+Y)").1 {
                                         crate::overlay::screen_draw_redo();
                                     }
 
@@ -13387,7 +13400,7 @@ impl eframe::App for CrosshairApp {
 
                                     let mut tool_btn = |ui: &mut egui::Ui, tool: crate::model::QuickScreenDrawTool, icon_type: &str, name: &str| {
                                         let selected = current_tool == tool && !eraser_active;
-                                        if icon_btn(ui, selected, icon_type, name).clicked() {
+                                        if icon_btn(ui, selected, icon_type, name).1 {
                                             crate::overlay::screen_draw_set_tool(tool);
                                             crate::overlay::screen_draw_set_eraser(false);
                                         }
@@ -13403,7 +13416,7 @@ impl eframe::App for CrosshairApp {
                                     tool_btn(ui, crate::model::QuickScreenDrawTool::Text, "text", "Text");
 
                                     // Eraser
-                                    if icon_btn(ui, eraser_active, "eraser", "Eraser").clicked() {
+                                    if icon_btn(ui, eraser_active, "eraser", "Eraser").1 {
                                         crate::overlay::screen_draw_set_eraser(!eraser_active);
                                     }
 
@@ -13442,7 +13455,7 @@ impl eframe::App for CrosshairApp {
                                         resp.on_hover_text(*name);
                                     }
 
-                                    if icon_btn(ui, crate::overlay::screen_draw_get_color_pick_mode(), "dropper", "Pick color from screen").clicked() {
+                                    if icon_btn(ui, crate::overlay::screen_draw_get_color_pick_mode(), "dropper", "Pick color from screen").1 {
                                         const SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS: u64 = 160;
                                         self.screen_draw_color_pick_pending_at = Some(Instant::now());
                                         crate::overlay::screen_draw_set_color_pick_cursor();
@@ -13491,21 +13504,21 @@ impl eframe::App for CrosshairApp {
                                     ui.separator();
 
                                     // 6. Capture Region
-                                    if icon_btn(ui, false, "capture", self.tr("Capture Region", "Chụp hình vùng")).clicked() {
+                                    if icon_btn(ui, false, "capture", self.tr("Capture Region", "Chụp hình vùng")).1 {
                                         crate::overlay::screen_draw_trigger_capture_region_from_toolbar();
                                     }
 
                                     // 7. Clear Canvas
-                                    if icon_btn(ui, false, "clear", "Clear Canvas").clicked() {
+                                    if icon_btn(ui, false, "clear", "Clear Canvas").1 {
                                         crate::overlay::screen_draw_clear();
                                     }
 
                                     // 8. Exit Drawing Mode
-                                    let exit_resp = icon_btn(ui, false, "exit", "Exit Drawing Mode");
+                                    let (exit_resp, exit_activated) = icon_btn(ui, false, "exit", "Exit Drawing Mode");
                                     if exit_resp.is_pointer_button_down_on() {
                                         crate::overlay::screen_draw_deactivate_from_toolbar();
                                     }
-                                    if exit_resp.clicked() {
+                                    if exit_activated {
                                         crate::overlay::screen_draw_deactivate_from_toolbar();
                                     }
 
