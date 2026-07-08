@@ -14289,10 +14289,11 @@ impl eframe::App for CrosshairApp {
 
         if self.titlebar_guides_open {
             let screen_center = ctx.screen_rect().center();
-            egui::Window::new(Self::tr_lang(self.state.ui_language, "Guides", "Guides"))
+            egui::Window::new("")
+                .title_bar(false)
                 .fixed_pos(screen_center)
                 .pivot(egui::Align2::CENTER_CENTER)
-                .default_size(egui::vec2(800.0, 800.0))
+                .fixed_size(egui::vec2(800.0, 800.0))
                 .resizable(false)
                 .movable(false)
                 .collapsible(false)
