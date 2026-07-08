@@ -44,15 +44,11 @@ impl CrosshairApp {
                         self.pitch_monitor.stop();
                         self.audio_sense_test_active = false;
                     } else {
-                        let config = PitchAudioSenseSettings {
-                            monitor: Self::audio_sense_test_monitor_settings(
-                                &self.audio_sense_test_settings,
-                            ),
-                            output_note_var: String::new(),
-                            output_level_var: String::new(),
-                            ..PitchAudioSenseSettings::default()
-                        };
-                        if self.pitch_monitor.start(config).is_ok() {
+                        if self
+                            .pitch_monitor
+                            .start(self.audio_sense_test_pitch_config())
+                            .is_ok()
+                        {
                             self.audio_sense_test_active = true;
                         }
                     }
@@ -174,6 +170,16 @@ impl CrosshairApp {
                 });
                 ui.add_space(4.0);
                 Self::render_audio_sense_live_waveform(ui, &test_snapshot.waveform);
+                ui.add_space(6.0);
+                let test_settings_changed = render_pitch_settings_ui(
+                    ui,
+                    language,
+                    &mut self.audio_sense_test_pitch_settings,
+                    &test_snapshot,
+                );
+                if test_settings_changed && self.audio_sense_test_active {
+                    self.restart_audio_sense_test();
+                }
                 if let Some(error) = test_snapshot.error.as_ref() {
                     ui.add_space(4.0);
                     ui.colored_label(Color32::from_rgb(255, 120, 120), error);
@@ -378,13 +384,16 @@ impl CrosshairApp {
 
     fn restart_audio_sense_test(&mut self) {
         self.pitch_monitor.stop();
-        let config = PitchAudioSenseSettings {
-            monitor: Self::audio_sense_test_monitor_settings(&self.audio_sense_test_settings),
-            output_note_var: String::new(),
-            output_level_var: String::new(),
-            ..PitchAudioSenseSettings::default()
-        };
+        let config = self.audio_sense_test_pitch_config();
         self.audio_sense_test_active = self.pitch_monitor.start(config).is_ok();
+    }
+
+    fn audio_sense_test_pitch_config(&self) -> PitchAudioSenseSettings {
+        let mut config = self.audio_sense_test_pitch_settings.clone();
+        config.monitor = Self::audio_sense_test_monitor_settings(&self.audio_sense_test_settings);
+        config.output_note_var.clear();
+        config.output_level_var.clear();
+        config
     }
 
     fn audio_sense_test_monitor_settings(

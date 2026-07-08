@@ -810,6 +810,7 @@ pub struct CrosshairApp {
     audio_sense_devices_loading: bool,
     pitch_monitor: audiosense::PitchMonitor,
     audio_sense_test_settings: crate::model::AudioSenseMonitorSettings,
+    audio_sense_test_pitch_settings: crate::model::PitchAudioSenseSettings,
     audio_sense_test_active: bool,
     active_pitch_preview_preset_id: Option<u32>,
     /// Target for color picking a DrawGeometry macro step spec (group_id, preset_id, step_index, is_fill, is_hold_stop)
@@ -1101,6 +1102,7 @@ impl CrosshairApp {
             audio_sense_devices_loading: false,
             pitch_monitor: audiosense::PitchMonitor::new(),
             audio_sense_test_settings: crate::model::AudioSenseMonitorSettings::default(),
+            audio_sense_test_pitch_settings: crate::model::PitchAudioSenseSettings::default(),
             audio_sense_test_active: false,
             active_pitch_preview_preset_id: None,
             macro_step_geometry_color_pick_target: None,
