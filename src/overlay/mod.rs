@@ -10841,11 +10841,7 @@ mod windows_overlay {
         if let Some(point) = point
             && screen_draw_toolbar_contains_screen_point(&state, point)
         {
-            let finishing_pointer_interaction = state.current_stroke.is_some()
-                || state.active_control != ScreenDrawControl::None;
-            if !finishing_pointer_interaction {
-                return HTTRANSPARENT as isize;
-            }
+            return HTTRANSPARENT as isize;
         }
         1
     }
