@@ -846,10 +846,28 @@ impl CrosshairApp {
                         }
                     }
                     UpdateStatus::Downloading => {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(Self::tr_lang(language, "Downloading update...", ""));
-                        });
+                        let progress =
+                            self.update_download_progress.load(Ordering::SeqCst) as f32 / 1000.0;
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Downloading update...",
+                            "Äang táº£i báº£n cáº­p nháº­t...",
+                        ));
+                        ui.add(
+                            egui::ProgressBar::new(progress)
+                                .desired_width(ui.available_width().max(180.0))
+                                .show_percentage(),
+                        );
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "The new app is downloaded first. Restart will replace the current .exe and reopen MacroNest.",
+                                "App má»›i sáº½ Ä‘Æ°á»£c táº£i vá» trÆ°á»›c. Khi báº¥m khá»Ÿi Ä‘á»™ng láº¡i, app sáº½ thay file .exe hiá»‡n táº¡i rá»“i má»Ÿ láº¡i MacroNest.",
+                            ))
+                            .small()
+                            .weak(),
+                        );
+                        ui.ctx().request_repaint();
                     }
                     UpdateStatus::ReadyToRestart(path) => {
                         ui.label(
@@ -874,6 +892,16 @@ impl CrosshairApp {
                         {
                             self.restart_and_apply_update(path);
                         }
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "Restart closes this app, swaps in the downloaded .exe, then launches the new version.",
+                                "Khá»Ÿi Ä‘á»™ng láº¡i sáº½ táº¯t app hiá»‡n táº¡i, thay báº±ng file .exe Ä‘Ã£ táº£i, rá»“i má»Ÿ báº£n má»›i.",
+                            ))
+                            .small()
+                            .weak(),
+                        );
                     }
                     UpdateStatus::UpToDate => {
                         ui.label(Self::tr_lang(language, "App is up to date.", ""));
@@ -1659,24 +1687,63 @@ impl CrosshairApp {
 
     pub(crate) fn start_download_update(&mut self, ctx: &egui::Context, download_url: String) {
         self.update_status = UpdateStatus::Downloading;
+        self.update_download_progress.store(0, Ordering::SeqCst);
         let ui_tx = self.ui_tx.clone();
         let ctx = ctx.clone();
+        let progress = self.update_download_progress.clone();
         std::thread::spawn(move || {
             let client = reqwest::blocking::Client::builder()
                 .user_agent("MacroNest")
                 .build();
             let result = client.map_err(|e| e.to_string()).and_then(|c| {
-                let mut resp = c.get(download_url).send().map_err(|e| e.to_string())?;
+                use std::io::{Read, Write};
+
+                let mut resp = c
+                    .get(&download_url)
+                    .send()
+                    .and_then(|resp| resp.error_for_status())
+                    .map_err(|e| e.to_string())?;
+                let total_size = resp.content_length().unwrap_or(0);
                 let temp_dir = std::env::temp_dir();
+                let temp_part_path = temp_dir.join("macronest_update.part");
                 let temp_path = temp_dir.join("macronest_update.exe");
-                let mut file = fs::File::create(&temp_path).map_err(|e| e.to_string())?;
-                std::io::copy(&mut resp, &mut file).map_err(|e| e.to_string())?;
+                let _ = fs::remove_file(&temp_part_path);
+                let _ = fs::remove_file(&temp_path);
+                let mut file = fs::File::create(&temp_part_path).map_err(|e| e.to_string())?;
+                let mut downloaded: u64 = 0;
+                let mut buffer = [0u8; 16_384];
+                let mut last_repaint = Instant::now();
+
+                loop {
+                    let read = resp.read(&mut buffer).map_err(|e| e.to_string())?;
+                    if read == 0 {
+                        break;
+                    }
+                    file.write_all(&buffer[..read]).map_err(|e| e.to_string())?;
+                    downloaded += read as u64;
+                    if total_size > 0 {
+                        let value = ((downloaded as f32 / total_size as f32) * 1000.0)
+                            .round()
+                            .clamp(0.0, 1000.0) as u32;
+                        progress.store(value, Ordering::SeqCst);
+                    }
+                    if last_repaint.elapsed() >= Duration::from_millis(40) {
+                        ctx.request_repaint();
+                        last_repaint = Instant::now();
+                    }
+                }
+
+                file.flush().map_err(|e| e.to_string())?;
+                drop(file);
+                fs::rename(&temp_part_path, &temp_path).map_err(|e| e.to_string())?;
+                progress.store(1000, Ordering::SeqCst);
                 let _ = ui_tx.send(UiCommand::UpdateDownloadFinished(
                     temp_path.to_string_lossy().to_string(),
                 ));
                 Ok(())
             });
             if let Err(e) = result {
+                progress.store(0, Ordering::SeqCst);
                 let _ = ui_tx.send(UiCommand::UpdateError(e));
             }
             ctx.request_repaint();
@@ -1686,6 +1753,7 @@ impl CrosshairApp {
     pub(crate) fn restart_and_apply_update(&mut self, new_exe_path: String) {
         let current_exe = std::env::current_exe().unwrap_or_default();
         let old_exe = current_exe.with_extension("exe.old");
+        let update_error_log = std::env::temp_dir().join("macronest_update_error.txt");
         let result: anyhow::Result<()> = (|| {
             if !Path::new(&new_exe_path).exists() {
                 bail!("Downloaded update file was not found");
@@ -1694,18 +1762,34 @@ impl CrosshairApp {
             let current_exe_ps = current_exe.display().to_string().replace('\'', "''");
             let new_exe_ps = new_exe_path.replace('\'', "''");
             let old_exe_ps = old_exe.display().to_string().replace('\'', "''");
+            let current_dir_ps = current_exe
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .display()
+                .to_string()
+                .replace('\'', "''");
+            let error_log_ps = update_error_log.display().to_string().replace('\'', "''");
             let helper = format!(
                 "$ErrorActionPreference='Stop'; \
                  $pidToWait={current_pid}; \
                  $currentExe='{current_exe_ps}'; \
                  $newExe='{new_exe_ps}'; \
                  $oldExe='{old_exe_ps}'; \
-                 Wait-Process -Id $pidToWait; \
-                 Start-Sleep -Milliseconds 350; \
-                 if (Test-Path -LiteralPath $oldExe) {{ Remove-Item -LiteralPath $oldExe -Force -ErrorAction SilentlyContinue }}; \
-                 if (Test-Path -LiteralPath $currentExe) {{ Move-Item -LiteralPath $currentExe -Destination $oldExe -Force }}; \
-                 Copy-Item -LiteralPath $newExe -Destination $currentExe -Force; \
-                 Start-Process -FilePath $currentExe"
+                 $currentDir='{current_dir_ps}'; \
+                 $errorLog='{error_log_ps}'; \
+                 if (Test-Path -LiteralPath $errorLog) {{ Remove-Item -LiteralPath $errorLog -Force -ErrorAction SilentlyContinue }}; \
+                 try {{ \
+                     Wait-Process -Id $pidToWait; \
+                     Start-Sleep -Milliseconds 350; \
+                     if (Test-Path -LiteralPath $oldExe) {{ Remove-Item -LiteralPath $oldExe -Force -ErrorAction SilentlyContinue }}; \
+                     if (Test-Path -LiteralPath $currentExe) {{ Move-Item -LiteralPath $currentExe -Destination $oldExe -Force }}; \
+                     Copy-Item -LiteralPath $newExe -Destination $currentExe -Force; \
+                     Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue; \
+                     Start-Process -FilePath $currentExe -WorkingDirectory $currentDir; \
+                 }} catch {{ \
+                     $_ | Out-File -LiteralPath $errorLog -Encoding utf8; \
+                     throw; \
+                 }}"
             );
             let mut command = Command::new("powershell");
             #[cfg(target_os = "windows")]
