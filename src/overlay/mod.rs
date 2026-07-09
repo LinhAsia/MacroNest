@@ -1956,6 +1956,8 @@ mod windows_overlay {
         text_box_height: i32,
         text_rotation_deg: f32,
         text_border: bool,
+        shift_snap_anchor: Option<POINT>,
+        shift_snap_active: bool,
     }
 
     #[derive(Clone)]
@@ -12850,14 +12852,7 @@ mod windows_overlay {
 
     fn append_screen_draw_point(stroke: &mut ScreenDrawStroke, point: POINT) -> bool {
         let point = if stroke.tool == ScreenDrawTool::Brush {
-            if screen_draw_snap_axis_active() {
-                snap_screen_draw_point_to_45_degrees(
-                    stroke.points.last().copied().unwrap_or(point),
-                    point,
-                )
-            } else {
-                point
-            }
+            point
         } else {
             snapped_screen_draw_point(
                 stroke.tool,
@@ -12865,6 +12860,34 @@ mod windows_overlay {
                 point,
             )
         };
+        if stroke.tool == ScreenDrawTool::Brush {
+            let shift_held = screen_draw_snap_axis_active();
+            if shift_held {
+                let anchor = if stroke.shift_snap_active {
+                    stroke
+                        .shift_snap_anchor
+                        .unwrap_or_else(|| stroke.points.last().copied().unwrap_or(point))
+                } else {
+                    let anchor = stroke.points.last().copied().unwrap_or(point);
+                    stroke.shift_snap_anchor = Some(anchor);
+                    stroke.shift_snap_active = true;
+                    anchor
+                };
+                let snapped = snap_screen_draw_point_to_45_degrees(anchor, point);
+                if stroke.points.last().copied() == Some(anchor) {
+                    stroke.points.push(snapped);
+                    return true;
+                }
+                let changed = stroke.points.last().copied() != Some(snapped);
+                if changed && let Some(last) = stroke.points.last_mut() {
+                    *last = snapped;
+                }
+                return changed;
+            }
+
+            stroke.shift_snap_anchor = None;
+            stroke.shift_snap_active = false;
+        }
         if stroke.tool != ScreenDrawTool::Brush {
             if stroke.points.len() == 1 {
                 stroke.points.push(point);
@@ -13535,6 +13558,8 @@ mod windows_overlay {
             text_box_height: 0,
             text_rotation_deg: 0.0,
             text_border: state.text_border,
+            shift_snap_anchor: None,
+            shift_snap_active: false,
         });
         state.current_stroke_updated_at = Some(Instant::now());
         state.current_stroke_release_seen_at = None;
@@ -28641,6 +28666,8 @@ mod windows_overlay {
                 text_box_height: 0,
                 text_rotation_deg: 0.0,
                 text_border: false,
+                shift_snap_anchor: None,
+                shift_snap_active: false,
             };
 
             let (left, top, width, height, font_size, text) =
@@ -28675,6 +28702,8 @@ mod windows_overlay {
                 text_box_height: 80,
                 text_rotation_deg: 35.0,
                 text_border: false,
+                shift_snap_anchor: None,
+                shift_snap_active: false,
             };
 
             let geometry = screen_draw_text_session_geometry(&stroke, "Text").unwrap();
@@ -28761,6 +28790,8 @@ mod windows_overlay {
                 text_box_height: 40,
                 text_rotation_deg: 0.0,
                 text_border: false,
+                shift_snap_anchor: None,
+                shift_snap_active: false,
             };
             let geometry = screen_draw_text_session_geometry_for_overlay(
                 &stroke,
