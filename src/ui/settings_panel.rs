@@ -720,8 +720,8 @@ impl CrosshairApp {
                                     path,
                                     expected_size_bytes,
                                 ))
-                                    .small()
-                                    .weak(),
+                                .small()
+                                .weak(),
                             )
                             .wrap(),
                         );
@@ -812,16 +812,21 @@ impl CrosshairApp {
                         });
                     }
                     UpdateStatus::Available(version, body, url) => {
-                        ui.label(
-                            RichText::new(format!("New version available: v{}", version))
-                                .color(Color32::GREEN),
-                        );
+                        let available_text = match language {
+                            UiLanguage::Vietnamese => {
+                                format!("Đã có phiên bản mới: v{}", version)
+                            }
+                            UiLanguage::English | UiLanguage::Icon => {
+                                format!("New version available: v{}", version)
+                            }
+                        };
+                        ui.label(RichText::new(available_text).color(Color32::GREEN));
                         if !body.is_empty() {
                             ui.label(RichText::new(body).small().weak());
                         }
                         if Self::settings_action_button(
                             ui,
-                            Self::tr_lang(language, "Download new version", "Tai ban moi"),
+                            Self::tr_lang(language, "Download new version", "Tải bản mới"),
                         )
                         .clicked()
                         {
@@ -835,14 +840,21 @@ impl CrosshairApp {
                         });
                     }
                     UpdateStatus::ReadyToRestart(path) => {
-                        ui.label(RichText::new("Update downloaded!").color(Color32::GREEN));
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "Update downloaded!",
+                                "Đã tải xong bản cập nhật!",
+                            ))
+                            .color(Color32::GREEN),
+                        );
                         let path = path.clone();
                         if Self::settings_action_button(
                             ui,
                             RichText::new(Self::tr_lang(
                                 language,
                                 "Restart app to update",
-                                "Khoi dong lai de cap nhat",
+                                "Khởi động lại để cập nhật",
                             ))
                             .strong(),
                         )
@@ -866,8 +878,13 @@ impl CrosshairApp {
                     UpdateStatus::Error(e) => {
                         let error_text = e.clone();
                         let is_rate_limit = error_text.to_ascii_lowercase().contains("rate limit");
+                        let error_prefix = match language {
+                            UiLanguage::Vietnamese => "Lỗi",
+                            UiLanguage::English | UiLanguage::Icon => "Error",
+                        };
                         ui.label(
-                            RichText::new(format!("Error: {}", error_text)).color(Color32::RED),
+                            RichText::new(format!("{error_prefix}: {}", error_text))
+                                .color(Color32::RED),
                         );
                         ui.add_space(4.0);
                         if Self::settings_action_button(
@@ -882,17 +899,12 @@ impl CrosshairApp {
                             ui.add_space(4.0);
                             if Self::settings_action_button(
                                 ui,
-                                Self::tr_lang(
-                                    language,
-                                    "Open Releases page",
-                                    "Mo trang Releases",
-                                ),
+                                Self::tr_lang(language, "Open Releases page", "Mở trang Releases"),
                             )
                             .clicked()
                             {
-                                let _ = crate::platform::open_url_in_browser(
-                                    GITHUB_RELEASES_PAGE_URL,
-                                );
+                                let _ =
+                                    crate::platform::open_url_in_browser(GITHUB_RELEASES_PAGE_URL);
                             }
                         }
                     }

@@ -35,9 +35,9 @@ impl CrosshairApp {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let button_label = if self.audio_sense_test_active {
-                    Self::tr_lang(language, "Stop test", "Stop test")
+                    Self::tr_lang(language, "Stop test", "Dừng test")
                 } else {
-                    Self::tr_lang(language, "Test sound", "Test sound")
+                    Self::tr_lang(language, "Test sound", "Thử âm thanh")
                 };
                 if ui.button(button_label).clicked() {
                     if self.audio_sense_test_active {
@@ -63,23 +63,15 @@ impl CrosshairApp {
                                 .input_device_name
                                 .clone()
                                 .unwrap_or_else(|| {
-                                    Self::tr_lang(
-                                        language,
-                                        "Default microphone",
-                                        "Default microphone",
-                                    )
-                                    .to_owned()
+                                    Self::tr_lang(language, "Default microphone", "Micro mặc định")
+                                        .to_owned()
                                 }),
                         )
                         .show_ui(ui, |ui| {
                             if ui
                                 .selectable_label(
                                     self.audio_sense_test_settings.input_device_name.is_none(),
-                                    Self::tr_lang(
-                                        language,
-                                        "Default microphone",
-                                        "Default microphone",
-                                    ),
+                                    Self::tr_lang(language, "Default microphone", "Micro mặc định"),
                                 )
                                 .clicked()
                             {
@@ -161,7 +153,7 @@ impl CrosshairApp {
                         egui::RichText::new(Self::tr_lang(
                             language,
                             "Live input preview",
-                    "Live input preview",
+                            "Xem trước âm thanh",
                         ))
                         .strong(),
                     );
@@ -191,7 +183,7 @@ impl CrosshairApp {
         let mut changed = false;
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(Self::tr_lang(language, "Detect Pitch", "Detect Pitch"))
+            egui::RichText::new(Self::tr_lang(language, "Detect Pitch", "Phát hiện cao độ"))
                 .strong()
                 .size(14.0),
         );
@@ -284,7 +276,7 @@ impl CrosshairApp {
                                             Self::tr_lang(
                                                 language,
                                                 "Default microphone",
-                                                "Default microphone",
+                                                "Micro mặc định",
                                             )
                                             .to_owned()
                                         }),
@@ -296,7 +288,7 @@ impl CrosshairApp {
                                             Self::tr_lang(
                                                 language,
                                                 "Default microphone",
-                                                "Default microphone",
+                                                "Micro mặc định",
                                             ),
                                         )
                                         .clicked()

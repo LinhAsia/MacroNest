@@ -1009,12 +1009,12 @@ fn protractor_calibration_status_text(
 
     match ui_language {
         crate::model::UiLanguage::Vietnamese => match count {
-            0 => "Can chinh: Click diem 1/3 tren man hinh. Nhan Esc de huy.",
-            1 => "Can chinh: Click diem 2/3 tren man hinh. Nhan Esc de huy.",
+            0 => "Căn chỉnh: Click điểm 1/3 trên màn hình. Nhấn Esc để hủy.",
+            1 => "Căn chỉnh: Click điểm 2/3 trên màn hình. Nhấn Esc để hủy.",
             _ if too_small => {
-                "Can chinh: vong tron qua nho. Hay chon diem 3 xa hon hoac nhan Esc de huy."
+                "Căn chỉnh: vòng tròn quá nhỏ. Hãy chọn điểm 3 xa hơn hoặc nhấn Esc để hủy."
             }
-            _ => "Can chinh: Click diem 3/3 tren man hinh. Nhan Esc de huy.",
+            _ => "Căn chỉnh: Click điểm 3/3 trên màn hình. Nhấn Esc để hủy.",
         },
         crate::model::UiLanguage::English | crate::model::UiLanguage::Icon => match count {
             0 => "Calibration: Click point 1/3 on screen. Press Esc to cancel.",
@@ -1036,7 +1036,7 @@ fn protractor_cursor_warning_text(
     }
 
     Some(match ui_language {
-        crate::model::UiLanguage::Vietnamese => "Vong tron qua nho",
+        crate::model::UiLanguage::Vietnamese => "Vòng tròn quá nhỏ",
         crate::model::UiLanguage::English | crate::model::UiLanguage::Icon => "Circle too small",
     })
 }
@@ -1051,7 +1051,11 @@ fn distance_measure_preview(state: &CaptureState) -> Option<(f64, (i32, i32), (i
 }
 
 fn native_capture_shift_held() -> bool {
-    unsafe { (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0 }
+    unsafe {
+        (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(VK_SHIFT.0 as i32) as u16
+            & 0x8000)
+            != 0
+    }
 }
 
 fn snap_point_to_45_degrees(anchor: (i32, i32), point: (i32, i32)) -> (i32, i32) {
@@ -1071,7 +1075,9 @@ fn snap_point_to_45_degrees(anchor: (i32, i32), point: (i32, i32)) -> (i32, i32)
 }
 
 fn distance_measure_constrained_local_point(state: &CaptureState, point: (i32, i32)) -> (i32, i32) {
-    if !matches!(state.mode, NativeCaptureMode::DistanceMeasure { .. }) || !native_capture_shift_held() {
+    if !matches!(state.mode, NativeCaptureMode::DistanceMeasure { .. })
+        || !native_capture_shift_held()
+    {
         return point;
     }
 
@@ -1087,7 +1093,7 @@ fn distance_measure_status_text(
 ) -> &'static str {
     match ui_language {
         crate::model::UiLanguage::Vietnamese => {
-            "Thuoc do: Click diem A, re chuot de do, click diem B de chot. Nhan Esc de huy."
+            "Thước đo: Click điểm A, rê chuột để đo, click điểm B để chốt. Nhấn Esc để hủy."
         }
         crate::model::UiLanguage::English | crate::model::UiLanguage::Icon => {
             "Ruler: Click point A, move the mouse to measure, click point B to confirm. Press Esc to cancel."
@@ -2221,9 +2227,9 @@ unsafe fn draw_capture_to_dc(
 
         // 3. Draw Center Pixel label
         let center_pixel_text = if vietnamese {
-            "Pixel trung tam"
+            "Màu tại tâm"
         } else {
-            "Center pixel"
+            "Center color"
         };
         let mut center_u16: Vec<u16> = center_pixel_text.encode_utf16().collect();
         let mut center_rect = RECT {

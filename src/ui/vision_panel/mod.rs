@@ -1298,7 +1298,7 @@ impl CrosshairApp {
         painter.text(
             pos2(content_left, panel_rect.min.y + 214.0),
             egui::Align2::LEFT_TOP,
-            "Center pixel",
+            Self::tr_lang(self.state.ui_language, "Center color", "Màu tại tâm"),
             egui::FontId::proportional(12.0),
             Color32::from_rgb(188, 206, 230),
         );
@@ -1661,23 +1661,23 @@ impl CrosshairApp {
                                 ctx, group_id, preset_id, step_index, x, y, width, height,
                             );
                         }
-                    VisionCaptureTarget::GeometryColor => {
-                        self.cancel_image_search_capture_with_status(
-                            ctx,
-                            "Geometry color picking does not support area captures.",
-                        );
-                    }
-                    VisionCaptureTarget::CrosshairProfileColor { .. } => {
-                        self.cancel_image_search_capture_with_status(
-                            ctx,
-                            "Crosshair color picking does not support area captures.",
-                        );
-                    }
-                    VisionCaptureTarget::MacroStepGeometryColor { .. } => {
-                        self.cancel_image_search_capture_with_status(
-                            ctx,
-                            "Geometry color picking does not support area captures.",
-                        );
+                        VisionCaptureTarget::GeometryColor => {
+                            self.cancel_image_search_capture_with_status(
+                                ctx,
+                                "Geometry color picking does not support area captures.",
+                            );
+                        }
+                        VisionCaptureTarget::CrosshairProfileColor { .. } => {
+                            self.cancel_image_search_capture_with_status(
+                                ctx,
+                                "Crosshair color picking does not support area captures.",
+                            );
+                        }
+                        VisionCaptureTarget::MacroStepGeometryColor { .. } => {
+                            self.cancel_image_search_capture_with_status(
+                                ctx,
+                                "Geometry color picking does not support area captures.",
+                            );
                         }
                         VisionCaptureTarget::QuickActionsCoordinates
                         | VisionCaptureTarget::QuickActionsColor
