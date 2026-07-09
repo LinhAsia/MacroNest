@@ -150,12 +150,13 @@ impl CrosshairApp {
             popup_pos.x = (anchor_rect.left() - popup_width - 10.0).max(content_rect.left() + 8.0);
         }
         if popup_pos.y < content_rect.top() + 8.0 {
-            popup_pos.y = (anchor_rect.left_bottom().y + 6.0)
-                .min(content_rect.bottom() - popup_height_hint);
+            popup_pos.y =
+                (anchor_rect.left_bottom().y + 6.0).min(content_rect.bottom() - popup_height_hint);
         }
-        popup_pos.y = popup_pos
-            .y
-            .clamp(content_rect.top() + 8.0, content_rect.bottom() - popup_height_hint);
+        popup_pos.y = popup_pos.y.clamp(
+            content_rect.top() + 8.0,
+            content_rect.bottom() - popup_height_hint,
+        );
         egui::Area::new(id.with("focus-help"))
             .order(egui::Order::Foreground)
             .fixed_pos(popup_pos)
@@ -413,7 +414,8 @@ impl CrosshairApp {
                 }
                 draft = clamped.to_string();
             }
-            ui.ctx().data_mut(|data| data.insert_temp(id, draft.clone()));
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(id, draft.clone()));
         } else if !response.has_focus() {
             ui.ctx()
                 .data_mut(|data| data.insert_temp(id, value.to_string()));
@@ -443,7 +445,8 @@ impl CrosshairApp {
                 }
                 draft = clamped.to_string();
             }
-            ui.ctx().data_mut(|data| data.insert_temp(id, draft.clone()));
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(id, draft.clone()));
         } else if !response.has_focus() {
             ui.ctx()
                 .data_mut(|data| data.insert_temp(id, value.to_string()));
@@ -679,7 +682,8 @@ impl CrosshairApp {
                     Button::new(Self::macro_action_icon_text(candidate))
                         .selected(*current == candidate),
                 );
-                if !is_submenu_item && !hover_blocked && (response.hovered() || response.clicked()) {
+                if !is_submenu_item && !hover_blocked && (response.hovered() || response.clicked())
+                {
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(action_hover_id, true));
                 }
@@ -1055,11 +1059,7 @@ impl CrosshairApp {
             egui::ComboBox::from_id_salt((id_salt, "network_method"))
                 .width(170.0)
                 .selected_text(match method {
-                    1 => Self::tr_lang(
-                        language,
-                        "Internet route (Fast)",
-                        "Tuyến mạng (Nhanh)",
-                    ),
+                    1 => Self::tr_lang(language, "Internet route (Fast)", "Tuyến mạng (Nhanh)"),
                     2 => Self::tr_lang(language, "Radio (Instant)", "Radio (Instant)"),
                     _ => Self::tr_lang(language, "Adapter (Slow)", "Card mạng (Chậm)"),
                 })
@@ -1072,11 +1072,7 @@ impl CrosshairApp {
                     ui.selectable_value(
                         &mut method,
                         1,
-                        Self::tr_lang(
-                            language,
-                            "Internet route (Fast)",
-                            "Tuyến mạng (Nhanh)",
-                        ),
+                        Self::tr_lang(language, "Internet route (Fast)", "Tuyến mạng (Nhanh)"),
                     );
                     // Radio (Instant) chỉ khả dụng khi chọn mạng là Wi-Fi
                     if is_wifi_target {
@@ -1102,11 +1098,7 @@ impl CrosshairApp {
                         false,
                         Self::tr_lang(language, "Off", "Tắt"),
                     );
-                    ui.selectable_value(
-                        &mut is_enable,
-                        true,
-                        Self::tr_lang(language, "On", "Bật"),
-                    );
+                    ui.selectable_value(&mut is_enable, true, Self::tr_lang(language, "On", "Bật"));
                 });
 
             Self::sync_network_step_action(step, is_enable, method);
@@ -1156,9 +1148,9 @@ impl CrosshairApp {
 
         let now = Instant::now();
         if let Ok(mut cache) = NETWORK_ADAPTER_NAME_CACHE.lock() {
-            let is_fresh = cache
-                .fetched_at
-                .is_some_and(|fetched_at| now.saturating_duration_since(fetched_at) < NETWORK_ADAPTER_CACHE_TTL);
+            let is_fresh = cache.fetched_at.is_some_and(|fetched_at| {
+                now.saturating_duration_since(fetched_at) < NETWORK_ADAPTER_CACHE_TTL
+            });
             if is_fresh {
                 return cache.names.clone();
             }
@@ -1180,7 +1172,6 @@ impl CrosshairApp {
 
         Vec::new()
     }
-
 
     fn clear_macro_action_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
         let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
@@ -1372,11 +1363,19 @@ impl CrosshairApp {
                                                     ui.label(egui::RichText::new("- a + b / a - b").monospace());
                                                     ui.label(egui::RichText::new("- a * b / a / b").monospace());
                                                     ui.label(egui::RichText::new("- a ^ b").monospace());
+                                                    ui.label(egui::RichText::new("- a == b / a != b").monospace());
+                                                    ui.label(egui::RichText::new("- a > b / a >= b").monospace());
+                                                    ui.label(egui::RichText::new("- a < b / a <= b").monospace());
                                                     ui.label(egui::RichText::new("- random(min, max)").monospace());
                                                     ui.label(egui::RichText::new("- choice(val1, val2, ...)").monospace());
+                                                    ui.label(egui::RichText::new("- clamp(x, min, max)").monospace());
+                                                    ui.label(egui::RichText::new("- between(x, a, b)").monospace());
                                                     ui.label(egui::RichText::new("- contains(a, b)").monospace());
+                                                    ui.label(egui::RichText::new("- concat(a, b, ...)").monospace());
                                                     ui.label(egui::RichText::new("- substr(text, start, len)").monospace());
                                                     ui.label(egui::RichText::new("- len(text)").monospace());
+                                                    ui.label(egui::RichText::new("- lower(text) / upper(text)").monospace());
+                                                    ui.label(egui::RichText::new("- trim(text)").monospace());
                                                     ui.label(egui::RichText::new("- div(a, b) / mod(a, b)").monospace());
                                                     ui.label(egui::RichText::new("- min(a, b) / max(a, b)").monospace());
                                                     ui.label(egui::RichText::new("- abs(a) / sqrt(a)").monospace());
@@ -1396,6 +1395,12 @@ impl CrosshairApp {
                                                     ui.label(egui::RichText::new("- pi / e").monospace());
                                                     ui.label(egui::RichText::new("- myVar.toNumber").monospace());
                                                     ui.label(egui::RichText::new("- myVar.toString").monospace());
+                                                    ui.add_space(4.0);
+                                                    ui.weak(Self::tr_lang(
+                                                        language,
+                                                        "Comparisons return 1 for true and 0 for false.",
+                                                        "So sánh trả về 1 nếu đúng và 0 nếu sai.",
+                                                    ));
                                                 });
                                             });
                                     });
@@ -1463,12 +1468,12 @@ impl CrosshairApp {
             // 3. Draw IMPORTANT NOTE (goes to the absolute bottom)
             let note_fill = Color32::from_rgba_unmultiplied(255, 194, 70, 16);
             let note_stroke = egui::Stroke::new(1.0, Color32::from_rgb(255, 194, 70));
-            
+
             let remaining = ui.available_height();
             if remaining > note_box_height {
                 ui.add_space(remaining - note_box_height);
             }
-            
+
             egui::Frame::group(ui.style())
                 .fill(note_fill)
                 .stroke(note_stroke)
@@ -1707,8 +1712,7 @@ impl CrosshairApp {
                     ui.ctx().data(|data| data.get_temp(popup_rect_id));
                 if open {
                     if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
-                        let mut keep_open_rect =
-                            tile_rect.expand2(egui::vec2(28.0, 22.0));
+                        let mut keep_open_rect = tile_rect.expand2(egui::vec2(28.0, 22.0));
                         if let Some(rect) = popup_rect {
                             keep_open_rect =
                                 keep_open_rect.union(rect.expand2(egui::vec2(18.0, 16.0)));
@@ -2035,8 +2039,7 @@ impl CrosshairApp {
                     ui.ctx().data(|data| data.get_temp(popup_rect_id));
                 if open {
                     if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
-                        let mut keep_open_rect =
-                            tile_rect.expand2(egui::vec2(22.0, 18.0));
+                        let mut keep_open_rect = tile_rect.expand2(egui::vec2(22.0, 18.0));
                         if let Some(rect) = popup_rect {
                             keep_open_rect =
                                 keep_open_rect.union(rect.expand2(egui::vec2(16.0, 14.0)));
@@ -2058,8 +2061,8 @@ impl CrosshairApp {
                                 keep_open_rect =
                                     keep_open_rect.union(rect.expand2(egui::vec2(16.0, 14.0)));
                                 if let Some(parent_rect) = popup_rect {
-                                    keep_open_rect = keep_open_rect.union(
-                                        egui::Rect::from_min_max(
+                                    keep_open_rect =
+                                        keep_open_rect.union(egui::Rect::from_min_max(
                                             egui::pos2(
                                                 parent_rect.min.x.min(rect.min.x) - 12.0,
                                                 parent_rect.min.y.min(rect.min.y) - 12.0,
@@ -2068,8 +2071,7 @@ impl CrosshairApp {
                                                 parent_rect.max.x.max(rect.max.x) + 12.0,
                                                 parent_rect.max.y.max(rect.max.y) + 12.0,
                                             ),
-                                        ),
-                                    );
+                                        ));
                                 }
                             }
                         }
@@ -2132,7 +2134,6 @@ impl CrosshairApp {
     fn macro_action_is_network(action: MacroAction) -> bool {
         Self::network_macro_actions().contains(&action)
     }
-
 
     fn render_network_action_single_option(
         ui: &mut egui::Ui,
@@ -3093,17 +3094,19 @@ impl CrosshairApp {
                     "hold-extra-join-cb",
                 ))
                 .width(56.0)
-                .selected_text(if cond.join_operator.eq_ignore_ascii_case("OR") {
-                    Self::tr_lang(language, "OR", "OR")
-                } else {
-                    Self::tr_lang(language, "AND", "AND")
-                })
+                .selected_text(
+                    match cond.join_operator.trim().to_ascii_uppercase().as_str() {
+                        "OR" => Self::tr_lang(language, "OR", "OR"),
+                        "NOT" => Self::tr_lang(language, "NOT", "KHÔNG"),
+                        _ => Self::tr_lang(language, "AND", "AND"),
+                    },
+                )
                 .show_ui(&mut cb_ui, |ui| {
-                    for op in &["AND", "OR"] {
-                        let label = if *op == "AND" {
-                            Self::tr_lang(language, "AND", "AND")
-                        } else {
-                            Self::tr_lang(language, "OR", "OR")
+                    for op in &["AND", "OR", "NOT"] {
+                        let label = match *op {
+                            "AND" => Self::tr_lang(language, "AND", "AND"),
+                            "OR" => Self::tr_lang(language, "OR", "OR"),
+                            _ => Self::tr_lang(language, "NOT", "KHÔNG"),
                         };
                         if ui
                             .selectable_label(cond.join_operator.eq_ignore_ascii_case(op), label)
@@ -16365,14 +16368,29 @@ if supports_move_mouse || show_detection_tuning {
         matches!(
             token.trim().to_ascii_lowercase().as_str(),
             "abs"
+                | "between"
+                | "clamp"
+                | "concat"
+                | "contains"
+                | "div"
+                | "len"
+                | "lower"
+                | "mod"
                 | "min"
                 | "max"
                 | "random"
                 | "choice"
+                | "substr"
                 | "atan"
                 | "atan2"
                 | "sin"
                 | "cos"
+                | "tan"
+                | "asin"
+                | "acos"
+                | "sinh"
+                | "cosh"
+                | "tanh"
                 | "sqrt"
                 | "pow"
                 | "round"
@@ -16386,8 +16404,15 @@ if supports_move_mouse || show_detection_tuning {
                 | "isqrt"
                 | "comb"
                 | "perm"
+                | "ln"
+                | "log"
+                | "log10"
+                | "exp"
                 | "pi"
+                | "e"
                 | "tonumber"
+                | "trim"
+                | "upper"
                 | "tostring"
         )
     }
@@ -16828,10 +16853,16 @@ if supports_move_mouse || show_detection_tuning {
         &[
             "abs()",
             "contains()",
+            "concat()",
             "substr()",
             "len()",
+            "lower()",
+            "upper()",
+            "trim()",
             "div()",
             "mod()",
+            "clamp()",
+            "between()",
             "min()",
             "max()",
             "random()",
@@ -16949,10 +16980,16 @@ if supports_move_mouse || show_detection_tuning {
         match suggestion {
             "abs()" => "abs(a)".to_string(),
             "contains()" => "contains(a, b)".to_string(),
+            "concat()" => "concat(a, b, ...)".to_string(),
             "substr()" => "substr(text, start, len)".to_string(),
             "len()" => "len(text)".to_string(),
+            "lower()" => "lower(text)".to_string(),
+            "upper()" => "upper(text)".to_string(),
+            "trim()" => "trim(text)".to_string(),
             "div()" => "div(a, b)".to_string(),
             "mod()" => "mod(a, b)".to_string(),
+            "clamp()" => "clamp(x, min, max)".to_string(),
+            "between()" => "between(x, a, b)".to_string(),
             "min()" => "min(a, b)".to_string(),
             "max()" => "max(a, b)".to_string(),
             "random()" => "random(min, max)".to_string(),
@@ -18704,9 +18741,10 @@ if supports_move_mouse || show_detection_tuning {
                                 );
                             }
                         } else {
-                            let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewHudPreset(
-                                vec![Self::default_macro_step_hud_preset(&step.text_override)],
-                            ));
+                            let _ =
+                                overlay_tx.send(crate::overlay::OverlayCommand::PreviewHudPreset(
+                                    vec![Self::default_macro_step_hud_preset(&step.text_override)],
+                                ));
                         }
                     }
                     _ => {}
@@ -20732,7 +20770,9 @@ mod tests {
             0, "search", None
         ));
         assert!(!CrosshairApp::should_show_global_empty_macro_group_cta(
-            0, "", Some(7)
+            0,
+            "",
+            Some(7)
         ));
     }
 }

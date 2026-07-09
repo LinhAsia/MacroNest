@@ -63,6 +63,10 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | `a * b` | Nhân | `3 * 4` | `12` |
 | `a / b` | Chia | `5 / 2` | `2.5` |
 | `a ^ b` | Lũy thừa | `5^2` | `25` |
+| `a == b` | So sánh bằng | `5 == 5` | `1` |
+| `a != b` | So sánh khác | `5 != 5` | `0` |
+| `a > b` / `a >= b` | So sánh lớn hơn | `8 >= 3` | `1` |
+| `a < b` / `a <= b` | So sánh nhỏ hơn | `2 < 1` | `0` |
 
 ### Hằng số
 
@@ -77,6 +81,8 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | :--- | :--- | :--- | :--- |
 | `random(min, max)` | Số nguyên ngẫu nhiên trong khoảng | `random(10, 20)` | `10..20` |
 | `choice(a, b, ...)` | Chọn ngẫu nhiên một giá trị (hỗ trợ số, chữ hoặc kết hợp) | 1. `choice(10, 20, 30)` (số)<br>2. `choice(apple, banana, cherry)` (chữ)<br>3. `choice(Level: 5, 50, critical)` (kết hợp) | 1. `10` hoặc `20` hoặc `30`<br>2. `apple` hoặc `banana` hoặc `cherry`<br>3. `Level: 5` hoặc `50` hoặc `critical` |
+| `clamp(x, min, max)` | Ép `x` nằm trong một khoảng | `clamp(120, 0, 100)` | `100` |
+| `between(x, a, b)` | Kiểm tra `x` có nằm trong khoảng hay không (bao gồm hai đầu mút) | `between(7, 1, 10)` | `1` |
 | `min(a, b)` | Giá trị nhỏ hơn | `min(20, 50)` | `20` |
 | `max(a, b)` | Giá trị lớn hơn | `max(20, 50)` | `50` |
 | `abs(a)` | Giá trị tuyệt đối | `abs(-50)` | `50` |
@@ -125,8 +131,12 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | Hàm | Ý nghĩa | Ví dụ | Kết quả |
 | :--- | :--- | :--- | :--- |
 | `contains(a, b)` | Kiểm tra chuỗi `a` có chứa chuỗi `b` hay không (hỗ trợ số, chữ hoặc kết hợp) | 1. `contains(hello, world)` (chữ)<br>2. `contains(Gold: 5000, 5000)` (kết hợp)<br>3. `contains(12345, 99)` (số) | 1. `0` (sai)<br>2. `1` (đúng)<br>3. `0` (sai) |
+| `concat(a, b, ...)` | Ghép nhiều giá trị thành một chuỗi | `concat(Player, "-", 01)` | `Player-01` |
 | `substr(text, start, len)` | Lấy một chuỗi con (hỗ trợ số, chữ hoặc kết hợp) | 1. `substr(banana, 2, 3)` (chữ)<br>2. `substr(Rank #1: Player, 9, 6)` (kết hợp)<br>3. `substr(123456, 1, 4)` (số) | 1. `nan`<br>2. `Player`<br>3. `2345` |
 | `len(text)` | Đếm số ký tự (hỗ trợ số, chữ hoặc kết hợp) | 1. `len(apple)` (chữ)<br>2. `len(Score: 9999)` (kết hợp)<br>3. `len(453454)` (số) | 1. `5`<br>2. `11`<br>3. `6` |
+| `lower(text)` | Đổi chữ thành chữ thường | `lower(HeLLo)` | `hello` |
+| `upper(text)` | Đổi chữ thành chữ hoa | `upper(HeLLo)` | `HELLO` |
+| `trim(text)` | Bỏ khoảng trắng ở đầu và cuối | `trim("  hello  ")` | `hello` |
 | `myVar.toNumber` | Trích xuất các chữ số từ biến văn bản và chuyển thành số (bỏ qua ký tự khác) | Nếu biến `A` là `"Gold: 500"` (văn bản):<br>`A.toNumber` | `500` (dạng số) |
 | `myVar.toString` | Lọc bỏ toàn bộ chữ số và giữ lại các ký tự khác để chuyển thành văn bản | Nếu biến `A` là `"Wave #10"` (văn bản):<br>`A.toString` | `"Wave #"` (văn bản) |
 
@@ -166,6 +176,7 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 
 - Các trường biểu thức tính toán trực tiếp các biến và hàm số.
 - Các trường văn bản thuần sẽ giữ nguyên chữ thường; dùng `{...}` để truyền biến hoặc phép toán vào văn bản.
+- Các toán tử so sánh trả về `1` nếu đúng và `0` nếu sai.
 - Một số trường macro lưu giá trị cuối cùng dạng số nguyên, vì vậy kết quả thập phân có thể bị làm tròn tại đó.
 - Mọi lỗi tính toán hoặc phép chia cho 0 (ví dụ: `5/0`) đều sẽ trả về kết quả là `0`.
 

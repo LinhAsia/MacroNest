@@ -96,6 +96,10 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                 let func_name_lower = func_name.to_ascii_lowercase();
                 let replacement = match func_name_lower.as_str() {
                     "substr" => quote_expression_text(&evaluate_substr_expression(&args)),
+                    "concat" => quote_expression_text(&evaluate_concat_expression(&args)),
+                    "lower" => quote_expression_text(&evaluate_lower_expression(&args)),
+                    "upper" => quote_expression_text(&evaluate_upper_expression(&args)),
+                    "trim" => quote_expression_text(&evaluate_trim_expression(&args)),
                     "len" => evaluate_len_expression(&args).to_string(),
                     "contains" => {
                         let left = args
@@ -109,8 +113,10 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                         if left.contains(&right) { 1.0 } else { 0.0 }.to_string()
                     }
                     "random" => {
-                        let resolved_args: Vec<f64> =
-                            args.iter().map(|arg| evaluate_math_expression_f64(arg)).collect();
+                        let resolved_args: Vec<f64> = args
+                            .iter()
+                            .map(|arg| evaluate_math_expression_f64(arg))
+                            .collect();
                         let min_val =
                             clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
                         let max_val = clamp_f64_to_i32(
@@ -119,9 +125,33 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                         (get_pseudo_random(min_val, max_val) as f64).to_string()
                     }
                     _ => {
-                        let resolved_args: Vec<f64> =
-                            args.iter().map(|arg| evaluate_math_expression_f64(arg)).collect();
+                        let resolved_args: Vec<f64> = args
+                            .iter()
+                            .map(|arg| evaluate_math_expression_f64(arg))
+                            .collect();
                         let result_val = match func_name_lower.as_str() {
+                            "clamp" => {
+                                let value = resolved_args.first().copied().unwrap_or(0.0);
+                                let first_bound = resolved_args.get(1).copied().unwrap_or(0.0);
+                                let second_bound =
+                                    resolved_args.get(2).copied().unwrap_or(first_bound);
+                                let min_bound = first_bound.min(second_bound);
+                                let max_bound = first_bound.max(second_bound);
+                                value.clamp(min_bound, max_bound)
+                            }
+                            "between" => {
+                                let value = resolved_args.first().copied().unwrap_or(0.0);
+                                let first_bound = resolved_args.get(1).copied().unwrap_or(0.0);
+                                let second_bound =
+                                    resolved_args.get(2).copied().unwrap_or(first_bound);
+                                let min_bound = first_bound.min(second_bound);
+                                let max_bound = first_bound.max(second_bound);
+                                if value >= min_bound && value <= max_bound {
+                                    1.0
+                                } else {
+                                    0.0
+                                }
+                            }
                             "mod" => {
                                 let dividend = resolved_args.first().copied().unwrap_or(0.0);
                                 let divisor = resolved_args.get(1).copied().unwrap_or(0.0);
@@ -152,119 +182,127 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                                 .max(resolved_args.get(1).copied().unwrap_or(0.0)),
                             "abs" => resolved_args.first().copied().unwrap_or(0.0).abs(),
                             "atan" => resolved_args.first().copied().unwrap_or(0.0).atan(),
-                    "ln" | "log" => {
-                        let value = resolved_args.first().copied().unwrap_or(0.0);
-                        if value > 0.0 { value.ln() } else { 0.0 }
-                    }
-                    "log10" => {
-                        let value = resolved_args.first().copied().unwrap_or(0.0);
-                        if value > 0.0 { value.log10() } else { 0.0 }
-                    }
-                    "exp" => {
-                        let value = resolved_args.first().copied().unwrap_or(0.0);
-                        let exp = value.exp();
-                        if exp.is_finite() { exp } else { 0.0 }
-                    }
-                    "atan2" => {
-                        let y = resolved_args.first().copied().unwrap_or(0.0);
-                        let x = resolved_args.get(1).copied().unwrap_or(0.0);
-                        y.atan2(x)
-                    }
-                    "sin" => resolved_args.first().copied().unwrap_or(0.0).sin(),
-                    "cos" => resolved_args.first().copied().unwrap_or(0.0).cos(),
-                    "tan" => resolved_args.first().copied().unwrap_or(0.0).tan(),
-                    "asin" => resolved_args.first().copied().unwrap_or(0.0).asin(),
-                    "acos" => resolved_args.first().copied().unwrap_or(0.0).acos(),
-                    "sinh" => resolved_args.first().copied().unwrap_or(0.0).sinh(),
-                    "cosh" => resolved_args.first().copied().unwrap_or(0.0).cosh(),
-                    "tanh" => resolved_args.first().copied().unwrap_or(0.0).tanh(),
-                    "sqrt" => {
-                        let value = resolved_args.first().copied().unwrap_or(0.0);
-                        if value < 0.0 { 0.0 } else { value.sqrt() }
-                    }
-                    "pow" => {
-                        let base = resolved_args.first().copied().unwrap_or(0.0);
-                        let exponent = resolved_args.get(1).copied().unwrap_or(1.0);
-                        let value = base.powf(exponent);
-                        if value.is_finite() { value } else { 0.0 }
-                    }
-                    "round" => {
-                        let value = resolved_args.first().copied().unwrap_or(0.0);
-                        let digits = clamp_f64_to_i32(resolved_args.get(1).copied().unwrap_or(0.0))
-                            .clamp(0, 9);
-                        let factor = 10_f64.powi(digits);
-                        if value.is_finite() {
-                            (value * factor).round() / factor
-                        } else {
-                            0.0
-                        }
-                    }
-                    "ceil" => resolved_args.first().copied().unwrap_or(0.0).ceil(),
-                    "floor" => resolved_args.first().copied().unwrap_or(0.0).floor(),
-                    "degrees" => resolved_args.first().copied().unwrap_or(0.0).to_degrees(),
-                    "radians" => resolved_args.first().copied().unwrap_or(0.0).to_radians(),
-                    "factorial" => {
-                        let value = clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
-                        if value < 0 {
-                            0.0
-                        } else {
-                            factorial_u128(value as u64).min(i32::MAX as u128) as f64
-                        }
-                    }
-                    "gcd" => {
-                        let mut result = 0i64;
-                        for arg in resolved_args {
-                            result = gcd_i64(result, clamp_f64_to_i32(arg) as i64);
-                        }
-                        result as f64
-                    }
-                    "lcm" => {
-                        let mut iter = resolved_args.into_iter();
-                        if let Some(first) = iter.next() {
-                            let mut result = clamp_f64_to_i32(first) as i64;
-                            for arg in iter {
-                                result = lcm_i64(result, clamp_f64_to_i32(arg) as i64);
+                            "ln" | "log" => {
+                                let value = resolved_args.first().copied().unwrap_or(0.0);
+                                if value > 0.0 { value.ln() } else { 0.0 }
                             }
-                            result.min(i32::MAX as i64) as f64
-                        } else {
-                            0.0
-                        }
-                    }
-                    "isqrt" => {
-                        let value = resolved_args.first().copied().unwrap_or(0.0);
-                        if value < 0.0 {
-                            0.0
-                        } else {
-                            value.sqrt().floor()
-                        }
-                    }
-                    "comb" => {
-                        let n = clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
-                        let k = clamp_f64_to_i32(resolved_args.get(1).copied().unwrap_or(0.0));
-                        if n < 0 || k < 0 {
-                            0.0
-                        } else {
-                            combination_u128(n as u64, k as u64).min(i32::MAX as u128) as f64
-                        }
-                    }
-                    "perm" => {
-                        let n = clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
-                        let k = clamp_f64_to_i32(resolved_args.get(1).copied().unwrap_or(0.0));
-                        if n < 0 || k < 0 {
-                            0.0
-                        } else {
-                            permutation_u128(n as u64, k as u64).min(i32::MAX as u128) as f64
-                        }
-                    }
-                    "choice" => {
-                        if resolved_args.is_empty() {
-                            0.0
-                        } else {
-                            let idx =
-                                get_pseudo_random(0, (resolved_args.len() - 1) as i32) as usize;
-                            resolved_args.get(idx).copied().unwrap_or(0.0)
-                        }
-                    }
+                            "log10" => {
+                                let value = resolved_args.first().copied().unwrap_or(0.0);
+                                if value > 0.0 { value.log10() } else { 0.0 }
+                            }
+                            "exp" => {
+                                let value = resolved_args.first().copied().unwrap_or(0.0);
+                                let exp = value.exp();
+                                if exp.is_finite() { exp } else { 0.0 }
+                            }
+                            "atan2" => {
+                                let y = resolved_args.first().copied().unwrap_or(0.0);
+                                let x = resolved_args.get(1).copied().unwrap_or(0.0);
+                                y.atan2(x)
+                            }
+                            "sin" => resolved_args.first().copied().unwrap_or(0.0).sin(),
+                            "cos" => resolved_args.first().copied().unwrap_or(0.0).cos(),
+                            "tan" => resolved_args.first().copied().unwrap_or(0.0).tan(),
+                            "asin" => resolved_args.first().copied().unwrap_or(0.0).asin(),
+                            "acos" => resolved_args.first().copied().unwrap_or(0.0).acos(),
+                            "sinh" => resolved_args.first().copied().unwrap_or(0.0).sinh(),
+                            "cosh" => resolved_args.first().copied().unwrap_or(0.0).cosh(),
+                            "tanh" => resolved_args.first().copied().unwrap_or(0.0).tanh(),
+                            "sqrt" => {
+                                let value = resolved_args.first().copied().unwrap_or(0.0);
+                                if value < 0.0 { 0.0 } else { value.sqrt() }
+                            }
+                            "pow" => {
+                                let base = resolved_args.first().copied().unwrap_or(0.0);
+                                let exponent = resolved_args.get(1).copied().unwrap_or(1.0);
+                                let value = base.powf(exponent);
+                                if value.is_finite() { value } else { 0.0 }
+                            }
+                            "round" => {
+                                let value = resolved_args.first().copied().unwrap_or(0.0);
+                                let digits =
+                                    clamp_f64_to_i32(resolved_args.get(1).copied().unwrap_or(0.0))
+                                        .clamp(0, 9);
+                                let factor = 10_f64.powi(digits);
+                                if value.is_finite() {
+                                    (value * factor).round() / factor
+                                } else {
+                                    0.0
+                                }
+                            }
+                            "ceil" => resolved_args.first().copied().unwrap_or(0.0).ceil(),
+                            "floor" => resolved_args.first().copied().unwrap_or(0.0).floor(),
+                            "degrees" => resolved_args.first().copied().unwrap_or(0.0).to_degrees(),
+                            "radians" => resolved_args.first().copied().unwrap_or(0.0).to_radians(),
+                            "factorial" => {
+                                let value =
+                                    clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
+                                if value < 0 {
+                                    0.0
+                                } else {
+                                    factorial_u128(value as u64).min(i32::MAX as u128) as f64
+                                }
+                            }
+                            "gcd" => {
+                                let mut result = 0i64;
+                                for arg in resolved_args {
+                                    result = gcd_i64(result, clamp_f64_to_i32(arg) as i64);
+                                }
+                                result as f64
+                            }
+                            "lcm" => {
+                                let mut iter = resolved_args.into_iter();
+                                if let Some(first) = iter.next() {
+                                    let mut result = clamp_f64_to_i32(first) as i64;
+                                    for arg in iter {
+                                        result = lcm_i64(result, clamp_f64_to_i32(arg) as i64);
+                                    }
+                                    result.min(i32::MAX as i64) as f64
+                                } else {
+                                    0.0
+                                }
+                            }
+                            "isqrt" => {
+                                let value = resolved_args.first().copied().unwrap_or(0.0);
+                                if value < 0.0 {
+                                    0.0
+                                } else {
+                                    value.sqrt().floor()
+                                }
+                            }
+                            "comb" => {
+                                let n =
+                                    clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
+                                let k =
+                                    clamp_f64_to_i32(resolved_args.get(1).copied().unwrap_or(0.0));
+                                if n < 0 || k < 0 {
+                                    0.0
+                                } else {
+                                    combination_u128(n as u64, k as u64).min(i32::MAX as u128)
+                                        as f64
+                                }
+                            }
+                            "perm" => {
+                                let n =
+                                    clamp_f64_to_i32(resolved_args.first().copied().unwrap_or(0.0));
+                                let k =
+                                    clamp_f64_to_i32(resolved_args.get(1).copied().unwrap_or(0.0));
+                                if n < 0 || k < 0 {
+                                    0.0
+                                } else {
+                                    permutation_u128(n as u64, k as u64).min(i32::MAX as u128)
+                                        as f64
+                                }
+                            }
+                            "choice" => {
+                                if resolved_args.is_empty() {
+                                    0.0
+                                } else {
+                                    let idx = get_pseudo_random(0, (resolved_args.len() - 1) as i32)
+                                        as usize;
+                                    resolved_args.get(idx).copied().unwrap_or(0.0)
+                                }
+                            }
                             _ => 0.0,
                         };
                         result_val.to_string()
@@ -283,6 +321,10 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
     let expr = expr_str.trim();
     if expr.is_empty() {
         return 0.0;
+    }
+
+    if let Some((left, operator, right)) = split_top_level_comparison(expr) {
+        return evaluate_comparison_expression(left, operator, right);
     }
 
     if let Ok(val) = expr.parse::<f64>() {
@@ -356,9 +398,11 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
     while i < tokens.len() {
         let token = &tokens[i];
         if token == "+" || token == "-" || token == "*" || token == "/" || token == "^" {
-            while operators.last().copied().is_some_and(|stack_op| {
-                should_apply_operator_before(stack_op, token)
-            }) {
+            while operators
+                .last()
+                .copied()
+                .is_some_and(|stack_op| should_apply_operator_before(stack_op, token))
+            {
                 if let Some(stack_op) = operators.pop() {
                     apply_numeric_operator(&mut values, stack_op);
                 }
@@ -592,12 +636,24 @@ pub(crate) fn smart_set_variable_from_expression(target_var: &str, expr_raw: &st
 fn looks_like_math_expression_text(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     text.chars().any(|c| "+-*/^()".contains(c))
+        || text.contains("==")
+        || text.contains("!=")
+        || text.contains(">=")
+        || text.contains("<=")
+        || text.contains('>')
+        || text.contains('<')
         || lower == "pi"
         || lower == "e"
         || lower.contains("len(")
         || lower.contains("contains(")
+        || lower.contains("concat(")
+        || lower.contains("lower(")
+        || lower.contains("upper(")
+        || lower.contains("trim(")
         || lower.contains("mod(")
         || lower.contains("div(")
+        || lower.contains("clamp(")
+        || lower.contains("between(")
         || lower.contains("random(")
         || lower.contains("choice(")
         || lower.contains("min(")
@@ -703,6 +759,10 @@ fn evaluate_text_function_expression(expr: &str) -> Option<String> {
     let (func_name, args) = parse_expression_function_call(expr)?;
     match func_name.to_ascii_lowercase().as_str() {
         "substr" => Some(evaluate_substr_expression(&args)),
+        "concat" => Some(evaluate_concat_expression(&args)),
+        "lower" => Some(evaluate_lower_expression(&args)),
+        "upper" => Some(evaluate_upper_expression(&args)),
+        "trim" => Some(evaluate_trim_expression(&args)),
         _ => None,
     }
 }
@@ -741,6 +801,31 @@ fn evaluate_substr_expression(args: &[String]) -> String {
     }
 }
 
+fn evaluate_concat_expression(args: &[String]) -> String {
+    args.iter()
+        .map(|arg| resolve_expression_argument_text(arg))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn evaluate_lower_expression(args: &[String]) -> String {
+    args.first()
+        .map(|arg| resolve_expression_argument_text(arg).to_lowercase())
+        .unwrap_or_default()
+}
+
+fn evaluate_upper_expression(args: &[String]) -> String {
+    args.first()
+        .map(|arg| resolve_expression_argument_text(arg).to_uppercase())
+        .unwrap_or_default()
+}
+
+fn evaluate_trim_expression(args: &[String]) -> String {
+    args.first()
+        .map(|arg| resolve_expression_argument_text(arg).trim().to_string())
+        .unwrap_or_default()
+}
+
 fn evaluate_len_expression(args: &[String]) -> usize {
     args.first()
         .map(|arg| resolve_expression_argument_text(arg).chars().count())
@@ -748,10 +833,217 @@ fn evaluate_len_expression(args: &[String]) -> usize {
 }
 
 fn quote_expression_text(text: &str) -> String {
-    format!(
-        "\"{}\"",
-        text.replace('\\', "\\\\").replace('"', "\\\"")
-    )
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ComparisonOperand {
+    Number(f64),
+    Text(String),
+}
+
+fn split_top_level_comparison<'a>(expr: &'a str) -> Option<(&'a str, &'static str, &'a str)> {
+    let chars: Vec<(usize, char)> = expr.char_indices().collect();
+    let mut paren_depth = 0i32;
+    let mut brace_depth = 0i32;
+    let mut quote_char: Option<char> = None;
+    let mut idx = 0usize;
+
+    while idx < chars.len() {
+        let (byte_idx, ch) = chars[idx];
+        if let Some(active_quote) = quote_char {
+            if ch == active_quote {
+                quote_char = None;
+            }
+            idx += 1;
+            continue;
+        }
+
+        match ch {
+            '"' | '\'' => {
+                quote_char = Some(ch);
+                idx += 1;
+                continue;
+            }
+            '(' => paren_depth += 1,
+            ')' => paren_depth = (paren_depth - 1).max(0),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = (brace_depth - 1).max(0),
+            _ => {}
+        }
+
+        if paren_depth == 0 && brace_depth == 0 {
+            if let Some((next_byte_idx, next_ch)) = chars.get(idx + 1).copied() {
+                let operator = match (ch, next_ch) {
+                    ('=', '=') => Some("=="),
+                    ('!', '=') => Some("!="),
+                    ('>', '=') => Some(">="),
+                    ('<', '=') => Some("<="),
+                    _ => None,
+                };
+                if let Some(operator) = operator {
+                    let left = expr[..byte_idx].trim();
+                    let right = expr[next_byte_idx + next_ch.len_utf8()..].trim();
+                    if !left.is_empty() && !right.is_empty() {
+                        return Some((left, operator, right));
+                    }
+                }
+            }
+
+            let operator = match ch {
+                '>' => Some(">"),
+                '<' => Some("<"),
+                _ => None,
+            };
+            if let Some(operator) = operator {
+                let left = expr[..byte_idx].trim();
+                let right = expr[byte_idx + ch.len_utf8()..].trim();
+                if !left.is_empty() && !right.is_empty() {
+                    return Some((left, operator, right));
+                }
+            }
+        }
+
+        idx += 1;
+    }
+
+    None
+}
+
+fn resolve_comparison_operand(expr: &str) -> ComparisonOperand {
+    let trimmed = expr.trim();
+    if let Some(unquoted) = trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            trimmed
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+    {
+        return ComparisonOperand::Text(unquoted.to_string());
+    }
+
+    if let Some(text_value) = evaluate_text_function_expression(trimmed) {
+        return ComparisonOperand::Text(text_value);
+    }
+
+    if let Some(text_value) = get_object_property_text_value(trimmed) {
+        return ComparisonOperand::Text(text_value);
+    }
+
+    {
+        let text_vars = TEXT_VARIABLES.lock();
+        if let Some(text_value) = text_vars.get(trimmed) {
+            return ComparisonOperand::Text(text_value.clone());
+        }
+    }
+
+    if trimmed.parse::<f64>().is_ok() || looks_like_math_expression_text(trimmed) {
+        return ComparisonOperand::Number(evaluate_math_expression_f64(trimmed));
+    }
+
+    if get_object_property_value(trimmed).is_some() {
+        return ComparisonOperand::Number(evaluate_math_expression_f64(trimmed));
+    }
+
+    {
+        let vars = RUNTIME_VARIABLES.lock();
+        if vars.contains_key(trimmed) {
+            return ComparisonOperand::Number(evaluate_math_expression_f64(trimmed));
+        }
+    }
+
+    ComparisonOperand::Text(interpolate_variables(trimmed))
+}
+
+fn numeric_truth(value: bool) -> f64 {
+    if value { 1.0 } else { 0.0 }
+}
+
+fn nearly_equal(left: f64, right: f64) -> bool {
+    (left - right).abs() <= 0.000_000_1
+}
+
+fn format_expression_number(value: f64) -> String {
+    if value.fract() == 0.0 {
+        (value as i64).to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn evaluate_comparison_expression(left: &str, operator: &str, right: &str) -> f64 {
+    let left_operand = resolve_comparison_operand(left);
+    let right_operand = resolve_comparison_operand(right);
+    match (left_operand, right_operand) {
+        (ComparisonOperand::Number(left), ComparisonOperand::Number(right)) => match operator {
+            "==" => numeric_truth(nearly_equal(left, right)),
+            "!=" => numeric_truth(!nearly_equal(left, right)),
+            ">" => numeric_truth(left > right),
+            "<" => numeric_truth(left < right),
+            ">=" => numeric_truth(left > right || nearly_equal(left, right)),
+            "<=" => numeric_truth(left < right || nearly_equal(left, right)),
+            _ => 0.0,
+        },
+        (ComparisonOperand::Text(left), ComparisonOperand::Text(right)) => match operator {
+            "==" => numeric_truth(left == right),
+            "!=" => numeric_truth(left != right),
+            ">" => numeric_truth(left > right),
+            "<" => numeric_truth(left < right),
+            ">=" => numeric_truth(left >= right),
+            "<=" => numeric_truth(left <= right),
+            _ => 0.0,
+        },
+        (ComparisonOperand::Number(left), ComparisonOperand::Text(right)) => {
+            if let Ok(parsed) = right.parse::<f64>() {
+                match operator {
+                    "==" => numeric_truth(nearly_equal(left, parsed)),
+                    "!=" => numeric_truth(!nearly_equal(left, parsed)),
+                    ">" => numeric_truth(left > parsed),
+                    "<" => numeric_truth(left < parsed),
+                    ">=" => numeric_truth(left > parsed || nearly_equal(left, parsed)),
+                    "<=" => numeric_truth(left < parsed || nearly_equal(left, parsed)),
+                    _ => 0.0,
+                }
+            } else {
+                let left_text = format_expression_number(left);
+                match operator {
+                    "==" => numeric_truth(left_text == right),
+                    "!=" => numeric_truth(left_text != right),
+                    ">" => numeric_truth(left_text > right),
+                    "<" => numeric_truth(left_text < right),
+                    ">=" => numeric_truth(left_text >= right),
+                    "<=" => numeric_truth(left_text <= right),
+                    _ => 0.0,
+                }
+            }
+        }
+        (ComparisonOperand::Text(left), ComparisonOperand::Number(right)) => {
+            if let Ok(parsed) = left.parse::<f64>() {
+                match operator {
+                    "==" => numeric_truth(nearly_equal(parsed, right)),
+                    "!=" => numeric_truth(!nearly_equal(parsed, right)),
+                    ">" => numeric_truth(parsed > right),
+                    "<" => numeric_truth(parsed < right),
+                    ">=" => numeric_truth(parsed > right || nearly_equal(parsed, right)),
+                    "<=" => numeric_truth(parsed < right || nearly_equal(parsed, right)),
+                    _ => 0.0,
+                }
+            } else {
+                let right_text = format_expression_number(right);
+                match operator {
+                    "==" => numeric_truth(left == right_text),
+                    "!=" => numeric_truth(left != right_text),
+                    ">" => numeric_truth(left > right_text),
+                    "<" => numeric_truth(left < right_text),
+                    ">=" => numeric_truth(left >= right_text),
+                    "<=" => numeric_truth(left <= right_text),
+                    _ => 0.0,
+                }
+            }
+        }
+    }
 }
 
 fn operator_precedence(op: &str) -> u8 {
@@ -1171,8 +1463,8 @@ fn combination_u128(n: u64, k: u64) -> u128 {
 #[cfg(test)]
 mod tests {
     use super::{
-        RUNTIME_VARIABLES, TEXT_VARIABLES, evaluate_math_expression, resolve_text_variable_value,
-        smart_set_variable_from_expression,
+        RUNTIME_VARIABLES, TEXT_VARIABLES, evaluate_math_expression, evaluate_math_expression_f64,
+        resolve_text_variable_value, smart_set_variable_from_expression,
     };
 
     #[test]
@@ -1192,7 +1484,10 @@ mod tests {
             Some("Dungeon")
         );
         assert_eq!(evaluate_math_expression("len(player_name)"), 11);
-        assert_eq!(evaluate_math_expression("contains(substr(player_name, 7, 4), Boss)"), 1);
+        assert_eq!(
+            evaluate_math_expression("contains(substr(player_name, 7, 4), Boss)"),
+            1
+        );
 
         smart_set_variable_from_expression("name_head", "substr(player_name, 0, 4)");
         smart_set_variable_from_expression("name_len", "len(player_name)");
@@ -1232,5 +1527,44 @@ mod tests {
         assert!((evaluate_math_expression_f64("log(e)") - 1.0).abs() < 0.000001);
         assert!((evaluate_math_expression_f64("ln(e)") - 1.0).abs() < 0.000001);
         assert!((evaluate_math_expression_f64("log10(1000)") - 3.0).abs() < 0.000001);
+    }
+
+    #[test]
+    fn comparisons_return_numeric_truth_values() {
+        assert_eq!(evaluate_math_expression("5 > 2"), 1);
+        assert_eq!(evaluate_math_expression("5 < 2"), 0);
+        assert_eq!(evaluate_math_expression("5 >= 5"), 1);
+        assert_eq!(evaluate_math_expression("5 != 5"), 0);
+        assert_eq!(evaluate_math_expression("2 + 3 == 5"), 1);
+    }
+
+    #[test]
+    fn clamp_between_and_text_helpers_work() {
+        {
+            let mut runtime_vars = RUNTIME_VARIABLES.lock();
+            runtime_vars.clear();
+        }
+        {
+            let mut text_vars = TEXT_VARIABLES.lock();
+            text_vars.clear();
+            text_vars.insert("player_name".to_string(), "  DungeonBoss  ".to_string());
+        }
+
+        assert_eq!(evaluate_math_expression("clamp(120, 0, 100)"), 100);
+        assert_eq!(evaluate_math_expression("between(7, 1, 10)"), 1);
+        assert_eq!(
+            resolve_text_variable_value("concat(trim(player_name), \"-\", upper(\"ok\"))")
+                .as_deref(),
+            Some("DungeonBoss-OK")
+        );
+        assert_eq!(
+            resolve_text_variable_value("lower(trim(player_name))").as_deref(),
+            Some("dungeonboss")
+        );
+
+        {
+            let mut text_vars = TEXT_VARIABLES.lock();
+            text_vars.clear();
+        }
     }
 }

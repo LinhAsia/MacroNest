@@ -63,6 +63,10 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | `a * b` | Multiply | `3 * 4` | `12` |
 | `a / b` | Divide | `5 / 2` | `2.5` |
 | `a ^ b` | Power | `5^2` | `25` |
+| `a == b` | Equal comparison | `5 == 5` | `1` |
+| `a != b` | Not-equal comparison | `5 != 5` | `0` |
+| `a > b` / `a >= b` | Greater-than comparison | `8 >= 3` | `1` |
+| `a < b` / `a <= b` | Less-than comparison | `2 < 1` | `0` |
 
 ### Constants
 
@@ -77,6 +81,8 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | :--- | :--- | :--- | :--- |
 | `random(min, max)` | Random integer in range | `random(10, 20)` | `10..20` |
 | `choice(a, b, ...)` | Pick one value at random (supports numbers, text, or a mix) | 1. `choice(10, 20, 30)` (numbers)<br>2. `choice(apple, banana, cherry)` (text)<br>3. `choice(Level: 5, 50, critical)` (mixed) | 1. `10` or `20` or `30`<br>2. `apple` or `banana` or `cherry`<br>3. `Level: 5` or `50` or `critical` |
+| `clamp(x, min, max)` | Keep `x` inside a range | `clamp(120, 0, 100)` | `100` |
+| `between(x, a, b)` | Check whether `x` is inside a range (inclusive) | `between(7, 1, 10)` | `1` |
 | `min(a, b)` | Smaller value | `min(20, 50)` | `20` |
 | `max(a, b)` | Larger value | `max(20, 50)` | `50` |
 | `abs(a)` | Absolute value | `abs(-50)` | `50` |
@@ -125,8 +131,12 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | Function | Meaning | Example | Result |
 | :--- | :--- | :--- | :--- |
 | `contains(a, b)` | Check whether text `a` contains text `b` (supports numbers, text, or a mix) | 1. `contains(hello, world)` (text)<br>2. `contains(Gold: 5000, 5000)` (mixed)<br>3. `contains(12345, 99)` (numbers) | 1. `0` (false)<br>2. `1` (true)<br>3. `0` (false) |
+| `concat(a, b, ...)` | Join multiple values into one text result | `concat(Player, "-", 01)` | `Player-01` |
 | `substr(text, start, len)` | Get part of a string (supports numbers, text, or a mix) | 1. `substr(banana, 2, 3)` (text)<br>2. `substr(Rank #1: Player, 9, 6)` (mixed)<br>3. `substr(123456, 1, 4)` (numbers) | 1. `nan`<br>2. `Player`<br>3. `2345` |
 | `len(text)` | Count characters (supports numbers, text, or a mix) | 1. `len(apple)` (text)<br>2. `len(Score: 9999)` (mixed)<br>3. `len(453454)` (numbers) | 1. `5`<br>2. `11`<br>3. `6` |
+| `lower(text)` | Convert text to lowercase | `lower(HeLLo)` | `hello` |
+| `upper(text)` | Convert text to uppercase | `upper(HeLLo)` | `HELLO` |
+| `trim(text)` | Remove leading and trailing spaces | `trim("  hello  ")` | `hello` |
 | `myVar.toNumber` | Extract digits from a text variable and convert them to a number (ignores non-digits) | If variable `A` is `"Gold: 500"` (text):<br>`A.toNumber` | `500` (numeric) |
 | `myVar.toString` | Convert a variable to text by filtering out all digits (keeps only non-digits) | If variable `A` is `"Wave #10"` (text):<br>`A.toString` | `"Wave #"` (text) |
 
@@ -166,6 +176,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 
 - Expression fields evaluate variables and functions directly.
 - Text fields keep plain text as-is; use `{...}` to inject variables or math into text.
+- Comparison operators return `1` for true and `0` for false.
 - Some macro fields store final values as integers, so decimal results may be rounded there.
 - Any math evaluation errors or division by zero (e.g. `5/0`) will return `0`.
 

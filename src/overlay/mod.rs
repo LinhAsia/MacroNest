@@ -89,12 +89,11 @@ mod windows_overlay {
                     CreateRectRgn, DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
                     DT_EDITCONTROL, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
                     DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, EndPaint, FF_DONTCARE,
-                    FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW,
-                    GetTextExtentPoint32W, GetTextMetricsW, HDC, HGDIOBJ,
-                    MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow, OUT_DEFAULT_PRECIS,
-                    PAINTSTRUCT, ReleaseDC, SRCCOPY, SelectObject, SetBkColor, SetBkMode,
-                    SetTextAlign, SetTextColor, SetWindowRgn, StretchDIBits, TA_BASELINE, TA_CENTER,
-                    TEXTMETRICW, TRANSPARENT, TextOutW,
+                    FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW, GetTextExtentPoint32W,
+                    GetTextMetricsW, HDC, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+                    MonitorFromWindow, OUT_DEFAULT_PRECIS, PAINTSTRUCT, ReleaseDC, SRCCOPY,
+                    SelectObject, SetBkColor, SetBkMode, SetTextAlign, SetTextColor, SetWindowRgn,
+                    StretchDIBits, TA_BASELINE, TA_CENTER, TEXTMETRICW, TRANSPARENT, TextOutW,
                 },
             },
             Media::Audio::{
@@ -139,25 +138,23 @@ mod windows_overlay {
                     GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTCLIENT,
                     HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IMAGE_ICON, IsZoomed,
                     KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LoadCursorW, LoadImageW,
-                    MA_NOACTIVATE,
-                    MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT, PostMessageW, PostQuitMessage,
-                    RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN,
+                    MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT, PostMessageW,
+                    PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN,
                     SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SPI_GETMOUSESPEED,
                     SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOWNA, SWP_FRAMECHANGED,
                     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
                     SetCursor, SetCursorPos, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
-                    SetWindowLongW, SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
-                    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
-                    UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
-                    WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
-                    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
-                    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-                    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE,
-                    WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SYSKEYDOWN,
-                    WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION,
-                    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-                    WS_EX_TRANSPARENT,
-                    WS_OVERLAPPEDWINDOW, WS_POPUP, WindowFromPoint,
+                    SetWindowLongW, SetWindowPos, SetWindowsHookExW, ShowWindow,
+                    SystemParametersInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu,
+                    TranslateMessage, ULW_ALPHA, UnhookWindowsHookEx, UpdateLayeredWindow,
+                    WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX,
+                    WINEVENT_OUTOFCONTEXT, WM_APP, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY,
+                    WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
+                    WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE,
+                    WM_NCCREATE, WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR,
+                    WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW,
+                    WS_CAPTION, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                    WS_EX_TRANSPARENT, WS_OVERLAPPEDWINDOW, WS_POPUP, WindowFromPoint,
                 },
             },
         },
@@ -4655,7 +4652,10 @@ mod windows_overlay {
                 if windows_key_locked && matches!(info.vkCode, 0x5B | 0x5C) {
                     update_held_key(info.vkCode, is_key_down, is_key_up);
                     update_modifier_state(info.vkCode, is_key_down);
-                    if is_key_up && !is_ui_in_foreground() && let Some(key_name) = key_name.as_ref() {
+                    if is_key_up
+                        && !is_ui_in_foreground()
+                        && let Some(key_name) = key_name.as_ref()
+                    {
                         update_quick_key_display_key(key_name, info.vkCode, false, true);
                     }
                     return LRESULT(1);
@@ -7091,9 +7091,9 @@ mod windows_overlay {
         {
             let key = quick_key_display_primary_key_name(combo_keys).unwrap_or_default();
             let binding = HotkeyBinding {
-                ctrl: combo_keys
-                    .iter()
-                    .any(|key| key.eq_ignore_ascii_case("Ctrl") || key.eq_ignore_ascii_case("Control")),
+                ctrl: combo_keys.iter().any(|key| {
+                    key.eq_ignore_ascii_case("Ctrl") || key.eq_ignore_ascii_case("Control")
+                }),
                 alt: combo_keys.iter().any(|key| key.eq_ignore_ascii_case("Alt")),
                 shift: combo_keys
                     .iter()
@@ -7245,7 +7245,10 @@ mod windows_overlay {
                 .all(|key| hotkey::is_modifier_key_name(key))
     }
 
-    fn quick_key_display_combo_contains_all(combo_keys: &[String], required_keys: &[String]) -> bool {
+    fn quick_key_display_combo_contains_all(
+        combo_keys: &[String],
+        required_keys: &[String],
+    ) -> bool {
         required_keys.iter().all(|required| {
             combo_keys
                 .iter()
@@ -7261,7 +7264,9 @@ mod windows_overlay {
             if !hotkey::is_modifier_key_name(key_name) {
                 continue;
             }
-            let Some(identity) = quick_key_display_identity_for_combo_keys(key_name, &[key_name.clone()]) else {
+            let Some(identity) =
+                quick_key_display_identity_for_combo_keys(key_name, &[key_name.clone()])
+            else {
                 continue;
             };
             let Some(held_state) =
@@ -7317,7 +7322,10 @@ mod windows_overlay {
         if win {
             combo_keys.push("Win".to_owned());
         }
-        if !combo_keys.iter().any(|key| key.eq_ignore_ascii_case(key_name)) {
+        if !combo_keys
+            .iter()
+            .any(|key| key.eq_ignore_ascii_case(key_name))
+        {
             combo_keys.push(key_name.to_owned());
         }
         combo_keys = quick_key_display_normalized_combo_keys(combo_keys);
@@ -7407,7 +7415,10 @@ mod windows_overlay {
 
     fn hook_state_key_is_down_or_async(hook_state: &HookState, key_name: &str) -> bool {
         let held_by_hook = hook_state_key_is_down(hook_state, key_name);
-        if held_by_hook || hotkey::is_modifier_key_name(key_name) || hotkey::is_mouse_key_name(key_name) {
+        if held_by_hook
+            || hotkey::is_modifier_key_name(key_name)
+            || hotkey::is_mouse_key_name(key_name)
+        {
             return held_by_hook;
         }
         if let Some(vk) = hotkey::key_name_to_vk(key_name) {
@@ -7747,7 +7758,9 @@ mod windows_overlay {
         }
 
         if !consecutive {
-            runtime.quick_key_display_entries.retain(|e| e.identity != identity);
+            runtime
+                .quick_key_display_entries
+                .retain(|e| e.identity != identity);
             if runtime.quick_key_display_mode == QuickKeyDisplayMode::Normal {
                 for entry in &mut runtime.quick_key_display_entries {
                     entry.pushed_at = Some(now);
@@ -7789,13 +7802,13 @@ mod windows_overlay {
             &runtime.quick_key_display_entries,
             identity,
             source_key,
-        )
-        else {
+        ) else {
             return;
         };
 
         let source_key = runtime.quick_key_display_entries[idx].source_key.clone();
-        if let Some(held_state) = quick_key_display_restore_live_held_state(runtime, identity, &source_key)
+        if let Some(held_state) =
+            quick_key_display_restore_live_held_state(runtime, identity, &source_key)
         {
             let entry = &mut runtime.quick_key_display_entries[idx];
             quick_key_display_apply_held_state(entry, &held_state, now);
@@ -8837,11 +8850,7 @@ mod windows_overlay {
         let binding = binding_from_trigger_event(key_name);
         let is_down = matches!(
             message,
-            WM_LBUTTONDOWN
-                | WM_RBUTTONDOWN
-                | WM_MBUTTONDOWN
-                | WM_XBUTTONDOWN
-                | WM_MOUSEWHEEL
+            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN | WM_MOUSEWHEEL
         );
         let matches_trigger = screen_draw_mouse_event_matches_trigger(message, mouse_data);
 
@@ -9000,14 +9009,7 @@ mod windows_overlay {
         if screen_draw_capture_should_swallow_binding(binding) {
             return true;
         }
-        let (
-            matches_trigger,
-            active,
-            capturing_region,
-            trigger_latched,
-            trigger,
-            editing_text,
-        ) = {
+        let (matches_trigger, active, capturing_region, trigger_latched, trigger, editing_text) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
                 state.enabled
@@ -9112,13 +9114,7 @@ mod windows_overlay {
     }
 
     fn process_screen_draw_hotkey_release(binding: &HotkeyBinding) -> bool {
-        let (
-            matches_trigger_key,
-            active,
-            capturing_region,
-            had_trigger_press,
-            editing_text,
-        ) = {
+        let (matches_trigger_key, active, capturing_region, had_trigger_press, editing_text) = {
             let state = SCREEN_DRAW_STATE.lock();
             (
                 state.enabled
@@ -9746,12 +9742,12 @@ mod windows_overlay {
                                 );
                             }
                         }
-                QuickKeyDisplayUpdate::Release {
-                    identity,
-                    source_key,
-                } => {
-                    quick_key_display_release_entry(runtime, &identity, &source_key);
-                }
+                        QuickKeyDisplayUpdate::Release {
+                            identity,
+                            source_key,
+                        } => {
+                            quick_key_display_release_entry(runtime, &identity, &source_key);
+                        }
                     }
                     let _ = refresh_quick_key_display(runtime);
                 }
@@ -10449,9 +10445,7 @@ mod windows_overlay {
 
     fn request_screen_draw_overlay_sync() {
         let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
-        if hwnd_raw == 0
-            || SCREEN_DRAW_OVERLAY_SYNC_PENDING.swap(true, Ordering::AcqRel)
-        {
+        if hwnd_raw == 0 || SCREEN_DRAW_OVERLAY_SYNC_PENDING.swap(true, Ordering::AcqRel) {
             return;
         }
         unsafe {
@@ -10812,9 +10806,9 @@ mod windows_overlay {
                 None => rect,
             });
         }
-        let Some(export_rect) = export_rect.and_then(|rect| {
-            rect.normalized(state.canvas_width, state.canvas_height)
-        }) else {
+        let Some(export_rect) =
+            export_rect.and_then(|rect| rect.normalized(state.canvas_width, state.canvas_height))
+        else {
             return Ok(None);
         };
         let center_x = state.canvas_width / 2;
@@ -10839,8 +10833,7 @@ mod windows_overlay {
 
         let mut cropped_rgba = vec![0u8; width.saturating_mul(height).saturating_mul(4)];
         for row in 0..height {
-            let src_start =
-                ((export_rect.top + row) * state.canvas_width + export_rect.left) * 4;
+            let src_start = ((export_rect.top + row) * state.canvas_width + export_rect.left) * 4;
             let src_end = src_start + width * 4;
             let dst_start = row * width * 4;
             let dst_end = dst_start + width * 4;
@@ -11182,8 +11175,8 @@ mod windows_overlay {
     pub fn screen_draw_set_brush_size(size: f32) {
         let mut state = SCREEN_DRAW_STATE.lock();
         state.brush_size = size.clamp(2.0, 80.0);
-        let should_sync = state.active_control == ScreenDrawControl::BrushSize
-            || state.brush_size_preview_active;
+        let should_sync =
+            state.active_control == ScreenDrawControl::BrushSize || state.brush_size_preview_active;
         if should_sync {
             mark_screen_draw_repaint_pending(&mut state);
         }
@@ -11973,8 +11966,10 @@ mod windows_overlay {
                     _ => ScreenDrawControl::None,
                 };
                 state.text_interaction_start_point = Some(point);
-                state.text_interaction_origin =
-                    state.text_session.as_ref().map(|session| session.stroke.clone());
+                state.text_interaction_origin = state
+                    .text_session
+                    .as_ref()
+                    .map(|session| session.stroke.clone());
             }
             ScreenDrawHit::ToolbarBody => {
                 state.active_control = ScreenDrawControl::MoveToolbar;
@@ -12990,9 +12985,8 @@ mod windows_overlay {
             let state = SCREEN_DRAW_STATE.lock();
             state.current_stroke.is_some() || state.active_control != ScreenDrawControl::None
         };
-        let begin_toolbar_interaction = is_over_toolbar
-            && matches!(message, WM_LBUTTONDOWN | WM_RBUTTONDOWN)
-            && {
+        let begin_toolbar_interaction =
+            is_over_toolbar && matches!(message, WM_LBUTTONDOWN | WM_RBUTTONDOWN) && {
                 let state = SCREEN_DRAW_STATE.lock();
                 state.current_stroke.is_some() || state.active_control != ScreenDrawControl::None
             };
@@ -13250,7 +13244,10 @@ mod windows_overlay {
         }
     }
 
-    fn screen_draw_text_content<'a>(stroke: &'a ScreenDrawStroke, fallback_text: &'a str) -> &'a str {
+    fn screen_draw_text_content<'a>(
+        stroke: &'a ScreenDrawStroke,
+        fallback_text: &'a str,
+    ) -> &'a str {
         if stroke.text.trim().is_empty() {
             fallback_text
         } else {
@@ -13390,8 +13387,16 @@ mod windows_overlay {
         let rotation_deg = stroke.text_rotation_deg;
         let controls_below =
             screen_draw_text_controls_below_box(top_f, height_f, toolbar_bounds, canvas_height);
-        let control_local_y = if controls_below { height_f + 28.0 } else { -28.0 };
-        let rotate_local_y = if controls_below { height_f + 32.0 } else { -32.0 };
+        let control_local_y = if controls_below {
+            height_f + 28.0
+        } else {
+            -28.0
+        };
+        let rotate_local_y = if controls_below {
+            height_f + 32.0
+        } else {
+            -32.0
+        };
         let control_edge_mid = if controls_below {
             screen_draw_text_local_to_world(
                 left_f,
@@ -13414,10 +13419,42 @@ mod windows_overlay {
             )
         };
         let corners = [
-            screen_draw_text_local_to_world(left_f, top_f, width_f, height_f, rotation_deg, 0.0, 0.0),
-            screen_draw_text_local_to_world(left_f, top_f, width_f, height_f, rotation_deg, width_f, 0.0),
-            screen_draw_text_local_to_world(left_f, top_f, width_f, height_f, rotation_deg, width_f, height_f),
-            screen_draw_text_local_to_world(left_f, top_f, width_f, height_f, rotation_deg, 0.0, height_f),
+            screen_draw_text_local_to_world(
+                left_f,
+                top_f,
+                width_f,
+                height_f,
+                rotation_deg,
+                0.0,
+                0.0,
+            ),
+            screen_draw_text_local_to_world(
+                left_f,
+                top_f,
+                width_f,
+                height_f,
+                rotation_deg,
+                width_f,
+                0.0,
+            ),
+            screen_draw_text_local_to_world(
+                left_f,
+                top_f,
+                width_f,
+                height_f,
+                rotation_deg,
+                width_f,
+                height_f,
+            ),
+            screen_draw_text_local_to_world(
+                left_f,
+                top_f,
+                width_f,
+                height_f,
+                rotation_deg,
+                0.0,
+                height_f,
+            ),
         ];
         Some(ScreenDrawTextSessionGeometry {
             left,
@@ -13744,11 +13781,7 @@ mod windows_overlay {
         state.text_session.take().is_some()
     }
 
-    fn screen_draw_point_hits_circle(
-        point: POINT,
-        center: (f32, f32),
-        radius: f32,
-    ) -> bool {
+    fn screen_draw_point_hits_circle(point: POINT, center: (f32, f32), radius: f32) -> bool {
         let dx = point.x as f32 - center.0;
         let dy = point.y as f32 - center.1;
         dx * dx + dy * dy <= radius * radius
@@ -13921,15 +13954,33 @@ mod windows_overlay {
         // Render premium custom color-coded button backgrounds
         // Confirm: Green
         fill_screen_draw_editor_circle(pixmap, geometry.confirm_button, 10.0, [34, 197, 94, 240]);
-        stroke_screen_draw_editor_circle(pixmap, geometry.confirm_button, 10.0, 1.4, [240, 253, 244, 245]);
+        stroke_screen_draw_editor_circle(
+            pixmap,
+            geometry.confirm_button,
+            10.0,
+            1.4,
+            [240, 253, 244, 245],
+        );
 
         // Delete: Red
         fill_screen_draw_editor_circle(pixmap, geometry.delete_button, 10.0, [239, 68, 68, 240]);
-        stroke_screen_draw_editor_circle(pixmap, geometry.delete_button, 10.0, 1.4, [254, 242, 242, 245]);
+        stroke_screen_draw_editor_circle(
+            pixmap,
+            geometry.delete_button,
+            10.0,
+            1.4,
+            [254, 242, 242, 245],
+        );
 
         // Rotate: Blue
         fill_screen_draw_editor_circle(pixmap, geometry.rotate_handle, 10.0, [59, 130, 246, 240]);
-        stroke_screen_draw_editor_circle(pixmap, geometry.rotate_handle, 10.0, 1.4, [239, 246, 255, 245]);
+        stroke_screen_draw_editor_circle(
+            pixmap,
+            geometry.rotate_handle,
+            10.0,
+            1.4,
+            [239, 246, 255, 245],
+        );
 
         // Resize: Standard/Dark Grey
         fill_screen_draw_editor_circle(pixmap, geometry.resize_handle, 10.0, handle_fill);
@@ -13976,7 +14027,13 @@ mod windows_overlay {
         );
 
         // Rotate arrow icon (White)
-        stroke_screen_draw_editor_circle(pixmap, geometry.rotate_handle, 4.0, 1.6, [255, 255, 255, 255]);
+        stroke_screen_draw_editor_circle(
+            pixmap,
+            geometry.rotate_handle,
+            4.0,
+            1.6,
+            [255, 255, 255, 255],
+        );
         draw_screen_draw_editor_line(
             pixmap,
             geometry.rotate_handle.0 + 2.5,
@@ -14221,13 +14278,20 @@ mod windows_overlay {
                     // Draw black border by blending at surrounding offsets
                     let border_radius: i32 = ((font_size / 12.0).round() as i32).max(1).min(4);
                     let border_offsets: &[(i32, i32)] = &[
-                        (-1, -1), (0, -1), (1, -1),
-                        (-1,  0),          (1,  0),
-                        (-1,  1), (0,  1), (1,  1),
+                        (-1, -1),
+                        (0, -1),
+                        (1, -1),
+                        (-1, 0),
+                        (1, 0),
+                        (-1, 1),
+                        (0, 1),
+                        (1, 1),
                     ];
                     for (odx, ody) in border_offsets {
-                        let bx = clamped_left as i64 + px as i64 + (*odx as i64 * border_radius as i64);
-                        let by = clamped_top as i64 + py as i64 + (*ody as i64 * border_radius as i64);
+                        let bx =
+                            clamped_left as i64 + px as i64 + (*odx as i64 * border_radius as i64);
+                        let by =
+                            clamped_top as i64 + py as i64 + (*ody as i64 * border_radius as i64);
                         if bx >= 0 && by >= 0 && bx < width as i64 && by < height as i64 {
                             let border_offset = (by as usize * width as usize + bx as usize) * 4;
                             blend_premultiplied_rgba(
@@ -14276,7 +14340,12 @@ mod windows_overlay {
         state.committed_rgba.clear();
         if let Some(background) = state.canvas_background.as_ref() {
             state.committed_rgba.resize(byte_len, 0);
-            blend_screen_draw_background_layer(&mut state.committed_rgba, width, height, background);
+            blend_screen_draw_background_layer(
+                &mut state.committed_rgba,
+                width,
+                height,
+                background,
+            );
             state.committed_dirty = false;
         } else if state.freeze_screen && state.freeze_frame.is_some() {
             if let Some(ref bg) = state.freeze_frame {
@@ -15893,10 +15962,24 @@ mod windows_overlay {
         );
         // 3. Color Picker (Pipette/Dropper - 32x32 button bounds)
         // Draw the rubber bulb
-        draw_skia_circle_fill(&mut pixmap, pick_button_x + 21.5, 17.5, 3.8, [240, 246, 255, 246]);
+        draw_skia_circle_fill(
+            &mut pixmap,
+            pick_button_x + 21.5,
+            17.5,
+            3.8,
+            [240, 246, 255, 246],
+        );
 
         // Draw the collar
-        draw_skia_line(&mut pixmap, pick_button_x + 16.0, 19.0, pick_button_x + 20.0, 23.0, [240, 246, 255, 246], 2.0);
+        draw_skia_line(
+            &mut pixmap,
+            pick_button_x + 16.0,
+            19.0,
+            pick_button_x + 20.0,
+            23.0,
+            [240, 246, 255, 246],
+            2.0,
+        );
 
         // Draw liquid inside the glass tube (using active color)
         let mut liquid_path = tiny_skia::PathBuilder::new();
@@ -15910,14 +15993,59 @@ mod windows_overlay {
         }
 
         // Draw glass tube outline
-        draw_skia_line(&mut pixmap, pick_button_x + 16.0, 21.0, pick_button_x + 10.0, 27.0, [240, 246, 255, 246], 1.2);
-        draw_skia_line(&mut pixmap, pick_button_x + 18.0, 23.0, pick_button_x + 12.0, 29.0, [240, 246, 255, 246], 1.2);
-        draw_skia_line(&mut pixmap, pick_button_x + 10.0, 27.0, pick_button_x + 7.5, 31.5, [240, 246, 255, 246], 1.2);
-        draw_skia_line(&mut pixmap, pick_button_x + 12.0, 29.0, pick_button_x + 7.5, 31.5, [240, 246, 255, 246], 1.2);
+        draw_skia_line(
+            &mut pixmap,
+            pick_button_x + 16.0,
+            21.0,
+            pick_button_x + 10.0,
+            27.0,
+            [240, 246, 255, 246],
+            1.2,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            pick_button_x + 18.0,
+            23.0,
+            pick_button_x + 12.0,
+            29.0,
+            [240, 246, 255, 246],
+            1.2,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            pick_button_x + 10.0,
+            27.0,
+            pick_button_x + 7.5,
+            31.5,
+            [240, 246, 255, 246],
+            1.2,
+        );
+        draw_skia_line(
+            &mut pixmap,
+            pick_button_x + 12.0,
+            29.0,
+            pick_button_x + 7.5,
+            31.5,
+            [240, 246, 255, 246],
+            1.2,
+        );
 
         // Draw color droplet falling from the tip (using active color)
-        draw_skia_circle_fill(&mut pixmap, pick_button_x + 5.5, 33.5, 2.2, [color.r, color.g, color.b, 255]);
-        draw_skia_circle_outline(&mut pixmap, pick_button_x + 5.5, 33.5, 2.2, [240, 246, 255, 180], 0.8);
+        draw_skia_circle_fill(
+            &mut pixmap,
+            pick_button_x + 5.5,
+            33.5,
+            2.2,
+            [color.r, color.g, color.b, 255],
+        );
+        draw_skia_circle_outline(
+            &mut pixmap,
+            pick_button_x + 5.5,
+            33.5,
+            2.2,
+            [240, 246, 255, 180],
+            0.8,
+        );
 
         // 4. Capture (Camera - 32x32 button bounds)
         let capture_x = SCREEN_DRAW_TOOLBAR_CAPTURE_X as f32;
@@ -19921,8 +20049,7 @@ mod windows_overlay {
                 .clamp(0.0, 1.0);
                 if push_t < 1.0 {
                     let eased = quick_key_display_ease_out_cubic(push_t);
-                    visual.translate_y +=
-                        entry.push_offset_rows * row_step as f32 * (1.0 - eased);
+                    visual.translate_y += entry.push_offset_rows * row_step as f32 * (1.0 - eased);
                 }
             }
             let display_text = quick_key_display_display_text(entry);
@@ -23751,7 +23878,12 @@ mod windows_overlay {
                 right: content_right,
                 bottom: content_bottom,
             };
-            let _ = DrawTextW(mem_dc, &mut wide, &mut measure_rect, draw_flags | DT_CALCRECT);
+            let _ = DrawTextW(
+                mem_dc,
+                &mut wide,
+                &mut measure_rect,
+                draw_flags | DT_CALCRECT,
+            );
             let available_height = (content_bottom - content_top).max(1);
             let measured_height = (measure_rect.bottom - measure_rect.top).max(1);
             let vertical_pad = ((available_height - measured_height).max(0)) / 2;
@@ -24504,7 +24636,9 @@ mod windows_overlay {
         }
     }
 
-    fn read_route_action_result(result_file: &std::path::Path) -> Result<(Option<Vec<String>>, Option<String>)> {
+    fn read_route_action_result(
+        result_file: &std::path::Path,
+    ) -> Result<(Option<Vec<String>>, Option<String>)> {
         let content = std::fs::read_to_string(result_file)
             .with_context(|| format!("Failed to read {}", result_file.display()))?;
         let mut lines = content.lines();
@@ -24749,7 +24883,9 @@ mod windows_overlay {
                 match build_restore_internet_route_command(&saved_routes, &result_file) {
                     Ok(command) => command,
                     Err(error) => {
-                        send_network_action_status(format!("Internet route action failed: {error}"));
+                        send_network_action_status(format!(
+                            "Internet route action failed: {error}"
+                        ));
                         return;
                     }
                 }
@@ -24760,7 +24896,9 @@ mod windows_overlay {
                         let mut hook_state = HOOK_STATE.lock();
                         if cut {
                             for route in &routes {
-                                hook_state.cut_internet_routes_this_session.insert(route.clone());
+                                hook_state
+                                    .cut_internet_routes_this_session
+                                    .insert(route.clone());
                             }
                         } else {
                             for route in &routes {
@@ -24826,7 +24964,11 @@ mod windows_overlay {
     }
 
     fn spawn_wifi_radio_command(enable: bool) {
-        let action_label = if enable { "Wi-Fi radio on" } else { "Wi-Fi radio off" };
+        let action_label = if enable {
+            "Wi-Fi radio on"
+        } else {
+            "Wi-Fi radio off"
+        };
         enqueue_network_action(move || {
             let result_file = network_action_result_file_path();
             let command_text = build_wifi_radio_command(enable, &result_file);
@@ -26731,7 +26873,7 @@ mod windows_overlay {
                 MacroAction::PlaySoundPreset => {
                     let _ = play_sound_preset(&step.key);
                 }
-                 MacroAction::StartVisionSearch => {
+                MacroAction::StartVisionSearch => {
                     let _ = start_vision_following(
                         &step.key,
                         Some(&step.if_variable_name),
@@ -28037,7 +28179,8 @@ mod windows_overlay {
                 };
                 let right_str = interpolate_variables(right_expr.trim());
 
-                if is_math_expression_or_numeric(&left_str) && is_math_expression_or_numeric(&right_str)
+                if is_math_expression_or_numeric(&left_str)
+                    && is_math_expression_or_numeric(&right_str)
                 {
                     let evaluate_operand = |expr: &str, fallback: f64| -> f64 {
                         if expr.trim().is_empty() {
@@ -28291,6 +28434,7 @@ mod windows_overlay {
             let join_operator = cond.join_operator.trim().to_ascii_uppercase();
             result = match join_operator.as_str() {
                 "OR" => result || cond_ok,
+                "NOT" => result && !cond_ok,
                 _ => result && cond_ok,
             };
         }
@@ -28540,7 +28684,10 @@ mod windows_overlay {
             assert_eq!(evaluate_math_expression("max(20, 50)"), 50);
             assert_eq!(evaluate_math_expression("min(max(-10, 0), 100)"), 0);
             assert_eq!(evaluate_math_expression("contains(\"MacroNest\", Nest)"), 1);
-            assert_eq!(evaluate_math_expression("contains(\"MacroNest\", \"Discord\")"), 0);
+            assert_eq!(
+                evaluate_math_expression("contains(\"MacroNest\", \"Discord\")"),
+                0
+            );
             let rnd = evaluate_math_expression("random(10, 20)");
             assert!(rnd >= 10 && rnd <= 20);
             let val = evaluate_math_expression("choice(10, 20, 30)");
@@ -29460,9 +29607,7 @@ mod windows_overlay {
             STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
             install_active();
             RUNTIME_VARIABLES.lock().clear();
-            RUNTIME_VARIABLES
-                .lock()
-                .insert("count".to_string(), 0.0);
+            RUNTIME_VARIABLES.lock().insert("count".to_string(), 0.0);
             let mut pending = HashMap::new();
             let continued = execute_hold_macro_sequence_with_pending(
                 preset_id,
@@ -29486,9 +29631,7 @@ mod windows_overlay {
 
             STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
             install_active();
-            RUNTIME_VARIABLES
-                .lock()
-                .insert("count".to_string(), 0.0);
+            RUNTIME_VARIABLES.lock().insert("count".to_string(), 0.0);
             let mut pending = HashMap::new();
             let stopped = execute_hold_macro_sequence_with_pending(
                 preset_id,
@@ -29543,17 +29686,18 @@ mod windows_overlay {
             reconcile_active_hold_mouse_macros();
 
             assert!(STOP_REQUESTED_MACRO_PRESETS.lock().contains(&preset_id));
-            assert!(HOOK_STATE
-                .lock()
-                .active_hold_macros
-                .get(&preset_id)
-                .is_some_and(|active| active.release_requested));
+            assert!(
+                HOOK_STATE
+                    .lock()
+                    .active_hold_macros
+                    .get(&preset_id)
+                    .is_some_and(|active| active.release_requested)
+            );
 
             HOOK_STATE.lock().active_hold_macros.remove(&preset_id);
             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
             FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
         }
-
     }
 
     fn is_infinite_loop_marker(value: &str) -> bool {
@@ -32233,7 +32377,9 @@ mod windows_overlay {
     }
 
     fn tracks_macro_foreground_window(hwnd: HWND) -> bool {
-        !hwnd.0.is_null() && !window_belongs_to_current_process(hwnd) && !is_internal_app_window(hwnd)
+        !hwnd.0.is_null()
+            && !window_belongs_to_current_process(hwnd)
+            && !is_internal_app_window(hwnd)
     }
 
     fn is_app_ui_currently_foreground() -> bool {
@@ -34151,8 +34297,7 @@ mod windows_overlay {
                         continue;
                     }
                     let top_offset = ((top as usize) * (width as usize) + px as usize) * 4;
-                    let bottom_offset =
-                        ((bottom as usize) * (width as usize) + px as usize) * 4;
+                    let bottom_offset = ((bottom as usize) * (width as usize) + px as usize) * 4;
                     pixels[top_offset] = border_b;
                     pixels[top_offset + 1] = border_g;
                     pixels[top_offset + 2] = border_r;
@@ -34198,20 +34343,105 @@ mod windows_overlay {
             }
 
             for region in regions {
-            let rel_left = region.left - min_x;
-            let rel_top = region.top - min_y;
-            let outline = [92, 220, 255, 210];
-            if region.is_circle {
-                let rect = tiny_skia::Rect::from_xywh(
-                    rel_left as f32,
-                    rel_top as f32,
-                    region.width as f32,
-                    region.height as f32,
-                )
-                .unwrap();
-                let mut pb = tiny_skia::PathBuilder::new();
-                pb.push_oval(rect);
-                if let Some(path) = pb.finish() {
+                let rel_left = region.left - min_x;
+                let rel_top = region.top - min_y;
+                let outline = [92, 220, 255, 210];
+                if region.is_circle {
+                    let rect = tiny_skia::Rect::from_xywh(
+                        rel_left as f32,
+                        rel_top as f32,
+                        region.width as f32,
+                        region.height as f32,
+                    )
+                    .unwrap();
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    pb.push_oval(rect);
+                    if let Some(path) = pb.finish() {
+                        let mut paint = tiny_skia::Paint::default();
+                        paint.set_color(tiny_skia::Color::from_rgba8(
+                            outline[0], outline[1], outline[2], outline[3],
+                        ));
+                        paint.anti_alias = true;
+                        let stroke = tiny_skia::Stroke {
+                            width: 1.0,
+                            ..Default::default()
+                        };
+                        pixmap.stroke_path(
+                            &path,
+                            &paint,
+                            &stroke,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
+                    }
+
+                    let center_x = rel_left + region.width / 2;
+                    let center_y = rel_top + region.height / 2;
+                    let rx = region.width as f32 / 2.0;
+                    let ry = region.height as f32 / 2.0;
+                    if let Some(angle_deg) = region.angle_offset_deg {
+                        // 1. Draw START ANGLE (0% - Orange Line)
+                        let rad0 = angle_deg.to_radians();
+                        let x0 = center_x as f32 + rx * rad0.sin();
+                        let y0 = center_y as f32 - ry * rad0.cos();
+                        let mut pb_line = tiny_skia::PathBuilder::new();
+                        pb_line.move_to(center_x as f32, center_y as f32);
+                        pb_line.line_to(x0, y0);
+                        if let Some(path) = pb_line.finish() {
+                            let mut paint = tiny_skia::Paint::default();
+                            paint.set_color(tiny_skia::Color::from_rgba8(255, 120, 0, 255));
+                            paint.anti_alias = true;
+                            let stroke = tiny_skia::Stroke {
+                                width: 1.0,
+                                ..Default::default()
+                            };
+                            pixmap.stroke_path(
+                                &path,
+                                &paint,
+                                &stroke,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
+                        }
+
+                        // 2. Draw END ANGLE (100% - Bright Green Line) based on SPAN!
+                        if let Some(span) = region.angle_span_deg {
+                            if span < 360.0 {
+                                let end_deg = (angle_deg + span) % 360.0;
+                                let rad1 = end_deg.to_radians();
+                                let x1 = center_x as f32 + rx * rad1.sin();
+                                let y1 = center_y as f32 - ry * rad1.cos();
+                                let mut pb_line = tiny_skia::PathBuilder::new();
+                                pb_line.move_to(center_x as f32, center_y as f32);
+                                pb_line.line_to(x1, y1);
+                                if let Some(path) = pb_line.finish() {
+                                    let mut paint = tiny_skia::Paint::default();
+                                    paint.set_color(tiny_skia::Color::from_rgba8(50, 255, 50, 255));
+                                    paint.anti_alias = true;
+                                    let stroke = tiny_skia::Stroke {
+                                        width: 1.0,
+                                        ..Default::default()
+                                    };
+                                    pixmap.stroke_path(
+                                        &path,
+                                        &paint,
+                                        &stroke,
+                                        tiny_skia::Transform::identity(),
+                                        None,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    let rect = tiny_skia::Rect::from_xywh(
+                        rel_left as f32,
+                        rel_top as f32,
+                        region.width as f32,
+                        region.height as f32,
+                    )
+                    .unwrap();
+                    let path = tiny_skia::PathBuilder::from_rect(rect);
                     let mut paint = tiny_skia::Paint::default();
                     paint.set_color(tiny_skia::Color::from_rgba8(
                         outline[0], outline[1], outline[2], outline[3],
@@ -34229,262 +34459,286 @@ mod windows_overlay {
                         None,
                     );
                 }
+            }
 
-                let center_x = rel_left + region.width / 2;
-                let center_y = rel_top + region.height / 2;
-                let rx = region.width as f32 / 2.0;
-                let ry = region.height as f32 / 2.0;
-                if let Some(angle_deg) = region.angle_offset_deg {
-                    // 1. Draw START ANGLE (0% - Orange Line)
-                    let rad0 = angle_deg.to_radians();
-                    let x0 = center_x as f32 + rx * rad0.sin();
-                    let y0 = center_y as f32 - ry * rad0.cos();
-                    let mut pb_line = tiny_skia::PathBuilder::new();
-                    pb_line.move_to(center_x as f32, center_y as f32);
-                    pb_line.line_to(x0, y0);
-                    if let Some(path) = pb_line.finish() {
-                        let mut paint = tiny_skia::Paint::default();
-                        paint.set_color(tiny_skia::Color::from_rgba8(255, 120, 0, 255));
-                        paint.anti_alias = true;
-                        let stroke = tiny_skia::Stroke {
-                            width: 1.0,
+            for region in preview_regions {
+                let rel_left = region.left - min_x;
+                let rel_top = region.top - min_y;
+                let outline = [255, 216, 96, 230];
+                let mut paint = tiny_skia::Paint::default();
+                paint.set_color(tiny_skia::Color::from_rgba8(
+                    outline[0], outline[1], outline[2], outline[3],
+                ));
+                paint.anti_alias = true;
+                let shadow = tiny_skia::Color::from_rgba8(0, 0, 0, 140);
+                let draw_dashed_edge = |pixmap: &mut tiny_skia::Pixmap,
+                                        x1: f32,
+                                        y1: f32,
+                                        x2: f32,
+                                        y2: f32,
+                                        color: tiny_skia::Color,
+                                        width_px: f32| {
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    pb.move_to(x1, y1);
+                    pb.line_to(x2, y2);
+                    if let Some(path) = pb.finish() {
+                        let mut edge_paint = tiny_skia::Paint::default();
+                        edge_paint.set_color(color);
+                        edge_paint.anti_alias = true;
+                        let mut edge_stroke = tiny_skia::Stroke {
+                            width: width_px,
                             ..Default::default()
                         };
+                        edge_stroke.dash = tiny_skia::StrokeDash::new(vec![10.0, 8.0], 0.0);
                         pixmap.stroke_path(
                             &path,
-                            &paint,
-                            &stroke,
+                            &edge_paint,
+                            &edge_stroke,
                             tiny_skia::Transform::identity(),
                             None,
                         );
                     }
+                };
+                let left = rel_left as f32;
+                let top = rel_top as f32;
+                let right = left + region.width as f32;
+                let bottom = top + region.height as f32;
+                draw_dashed_edge(&mut pixmap, left, top, right, top, shadow, 2.0);
+                draw_dashed_edge(&mut pixmap, right, top, right, bottom, shadow, 2.0);
+                draw_dashed_edge(&mut pixmap, right, bottom, left, bottom, shadow, 2.0);
+                draw_dashed_edge(&mut pixmap, left, bottom, left, top, shadow, 2.0);
+                let color =
+                    tiny_skia::Color::from_rgba8(outline[0], outline[1], outline[2], outline[3]);
+                draw_dashed_edge(&mut pixmap, left, top, right, top, color, 1.15);
+                draw_dashed_edge(&mut pixmap, right, top, right, bottom, color, 1.15);
+                draw_dashed_edge(&mut pixmap, right, bottom, left, bottom, color, 1.15);
+                draw_dashed_edge(&mut pixmap, left, bottom, left, top, color, 1.15);
+            }
 
-                    // 2. Draw END ANGLE (100% - Bright Green Line) based on SPAN!
-                    if let Some(span) = region.angle_span_deg {
-                        if span < 360.0 {
-                            let end_deg = (angle_deg + span) % 360.0;
-                            let rad1 = end_deg.to_radians();
-                            let x1 = center_x as f32 + rx * rad1.sin();
-                            let y1 = center_y as f32 - ry * rad1.cos();
-                            let mut pb_line = tiny_skia::PathBuilder::new();
-                            pb_line.move_to(center_x as f32, center_y as f32);
-                            pb_line.line_to(x1, y1);
-                            if let Some(path) = pb_line.finish() {
+            for shape in static_geometry_shapes
+                .iter()
+                .chain(dynamic_geometry_shapes.iter())
+            {
+                match &shape.draw {
+                    GeometryRenderDraw::Point { x, y, radius, fill } => {
+                        let left = x - min_x - radius;
+                        let top = y - min_y - radius;
+                        let size = radius.saturating_mul(2).max(1);
+                        let mut pb = tiny_skia::PathBuilder::new();
+                        if let Some(rect) = tiny_skia::Rect::from_xywh(
+                            left as f32,
+                            top as f32,
+                            size as f32,
+                            size as f32,
+                        ) {
+                            pb.push_oval(rect);
+                            if let Some(path) = pb.finish() {
                                 let mut paint = tiny_skia::Paint::default();
-                                paint.set_color(tiny_skia::Color::from_rgba8(50, 255, 50, 255));
+                                paint.set_color(tiny_skia::Color::from_rgba8(
+                                    fill[0], fill[1], fill[2], fill[3],
+                                ));
                                 paint.anti_alias = true;
-                                let stroke = tiny_skia::Stroke {
-                                    width: 1.0,
-                                    ..Default::default()
-                                };
-                                pixmap.stroke_path(
+                                pixmap.fill_path(
                                     &path,
                                     &paint,
-                                    &stroke,
+                                    tiny_skia::FillRule::Winding,
                                     tiny_skia::Transform::identity(),
                                     None,
                                 );
                             }
                         }
                     }
-                }
-            } else {
-                let rect = tiny_skia::Rect::from_xywh(
-                    rel_left as f32,
-                    rel_top as f32,
-                    region.width as f32,
-                    region.height as f32,
-                )
-                .unwrap();
-                let path = tiny_skia::PathBuilder::from_rect(rect);
-                let mut paint = tiny_skia::Paint::default();
-                paint.set_color(tiny_skia::Color::from_rgba8(
-                    outline[0], outline[1], outline[2], outline[3],
-                ));
-                paint.anti_alias = true;
-                let stroke = tiny_skia::Stroke {
-                    width: 1.0,
-                    ..Default::default()
-                };
-                pixmap.stroke_path(
-                    &path,
-                    &paint,
-                    &stroke,
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
-            }
-        }
-
-            for region in preview_regions {
-            let rel_left = region.left - min_x;
-            let rel_top = region.top - min_y;
-            let outline = [255, 216, 96, 230];
-            let mut paint = tiny_skia::Paint::default();
-            paint.set_color(tiny_skia::Color::from_rgba8(
-                outline[0], outline[1], outline[2], outline[3],
-            ));
-            paint.anti_alias = true;
-            let shadow = tiny_skia::Color::from_rgba8(0, 0, 0, 140);
-            let draw_dashed_edge = |pixmap: &mut tiny_skia::Pixmap,
-                                    x1: f32,
-                                    y1: f32,
-                                    x2: f32,
-                                    y2: f32,
-                                    color: tiny_skia::Color,
-                                    width_px: f32| {
-                let mut pb = tiny_skia::PathBuilder::new();
-                pb.move_to(x1, y1);
-                pb.line_to(x2, y2);
-                if let Some(path) = pb.finish() {
-                    let mut edge_paint = tiny_skia::Paint::default();
-                    edge_paint.set_color(color);
-                    edge_paint.anti_alias = true;
-                    let mut edge_stroke = tiny_skia::Stroke {
-                        width: width_px,
-                        ..Default::default()
-                    };
-                    edge_stroke.dash = tiny_skia::StrokeDash::new(vec![10.0, 8.0], 0.0);
-                    pixmap.stroke_path(
-                        &path,
-                        &edge_paint,
-                        &edge_stroke,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
-                }
-            };
-            let left = rel_left as f32;
-            let top = rel_top as f32;
-            let right = left + region.width as f32;
-            let bottom = top + region.height as f32;
-            draw_dashed_edge(
-                &mut pixmap,
-                left,
-                top,
-                right,
-                top,
-                shadow,
-                2.0,
-            );
-            draw_dashed_edge(
-                &mut pixmap,
-                right,
-                top,
-                right,
-                bottom,
-                shadow,
-                2.0,
-            );
-            draw_dashed_edge(
-                &mut pixmap,
-                right,
-                bottom,
-                left,
-                bottom,
-                shadow,
-                2.0,
-            );
-            draw_dashed_edge(
-                &mut pixmap,
-                left,
-                bottom,
-                left,
-                top,
-                shadow,
-                2.0,
-            );
-            let color = tiny_skia::Color::from_rgba8(
-                outline[0], outline[1], outline[2], outline[3],
-            );
-            draw_dashed_edge(&mut pixmap, left, top, right, top, color, 1.15);
-            draw_dashed_edge(&mut pixmap, right, top, right, bottom, color, 1.15);
-            draw_dashed_edge(&mut pixmap, right, bottom, left, bottom, color, 1.15);
-            draw_dashed_edge(&mut pixmap, left, bottom, left, top, color, 1.15);
-        }
-
-            for shape in static_geometry_shapes
-                .iter()
-                .chain(dynamic_geometry_shapes.iter())
-            {
-            match &shape.draw {
-                GeometryRenderDraw::Point { x, y, radius, fill } => {
-                    let left = x - min_x - radius;
-                    let top = y - min_y - radius;
-                    let size = radius.saturating_mul(2).max(1);
-                    let mut pb = tiny_skia::PathBuilder::new();
-                    if let Some(rect) = tiny_skia::Rect::from_xywh(
-                        left as f32,
-                        top as f32,
-                        size as f32,
-                        size as f32,
-                    ) {
-                        pb.push_oval(rect);
+                    GeometryRenderDraw::Line {
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        stroke,
+                        thickness,
+                    } => {
+                        let mut pb = tiny_skia::PathBuilder::new();
+                        pb.move_to((x1 - min_x) as f32, (y1 - min_y) as f32);
+                        pb.line_to((x2 - min_x) as f32, (y2 - min_y) as f32);
                         if let Some(path) = pb.finish() {
                             let mut paint = tiny_skia::Paint::default();
                             paint.set_color(tiny_skia::Color::from_rgba8(
-                                fill[0], fill[1], fill[2], fill[3],
+                                stroke[0], stroke[1], stroke[2], stroke[3],
                             ));
                             paint.anti_alias = true;
-                            pixmap.fill_path(
+                            let skia_stroke = tiny_skia::Stroke {
+                                width: *thickness as f32,
+                                ..Default::default()
+                            };
+                            pixmap.stroke_path(
                                 &path,
                                 &paint,
-                                tiny_skia::FillRule::Winding,
+                                &skia_stroke,
                                 tiny_skia::Transform::identity(),
                                 None,
                             );
                         }
                     }
-                }
-                GeometryRenderDraw::Line {
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    stroke,
-                    thickness,
-                } => {
-                    let mut pb = tiny_skia::PathBuilder::new();
-                    pb.move_to((x1 - min_x) as f32, (y1 - min_y) as f32);
-                    pb.line_to((x2 - min_x) as f32, (y2 - min_y) as f32);
-                    if let Some(path) = pb.finish() {
-                        let mut paint = tiny_skia::Paint::default();
-                        paint.set_color(tiny_skia::Color::from_rgba8(
-                            stroke[0], stroke[1], stroke[2], stroke[3],
-                        ));
-                        paint.anti_alias = true;
-                        let skia_stroke = tiny_skia::Stroke {
-                            width: *thickness as f32,
-                            ..Default::default()
-                        };
-                        pixmap.stroke_path(
-                            &path,
-                            &paint,
-                            &skia_stroke,
-                            tiny_skia::Transform::identity(),
-                            None,
-                        );
+                    GeometryRenderDraw::Circle {
+                        cx,
+                        cy,
+                        radius,
+                        stroke,
+                        fill,
+                        thickness,
+                    } => {
+                        let left = cx - min_x - radius;
+                        let top = cy - min_y - radius;
+                        let size = radius.saturating_mul(2).max(1);
+                        let mut pb = tiny_skia::PathBuilder::new();
+                        if let Some(rect) = tiny_skia::Rect::from_xywh(
+                            left as f32,
+                            top as f32,
+                            size as f32,
+                            size as f32,
+                        ) {
+                            pb.push_oval(rect);
+                            if let Some(path) = pb.finish() {
+                                let mut paint = tiny_skia::Paint::default();
+                                paint.anti_alias = true;
+                                if let Some(fill_color) = fill {
+                                    paint.set_color(tiny_skia::Color::from_rgba8(
+                                        fill_color[0],
+                                        fill_color[1],
+                                        fill_color[2],
+                                        fill_color[3],
+                                    ));
+                                    pixmap.fill_path(
+                                        &path,
+                                        &paint,
+                                        tiny_skia::FillRule::Winding,
+                                        tiny_skia::Transform::identity(),
+                                        None,
+                                    );
+                                }
+                                paint.set_color(tiny_skia::Color::from_rgba8(
+                                    stroke[0], stroke[1], stroke[2], stroke[3],
+                                ));
+                                let skia_stroke = tiny_skia::Stroke {
+                                    width: *thickness as f32,
+                                    ..Default::default()
+                                };
+                                pixmap.stroke_path(
+                                    &path,
+                                    &paint,
+                                    &skia_stroke,
+                                    tiny_skia::Transform::identity(),
+                                    None,
+                                );
+                            }
+                        }
                     }
-                }
-                GeometryRenderDraw::Circle {
-                    cx,
-                    cy,
-                    radius,
-                    stroke,
-                    fill,
-                    thickness,
-                } => {
-                    let left = cx - min_x - radius;
-                    let top = cy - min_y - radius;
-                    let size = radius.saturating_mul(2).max(1);
-                    let mut pb = tiny_skia::PathBuilder::new();
-                    if let Some(rect) = tiny_skia::Rect::from_xywh(
-                        left as f32,
-                        top as f32,
-                        size as f32,
-                        size as f32,
-                    ) {
-                        pb.push_oval(rect);
+                    GeometryRenderDraw::Arrow {
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        stroke,
+                        thickness,
+                        head_size,
+                    } => {
+                        let rel_x1 = (x1 - min_x) as f32;
+                        let rel_y1 = (y1 - min_y) as f32;
+                        let rel_x2 = (x2 - min_x) as f32;
+                        let rel_y2 = (y2 - min_y) as f32;
+                        let mut pb = tiny_skia::PathBuilder::new();
+                        pb.move_to(rel_x1, rel_y1);
+                        pb.line_to(rel_x2, rel_y2);
+
+                        let dx = rel_x2 - rel_x1;
+                        let dy = rel_y2 - rel_y1;
+                        let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                        let ux = dx / len;
+                        let uy = dy / len;
+                        let angle = 28.0_f32.to_radians();
+                        let sin_a = angle.sin();
+                        let cos_a = angle.cos();
+                        for side in [-1.0_f32, 1.0_f32] {
+                            let rx = ux * cos_a - side * uy * sin_a;
+                            let ry = uy * cos_a + side * ux * sin_a;
+                            let hx = rel_x2 - rx * *head_size as f32;
+                            let hy = rel_y2 - ry * *head_size as f32;
+                            pb.move_to(rel_x2, rel_y2);
+                            pb.line_to(hx, hy);
+                        }
+                        if let Some(path) = pb.finish() {
+                            let mut paint = tiny_skia::Paint::default();
+                            paint.set_color(tiny_skia::Color::from_rgba8(
+                                stroke[0], stroke[1], stroke[2], stroke[3],
+                            ));
+                            paint.anti_alias = true;
+                            let skia_stroke = tiny_skia::Stroke {
+                                width: *thickness as f32,
+                                ..Default::default()
+                            };
+                            pixmap.stroke_path(
+                                &path,
+                                &paint,
+                                &skia_stroke,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
+                        }
+                    }
+                    GeometryRenderDraw::Polyline {
+                        points,
+                        stroke,
+                        thickness,
+                    } => {
+                        let mut pb = tiny_skia::PathBuilder::new();
+                        let mut first = true;
+                        for pt in points {
+                            let px = (pt.0 - min_x) as f32;
+                            let py = (pt.1 - min_y) as f32;
+                            if first {
+                                pb.move_to(px, py);
+                                first = false;
+                            } else {
+                                pb.line_to(px, py);
+                            }
+                        }
+                        if let Some(path) = pb.finish() {
+                            let mut paint = tiny_skia::Paint::default();
+                            paint.set_color(tiny_skia::Color::from_rgba8(
+                                stroke[0], stroke[1], stroke[2], stroke[3],
+                            ));
+                            paint.anti_alias = true;
+                            let skia_stroke = tiny_skia::Stroke {
+                                width: *thickness as f32,
+                                ..Default::default()
+                            };
+                            pixmap.stroke_path(
+                                &path,
+                                &paint,
+                                &skia_stroke,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
+                        }
+                    }
+                    GeometryRenderDraw::Polygon {
+                        points,
+                        stroke,
+                        thickness,
+                        fill,
+                    } => {
+                        let mut pb = tiny_skia::PathBuilder::new();
+                        let mut first = true;
+                        for pt in points {
+                            let px = (pt.0 - min_x) as f32;
+                            let py = (pt.1 - min_y) as f32;
+                            if first {
+                                pb.move_to(px, py);
+                                first = false;
+                            } else {
+                                pb.line_to(px, py);
+                            }
+                        }
+                        pb.close();
                         if let Some(path) = pb.finish() {
                             let mut paint = tiny_skia::Paint::default();
                             paint.anti_alias = true;
@@ -34519,152 +34773,10 @@ mod windows_overlay {
                             );
                         }
                     }
+                    GeometryRenderDraw::Label(text) => geometry_texts.push(text.clone()),
+                    GeometryRenderDraw::Svg { .. } => {}
                 }
-                GeometryRenderDraw::Arrow {
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    stroke,
-                    thickness,
-                    head_size,
-                } => {
-                    let rel_x1 = (x1 - min_x) as f32;
-                    let rel_y1 = (y1 - min_y) as f32;
-                    let rel_x2 = (x2 - min_x) as f32;
-                    let rel_y2 = (y2 - min_y) as f32;
-                    let mut pb = tiny_skia::PathBuilder::new();
-                    pb.move_to(rel_x1, rel_y1);
-                    pb.line_to(rel_x2, rel_y2);
-
-                    let dx = rel_x2 - rel_x1;
-                    let dy = rel_y2 - rel_y1;
-                    let len = (dx * dx + dy * dy).sqrt().max(1.0);
-                    let ux = dx / len;
-                    let uy = dy / len;
-                    let angle = 28.0_f32.to_radians();
-                    let sin_a = angle.sin();
-                    let cos_a = angle.cos();
-                    for side in [-1.0_f32, 1.0_f32] {
-                        let rx = ux * cos_a - side * uy * sin_a;
-                        let ry = uy * cos_a + side * ux * sin_a;
-                        let hx = rel_x2 - rx * *head_size as f32;
-                        let hy = rel_y2 - ry * *head_size as f32;
-                        pb.move_to(rel_x2, rel_y2);
-                        pb.line_to(hx, hy);
-                    }
-                    if let Some(path) = pb.finish() {
-                        let mut paint = tiny_skia::Paint::default();
-                        paint.set_color(tiny_skia::Color::from_rgba8(
-                            stroke[0], stroke[1], stroke[2], stroke[3],
-                        ));
-                        paint.anti_alias = true;
-                        let skia_stroke = tiny_skia::Stroke {
-                            width: *thickness as f32,
-                            ..Default::default()
-                        };
-                        pixmap.stroke_path(
-                            &path,
-                            &paint,
-                            &skia_stroke,
-                            tiny_skia::Transform::identity(),
-                            None,
-                        );
-                    }
-                }
-                GeometryRenderDraw::Polyline {
-                    points,
-                    stroke,
-                    thickness,
-                } => {
-                    let mut pb = tiny_skia::PathBuilder::new();
-                    let mut first = true;
-                    for pt in points {
-                        let px = (pt.0 - min_x) as f32;
-                        let py = (pt.1 - min_y) as f32;
-                        if first {
-                            pb.move_to(px, py);
-                            first = false;
-                        } else {
-                            pb.line_to(px, py);
-                        }
-                    }
-                    if let Some(path) = pb.finish() {
-                        let mut paint = tiny_skia::Paint::default();
-                        paint.set_color(tiny_skia::Color::from_rgba8(
-                            stroke[0], stroke[1], stroke[2], stroke[3],
-                        ));
-                        paint.anti_alias = true;
-                        let skia_stroke = tiny_skia::Stroke {
-                            width: *thickness as f32,
-                            ..Default::default()
-                        };
-                        pixmap.stroke_path(
-                            &path,
-                            &paint,
-                            &skia_stroke,
-                            tiny_skia::Transform::identity(),
-                            None,
-                        );
-                    }
-                }
-                GeometryRenderDraw::Polygon {
-                    points,
-                    stroke,
-                    thickness,
-                    fill,
-                } => {
-                    let mut pb = tiny_skia::PathBuilder::new();
-                    let mut first = true;
-                    for pt in points {
-                        let px = (pt.0 - min_x) as f32;
-                        let py = (pt.1 - min_y) as f32;
-                        if first {
-                            pb.move_to(px, py);
-                            first = false;
-                        } else {
-                            pb.line_to(px, py);
-                        }
-                    }
-                    pb.close();
-                    if let Some(path) = pb.finish() {
-                        let mut paint = tiny_skia::Paint::default();
-                        paint.anti_alias = true;
-                        if let Some(fill_color) = fill {
-                            paint.set_color(tiny_skia::Color::from_rgba8(
-                                fill_color[0],
-                                fill_color[1],
-                                fill_color[2],
-                                fill_color[3],
-                            ));
-                            pixmap.fill_path(
-                                &path,
-                                &paint,
-                                tiny_skia::FillRule::Winding,
-                                tiny_skia::Transform::identity(),
-                                None,
-                            );
-                        }
-                        paint.set_color(tiny_skia::Color::from_rgba8(
-                            stroke[0], stroke[1], stroke[2], stroke[3],
-                        ));
-                        let skia_stroke = tiny_skia::Stroke {
-                            width: *thickness as f32,
-                            ..Default::default()
-                        };
-                        pixmap.stroke_path(
-                            &path,
-                            &paint,
-                            &skia_stroke,
-                            tiny_skia::Transform::identity(),
-                            None,
-                        );
-                    }
-                }
-                GeometryRenderDraw::Label(text) => geometry_texts.push(text.clone()),
-                GeometryRenderDraw::Svg { .. } => {}
             }
-        }
 
             // Copy Skia pixmap to DIB section pixels buffer
             let pixmap_data = pixmap.data();
@@ -34686,88 +34798,94 @@ mod windows_overlay {
                 .iter()
                 .chain(dynamic_geometry_shapes.iter())
             {
-            if let GeometryRenderDraw::Svg {
-                x,
-                y,
-                width: target_w,
-                height: target_h,
-                opacity,
-                rotation,
-                code,
-            } = &shape.draw
-            {
-                if !code.trim().is_empty() {
-                    let opacity_key = (opacity * 1000.0).round() as u32;
-                    let rotation_key = (rotation * 1000.0).round() as i32;
-                    let cache_key = (
-                        code.clone(),
-                        *target_w,
-                        *target_h,
-                        opacity_key,
-                        rotation_key,
-                    );
-                    let mut cache = GEOMETRY_SVG_CACHE.lock();
-                    let rendered = if let Some(cached) = cache.get(&cache_key) {
-                        Some(cached)
-                    } else {
-                        match crate::render::render_svg_image(
-                            code, *target_w, *target_h, *opacity, *rotation,
-                        ) {
-                            Ok(img) => {
-                                cache.insert(cache_key.clone(), img);
-                                cache.get(&cache_key)
+                if let GeometryRenderDraw::Svg {
+                    x,
+                    y,
+                    width: target_w,
+                    height: target_h,
+                    opacity,
+                    rotation,
+                    code,
+                } = &shape.draw
+                {
+                    if !code.trim().is_empty() {
+                        let opacity_key = (opacity * 1000.0).round() as u32;
+                        let rotation_key = (rotation * 1000.0).round() as i32;
+                        let cache_key = (
+                            code.clone(),
+                            *target_w,
+                            *target_h,
+                            opacity_key,
+                            rotation_key,
+                        );
+                        let mut cache = GEOMETRY_SVG_CACHE.lock();
+                        let rendered = if let Some(cached) = cache.get(&cache_key) {
+                            Some(cached)
+                        } else {
+                            match crate::render::render_svg_image(
+                                code, *target_w, *target_h, *opacity, *rotation,
+                            ) {
+                                Ok(img) => {
+                                    cache.insert(cache_key.clone(), img);
+                                    cache.get(&cache_key)
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "Overlay Svg paint: failed to render inline SVG: {e}"
+                                    );
+                                    None
+                                }
                             }
-                            Err(e) => {
-                                eprintln!("Overlay Svg paint: failed to render inline SVG: {e}");
-                                None
-                            }
-                        }
-                    };
+                        };
 
-                    if let Some(img) = rendered {
-                        let img_w = img.width as usize;
-                        let img_h = img.height as usize;
-                        let offset_x = (img.orig_width as i32 - img.width as i32) / 2;
-                        let offset_y = (img.orig_height as i32 - img.height as i32) / 2;
-                        let rel_x = x + offset_x - min_x;
-                        let rel_y = y + offset_y - min_y;
-                        for py in 0..img_h {
-                            let screen_y = rel_y + py as i32;
-                            if screen_y < 0 || screen_y >= height as i32 {
-                                continue;
-                            }
-                            for px in 0..img_w {
-                                let screen_x = rel_x + px as i32;
-                                if screen_x < 0 || screen_x >= width as i32 {
+                        if let Some(img) = rendered {
+                            let img_w = img.width as usize;
+                            let img_h = img.height as usize;
+                            let offset_x = (img.orig_width as i32 - img.width as i32) / 2;
+                            let offset_y = (img.orig_height as i32 - img.height as i32) / 2;
+                            let rel_x = x + offset_x - min_x;
+                            let rel_y = y + offset_y - min_y;
+                            for py in 0..img_h {
+                                let screen_y = rel_y + py as i32;
+                                if screen_y < 0 || screen_y >= height as i32 {
                                     continue;
                                 }
-                                let img_idx = (py * img_w + px) * 4;
-                                if img_idx + 3 >= img.rgba.len() {
-                                    continue;
-                                }
-                                let alpha = img.rgba[img_idx + 3] as u32;
-                                if alpha > 0 {
-                                    let dest_idx = ((screen_y as usize) * (width as usize)
-                                        + (screen_x as usize))
-                                        * 4;
-                                    if dest_idx + 3 < pixels.len() {
-                                        let src_r = img.rgba[img_idx] as u32;
-                                        let src_g = img.rgba[img_idx + 1] as u32;
-                                        let src_b = img.rgba[img_idx + 2] as u32;
+                                for px in 0..img_w {
+                                    let screen_x = rel_x + px as i32;
+                                    if screen_x < 0 || screen_x >= width as i32 {
+                                        continue;
+                                    }
+                                    let img_idx = (py * img_w + px) * 4;
+                                    if img_idx + 3 >= img.rgba.len() {
+                                        continue;
+                                    }
+                                    let alpha = img.rgba[img_idx + 3] as u32;
+                                    if alpha > 0 {
+                                        let dest_idx = ((screen_y as usize) * (width as usize)
+                                            + (screen_x as usize))
+                                            * 4;
+                                        if dest_idx + 3 < pixels.len() {
+                                            let src_r = img.rgba[img_idx] as u32;
+                                            let src_g = img.rgba[img_idx + 1] as u32;
+                                            let src_b = img.rgba[img_idx + 2] as u32;
 
-                                        let dest_b = pixels[dest_idx] as u32;
-                                        let dest_g = pixels[dest_idx + 1] as u32;
-                                        let dest_r = pixels[dest_idx + 2] as u32;
+                                            let dest_b = pixels[dest_idx] as u32;
+                                            let dest_g = pixels[dest_idx + 1] as u32;
+                                            let dest_r = pixels[dest_idx + 2] as u32;
 
-                                        let out_r = (src_r * alpha + dest_r * (255 - alpha)) / 255;
-                                        let out_g = (src_g * alpha + dest_g * (255 - alpha)) / 255;
-                                        let out_b = (src_b * alpha + dest_b * (255 - alpha)) / 255;
+                                            let out_r =
+                                                (src_r * alpha + dest_r * (255 - alpha)) / 255;
+                                            let out_g =
+                                                (src_g * alpha + dest_g * (255 - alpha)) / 255;
+                                            let out_b =
+                                                (src_b * alpha + dest_b * (255 - alpha)) / 255;
 
-                                        pixels[dest_idx] = out_b as u8;
-                                        pixels[dest_idx + 1] = out_g as u8;
-                                        pixels[dest_idx + 2] = out_r as u8;
-                                        pixels[dest_idx + 3] =
-                                            pixels[dest_idx + 3].max(alpha as u8);
+                                            pixels[dest_idx] = out_b as u8;
+                                            pixels[dest_idx + 1] = out_g as u8;
+                                            pixels[dest_idx + 2] = out_r as u8;
+                                            pixels[dest_idx + 3] =
+                                                pixels[dest_idx + 3].max(alpha as u8);
+                                        }
                                     }
                                 }
                             }
@@ -34775,8 +34893,6 @@ mod windows_overlay {
                     }
                 }
             }
-        }
-
         }
 
         use windows::Win32::Foundation::RECT;
