@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::ocr::OcrResult;
 
@@ -17,6 +17,40 @@ use super::{
     default_timer_progress_border_color, default_timer_progress_border_thickness,
     default_timer_progress_smoothness_fps, default_true,
 };
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum GlobalConstantStoredValue {
+    Text(String),
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+}
+
+fn deserialize_global_constants<'de, D>(deserializer: D) -> Result<Vec<(String, String)>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let values = Vec::<(String, GlobalConstantStoredValue)>::deserialize(deserializer)?;
+    Ok(values
+        .into_iter()
+        .map(|(name, value)| {
+            let value = match value {
+                GlobalConstantStoredValue::Text(text) => text,
+                GlobalConstantStoredValue::Int(number) => number.to_string(),
+                GlobalConstantStoredValue::Float(number) => number.to_string(),
+                GlobalConstantStoredValue::Bool(flag) => {
+                    if flag {
+                        "1".to_owned()
+                    } else {
+                        "0".to_owned()
+                    }
+                }
+            };
+            (name, value)
+        })
+        .collect())
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum QuickKeyDisplayMode {
@@ -467,8 +501,8 @@ pub struct AppState {
     pub macro_mouse_click_delay_ms: u32,
     #[serde(default = "default_macro_keyboard_key_press_delay_ms")]
     pub macro_keyboard_key_press_delay_ms: u32,
-    #[serde(default)]
-    pub global_constants: Vec<(String, i32)>,
+    #[serde(default, deserialize_with = "deserialize_global_constants")]
+    pub global_constants: Vec<(String, String)>,
     #[serde(default)]
     pub ocr_presets: Vec<OcrPreset>,
     #[serde(default = "default_ocr_language_code")]
@@ -882,6 +916,25 @@ mod tests {
         assert_eq!(
             state.focus_highlight_decoration,
             super::FocusHighlightDecoration::Plain
+        );
+    }
+
+    #[test]
+    fn app_state_deserializes_numeric_and_text_global_constants() {
+        let state: AppState = serde_json::from_value(json!({
+            "global_constants": [
+                ["HP", 123],
+                ["NAME", "hello123"]
+            ]
+        }))
+        .expect("global constants should accept legacy numbers and text");
+
+        assert_eq!(
+            state.global_constants,
+            vec![
+                ("HP".to_owned(), "123".to_owned()),
+                ("NAME".to_owned(), "hello123".to_owned())
+            ]
         );
     }
 

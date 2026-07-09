@@ -840,6 +840,26 @@ pub struct CrosshairApp {
 }
 
 impl CrosshairApp {
+    pub(crate) fn apply_fixed_variable_to_overlay(name: &str, value: &str) {
+        let trimmed = value.trim();
+        if let Ok(parsed) = trimmed.parse::<f64>() {
+            crate::overlay::RUNTIME_VARIABLES
+                .lock()
+                .insert(name.to_owned(), parsed);
+            crate::overlay::TEXT_VARIABLES.lock().remove(name);
+        } else {
+            crate::overlay::RUNTIME_VARIABLES.lock().remove(name);
+            crate::overlay::TEXT_VARIABLES
+                .lock()
+                .insert(name.to_owned(), value.to_owned());
+        }
+    }
+
+    pub(crate) fn remove_fixed_variable_from_overlay(name: &str) {
+        crate::overlay::RUNTIME_VARIABLES.lock().remove(name);
+        crate::overlay::TEXT_VARIABLES.lock().remove(name);
+    }
+
     pub fn new(
         paths: AppPaths,
         state: AppState,
@@ -1135,11 +1155,10 @@ impl CrosshairApp {
             pending_startup_persist = true;
         }
         app.startup_state_persist_pending = pending_startup_persist;
-        {
-            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-            for (name, val) in &app.state.global_constants {
-                vars.insert(name.clone(), *val as f64);
-            }
+        crate::overlay::RUNTIME_VARIABLES.lock().clear();
+        crate::overlay::TEXT_VARIABLES.lock().clear();
+        for (name, val) in &app.state.global_constants {
+            Self::apply_fixed_variable_to_overlay(name, val);
         }
         app
     }
@@ -14298,24 +14317,69 @@ impl eframe::App for CrosshairApp {
         self.render_update_notice(ctx);
 
         if self.variable_inspector_open {
-            let mut open = self.variable_inspector_open;
-            let screen_center = ctx.screen_rect().center();
-            egui::Window::new(Self::tr_lang(
-                self.state.ui_language,
-                "Variables",
-                "Variables",
-            ))
-            .open(&mut open)
-            .fixed_pos(screen_center)
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_size(egui::vec2(820.0, 430.0))
-            .resizable(false)
-            .movable(false)
-            .collapsible(false)
-            .show(ctx, |ui| {
-                self.render_variable_inspector(ui);
-            });
-            self.variable_inspector_open = open;
+            if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+                self.variable_inspector_open = false;
+            } else {
+                self.render_modal_backdrop(ctx, true);
+                let (panel_size, panel_pos) =
+                    Self::centered_modal_placement(ctx, vec2(840.0, 460.0), vec2(620.0, 360.0));
+                let mut close_request = false;
+                let title = Self::tr_lang(self.state.ui_language, "Variables", "Variables");
+                egui::Area::new(egui::Id::new("variable-inspector-modal"))
+                    .order(Order::Foreground)
+                    .fixed_pos(panel_pos)
+                    .interactable(true)
+                    .show(ctx, |ui| {
+                        Frame::new()
+                            .fill(if self.state.ui_theme == UiThemeMode::Dark {
+                                Color32::from_rgba_premultiplied(24, 26, 32, 248)
+                            } else {
+                                Color32::from_rgba_premultiplied(248, 248, 250, 248)
+                            })
+                            .stroke(Stroke::new(
+                                1.0,
+                                Color32::from_rgba_premultiplied(90, 94, 108, 180),
+                            ))
+                            .shadow(Shadow {
+                                offset: [0, 14],
+                                blur: 32,
+                                spread: 0,
+                                color: Color32::from_rgba_premultiplied(12, 12, 16, 72),
+                            })
+                            .corner_radius(24.0)
+                            .inner_margin(Margin::same(16))
+                            .show(ui, |ui| {
+                                ui.set_min_size(panel_size);
+                                ui.set_max_size(panel_size);
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(title).strong().size(16.0));
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                if ui
+                                                    .add_sized(
+                                                        [34.0, 28.0],
+                                                        Button::new(Self::material_icon_text(
+                                                            0xe5cd, 18.0,
+                                                        )),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    close_request = true;
+                                                }
+                                            },
+                                        );
+                                    });
+                                    ui.separator();
+                                    self.render_variable_inspector(ui);
+                                });
+                            });
+                    });
+                if close_request {
+                    self.variable_inspector_open = false;
+                }
+            }
         }
 
         if self.titlebar_guides_open {

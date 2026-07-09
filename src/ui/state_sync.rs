@@ -403,12 +403,10 @@ impl CrosshairApp {
         self.panel_warmup_target = Some(self.state.active_panel);
         self.panel_warmup_frames_remaining = 1;
         self.warmed_panels.clear();
-        {
-            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-            vars.clear();
-            for (name, val) in &self.state.global_constants {
-                vars.insert(name.clone(), *val as f64);
-            }
+        crate::overlay::RUNTIME_VARIABLES.lock().clear();
+        crate::overlay::TEXT_VARIABLES.lock().clear();
+        for (name, val) in &self.state.global_constants {
+            Self::apply_fixed_variable_to_overlay(name, val);
         }
         let mut persist_pending = startup_state_dirty;
         if self.apply_startup_state_adjustments() {

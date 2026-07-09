@@ -16600,7 +16600,7 @@ if supports_move_mouse || show_detection_tuning {
                         );
                         ui.label("=");
                         ui.add_sized(
-                            [70.0, 20.0],
+                            [140.0, 20.0],
                             egui::TextEdit::singleline(&mut val_buf).hint_text(
                                 RichText::new(Self::tr_lang(language, "Value", "Value"))
                                     .color(hint_color)
@@ -16610,7 +16610,7 @@ if supports_move_mouse || show_detection_tuning {
                         if ui.button(Self::tr_lang(language, "Add", "Add")).clicked() {
                             let name_trimmed = name_buf.trim().to_uppercase();
                             if !name_trimmed.is_empty() {
-                                let parsed_val = val_buf.trim().parse::<i32>().unwrap_or(0);
+                                let stored_value = val_buf.trim().to_owned();
                                 if !self
                                     .state
                                     .global_constants
@@ -16619,9 +16619,11 @@ if supports_move_mouse || show_detection_tuning {
                                 {
                                     self.state
                                         .global_constants
-                                        .push((name_trimmed.clone(), parsed_val));
-                                    let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                    vars.insert(name_trimmed, parsed_val as f64);
+                                        .push((name_trimmed.clone(), stored_value.clone()));
+                                    Self::apply_fixed_variable_to_overlay(
+                                        &name_trimmed,
+                                        &stored_value,
+                                    );
                                     name_buf.clear();
                                     val_buf.clear();
                                     self.persist();
@@ -16655,7 +16657,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     .color(Color32::from_rgb(0, 180, 216)),
                                             );
                                             ui.add_sized(
-                                                [70.0, 20.0],
+                                                [140.0, 20.0],
                                                 egui::Label::new(
                                                     RichText::new(val.to_string()).monospace(),
                                                 ),
@@ -16674,8 +16676,9 @@ if supports_move_mouse || show_detection_tuning {
                                         if let Some(idx) = to_remove_idx {
                                             let (removed_name, _) =
                                                 self.state.global_constants.remove(idx);
-                                            let mut vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                                            vars.remove(&removed_name);
+                                            Self::remove_fixed_variable_from_overlay(
+                                                &removed_name,
+                                            );
                                             self.persist();
                                         }
                                     });
