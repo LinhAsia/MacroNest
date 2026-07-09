@@ -11,7 +11,7 @@ use windows::Win32::{
         SRCCOPY, SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, StretchDIBits,
         TRANSPARENT, UpdateWindow,
     },
-    UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN},
+    UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN, VK_SHIFT},
     UI::WindowsAndMessaging::{
         CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
         DispatchMessageW, GWLP_USERDATA, GetCursorPos, GetMessageW, GetWindowLongPtrW, HCURSOR,
@@ -455,7 +455,8 @@ unsafe extern "system" fn capture_wnd_proc(
                                 None
                             };
                         let previous_point = state.current_point;
-                        state.current_point = Some((rx, ry));
+                        state.current_point =
+                            Some(distance_measure_constrained_local_point(state, (rx, ry)));
                         unsafe {
                             if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
                                 let next_rect = region_select_rect(state);
@@ -494,6 +495,8 @@ unsafe extern "system" fn capture_wnd_proc(
                 if GetCursorPos(&mut pt).is_ok() {
                     let rx = pt.x - state.left;
                     let ry = pt.y - state.top;
+                    let constrained_point =
+                        distance_measure_constrained_local_point(state, (rx, ry));
 
                     match state.mode {
                         NativeCaptureMode::RegionAdjust { .. } => {
@@ -561,9 +564,10 @@ unsafe extern "system" fn capture_wnd_proc(
                             }
                         }
                         NativeCaptureMode::DistanceMeasure { .. } => {
-                            state
-                                .protractor_points
-                                .push((rx + state.left, ry + state.top));
+                            state.protractor_points.push((
+                                constrained_point.0 + state.left,
+                                constrained_point.1 + state.top,
+                            ));
                             state.start_point = None;
                             if state.protractor_points.len() == 2 {
                                 state.result = NativeCaptureResult::DistancePoints(
@@ -1044,6 +1048,37 @@ fn distance_measure_preview(state: &CaptureState) -> Option<(f64, (i32, i32), (i
     let dx = (pt2.0 - pt1.0) as f64;
     let dy = (pt2.1 - pt1.1) as f64;
     Some((dx.hypot(dy), pt1, pt2))
+}
+
+fn native_capture_shift_held() -> bool {
+    unsafe { (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0 }
+}
+
+fn snap_point_to_45_degrees(anchor: (i32, i32), point: (i32, i32)) -> (i32, i32) {
+    let dx = (point.0 - anchor.0) as f32;
+    let dy = (point.1 - anchor.1) as f32;
+    let radius = dx.hypot(dy);
+    if radius <= f32::EPSILON {
+        return point;
+    }
+
+    let snapped_angle =
+        (dy.atan2(dx) / std::f32::consts::FRAC_PI_4).round() * std::f32::consts::FRAC_PI_4;
+    (
+        anchor.0 + (radius * snapped_angle.cos()).round() as i32,
+        anchor.1 + (radius * snapped_angle.sin()).round() as i32,
+    )
+}
+
+fn distance_measure_constrained_local_point(state: &CaptureState, point: (i32, i32)) -> (i32, i32) {
+    if !matches!(state.mode, NativeCaptureMode::DistanceMeasure { .. }) || !native_capture_shift_held() {
+        return point;
+    }
+
+    let Some(&(anchor_x, anchor_y)) = state.protractor_points.first() else {
+        return point;
+    };
+    snap_point_to_45_degrees((anchor_x - state.left, anchor_y - state.top), point)
 }
 
 fn distance_measure_status_text(

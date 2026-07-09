@@ -12850,7 +12850,14 @@ mod windows_overlay {
 
     fn append_screen_draw_point(stroke: &mut ScreenDrawStroke, point: POINT) -> bool {
         let point = if stroke.tool == ScreenDrawTool::Brush {
-            point
+            if screen_draw_snap_axis_active() {
+                snap_screen_draw_point_to_45_degrees(
+                    stroke.points.last().copied().unwrap_or(point),
+                    point,
+                )
+            } else {
+                point
+            }
         } else {
             snapped_screen_draw_point(
                 stroke.tool,
@@ -12888,6 +12895,22 @@ mod windows_overlay {
 
     fn screen_draw_snap_axis_active() -> bool {
         (unsafe { GetAsyncKeyState(0x10) } as u16 & 0x8000) != 0
+    }
+
+    fn snap_screen_draw_point_to_45_degrees(anchor: POINT, point: POINT) -> POINT {
+        let dx = (point.x - anchor.x) as f32;
+        let dy = (point.y - anchor.y) as f32;
+        let radius = dx.hypot(dy);
+        if radius <= f32::EPSILON {
+            return point;
+        }
+
+        let snapped_angle =
+            (dy.atan2(dx) / std::f32::consts::FRAC_PI_4).round() * std::f32::consts::FRAC_PI_4;
+        POINT {
+            x: anchor.x + (radius * snapped_angle.cos()).round() as i32,
+            y: anchor.y + (radius * snapped_angle.sin()).round() as i32,
+        }
     }
 
     fn constrained_screen_draw_point(
