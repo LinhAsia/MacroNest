@@ -8,7 +8,7 @@ use eframe::egui::{
 };
 use serde::Deserialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -30,6 +30,28 @@ struct UpdateManifest {
 }
 
 impl CrosshairApp {
+    fn update_download_file_stem(version: &str) -> String {
+        let sanitized: String = version
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        format!("macronest_update_{}", sanitized.trim_matches('_'))
+    }
+
+    fn update_download_final_path(version: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("{}.exe", Self::update_download_file_stem(version)))
+    }
+
+    fn update_download_partial_path(version: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("{}.part", Self::update_download_file_stem(version)))
+    }
+
     pub(crate) fn render_settings_popup(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
         egui::ScrollArea::vertical()
@@ -842,7 +864,7 @@ impl CrosshairApp {
                         )
                         .clicked()
                         {
-                            self.start_download_update(ctx, url.clone());
+                            self.start_download_update(ctx, version.clone(), url.clone());
                         }
                     }
                     UpdateStatus::Downloading => {
@@ -1652,6 +1674,13 @@ impl CrosshairApp {
                     let _ = ui_tx.send(UiCommand::UpdateUpToDate);
                     return Ok(());
                 }
+                let downloaded_update_path = Self::update_download_final_path(&latest_version);
+                if downloaded_update_path.exists() {
+                    let _ = ui_tx.send(UiCommand::UpdateDownloadFinished(
+                        downloaded_update_path.to_string_lossy().to_string(),
+                    ));
+                    return Ok(());
+                }
                 let download_url = manifest.url.trim().to_owned();
                 if download_url.is_empty() {
                     let _ = ui_tx.send(UiCommand::UpdateError(
@@ -1685,7 +1714,12 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn start_download_update(&mut self, ctx: &egui::Context, download_url: String) {
+    pub(crate) fn start_download_update(
+        &mut self,
+        ctx: &egui::Context,
+        version: String,
+        download_url: String,
+    ) {
         self.update_status = UpdateStatus::Downloading;
         self.update_download_progress.store(0, Ordering::SeqCst);
         let ui_tx = self.ui_tx.clone();
@@ -1704,11 +1738,9 @@ impl CrosshairApp {
                     .and_then(|resp| resp.error_for_status())
                     .map_err(|e| e.to_string())?;
                 let total_size = resp.content_length().unwrap_or(0);
-                let temp_dir = std::env::temp_dir();
-                let temp_part_path = temp_dir.join("macronest_update.part");
-                let temp_path = temp_dir.join("macronest_update.exe");
+                let temp_part_path = Self::update_download_partial_path(&version);
+                let temp_path = Self::update_download_final_path(&version);
                 let _ = fs::remove_file(&temp_part_path);
-                let _ = fs::remove_file(&temp_path);
                 let mut file = fs::File::create(&temp_part_path).map_err(|e| e.to_string())?;
                 let mut downloaded: u64 = 0;
                 let mut buffer = [0u8; 16_384];
@@ -1779,7 +1811,8 @@ impl CrosshairApp {
                  $errorLog='{error_log_ps}'; \
                  if (Test-Path -LiteralPath $errorLog) {{ Remove-Item -LiteralPath $errorLog -Force -ErrorAction SilentlyContinue }}; \
                  try {{ \
-                     Wait-Process -Id $pidToWait; \
+                     $proc = Get-Process -Id $pidToWait -ErrorAction SilentlyContinue; \
+                     if ($proc) {{ Wait-Process -Id $pidToWait; }} \
                      Start-Sleep -Milliseconds 350; \
                      if (Test-Path -LiteralPath $oldExe) {{ Remove-Item -LiteralPath $oldExe -Force -ErrorAction SilentlyContinue }}; \
                      if (Test-Path -LiteralPath $currentExe) {{ Move-Item -LiteralPath $currentExe -Destination $oldExe -Force }}; \
