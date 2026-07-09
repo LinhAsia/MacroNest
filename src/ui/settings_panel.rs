@@ -822,7 +822,19 @@ impl CrosshairApp {
                         };
                         ui.label(RichText::new(available_text).color(Color32::GREEN));
                         if !body.is_empty() {
-                            ui.label(RichText::new(body).small().weak());
+                            let localized_body = if matches!(language, UiLanguage::Vietnamese) {
+                                match body.trim() {
+                                    "Added new features and fixed various bugs"
+                                    | "Added new features and fixed various bugs." => {
+                                        "Đã thêm một số tính năng mới và sửa nhiều lỗi khác nhau."
+                                            .to_owned()
+                                    }
+                                    _ => body.clone(),
+                                }
+                            } else {
+                                body.clone()
+                            };
+                            ui.label(RichText::new(localized_body).small().weak());
                         }
                         if Self::settings_action_button(
                             ui,

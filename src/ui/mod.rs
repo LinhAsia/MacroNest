@@ -7344,7 +7344,7 @@ impl CrosshairApp {
     fn show_update_notice(&mut self, message: impl Into<String>) {
         self.update_notice = Some(UpdateNotice {
             message: message.into(),
-            expires_at: Instant::now() + Duration::from_secs(6),
+            expires_at: Instant::now() + Duration::from_secs(2),
         });
     }
 
@@ -11959,11 +11959,7 @@ impl eframe::App for CrosshairApp {
                     status,
                 } => {
                     if asset_name.is_some() {
-                        self.apply_drawn_crosshair_asset(
-                            &profile_name,
-                            asset_name,
-                            asset_scale,
-                        );
+                        self.apply_drawn_crosshair_asset(&profile_name, asset_name, asset_scale);
                     } else {
                         self.sync_crosshair();
                     }
@@ -12427,7 +12423,13 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::UpdateAvailable(version, body, url) => {
                     if self.update_check_was_automatic {
-                        self.show_update_notice(format!("New version v{version} is available."));
+                        let message = match self.state.ui_language {
+                            UiLanguage::Vietnamese => format!("Đã có phiên bản mới v{version}."),
+                            UiLanguage::English | UiLanguage::Icon => {
+                                format!("New version v{version} is available.")
+                            }
+                        };
+                        self.show_update_notice(message);
                     }
                     self.update_status = UpdateStatus::Available(version, body, url);
                     self.update_check_was_automatic = false;
@@ -12930,7 +12932,10 @@ impl eframe::App for CrosshairApp {
                 }
                 ctx.data_mut(|d| {
                     d.insert_temp(egui::Id::new("screen_draw_capturing"), capturing_region);
-                    d.insert_temp(egui::Id::new("screen_draw_color_pick_mode"), color_pick_mode);
+                    d.insert_temp(
+                        egui::Id::new("screen_draw_color_pick_mode"),
+                        color_pick_mode,
+                    );
                 });
                 ctx.send_viewport_cmd_to(
                     egui::ViewportId::from_hash_of("screen_draw_toolbar"),
@@ -12968,9 +12973,8 @@ impl eframe::App for CrosshairApp {
             });
             if capturing_region != was_capturing || color_pick_mode != was_color_pick_mode {
                 if toolbar_visible {
-                    let toolbar_pos = ctx.data(|d| {
-                        d.get_temp::<egui::Pos2>(egui::Id::new("toolbar_pos"))
-                    });
+                    let toolbar_pos =
+                        ctx.data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("toolbar_pos")));
                     if let Some(toolbar_pos) = toolbar_pos {
                         ctx.send_viewport_cmd_to(
                             egui::ViewportId::from_hash_of("screen_draw_toolbar"),
@@ -12980,7 +12984,10 @@ impl eframe::App for CrosshairApp {
                 }
                 ctx.data_mut(|d| {
                     d.insert_temp(egui::Id::new("screen_draw_capturing"), capturing_region);
-                    d.insert_temp(egui::Id::new("screen_draw_color_pick_mode"), color_pick_mode);
+                    d.insert_temp(
+                        egui::Id::new("screen_draw_color_pick_mode"),
+                        color_pick_mode,
+                    );
                 });
                 ctx.send_viewport_cmd_to(
                     egui::ViewportId::from_hash_of("screen_draw_toolbar"),
