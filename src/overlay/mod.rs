@@ -87,12 +87,13 @@ mod windows_overlay {
                     BITMAPINFOHEADER, BLENDFUNCTION, BeginPaint, CLIP_DEFAULT_PRECIS,
                     ClientToScreen, CreateCompatibleDC, CreateDIBSection, CreateFontW,
                     CreateRectRgn, DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
-                    DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint,
-                    FF_DONTCARE, FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW,
+                    DT_EDITCONTROL, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
+                    DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, EndPaint, FF_DONTCARE,
+                    FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW,
                     GetTextExtentPoint32W, GetTextMetricsW, HDC, HGDIOBJ,
                     MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow, OUT_DEFAULT_PRECIS,
-                    PAINTSTRUCT, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetTextAlign,
-                    SetTextColor, SetWindowRgn, StretchDIBits, TA_BASELINE, TA_CENTER,
+                    PAINTSTRUCT, ReleaseDC, SRCCOPY, SelectObject, SetBkColor, SetBkMode,
+                    SetTextAlign, SetTextColor, SetWindowRgn, StretchDIBits, TA_BASELINE, TA_CENTER,
                     TEXTMETRICW, TRANSPARENT, TextOutW,
                 },
             },
@@ -23653,7 +23654,19 @@ mod windows_overlay {
             PCWSTR(font_name.as_ptr()),
         );
         let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
-        let _ = SetBkMode(mem_dc, TRANSPARENT);
+        if bg_alpha > 0 {
+            let _ = SetBkColor(
+                mem_dc,
+                COLORREF(
+                    ((display.background_color.b as u32) << 16)
+                        | ((display.background_color.g as u32) << 8)
+                        | (display.background_color.r as u32),
+                ),
+            );
+            let _ = SetBkMode(mem_dc, windows::Win32::Graphics::Gdi::OPAQUE);
+        } else {
+            let _ = SetBkMode(mem_dc, TRANSPARENT);
+        }
         let _ = SetTextColor(
             mem_dc,
             COLORREF(
@@ -23662,23 +23675,42 @@ mod windows_overlay {
                     | (display.text_color.r as u32),
             ),
         );
+        let content_left = 12;
+        let content_top = 6;
+        let content_right = width - 12;
+        let content_bottom = height - 6;
         let mut text_rect = RECT {
-            left: 12,
-            top: 4,
-            right: width - 12,
-            bottom: height - 4,
+            left: content_left,
+            top: content_top,
+            right: content_right,
+            bottom: content_bottom,
+        };
+        let wrap_text = display.text.chars().any(char::is_whitespace);
+        let draw_flags = if wrap_text {
+            DT_CENTER | DT_NOPREFIX | DT_WORDBREAK | DT_EDITCONTROL
+        } else {
+            DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS
         };
         let mut wide = display
             .text
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
-        let _ = DrawTextW(
-            mem_dc,
-            &mut wide,
-            &mut text_rect,
-            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-        );
+        if wrap_text {
+            let mut measure_rect = RECT {
+                left: content_left,
+                top: content_top,
+                right: content_right,
+                bottom: content_bottom,
+            };
+            let _ = DrawTextW(mem_dc, &mut wide, &mut measure_rect, draw_flags | DT_CALCRECT);
+            let available_height = (content_bottom - content_top).max(1);
+            let measured_height = (measure_rect.bottom - measure_rect.top).max(1);
+            let vertical_pad = ((available_height - measured_height).max(0)) / 2;
+            text_rect.top = content_top + vertical_pad;
+            text_rect.bottom = content_bottom;
+        }
+        let _ = DrawTextW(mem_dc, &mut wide, &mut text_rect, draw_flags);
         let text_alpha = display.text_color.a.max(1);
         for py in 0..height {
             for px in 0..width {
@@ -32154,6 +32186,10 @@ mod windows_overlay {
         }
     }
 
+    fn tracks_macro_foreground_window(hwnd: HWND) -> bool {
+        !hwnd.0.is_null() && !window_belongs_to_current_process(hwnd) && !is_internal_app_window(hwnd)
+    }
+
     fn is_app_ui_currently_foreground() -> bool {
         unsafe {
             let Some(ui_hwnd) = find_app_ui_window() else {
@@ -32238,6 +32274,13 @@ mod windows_overlay {
 
     fn handle_window_focus_event(controller_hwnd: HWND, hwnd: HWND) {
         let hwnd = normalize_focus_window(hwnd);
+        if !tracks_macro_foreground_window(hwnd) {
+            reset_window_focus_dispatch_guard();
+            unsafe {
+                let _ = KillTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID);
+            }
+            return;
+        }
         if !update_foreground_window(hwnd) {
             return;
         }
@@ -32375,6 +32418,9 @@ mod windows_overlay {
     }
 
     pub fn update_foreground_window(hwnd: HWND) -> bool {
+        if !tracks_macro_foreground_window(hwnd) {
+            return false;
+        }
         let current_hwnd = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
         if hwnd.0 as isize != current_hwnd {
             FOREGROUND_WINDOW_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
