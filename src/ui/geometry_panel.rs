@@ -8,6 +8,30 @@ impl CrosshairApp {
     pub(crate) const GEOMETRY_FIELD_EXPANDED_WIDTH: f32 = 120.0;
     pub(crate) const GEOMETRY_GRID_SPACING_X: f32 = 2.0;
 
+    fn geometry_label_text<'a>(language: UiLanguage, label: &'a str) -> &'a str {
+        match label {
+            "SVG Code" => Self::tr_lang(language, "SVG Code", "Mã SVG"),
+            "Width" => Self::tr_lang(language, "Width", "Rộng"),
+            "Height" => Self::tr_lang(language, "Height", "Cao"),
+            "Radius" => Self::tr_lang(language, "Radius", "Bán kính"),
+            "Radius X" => Self::tr_lang(language, "Radius X", "Bán kính X"),
+            "Radius Y" => Self::tr_lang(language, "Radius Y", "Bán kính Y"),
+            "Arrow Head" => Self::tr_lang(language, "Arrow Head", "Đầu mũi tên"),
+            "Font Size" => Self::tr_lang(language, "Font Size", "Cỡ chữ"),
+            "Thickness" => Self::tr_lang(language, "Thickness", "Độ dày"),
+            "Start" => Self::tr_lang(language, "Start", "Bắt đầu"),
+            "End" => Self::tr_lang(language, "End", "Kết thúc"),
+            "Rotate" => Self::tr_lang(language, "Rotate", "Xoay"),
+            "Opacity" => Self::tr_lang(language, "Opacity", "Độ mờ"),
+            "Fill Opacity" => Self::tr_lang(language, "Fill Opacity", "Độ mờ nền"),
+            "Points" => Self::tr_lang(language, "Points", "Điểm"),
+            "Content" => Self::tr_lang(language, "Content", "Nội dung"),
+            "Color" => Self::tr_lang(language, "Color", "Màu"),
+            "Fill" => Self::tr_lang(language, "Fill", "Tô màu"),
+            _ => label,
+        }
+    }
+
     pub(crate) fn render_geometry_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
         let mut changed = false;
@@ -1395,7 +1419,7 @@ impl CrosshairApp {
         let expanded_width = expanded_width.min(Self::GEOMETRY_FIELD_EXPANDED_WIDTH);
         ui.add_sized(
             [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
-            egui::Label::new(label),
+            egui::Label::new(Self::geometry_label_text(language, label)),
         );
         let id = ui.make_persistent_id((preset_id, object_id, row_id, "expr"));
         let response = Self::render_variable_text_edit(
@@ -1450,7 +1474,7 @@ impl CrosshairApp {
         if !label_a.is_empty() {
             ui.add_sized(
                 [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
-                egui::Label::new(label_a),
+                egui::Label::new(Self::geometry_label_text(language, label_a)),
             );
             let id_a = ui.make_persistent_id((preset_id, object_id, row_id, "expr-a"));
             let response_a = Self::render_variable_text_edit(
@@ -1480,7 +1504,7 @@ impl CrosshairApp {
         if !label_b.is_empty() {
             ui.add_sized(
                 [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
-                egui::Label::new(label_b),
+                egui::Label::new(Self::geometry_label_text(language, label_b)),
             );
             let id_b = ui.make_persistent_id((preset_id, object_id, row_id, "expr-b"));
             ui.horizontal(|ui| {
@@ -1519,7 +1543,7 @@ impl CrosshairApp {
                         .on_hover_text(Self::tr_lang(
                             language,
                             "Pick coordinates from screen",
-                            "Pick coordinates from screen",
+                            "Lấy tọa độ từ màn hình",
                         ))
                         .clicked()
                     {
@@ -1552,21 +1576,21 @@ impl CrosshairApp {
         let mut changed = false;
         ui.add_sized(
             [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
-            egui::Label::new(Self::tr_lang(language, "Mode", "Mode")),
+            egui::Label::new(Self::tr_lang(language, "Mode", "Chế độ")),
         );
         ComboBox::from_id_salt(ui.next_auto_id())
             .width(Self::GEOMETRY_FIELD_WIDTH)
             .selected_text(if *filled {
-                Self::tr_lang(language, "Filled", "Filled")
+                Self::tr_lang(language, "Filled", "Tô màu")
             } else {
-                Self::tr_lang(language, "Outline", "Outline")
+                Self::tr_lang(language, "Outline", "Viền")
             })
             .show_ui(ui, |ui| {
                 changed |= ui
-                    .selectable_value(filled, false, Self::tr_lang(language, "Outline", "Outline"))
+                    .selectable_value(filled, false, Self::tr_lang(language, "Outline", "Viền"))
                     .changed();
                 changed |= ui
-                    .selectable_value(filled, true, Self::tr_lang(language, "Filled", "Filled"))
+                    .selectable_value(filled, true, Self::tr_lang(language, "Filled", "Tô màu"))
                     .changed();
             });
         ui.end_row();
@@ -1608,11 +1632,11 @@ impl CrosshairApp {
         let empty_tooltip = Self::tr_lang(
             language,
             "No override color set yet.",
-            "No override color set yet.",
+            "Chưa đặt màu ghi đè.",
         );
         ui.add_sized(
             [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
-            egui::Label::new(label),
+            egui::Label::new(Self::geometry_label_text(language, label)),
         );
         ui.horizontal(|ui| {
             if allow_color_expression {
@@ -1626,7 +1650,7 @@ impl CrosshairApp {
                     Self::GEOMETRY_FIELD_EXPANDED_WIDTH,
                     18.0,
                     18.0,
-                    "{A} or #RRGGBB",
+                    "{A} hoặc #RRGGBB",
                     false,
                 );
                 changed |= expr_response.changed();

@@ -2427,7 +2427,16 @@ impl CrosshairApp {
                     .find(|(option_id, _)| *option_id == id)
                     .map(|(_, label)| label.clone())
             })
-            .unwrap_or_else(|| Self::tr_lang(language, fallback, fallback).to_owned())
+            .unwrap_or_else(|| {
+                let fallback_vi = match fallback {
+                    "Select image search preset" => "Chọn preset image search",
+                    "Select geometry" => "Chọn geometry",
+                    "Select OCR" => "Chọn OCR",
+                    "Any Preset" => "Mọi preset",
+                    _ => fallback,
+                };
+                Self::tr_lang(language, fallback, fallback_vi).to_owned()
+            })
     }
 
     fn option_label_by_id_or_any(
@@ -2441,7 +2450,11 @@ impl CrosshairApp {
         selected_id
             .and_then(|id| {
                 if id == any_id {
-                    Some(Self::tr_lang(language, any_label, any_label).to_owned())
+                    let any_label_vi = match any_label {
+                        "Any Preset" => "Mọi preset",
+                        _ => any_label,
+                    };
+                    Some(Self::tr_lang(language, any_label, any_label_vi).to_owned())
                 } else {
                     options
                         .iter()
@@ -2449,7 +2462,16 @@ impl CrosshairApp {
                         .map(|(_, label)| label.clone())
                 }
             })
-            .unwrap_or_else(|| Self::tr_lang(language, fallback, fallback).to_owned())
+            .unwrap_or_else(|| {
+                let fallback_vi = match fallback {
+                    "Select image search preset" => "Chọn preset image search",
+                    "Select geometry" => "Chọn geometry",
+                    "Select OCR" => "Chọn OCR",
+                    "Any Preset" => "Mọi preset",
+                    _ => fallback,
+                };
+                Self::tr_lang(language, fallback, fallback_vi).to_owned()
+            })
     }
 
     fn ocr_step_selected_label(

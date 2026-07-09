@@ -122,12 +122,12 @@ impl CrosshairApp {
             TextHighlightMode::VariableTokens => Some(Self::tr_lang(
                 language,
                 "Expression field. Variables and functions work directly here. Example: count + 1 or contains(name, \"boss\").",
-                "� bi?u th?c. Bi?n v� h�m d�ng tr?c ti?p ? d�y. V� d?: count + 1 ho?c contains(name, \"boss\").",
+                "Ô biểu thức. Biến và hàm dùng trực tiếp ở đây. Ví dụ: count + 1 hoặc contains(name, \"boss\").",
             )),
             TextHighlightMode::Interpolations => Some(Self::tr_lang(
                 language,
                 "Text field. Plain text stays as-is. Put variables or math inside {} to show values. Example: HP: {player_hp}.",
-                "� van b?n. Ch? thu?ng s? du?c gi? nguy�n. H�y d?t bi?n ho?c ph�p t�nh trong {} d? hi?n gi� tr?. V� d?: HP: {player_hp}.",
+                "Ô văn bản. Chữ thường sẽ được giữ nguyên. Hãy đặt biến hoặc phép tính trong {} để hiện giá trị. Ví dụ: HP: {player_hp}.",
             )),
             TextHighlightMode::None => None,
         }
@@ -957,9 +957,11 @@ impl CrosshairApp {
             .width(width)
             .selected_text(match mode {
                 1 => Self::tr_lang(language, "Ethernet", "Ethernet"),
-                2 if custom_name.trim().is_empty() => {
-                    Self::tr_lang(language, "Loading adapters...", "Loading adapters...")
-                }
+                2 if custom_name.trim().is_empty() => Self::tr_lang(
+                    language,
+                    "Loading adapters...",
+                    "\u{0110}ang t\u{1ea3}i adapter...",
+                ),
                 2 => custom_name.as_str(),
                 _ => Self::tr_lang(language, "Wi-Fi", "Wi-Fi"),
             })
@@ -985,7 +987,7 @@ impl CrosshairApp {
                         egui::Label::new(Self::tr_lang(
                             language,
                             "Loading adapters...",
-                            "Loading adapters...",
+                            "\u{0110}ang t\u{1ea3}i adapter...",
                         )),
                     );
                 } else {
@@ -6754,10 +6756,10 @@ impl CrosshairApp {
                                     live_sync |= ui
                                         .checkbox(
                                             &mut preset.press_stop_step_enabled,
-                                            Self::tr_lang(language, "Run one action if stopped early", "Run one action if stopped early"),
+                                            Self::tr_lang(language, "Run one action if stopped early", "Chạy một action nếu bị dừng sớm"),
                                         )
                                         .on_hover_text(
-                                            Self::tr_lang(language, "If this macro is interrupted by trigger again, run this extra action once on stop.", "If this macro is interrupted by trigger again, run this extra action once on stop."),
+                                            Self::tr_lang(language, "If this macro is interrupted by trigger again, run this extra action once on stop.", "Nếu macro này bị ngắt do kích hoạt lại trigger, hãy chạy action phụ này một lần khi dừng."),
                                         )
                                         .changed();
                                 } else {
@@ -6780,10 +6782,10 @@ impl CrosshairApp {
                                 live_sync |= ui
                                     .checkbox(
                                         &mut preset.hold_stop_step_enabled,
-                                        Self::tr_lang(language, "Run one action if hold stops early", "Run one action if hold stops early"),
+                                        Self::tr_lang(language, "Run one action if hold stops early", "Chạy một action nếu hold dừng sớm"),
                                     )
                                     .on_hover_text(
-                                        Self::tr_lang(language, "If this hold macro is interrupted before it finishes all steps, run this extra action once on stop.", "If this hold macro is interrupted before it finishes all steps, run this extra action once on stop."),
+                                        Self::tr_lang(language, "If this hold macro is interrupted before it finishes all steps, run this extra action once on stop.", "Nếu macro hold này bị ngắt trước khi chạy hết các bước, hãy chạy action phụ này một lần khi dừng."),
                                      )
                                         .changed();
                                 } else {
@@ -7583,7 +7585,7 @@ impl CrosshairApp {
                         }
                     );
                     if !image_presets.is_empty() {
-                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), "Image Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), Self::tr_lang(language, "Image Detect", "Ph\u{00e1}t hi\u{1ec7}n \u{1ea3}nh"));
                         ui.separator();
                         for p in &image_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -7595,7 +7597,7 @@ impl CrosshairApp {
                         if !image_presets.is_empty() {
                             ui.add_space(4.0);
                         }
-                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), "Color Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), Self::tr_lang(language, "Color Detect", "Ph\u{00e1}t hi\u{1ec7}n m\u{00e0}u"));
                         ui.separator();
                         for p in &color_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -7608,7 +7610,7 @@ impl CrosshairApp {
                         if !image_presets.is_empty() || !color_presets.is_empty() {
                             ui.add_space(4.0);
                         }
-                        ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "Pixel Counter");
+                        ui.colored_label(egui::Color32::from_rgb(255, 165, 0), Self::tr_lang(language, "Pixel Counter", "\u{0110}\u{1ebf}m pixel"));
                         ui.separator();
                         for p in &pixel_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -7944,7 +7946,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               Self::tr_lang(
                                                                   language,
                                                                   "Finish current iteration before stop",
-                                                                  "Finish current iteration before stop",
+                                                                  "Ho\u{00e0}n t\u{1ea5}t l\u{01b0}\u{1ee3}t l\u{1eb7}p hi\u{1ec7}n t\u{1ea1}i tr\u{01b0}\u{1edbc} khi d\u{1eeb}ng",
                                                               ),
                                                           );
                                                           if response.changed() {
@@ -8312,7 +8314,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 } else if matches!(step.action, MacroAction::DisableZoom | MacroAction::HideHud) {
                                                      ui.add_sized(
                                                          [110.0, 21.0],
-                                                         egui::Label::new(Self::tr_lang(language, "No input", "No input")),
+                                                         egui::Label::new(""),
                                                      );
                                                 } else if step.action == MacroAction::LockMouse {
                                                     Self::render_mouse_move_direction_controls(
@@ -8496,7 +8498,7 @@ if supports_move_mouse || show_detection_tuning {
                         }
                     );
                     if !image_presets.is_empty() {
-                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), "Image Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), Self::tr_lang(language, "Image Detect", "Ph\u{00e1}t hi\u{1ec7}n \u{1ea3}nh"));
                         ui.separator();
                         for p in &image_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -8509,7 +8511,7 @@ if supports_move_mouse || show_detection_tuning {
                         if !image_presets.is_empty() {
                             ui.add_space(4.0);
                         }
-                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), "Color Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), Self::tr_lang(language, "Color Detect", "Ph\u{00e1}t hi\u{1ec7}n m\u{00e0}u"));
                         ui.separator();
                         for p in &color_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -9116,13 +9118,13 @@ if supports_move_mouse || show_detection_tuning {
                                                             Self::tr_lang(
                                                                 language,
                                                                 "Auto up on end",
-                                                                "Auto up on end",
+                                                                "T\u{1ef1} nh\u{1ea3} khi k\u{1ebf}t th\u{00fac}",
                                                             ),
                                                         )
                                                         .on_hover_text(Self::tr_lang(
                                                             language,
                                                             "Release this held key automatically when the macro ends.",
-                                                            "Release this held key automatically when the macro ends.",
+                                                            "T\u{1ef1} \u{0111}\u{1ed9}ng nh\u{1ea3} ph\u{00ed}m \u{0111}ang gi\u{1eef} n\u{00e0}y khi macro k\u{1ebf}t th\u{00fac}.",
                                                         ));
                                                     live_sync |= response.changed();
                                                 }
@@ -9881,7 +9883,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                         }
                     );
                     if !image_presets.is_empty() {
-                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), "Image Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), Self::tr_lang(language, "Image Detect", "Ph\u{00e1}t hi\u{1ec7}n \u{1ea3}nh"));
                         ui.separator();
                         for p in &image_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -9893,7 +9895,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                         if !image_presets.is_empty() {
                             ui.add_space(4.0);
                         }
-                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), "Color Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), Self::tr_lang(language, "Color Detect", "Ph\u{00e1}t hi\u{1ec7}n m\u{00e0}u"));
                         ui.separator();
                         for p in &color_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -9906,7 +9908,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                         if !image_presets.is_empty() || !color_presets.is_empty() {
                             ui.add_space(4.0);
                         }
-                        ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "Pixel Counter");
+                        ui.colored_label(egui::Color32::from_rgb(255, 165, 0), Self::tr_lang(language, "Pixel Counter", "\u{0110}\u{1ebf}m pixel"));
                         ui.separator();
                         for p in &pixel_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -10242,7 +10244,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               Self::tr_lang(
                                                                   language,
                                                                   "Finish current iteration before stop",
-                                                                  "Finish current iteration before stop",
+                                                                  "Ho\u{00e0}n t\u{1ea5}t l\u{01b0}\u{1ee3}t l\u{1eb7}p hi\u{1ec7}n t\u{1ea1}i tr\u{01b0}\u{1edbc} khi d\u{1eeb}ng",
                                                               ),
                                                           );
                                                           if response.changed() {
@@ -10613,7 +10615,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 } else if matches!(step.action, MacroAction::DisableZoom | MacroAction::HideHud) {
                                                      ui.add_sized(
                                                          [110.0, 21.0],
-                                                         egui::Label::new(Self::tr_lang(language, "No input", "No input")),
+                                                         egui::Label::new(""),
                                                      );
                                                 } else if step.action == MacroAction::LockMouse {
                                                     Self::render_mouse_move_direction_controls(
@@ -10797,7 +10799,7 @@ if supports_move_mouse || show_detection_tuning {
                         }
                     );
                     if !image_presets.is_empty() {
-                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), "Image Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), Self::tr_lang(language, "Image Detect", "Ph\u{00e1}t hi\u{1ec7}n \u{1ea3}nh"));
                         ui.separator();
                         for p in &image_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -10810,7 +10812,7 @@ if supports_move_mouse || show_detection_tuning {
                         if !image_presets.is_empty() {
                             ui.add_space(4.0);
                         }
-                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), "Color Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), Self::tr_lang(language, "Color Detect", "Ph\u{00e1}t hi\u{1ec7}n m\u{00e0}u"));
                         ui.separator();
                         for p in &color_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -11417,13 +11419,13 @@ if supports_move_mouse || show_detection_tuning {
                                                             Self::tr_lang(
                                                                 language,
                                                                 "Auto up on end",
-                                                                "Auto up on end",
+                                                                "T\u{1ef1} nh\u{1ea3} khi k\u{1ebf}t th\u{00fac}",
                                                             ),
                                                         )
                                                         .on_hover_text(Self::tr_lang(
                                                             language,
                                                             "Release this held key automatically when the macro ends.",
-                                                            "Release this held key automatically when the macro ends.",
+                                                            "T\u{1ef1} \u{0111}\u{1ed9}ng nh\u{1ea3} ph\u{00ed}m \u{0111}ang gi\u{1eef} n\u{00e0}y khi macro k\u{1ebf}t th\u{00fac}.",
                                                         ));
                                                     live_sync |= response.changed();
                                                 }
@@ -13127,7 +13129,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     let selected_label = Self::option_label_by_id(
                                                         &image_search_preset_options,
                                                         selected_id,
-                                                        "Select image",
+                                                        "Select image search preset",
                                                         language,
                                                     );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "image-search-preset-step"))
@@ -13151,7 +13153,7 @@ if supports_move_mouse || show_detection_tuning {
                         }
                     );
                     if !image_presets.is_empty() {
-                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), "Image Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), Self::tr_lang(language, "Image Detect", "Ph\u{00e1}t hi\u{1ec7}n \u{1ea3}nh"));
                         ui.separator();
                         for p in &image_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -13163,7 +13165,7 @@ if supports_move_mouse || show_detection_tuning {
                         if !image_presets.is_empty() {
                             ui.add_space(4.0);
                         }
-                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), "Color Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), Self::tr_lang(language, "Color Detect", "Ph\u{00e1}t hi\u{1ec7}n m\u{00e0}u"));
                         ui.separator();
                         for p in &color_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -13176,7 +13178,7 @@ if supports_move_mouse || show_detection_tuning {
                         if !image_presets.is_empty() || !color_presets.is_empty() {
                             ui.add_space(4.0);
                         }
-                        ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "Pixel Counter");
+                        ui.colored_label(egui::Color32::from_rgb(255, 165, 0), Self::tr_lang(language, "Pixel Counter", "\u{0110}\u{1ebf}m pixel"));
                         ui.separator();
                         for p in &pixel_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -13576,7 +13578,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               Self::tr_lang(
                                                                   language,
                                                                   "Finish current iteration before stop",
-                                                                  "Finish current iteration before stop",
+                                                                  "Ho\u{00e0}n t\u{1ea5}t l\u{01b0}\u{1ee3}t l\u{1eb7}p hi\u{1ec7}n t\u{1ea1}i tr\u{01b0}\u{1edbc} khi d\u{1eeb}ng",
                                                               ),
                                                           );
                                                           if response.changed() {
@@ -14013,7 +14015,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 } else if matches!(step.action, MacroAction::DisableZoom | MacroAction::HideHud) {
                                                      ui.add_sized(
                                                          [146.0, 21.0],
-                                                         egui::Label::new(Self::tr_lang(language, "No input", "No input")),
+                                                         egui::Label::new(""),
                                                      );
                                                 } else if step.action == MacroAction::LockMouse {
                                                     Self::render_mouse_move_direction_controls(
@@ -14194,7 +14196,7 @@ if supports_move_mouse || show_detection_tuning {
                         }
                     );
                     if !image_presets.is_empty() {
-                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), "Image Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), Self::tr_lang(language, "Image Detect", "Ph\u{00e1}t hi\u{1ec7}n \u{1ea3}nh"));
                         ui.separator();
                         for p in &image_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -14207,7 +14209,7 @@ if supports_move_mouse || show_detection_tuning {
                         if !image_presets.is_empty() {
                             ui.add_space(4.0);
                         }
-                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), "Color Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), Self::tr_lang(language, "Color Detect", "Ph\u{00e1}t hi\u{1ec7}n m\u{00e0}u"));
                         ui.separator();
                         for p in &color_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -14558,7 +14560,7 @@ if supports_move_mouse || show_detection_tuning {
                         }
                     );
                     if !image_presets.is_empty() {
-                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), "Image Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), Self::tr_lang(language, "Image Detect", "Ph\u{00e1}t hi\u{1ec7}n \u{1ea3}nh"));
                         ui.separator();
                         for p in &image_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -14570,7 +14572,7 @@ if supports_move_mouse || show_detection_tuning {
                         if !image_presets.is_empty() {
                             ui.add_space(4.0);
                         }
-                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), "Color Detect");
+                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), Self::tr_lang(language, "Color Detect", "Ph\u{00e1}t hi\u{1ec7}n m\u{00e0}u"));
                         ui.separator();
                         for p in &color_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -14583,7 +14585,7 @@ if supports_move_mouse || show_detection_tuning {
                         if !image_presets.is_empty() || !color_presets.is_empty() {
                             ui.add_space(4.0);
                         }
-                        ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "Pixel Counter");
+                        ui.colored_label(egui::Color32::from_rgb(255, 165, 0), Self::tr_lang(language, "Pixel Counter", "\u{0110}\u{1ebf}m pixel"));
                         ui.separator();
                         for p in &pixel_presets {
                             if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
@@ -15168,13 +15170,13 @@ if supports_move_mouse || show_detection_tuning {
                                                             Self::tr_lang(
                                                                 language,
                                                                 "Auto up on end",
-                                                                "Auto up on end",
+                                                                "T\u{1ef1} nh\u{1ea3} khi k\u{1ebf}t th\u{00fac}",
                                                             ),
                                                         )
                                                         .on_hover_text(Self::tr_lang(
                                                             language,
                                                             "Release this held key automatically when the macro ends.",
-                                                            "Release this held key automatically when the macro ends.",
+                                                            "T\u{1ef1} \u{0111}\u{1ed9}ng nh\u{1ea3} ph\u{00ed}m \u{0111}ang gi\u{1eef} n\u{00e0}y khi macro k\u{1ebf}t th\u{00fac}.",
                                                         ));
                                                     live_sync |= response.changed();
                                                 }
@@ -18065,7 +18067,7 @@ if supports_move_mouse || show_detection_tuning {
             ui.spacing_mut().item_spacing.x = Self::GEOMETRY_GRID_SPACING_X;
             ui.add_sized(
                 [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
-                egui::Label::new("SVG Code"),
+                egui::Label::new(Self::tr_lang(language, "SVG Code", "Mã SVG")),
             );
             let id = ui.make_persistent_id((preset_id, object_id, "override-code"));
             let response =
@@ -18104,7 +18106,7 @@ if supports_move_mouse || show_detection_tuning {
         ui.weak(Self::tr_lang(
             language,
             "Filled fields override the selected preset.",
-            "Filled fields override the selected preset.",
+            "Ô có giá trị sẽ đè lên preset đã chọn.",
         ));
         ui.add_space(4.0);
 
@@ -18950,7 +18952,7 @@ if supports_move_mouse || show_detection_tuning {
                         let modify_changed = ui
                             .checkbox(
                                 &mut step.geometry_preset_modify_enabled,
-                                Self::tr_lang(language, "Modify", "Modify"),
+                                Self::tr_lang(language, "Modify", "S\u{1eeda}"),
                             )
                             .changed();
                         if modify_changed {
@@ -19338,20 +19340,20 @@ if supports_move_mouse || show_detection_tuning {
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                             egui::ComboBox::from_id_salt(ui.id().with((id_prefix, "audio-start-mode")))
                                 .selected_text(match start_mode {
-                                    0 => Self::tr_lang(language, "Preset", "Preset"),
-                                    _ => Self::tr_lang(language, "Pitch", "Pitch"),
+                                    0 => Self::tr_lang(language, "Preset", "T\u{1eeb} preset"),
+                                    _ => Self::tr_lang(language, "Pitch", "Cao \u{0111}\u{1ed9}"),
                                 })
                                 .width(90.0)
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(
                                         &mut start_mode,
                                         0,
-                                        Self::tr_lang(language, "Preset", "Preset"),
+                                        Self::tr_lang(language, "Preset", "T\u{1eeb} preset"),
                                     );
                                     ui.selectable_value(
                                         &mut start_mode,
                                         1,
-                                        Self::tr_lang(language, "Pitch", "Pitch"),
+                                        Self::tr_lang(language, "Pitch", "Cao \u{0111}\u{1ed9}"),
                                     );
                                 });
                             match start_mode {
