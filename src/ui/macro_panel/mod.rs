@@ -16608,7 +16608,7 @@ if supports_move_mouse || show_detection_tuning {
                             ),
                         );
                         if ui.button(Self::tr_lang(language, "Add", "Add")).clicked() {
-                            let name_trimmed = name_buf.trim().to_uppercase();
+                            let name_trimmed = name_buf.trim().to_owned();
                             if !name_trimmed.is_empty() {
                                 let stored_value = val_buf.trim().to_owned();
                                 if !self
