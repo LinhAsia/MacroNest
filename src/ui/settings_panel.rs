@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -1656,8 +1656,13 @@ impl CrosshairApp {
                 .build()
                 .map_err(|e| e.to_string());
             let result = client.and_then(|c| {
+                let cache_buster = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|duration| duration.as_secs())
+                    .unwrap_or(0);
+                let manifest_url = format!("{UPDATE_MANIFEST_URL}?ts={cache_buster}");
                 let resp = c
-                    .get(UPDATE_MANIFEST_URL)
+                    .get(&manifest_url)
                     .send()
                     .map_err(|e| e.to_string())?;
 
