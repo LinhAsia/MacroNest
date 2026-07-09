@@ -18,7 +18,7 @@ use std::os::windows::process::CommandExt;
 
 const GITHUB_RELEASES_PAGE_URL: &str = "https://github.com/LinhAsia/MacroNest/releases/latest";
 const UPDATE_MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/LinhAsia/MacroNest/master/update.json";
+    "https://github.com/LinhAsia/MacroNest/raw/master/update.json";
 
 #[derive(Debug, Deserialize)]
 struct UpdateManifest {
