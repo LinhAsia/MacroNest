@@ -16590,7 +16590,7 @@ if supports_move_mouse || show_detection_tuning {
                         Color32::from_rgba_premultiplied(100, 100, 100, 150)
                     };
                     ui.horizontal(|ui| {
-                        ui.add_sized(
+                        let name_response = ui.add_sized(
                             [100.0, 20.0],
                             egui::TextEdit::singleline(&mut name_buf).hint_text(
                                 RichText::new(Self::tr_lang(language, "CONST_NAME", "CONST_NAME"))
@@ -16599,7 +16599,7 @@ if supports_move_mouse || show_detection_tuning {
                             ),
                         );
                         ui.label("=");
-                        ui.add_sized(
+                        let value_response = ui.add_sized(
                             [140.0, 20.0],
                             egui::TextEdit::singleline(&mut val_buf).hint_text(
                                 RichText::new(Self::tr_lang(language, "Value", "Value"))
@@ -16607,7 +16607,10 @@ if supports_move_mouse || show_detection_tuning {
                                     .weak(),
                             ),
                         );
-                        if ui.button(Self::tr_lang(language, "Add", "Add")).clicked() {
+                        let enter_pressed = (name_response.has_focus() || value_response.has_focus())
+                            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                        let add_clicked = ui.button(Self::tr_lang(language, "Add", "Add")).clicked();
+                        if add_clicked || enter_pressed {
                             let name_trimmed = name_buf.trim().to_owned();
                             if !name_trimmed.is_empty() {
                                 let stored_value = val_buf.trim().to_owned();
