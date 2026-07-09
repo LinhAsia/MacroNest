@@ -35537,16 +35537,14 @@ mod windows_overlay {
     }
 
     pub(crate) fn is_hud_active(preset_id_str: &str) -> bool {
-        let preset_id = match preset_id_str.trim().parse::<u32>() {
-            Ok(id) => id,
-            Err(_) => return false,
-        };
+        let trimmed = preset_id_str.trim();
+        let preset_id = trimmed.parse::<u32>().ok();
         let hud_state = HUD_DISPLAY.lock();
-        if hud_state.as_ref().and_then(|h| h.preset_id) == Some(preset_id) {
+        if hud_state.as_ref().and_then(|h| h.preset_id) == preset_id {
             return true;
         }
         let preview_state = HUD_PREVIEW_DISPLAY.lock();
-        preview_state.as_ref().and_then(|h| h.preset_id) == Some(preset_id)
+        preview_state.as_ref().and_then(|h| h.preset_id) == preset_id
     }
 
     pub(crate) fn has_active_macro_visual_overlay() -> bool {
