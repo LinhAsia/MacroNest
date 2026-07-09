@@ -52,6 +52,10 @@ impl CrosshairApp {
         std::env::temp_dir().join(format!("{}.part", Self::update_download_file_stem(version)))
     }
 
+    fn update_download_ready_path(version: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("{}.ready", Self::update_download_file_stem(version)))
+    }
+
     pub(crate) fn render_settings_popup(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
         egui::ScrollArea::vertical()
@@ -1675,7 +1679,8 @@ impl CrosshairApp {
                     return Ok(());
                 }
                 let downloaded_update_path = Self::update_download_final_path(&latest_version);
-                if downloaded_update_path.exists() {
+                let downloaded_update_ready = Self::update_download_ready_path(&latest_version);
+                if downloaded_update_path.exists() && downloaded_update_ready.exists() {
                     let _ = ui_tx.send(UiCommand::UpdateDownloadFinished(
                         downloaded_update_path.to_string_lossy().to_string(),
                     ));
@@ -1740,7 +1745,9 @@ impl CrosshairApp {
                 let total_size = resp.content_length().unwrap_or(0);
                 let temp_part_path = Self::update_download_partial_path(&version);
                 let temp_path = Self::update_download_final_path(&version);
+                let ready_path = Self::update_download_ready_path(&version);
                 let _ = fs::remove_file(&temp_part_path);
+                let _ = fs::remove_file(&ready_path);
                 let mut file = fs::File::create(&temp_part_path).map_err(|e| e.to_string())?;
                 let mut downloaded: u64 = 0;
                 let mut buffer = [0u8; 16_384];
@@ -1768,6 +1775,7 @@ impl CrosshairApp {
                 file.flush().map_err(|e| e.to_string())?;
                 drop(file);
                 fs::rename(&temp_part_path, &temp_path).map_err(|e| e.to_string())?;
+                fs::write(&ready_path, version.as_bytes()).map_err(|e| e.to_string())?;
                 progress.store(1000, Ordering::SeqCst);
                 let _ = ui_tx.send(UiCommand::UpdateDownloadFinished(
                     temp_path.to_string_lossy().to_string(),
@@ -1790,10 +1798,12 @@ impl CrosshairApp {
             if !Path::new(&new_exe_path).exists() {
                 bail!("Downloaded update file was not found");
             }
+            let ready_stamp = Path::new(&new_exe_path).with_extension("ready");
             let current_pid = std::process::id();
             let current_exe_ps = current_exe.display().to_string().replace('\'', "''");
             let new_exe_ps = new_exe_path.replace('\'', "''");
             let old_exe_ps = old_exe.display().to_string().replace('\'', "''");
+            let ready_stamp_ps = ready_stamp.display().to_string().replace('\'', "''");
             let current_dir_ps = current_exe
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
@@ -1807,6 +1817,7 @@ impl CrosshairApp {
                  $currentExe='{current_exe_ps}'; \
                  $newExe='{new_exe_ps}'; \
                  $oldExe='{old_exe_ps}'; \
+                 $readyStamp='{ready_stamp_ps}'; \
                  $currentDir='{current_dir_ps}'; \
                  $errorLog='{error_log_ps}'; \
                  if (Test-Path -LiteralPath $errorLog) {{ Remove-Item -LiteralPath $errorLog -Force -ErrorAction SilentlyContinue }}; \
@@ -1817,8 +1828,18 @@ impl CrosshairApp {
                      if (Test-Path -LiteralPath $oldExe) {{ Remove-Item -LiteralPath $oldExe -Force -ErrorAction SilentlyContinue }}; \
                      if (Test-Path -LiteralPath $currentExe) {{ Move-Item -LiteralPath $currentExe -Destination $oldExe -Force }}; \
                      Copy-Item -LiteralPath $newExe -Destination $currentExe -Force; \
+                     $launched = $null; \
+                     for ($i = 0; $i -lt 10 -and -not $launched; $i++) {{ \
+                         try {{ \
+                             $launched = Start-Process -FilePath $currentExe -WorkingDirectory $currentDir -PassThru -ErrorAction Stop; \
+                         }} catch {{ \
+                             Start-Sleep -Milliseconds 500; \
+                         }} \
+                     }} \
+                     if (-not $launched) {{ throw 'Failed to relaunch updated app.' }}; \
                      Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue; \
-                     Start-Process -FilePath $currentExe -WorkingDirectory $currentDir; \
+                     Remove-Item -LiteralPath $readyStamp -Force -ErrorAction SilentlyContinue; \
+                     Remove-Item -LiteralPath $oldExe -Force -ErrorAction SilentlyContinue; \
                  }} catch {{ \
                      $_ | Out-File -LiteralPath $errorLog -Encoding utf8; \
                      throw; \
