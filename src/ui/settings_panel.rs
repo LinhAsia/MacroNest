@@ -6,6 +6,7 @@ use eframe::egui::{
     self, Button, Color32, Frame, Margin, Order, RichText, Shadow, Stroke, TextEdit, WidgetText,
     vec2,
 };
+use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -16,6 +17,17 @@ use std::time::{Duration, Instant};
 use std::os::windows::process::CommandExt;
 
 const GITHUB_RELEASES_PAGE_URL: &str = "https://github.com/LinhAsia/MacroNest/releases/latest";
+const UPDATE_MANIFEST_URL: &str =
+    "https://raw.githubusercontent.com/LinhAsia/MacroNest/master/update.json";
+
+#[derive(Debug, Deserialize)]
+struct UpdateManifest {
+    version: String,
+    #[serde(default, alias = "body")]
+    notes: String,
+    #[serde(alias = "download_url", alias = "browser_download_url")]
+    url: String,
+}
 
 impl CrosshairApp {
     pub(crate) fn render_settings_popup(&mut self, ui: &mut egui::Ui) {
@@ -1591,49 +1603,37 @@ impl CrosshairApp {
                 .map_err(|e| e.to_string());
             let result = client.and_then(|c| {
                 let resp = c
-                    .get("https://api.github.com/repos/LinhAsia/MacroNest/releases/latest")
+                    .get(UPDATE_MANIFEST_URL)
                     .send()
                     .map_err(|e| e.to_string())?;
 
                 if resp.status() == reqwest::StatusCode::NOT_FOUND {
-                    return Err("No releases found on GitHub.".to_owned());
+                    return Err("No update manifest found.".to_owned());
                 }
 
                 if !resp.status().is_success() {
-                    return Err(Self::github_update_error_message(resp));
+                    return Err(Self::update_manifest_error_message(resp));
                 }
 
-                let json: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
-                let latest_version = json["tag_name"]
-                    .as_str()
-                    .unwrap_or("")
-                    .trim_start_matches('v')
-                    .to_owned();
+                let manifest: UpdateManifest = resp.json().map_err(|e| e.to_string())?;
+                let latest_version = manifest.version.trim().trim_start_matches('v').to_owned();
                 if latest_version.is_empty() {
-                    return Err("Failed to parse version from GitHub".to_owned());
+                    return Err("Failed to parse version from update manifest".to_owned());
                 }
                 if Self::versions_are_equal(&latest_version, &current_version) {
                     let _ = ui_tx.send(UiCommand::UpdateUpToDate);
                     return Ok(());
                 }
-                let body = json["body"].as_str().unwrap_or("").to_owned();
-                let download_url = json["assets"]
-                    .as_array()
-                    .and_then(|assets| {
-                        assets.iter().find(|a| {
-                            a["name"]
-                                .as_str()
-                                .map(|n| n.ends_with(".exe"))
-                                .unwrap_or(false)
-                        })
-                    })
-                    .and_then(|a| a["browser_download_url"].as_str())
-                    .map(|s| s.to_owned());
-                if let Some(url) = download_url {
-                    let _ = ui_tx.send(UiCommand::UpdateAvailable(latest_version, body, url));
-                } else {
+                let download_url = manifest.url.trim().to_owned();
+                if download_url.is_empty() {
                     let _ = ui_tx.send(UiCommand::UpdateError(
-                        "No executable found in the latest release".to_owned(),
+                        "No executable found in update manifest".to_owned(),
+                    ));
+                } else {
+                    let _ = ui_tx.send(UiCommand::UpdateAvailable(
+                        latest_version,
+                        manifest.notes,
+                        download_url,
                     ));
                 }
                 Ok(())
@@ -1645,13 +1645,15 @@ impl CrosshairApp {
         });
     }
 
-    fn github_update_error_message(resp: reqwest::blocking::Response) -> String {
+    fn update_manifest_error_message(resp: reqwest::blocking::Response) -> String {
         let status = resp.status();
 
-        if status == reqwest::StatusCode::FORBIDDEN {
-            "GitHub rate limit reached. Please try again later.".to_owned()
+        if status == reqwest::StatusCode::FORBIDDEN
+            || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        {
+            "Update server is rate-limited. Please try again later.".to_owned()
         } else {
-            format!("GitHub API error: {}", status)
+            format!("Update server error: {}", status)
         }
     }
 
