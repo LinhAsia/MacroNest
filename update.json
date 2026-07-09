@@ -1,5 +1,5 @@
 {
-  "version": "1.2.3-test",
-  "notes": "Updater restart test build.",
-  "url": "https://github.com/LinhAsia/MacroNest/releases/download/v1.2.3-test/MacroNest.exe"
+  "version": "1.2.2",
+  "notes": "Added some features and fixed some bugs.",
+  "url": "https://github.com/LinhAsia/MacroNest/releases/download/v1.2.2/MacroNest.exe"
 }
