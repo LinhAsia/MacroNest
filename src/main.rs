@@ -47,8 +47,7 @@ fn cleanup_post_update_artifacts() {
                 continue;
             };
             let should_remove = file_name == "macronest_update_error.txt"
-                || (file_name.starts_with("macronest_update")
-                    && (file_name.ends_with(".exe") || file_name.ends_with(".part")));
+                || (file_name.starts_with("macronest_update") && file_name.ends_with(".part"));
             if should_remove {
                 let _ = std::fs::remove_file(path);
             }
