@@ -5,10 +5,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::{
-    ActiveTimerState, HOOK_STATE, RANDOM_STATE, RUNTIME_VARIABLES, TEXT_VARIABLES,
-    current_mouse_speed, current_system_volume_percent, request_ui_repaint, wake_command_queue,
+    RANDOM_STATE, RUNTIME_VARIABLES, TEXT_VARIABLES, current_mouse_speed,
+    current_system_volume_percent,
 };
-use crate::model::TimerPreset;
 use crate::window_list::window_title;
 
 pub fn interpolate_variables(text: &str) -> String {
@@ -472,109 +471,6 @@ pub(crate) fn set_variable_value(target_var: &str, value: f64) {
     }
 
     TEXT_VARIABLES.lock().remove(target_trimmed);
-
-    if target_trimmed.contains('.') {
-        let parts: Vec<&str> = target_trimmed.split('.').collect();
-        if parts.len() == 2 {
-            let obj_name = parts[0].trim().to_lowercase();
-            let prop_name = parts[1].trim().to_lowercase();
-            let mut hook_state = HOOK_STATE.lock();
-            let timer_preset = resolve_timer_preset_ref(&hook_state, &obj_name);
-            if let Some(timer) = timer_preset {
-                let state =
-                    hook_state
-                        .active_timers
-                        .entry(timer.id)
-                        .or_insert_with(|| ActiveTimerState {
-                            running: false,
-                            start_time: None,
-                            elapsed_ms: 0,
-                            on_complete_macro_preset_id: None,
-                        });
-                let current_elapsed = state.get_elapsed_ms();
-                let current_ms = if timer.is_countdown {
-                    let total_ms = (timer.duration_secs as u64) * 1000;
-                    if total_ms > current_elapsed {
-                        total_ms - current_elapsed
-                    } else {
-                        0
-                    }
-                } else {
-                    current_elapsed
-                };
-                let mut hour = (current_ms / 3600000) as i32;
-                let mut minute = ((current_ms % 3600000) / 60000) as i32;
-                let mut second = ((current_ms % 60000) / 1000) as i32;
-                let mut millisecond = (current_ms % 1000) as i32;
-                let value_i = clamp_f64_to_i32(value);
-                match prop_name.as_str() {
-                    "hour" | "h" => hour = value_i.max(0),
-                    "minute" | "m" => minute = value_i.clamp(0, 59),
-                    "second" | "s" => second = value_i.clamp(0, 59),
-                    "millisecond" | "ms" => millisecond = value_i.clamp(0, 999),
-                    "raw" | "total_ms" => {
-                        let new_ms = value_i.max(0) as u64;
-                        hour = (new_ms / 3600000) as i32;
-                        minute = ((new_ms % 3600000) / 60000) as i32;
-                        second = ((new_ms % 60000) / 1000) as i32;
-                        millisecond = (new_ms % 1000) as i32;
-                    }
-                    "total_sec" => {
-                        let new_ms = (value_i.max(0) as u64) * 1000;
-                        hour = (new_ms / 3600000) as i32;
-                        minute = ((new_ms % 3600000) / 60000) as i32;
-                        second = ((new_ms % 60000) / 1000) as i32;
-                        millisecond = 0;
-                    }
-                    _ => {}
-                }
-
-                let new_ms = (hour as u64) * 3600000
-                    + (minute as u64) * 60000
-                    + (second as u64) * 1000
-                    + (millisecond as u64);
-                if timer.is_countdown {
-                    let total_ms = (timer.duration_secs as u64) * 1000;
-                    let safe_new_ms = new_ms.min(total_ms);
-                    let new_elapsed = total_ms - safe_new_ms;
-                    if state.running {
-                        let elapsed_since_start = state
-                            .start_time
-                            .map(|t| t.elapsed().as_millis() as u64)
-                            .unwrap_or(0);
-                        if new_elapsed >= elapsed_since_start {
-                            state.elapsed_ms = new_elapsed - elapsed_since_start;
-                        } else {
-                            state.elapsed_ms = 0;
-                            state.start_time = Some(std::time::Instant::now());
-                        }
-                    } else {
-                        state.elapsed_ms = new_elapsed;
-                    }
-                } else {
-                    if state.running {
-                        let elapsed_since_start = state
-                            .start_time
-                            .map(|t| t.elapsed().as_millis() as u64)
-                            .unwrap_or(0);
-                        if new_ms >= elapsed_since_start {
-                            state.elapsed_ms = new_ms - elapsed_since_start;
-                        } else {
-                            state.elapsed_ms = 0;
-                            state.start_time = Some(std::time::Instant::now());
-                        }
-                    } else {
-                        state.elapsed_ms = new_ms;
-                    }
-                }
-
-                drop(hook_state);
-                wake_command_queue();
-                request_ui_repaint();
-                return;
-            }
-        }
-    }
 
     let mut vars = RUNTIME_VARIABLES.lock();
     vars.insert(target_trimmed.to_string(), value);
@@ -1233,40 +1129,6 @@ fn get_object_property_value(token: &str) -> Option<i32> {
         };
     }
 
-    let hook_state = HOOK_STATE.lock();
-    let timer_preset = resolve_timer_preset_ref(&hook_state, &obj_name);
-    if let Some(timer) = timer_preset {
-        let ms = if let Some(state) = hook_state.active_timers.get(&timer.id) {
-            let elapsed = state.get_elapsed_ms();
-            if timer.is_countdown {
-                let total_ms = (timer.duration_secs as u64) * 1000;
-                if total_ms > elapsed {
-                    total_ms - elapsed
-                } else {
-                    0
-                }
-            } else {
-                elapsed
-            }
-        } else {
-            if timer.is_countdown {
-                (timer.duration_secs as u64) * 1000
-            } else {
-                0
-            }
-        };
-        let val = match prop_name.as_str() {
-            "hour" | "h" => (ms / 3600000) as i32,
-            "minute" | "m" => ((ms % 3600000) / 60000) as i32,
-            "second" | "s" => ((ms % 60000) / 1000) as i32,
-            "millisecond" | "ms" => (ms % 1000) as i32,
-            "raw" | "total_ms" => ms as i32,
-            "total_sec" => (ms / 1000) as i32,
-            _ => 0,
-        };
-        return Some(val);
-    }
-
     if prop_name == "tonumber" {
         let mut found_str = None;
         let mut is_text_var = false;
@@ -1380,23 +1242,6 @@ fn get_object_property_text_value(token: &str) -> Option<String> {
     }
 
     None
-}
-
-fn resolve_timer_preset_ref(hook_state: &super::HookState, obj_name: &str) -> Option<TimerPreset> {
-    let normalized = obj_name.trim().replace(' ', "").to_lowercase();
-    if let Some(idx_str) = normalized.strip_prefix("timer")
-        && let Ok(idx) = idx_str.parse::<usize>()
-        && idx > 0
-        && let Some(timer) = hook_state.timer_presets.get(idx - 1)
-    {
-        return Some(timer.clone());
-    }
-
-    hook_state
-        .timer_presets
-        .iter()
-        .find(|t| t.name.replace(" ", "").to_lowercase() == normalized)
-        .cloned()
 }
 
 fn gcd_i64(mut a: i64, mut b: i64) -> i64 {

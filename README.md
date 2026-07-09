@@ -170,7 +170,6 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | `system.time` | Current system time | e.g. `04:24:00` |
 | `window.title` | Title text of the target window | `window.title` |
 | `clipboard.text` | Current text content in the clipboard | `clipboard.text` |
-| `timer1.hour` / `minute` / `second` / `total_sec` | Built-in timer/stopwatch values | e.g. `timer1.total_sec`. Replace `timer1` with custom timer name if configured |
 
 ### Notes
 

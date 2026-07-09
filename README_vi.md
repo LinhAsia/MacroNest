@@ -170,7 +170,6 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | `system.time` | Giờ hệ thống hiện tại dưới dạng chuỗi | ví dụ `04:24:00` |
 | `window.title` | Tiêu đề của cửa sổ mục tiêu | `window.title` |
 | `clipboard.text` | Nội dung văn bản hiện tại trong clipboard | `clipboard.text` |
-| `timer1.hour` / `minute` / `second` / `total_sec` | Giá trị của bộ đếm thời gian tích hợp sẵn | ví dụ `timer1.total_sec`. Thay `timer1` bằng tên timer tùy chỉnh của bạn nếu có |
 
 ### Ghi chú
 

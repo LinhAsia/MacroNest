@@ -1433,9 +1433,6 @@ impl CrosshairApp {
                                                     ui.label(egui::RichText::new("- window.height / h").monospace());
                                                     ui.label(egui::RichText::new("- window.centerx / cx").monospace());
                                                     ui.label(egui::RichText::new("- window.centery / cy").monospace());
-                                                    ui.label(egui::RichText::new("- timer1.hour / minute / second").monospace());
-                                                    ui.label(egui::RichText::new("- timer1.millisecond / ms").monospace());
-                                                    ui.label(egui::RichText::new("- timer1.total_sec / total_ms").monospace());
                                                 });
                                             });
                                     });
@@ -3686,9 +3683,6 @@ impl CrosshairApp {
             .map(|t| t.name.clone())
             .collect();
         let mut suggestion_names = std::collections::HashSet::new();
-        for (idx, _name) in timer_names.iter().enumerate() {
-            suggestion_names.insert(format!("Timer{}", idx + 1));
-        }
         for name in Self::builtin_variable_suggestions() {
             suggestion_names.insert(name.to_string());
         }
@@ -3716,9 +3710,6 @@ impl CrosshairApp {
                 }
             }
         }
-        for (idx, _name) in timer_names.iter().enumerate() {
-            writable_suggestion_names.insert(format!("Timer{}", idx + 1));
-        }
         let mut writable_suggestion_names: Vec<String> =
             writable_suggestion_names.into_iter().collect();
         writable_suggestion_names.sort();
@@ -3733,10 +3724,6 @@ impl CrosshairApp {
             mem.data.insert_temp(
                 egui::Id::new("macro_variable_suggestion_names"),
                 suggestion_names,
-            );
-            mem.data.insert_temp(
-                egui::Id::new("macro_timer_suggestion_names"),
-                timer_names.clone(),
             );
             mem.data.insert_temp(
                 egui::Id::new("macro_variable_writable_suggestion_names"),
@@ -16912,15 +16899,6 @@ if supports_move_mouse || show_detection_tuning {
                 "second",
                 "millisecond",
             ]),
-            s if s.starts_with("timer") => Some(&[
-                "hour",
-                "minute",
-                "second",
-                "millisecond",
-                "ms",
-                "raw",
-                "total_sec",
-            ]),
             "screen" => Some(&["width", "height"]),
             "mouse" => Some(&["x", "y", "sensitivity"]),
             "volume" => Some(&["level"]),
@@ -16949,34 +16927,12 @@ if supports_move_mouse || show_detection_tuning {
             .any(|name| name.replace(' ', "").to_lowercase() == normalized)
     }
 
-    fn timer_ref_index(ref_name: &str) -> Option<usize> {
-        let normalized = ref_name.trim().replace(' ', "").to_lowercase();
-        let idx_str = normalized.strip_prefix("timer")?;
-        let idx = idx_str.parse::<usize>().ok()?;
-        idx.checked_sub(1)
-    }
-
-    fn timer_suggestion_label(suggestion: &str, timer_names: &[String]) -> String {
-        if let Some((base, prop)) = suggestion.split_once('.') {
-            if let Some(idx) = Self::timer_ref_index(base)
-                && let Some(timer_name) = timer_names.get(idx)
-            {
-                return format!("{}.{} ({})", base, prop, timer_name);
-            }
-        } else if let Some(idx) = Self::timer_ref_index(suggestion)
-            && let Some(timer_name) = timer_names.get(idx)
-        {
-            return format!("{} ({})", suggestion, timer_name);
-        }
-        suggestion.to_string()
-    }
-
     fn dedupe_suggestions_preserve_order(suggestions: &mut Vec<String>) {
         let mut seen = std::collections::HashSet::new();
         suggestions.retain(|item| seen.insert(item.to_lowercase()));
     }
 
-    fn expression_suggestion_label(suggestion: &str, timer_names: &[String]) -> String {
+    fn expression_suggestion_label(suggestion: &str, _timer_names: &[String]) -> String {
         match suggestion {
             "abs()" => "abs(a)".to_string(),
             "contains()" => "contains(a, b)".to_string(),
@@ -17023,7 +16979,7 @@ if supports_move_mouse || show_detection_tuning {
             "perm()" => "perm(n, k)".to_string(),
             "pi" => "pi".to_string(),
             "e" => "e".to_string(),
-            _ => Self::timer_suggestion_label(suggestion, timer_names),
+            _ => suggestion.to_string(),
         }
     }
 
@@ -19618,19 +19574,12 @@ if supports_move_mouse || show_detection_tuning {
                     "text" => VariableValueKind::Text,
                     _ => VariableValueKind::Neutral,
                 },
-                s if s.starts_with("timer") => match prop_clean.as_str() {
-                    "hour" | "minute" | "second" | "millisecond" | "ms" | "raw" | "total_sec" => {
-                        VariableValueKind::Number
-                    }
-                    _ => VariableValueKind::Neutral,
-                },
                 _ => VariableValueKind::Neutral,
             };
         }
         if Self::builtin_variable_suggestions()
             .iter()
             .any(|name| name.eq_ignore_ascii_case(trimmed))
-            || Self::timer_ref_index(trimmed).is_some()
         {
             return VariableValueKind::Neutral;
         }
@@ -19769,14 +19718,9 @@ if supports_move_mouse || show_detection_tuning {
         ui: &mut egui::Ui,
         response: &egui::Response,
         text: &mut String,
-        timer_names: &[String],
+        _timer_names: &[String],
         require_wrap_open: bool,
     ) {
-        let temp_timer_names = ui.memory(|mem| {
-            mem.data
-                .get_temp::<Vec<String>>(egui::Id::new("macro_timer_suggestion_names"))
-        });
-        let timer_names = temp_timer_names.as_deref().unwrap_or(timer_names);
         let suggestion_names = ui
             .memory(|mem| {
                 mem.data
@@ -19832,27 +19776,11 @@ if supports_move_mouse || show_detection_tuning {
             let parts: Vec<&str> = last_word_trimmed.split('.').collect();
             let base = parts[0].trim();
             let prop_part = parts[1].to_lowercase();
-            let timer_exists = Self::timer_ref_index(base).is_some()
-                || timer_names.iter().any(|name| {
-                    name.replace(' ', "").to_lowercase() == base.replace(' ', "").to_lowercase()
-                });
-            if !timer_exists && !Self::variable_base_exists(base, &suggestion_names) {
+            if !Self::variable_base_exists(base, &suggestion_names) {
                 return;
             }
-            let props: Vec<&str> = if timer_exists {
-                vec![
-                    "hour",
-                    "minute",
-                    "second",
-                    "millisecond",
-                    "ms",
-                    "raw",
-                    "total_sec",
-                ]
-            } else {
-                Self::object_property_suggestions(base)
-                    .map_or_else(Vec::new, |props| props.to_vec())
-            };
+            let props: Vec<&str> = Self::object_property_suggestions(base)
+                .map_or_else(Vec::new, |props| props.to_vec());
             for prop in props {
                 let full_prop = format!("{}.{}", parts[0], prop);
                 if prop.starts_with(&prop_part)
@@ -20005,7 +19933,7 @@ if supports_move_mouse || show_detection_tuning {
                             ui.vertical(|ui| {
                                 for (idx, sug) in suggestions.iter().enumerate() {
                                     let is_selected = idx == selected_index;
-                                    let label = Self::expression_suggestion_label(sug, timer_names);
+                                    let label = Self::expression_suggestion_label(sug, &[]);
                                     let color = match Self::variable_value_kind(sug) {
                                         VariableValueKind::Text => Color32::from_rgb(255, 185, 92),
                                         VariableValueKind::Number => {
@@ -20061,7 +19989,7 @@ if supports_move_mouse || show_detection_tuning {
         ui: &mut egui::Ui,
         response: &egui::Response,
         text: &mut String,
-        timer_names: &[String],
+        _timer_names: &[String],
         _language: UiLanguage,
     ) {
         let suggestion_names = ui
@@ -20114,26 +20042,7 @@ if supports_move_mouse || show_detection_tuning {
         }
         let mut suggestions = Vec::new();
         if last_word.contains('.') {
-            let parts: Vec<&str> = last_word.split('.').collect();
-            let prop_part = parts.get(1).map(|s| s.to_lowercase()).unwrap_or_default();
-            if Self::timer_ref_index(parts[0]).is_some() {
-                for prop in [
-                    "hour",
-                    "minute",
-                    "second",
-                    "millisecond",
-                    "ms",
-                    "raw",
-                    "total_sec",
-                ] {
-                    let full_prop = format!("{}.{}", parts[0], prop);
-                    if prop.starts_with(&prop_part)
-                        && full_prop.to_lowercase() != last_word.to_lowercase()
-                    {
-                        suggestions.push(full_prop);
-                    }
-                }
-            }
+            return;
         } else {
             for name in &suggestion_names {
                 let name_no_space = name.replace(" ", "");
@@ -20265,7 +20174,7 @@ if supports_move_mouse || show_detection_tuning {
                             ui.vertical(|ui| {
                                 for (idx, sug) in suggestions.iter().enumerate() {
                                     let is_selected = idx == selected_index;
-                                    let label = Self::expression_suggestion_label(sug, timer_names);
+                                    let label = Self::expression_suggestion_label(sug, &[]);
                                     let color = match Self::variable_value_kind(sug) {
                                         VariableValueKind::Text => Color32::from_rgb(255, 185, 92),
                                         VariableValueKind::Number => {
