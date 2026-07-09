@@ -29734,37 +29734,29 @@ mod windows_overlay {
             return;
         }
 
+        let preset = HudPreset::default_step_preview();
+        let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(1);
+        let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) }.max(1);
+        let scale_x = screen_width as f32 / 1920.0;
+        let scale_y = screen_height as f32 / 1080.0;
+        let width = ((preset.width.max(1)) as f32 * scale_x).round().max(1.0) as i32;
+        let height = ((preset.height.max(1)) as f32 * scale_y).round().max(1.0) as i32;
         *HUD_DISPLAY.lock() = Some(HudDisplayState {
             owner_preset_id: Some(owner_preset_id),
             preset_id: None,
             text: trimmed,
-            text_color: RgbaColor {
-                r: 244,
-                g: 244,
-                b: 244,
-                a: 255,
-            },
-            background_color: RgbaColor {
-                r: 34,
-                g: 34,
-                b: 34,
-                a: 255,
-            },
-            background_opacity: 0.72,
-            rounded_background: true,
-            border_enabled: false,
-            border_color: RgbaColor {
-                r: 255,
-                g: 255,
-                b: 255,
-                a: 255,
-            },
-            border_thickness: 1.0,
-            font_size: 28.0,
-            x: 660,
-            y: 36,
-            width: 600,
-            height: 80,
+            text_color: preset.text_color,
+            background_color: preset.background_color,
+            background_opacity: preset.background_opacity.clamp(0.0, 1.0),
+            rounded_background: preset.rounded_background,
+            border_enabled: preset.border_enabled,
+            border_color: preset.border_color,
+            border_thickness: preset.border_thickness.max(0.0),
+            font_size: preset.font_size.max(1.0),
+            x: ((screen_width - width) / 2).max(0),
+            y: ((screen_height - height) / 2).max(0),
+            width,
+            height,
             auto_hide_on_owner_completion: false,
             expires_at: {
                 let duration = step.get_duration_ms();

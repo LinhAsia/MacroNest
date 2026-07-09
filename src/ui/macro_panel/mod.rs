@@ -48,6 +48,38 @@ enum TextHighlightMode {
 }
 
 impl CrosshairApp {
+    fn default_macro_step_hud_preset(text_override: &str) -> HudPreset {
+        let mut preset = HudPreset::default_step_preview();
+        if !text_override.trim().is_empty() {
+            preset.text = text_override.trim().to_owned();
+        }
+        preset
+    }
+
+    fn show_hud_step_selected_label(
+        hud_presets: &[HudPreset],
+        language: UiLanguage,
+        selected_id: Option<u32>,
+        step_key: &str,
+    ) -> String {
+        selected_id
+            .and_then(|id| {
+                hud_presets
+                    .iter()
+                    .find(|preset| preset.id == id)
+                    .map(|preset| preset.name.clone())
+            })
+            .unwrap_or_else(|| {
+                if step_key.trim().is_empty() {
+                    Self::tr_lang(language, "Default HUD", "HUD mac dinh").to_owned()
+                } else {
+                    crate::lang::translate(language, "Legacy: {}")
+                        .unwrap_or("Legacy: {}")
+                        .replace("{}", step_key)
+                }
+            })
+    }
+
     fn remember_macro_panel_language(ui: &mut egui::Ui, language: UiLanguage) {
         ui.memory_mut(|mem| {
             mem.data
@@ -5462,6 +5494,7 @@ impl CrosshairApp {
                     let mut pending_geometry_macro_step_color_pick: Option<(u32, u32, usize, bool, bool)> = None;
                     let mut open_groq_api_settings_requested = false;
                     let is_ocr_download_running = self.ocr_download_job.is_some();
+                    let hud_presets_snapshot = self.state.hud_presets.clone();
                     let group = &mut self.state.macro_groups[group_index];
                     let folder_enabled = true;
                     let group_scroll_rect_top = ui.cursor().min.y;
@@ -8087,24 +8120,12 @@ if supports_move_mouse || show_detection_tuning {
                                                      });
                                                 } else if step.action == MacroAction::ShowHud {
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .hud_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            if step.key.trim().is_empty() {
-                                                                Self::tr_lang(language, "Select HUD", "Select HUD")
-                                                                .to_owned()
-                                                            } else {
-                                                                crate::lang::translate(language, "Legacy: {}")
-                                                                    .unwrap_or("Legacy: {}")
-                                                                    .replace("{}", &step.key)
-                                                            }
-                                                        });
+                                                    let selected_label = Self::show_hud_step_selected_label(
+                                                        &hud_presets_snapshot,
+                                                        language,
+                                                        selected_id,
+                                                        &step.key,
+                                                    );
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
                                                         ui.spacing_mut().interact_size.y = 18.0;
@@ -8113,7 +8134,21 @@ if supports_move_mouse || show_detection_tuning {
                                                             .width(88.0)
                                                             .selected_text(selected_label)
                                                             .show_ui(ui, |ui| {
-                                                                for toolbox_preset in &self.state.hud_presets {
+                                                                if ui
+                                                                    .selectable_label(
+                                                                        step.key.trim().is_empty(),
+                                                                        Self::tr_lang(
+                                                                            language,
+                                                                            "Default HUD",
+                                                                            "HUD mac dinh",
+                                                                        ),
+                                                                    )
+                                                                    .clicked()
+                                                                {
+                                                                    step.key.clear();
+                                                                    live_sync = true;
+                                                                }
+                                                                for toolbox_preset in &hud_presets_snapshot {
                                                                     if ui
                                                                         .selectable_label(
                                                                             selected_id == Some(toolbox_preset.id),
@@ -10383,24 +10418,12 @@ if supports_move_mouse || show_detection_tuning {
                                                      });
                                                 } else if step.action == MacroAction::ShowHud {
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .hud_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            if step.key.trim().is_empty() {
-                                                                Self::tr_lang(language, "Select HUD", "Select HUD")
-                                                                .to_owned()
-                                                            } else {
-                                                                crate::lang::translate(language, "Legacy: {}")
-                                                                    .unwrap_or("Legacy: {}")
-                                                                    .replace("{}", &step.key)
-                                                            }
-                                                        });
+                                                    let selected_label = Self::show_hud_step_selected_label(
+                                                        &hud_presets_snapshot,
+                                                        language,
+                                                        selected_id,
+                                                        &step.key,
+                                                    );
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
                                                         ui.spacing_mut().interact_size.y = 18.0;
@@ -10409,7 +10432,21 @@ if supports_move_mouse || show_detection_tuning {
                                                             .width(88.0)
                                                             .selected_text(selected_label)
                                                             .show_ui(ui, |ui| {
-                                                                for toolbox_preset in &self.state.hud_presets {
+                                                                if ui
+                                                                    .selectable_label(
+                                                                        step.key.trim().is_empty(),
+                                                                        Self::tr_lang(
+                                                                            language,
+                                                                            "Default HUD",
+                                                                            "HUD mac dinh",
+                                                                        ),
+                                                                    )
+                                                                    .clicked()
+                                                                {
+                                                                    step.key.clear();
+                                                                    live_sync = true;
+                                                                }
+                                                                for toolbox_preset in &hud_presets_snapshot {
                                                                     if ui
                                                                         .selectable_label(
                                                                             selected_id == Some(toolbox_preset.id),
@@ -13719,29 +13756,31 @@ if supports_move_mouse || show_detection_tuning {
                                                      });
                                                 } else if step.action == MacroAction::ShowHud {
                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .hud_presets
-                                                                .iter()
-                                                                .find(|preset| preset.id == id)
-                                                                .map(|preset| preset.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            if step.key.trim().is_empty() {
-                                                                Self::tr_lang(language, "Select HUD", "Select HUD")
-                                                                .to_owned()
-                                                            } else {
-                                                                crate::lang::translate(language, "Legacy: {}")
-                                                                    .unwrap_or("Legacy: {}")
-                                                                    .replace("{}", &step.key)
-                                                            }
-                                                        });
+                                                    let selected_label = Self::show_hud_step_selected_label(
+                                                        &hud_presets_snapshot,
+                                                        language,
+                                                        selected_id,
+                                                        &step.key,
+                                                    );
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "toolbox-preset-step"))
                                                         .width(146.0)
                                                         .selected_text(selected_label)
                                                         .show_ui(ui, |ui| {
-                                                            for toolbox_preset in &self.state.hud_presets {
+                                                            if ui
+                                                                .selectable_label(
+                                                                    step.key.trim().is_empty(),
+                                                                    Self::tr_lang(
+                                                                        language,
+                                                                        "Default HUD",
+                                                                        "HUD mac dinh",
+                                                                    ),
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                step.key.clear();
+                                                                live_sync = true;
+                                                            }
+                                                            for toolbox_preset in &hud_presets_snapshot {
                                                                 if ui
                                                                     .selectable_label(
                                                                         selected_id == Some(toolbox_preset.id),
@@ -18664,6 +18703,10 @@ if supports_move_mouse || show_detection_tuning {
                                     ]),
                                 );
                             }
+                        } else {
+                            let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewHudPreset(
+                                vec![Self::default_macro_step_hud_preset(&step.text_override)],
+                            ));
                         }
                     }
                     _ => {}

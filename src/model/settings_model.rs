@@ -162,6 +162,16 @@ impl HudPreset {
             height: 80,
         }
     }
+
+    pub fn default_step_preview() -> Self {
+        let mut preset = Self::new(0);
+        preset.name = "Default HUD".to_owned();
+        preset.collapsed = false;
+        preset.preview_enabled = true;
+        preset.x = 660;
+        preset.y = 500;
+        preset
+    }
 }
 
 impl Default for HudPreset {
