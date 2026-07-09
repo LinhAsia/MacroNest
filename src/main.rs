@@ -33,6 +33,29 @@ use crate::{
 #[cfg(not(windows))]
 compile_error!("This application currently supports Windows only.");
 
+fn cleanup_post_update_artifacts() {
+    if let Ok(current_exe) = std::env::current_exe() {
+        let old_exe = current_exe.with_extension("exe.old");
+        let _ = std::fs::remove_file(old_exe);
+    }
+
+    let temp_dir = std::env::temp_dir();
+    if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let should_remove = file_name == "macronest_update_error.txt"
+                || (file_name.starts_with("macronest_update")
+                    && (file_name.ends_with(".exe") || file_name.ends_with(".part")));
+            if should_remove {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+}
+
 fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool, bool)> {
     let startup_state_needs_cjk_fallback = std::fs::read_to_string(&paths.state_file)
         .map(|json| ui::text_has_cjk(&json))
@@ -328,6 +351,7 @@ fn main() -> Result<()> {
     }
 
     let paths = AppPaths::discover()?;
+    cleanup_post_update_artifacts();
     apply_process_startup_tuning(&paths);
 
     {
