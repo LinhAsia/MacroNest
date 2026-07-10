@@ -13488,11 +13488,6 @@ impl eframe::App for CrosshairApp {
                                     tool_btn(ui, crate::model::QuickScreenDrawTool::Circle, "circle", self.tr("Circle", "Hình tròn"));
                                     tool_btn(ui, crate::model::QuickScreenDrawTool::Polygon, "poly", self.tr("Polygon", "Đa giác"));
                                     tool_btn(ui, crate::model::QuickScreenDrawTool::Text, "text", self.tr("Text", "Chữ"));
-                                    if !crosshair_draw_mode {
-                                        tool_btn(ui, crate::model::QuickScreenDrawTool::Highlight, "highlight", self.tr("Highlight", "Tô sáng"));
-                                        tool_btn(ui, crate::model::QuickScreenDrawTool::Blur, "blur", self.tr("Blur", "Làm mờ"));
-                                    }
-
                                     // Eraser
                                     if icon_btn(ui, eraser_active, "eraser", self.tr("Eraser", "Tẩy")).1 {
                                         crate::overlay::screen_draw_set_eraser(!eraser_active);
@@ -13510,7 +13505,7 @@ impl eframe::App for CrosshairApp {
                                     ];
                                     let active_color = crate::overlay::screen_draw_get_color();
                                     for (name, c32, rgba) in color_presets.iter() {
-                                        let is_selected = active_color.r == rgba.r && active_color.g == rgba.g && active_color.b == rgba.b;
+                                        let is_selected = active_color == *rgba;
                                         let (rect, resp) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::click());
                                         ui.painter().circle_filled(rect.center(), 7.0, *c32);
                                         if is_selected {
@@ -13531,6 +13526,20 @@ impl eframe::App for CrosshairApp {
                                             crate::overlay::screen_draw_toolbar_interacted();
                                         }
                                         resp.on_hover_text(*name);
+                                    }
+                                    if !crosshair_draw_mode {
+                                        let special_colors = [
+                                            (self.tr("Highlight color", "Màu tô sáng"), "highlight", crate::model::RgbaColor { r: 255, g: 220, b: 50, a: 2 }),
+                                            (self.tr("Blur color", "Màu làm mờ"), "blur", crate::model::RgbaColor { r: 200, g: 220, b: 255, a: 1 }),
+                                        ];
+                                        for (name, icon, color) in special_colors {
+                                            let selected = active_color == color;
+                                            if icon_btn(ui, selected, icon, name).1 {
+                                                crate::overlay::screen_draw_set_color(color);
+                                                crate::overlay::screen_draw_set_eraser(false);
+                                                crate::overlay::screen_draw_toolbar_interacted();
+                                            }
+                                        }
                                     }
 
                                     let (pick_color_resp, pick_color_activated) = icon_btn(
