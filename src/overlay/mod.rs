@@ -4877,6 +4877,26 @@ mod windows_overlay {
                 } else if delta < 0 {
                     hook_state.last_scroll_down_at = Some(std::time::Instant::now());
                 }
+                drop(hook_state);
+
+                if screen_draw_active() {
+                    let step = if delta > 0 { 2.0 } else { -2.0 };
+                    let mut state = SCREEN_DRAW_STATE.lock();
+                    state.brush_size = (state.brush_size + step).clamp(2.0, 80.0);
+                    mark_screen_draw_repaint_pending(&mut state);
+                    drop(state);
+                    request_screen_draw_overlay_sync();
+                    request_ui_repaint();
+                    if let Some(hwnd) = screen_draw_hwnd() {
+                        let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                            Some(hwnd),
+                            windows::Win32::UI::WindowsAndMessaging::WM_SETCURSOR,
+                            WPARAM(hwnd.0 as usize),
+                            LPARAM(windows::Win32::UI::WindowsAndMessaging::HTCLIENT as isize),
+                        );
+                    }
+                    return LRESULT(1);
+                }
             }
 
             record_mouse_event(message, &info);
