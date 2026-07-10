@@ -2523,6 +2523,8 @@ impl CrosshairApp {
         id_source: impl std::hash::Hash,
         step_index: Option<usize>,
         language: UiLanguage,
+        vietnamese_input_enabled: bool,
+        vietnamese_input_mode: VietnameseInputMode,
         command_presets: &[CommandPreset],
         is_generating: bool,
     ) -> (
@@ -2670,17 +2672,22 @@ impl CrosshairApp {
                     if resolved_preset.is_none() {
                         ui.horizontal(|ui| {
                             ui.label(Self::tr_lang(language, "Preset name:", "Preset name:"));
-                            let name_changed = ui
-                                .add(
-                                    TextEdit::singleline(&mut step.key)
-                                        .hint_text(Self::tr_lang(
-                                            language,
-                                            "Enter name...",
-                                            "Enter name...",
-                                        ))
-                                        .desired_width(180.0),
-                                )
-                                .changed();
+                            let name_response = ui.add(
+                                TextEdit::singleline(&mut step.key)
+                                    .hint_text(Self::tr_lang(
+                                        language,
+                                        "Enter name...",
+                                        "Nhập tên...",
+                                    ))
+                                    .desired_width(180.0),
+                            );
+                            Self::apply_vietnamese_input_if_changed(
+                                &name_response,
+                                vietnamese_input_enabled,
+                                vietnamese_input_mode,
+                                &mut step.key,
+                            );
+                            let name_changed = name_response.changed();
                             if name_changed {
                                 changed = true;
                             }
@@ -7128,6 +7135,8 @@ impl CrosshairApp {
                                                           (group.id, preset.id, "hold-stop"),
                                                           None,
                                                           language,
+                                                          self.state.vietnamese_input_enabled,
+                                                          self.state.vietnamese_input_mode,
                                                           &command_presets_snapshot,
                                                           is_generating,
                                                      );
@@ -9427,6 +9436,8 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                           (group.id, preset.id, "press-stop"),
                                                           None,
                                                           language,
+                                                          self.state.vietnamese_input_enabled,
+                                                          self.state.vietnamese_input_mode,
                                                           &command_presets_snapshot,
                                                           is_generating,
                                                      );
@@ -12604,6 +12615,8 @@ if supports_move_mouse || show_detection_tuning {
                                                           (group.id, preset.id, step_index),
                                                           Some(step_index),
                                                           language,
+                                                          self.state.vietnamese_input_enabled,
+                                                          self.state.vietnamese_input_mode,
                                                           &command_presets_snapshot,
                                                           is_generating,
                                                      );
@@ -16606,6 +16619,12 @@ if supports_move_mouse || show_detection_tuning {
                                     .color(hint_color)
                                     .weak(),
                             ),
+                        );
+                        Self::apply_vietnamese_input_if_changed(
+                            &value_response,
+                            self.state.vietnamese_input_enabled,
+                            self.state.vietnamese_input_mode,
+                            &mut val_buf,
                         );
                         let enter_pressed = (name_response.has_focus() || value_response.has_focus())
                             && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
