@@ -15101,10 +15101,10 @@ mod windows_overlay {
                             let mut fill_paint = tiny_skia::Paint::default();
                             fill_paint.anti_alias = true;
                             fill_paint.set_color(tiny_skia::Color::from_rgba8(
-                                200,
-                                220,
-                                255,
-                                SCREEN_DRAW_BLUR_PREVIEW_ALPHA,
+                                0,
+                                102,
+                                204,
+                                SCREEN_DRAW_BLUR_PREVIEW_ALPHA + 10,
                             ));
                             pixmap.fill_path(
                                 &path,
@@ -15114,20 +15114,38 @@ mod windows_overlay {
                                 None,
                             );
 
-                            let mut outline_paint = tiny_skia::Paint::default();
-                            outline_paint.anti_alias = true;
-                            outline_paint
-                                .set_color(tiny_skia::Color::from_rgba8(235, 245, 255, 210));
-                            let outline = tiny_skia::Stroke {
-                                width: 1.6,
+                            // Draw outer white outline (halo) to stand out on dark backgrounds
+                            let mut outer_paint = tiny_skia::Paint::default();
+                            outer_paint.anti_alias = true;
+                            outer_paint.set_color(tiny_skia::Color::from_rgba8(255, 255, 255, 240));
+                            let outer_stroke = tiny_skia::Stroke {
+                                width: 2.8,
                                 line_cap: tiny_skia::LineCap::Round,
                                 line_join: tiny_skia::LineJoin::Round,
                                 ..Default::default()
                             };
                             pixmap.stroke_path(
                                 &path,
-                                &outline_paint,
-                                &outline,
+                                &outer_paint,
+                                &outer_stroke,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
+
+                            // Draw inner dark blue outline to stand out on light backgrounds
+                            let mut inner_paint = tiny_skia::Paint::default();
+                            inner_paint.anti_alias = true;
+                            inner_paint.set_color(tiny_skia::Color::from_rgba8(0, 102, 204, 255));
+                            let inner_stroke = tiny_skia::Stroke {
+                                width: 1.2,
+                                line_cap: tiny_skia::LineCap::Round,
+                                line_join: tiny_skia::LineJoin::Round,
+                                ..Default::default()
+                            };
+                            pixmap.stroke_path(
+                                &path,
+                                &inner_paint,
+                                &inner_stroke,
                                 tiny_skia::Transform::identity(),
                                 None,
                             );
