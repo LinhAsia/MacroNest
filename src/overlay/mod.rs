@@ -33394,12 +33394,13 @@ mod windows_overlay {
                 return Ok(());
             }
 
-            let _ = ShowWindow(target, SW_RESTORE);
+            ensure_window_restored(target);
             if preset.remove_title_bar {
                 let _ = remove_window_title_bar(target);
             } else {
                 let _ = restore_window_title_bar(target);
             }
+            wait_for_window_frame_to_settle(target);
 
             let bounds = calculate_window_bounds(target, preset)?;
             let _ = SetWindowPos(

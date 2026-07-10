@@ -361,16 +361,45 @@ impl CrosshairApp {
                             });
                             ui.end_row();
                         });
-                    if preset.preview_enabled {
-                        ui.add_space(8.0);
-                        Self::render_window_preset_preview(
-                            ui,
-                            language,
-                            preset,
-                            preview.as_ref(),
-                            &mut live_sync,
-                        );
-                    }
+                    ui.add_space(8.0);
+                    Self::render_window_preset_preview(
+                        ui,
+                        language,
+                        preset,
+                        if preset.preview_enabled { preview.as_ref() } else { None },
+                        &mut live_sync,
+                    );
+                    let screen_size = Self::screen_size();
+                    ui.horizontal_wrapped(|ui| {
+                        if ui
+                            .button(Self::tr_lang(language, "Center X", "Center X"))
+                            .clicked()
+                        {
+                            if preset.anchor != WindowAnchor::Manual {
+                                if let Some((wx, wy)) = Self::window_anchor_preview_position(preset) {
+                                    preset.x = wx;
+                                    preset.y = wy;
+                                }
+                                preset.anchor = WindowAnchor::Manual;
+                            }
+                            preset.x = ((screen_size.x as i32 - preset.width.max(1)) / 2).max(0);
+                            live_sync = true;
+                        }
+                        if ui
+                            .button(Self::tr_lang(language, "Center Y", "Center Y"))
+                            .clicked()
+                        {
+                            if preset.anchor != WindowAnchor::Manual {
+                                if let Some((wx, wy)) = Self::window_anchor_preview_position(preset) {
+                                    preset.x = wx;
+                                    preset.y = wy;
+                                }
+                                preset.anchor = WindowAnchor::Manual;
+                            }
+                            preset.y = ((screen_size.y as i32 - preset.height.max(1)) / 2).max(0);
+                            live_sync = true;
+                        }
+                    });
                 });
             }
             if let Some((target, status)) = next_capture_target.take() {
