@@ -13246,28 +13246,28 @@ impl eframe::App for CrosshairApp {
                                                 painter.line_segment([top_left, top_right], stroke);
                                                 painter.line_segment([top_mid, bottom_mid], stroke);
                                             }
-                                            "highlight" => {
-                                                let body = egui::Rect::from_min_max(
-                                                    rect.left_top() + egui::vec2(pad + 1.0, pad + 7.0),
-                                                    rect.right_bottom() + egui::vec2(-pad + 1.0, -pad + 1.0),
+                                            "effect_highlight" => {
+                                                let bar = egui::Rect::from_center_size(
+                                                    center + egui::vec2(0.0, 3.0),
+                                                    egui::vec2(rect.width() - pad * 2.0, 5.0),
                                                 );
                                                 painter.rect_filled(
-                                                    body,
-                                                    1.5,
-                                                    egui::Color32::from_rgba_premultiplied(255, 224, 64, 130),
+                                                    bar,
+                                                    1.0,
+                                                    egui::Color32::from_rgba_premultiplied(255, 220, 50, 150),
                                                 );
-                                                let tip = [
-                                                    rect.left_top() + egui::vec2(pad + 1.0, pad + 4.0),
-                                                    rect.left_top() + egui::vec2(pad + 6.2, pad + 4.0),
-                                                    rect.left_top() + egui::vec2(pad + 8.6, pad + 7.0),
-                                                    rect.left_top() + egui::vec2(pad + 3.5, pad + 7.0),
-                                                ];
-                                                painter.add(egui::Shape::convex_polygon(
-                                                    tip.to_vec(),
-                                                    color,
-                                                    egui::Stroke::NONE,
-                                                ));
-                                                painter.rect_stroke(body, 1.5, stroke, egui::StrokeKind::Inside);
+                                                painter.line_segment(
+                                                    [center + egui::vec2(0.0, -7.0), center + egui::vec2(0.0, -2.0)],
+                                                    stroke,
+                                                );
+                                                painter.line_segment(
+                                                    [center + egui::vec2(-5.0, -5.0), center + egui::vec2(-2.0, -2.0)],
+                                                    stroke,
+                                                );
+                                                painter.line_segment(
+                                                    [center + egui::vec2(5.0, -5.0), center + egui::vec2(2.0, -2.0)],
+                                                    stroke,
+                                                );
                                             }
                                             "blur" => {
                                                 let body = rect.shrink2(egui::vec2(pad, pad));
@@ -13527,21 +13527,6 @@ impl eframe::App for CrosshairApp {
                                         }
                                         resp.on_hover_text(*name);
                                     }
-                                    if !crosshair_draw_mode {
-                                        let special_colors = [
-                                            (self.tr("Highlight color", "Màu tô sáng"), "highlight", crate::model::RgbaColor { r: 255, g: 220, b: 50, a: 2 }),
-                                            (self.tr("Blur color", "Màu làm mờ"), "blur", crate::model::RgbaColor { r: 200, g: 220, b: 255, a: 1 }),
-                                        ];
-                                        for (name, icon, color) in special_colors {
-                                            let selected = active_color == color;
-                                            if icon_btn(ui, selected, icon, name).1 {
-                                                crate::overlay::screen_draw_set_color(color);
-                                                crate::overlay::screen_draw_set_eraser(false);
-                                                crate::overlay::screen_draw_toolbar_interacted();
-                                            }
-                                        }
-                                    }
-
                                     let (pick_color_resp, pick_color_activated) = icon_btn(
                                         ui,
                                         crate::overlay::screen_draw_get_color_pick_mode(),
@@ -13580,6 +13565,29 @@ impl eframe::App for CrosshairApp {
                                                     crate::overlay::screen_draw_toggle_color_pick_mode();
                                                 }
                                             });
+                                        }
+                                    }
+
+                                    if !crosshair_draw_mode {
+                                        ui.separator();
+                                        let effect = crate::overlay::screen_draw_get_effect();
+                                        if icon_btn(
+                                            ui,
+                                            effect == 1,
+                                            "effect_highlight",
+                                            self.tr("Highlight effect", "Hiệu ứng tô sáng"),
+                                        ).1 {
+                                            crate::overlay::screen_draw_toggle_effect(1);
+                                            crate::overlay::screen_draw_toolbar_interacted();
+                                        }
+                                        if icon_btn(
+                                            ui,
+                                            effect == 2,
+                                            "blur",
+                                            self.tr("Blur effect", "Hiệu ứng làm mờ"),
+                                        ).1 {
+                                            crate::overlay::screen_draw_toggle_effect(2);
+                                            crate::overlay::screen_draw_toolbar_interacted();
                                         }
                                     }
 

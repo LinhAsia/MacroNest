@@ -1952,12 +1952,12 @@ mod windows_overlay {
         Blur,
     }
 
-    fn screen_draw_is_highlight_color(color: RgbaColor) -> bool {
-        color == SCREEN_DRAW_HIGHLIGHT_COLOR
-    }
-
-    fn screen_draw_is_blur_color(color: RgbaColor) -> bool {
-        color == SCREEN_DRAW_BLUR_COLOR
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    enum ScreenDrawEffect {
+        #[default]
+        None,
+        Highlight,
+        Blur,
     }
 
     impl Default for ScreenDrawTool {
@@ -1969,6 +1969,7 @@ mod windows_overlay {
     #[derive(Clone)]
     struct ScreenDrawStroke {
         tool: ScreenDrawTool,
+        effect: ScreenDrawEffect,
         points: Vec<POINT>,
         color: RgbaColor,
         brush_size: f32,
@@ -2073,6 +2074,7 @@ mod windows_overlay {
         smoothing: bool,
         smoothing_amount: f32,
         tool: ScreenDrawTool,
+        effect: ScreenDrawEffect,
         toolbar_x: i32,
         toolbar_y: i32,
         toolbar_w: i32,
@@ -2150,6 +2152,7 @@ mod windows_overlay {
                 smoothing: false,
                 smoothing_amount: 0.45,
                 tool: ScreenDrawTool::Brush,
+                effect: ScreenDrawEffect::None,
                 toolbar_x: 24,
                 toolbar_y: 24,
                 toolbar_w: 640,
@@ -4616,15 +4619,18 @@ mod windows_overlay {
                 {
                     update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
                 }
-                if let Some(key_name) = key_name.clone() {
-                    if process_screen_draw_text_input(info.vkCode, is_key_down, is_key_up) {
-                        update_held_key(info.vkCode, is_key_down, is_key_up);
-                        update_modifier_state(info.vkCode, is_key_down);
-                        if is_key_up && !is_ui_in_foreground() {
-                            update_quick_key_display_key(&key_name, info.vkCode, false, true);
-                        }
-                        return LRESULT(1);
+                if process_screen_draw_text_input(info.vkCode, is_key_down, is_key_up) {
+                    update_held_key(info.vkCode, is_key_down, is_key_up);
+                    update_modifier_state(info.vkCode, is_key_down);
+                    if is_key_up
+                        && !is_ui_in_foreground()
+                        && let Some(key_name) = key_name.as_ref()
+                    {
+                        update_quick_key_display_key(key_name, info.vkCode, false, true);
                     }
+                    return LRESULT(1);
+                }
+                if let Some(key_name) = key_name.clone() {
                     let screen_draw_active = {
                         let state = SCREEN_DRAW_STATE.lock();
                         state.active && state.text_session.is_none()
@@ -9810,12 +9816,19 @@ mod windows_overlay {
                         let mut state = SCREEN_DRAW_STATE.lock();
                         state.enabled = enabled;
                         state.trigger = trigger;
-                        state.color = match tool {
-                            crate::model::QuickScreenDrawTool::Highlight => {
-                                SCREEN_DRAW_HIGHLIGHT_COLOR
-                            }
-                            crate::model::QuickScreenDrawTool::Blur => SCREEN_DRAW_BLUR_COLOR,
-                            _ => color,
+                        state.effect = match tool {
+                            crate::model::QuickScreenDrawTool::Highlight => ScreenDrawEffect::Highlight,
+                            crate::model::QuickScreenDrawTool::Blur => ScreenDrawEffect::Blur,
+                            _ => state.effect,
+                        };
+                        state.color = if color == SCREEN_DRAW_HIGHLIGHT_COLOR {
+                            state.effect = ScreenDrawEffect::Highlight;
+                            RgbaColor { r: 255, g: 220, b: 50, a: 255 }
+                        } else if color == SCREEN_DRAW_BLUR_COLOR {
+                            state.effect = ScreenDrawEffect::Blur;
+                            RgbaColor { r: 200, g: 220, b: 255, a: 255 }
+                        } else {
+                            color
                         };
                         state.brush_size = brush_size.clamp(2.0, 80.0);
                         state.smoothing = smoothing;
@@ -11122,6 +11135,29 @@ mod windows_overlay {
             b: color.b,
             a: color.a,
         };
+    }
+
+    pub fn screen_draw_get_effect() -> u8 {
+        match SCREEN_DRAW_STATE.lock().effect {
+            ScreenDrawEffect::None => 0,
+            ScreenDrawEffect::Highlight => 1,
+            ScreenDrawEffect::Blur => 2,
+        }
+    }
+
+    pub fn screen_draw_toggle_effect(effect: u8) {
+        let mut state = SCREEN_DRAW_STATE.lock();
+        let requested = match effect {
+            1 => ScreenDrawEffect::Highlight,
+            2 => ScreenDrawEffect::Blur,
+            _ => ScreenDrawEffect::None,
+        };
+        state.effect = if state.effect == requested {
+            ScreenDrawEffect::None
+        } else {
+            requested
+        };
+        state.eraser = false;
     }
 
     pub fn screen_draw_get_color_pick_mode() -> bool {
@@ -12823,7 +12859,7 @@ mod windows_overlay {
             if !stroke.points.is_empty() {
                 if stroke.tool == ScreenDrawTool::Text && !stroke.eraser {
                     state.text_session = finalize_screen_draw_text_stroke(stroke);
-                } else if screen_draw_is_blur_color(stroke.color) && !stroke.eraser {
+                } else if stroke.effect == ScreenDrawEffect::Blur && !stroke.eraser {
                     if screen_draw_prepare_blur_patch(&state, &mut stroke) {
                         if state.canvas_width > 0
                             && state.canvas_height > 0
@@ -13661,6 +13697,7 @@ mod windows_overlay {
         };
         state.current_stroke = Some(ScreenDrawStroke {
             tool,
+            effect: state.effect,
             points: vec![point],
             color: state.color,
             brush_size: state.brush_size,
@@ -13853,6 +13890,7 @@ mod windows_overlay {
             b: 255,
             a: 255,
         };
+        mask_stroke.effect = ScreenDrawEffect::None;
         mask_stroke.filled = !matches!(
             mask_stroke.tool,
             ScreenDrawTool::Line | ScreenDrawTool::Arrow
@@ -14697,8 +14735,9 @@ mod windows_overlay {
         pixmap: &mut tiny_skia::PixmapMut,
         stroke: &ScreenDrawStroke,
     ) {
-        if screen_draw_is_highlight_color(stroke.color) && !stroke.eraser {
+        if stroke.effect == ScreenDrawEffect::Highlight && !stroke.eraser {
             let mut highlighted = stroke.clone();
+            highlighted.effect = ScreenDrawEffect::None;
             highlighted.color = RgbaColor {
                 r: 255,
                 g: 220,
@@ -14712,7 +14751,7 @@ mod windows_overlay {
             render_screen_draw_stroke_skia(pixmap, &highlighted);
             return;
         }
-        if screen_draw_is_blur_color(stroke.color) && !stroke.eraser {
+        if stroke.effect == ScreenDrawEffect::Blur && !stroke.eraser {
             if !stroke.blur_patch_rgba.is_empty() {
                 if let Some((first, last)) = screen_draw_rect_points(stroke) {
                     screen_draw_blit_patch(
@@ -14726,6 +14765,7 @@ mod windows_overlay {
                 }
             } else {
                 let mut preview = stroke.clone();
+                preview.effect = ScreenDrawEffect::None;
                 preview.color = RgbaColor {
                     r: 200,
                     g: 220,
@@ -14806,13 +14846,15 @@ mod windows_overlay {
                     }
                 }
                 if let Some(path) = pb.finish() {
-                    pixmap.stroke_path(
-                        &path,
-                        &paint,
-                        &stroke_style,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
+                    if stroke.color.a != SCREEN_DRAW_HIGHLIGHT_ALPHA {
+                        pixmap.stroke_path(
+                            &path,
+                            &paint,
+                            &stroke_style,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
+                    }
                 }
             }
             ScreenDrawTool::Highlight => {
@@ -14967,13 +15009,15 @@ mod windows_overlay {
                                 None,
                             );
                         }
-                        pixmap.stroke_path(
-                            &path,
-                            &paint,
-                            &stroke_style,
-                            tiny_skia::Transform::identity(),
-                            None,
-                        );
+                        if stroke.color.a != SCREEN_DRAW_HIGHLIGHT_ALPHA {
+                            pixmap.stroke_path(
+                                &path,
+                                &paint,
+                                &stroke_style,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
+                        }
                     }
                 }
             }
@@ -15010,13 +15054,15 @@ mod windows_overlay {
                                 None,
                             );
                         }
-                        pixmap.stroke_path(
-                            &path,
-                            &paint,
-                            &stroke_style,
-                            tiny_skia::Transform::identity(),
-                            None,
-                        );
+                        if stroke.color.a != SCREEN_DRAW_HIGHLIGHT_ALPHA {
+                            pixmap.stroke_path(
+                                &path,
+                                &paint,
+                                &stroke_style,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
+                        }
                     }
                 }
             }
@@ -15036,13 +15082,15 @@ mod windows_overlay {
                             None,
                         );
                     }
-                    pixmap.stroke_path(
-                        &path,
-                        &paint,
-                        &stroke_style,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
+                    if stroke.color.a != SCREEN_DRAW_HIGHLIGHT_ALPHA {
+                        pixmap.stroke_path(
+                            &path,
+                            &paint,
+                            &stroke_style,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
+                    }
                 }
             }
             ScreenDrawTool::Polygon => {
@@ -15073,13 +15121,15 @@ mod windows_overlay {
                             None,
                         );
                     }
-                    pixmap.stroke_path(
-                        &path,
-                        &paint,
-                        &stroke_style,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
+                    if stroke.color.a != SCREEN_DRAW_HIGHLIGHT_ALPHA {
+                        pixmap.stroke_path(
+                            &path,
+                            &paint,
+                            &stroke_style,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
+                    }
                 }
             }
             ScreenDrawTool::Text => {
@@ -29206,6 +29256,7 @@ mod windows_overlay {
         fn screen_draw_text_layout_tracks_latest_pointer_for_text_preview() {
             let stroke = ScreenDrawStroke {
                 tool: ScreenDrawTool::Text,
+                effect: ScreenDrawEffect::None,
                 points: vec![POINT { x: 300, y: 220 }, POINT { x: 180, y: 268 }],
                 color: RgbaColor {
                     r: 255,
@@ -29242,6 +29293,7 @@ mod windows_overlay {
         fn screen_draw_text_session_geometry_tracks_controls_after_rotation() {
             let stroke = ScreenDrawStroke {
                 tool: ScreenDrawTool::Text,
+                effect: ScreenDrawEffect::None,
                 points: vec![POINT { x: 120, y: 140 }, POINT { x: 320, y: 220 }],
                 color: RgbaColor {
                     r: 255,
@@ -29330,6 +29382,7 @@ mod windows_overlay {
         fn screen_draw_text_controls_drop_below_when_toolbar_blocks_top_space() {
             let stroke = ScreenDrawStroke {
                 tool: ScreenDrawTool::Text,
+                effect: ScreenDrawEffect::None,
                 points: vec![POINT { x: 48, y: 48 }, POINT { x: 208, y: 82 }],
                 color: RgbaColor {
                     r: 255,
@@ -36407,6 +36460,10 @@ mod fallback {
         crate::model::RgbaColor::default()
     }
     pub fn screen_draw_set_color(_color: crate::model::RgbaColor) {}
+    pub fn screen_draw_get_effect() -> u8 {
+        0
+    }
+    pub fn screen_draw_toggle_effect(_effect: u8) {}
     pub fn screen_draw_get_color_pick_mode() -> bool {
         false
     }
