@@ -13246,6 +13246,52 @@ impl eframe::App for CrosshairApp {
                                                 painter.line_segment([top_left, top_right], stroke);
                                                 painter.line_segment([top_mid, bottom_mid], stroke);
                                             }
+                                            "highlight" => {
+                                                let body = egui::Rect::from_min_max(
+                                                    rect.left_top() + egui::vec2(pad + 1.0, pad + 7.0),
+                                                    rect.right_bottom() + egui::vec2(-pad + 1.0, -pad + 1.0),
+                                                );
+                                                painter.rect_filled(
+                                                    body,
+                                                    1.5,
+                                                    egui::Color32::from_rgba_premultiplied(255, 224, 64, 130),
+                                                );
+                                                let tip = [
+                                                    rect.left_top() + egui::vec2(pad + 1.0, pad + 4.0),
+                                                    rect.left_top() + egui::vec2(pad + 6.2, pad + 4.0),
+                                                    rect.left_top() + egui::vec2(pad + 8.6, pad + 7.0),
+                                                    rect.left_top() + egui::vec2(pad + 3.5, pad + 7.0),
+                                                ];
+                                                painter.add(egui::Shape::convex_polygon(
+                                                    tip.to_vec(),
+                                                    color,
+                                                    egui::Stroke::NONE,
+                                                ));
+                                                painter.rect_stroke(body, 1.5, stroke, egui::StrokeKind::Inside);
+                                            }
+                                            "blur" => {
+                                                let body = rect.shrink2(egui::vec2(pad, pad));
+                                                let cols = [0.22, 0.5, 0.78];
+                                                let rows = [0.28, 0.5, 0.72];
+                                                for (ry, row) in rows.iter().enumerate() {
+                                                    for (cx, col) in cols.iter().enumerate() {
+                                                        let alpha = match (ry, cx) {
+                                                            (1, 1) => 0.86,
+                                                            (1, _) | (_, 1) => 0.58,
+                                                            _ => 0.33,
+                                                        };
+                                                        painter.circle_filled(
+                                                            egui::pos2(
+                                                                egui::lerp(body.left()..=body.right(), *col),
+                                                                egui::lerp(body.top()..=body.bottom(), *row),
+                                                            ),
+                                                            if ry == 1 && cx == 1 { 2.0 } else { 1.4 },
+                                                            color.linear_multiply(alpha),
+                                                        );
+                                                    }
+                                                }
+                                                painter.rect_stroke(body, 2.0, stroke, egui::StrokeKind::Inside);
+                                            }
                                             "eraser" => {
                                                 let body = rect.shrink2(egui::vec2(pad + 1.0, pad));
                                                 painter.rect_filled(body, 2.0, color.linear_multiply(0.25));
@@ -13442,6 +13488,10 @@ impl eframe::App for CrosshairApp {
                                     tool_btn(ui, crate::model::QuickScreenDrawTool::Circle, "circle", self.tr("Circle", "Hình tròn"));
                                     tool_btn(ui, crate::model::QuickScreenDrawTool::Polygon, "poly", self.tr("Polygon", "Đa giác"));
                                     tool_btn(ui, crate::model::QuickScreenDrawTool::Text, "text", self.tr("Text", "Chữ"));
+                                    if !crosshair_draw_mode {
+                                        tool_btn(ui, crate::model::QuickScreenDrawTool::Highlight, "highlight", self.tr("Highlight", "Tô sáng"));
+                                        tool_btn(ui, crate::model::QuickScreenDrawTool::Blur, "blur", self.tr("Blur", "Làm mờ"));
+                                    }
 
                                     // Eraser
                                     if icon_btn(ui, eraser_active, "eraser", self.tr("Eraser", "Tẩy")).1 {

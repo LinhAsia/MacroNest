@@ -212,7 +212,10 @@ mod windows_overlay {
                     .find(|item| name_of(item).trim().eq_ignore_ascii_case(spec))
             })
     }
-    use image::{RgbaImage, imageops::FilterType};
+    use image::{
+        RgbaImage,
+        imageops::{self, FilterType},
+    };
     #[path = "../window_preset.rs"]
     mod window_preset;
     const HOTKEY_ID: i32 = 1001;
@@ -226,6 +229,9 @@ mod windows_overlay {
     const WMAPP_WINDOW_FOCUS_CHANGED: u32 = WM_APP + 3;
     const WMAPP_WINDOW_LOCATION_CHANGED: u32 = WM_APP + 4;
     const WMAPP_SCREEN_DRAW_SYNC: u32 = WM_APP + 5;
+    const SCREEN_DRAW_HIGHLIGHT_ALPHA: u8 = 88;
+    const SCREEN_DRAW_BLUR_PREVIEW_ALPHA: u8 = 46;
+    const SCREEN_DRAW_BLUR_RADIUS: f32 = 6.0;
     const MACRO_PRESET_BASE_ID: i32 = 10000;
     const FOCUS_TRIGGER_TIMER_ID: usize = 2;
     const SCREEN_DRAW_TIMER_ID: usize = 3;
@@ -1930,6 +1936,8 @@ mod windows_overlay {
         Circle,
         Polygon,
         Text,
+        Highlight,
+        Blur,
     }
 
     impl Default for ScreenDrawTool {
@@ -1955,6 +1963,9 @@ mod windows_overlay {
         text_border: bool,
         shift_snap_anchor: Option<POINT>,
         shift_snap_active: bool,
+        blur_patch_rgba: Vec<u8>,
+        blur_patch_width: usize,
+        blur_patch_height: usize,
     }
 
     #[derive(Clone)]
@@ -9796,6 +9807,10 @@ mod windows_overlay {
                             crate::model::QuickScreenDrawTool::Circle => ScreenDrawTool::Circle,
                             crate::model::QuickScreenDrawTool::Polygon => ScreenDrawTool::Polygon,
                             crate::model::QuickScreenDrawTool::Text => ScreenDrawTool::Text,
+                            crate::model::QuickScreenDrawTool::Highlight => {
+                                ScreenDrawTool::Highlight
+                            }
+                            crate::model::QuickScreenDrawTool::Blur => ScreenDrawTool::Blur,
                         };
                         if !enabled && state.active {
                             deactivate_screen_draw(&mut state);
@@ -11209,6 +11224,8 @@ mod windows_overlay {
             ScreenDrawTool::Circle => crate::model::QuickScreenDrawTool::Circle,
             ScreenDrawTool::Polygon => crate::model::QuickScreenDrawTool::Polygon,
             ScreenDrawTool::Text => crate::model::QuickScreenDrawTool::Text,
+            ScreenDrawTool::Highlight => crate::model::QuickScreenDrawTool::Highlight,
+            ScreenDrawTool::Blur => crate::model::QuickScreenDrawTool::Blur,
         }
     }
 
@@ -11226,6 +11243,8 @@ mod windows_overlay {
             crate::model::QuickScreenDrawTool::Circle => ScreenDrawTool::Circle,
             crate::model::QuickScreenDrawTool::Polygon => ScreenDrawTool::Polygon,
             crate::model::QuickScreenDrawTool::Text => ScreenDrawTool::Text,
+            crate::model::QuickScreenDrawTool::Highlight => ScreenDrawTool::Highlight,
+            crate::model::QuickScreenDrawTool::Blur => ScreenDrawTool::Blur,
         };
     }
 
@@ -11444,7 +11463,11 @@ mod windows_overlay {
             }
         };
         let extra_pad = match stroke.tool {
-            ScreenDrawTool::Brush | ScreenDrawTool::Line | ScreenDrawTool::Rectangle => 6,
+            ScreenDrawTool::Brush
+            | ScreenDrawTool::Line
+            | ScreenDrawTool::Rectangle
+            | ScreenDrawTool::Highlight => 6,
+            ScreenDrawTool::Blur => SCREEN_DRAW_BLUR_RADIUS.ceil() as i32 + 8,
             ScreenDrawTool::Arrow
             | ScreenDrawTool::Ellipse
             | ScreenDrawTool::Circle
@@ -11560,6 +11583,8 @@ mod windows_overlay {
                     ScreenDrawTool::Circle => crate::model::QuickScreenDrawTool::Circle,
                     ScreenDrawTool::Polygon => crate::model::QuickScreenDrawTool::Polygon,
                     ScreenDrawTool::Text => crate::model::QuickScreenDrawTool::Text,
+                    ScreenDrawTool::Highlight => crate::model::QuickScreenDrawTool::Highlight,
+                    ScreenDrawTool::Blur => crate::model::QuickScreenDrawTool::Blur,
                 },
                 text_border: state.text_border,
             });
@@ -12765,12 +12790,36 @@ mod windows_overlay {
         if let Some(previous) = state.live_stroke_rect.take() {
             mark_screen_draw_dirty(&mut state, previous);
         }
-        if let Some(stroke) = state.current_stroke.take() {
+        if let Some(mut stroke) = state.current_stroke.take() {
             state.current_stroke_updated_at = None;
             state.current_stroke_release_seen_at = None;
             if !stroke.points.is_empty() {
                 if stroke.tool == ScreenDrawTool::Text && !stroke.eraser {
                     state.text_session = finalize_screen_draw_text_stroke(stroke);
+                } else if stroke.tool == ScreenDrawTool::Blur && !stroke.eraser {
+                    if screen_draw_prepare_blur_patch(&state, &mut stroke) {
+                        if state.canvas_width > 0
+                            && state.canvas_height > 0
+                            && !state.committed_rgba.is_empty()
+                            && !state.committed_dirty
+                        {
+                            let canvas_width = state.canvas_width as u32;
+                            let canvas_height = state.canvas_height as u32;
+                            if let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
+                                state.committed_rgba.as_mut_slice(),
+                                canvas_width,
+                                canvas_height,
+                            ) {
+                                render_screen_draw_stroke_skia(&mut pixmap, &stroke);
+                            } else {
+                                state.committed_dirty = true;
+                            }
+                        } else {
+                            state.committed_dirty = true;
+                        }
+                        state.strokes.push(stroke);
+                        state.redo_strokes.clear();
+                    }
                 } else if state.canvas_width > 0
                     && state.canvas_height > 0
                     && !state.committed_rgba.is_empty()
@@ -12826,6 +12875,8 @@ mod windows_overlay {
                     ScreenDrawTool::Circle => crate::model::QuickScreenDrawTool::Circle,
                     ScreenDrawTool::Polygon => crate::model::QuickScreenDrawTool::Polygon,
                     ScreenDrawTool::Text => crate::model::QuickScreenDrawTool::Text,
+                    ScreenDrawTool::Highlight => crate::model::QuickScreenDrawTool::Highlight,
+                    ScreenDrawTool::Blur => crate::model::QuickScreenDrawTool::Blur,
                     ScreenDrawTool::Brush => crate::model::QuickScreenDrawTool::Brush,
                 },
                 state.text_border,
@@ -13597,9 +13648,181 @@ mod windows_overlay {
             text_border: state.text_border,
             shift_snap_anchor: None,
             shift_snap_active: false,
+            blur_patch_rgba: Vec::new(),
+            blur_patch_width: 0,
+            blur_patch_height: 0,
         });
         state.current_stroke_updated_at = Some(Instant::now());
         state.current_stroke_release_seen_at = None;
+    }
+
+    fn screen_draw_rect_points(stroke: &ScreenDrawStroke) -> Option<(POINT, POINT)> {
+        let first = stroke.points.first().copied()?;
+        let last = stroke.points.last().copied().unwrap_or(first);
+        Some((
+            POINT {
+                x: first.x.min(last.x),
+                y: first.y.min(last.y),
+            },
+            POINT {
+                x: first.x.max(last.x),
+                y: first.y.max(last.y),
+            },
+        ))
+    }
+
+    fn screen_draw_blit_patch(
+        pixmap: &mut tiny_skia::PixmapMut<'_>,
+        left: i32,
+        top: i32,
+        width: usize,
+        height: usize,
+        rgba: &[u8],
+    ) {
+        if width == 0 || height == 0 || rgba.len() < width.saturating_mul(height).saturating_mul(4)
+        {
+            return;
+        }
+        let pixmap_width = pixmap.width() as i32;
+        let pixmap_height = pixmap.height() as i32;
+        let data = pixmap.data_mut();
+        for row in 0..height {
+            let dst_y = top + row as i32;
+            if !(0..pixmap_height).contains(&dst_y) {
+                continue;
+            }
+            for col in 0..width {
+                let dst_x = left + col as i32;
+                if !(0..pixmap_width).contains(&dst_x) {
+                    continue;
+                }
+                let src_offset = (row * width + col) * 4;
+                let src_a = rgba[src_offset + 3];
+                if src_a == 0 {
+                    continue;
+                }
+                let dst_offset = ((dst_y as usize * pixmap_width as usize) + dst_x as usize) * 4;
+                blend_premultiplied_rgba(
+                    &mut data[dst_offset..dst_offset + 4],
+                    rgba[src_offset],
+                    rgba[src_offset + 1],
+                    rgba[src_offset + 2],
+                    src_a,
+                );
+            }
+        }
+    }
+
+    fn screen_draw_compose_committed_region_over_capture(
+        state: &ScreenDrawState,
+        left: usize,
+        top: usize,
+        width: usize,
+        height: usize,
+        dst: &mut [u8],
+    ) {
+        if state.committed_rgba.is_empty() || state.canvas_width == 0 || state.canvas_height == 0 {
+            return;
+        }
+        let copy_width = width.min(state.canvas_width.saturating_sub(left));
+        let copy_height = height.min(state.canvas_height.saturating_sub(top));
+        if copy_width == 0 || copy_height == 0 {
+            return;
+        }
+        for row in 0..copy_height {
+            let src_row = ((top + row) * state.canvas_width + left) * 4;
+            let dst_row = row * width * 4;
+            for col in 0..copy_width {
+                let src_offset = src_row + col * 4;
+                let src_a = state.committed_rgba[src_offset + 3];
+                if src_a == 0 {
+                    continue;
+                }
+                let dst_offset = dst_row + col * 4;
+                blend_premultiplied_rgba(
+                    &mut dst[dst_offset..dst_offset + 4],
+                    state.committed_rgba[src_offset],
+                    state.committed_rgba[src_offset + 1],
+                    state.committed_rgba[src_offset + 2],
+                    src_a,
+                );
+            }
+        }
+    }
+
+    fn screen_draw_prepare_blur_patch(
+        state: &ScreenDrawState,
+        stroke: &mut ScreenDrawStroke,
+    ) -> bool {
+        let Some((top_left, bottom_right)) = screen_draw_rect_points(stroke) else {
+            return false;
+        };
+        let canvas_w = state.canvas_width as i32;
+        let canvas_h = state.canvas_height as i32;
+        if canvas_w <= 0 || canvas_h <= 0 {
+            return false;
+        }
+
+        let left = top_left.x.clamp(0, canvas_w);
+        let top = top_left.y.clamp(0, canvas_h);
+        let right = bottom_right.x.clamp(0, canvas_w);
+        let bottom = bottom_right.y.clamp(0, canvas_h);
+        let width = (right - left).max(0) as usize;
+        let height = (bottom - top).max(0) as usize;
+        if width == 0 || height == 0 {
+            return false;
+        }
+
+        let source_rgba = if state.freeze_screen || state.canvas_background.is_some() {
+            let mut buf = vec![0u8; width * height * 4];
+            for row in 0..height {
+                let src_start = (((top as usize + row) * state.canvas_width) + left as usize) * 4;
+                let src_end = src_start + width * 4;
+                let dst_start = row * width * 4;
+                let dst_end = dst_start + width * 4;
+                buf[dst_start..dst_end].copy_from_slice(&state.committed_rgba[src_start..src_end]);
+            }
+            unpremultiply_rgba_in_place(&mut buf);
+            buf
+        } else {
+            let (screen_x, screen_y, _, _) = window_list::virtual_screen_bounds();
+            let Some(capture) = window_list::capture_virtual_screen_region(
+                screen_x + left,
+                screen_y + top,
+                width as i32,
+                height as i32,
+            ) else {
+                return false;
+            };
+            let mut buf = capture.rgba;
+            screen_draw_compose_committed_region_over_capture(
+                state,
+                left as usize,
+                top as usize,
+                width,
+                height,
+                &mut buf,
+            );
+            buf
+        };
+
+        let Some(image) = RgbaImage::from_raw(width as u32, height as u32, source_rgba) else {
+            return false;
+        };
+        let mut blurred = imageops::blur(&image, SCREEN_DRAW_BLUR_RADIUS).into_raw();
+        premultiply_rgba_in_place(&mut blurred);
+
+        stroke.points = vec![
+            POINT { x: left, y: top },
+            POINT {
+                x: right,
+                y: bottom,
+            },
+        ];
+        stroke.blur_patch_rgba = blurred;
+        stroke.blur_patch_width = width;
+        stroke.blur_patch_height = height;
+        true
     }
 
     fn next_screen_draw_color(color: RgbaColor) -> RgbaColor {
@@ -14494,6 +14717,97 @@ mod windows_overlay {
                         tiny_skia::Transform::identity(),
                         None,
                     );
+                }
+            }
+            ScreenDrawTool::Highlight => {
+                let left = first.x.min(last.x) as f32;
+                let top = first.y.min(last.y) as f32;
+                let width = (first.x - last.x).unsigned_abs() as f32;
+                let height = (first.y - last.y).unsigned_abs() as f32;
+                if width > 0.0 && height > 0.0 {
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    pb.move_to(left, top);
+                    pb.line_to(left + width, top);
+                    pb.line_to(left + width, top + height);
+                    pb.line_to(left, top + height);
+                    pb.close();
+                    if let Some(path) = pb.finish() {
+                        let mut fill_paint = tiny_skia::Paint::default();
+                        fill_paint.anti_alias = true;
+                        fill_paint.set_color(tiny_skia::Color::from_rgba8(
+                            stroke.color.r,
+                            stroke.color.g,
+                            stroke.color.b,
+                            SCREEN_DRAW_HIGHLIGHT_ALPHA,
+                        ));
+                        pixmap.fill_path(
+                            &path,
+                            &fill_paint,
+                            tiny_skia::FillRule::Winding,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
+                    }
+                }
+            }
+            ScreenDrawTool::Blur => {
+                if !stroke.blur_patch_rgba.is_empty() {
+                    screen_draw_blit_patch(
+                        pixmap,
+                        first.x.min(last.x),
+                        first.y.min(last.y),
+                        stroke.blur_patch_width,
+                        stroke.blur_patch_height,
+                        &stroke.blur_patch_rgba,
+                    );
+                } else {
+                    let left = first.x.min(last.x) as f32;
+                    let top = first.y.min(last.y) as f32;
+                    let width = (first.x - last.x).unsigned_abs() as f32;
+                    let height = (first.y - last.y).unsigned_abs() as f32;
+                    if width > 0.0 && height > 0.0 {
+                        let mut pb = tiny_skia::PathBuilder::new();
+                        pb.move_to(left, top);
+                        pb.line_to(left + width, top);
+                        pb.line_to(left + width, top + height);
+                        pb.line_to(left, top + height);
+                        pb.close();
+                        if let Some(path) = pb.finish() {
+                            let mut fill_paint = tiny_skia::Paint::default();
+                            fill_paint.anti_alias = true;
+                            fill_paint.set_color(tiny_skia::Color::from_rgba8(
+                                200,
+                                220,
+                                255,
+                                SCREEN_DRAW_BLUR_PREVIEW_ALPHA,
+                            ));
+                            pixmap.fill_path(
+                                &path,
+                                &fill_paint,
+                                tiny_skia::FillRule::Winding,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
+
+                            let mut outline_paint = tiny_skia::Paint::default();
+                            outline_paint.anti_alias = true;
+                            outline_paint
+                                .set_color(tiny_skia::Color::from_rgba8(235, 245, 255, 210));
+                            let outline = tiny_skia::Stroke {
+                                width: 1.6,
+                                line_cap: tiny_skia::LineCap::Round,
+                                line_join: tiny_skia::LineJoin::Round,
+                                ..Default::default()
+                            };
+                            pixmap.stroke_path(
+                                &path,
+                                &outline_paint,
+                                &outline,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
+                        }
+                    }
                 }
             }
             ScreenDrawTool::Line => {

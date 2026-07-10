@@ -70,6 +70,8 @@ pub enum QuickScreenDrawTool {
     Circle,
     Polygon,
     Text,
+    Highlight,
+    Blur,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
