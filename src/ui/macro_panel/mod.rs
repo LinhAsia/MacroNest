@@ -1479,6 +1479,7 @@ impl CrosshairApp {
                 .inner_margin(egui::Margin::symmetric(10, 8))
                 .show(ui, |ui| {
                     ui.set_min_width((full_width - 22.0).max(0.0));
+                    ui.set_max_width((full_width - 22.0).max(0.0));
                     ui.horizontal(|ui| {
                         ui.label(
                             Self::material_icon_text(0xe002, 14.0)
