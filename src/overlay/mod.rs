@@ -85,7 +85,7 @@ mod windows_overlay {
                 Gdi::{
                     AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO,
                     BITMAPINFOHEADER, BLENDFUNCTION, BeginPaint, CLIP_DEFAULT_PRECIS,
-                    ClientToScreen, CreateCompatibleDC, CreateDIBSection, CreateFontW,
+                    ClientToScreen, CreateBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontW,
                     CreateRectRgn, DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
                     DT_EDITCONTROL, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
                     DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, EndPaint, FF_DONTCARE,
@@ -130,12 +130,14 @@ mod windows_overlay {
                     NOTIFYICONDATAW, Shell_NotifyIconW,
                 },
                 WindowsAndMessaging::{
-                    AppendMenuW, CREATESTRUCTW, CallNextHookEx, CreatePopupMenu, CreateWindowExW,
-                    DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW,
+                    AppendMenuW, CREATESTRUCTW, CallNextHookEx, CreateIconIndirect, CreatePopupMenu,
+                    CreateWindowExW, DefWindowProcW, DestroyCursor, DestroyIcon, DestroyMenu,
+                    DestroyWindow, DispatchMessageW,
                     EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA,
                     GetAncestor, GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow,
                     GetMessageW, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW,
-                    GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HHOOK, HMENU, HTCLIENT,
+                    GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HCURSOR, HHOOK, HMENU,
+                    HTCLIENT,
                     HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IMAGE_ICON, IsZoomed,
                     KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LoadCursorW, LoadImageW,
                     MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT, PostMessageW,
@@ -152,7 +154,8 @@ mod windows_overlay {
                     WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
                     WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE,
                     WM_NCCREATE, WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR,
-                    WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW,
+                    WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, ICONINFO,
+                    WNDCLASSW,
                     WS_CAPTION, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
                     WS_EX_TRANSPARENT, WS_OVERLAPPEDWINDOW, WS_POPUP, WindowFromPoint,
                 },
@@ -305,6 +308,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static SCREEN_DRAW_STATE: Lazy<Mutex<ScreenDrawState>> =
         Lazy::new(|| Mutex::new(ScreenDrawState::default()));
+    static SCREEN_DRAW_BRUSH_CURSOR: Lazy<Mutex<Option<(ScreenDrawBrushCursorKey, isize)>>> =
+        Lazy::new(|| Mutex::new(None));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
     static LAST_MOUSE_MOVE_TIME_MS: AtomicU64 = AtomicU64::new(0);
     const QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS: u32 = 1200;
@@ -1958,6 +1963,12 @@ mod windows_overlay {
         None,
         Highlight,
         Blur,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct ScreenDrawBrushCursorKey {
+        diameter: u8,
+        color: [u8; 3],
     }
 
     impl Default for ScreenDrawTool {
@@ -4541,6 +4552,10 @@ mod windows_overlay {
             WM_SETCURSOR => {
                 if screen_draw_color_pick_mode_active() {
                     set_screen_draw_color_pick_cursor();
+                    return LRESULT(1);
+                }
+                let state = SCREEN_DRAW_STATE.lock();
+                if set_screen_draw_brush_cursor(&state) {
                     return LRESULT(1);
                 }
                 return DefWindowProcW(hwnd, msg, _wparam, _lparam);
@@ -11178,6 +11193,115 @@ mod windows_overlay {
         }
     }
 
+    fn screen_draw_brush_cursor_key(state: &ScreenDrawState) -> ScreenDrawBrushCursorKey {
+        let color = if state.eraser {
+            [255, 255, 255]
+        } else if state.effect == ScreenDrawEffect::Blur {
+            [160, 205, 255]
+        } else {
+            [state.color.r, state.color.g, state.color.b]
+        };
+        ScreenDrawBrushCursorKey {
+            diameter: state.brush_size.round().clamp(2.0, 80.0) as u8,
+            color,
+        }
+    }
+
+    unsafe fn create_screen_draw_brush_cursor(key: ScreenDrawBrushCursorKey) -> Option<HCURSOR> {
+        let padding = 8i32;
+        let side = key.diameter as i32 + padding;
+        let center = side as f32 * 0.5;
+        let radius = key.diameter as f32 * 0.5;
+        let mut pixels = vec![0u8; (side * side * 4) as usize];
+        for y in 0..side {
+            for x in 0..side {
+                let distance = ((x as f32 + 0.5 - center).powi(2)
+                    + (y as f32 + 0.5 - center).powi(2))
+                .sqrt();
+                let alpha = ((1.5 - (distance - radius).abs()).clamp(0.0, 1.0) * 255.0) as u8;
+                if alpha == 0 {
+                    continue;
+                }
+                let offset = ((y * side + x) * 4) as usize;
+                pixels[offset] = ((key.color[2] as u16 * alpha as u16) / 255) as u8;
+                pixels[offset + 1] = ((key.color[1] as u16 * alpha as u16) / 255) as u8;
+                pixels[offset + 2] = ((key.color[0] as u16 * alpha as u16) / 255) as u8;
+                pixels[offset + 3] = alpha;
+            }
+        }
+        let color_bitmap = CreateBitmap(
+            side,
+            side,
+            1,
+            32,
+            Some(pixels.as_ptr().cast::<c_void>()),
+        );
+        let mask_stride = ((side + 15) / 16 * 2) as usize;
+        let mask_pixels = vec![0u8; mask_stride * side as usize];
+        let mask_bitmap = CreateBitmap(
+            side,
+            side,
+            1,
+            1,
+            Some(mask_pixels.as_ptr().cast::<c_void>()),
+        );
+        if color_bitmap.is_invalid() || mask_bitmap.is_invalid() {
+            if !color_bitmap.is_invalid() {
+                let _ = DeleteObject(HGDIOBJ(color_bitmap.0));
+            }
+            if !mask_bitmap.is_invalid() {
+                let _ = DeleteObject(HGDIOBJ(mask_bitmap.0));
+            }
+            return None;
+        }
+        let icon = CreateIconIndirect(&ICONINFO {
+            fIcon: false.into(),
+            xHotspot: (side / 2) as u32,
+            yHotspot: (side / 2) as u32,
+            hbmMask: mask_bitmap,
+            hbmColor: color_bitmap,
+        })
+        .ok();
+        let _ = DeleteObject(HGDIOBJ(color_bitmap.0));
+        let _ = DeleteObject(HGDIOBJ(mask_bitmap.0));
+        icon.map(|icon| HCURSOR(icon.0))
+    }
+
+    unsafe fn set_screen_draw_brush_cursor(state: &ScreenDrawState) -> bool {
+        if state.tool != ScreenDrawTool::Brush
+            || state.current_stroke.is_some()
+            || state.active_control != ScreenDrawControl::None
+            || state.screen_color_pick_mode
+            || state.capturing_region
+        {
+            return false;
+        }
+        let toolbar = screen_draw_toolbar_rect(state);
+        if (toolbar.left as i32..toolbar.right as i32).contains(&state.pointer_point.x)
+            && (toolbar.top as i32..toolbar.bottom as i32).contains(&state.pointer_point.y)
+        {
+            return false;
+        }
+        let key = screen_draw_brush_cursor_key(state);
+        let mut cached = SCREEN_DRAW_BRUSH_CURSOR.lock();
+        if cached.as_ref().is_none_or(|(cached_key, _)| *cached_key != key) {
+            let cursor = match create_screen_draw_brush_cursor(key) {
+                Some(cursor) => cursor,
+                None => return false,
+            };
+            SetCursor(Some(cursor));
+            if let Some((_, old)) = cached.replace((key, cursor.0 as isize)) {
+                let _ = DestroyCursor(HCURSOR(old as *mut c_void));
+            }
+        }
+        if let Some((_, cursor)) = *cached {
+            SetCursor(Some(HCURSOR(cursor as *mut c_void)));
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn screen_draw_set_color_pick_cursor() {
         unsafe {
             set_screen_draw_color_pick_cursor();
@@ -11474,33 +11598,6 @@ mod windows_overlay {
         } else {
             base_rect
         }
-    }
-
-    fn screen_draw_cursor_preview_rect(
-        state: &ScreenDrawState,
-        point: POINT,
-    ) -> Option<ScreenDrawDirtyRect> {
-        if state.tool != ScreenDrawTool::Brush
-            || state.current_stroke.is_some()
-            || state.active_control != ScreenDrawControl::None
-            || state.screen_color_pick_mode
-            || state.capturing_region
-        {
-            return None;
-        }
-        let toolbar = screen_draw_toolbar_rect(state);
-        if (toolbar.left as i32..toolbar.right as i32).contains(&point.x)
-            && (toolbar.top as i32..toolbar.bottom as i32).contains(&point.y)
-        {
-            return None;
-        }
-        let radius = (state.brush_size * 0.5).ceil() as i32 + 4;
-        Some(ScreenDrawDirtyRect {
-            left: point.x.saturating_sub(radius).max(0) as usize,
-            top: point.y.saturating_sub(radius).max(0) as usize,
-            right: (point.x + radius + 1).max(0) as usize,
-            bottom: (point.y + radius + 1).max(0) as usize,
-        })
     }
 
     fn mark_screen_draw_dirty(state: &mut ScreenDrawState, rect: ScreenDrawDirtyRect) {
@@ -12684,24 +12781,10 @@ mod windows_overlay {
             return false;
         }
         let previous_preview_rect = screen_draw_color_pick_panel_rect(&state);
-        let previous_cursor_rect = screen_draw_cursor_preview_rect(&state, state.pointer_point);
         state.pointer_point = point;
-        let cursor_preview_changed = if let Some(current) =
-            screen_draw_cursor_preview_rect(&state, point)
-        {
-            if let Some(previous) = previous_cursor_rect {
-                mark_screen_draw_dirty(&mut state, previous);
-            }
-            mark_screen_draw_dirty(&mut state, current);
-            mark_screen_draw_repaint_pending(&mut state);
-            true
-        } else if let Some(previous) = previous_cursor_rect {
-            mark_screen_draw_dirty(&mut state, previous);
-            mark_screen_draw_repaint_pending(&mut state);
-            true
-        } else {
-            false
-        };
+        unsafe {
+            set_screen_draw_brush_cursor(&state);
+        }
         match state.active_control {
             ScreenDrawControl::MoveToolbar => {
                 let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
@@ -12879,7 +12962,7 @@ mod windows_overlay {
                     }
                     changed
                 } else {
-                    cursor_preview_changed
+                    state.tool == ScreenDrawTool::Brush
                 }
             }
         }
@@ -15550,53 +15633,6 @@ mod windows_overlay {
                         &path,
                         &paint,
                         tiny_skia::FillRule::Winding,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
-                }
-            }
-        }
-
-        if state_guard.tool == ScreenDrawTool::Brush
-            && state_guard.current_stroke.is_none()
-            && state_guard.active_control == ScreenDrawControl::None
-            && !state_guard.screen_color_pick_mode
-            && !capturing_region
-            && screen_draw_cursor_preview_rect(&state_guard, state_guard.pointer_point).is_some()
-        {
-            let point = state_guard.pointer_point;
-            let radius = (state_guard.brush_size * 0.5).max(1.0);
-            let color = if state_guard.eraser {
-                RgbaColor { r: 255, g: 255, b: 255, a: 220 }
-            } else if state_guard.effect == ScreenDrawEffect::Blur {
-                RgbaColor { r: 200, g: 220, b: 255, a: 220 }
-            } else {
-                RgbaColor {
-                    a: 220,
-                    ..state_guard.color
-                }
-            };
-            if let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
-                state_guard.frame_rgba.as_mut_slice(),
-                width as u32,
-                height as u32,
-            ) {
-                let mut path = tiny_skia::PathBuilder::new();
-                path.push_circle(point.x as f32, point.y as f32, radius);
-                if let Some(path) = path.finish() {
-                    let mut paint = tiny_skia::Paint::default();
-                    paint.set_color(tiny_skia::Color::from_rgba8(
-                        color.r, color.g, color.b, color.a,
-                    ));
-                    paint.anti_alias = true;
-                    let stroke = tiny_skia::Stroke {
-                        width: 1.25,
-                        ..Default::default()
-                    };
-                    pixmap.stroke_path(
-                        &path,
-                        &paint,
-                        &stroke,
                         tiny_skia::Transform::identity(),
                         None,
                     );
