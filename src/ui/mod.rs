@@ -8335,6 +8335,8 @@ impl CrosshairApp {
 
         let rect_id = ui.make_persistent_id((id_source, "timer-rect"));
         let drag_id = ui.make_persistent_id((id_source, "timer-selection-drag-handle"));
+        let offset_id = ui.make_persistent_id((id_source, "timer-selection-drag-offset"));
+        let anchor_id = ui.make_persistent_id((id_source, "timer-selection-drag-anchor"));
 
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         enum SelectionDragHandle {
@@ -8352,197 +8354,294 @@ impl CrosshairApp {
 
         let mut active_handle: SelectionDragHandle =
             ui.data_mut(|d| d.get_temp(drag_id).unwrap_or(SelectionDragHandle::None));
+        let mut drag_offset: egui::Vec2 =
+            ui.data_mut(|d| d.get_temp(offset_id).unwrap_or(egui::Vec2::ZERO));
+        let mut drag_anchor: egui::Pos2 =
+            ui.data_mut(|d| d.get_temp(anchor_id).unwrap_or(egui::Pos2::ZERO));
 
-        if response.drag_started() {
-            if let Some(pointer_pos) = response.interact_pointer_pos() {
-                let dist_tl = pointer_pos.distance(rect.left_top());
-                let dist_tr = pointer_pos.distance(rect.right_top());
-                let dist_bl = pointer_pos.distance(rect.left_bottom());
-                let dist_br = pointer_pos.distance(rect.right_bottom());
+        let pick_selection_drag_handle = |pointer_pos: egui::Pos2, rect: egui::Rect| {
+            let dist_tl = pointer_pos.distance(rect.left_top());
+            let dist_tr = pointer_pos.distance(rect.right_top());
+            let dist_bl = pointer_pos.distance(rect.left_bottom());
+            let dist_br = pointer_pos.distance(rect.right_bottom());
+            let edge_threshold = 10.0;
+            let vertical_hit_min = rect.top() - edge_threshold;
+            let vertical_hit_max = rect.bottom() + edge_threshold;
+            let horizontal_hit_min = rect.left() - edge_threshold;
+            let horizontal_hit_max = rect.right() + edge_threshold;
 
-                let nearest_on_box = egui::pos2(
-                    pointer_pos.x.clamp(rect.left(), rect.right()),
-                    pointer_pos.y.clamp(rect.top(), rect.bottom()),
-                );
-                let dist_to_box = pointer_pos.distance(nearest_on_box);
+            if dist_tl < 14.0 {
+                SelectionDragHandle::TopLeft
+            } else if dist_tr < 14.0 {
+                SelectionDragHandle::TopRight
+            } else if dist_bl < 14.0 {
+                SelectionDragHandle::BottomLeft
+            } else if dist_br < 14.0 {
+                SelectionDragHandle::BottomRight
+            } else if (pointer_pos.x - rect.left()).abs() < edge_threshold
+                && pointer_pos.y >= vertical_hit_min
+                && pointer_pos.y <= vertical_hit_max
+            {
+                SelectionDragHandle::Left
+            } else if (pointer_pos.x - rect.right()).abs() < edge_threshold
+                && pointer_pos.y >= vertical_hit_min
+                && pointer_pos.y <= vertical_hit_max
+            {
+                SelectionDragHandle::Right
+            } else if (pointer_pos.y - rect.top()).abs() < edge_threshold
+                && pointer_pos.x >= horizontal_hit_min
+                && pointer_pos.x <= horizontal_hit_max
+            {
+                SelectionDragHandle::Top
+            } else if (pointer_pos.y - rect.bottom()).abs() < edge_threshold
+                && pointer_pos.x >= horizontal_hit_min
+                && pointer_pos.x <= horizontal_hit_max
+            {
+                SelectionDragHandle::Bottom
+            } else if rect.contains(pointer_pos) {
+                SelectionDragHandle::Center
+            } else {
+                SelectionDragHandle::None
+            }
+        };
 
-                active_handle = if dist_tl < 14.0 {
-                    SelectionDragHandle::TopLeft
-                } else if dist_tr < 14.0 {
-                    SelectionDragHandle::TopRight
-                } else if dist_bl < 14.0 {
-                    SelectionDragHandle::BottomLeft
-                } else if dist_br < 14.0 {
-                    SelectionDragHandle::BottomRight
-                } else if (pointer_pos.x - rect.left()).abs() < 10.0
-                    && pointer_pos.y >= rect.top()
-                    && pointer_pos.y <= rect.bottom()
-                {
-                    SelectionDragHandle::Left
-                } else if (pointer_pos.x - rect.right()).abs() < 10.0
-                    && pointer_pos.y >= rect.top()
-                    && pointer_pos.y <= rect.bottom()
-                {
-                    SelectionDragHandle::Right
-                } else if (pointer_pos.y - rect.top()).abs() < 10.0
-                    && pointer_pos.x >= rect.left()
-                    && pointer_pos.x <= rect.right()
-                {
-                    SelectionDragHandle::Top
-                } else if (pointer_pos.y - rect.bottom()).abs() < 10.0
-                    && pointer_pos.x >= rect.left()
-                    && pointer_pos.x <= rect.right()
-                {
-                    SelectionDragHandle::Bottom
-                } else if rect.contains(pointer_pos) {
-                    SelectionDragHandle::Center
-                } else if dist_to_box < 20.0 {
-                    SelectionDragHandle::Center
-                } else {
-                    SelectionDragHandle::None
-                };
+        if response.hovered() && ui.input(|i| i.pointer.primary_pressed()) {
+            if let Some(pointer_pos) = ui
+                .input(|i| i.pointer.press_origin())
+                .or_else(|| response.interact_pointer_pos())
+            {
+                active_handle = pick_selection_drag_handle(pointer_pos, rect);
                 ui.data_mut(|d| d.insert_temp(drag_id, active_handle));
+
+                drag_offset = match active_handle {
+                    SelectionDragHandle::Center => pointer_pos - rect.min,
+                    SelectionDragHandle::Left
+                    | SelectionDragHandle::TopLeft
+                    | SelectionDragHandle::BottomLeft => {
+                        let ox = pointer_pos.x - rect.min.x;
+                        let oy = if active_handle == SelectionDragHandle::TopLeft {
+                            pointer_pos.y - rect.min.y
+                        } else if active_handle == SelectionDragHandle::BottomLeft {
+                            pointer_pos.y - rect.max.y
+                        } else {
+                            0.0
+                        };
+                        egui::vec2(ox, oy)
+                    }
+                    SelectionDragHandle::Right
+                    | SelectionDragHandle::TopRight
+                    | SelectionDragHandle::BottomRight => {
+                        let ox = pointer_pos.x - rect.max.x;
+                        let oy = if active_handle == SelectionDragHandle::TopRight {
+                            pointer_pos.y - rect.min.y
+                        } else if active_handle == SelectionDragHandle::BottomRight {
+                            pointer_pos.y - rect.max.y
+                        } else {
+                            0.0
+                        };
+                        egui::vec2(ox, oy)
+                    }
+                    SelectionDragHandle::Top => egui::vec2(0.0, pointer_pos.y - rect.min.y),
+                    SelectionDragHandle::Bottom => egui::vec2(0.0, pointer_pos.y - rect.max.y),
+                    SelectionDragHandle::None => egui::Vec2::ZERO,
+                };
+                ui.data_mut(|d| d.insert_temp(offset_id, drag_offset));
+
+                drag_anchor = match active_handle {
+                    SelectionDragHandle::Left | SelectionDragHandle::TopLeft => rect.max,
+                    SelectionDragHandle::BottomLeft => egui::pos2(rect.max.x, rect.min.y),
+                    SelectionDragHandle::Right | SelectionDragHandle::BottomRight => rect.min,
+                    SelectionDragHandle::TopRight => egui::pos2(rect.min.x, rect.max.y),
+                    SelectionDragHandle::Top => rect.max,
+                    SelectionDragHandle::Bottom => rect.min,
+                    _ => egui::Pos2::ZERO,
+                };
+                ui.data_mut(|d| d.insert_temp(anchor_id, drag_anchor));
             }
         }
 
-        let tr_primary_down = ui.input(|i| i.pointer.primary_down());
-        let tr_delta = ui.input(|i| i.pointer.delta());
-        if tr_primary_down && active_handle != SelectionDragHandle::None {
-            let delta = tr_delta;
-            let shift_pressed = ui.input(|i| i.modifiers.shift);
-            let original_aspect = if preset.height > 0 {
-                preset.width as f32 / preset.height as f32
-            } else {
-                16.0 / 9.0
-            };
-            let lock_aspect = if shift_pressed { original_aspect } else { 0.0 };
+        let pointer_primary_down = ui.input(|i| i.pointer.primary_down());
+        if pointer_primary_down && active_handle != SelectionDragHandle::None {
+            if let Some(pointer_pos) = ui
+                .input(|i| i.pointer.latest_pos())
+                .or_else(|| ui.input(|i| i.pointer.hover_pos()))
+            {
+                let shift_pressed = ui.input(|i| i.modifiers.shift);
+                let original_aspect = if preset.height > 0 {
+                    preset.width as f32 / preset.height as f32
+                } else {
+                    16.0 / 9.0
+                };
+                let lock_aspect = if shift_pressed { original_aspect } else { 0.0 };
 
-            changed = true;
+                changed = true;
 
-            match active_handle {
-                SelectionDragHandle::Center => {
-                    rect = rect.translate(delta);
-                }
-                SelectionDragHandle::Right => {
-                    let new_w = (rect.width() + delta.x).max(min_size.x);
-                    if lock_aspect > 0.0 {
-                        let new_h = new_w / lock_aspect;
-                        rect.max.x = rect.min.x + new_w;
-                        rect.max.y = rect.min.y + new_h;
-                    } else {
-                        rect.max.x = rect.min.x + new_w;
-                    }
-                }
-                SelectionDragHandle::Left => {
-                    let new_w = (rect.width() - delta.x).max(min_size.x);
-                    if lock_aspect > 0.0 {
-                        let new_h = new_w / lock_aspect;
-                        rect.min.x = rect.max.x - new_w;
-                        rect.min.y = rect.max.y - new_h;
-                    } else {
-                        rect.min.x = rect.max.x - new_w;
-                    }
-                }
-                SelectionDragHandle::Bottom => {
-                    let new_h = (rect.height() + delta.y).max(min_size.y);
-                    if lock_aspect > 0.0 {
-                        let new_w = new_h * lock_aspect;
-                        rect.max.x = rect.min.x + new_w;
-                        rect.max.y = rect.min.y + new_h;
-                    } else {
-                        rect.max.y = rect.min.y + new_h;
-                    }
-                }
-                SelectionDragHandle::Top => {
-                    let new_h = (rect.height() - delta.y).max(min_size.y);
-                    if lock_aspect > 0.0 {
-                        let new_w = new_h * lock_aspect;
-                        rect.min.x = rect.max.x - new_w;
-                        rect.min.y = rect.max.y - new_h;
-                    } else {
-                        rect.min.y = rect.max.y - new_h;
-                    }
-                }
-                SelectionDragHandle::BottomRight => {
-                    let new_w = (rect.width() + delta.x).max(min_size.x);
-                    if lock_aspect > 0.0 {
-                        let new_h = new_w / lock_aspect;
-                        rect.max.x = rect.min.x + new_w;
-                        rect.max.y = rect.min.y + new_h;
-                    } else {
-                        let new_h = (rect.height() + delta.y).max(min_size.y);
-                        rect.max.x = rect.min.x + new_w;
-                        rect.max.y = rect.min.y + new_h;
-                    }
-                }
-                SelectionDragHandle::TopLeft => {
-                    let new_w = (rect.width() - delta.x).max(min_size.x);
-                    if lock_aspect > 0.0 {
-                        let new_h = new_w / lock_aspect;
-                        rect.min.x = rect.max.x - new_w;
-                        rect.min.y = rect.max.y - new_h;
-                    } else {
-                        let new_h = (rect.height() - delta.y).max(min_size.y);
-                        rect.min.x = rect.max.x - new_w;
-                        rect.min.y = rect.max.y - new_h;
-                    }
-                }
-                SelectionDragHandle::TopRight => {
-                    let new_w = (rect.width() + delta.x).max(min_size.x);
-                    if lock_aspect > 0.0 {
-                        let new_h = new_w / lock_aspect;
-                        rect.max.x = rect.min.x + new_w;
-                        rect.min.y = rect.max.y - new_h;
-                    } else {
-                        let new_h = (rect.height() - delta.y).max(min_size.y);
-                        rect.max.x = rect.min.x + new_w;
-                        rect.min.y = rect.max.y - new_h;
-                    }
-                }
-                SelectionDragHandle::BottomLeft => {
-                    let new_w = (rect.width() - delta.x).max(min_size.x);
-                    if lock_aspect > 0.0 {
-                        let new_h = new_w / lock_aspect;
-                        rect.min.x = rect.max.x - new_w;
-                        rect.max.y = rect.min.y + new_h;
-                    } else {
-                        let new_h = (rect.height() + delta.y).max(min_size.y);
-                        rect.min.x = rect.max.x - new_w;
-                        rect.max.y = rect.min.y + new_h;
-                    }
-                }
-                SelectionDragHandle::None => {}
-            }
+                let mut target_pos = pointer_pos - drag_offset;
 
-            if rect.left() < preview_rect.left() {
-                rect = rect.translate(vec2(preview_rect.left() - rect.left(), 0.0));
-            }
-            if rect.top() < preview_rect.top() {
-                rect = rect.translate(vec2(0.0, preview_rect.top() - rect.top()));
-            }
-            if rect.right() > preview_rect.right() {
-                rect = rect.translate(vec2(preview_rect.right() - rect.right(), 0.0));
-            }
-            if rect.bottom() > preview_rect.bottom() {
-                rect = rect.translate(vec2(0.0, preview_rect.bottom() - rect.bottom()));
-            }
+                match active_handle {
+                    SelectionDragHandle::Left
+                    | SelectionDragHandle::TopLeft
+                    | SelectionDragHandle::BottomLeft => {
+                        target_pos.x = target_pos
+                            .x
+                            .clamp(preview_rect.left(), drag_anchor.x - min_size.x);
+                    }
+                    SelectionDragHandle::Right
+                    | SelectionDragHandle::TopRight
+                    | SelectionDragHandle::BottomRight => {
+                        target_pos.x = target_pos
+                            .x
+                            .clamp(drag_anchor.x + min_size.x, preview_rect.right());
+                    }
+                    _ => {}
+                }
+                match active_handle {
+                    SelectionDragHandle::Top
+                    | SelectionDragHandle::TopLeft
+                    | SelectionDragHandle::TopRight => {
+                        target_pos.y = target_pos
+                            .y
+                            .clamp(preview_rect.top(), drag_anchor.y - min_size.y);
+                    }
+                    SelectionDragHandle::Bottom
+                    | SelectionDragHandle::BottomLeft
+                    | SelectionDragHandle::BottomRight => {
+                        target_pos.y = target_pos
+                            .y
+                            .clamp(drag_anchor.y + min_size.y, preview_rect.bottom());
+                    }
+                    _ => {}
+                }
+                if active_handle == SelectionDragHandle::Center {
+                    target_pos.x = target_pos.x.clamp(
+                        preview_rect.left(),
+                        preview_rect.right() - rect.width(),
+                    );
+                    target_pos.y = target_pos.y.clamp(
+                        preview_rect.top(),
+                        preview_rect.bottom() - rect.height(),
+                    );
+                }
 
-            rect.min.x = rect
-                .min
-                .x
-                .clamp(preview_rect.left(), preview_rect.right() - min_size.x);
-            rect.min.y = rect
-                .min
-                .y
-                .clamp(preview_rect.top(), preview_rect.bottom() - min_size.y);
-            rect.max.x = rect
-                .max
-                .x
-                .clamp(rect.min.x + min_size.x, preview_rect.right());
-            rect.max.y = rect
-                .max
-                .y
-                .clamp(rect.min.y + min_size.y, preview_rect.bottom());
+                match active_handle {
+                    SelectionDragHandle::Center => {
+                        let size = rect.size();
+                        rect.min = target_pos;
+                        rect.max = rect.min + size;
+                    }
+                    SelectionDragHandle::Left => {
+                        let new_left = target_pos.x.min(drag_anchor.x - min_size.x);
+                        rect.min.x = new_left;
+                        rect.max.x = drag_anchor.x;
+                    }
+                    SelectionDragHandle::Right => {
+                        let new_right = target_pos.x.max(drag_anchor.x + min_size.x);
+                        rect.min.x = drag_anchor.x;
+                        rect.max.x = new_right;
+                    }
+                    SelectionDragHandle::Top => {
+                        let new_top = target_pos.y.min(drag_anchor.y - min_size.y);
+                        rect.min.y = new_top;
+                        rect.max.y = drag_anchor.y;
+                    }
+                    SelectionDragHandle::Bottom => {
+                        let new_bottom = target_pos.y.max(drag_anchor.y + min_size.y);
+                        rect.min.y = drag_anchor.y;
+                        rect.max.y = new_bottom;
+                    }
+                    SelectionDragHandle::TopLeft => {
+                        let new_left = target_pos.x.min(drag_anchor.x - min_size.x);
+                        let new_top = target_pos.y.min(drag_anchor.y - min_size.y);
+                        rect.min = egui::pos2(new_left, new_top);
+                        rect.max = drag_anchor;
+                    }
+                    SelectionDragHandle::TopRight => {
+                        let new_right = target_pos.x.max(drag_anchor.x + min_size.x);
+                        let new_top = target_pos.y.min(drag_anchor.y - min_size.y);
+                        rect.min = egui::pos2(drag_anchor.x, new_top);
+                        rect.max = egui::pos2(new_right, drag_anchor.y);
+                    }
+                    SelectionDragHandle::BottomLeft => {
+                        let new_left = target_pos.x.min(drag_anchor.x - min_size.x);
+                        let new_bottom = target_pos.y.max(drag_anchor.y + min_size.y);
+                        rect.min = egui::pos2(new_left, drag_anchor.y);
+                        rect.max = egui::pos2(drag_anchor.x, new_bottom);
+                    }
+                    SelectionDragHandle::BottomRight => {
+                        let new_right = target_pos.x.max(drag_anchor.x + min_size.x);
+                        let new_bottom = target_pos.y.max(drag_anchor.y + min_size.y);
+                        rect.min = drag_anchor;
+                        rect.max = egui::pos2(new_right, new_bottom);
+                    }
+                    SelectionDragHandle::None => {}
+                }
+
+                if lock_aspect > 0.0 {
+                    match active_handle {
+                        SelectionDragHandle::Right
+                        | SelectionDragHandle::BottomRight
+                        | SelectionDragHandle::TopRight => {
+                            let new_h = rect.width() / lock_aspect;
+                            if active_handle == SelectionDragHandle::TopRight {
+                                rect.min.y = rect.max.y - new_h;
+                            } else {
+                                rect.max.y = rect.min.y + new_h;
+                            }
+                        }
+                        SelectionDragHandle::Left
+                        | SelectionDragHandle::TopLeft
+                        | SelectionDragHandle::BottomLeft => {
+                            let new_h = rect.width() / lock_aspect;
+                            if active_handle == SelectionDragHandle::TopLeft {
+                                rect.min.y = rect.max.y - new_h;
+                            } else {
+                                rect.max.y = rect.min.y + new_h;
+                            }
+                        }
+                        SelectionDragHandle::Bottom => {
+                            let new_w = rect.height() * lock_aspect;
+                            rect.max.x = rect.min.x + new_w;
+                        }
+                        SelectionDragHandle::Top => {
+                            let new_w = rect.height() * lock_aspect;
+                            rect.min.x = rect.max.x - new_w;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if active_handle == SelectionDragHandle::Center {
+                    if rect.left() < preview_rect.left() {
+                        rect = rect.translate(egui::vec2(preview_rect.left() - rect.left(), 0.0));
+                    }
+                    if rect.top() < preview_rect.top() {
+                        rect = rect.translate(egui::vec2(0.0, preview_rect.top() - rect.top()));
+                    }
+                    if rect.right() > preview_rect.right() {
+                        rect = rect.translate(egui::vec2(preview_rect.right() - rect.right(), 0.0));
+                    }
+                    if rect.bottom() > preview_rect.bottom() {
+                        rect = rect.translate(egui::vec2(0.0, preview_rect.bottom() - rect.bottom()));
+                    }
+                }
+
+                rect.min.x = rect.min.x.clamp(
+                    preview_rect.left(),
+                    preview_rect.right() - min_size.x,
+                );
+                rect.min.y = rect.min.y.clamp(
+                    preview_rect.top(),
+                    preview_rect.bottom() - min_size.y,
+                );
+                rect.max.x = rect
+                    .max
+                    .x
+                    .clamp(rect.min.x + min_size.x, preview_rect.right());
+                rect.max.y = rect
+                    .max
+                    .y
+                    .clamp(rect.min.y + min_size.y, preview_rect.bottom());
+            }
         }
 
         if ui.input(|i| i.pointer.any_released()) {
@@ -8552,46 +8651,17 @@ impl CrosshairApp {
 
         if response.hovered() || active_handle != SelectionDragHandle::None {
             if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                let dist_tl = pointer_pos.distance(rect.left_top());
-                let dist_tr = pointer_pos.distance(rect.right_top());
-                let dist_bl = pointer_pos.distance(rect.left_bottom());
-                let dist_br = pointer_pos.distance(rect.right_bottom());
-
-                let handle_to_use = if active_handle != SelectionDragHandle::None {
+                let mut handle_to_use = if active_handle != SelectionDragHandle::None {
                     active_handle
-                } else if dist_tl < 14.0 {
-                    SelectionDragHandle::TopLeft
-                } else if dist_tr < 14.0 {
-                    SelectionDragHandle::TopRight
-                } else if dist_bl < 14.0 {
-                    SelectionDragHandle::BottomLeft
-                } else if dist_br < 14.0 {
-                    SelectionDragHandle::BottomRight
-                } else if (pointer_pos.x - rect.left()).abs() < 10.0
-                    && pointer_pos.y >= rect.top()
-                    && pointer_pos.y <= rect.bottom()
-                {
-                    SelectionDragHandle::Left
-                } else if (pointer_pos.x - rect.right()).abs() < 10.0
-                    && pointer_pos.y >= rect.top()
-                    && pointer_pos.y <= rect.bottom()
-                {
-                    SelectionDragHandle::Right
-                } else if (pointer_pos.y - rect.top()).abs() < 10.0
-                    && pointer_pos.x >= rect.left()
-                    && pointer_pos.x <= rect.right()
-                {
-                    SelectionDragHandle::Top
-                } else if (pointer_pos.y - rect.bottom()).abs() < 10.0
-                    && pointer_pos.x >= rect.left()
-                    && pointer_pos.x <= rect.right()
-                {
-                    SelectionDragHandle::Bottom
-                } else if rect.contains(pointer_pos) {
-                    SelectionDragHandle::Center
                 } else {
-                    SelectionDragHandle::None
+                    pick_selection_drag_handle(pointer_pos, rect)
                 };
+                if active_handle == SelectionDragHandle::None
+                    && handle_to_use == SelectionDragHandle::Center
+                    && !rect.contains(pointer_pos)
+                {
+                    handle_to_use = SelectionDragHandle::None;
+                }
 
                 match handle_to_use {
                     SelectionDragHandle::TopLeft | SelectionDragHandle::BottomRight => {
