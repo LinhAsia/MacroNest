@@ -105,7 +105,8 @@ impl CrosshairApp {
                 output
             });
 
-        if res.response.hovered() {
+        // ponytail: collapsed cards are header-height; expanded cards should stay visually clear.
+        if res.response.hovered() && res.response.rect.height() <= 44.0 {
             let hover_fill = if dark_mode {
                 Color32::from_rgba_unmultiplied(255, 255, 255, 14)
             } else {
@@ -232,7 +233,8 @@ impl CrosshairApp {
                 output
             });
 
-        if res.response.hovered() {
+        // ponytail: collapsed cards are header-height; expanded cards should stay visually clear.
+        if res.response.hovered() && res.response.rect.height() <= 44.0 {
             let hover_fill = if dark_mode {
                 Color32::from_rgba_unmultiplied(255, 255, 255, 14)
             } else {
