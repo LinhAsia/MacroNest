@@ -1182,6 +1182,7 @@ impl CrosshairApp {
             style: self.state.active_style.clone(),
             target_window_title: None,
             extra_target_window_titles: Vec::new(),
+            fullscreen_compatibility: false,
         });
         self.state.selected_profile = Some(name.clone());
         self.save_name = name.clone();
@@ -8241,11 +8242,11 @@ impl CrosshairApp {
             });
 
         // Close popup if cursor hovers away from both the button and the popup
-        if popup_open {
+        if popup_open && !ui.input(|input| input.pointer.any_down()) {
             if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
-                let mut keep_open_rect = response.rect.expand(15.0);
+                let mut keep_open_rect = response.rect.expand(24.0);
                 if let Some(ref popup) = popup_response {
-                    keep_open_rect = keep_open_rect.union(popup.response.rect.expand(15.0));
+                    keep_open_rect = keep_open_rect.union(popup.response.rect.expand(24.0));
                 }
                 if !keep_open_rect.contains(pointer_pos) {
                     popup_open = false;

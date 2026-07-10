@@ -491,6 +491,22 @@ impl CrosshairApp {
                     });
                     if !preset.collapsed {
                         ui.add_space(4.0);
+                        preset_changed |= ui
+                            .checkbox(
+                                &mut preset.fullscreen_compatibility,
+                                Self::tr_lang(
+                                    language,
+                                    "Fullscreen compatibility",
+                                    "Tương thích toàn màn hình",
+                                ),
+                            )
+                            .on_hover_text(Self::tr_lang(
+                                language,
+                                "Best effort for games using Fullscreen Optimizations. True exclusive fullscreen may require borderless mode; anti-cheat-safe game injection is not used.",
+                                "Hỗ trợ tối đa cho game dùng Fullscreen Optimizations. Exclusive fullscreen thật có thể vẫn cần chế độ borderless; ứng dụng không inject vào game để tránh ảnh hưởng anti-cheat.",
+                            ))
+                            .changed();
+                        ui.add_space(4.0);
                         ui.label(Self::tr_lang(
                             language,
                             "Crosshair Settings",
