@@ -92,7 +92,7 @@ impl CrosshairApp {
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> R {
         let dark_mode = ui.visuals().dark_mode;
-        Self::preset_frame(ui, enabled)
+        let res = Self::preset_frame(ui, enabled)
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 let previous = ui.visuals().override_text_color;
@@ -103,8 +103,33 @@ impl CrosshairApp {
                 let output = add_contents(ui);
                 ui.visuals_mut().override_text_color = previous;
                 output
-            })
-            .inner
+            });
+
+        if res.response.hovered() {
+            let hover_fill = if dark_mode {
+                Color32::from_rgba_unmultiplied(255, 255, 255, 14)
+            } else {
+                Color32::from_rgba_unmultiplied(24, 64, 104, 18)
+            };
+            let hover_stroke = if dark_mode {
+                Color32::from_rgba_unmultiplied(155, 220, 255, 92)
+            } else {
+                Color32::from_rgba_unmultiplied(42, 106, 166, 110)
+            };
+            ui.painter().rect_filled(
+                res.response.rect,
+                egui::CornerRadius::same(6),
+                hover_fill,
+            );
+            ui.painter().rect_stroke(
+                res.response.rect,
+                egui::CornerRadius::same(6),
+                egui::Stroke::new(1.0, hover_stroke),
+                egui::StrokeKind::Middle,
+            );
+        }
+
+        res.inner
     }
 
     pub(crate) fn show_macro_preset_card<R>(
@@ -192,7 +217,7 @@ impl CrosshairApp {
                 },
             )
         };
-        egui::Frame::group(ui.style())
+        let res = egui::Frame::group(ui.style())
             .fill(fill)
             .stroke(egui::Stroke::new(1.0, stroke_color))
             .show(ui, |ui| {
@@ -205,8 +230,33 @@ impl CrosshairApp {
                 let output = add_contents(ui);
                 ui.visuals_mut().override_text_color = previous;
                 output
-            })
-            .inner
+            });
+
+        if res.response.hovered() {
+            let hover_fill = if dark_mode {
+                Color32::from_rgba_unmultiplied(255, 255, 255, 14)
+            } else {
+                Color32::from_rgba_unmultiplied(24, 64, 104, 18)
+            };
+            let hover_stroke = if dark_mode {
+                Color32::from_rgba_unmultiplied(155, 220, 255, 92)
+            } else {
+                Color32::from_rgba_unmultiplied(42, 106, 166, 110)
+            };
+            ui.painter().rect_filled(
+                res.response.rect,
+                egui::CornerRadius::same(6),
+                hover_fill,
+            );
+            ui.painter().rect_stroke(
+                res.response.rect,
+                egui::CornerRadius::same(6),
+                egui::Stroke::new(1.0, hover_stroke),
+                egui::StrokeKind::Middle,
+            );
+        }
+
+        res.inner
     }
 
     pub(crate) fn hover_if(response: egui::Response, enabled: bool, text: &str) -> egui::Response {
