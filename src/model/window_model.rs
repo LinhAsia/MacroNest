@@ -161,6 +161,8 @@ pub struct WindowLayout {
     pub trigger_keys: String,
     pub block_taskbar: bool,
     pub remove_title_bar: bool,
+    pub animate_enabled: bool,
+    pub animate_duration_ms: u64,
 }
 
 impl WindowLayout {
@@ -201,6 +203,8 @@ impl WindowLayout {
             trigger_keys: String::new(),
             block_taskbar: false,
             remove_title_bar: false,
+            animate_enabled: false,
+            animate_duration_ms: 260,
         }
     }
 }

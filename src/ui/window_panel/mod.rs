@@ -3214,6 +3214,27 @@ impl CrosshairApp {
                         live_sync |= ui.checkbox(&mut layout.remove_title_bar, "").changed();
                         ui.end_row();
 
+                        ui.label(Self::tr_lang(language, "Animated apply", "Chuyển động"));
+                        ui.horizontal_wrapped(|ui| {
+                            live_sync |= ui
+                                .checkbox(
+                                    &mut layout.animate_enabled,
+                                    Self::tr_lang(language, "Enabled", "Bật"),
+                                )
+                                .changed();
+                            if layout.animate_enabled {
+                                ui.label(Self::tr_lang(language, "Duration", "Thời gian"));
+                                live_sync |= ui
+                                    .add(
+                                        DragValue::new(&mut layout.animate_duration_ms)
+                                            .range(60..=10_000)
+                                            .suffix(" ms"),
+                                    )
+                                    .changed();
+                            }
+                        });
+                        ui.end_row();
+
                         ui.label(Self::tr_lang(language, "Grid size", "Grid size"));
                         ui.horizontal(|ui| {
                             ui.label(Self::tr_lang(language, "Rows", "Rows"));

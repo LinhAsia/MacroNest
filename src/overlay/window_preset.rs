@@ -387,6 +387,7 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
 
     let mut used_hwnds: HashSet<isize> = HashSet::new();
     let mut focus_targets: Vec<HWND> = Vec::new();
+    let mut animated_targets: Vec<(isize, RECT, RECT)> = Vec::new();
 
     for cell in &layout.cells {
         if cell.row >= rows || cell.col >= cols {
@@ -472,20 +473,42 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
             } else {
                 (0, 0, 0, 0)
             };
-            let _ = SetWindowPos(
-                hwnd,
-                None,
-                cell_x - li,
-                cell_y - ti,
-                cell_w + li + ri,
-                cell_h + ti + bi,
-                SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER,
-            );
+            let end = RECT {
+                left: cell_x - li,
+                top: cell_y - ti,
+                right: cell_x - li + cell_w + li + ri,
+                bottom: cell_y - ti + cell_h + ti + bi,
+            };
+            if layout.animate_enabled {
+                animated_targets.push((hwnd.0 as isize, wr, end));
+            } else {
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    end.left,
+                    end.top,
+                    end.right - end.left,
+                    end.bottom - end.top,
+                    SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER,
+                );
+            }
         }
 
         if layout.focus_on_apply {
             focus_targets.push(hwnd);
         }
+    }
+
+    if layout.animate_enabled {
+        let duration_ms = layout.animate_duration_ms.max(60);
+        thread::scope(|scope| {
+            for (hwnd, start, end) in animated_targets {
+                scope.spawn(move || {
+                    let hwnd = HWND(hwnd as *mut std::ffi::c_void);
+                    let _ = super::animate_window_rect(hwnd, start, end, duration_ms);
+                });
+            }
+        });
     }
 
     if layout.focus_on_apply {
