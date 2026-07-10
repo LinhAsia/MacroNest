@@ -1182,7 +1182,6 @@ impl CrosshairApp {
             style: self.state.active_style.clone(),
             target_window_title: None,
             extra_target_window_titles: Vec::new(),
-            fullscreen_compatibility: false,
         });
         self.state.selected_profile = Some(name.clone());
         self.save_name = name.clone();

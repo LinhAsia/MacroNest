@@ -4195,7 +4195,6 @@ mod windows_overlay {
 
                     let _ = refresh_search_area_overlay(runtime);
                     let _ = refresh_timer_overlays(runtime);
-                    refresh_fullscreen_crosshair_compatibility(runtime);
 
                     if runtime.native_focus_highlight_enabled
                         && focus_highlight_decoration_is_animated(
@@ -17228,10 +17227,6 @@ mod windows_overlay {
     }
 
     fn desired_timer_interval_ms(runtime: &Runtime) -> u32 {
-        if fullscreen_crosshair_compatibility_active() {
-            return 16;
-        }
-
         if runtime.native_focus_highlight_enabled
             && focus_highlight_decoration_is_animated(runtime.focus_highlight_decoration)
             && runtime.active_focus_highlight_hwnd.is_some()
@@ -17320,32 +17315,6 @@ mod windows_overlay {
         }
 
         750
-    }
-
-    fn fullscreen_crosshair_compatibility_active() -> bool {
-        HOOK_STATE
-            .lock()
-            .profiles
-            .iter()
-            .any(|profile| profile.enabled && profile.fullscreen_compatibility)
-    }
-
-    unsafe fn refresh_fullscreen_crosshair_compatibility(runtime: &Runtime) {
-        if !fullscreen_crosshair_compatibility_active()
-            || !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(runtime.overlay_hwnd)
-                .as_bool()
-        {
-            return;
-        }
-        let _ = SetWindowPos(
-            runtime.overlay_hwnd,
-            Some(HWND_TOPMOST),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
-        );
     }
 
     fn desired_hooks_enabled(_runtime: &Runtime) -> bool {

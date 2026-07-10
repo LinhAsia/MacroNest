@@ -117,8 +117,6 @@ pub struct ProfileRecord {
     pub style: CrosshairStyle,
     pub target_window_title: Option<String>,
     pub extra_target_window_titles: Vec<String>,
-    #[serde(default)]
-    pub fullscreen_compatibility: bool,
 }
 
 impl Default for ProfileRecord {
@@ -130,7 +128,6 @@ impl Default for ProfileRecord {
             style: CrosshairStyle::default(),
             target_window_title: None,
             extra_target_window_titles: Vec::new(),
-            fullscreen_compatibility: false,
         }
     }
 }
