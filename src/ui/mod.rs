@@ -13443,7 +13443,7 @@ impl eframe::App for CrosshairApp {
                                                 d.remove::<bool>(press_id);
                                             }
                                         });
-                                        let activated = response.clicked() || (pressed_now && !was_pressed);
+                                        let activated = !was_pressed && (pressed_now || response.clicked());
                                         if activated {
                                             #[cfg(windows)]
                                             {
