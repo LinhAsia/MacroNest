@@ -1967,6 +1967,7 @@ mod windows_overlay {
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct ScreenDrawBrushCursorKey {
+        tool: ScreenDrawTool,
         diameter: u8,
         color: [u8; 3],
     }
@@ -11202,7 +11203,12 @@ mod windows_overlay {
             [state.color.r, state.color.g, state.color.b]
         };
         ScreenDrawBrushCursorKey {
-            diameter: state.brush_size.round().clamp(2.0, 80.0) as u8,
+            tool: state.tool,
+            diameter: if matches!(state.tool, ScreenDrawTool::Brush | ScreenDrawTool::Highlight | ScreenDrawTool::Blur) {
+                state.brush_size.round().clamp(2.0, 80.0) as u8
+            } else {
+                24
+            },
             color,
         }
     }
@@ -11212,13 +11218,72 @@ mod windows_overlay {
         let side = key.diameter as i32 + padding;
         let center = side as f32 * 0.5;
         let radius = key.diameter as f32 * 0.5;
+        let segment_distance = |px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32| {
+            let dx = bx - ax;
+            let dy = by - ay;
+            let length_squared = dx * dx + dy * dy;
+            let t = if length_squared > 0.0 {
+                (((px - ax) * dx + (py - ay) * dy) / length_squared).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            ((px - (ax + t * dx)).powi(2) + (py - (ay + t * dy)).powi(2)).sqrt()
+        };
         let mut pixels = vec![0u8; (side * side * 4) as usize];
         for y in 0..side {
             for x in 0..side {
-                let distance = ((x as f32 + 0.5 - center).powi(2)
-                    + (y as f32 + 0.5 - center).powi(2))
-                .sqrt();
-                let alpha = ((1.5 - (distance - radius).abs()).clamp(0.0, 1.0) * 255.0) as u8;
+                let px = x as f32 + 0.5;
+                let py = y as f32 + 0.5;
+                let edge_distance = match key.tool {
+                    ScreenDrawTool::Brush | ScreenDrawTool::Highlight | ScreenDrawTool::Blur => {
+                        (((px - center).powi(2) + (py - center).powi(2)).sqrt() - radius).abs()
+                    }
+                    ScreenDrawTool::Line => segment_distance(
+                        px,
+                        py,
+                        5.0,
+                        side as f32 - 5.0,
+                        side as f32 - 5.0,
+                        5.0,
+                    ),
+                    ScreenDrawTool::Arrow => {
+                        let end = side as f32 - 5.0;
+                        segment_distance(px, py, 5.0, end, end, 5.0)
+                            .min(segment_distance(px, py, end, 5.0, end - 8.0, 5.0))
+                            .min(segment_distance(px, py, end, 5.0, end, 13.0))
+                    }
+                    ScreenDrawTool::Rectangle => {
+                        let inset = 4.5;
+                        let far = side as f32 - inset;
+                        if px >= inset && px <= far && py >= inset && py <= far {
+                            (px - inset).min(far - px).min(py - inset).min(far - py)
+                        } else {
+                            10.0
+                        }
+                    }
+                    ScreenDrawTool::Ellipse | ScreenDrawTool::Circle => {
+                        let rx = radius;
+                        let ry = if key.tool == ScreenDrawTool::Ellipse {
+                            radius * 0.68
+                        } else {
+                            radius
+                        };
+                        ((((px - center) / rx).powi(2) + ((py - center) / ry).powi(2)).sqrt()
+                            - 1.0)
+                            .abs()
+                            * rx.min(ry)
+                    }
+                    ScreenDrawTool::Polygon => {
+                        let top = (center, 4.5);
+                        let left = (4.5, side as f32 - 5.0);
+                        let right = (side as f32 - 4.5, side as f32 - 5.0);
+                        segment_distance(px, py, top.0, top.1, left.0, left.1)
+                            .min(segment_distance(px, py, left.0, left.1, right.0, right.1))
+                            .min(segment_distance(px, py, right.0, right.1, top.0, top.1))
+                    }
+                    ScreenDrawTool::Text => 10.0,
+                };
+                let alpha = ((1.5 - edge_distance).clamp(0.0, 1.0) * 255.0) as u8;
                 if alpha == 0 {
                     continue;
                 }
@@ -11268,8 +11333,7 @@ mod windows_overlay {
     }
 
     unsafe fn set_screen_draw_brush_cursor(state: &ScreenDrawState) -> bool {
-        if state.tool != ScreenDrawTool::Brush
-            || state.current_stroke.is_some()
+        if state.tool == ScreenDrawTool::Text
             || state.active_control != ScreenDrawControl::None
             || state.screen_color_pick_mode
             || state.capturing_region
