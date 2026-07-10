@@ -15014,7 +15014,7 @@ mod windows_overlay {
                 let dy = (last.y - first.y) as f32;
                 let length = dx.hypot(dy).max(1.0);
                 let shaft_end = if length > head_size {
-                    let ratio = (length - head_size) / length;
+                    let ratio = (length - head_size - stroke.brush_size * 0.5).max(0.0) / length;
                     (first.x as f32 + dx * ratio, first.y as f32 + dy * ratio)
                 } else {
                     (first.x as f32, first.y as f32)

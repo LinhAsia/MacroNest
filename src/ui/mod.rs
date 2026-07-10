@@ -12995,10 +12995,9 @@ impl eframe::App for CrosshairApp {
                     egui::ViewportId::from_hash_of("screen_draw_toolbar"),
                     egui::ViewportCommand::Visible(false),
                 );
-                // Reset toolbar init and no_activate flags so next draw session positions and configures toolbar correctly
+                // Reset toolbar positioning for the next draw session.
                 ctx.data_mut(|d| {
                     d.insert_temp(egui::Id::new("toolbar_inited"), false);
-                    d.insert_temp(egui::Id::new("toolbar_no_activate_done"), false);
                 });
             }
         } else if drawing_active {
@@ -13033,10 +13032,7 @@ impl eframe::App for CrosshairApp {
                     egui::ViewportCommand::Visible(toolbar_visible),
                 );
                 if toolbar_visible {
-                    ctx.data_mut(|d| {
-                        d.insert_temp(egui::Id::new("toolbar_no_activate_done"), false);
-                        d.insert_temp(egui::Id::new("toolbar_no_activate_search_counter"), 0usize);
-                    });
+                    ctx.request_repaint();
                 }
             }
         }
@@ -13103,17 +13099,10 @@ impl eframe::App for CrosshairApp {
                     {
                         // Apply WS_EX_NOACTIVATE to the toolbar viewport window (found by title)
                         // so clicking toolbar buttons doesn't steal focus from the drawing canvas.
-                        // ponytail: keep retrying every frame until the style sticks; the lookup is cheap
-                        // and this avoids the "clicked before the 60-frame retry" focus bug.
-                        let done = ctx.data(|d| d.get_temp::<bool>(egui::Id::new("toolbar_no_activate_done")).unwrap_or(false));
-                        if !done {
-                            if crate::platform::make_window_title_no_activate("Drawing Toolbar") {
-                                ctx.data_mut(|d| {
-                                    d.insert_temp(egui::Id::new("toolbar_no_activate_done"), true);
-                                });
-                            } else {
-                                ctx.request_repaint_after(Duration::from_millis(16));
-                            }
+                        // eframe can refresh native styles after viewport updates, so keep
+                        // NOACTIVATE asserted while the toolbar exists.
+                        if !crate::platform::make_window_title_no_activate("Drawing Toolbar") {
+                            ctx.request_repaint_after(Duration::from_millis(16));
                         }
                     }
                     if class == egui::ViewportClass::Immediate {
