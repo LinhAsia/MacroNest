@@ -20415,6 +20415,7 @@ if supports_move_mouse || show_detection_tuning {
         if now_focused != has_focus {
             ui.memory_mut(|mem| mem.data.insert_temp(focus_key, now_focused));
         }
+        Self::apply_vietnamese_input_static(&response, text);
         response
     }
 
@@ -20572,6 +20573,7 @@ if supports_move_mouse || show_detection_tuning {
         ui.spacing_mut().interact_size.y = prev_interact_y;
         ui.spacing_mut().button_padding = prev_padding;
         ui.visuals_mut().override_text_color = prev_override;
+        Self::apply_vietnamese_input_static(&response, text);
         response
     }
 
@@ -20676,6 +20678,7 @@ if supports_move_mouse || show_detection_tuning {
         if now_focused != has_focus {
             ui.memory_mut(|mem| mem.data.insert_temp(focus_key, now_focused));
         }
+        Self::apply_vietnamese_input_static(&response, text);
         response
     }
 }

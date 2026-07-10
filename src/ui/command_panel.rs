@@ -130,14 +130,19 @@ impl CrosshairApp {
                         ))
                         .italics()
                         .color(Color32::from_rgba_unmultiplied(120, 120, 120, 140));
-                        changed |= ui
-                            .add_sized(
-                                [ui.available_width().max(240.0), 92.0],
-                                TextEdit::multiline(&mut preset.command)
-                                    .desired_rows(4)
-                                    .hint_text(command_hint),
-                            )
-                            .changed();
+                        let response = ui.add_sized(
+                            [ui.available_width().max(240.0), 92.0],
+                            TextEdit::multiline(&mut preset.command)
+                                .desired_rows(4)
+                                .hint_text(command_hint),
+                        );
+                        Self::apply_vietnamese_input_if_changed(
+                            &response,
+                            self.state.vietnamese_input_enabled,
+                            self.state.vietnamese_input_mode,
+                            &mut preset.command,
+                        );
+                        changed |= response.changed();
                         ui.end_row();
                     });
 

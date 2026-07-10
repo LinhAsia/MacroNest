@@ -88,6 +88,20 @@ pub(crate) struct VietnameseInputSession {
 
 static VIETNAMESE_INPUT_SESSION: Lazy<Mutex<VietnameseInputSession>> =
     Lazy::new(|| Mutex::new(VietnameseInputSession::default()));
+
+#[derive(Clone, Copy)]
+pub(crate) struct VietnameseInputConfig {
+    pub(crate) enabled: bool,
+    pub(crate) mode: VietnameseInputMode,
+}
+
+pub(crate) static VIETNAMESE_INPUT_CONFIG: Lazy<Mutex<VietnameseInputConfig>> =
+    Lazy::new(|| {
+        Mutex::new(VietnameseInputConfig {
+            enabled: false,
+            mode: VietnameseInputMode::Telex,
+        })
+    });
 static LIVE_WINDOW_TARGET_COMBO_WINDOWS: Lazy<Mutex<Option<Vec<WindowInfo>>>> =
     Lazy::new(|| Mutex::new(None));
 
@@ -3295,6 +3309,17 @@ impl CrosshairApp {
         if response.changed() {
             Self::apply_vietnamese_input_mode(response, text, enabled, mode);
         }
+    }
+
+    pub(crate) fn apply_vietnamese_input_static(
+        response: &egui::Response,
+        text: &mut String,
+    ) {
+        let (enabled, mode) = {
+            let config = VIETNAMESE_INPUT_CONFIG.lock();
+            (config.enabled, config.mode)
+        };
+        Self::apply_vietnamese_input_if_changed(response, enabled, mode, text);
     }
 
     fn load_svg_texture(ctx: &egui::Context, name: &str, svg: &[u8]) -> Option<TextureHandle> {
@@ -11641,6 +11666,11 @@ impl eframe::App for CrosshairApp {
         [0.0, 0.0, 0.0, 0.0]
     }
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        {
+            let mut config = VIETNAMESE_INPUT_CONFIG.lock();
+            config.enabled = self.state.vietnamese_input_enabled;
+            config.mode = self.state.vietnamese_input_mode;
+        }
         if self.startup_shell_frames_remaining > 0 {
             self.startup_shell_frames_remaining -= 1;
             ctx.request_repaint();
