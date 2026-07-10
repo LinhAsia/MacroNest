@@ -249,7 +249,7 @@ mod windows_overlay {
     const SCREEN_DRAW_TIMER_ID: usize = 3;
     const SCREEN_DRAW_REFRESH_INTERVAL_MS: u32 = 16;
     const SCREEN_DRAW_MIN_FRAME_INTERVAL_MS: u64 = 4;
-    const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 210;
+    const SCREEN_DRAW_TRIGGER_CAPTURE_HOLD_MS: u64 = 105;
     const SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS: u64 = 180;
     const SCREEN_DRAW_ORPHAN_STROKE_RELEASE_MS: u64 = 5000;
     const SCREEN_DRAW_TOOLBAR_BRUSH_SVG: &str = r##"<svg viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -11476,6 +11476,33 @@ mod windows_overlay {
         }
     }
 
+    fn screen_draw_cursor_preview_rect(
+        state: &ScreenDrawState,
+        point: POINT,
+    ) -> Option<ScreenDrawDirtyRect> {
+        if state.tool != ScreenDrawTool::Brush
+            || state.current_stroke.is_some()
+            || state.active_control != ScreenDrawControl::None
+            || state.screen_color_pick_mode
+            || state.capturing_region
+        {
+            return None;
+        }
+        let toolbar = screen_draw_toolbar_rect(state);
+        if (toolbar.left as i32..toolbar.right as i32).contains(&point.x)
+            && (toolbar.top as i32..toolbar.bottom as i32).contains(&point.y)
+        {
+            return None;
+        }
+        let radius = (state.brush_size * 0.5).ceil() as i32 + 4;
+        Some(ScreenDrawDirtyRect {
+            left: point.x.saturating_sub(radius).max(0) as usize,
+            top: point.y.saturating_sub(radius).max(0) as usize,
+            right: (point.x + radius + 1).max(0) as usize,
+            bottom: (point.y + radius + 1).max(0) as usize,
+        })
+    }
+
     fn mark_screen_draw_dirty(state: &mut ScreenDrawState, rect: ScreenDrawDirtyRect) {
         state.dirty_rect = Some(match state.dirty_rect {
             Some(existing) => existing.union(rect),
@@ -12657,7 +12684,24 @@ mod windows_overlay {
             return false;
         }
         let previous_preview_rect = screen_draw_color_pick_panel_rect(&state);
+        let previous_cursor_rect = screen_draw_cursor_preview_rect(&state, state.pointer_point);
         state.pointer_point = point;
+        let cursor_preview_changed = if let Some(current) =
+            screen_draw_cursor_preview_rect(&state, point)
+        {
+            if let Some(previous) = previous_cursor_rect {
+                mark_screen_draw_dirty(&mut state, previous);
+            }
+            mark_screen_draw_dirty(&mut state, current);
+            mark_screen_draw_repaint_pending(&mut state);
+            true
+        } else if let Some(previous) = previous_cursor_rect {
+            mark_screen_draw_dirty(&mut state, previous);
+            mark_screen_draw_repaint_pending(&mut state);
+            true
+        } else {
+            false
+        };
         match state.active_control {
             ScreenDrawControl::MoveToolbar => {
                 let (_, _, screen_w, screen_h) = window_list::virtual_screen_bounds();
@@ -12835,7 +12879,7 @@ mod windows_overlay {
                     }
                     changed
                 } else {
-                    false
+                    cursor_preview_changed
                 }
             }
         }
@@ -13697,7 +13741,11 @@ mod windows_overlay {
         };
         state.current_stroke = Some(ScreenDrawStroke {
             tool,
-            effect: state.effect,
+            effect: if tool == ScreenDrawTool::Text {
+                ScreenDrawEffect::None
+            } else {
+                state.effect
+            },
             points: vec![point],
             color: state.color,
             brush_size: state.brush_size,
@@ -15502,6 +15550,53 @@ mod windows_overlay {
                         &path,
                         &paint,
                         tiny_skia::FillRule::Winding,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
+            }
+        }
+
+        if state_guard.tool == ScreenDrawTool::Brush
+            && state_guard.current_stroke.is_none()
+            && state_guard.active_control == ScreenDrawControl::None
+            && !state_guard.screen_color_pick_mode
+            && !capturing_region
+            && screen_draw_cursor_preview_rect(&state_guard, state_guard.pointer_point).is_some()
+        {
+            let point = state_guard.pointer_point;
+            let radius = (state_guard.brush_size * 0.5).max(1.0);
+            let color = if state_guard.eraser {
+                RgbaColor { r: 255, g: 255, b: 255, a: 220 }
+            } else if state_guard.effect == ScreenDrawEffect::Blur {
+                RgbaColor { r: 200, g: 220, b: 255, a: 220 }
+            } else {
+                RgbaColor {
+                    a: 220,
+                    ..state_guard.color
+                }
+            };
+            if let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
+                state_guard.frame_rgba.as_mut_slice(),
+                width as u32,
+                height as u32,
+            ) {
+                let mut path = tiny_skia::PathBuilder::new();
+                path.push_circle(point.x as f32, point.y as f32, radius);
+                if let Some(path) = path.finish() {
+                    let mut paint = tiny_skia::Paint::default();
+                    paint.set_color(tiny_skia::Color::from_rgba8(
+                        color.r, color.g, color.b, color.a,
+                    ));
+                    paint.anti_alias = true;
+                    let stroke = tiny_skia::Stroke {
+                        width: 1.25,
+                        ..Default::default()
+                    };
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke,
                         tiny_skia::Transform::identity(),
                         None,
                     );
