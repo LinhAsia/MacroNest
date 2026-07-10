@@ -12980,10 +12980,6 @@ impl eframe::App for CrosshairApp {
                         color_pick_mode,
                     );
                 });
-                ctx.send_viewport_cmd_to(
-                    egui::ViewportId::from_hash_of("screen_draw_toolbar"),
-                    egui::ViewportCommand::Visible(toolbar_visible),
-                );
             } else {
                 let hidden_for_drawing = ctx.data(|d| {
                     d.get_temp::<bool>(egui::Id::new("main_window_hidden_for_drawing"))
@@ -13089,6 +13085,7 @@ impl eframe::App for CrosshairApp {
             let mut builder = egui::ViewportBuilder::default()
                 .with_title("Drawing Toolbar")
                 .with_inner_size(egui::vec2(toolbar_width, TOOLBAR_HEIGHT))
+                .with_visible(toolbar_visible)
                 .with_active(false)
                 .with_decorations(false)
                 .with_transparent(true)

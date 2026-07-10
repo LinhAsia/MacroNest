@@ -14739,9 +14739,9 @@ mod windows_overlay {
             let mut highlighted = stroke.clone();
             highlighted.effect = ScreenDrawEffect::None;
             highlighted.color = RgbaColor {
-                r: 255,
-                g: 220,
-                b: 50,
+                r: stroke.color.r,
+                g: stroke.color.g,
+                b: stroke.color.b,
                 a: SCREEN_DRAW_HIGHLIGHT_ALPHA,
             };
             highlighted.filled = !matches!(
@@ -14846,15 +14846,13 @@ mod windows_overlay {
                     }
                 }
                 if let Some(path) = pb.finish() {
-                    if stroke.color.a != SCREEN_DRAW_HIGHLIGHT_ALPHA {
-                        pixmap.stroke_path(
-                            &path,
-                            &paint,
-                            &stroke_style,
-                            tiny_skia::Transform::identity(),
-                            None,
-                        );
-                    }
+                    pixmap.stroke_path(
+                        &path,
+                        &paint,
+                        &stroke_style,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
                 }
             }
             ScreenDrawTool::Highlight => {
@@ -14968,7 +14966,7 @@ mod windows_overlay {
                 let dy = (last.y - first.y) as f32;
                 let length = dx.hypot(dy).max(1.0);
                 let shaft_end = if length > head_size {
-                    let ratio = (length - head_size * 0.72) / length;
+                    let ratio = (length - head_size) / length;
                     (first.x as f32 + dx * ratio, first.y as f32 + dy * ratio)
                 } else {
                     (first.x as f32, first.y as f32)
@@ -15009,7 +15007,7 @@ mod windows_overlay {
                                 None,
                             );
                         }
-                        if stroke.color.a != SCREEN_DRAW_HIGHLIGHT_ALPHA {
+                        if !stroke.filled {
                             pixmap.stroke_path(
                                 &path,
                                 &paint,
@@ -15054,7 +15052,7 @@ mod windows_overlay {
                                 None,
                             );
                         }
-                        if stroke.color.a != SCREEN_DRAW_HIGHLIGHT_ALPHA {
+                        if !stroke.filled {
                             pixmap.stroke_path(
                                 &path,
                                 &paint,
@@ -15082,7 +15080,7 @@ mod windows_overlay {
                             None,
                         );
                     }
-                    if stroke.color.a != SCREEN_DRAW_HIGHLIGHT_ALPHA {
+                    if !stroke.filled {
                         pixmap.stroke_path(
                             &path,
                             &paint,
@@ -15121,7 +15119,7 @@ mod windows_overlay {
                             None,
                         );
                     }
-                    if stroke.color.a != SCREEN_DRAW_HIGHLIGHT_ALPHA {
+                    if !stroke.filled {
                         pixmap.stroke_path(
                             &path,
                             &paint,
