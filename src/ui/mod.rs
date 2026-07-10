@@ -679,7 +679,6 @@ pub struct CrosshairApp {
     capture_suppress_polls_remaining: u8,
     capture_mouse_guard_until: Option<Instant>,
     mouse_move_absolute_capture_target: Option<MouseMoveAbsoluteCaptureTarget>,
-    mouse_move_absolute_capture_wait_for_mouse_release: bool,
     mouse_move_absolute_capture_raise_window: bool,
     mouse_move_absolute_restore_inner_size: Option<egui::Vec2>,
     mouse_move_absolute_restore_outer_pos: Option<egui::Pos2>,
@@ -744,8 +743,6 @@ pub struct CrosshairApp {
     vision_preview_cache: HashMap<u32, VisionPreviewCache>,
     window_preview_requested: HashMap<u32, Instant>,
     window_preview_loading: HashSet<u32>,
-    vision_color_pick_texture: Option<TextureHandle>,
-    vision_color_pick_preview_color: Option<RgbaColor>,
     vietnamese_input_enabled_texture: Option<TextureHandle>,
     vietnamese_input_disabled_texture: Option<TextureHandle>,
     titlebar_app_icon_texture: Option<TextureHandle>,
@@ -979,7 +976,6 @@ impl CrosshairApp {
             capture_suppress_polls_remaining: 0,
             capture_mouse_guard_until: None,
             mouse_move_absolute_capture_target: None,
-            mouse_move_absolute_capture_wait_for_mouse_release: false,
             mouse_move_absolute_capture_raise_window: false,
             mouse_move_absolute_restore_inner_size: None,
             mouse_move_absolute_restore_outer_pos: None,
@@ -1051,8 +1047,6 @@ impl CrosshairApp {
             vision_preview_cache: HashMap::new(),
             window_preview_requested: HashMap::new(),
             window_preview_loading: HashSet::new(),
-            vision_color_pick_texture: None,
-            vision_color_pick_preview_color: None,
             vietnamese_input_enabled_texture: None,
             vietnamese_input_disabled_texture: None,
             titlebar_app_icon_texture: None,
@@ -2282,18 +2276,6 @@ impl CrosshairApp {
                 self.warmed_panels.push(panel);
             }
         }
-    }
-
-    #[cfg(windows)]
-    #[cfg(not(windows))]
-    fn precise_image_search_capture_pointer(&self, _ctx: &egui::Context) -> Option<egui::Pos2> {
-        None
-    }
-
-    #[cfg(windows)]
-    #[cfg(not(windows))]
-    fn current_screen_cursor_pos() -> Option<(i32, i32)> {
-        None
     }
 
     fn open_audio_editor(&mut self, target: AudioEditorTarget) {
@@ -4961,7 +4943,11 @@ impl CrosshairApp {
                                     let selected_text = match self.state.focus_highlight_decoration
                                     {
                                         FocusHighlightDecoration::Plain => {
-                                            Self::tr_lang(self.state.ui_language, "Plain", "Plain")
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Plain (Native / Smooth)",
+                                                "Đơn giản (Native / mượt)",
+                                            )
                                         }
                                         FocusHighlightDecoration::Rainbow => Self::tr_lang(
                                             self.state.ui_language,
@@ -4987,8 +4973,8 @@ impl CrosshairApp {
                                                         FocusHighlightDecoration::Plain,
                                                         Self::tr_lang(
                                                             self.state.ui_language,
-                                                            "Plain",
-                                                            "Plain",
+                                                            "Plain (Native / Smooth)",
+                                                            "Đơn giản (Native / mượt)",
                                                         ),
                                                     )
                                                     .clicked();
@@ -12480,7 +12466,6 @@ impl eframe::App for CrosshairApp {
                         }
                         _ => {
                             self.mouse_move_absolute_capture_target = None;
-                            self.mouse_move_absolute_capture_wait_for_mouse_release = false;
                             self.status = Self::tr_lang(
                                 self.state.ui_language,
                                 "Absolute coordinate capture cancelled.",
@@ -13714,10 +13699,6 @@ impl eframe::App for CrosshairApp {
                 self.cancel_capture();
             }
         }
-        if self.mouse_move_absolute_capture_target.is_some() {
-            self.poll_mouse_move_absolute_capture(ctx);
-        }
-
         if self.mouse_move_absolute_capture_raise_window {
             self.mouse_move_absolute_capture_raise_window = false;
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
@@ -13735,9 +13716,6 @@ impl eframe::App for CrosshairApp {
         }
 
         if self.render_image_search_capture_overlay(ctx) {
-            return;
-        }
-        if self.render_mouse_move_absolute_capture_overlay(ctx) {
             return;
         }
         if self.render_protractor_calibration_overlay(ctx) {

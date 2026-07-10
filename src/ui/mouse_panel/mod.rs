@@ -4,8 +4,7 @@ use crate::overlay::{OverlayCommand, UiCommand};
 use crate::ui::{CrosshairApp, MouseCaptureKind, MouseMoveAbsoluteCaptureTarget};
 use crate::window_list;
 use eframe::egui::{
-    self, Button, Color32, DragValue, Frame, Margin, RichText, Sense, Slider, TextBuffer, TextEdit,
-    vec2,
+    self, Button, Color32, DragValue, RichText, Sense, Slider, TextBuffer, TextEdit, vec2,
 };
 use std::time::Duration;
 
@@ -1850,93 +1849,6 @@ impl CrosshairApp {
         outcome
     }
 
-    pub(crate) fn render_mouse_move_absolute_capture_overlay(
-        &mut self,
-        ctx: &egui::Context,
-    ) -> bool {
-        if self.mouse_move_absolute_capture_target.is_none() {
-            return false;
-        }
-
-        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) || Self::is_vk_down(0x1B) {
-            self.cancel_mouse_move_absolute_capture(ctx);
-            return true;
-        }
-
-        ctx.request_repaint_after(std::time::Duration::from_millis(16));
-        egui::CentralPanel::default()
-            .frame(
-                Frame::new()
-                    .fill(Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::NONE)
-                    .inner_margin(Margin::same(0)),
-            )
-            .show(ctx, |ui| {
-                let max_rect = ui.max_rect();
-
-                if let Some(ref texture) = self.captured_freeze_texture {
-                    ui.painter().image(
-                        texture.id(),
-                        max_rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
-                }
-
-                let dim_color = Color32::TRANSPARENT;
-                ui.painter().rect_filled(max_rect, 0.0, dim_color);
-
-                let status_text = &self.status;
-                if !status_text.is_empty() {
-                    let text_width = ui
-                        .painter()
-                        .layout_no_wrap(
-                            status_text.clone(),
-                            egui::FontId::proportional(14.0),
-                            Color32::WHITE,
-                        )
-                        .size()
-                        .x;
-                    let padding = 24.0;
-                    let top_bar_rect = egui::Rect::from_center_size(
-                        egui::pos2(max_rect.center().x, max_rect.top() + 40.0),
-                        egui::vec2(text_width + padding * 2.0, 36.0),
-                    );
-                    ui.painter()
-                        .rect_filled(top_bar_rect, 18.0, Color32::from_rgb(12, 18, 28));
-                    ui.painter().rect_stroke(
-                        top_bar_rect,
-                        18.0,
-                        egui::Stroke::new(1.0, Color32::from_rgb(110, 156, 210)),
-                        egui::StrokeKind::Outside,
-                    );
-                    ui.painter().text(
-                        top_bar_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        status_text,
-                        egui::FontId::proportional(14.0),
-                        Color32::WHITE,
-                    );
-                }
-
-                let pointer = self.precise_image_search_capture_pointer(ctx);
-                let screen_point = Self::current_screen_cursor_pos();
-                if pointer.is_some() {
-                    let sampled_color = screen_point.and_then(|(screen_x, screen_y)| {
-                        self.update_image_search_cursor_preview(ctx, screen_x, screen_y, 17)
-                    });
-                    self.render_image_search_cursor_preview_panel(
-                        ui.painter(),
-                        max_rect,
-                        pointer,
-                        sampled_color,
-                        screen_point,
-                    );
-                }
-            });
-        true
-    }
-
     pub(crate) fn add_mouse_path_preset(&mut self) -> u32 {
         self.add_mouse_path_preset_from(None)
     }
@@ -2363,7 +2275,6 @@ impl CrosshairApp {
             self.set_image_search_capture_mouse_blocked(false, false);
         }
         self.mouse_move_absolute_capture_target = None;
-        self.mouse_move_absolute_capture_wait_for_mouse_release = false;
         self.restore_mouse_move_absolute_capture_window(ctx);
         self.mouse_move_absolute_capture_raise_window = true;
         self.status = Self::tr_lang(
@@ -2405,7 +2316,6 @@ impl CrosshairApp {
             let color = if target.capture_kind == MouseCaptureKind::ExtraCondPixelColor {
                 if let Some(color) = color {
                     self.mouse_move_absolute_capture_target = None;
-                    self.mouse_move_absolute_capture_wait_for_mouse_release = false;
                     self.restore_mouse_move_absolute_capture_window(ctx);
                     Some(color)
                 } else {
@@ -2418,7 +2328,6 @@ impl CrosshairApp {
                 }
             } else {
                 self.mouse_move_absolute_capture_target = None;
-                self.mouse_move_absolute_capture_wait_for_mouse_release = false;
                 self.restore_mouse_move_absolute_capture_window(ctx);
                 None
             };
@@ -2485,7 +2394,6 @@ impl CrosshairApp {
             let color = if target.capture_kind == MouseCaptureKind::IfStartPixelColor {
                 if let Some(color) = color {
                     self.mouse_move_absolute_capture_target = None;
-                    self.mouse_move_absolute_capture_wait_for_mouse_release = false;
                     self.restore_mouse_move_absolute_capture_window(ctx);
                     Some(color)
                 } else {
@@ -2498,7 +2406,6 @@ impl CrosshairApp {
                 }
             } else {
                 self.mouse_move_absolute_capture_target = None;
-                self.mouse_move_absolute_capture_wait_for_mouse_release = false;
                 self.restore_mouse_move_absolute_capture_window(ctx);
                 None
             };
@@ -2619,7 +2526,6 @@ impl CrosshairApp {
                 }
             }
             self.mouse_move_absolute_capture_target = None;
-            self.mouse_move_absolute_capture_wait_for_mouse_release = false;
             self.restore_mouse_move_absolute_capture_window(ctx);
             self.mouse_move_absolute_capture_raise_window = true;
             self.status = match self.state.ui_language {
@@ -2712,7 +2618,6 @@ impl CrosshairApp {
             }
 
             self.mouse_move_absolute_capture_target = None;
-            self.mouse_move_absolute_capture_wait_for_mouse_release = false;
             self.restore_mouse_move_absolute_capture_window(ctx);
             self.mouse_move_absolute_capture_raise_window = true;
             self.status = match self.state.ui_language {
@@ -2748,7 +2653,6 @@ impl CrosshairApp {
         step.y_expr = screen_y.to_string();
         step.action = MacroAction::MouseMoveAbsolute;
         self.mouse_move_absolute_capture_target = None;
-        self.mouse_move_absolute_capture_wait_for_mouse_release = false;
         self.restore_mouse_move_absolute_capture_window(ctx);
         self.mouse_move_absolute_capture_raise_window = true;
         self.status =
@@ -2818,7 +2722,6 @@ impl CrosshairApp {
             self.set_image_search_capture_mouse_blocked(false, false);
         }
         self.mouse_move_absolute_capture_target = None;
-        self.mouse_move_absolute_capture_wait_for_mouse_release = false;
         self.restore_mouse_move_absolute_capture_window(ctx);
 
         color
@@ -2842,35 +2745,6 @@ impl CrosshairApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
         crate::overlay::wake_command_queue();
-    }
-
-    pub(crate) fn poll_mouse_move_absolute_capture(&mut self, ctx: &egui::Context) {
-        let Some(target) = self.mouse_move_absolute_capture_target else {
-            return;
-        };
-        ctx.request_repaint_after(Duration::from_millis(16));
-        if Self::is_vk_down(0x1B) {
-            self.cancel_mouse_move_absolute_capture(ctx);
-            return;
-        }
-        if Self::mouse_move_absolute_capture_uses_blocked_click(target) {
-            return;
-        }
-        if self.mouse_move_absolute_capture_wait_for_mouse_release {
-            if Self::is_vk_down(0x01) {
-                return;
-            }
-            self.mouse_move_absolute_capture_wait_for_mouse_release = false;
-            ctx.request_repaint();
-            return;
-        }
-        if !Self::is_vk_down(0x01) {
-            return;
-        }
-        let mut point = POINT::default();
-        if unsafe { GetCursorPos(&mut point) }.is_ok() {
-            self.finish_mouse_move_absolute_capture(ctx, target, point.x, point.y, None);
-        }
     }
 
     fn refresh_arduino_ports(&mut self) {

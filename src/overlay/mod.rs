@@ -2795,7 +2795,7 @@ mod windows_overlay {
         mouse_trail_hwnd: HWND,
         search_area_hwnd: HWND,
         dynamic_geometry_hwnd: HWND,
-        focus_highlight_hwnd: HWND,
+        focus_highlight_hwnds: [HWND; 4],
         hud_hwnd: HWND,
         key_display_hwnd: HWND,
         key_display_extra_hwnds: Vec<HWND>,
@@ -3451,6 +3451,27 @@ mod windows_overlay {
                 Some(instance),
                 None,
             )?;
+            let mut focus_highlight_hwnds = [focus_highlight_hwnd, HWND::default(), HWND::default(), HWND::default()];
+            for hwnd in focus_highlight_hwnds.iter_mut().skip(1) {
+                *hwnd = CreateWindowExW(
+                    WS_EX_LAYERED
+                        | WS_EX_TRANSPARENT
+                        | WS_EX_TOOLWINDOW
+                        | WS_EX_TOPMOST
+                        | WS_EX_NOACTIVATE,
+                    w!("CrosshairOverlay"),
+                    w!("CrosshairFocusHighlight"),
+                    WS_POPUP,
+                    0,
+                    0,
+                    4,
+                    4,
+                    None,
+                    None,
+                    Some(instance),
+                    None,
+                )?;
+            }
             let hud_hwnd = CreateWindowExW(
                 WS_EX_LAYERED
                     | WS_EX_TOOLWINDOW
@@ -3589,7 +3610,7 @@ mod windows_overlay {
                 mouse_trail_hwnd,
                 search_area_hwnd,
                 dynamic_geometry_hwnd,
-                focus_highlight_hwnd,
+                focus_highlight_hwnds,
                 hud_hwnd,
                 key_display_hwnd,
                 key_display_extra_hwnds,
@@ -4460,7 +4481,7 @@ mod windows_overlay {
                     let _ = ShowWindow(runtime.hud_hwnd, SW_HIDE);
                     hide_quick_key_display_windows(runtime);
                     let _ = ShowWindow(runtime.screen_draw_hwnd, SW_HIDE);
-                    let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
+                    hide_focus_highlight_windows(runtime);
                     let _ = set_window_focus_event_hook_enabled(runtime, false);
                     let _ = set_window_location_event_hook_enabled(runtime, false);
                     let _ = set_input_hooks_enabled(runtime, false);
@@ -9379,11 +9400,31 @@ mod windows_overlay {
                 OverlayCommand::UpdateCrosshairProfile { index, profile } => {
                     let mut hook_state = HOOK_STATE.lock();
                     let mut is_active = false;
+                    let mut native_move_delta = None;
                     if let Some(existing) = hook_state.profiles.get(index) {
                         if hook_state.active_crosshair_profile_name.as_deref()
                             == Some(&existing.name)
                         {
                             is_active = true;
+                        }
+                        let visible_count = hook_state
+                            .profiles
+                            .iter()
+                            .filter(|candidate| candidate.enabled)
+                            .count();
+                        let mut previous_without_position = existing.style.clone();
+                        let next_without_position = profile.style.clone();
+                        previous_without_position.x_offset = next_without_position.x_offset;
+                        previous_without_position.y_offset = next_without_position.y_offset;
+                        if visible_count == 1
+                            && existing.enabled
+                            && profile.enabled
+                            && previous_without_position == next_without_position
+                        {
+                            native_move_delta = Some((
+                                profile.style.x_offset - existing.style.x_offset,
+                                profile.style.y_offset - existing.style.y_offset,
+                            ));
                         }
                     }
                     if let Some(existing) = hook_state.profiles.get_mut(index) {
@@ -9398,7 +9439,24 @@ mod windows_overlay {
                         hook_state.current_style = style;
                     }
                     drop(hook_state);
-                    let _ = refresh_overlay(runtime);
+                    if let Some((dx, dy)) = native_move_delta {
+                        if dx != 0 || dy != 0 {
+                            let mut rect = RECT::default();
+                            if GetWindowRect(runtime.overlay_hwnd, &mut rect).is_ok() {
+                                let _ = SetWindowPos(
+                                    runtime.overlay_hwnd,
+                                    Some(HWND_TOPMOST),
+                                    rect.left + dx,
+                                    rect.top + dy,
+                                    0,
+                                    0,
+                                    SWP_NOACTIVATE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                                );
+                            }
+                        }
+                    } else {
+                        let _ = refresh_overlay(runtime);
+                    }
                 }
 
                 OverlayCommand::BeginCrosshairDraw {
@@ -17261,7 +17319,13 @@ mod windows_overlay {
         runtime.active_focus_highlight_hwnd = None;
         ACTIVE_HIGHLIGHT_HWND.store(0, Ordering::Relaxed);
         sync_window_location_hook_state(runtime);
-        let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
+        hide_focus_highlight_windows(runtime);
+    }
+
+    unsafe fn hide_focus_highlight_windows(runtime: &Runtime) {
+        for hwnd in runtime.focus_highlight_hwnds {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
     }
 
     fn angle_between(angle: f32, start: f32, end: f32) -> bool {
@@ -19413,7 +19477,7 @@ mod windows_overlay {
 
     unsafe fn paint_focus_highlight_overlay(runtime: &Runtime, target: HWND) -> Result<()> {
         let Some(rect) = focus_highlight_rect(target) else {
-            let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
+            hide_focus_highlight_windows(runtime);
             return Ok(());
         };
 
@@ -19440,19 +19504,56 @@ mod windows_overlay {
         let visible_right = (rect.right + margin).min(monitor_rect.right);
         let visible_bottom = (rect.bottom + margin).min(monitor_rect.bottom);
         if visible_right <= visible_left || visible_bottom <= visible_top {
-            let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE);
+            hide_focus_highlight_windows(runtime);
             return Ok(());
         }
 
         let width = (visible_right - visible_left).max(1) as u32;
         let height = (visible_bottom - visible_top).max(1) as u32;
-        let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
         let accent = image::Rgba([
             runtime.focus_highlight_color.r,
             runtime.focus_highlight_color.g,
             runtime.focus_highlight_color.b,
             runtime.focus_highlight_color.a,
         ]);
+        if decoration == crate::model::FocusHighlightDecoration::Plain {
+            let thickness = thickness.min(width).min(height).max(1);
+            let thickness_i32 = thickness as i32;
+            let strips = [
+                (visible_left, visible_top, width, thickness as u32),
+                (
+                    visible_left,
+                    visible_bottom - thickness_i32,
+                    width,
+                    thickness as u32,
+                ),
+                (
+                    visible_left,
+                    visible_top + thickness_i32,
+                    thickness as u32,
+                    height.saturating_sub((thickness * 2) as u32).max(1),
+                ),
+                (
+                    visible_right - thickness_i32,
+                    visible_top + thickness_i32,
+                    thickness as u32,
+                    height.saturating_sub((thickness * 2) as u32).max(1),
+                ),
+            ];
+            for (hwnd, (x, y, strip_width, strip_height)) in
+                runtime.focus_highlight_hwnds.into_iter().zip(strips)
+            {
+                let canvas = RgbaImage::from_pixel(strip_width, strip_height, accent);
+                paint_crosshair_canvas(hwnd, canvas, x, y)?;
+                let _ = ShowWindow(hwnd, SW_SHOWNA);
+            }
+            return Ok(());
+        }
+
+        for hwnd in runtime.focus_highlight_hwnds.into_iter().skip(1) {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+        let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
         let color = if matches!(decoration, crate::model::FocusHighlightDecoration::Rainbow) {
             let hue = runtime.focus_highlight_rainbow_hue;
             let rgb = hsv_to_rgb(hue * 360.0, 0.85, 0.95);
@@ -19462,22 +19563,22 @@ mod windows_overlay {
         };
 
         match decoration {
-            crate::model::FocusHighlightDecoration::Plain
-            | crate::model::FocusHighlightDecoration::Rainbow => {
+            crate::model::FocusHighlightDecoration::Rainbow => {
                 draw_focus_highlight_basic_border(&mut canvas, thickness, color);
             }
+            crate::model::FocusHighlightDecoration::Plain => unreachable!(),
             crate::model::FocusHighlightDecoration::FloralWood => {
                 draw_focus_highlight_floral_wood(&mut canvas, thickness, accent);
             }
         }
 
         paint_crosshair_canvas(
-            runtime.focus_highlight_hwnd,
+            runtime.focus_highlight_hwnds[0],
             canvas,
             visible_left,
             visible_top,
         )?;
-        let _ = ShowWindow(runtime.focus_highlight_hwnd, SW_SHOWNA);
+        let _ = ShowWindow(runtime.focus_highlight_hwnds[0], SW_SHOWNA);
         Ok(())
     }
 
@@ -34421,7 +34522,7 @@ mod windows_overlay {
         let _ = unsafe { ShowWindow(runtime.overlay_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.hud_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.pin_hwnd, SW_HIDE) };
-        let _ = unsafe { ShowWindow(runtime.focus_highlight_hwnd, SW_HIDE) };
+        unsafe { hide_focus_highlight_windows(runtime) };
         if let Some(active) = &runtime.active_pin_thumbnail {
             if let Some(thumbnail_id) = active.thumbnail_id {
                 let _ = unsafe { DwmUnregisterThumbnail(thumbnail_id) };
