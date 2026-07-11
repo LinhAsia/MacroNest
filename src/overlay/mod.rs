@@ -31724,6 +31724,7 @@ mod windows_overlay {
             let step_x = rem_x.clamp(-96, 96);
             let step_y = rem_y.clamp(-96, 96);
             send_arduino_relative_move_packet(step_x, step_y)?;
+            thread::sleep(Duration::from_millis(8));
             rem_x -= step_x;
             rem_y -= step_y;
         }
@@ -31732,6 +31733,21 @@ mod windows_overlay {
     }
 
     pub(crate) fn test_arduino_mouse_direct() -> Result<()> {
+        use std::io::Read;
+
+        write_arduino_data(&[0xAA, 0x7F, 0, 0, 0, 0])?;
+        let mut reply = [0u8; 1];
+        ARDUINO_PORT
+            .lock()
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Arduino serial port is not open"))?
+            .read_exact(&mut reply)
+            .map_err(|error| anyhow::anyhow!(
+                "Firmware did not acknowledge the test; flash the firmware again: {error}"
+            ))?;
+        if reply[0] != 0xAC {
+            anyhow::bail!("Unexpected firmware response: 0x{:02X}", reply[0]);
+        }
         send_arduino_relative_move_sequence(240, 0)?;
         write_arduino_data(&[0xAA, 2, 1, 1, 0, 0])?;
         thread::sleep(Duration::from_millis(40));

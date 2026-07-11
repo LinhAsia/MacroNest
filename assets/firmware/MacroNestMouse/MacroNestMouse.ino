@@ -27,6 +27,9 @@ void handlePacket() {
     case 3:
       Mouse.move(0, 0, static_cast<int8_t>(packet[2]));
       break;
+    case 0x7F:
+      Serial.write(0xAC);
+      break;
   }
 }
 }
