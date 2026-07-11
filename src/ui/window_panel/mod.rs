@@ -3698,6 +3698,10 @@ impl CrosshairApp {
                                     let mut candidate = layout.cells[cell_index].clone();
                                     let end_row = (candidate.row + candidate.row_span).min(layout.rows);
                                     let end_col = (candidate.col + candidate.col_span).min(layout.cols);
+                                    let old_left = col_starts[candidate.col] + candidate.adjust_left;
+                                    let old_right = col_starts[end_col] + candidate.adjust_right;
+                                    let old_top = row_starts[candidate.row] + candidate.adjust_top;
+                                    let old_bottom = row_starts[end_row] + candidate.adjust_bottom;
                                     let min_dx = -(col_starts[candidate.col] + candidate.adjust_left);
                                     let max_dx = 1.0 - (col_starts[end_col] + candidate.adjust_right);
                                     let min_dy = -(row_starts[candidate.row] + candidate.adjust_top);
@@ -3723,23 +3727,23 @@ impl CrosshairApp {
                                         let other_top = row_starts[other.row] + other.adjust_top;
                                         let other_bottom = row_starts[other_end_row] + other.adjust_bottom;
                                         if bottom > other_top && top < other_bottom {
-                                            if dx > 0.0 && other_left >= right
-                                                && (other_left - right) * grid_w <= 6.0
+                                            if dx > 0.0 && old_right <= other_left
+                                                && right >= other_left - 6.0 / grid_w.max(1.0)
                                             {
                                                 live_snap_x = other_left - right;
-                                            } else if dx < 0.0 && left >= other_right
-                                                && (left - other_right) * grid_w <= 6.0
+                                            } else if dx < 0.0 && old_left >= other_right
+                                                && left <= other_right + 6.0 / grid_w.max(1.0)
                                             {
                                                 live_snap_x = other_right - left;
                                             }
                                         }
                                         if right > other_left && left < other_right {
-                                            if dy > 0.0 && other_top >= bottom
-                                                && (other_top - bottom) * grid_h <= 6.0
+                                            if dy > 0.0 && old_bottom <= other_top
+                                                && bottom >= other_top - 6.0 / grid_h.max(1.0)
                                             {
                                                 live_snap_y = other_top - bottom;
-                                            } else if dy < 0.0 && top >= other_bottom
-                                                && (top - other_bottom) * grid_h <= 6.0
+                                            } else if dy < 0.0 && old_top >= other_bottom
+                                                && top <= other_bottom + 6.0 / grid_h.max(1.0)
                                             {
                                                 live_snap_y = other_bottom - top;
                                             }
