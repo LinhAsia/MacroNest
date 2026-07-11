@@ -3604,6 +3604,10 @@ impl CrosshairApp {
                                             let mut candidate = layout.cells[cell_index].clone();
                                             let min_width = 24.0 / grid_w.max(1.0);
                                             let min_height = 24.0 / grid_h.max(1.0);
+                                            let old_left = col_starts[cell.col] + candidate.adjust_left;
+                                            let old_right = col_starts[end_col] + candidate.adjust_right;
+                                            let old_top = row_starts[cell.row] + candidate.adjust_top;
+                                            let old_bottom = row_starts[end_row] + candidate.adjust_bottom;
                                             match edge {
                                                 "left" => {
                                                     let max_left = col_starts[end_col]
@@ -3643,10 +3647,70 @@ impl CrosshairApp {
                                                 }
                                                 _ => {}
                                             }
-                                            let left = col_starts[candidate.col] + candidate.adjust_left;
-                                            let right = col_starts[end_col] + candidate.adjust_right;
-                                            let top = row_starts[candidate.row] + candidate.adjust_top;
-                                            let bottom = row_starts[end_row] + candidate.adjust_bottom;
+                                            let mut left = col_starts[candidate.col] + candidate.adjust_left;
+                                            let mut right = col_starts[end_col] + candidate.adjust_right;
+                                            let mut top = row_starts[candidate.row] + candidate.adjust_top;
+                                            let mut bottom = row_starts[end_row] + candidate.adjust_bottom;
+                                            let mut snapped = false;
+                                            for (index, other) in layout.cells.iter().enumerate() {
+                                                if index == cell_index { continue; }
+                                                let other_end_row = (other.row + other.row_span).min(layout.rows);
+                                                let other_end_col = (other.col + other.col_span).min(layout.cols);
+                                                let other_left = col_starts[other.col] + other.adjust_left;
+                                                let other_right = col_starts[other_end_col] + other.adjust_right;
+                                                let other_top = row_starts[other.row] + other.adjust_top;
+                                                let other_bottom = row_starts[other_end_row] + other.adjust_bottom;
+                                                let vertical_overlap = bottom > other_top && top < other_bottom;
+                                                let horizontal_overlap = right > other_left && left < other_right;
+                                                match edge {
+                                                    "right" if delta.x > 0.0 && vertical_overlap
+                                                        && old_right <= other_left
+                                                        && right >= other_left - 6.0 / grid_w.max(1.0) => {
+                                                        candidate.adjust_right = other_left - col_starts[end_col];
+                                                        right = other_left;
+                                                        snapped = true;
+                                                    }
+                                                    "left" if delta.x < 0.0 && vertical_overlap
+                                                        && old_left >= other_right
+                                                        && left <= other_right + 6.0 / grid_w.max(1.0) => {
+                                                        candidate.adjust_left = other_right - col_starts[candidate.col];
+                                                        left = other_right;
+                                                        snapped = true;
+                                                    }
+                                                    "bottom" if delta.y > 0.0 && horizontal_overlap
+                                                        && old_bottom <= other_top
+                                                        && bottom >= other_top - 6.0 / grid_h.max(1.0) => {
+                                                        candidate.adjust_bottom = other_top - row_starts[end_row];
+                                                        bottom = other_top;
+                                                        snapped = true;
+                                                    }
+                                                    "top" if delta.y < 0.0 && horizontal_overlap
+                                                        && old_top >= other_bottom
+                                                        && top <= other_bottom + 6.0 / grid_h.max(1.0) => {
+                                                        candidate.adjust_top = other_bottom - row_starts[candidate.row];
+                                                        top = other_bottom;
+                                                        snapped = true;
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                            if edge == "left" && delta.x < 0.0 && left * grid_w <= 6.0 {
+                                                candidate.adjust_left = -col_starts[candidate.col];
+                                                left = 0.0;
+                                                snapped = true;
+                                            } else if edge == "right" && delta.x > 0.0 && (1.0 - right) * grid_w <= 6.0 {
+                                                candidate.adjust_right = 1.0 - col_starts[end_col];
+                                                right = 1.0;
+                                                snapped = true;
+                                            } else if edge == "top" && delta.y < 0.0 && top * grid_h <= 6.0 {
+                                                candidate.adjust_top = -row_starts[candidate.row];
+                                                top = 0.0;
+                                                snapped = true;
+                                            } else if edge == "bottom" && delta.y > 0.0 && (1.0 - bottom) * grid_h <= 6.0 {
+                                                candidate.adjust_bottom = 1.0 - row_starts[end_row];
+                                                bottom = 1.0;
+                                                snapped = true;
+                                            }
                                             let overlaps = layout.cells.iter().enumerate().any(|(index, other)| {
                                                 if index == cell_index { return false; }
                                                 let other_end_row = (other.row + other.row_span).min(layout.rows);
@@ -3664,6 +3728,12 @@ impl CrosshairApp {
                                             {
                                                 layout.cells[cell_index] = candidate;
                                                 live_sync = true;
+                                                if snapped {
+                                                    snap_preview = Some(egui::Rect::from_min_max(
+                                                        egui::pos2(grid_rect.min.x + left * grid_w, grid_rect.min.y + top * grid_h),
+                                                        egui::pos2(grid_rect.min.x + right * grid_w, grid_rect.min.y + bottom * grid_h),
+                                                    ));
+                                                }
                                             }
                                         }
                                     }
