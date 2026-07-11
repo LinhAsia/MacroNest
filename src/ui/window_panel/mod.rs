@@ -3495,37 +3495,6 @@ impl CrosshairApp {
                                 }
                             }
 
-                            let mut hovered_row_col = None;
-                            if !split_hovered_or_dragged {
-                                for cell in &layout.cells {
-                                    if cell.row >= layout.rows || cell.col >= layout.cols {
-                                        continue;
-                                    }
-                                    let end_row = (cell.row + cell.row_span).min(layout.rows);
-                                    let end_col = (cell.col + cell.col_span).min(layout.cols);
-
-                                    let x1 = grid_rect.min.x
-                                        + (col_starts[cell.col] + cell.adjust_left) * grid_w;
-                                    let y1 = grid_rect.min.y
-                                        + (row_starts[cell.row] + cell.adjust_top) * grid_h;
-                                    let x2 = grid_rect.min.x
-                                        + (col_starts[end_col] + cell.adjust_right) * grid_w;
-                                    let y2 = grid_rect.min.y
-                                        + (row_starts[end_row] + cell.adjust_bottom) * grid_h;
-
-                                    let cell_rect = egui::Rect::from_min_max(
-                                        egui::pos2(x1, y1),
-                                        egui::pos2(x2, y2),
-                                    )
-                                    .shrink(2.0);
-
-                                    if ui.rect_contains_pointer(cell_rect) {
-                                        hovered_row_col = Some((cell.row, cell.col));
-                                        break;
-                                    }
-                                }
-                            }
-
                             ui.painter()
                                 .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
 
@@ -3634,7 +3603,6 @@ impl CrosshairApp {
                                 }
                             }
 
-                            let mut merge_action = None;
                             let cells_to_draw = layout.cells.clone();
                             for cell in &cells_to_draw {
                                 if cell.row >= layout.rows || cell.col >= layout.cols {
@@ -3662,196 +3630,57 @@ impl CrosshairApp {
                                 let is_selected = self.selected_layout_cell
                                     == Some((layout.id, cell.row, cell.col));
 
-                                let is_in_drag_merge_range =
-                                    if let Some((start_layout_id, start_row, start_col)) =
-                                        self.drag_start_layout_cell
-                                    {
-                                        if start_layout_id == layout.id {
-                                            if let Some((hover_row, hover_col)) = hovered_row_col {
-                                                let cell_a_opt = layout.cells.iter().find(|c| {
-                                                    c.row == start_row && c.col == start_col
-                                                });
-                                                let cell_b_opt = layout.cells.iter().find(|c| {
-                                                    c.row == hover_row && c.col == hover_col
-                                                });
-                                                if let (Some(cell_a), Some(cell_b)) =
-                                                    (cell_a_opt, cell_b_opt)
-                                                {
-                                                    let r1 = cell_a.row.min(cell_b.row);
-                                                    let c1 = cell_a.col.min(cell_b.col);
-                                                    let r2 = (cell_a.row + cell_a.row_span - 1)
-                                                        .max(cell_b.row + cell_b.row_span - 1);
-                                                    let c2 = (cell_a.col + cell_a.col_span - 1)
-                                                        .max(cell_b.col + cell_b.col_span - 1);
-
-                                                    cell.row >= r1
-                                                        && cell.col >= c1
-                                                        && (cell.row + cell.row_span - 1) <= r2
-                                                        && (cell.col + cell.col_span - 1) <= c2
-                                                } else {
-                                                    false
-                                                }
-                                            } else {
-                                                false
-                                            }
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    };
-
                                 let cell_id =
                                     ui.make_persistent_id((layout.id, "cell", cell.row, cell.col));
                                 let cell_index = layout.cells.iter().position(|candidate| {
                                     candidate.row == cell.row && candidate.col == cell.col
                                 });
-                                let mut cell_edge_active = false;
-                                if !split_hovered_or_dragged {
-                                    let edge_handles = [
-                                        (
-                                            "left",
-                                            egui::Rect::from_min_max(
-                                                raw_cell_rect.left_top(),
-                                                egui::pos2(
-                                                    raw_cell_rect.min.x + 7.0,
-                                                    raw_cell_rect.max.y,
-                                                ),
-                                            ),
-                                            egui::CursorIcon::ResizeHorizontal,
-                                        ),
-                                        (
-                                            "right",
-                                            egui::Rect::from_min_max(
-                                                egui::pos2(
-                                                    raw_cell_rect.max.x - 7.0,
-                                                    raw_cell_rect.min.y,
-                                                ),
-                                                raw_cell_rect.right_bottom(),
-                                            ),
-                                            egui::CursorIcon::ResizeHorizontal,
-                                        ),
-                                        (
-                                            "top",
-                                            egui::Rect::from_min_max(
-                                                raw_cell_rect.left_top(),
-                                                egui::pos2(
-                                                    raw_cell_rect.max.x,
-                                                    raw_cell_rect.min.y + 7.0,
-                                                ),
-                                            ),
-                                            egui::CursorIcon::ResizeVertical,
-                                        ),
-                                        (
-                                            "bottom",
-                                            egui::Rect::from_min_max(
-                                                egui::pos2(
-                                                    raw_cell_rect.min.x,
-                                                    raw_cell_rect.max.y - 7.0,
-                                                ),
-                                                raw_cell_rect.right_bottom(),
-                                            ),
-                                            egui::CursorIcon::ResizeVertical,
-                                        ),
-                                    ];
-                                    for (edge, edge_rect, cursor) in edge_handles {
-                                        let edge_response = ui.interact(
-                                            edge_rect,
-                                            ui.make_persistent_id((
-                                                layout.id,
-                                                "cell_edge",
-                                                cell.row,
-                                                cell.col,
-                                                edge,
-                                            )),
-                                            egui::Sense::drag(),
-                                        );
-                                        if edge_response.hovered() || edge_response.dragged() {
-                                            ui.ctx().set_cursor_icon(cursor);
-                                            cell_edge_active = true;
-                                        }
-                                        if edge_response.dragged()
-                                            && let Some(cell_index) = cell_index
-                                        {
-                                            let delta = ui.input(|input| input.pointer.delta());
-                                            let target = &mut layout.cells[cell_index];
-                                            let min_width = 24.0 / grid_w.max(1.0);
-                                            let min_height = 24.0 / grid_h.max(1.0);
-                                            match edge {
-                                                "left" => {
-                                                    let max_left = col_starts[end_col]
-                                                        + target.adjust_right
-                                                        - col_starts[cell.col]
-                                                        - min_width;
-                                                    target.adjust_left = (target.adjust_left
-                                                        + delta.x / grid_w.max(1.0))
-                                                        .min(max_left);
-                                                }
-                                                "right" => {
-                                                    let min_right = col_starts[cell.col]
-                                                        + target.adjust_left
-                                                        + min_width
-                                                        - col_starts[end_col];
-                                                    target.adjust_right = (target.adjust_right
-                                                        + delta.x / grid_w.max(1.0))
-                                                        .max(min_right);
-                                                }
-                                                "top" => {
-                                                    let max_top = row_starts[end_row]
-                                                        + target.adjust_bottom
-                                                        - row_starts[cell.row]
-                                                        - min_height;
-                                                    target.adjust_top = (target.adjust_top
-                                                        + delta.y / grid_h.max(1.0))
-                                                        .min(max_top);
-                                                }
-                                                "bottom" => {
-                                                    let min_bottom = row_starts[cell.row]
-                                                        + target.adjust_top
-                                                        + min_height
-                                                        - row_starts[end_row];
-                                                    target.adjust_bottom = (target.adjust_bottom
-                                                        + delta.y / grid_h.max(1.0))
-                                                        .max(min_bottom);
-                                                }
-                                                _ => {}
-                                            }
-                                            live_sync = true;
-                                        }
-                                    }
-                                }
-                                let cell_sense = if split_hovered_or_dragged || cell_edge_active {
+                                let cell_sense = if split_hovered_or_dragged {
                                     egui::Sense::hover()
                                 } else {
                                     egui::Sense::click_and_drag()
                                 };
                                 let cell_resp = ui.interact(cell_rect, cell_id, cell_sense);
 
-                                let merge_drag = ui.input(|input| input.modifiers.ctrl);
-                                if cell_resp.drag_started() && merge_drag {
-                                    self.drag_start_layout_cell =
-                                        Some((layout.id, cell.row, cell.col));
-                                }
-
                                 if cell_resp.dragged()
-                                    && !merge_drag
                                     && let Some(cell_index) = cell_index
+                                    && layout.cells[cell_index].detached
                                 {
                                     let delta = ui.input(|input| input.pointer.delta());
                                     let dx = delta.x / grid_w.max(1.0);
                                     let dy = delta.y / grid_h.max(1.0);
-                                    let target = &mut layout.cells[cell_index];
-                                    target.adjust_left += dx;
-                                    target.adjust_right += dx;
-                                    target.adjust_top += dy;
-                                    target.adjust_bottom += dy;
+                                    let mut candidate = layout.cells[cell_index].clone();
+                                    candidate.adjust_left += dx;
+                                    candidate.adjust_right += dx;
+                                    candidate.adjust_top += dy;
+                                    candidate.adjust_bottom += dy;
+                                    let end_row = (candidate.row + candidate.row_span).min(layout.rows);
+                                    let end_col = (candidate.col + candidate.col_span).min(layout.cols);
+                                    let left = col_starts[candidate.col] + candidate.adjust_left;
+                                    let right = col_starts[end_col] + candidate.adjust_right;
+                                    let top = row_starts[candidate.row] + candidate.adjust_top;
+                                    let bottom = row_starts[end_row] + candidate.adjust_bottom;
+                                    let overlaps = layout.cells.iter().enumerate().any(|(index, other)| {
+                                        if index == cell_index { return false; }
+                                        let other_end_row = (other.row + other.row_span).min(layout.rows);
+                                        let other_end_col = (other.col + other.col_span).min(layout.cols);
+                                        let other_left = col_starts[other.col] + other.adjust_left;
+                                        let other_right = col_starts[other_end_col] + other.adjust_right;
+                                        let other_top = row_starts[other.row] + other.adjust_top;
+                                        let other_bottom = row_starts[other_end_row] + other.adjust_bottom;
+                                        left < other_right && right > other_left
+                                            && top < other_bottom && bottom > other_top
+                                    });
+                                    if left >= 0.0 && top >= 0.0 && right <= 1.0 && bottom <= 1.0 && !overlaps {
+                                        layout.cells[cell_index] = candidate;
+                                    }
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                                     live_sync = true;
                                 }
 
                                 if cell_resp.drag_stopped()
-                                    && !merge_drag
                                     && let Some(cell_index) = cell_index
+                                    && layout.cells[cell_index].detached
                                 {
                                     let target = layout.cells[cell_index].clone();
                                     let target_end_row =
@@ -3974,17 +3803,6 @@ impl CrosshairApp {
                                     }
                                 }
 
-                                if cell_resp.drag_stopped() {
-                                    if let Some((start_layout_id, start_row, start_col)) =
-                                        self.drag_start_layout_cell
-                                    {
-                                        if start_layout_id == layout.id {
-                                            merge_action = Some((start_row, start_col));
-                                        }
-                                    }
-                                    self.drag_start_layout_cell = None;
-                                }
-
                                 if cell_resp.clicked() {
                                     if self.selected_layout_cell
                                         == Some((layout.id, cell.row, cell.col))
@@ -4000,8 +3818,6 @@ impl CrosshairApp {
 
                                 let fill_color = if is_selected {
                                     Color32::from_rgba_premultiplied(0, 120, 215, 80)
-                                } else if is_in_drag_merge_range {
-                                    Color32::from_rgba_premultiplied(0, 120, 215, 40)
                                 } else if cell_resp.hovered() {
                                     Color32::from_rgba_premultiplied(128, 128, 128, 40)
                                 } else {
@@ -4010,13 +3826,11 @@ impl CrosshairApp {
 
                                 let border_color = if is_selected {
                                     Color32::from_rgb(0, 120, 215)
-                                } else if is_in_drag_merge_range {
-                                    Color32::from_rgb(0, 150, 255)
                                 } else {
                                     ui.visuals().widgets.noninteractive.bg_stroke.color
                                 };
 
-                                let stroke_width = if is_selected || is_in_drag_merge_range {
+                                let stroke_width = if is_selected {
                                     2.0
                                 } else {
                                     1.0
@@ -4142,63 +3956,6 @@ impl CrosshairApp {
                                 );
                             }
 
-                            if let Some((start_row, start_col)) = merge_action {
-                                if let Some((end_row, end_col)) = hovered_row_col {
-                                    if (start_row, start_col) != (end_row, end_col) {
-                                        let cell_a_opt = layout
-                                            .cells
-                                            .iter()
-                                            .find(|c| c.row == start_row && c.col == start_col)
-                                            .cloned();
-                                        let cell_b_opt = layout
-                                            .cells
-                                            .iter()
-                                            .find(|c| c.row == end_row && c.col == end_col)
-                                            .cloned();
-                                        if let (Some(cell_a), Some(cell_b)) =
-                                            (cell_a_opt, cell_b_opt)
-                                        {
-                                            let r1 = cell_a.row.min(cell_b.row);
-                                            let c1 = cell_a.col.min(cell_b.col);
-                                            let r2 = (cell_a.row + cell_a.row_span - 1)
-                                                .max(cell_b.row + cell_b.row_span - 1);
-                                            let c2 = (cell_a.col + cell_a.col_span - 1)
-                                                .max(cell_b.col + cell_b.col_span - 1);
-
-                                            let new_cell = WindowLayoutCell {
-                                                row: r1,
-                                                col: c1,
-                                                row_span: r2 - r1 + 1,
-                                                col_span: c2 - c1 + 1,
-                                                target_window_title: cell_a
-                                                    .target_window_title
-                                                    .clone()
-                                                    .or(cell_b.target_window_title.clone()),
-                                                extra_target_window_titles: if !cell_a
-                                                    .extra_target_window_titles
-                                                    .is_empty()
-                                                {
-                                                    cell_a.extra_target_window_titles.clone()
-                                                } else {
-                                                    cell_b.extra_target_window_titles.clone()
-                                                },
-                                                match_duplicate_window_titles: cell_a
-                                                    .match_duplicate_window_titles
-                                                    || cell_b.match_duplicate_window_titles,
-                                                adjust_left: 0.0,
-                                                adjust_right: 0.0,
-                                                adjust_top: 0.0,
-                                                adjust_bottom: 0.0,
-                                            };
-
-                                            layout.cells.insert(0, new_cell);
-                                            Self::sanitize_layout(layout);
-                                            live_sync = true;
-                                            self.selected_layout_cell = Some((layout.id, r1, c1));
-                                        }
-                                    }
-                                }
-                            }
                         });
                         ui.end_row();
                     });
@@ -4247,6 +4004,26 @@ impl CrosshairApp {
                                 layout.cells[cell_idx].extra_target_window_titles.clone();
                             let mut match_duplicate_window_titles =
                                 layout.cells[cell_idx].match_duplicate_window_titles;
+
+                            ui.horizontal(|ui| {
+                                let detached = layout.cells[cell_idx].detached;
+                                let label = if detached {
+                                    Self::tr_lang(language, "Return to grid", "Đưa về lưới")
+                                } else {
+                                    Self::tr_lang(language, "Detach", "Tách")
+                                };
+                                if ui.button(label).clicked() {
+                                    let cell = &mut layout.cells[cell_idx];
+                                    cell.detached = !detached;
+                                    if !cell.detached {
+                                        cell.adjust_left = 0.0;
+                                        cell.adjust_right = 0.0;
+                                        cell.adjust_top = 0.0;
+                                        cell.adjust_bottom = 0.0;
+                                    }
+                                    live_sync = true;
+                                }
+                            });
 
                             egui::Grid::new((layout.id, "cell-settings-grid", sel_row, sel_col))
                                 .num_columns(2)
