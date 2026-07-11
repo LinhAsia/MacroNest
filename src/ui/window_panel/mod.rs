@@ -3711,6 +3711,37 @@ impl CrosshairApp {
                                                 bottom = 1.0;
                                                 snapped = true;
                                             }
+                                            if !snapped {
+                                                snapped = match edge {
+                                                    "left" => left.abs() * grid_w <= 0.5,
+                                                    "right" => (1.0 - right).abs() * grid_w <= 0.5,
+                                                    "top" => top.abs() * grid_h <= 0.5,
+                                                    "bottom" => (1.0 - bottom).abs() * grid_h <= 0.5,
+                                                    _ => false,
+                                                };
+                                            }
+                                            if !snapped {
+                                                snapped = layout.cells.iter().enumerate().any(|(index, other)| {
+                                                    if index == cell_index { return false; }
+                                                    let other_end_row = (other.row + other.row_span).min(layout.rows);
+                                                    let other_end_col = (other.col + other.col_span).min(layout.cols);
+                                                    let other_left = col_starts[other.col] + other.adjust_left;
+                                                    let other_right = col_starts[other_end_col] + other.adjust_right;
+                                                    let other_top = row_starts[other.row] + other.adjust_top;
+                                                    let other_bottom = row_starts[other_end_row] + other.adjust_bottom;
+                                                    match edge {
+                                                        "left" => bottom > other_top && top < other_bottom
+                                                            && (left - other_right).abs() * grid_w <= 0.5,
+                                                        "right" => bottom > other_top && top < other_bottom
+                                                            && (right - other_left).abs() * grid_w <= 0.5,
+                                                        "top" => right > other_left && left < other_right
+                                                            && (top - other_bottom).abs() * grid_h <= 0.5,
+                                                        "bottom" => right > other_left && left < other_right
+                                                            && (bottom - other_top).abs() * grid_h <= 0.5,
+                                                        _ => false,
+                                                    }
+                                                });
+                                            }
                                             let overlaps = layout.cells.iter().enumerate().any(|(index, other)| {
                                                 if index == cell_index { return false; }
                                                 let other_end_row = (other.row + other.row_span).min(layout.rows);
