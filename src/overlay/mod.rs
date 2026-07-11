@@ -3223,14 +3223,13 @@ mod windows_overlay {
                             let mut name_guard = CURRENT_ARDUINO_PORT_NAME.lock();
                             let mut port_guard = ARDUINO_PORT.lock();
 
-                            let port_present = serialport::available_ports()
-                                .map(|ports| ports.iter().any(|port| port.port_name == com_port))
-                                .unwrap_or(false);
-                            if !port_present {
-                                *port_guard = None;
-                                *name_guard = String::new();
-                                thread::sleep(Duration::from_millis(250));
-                                continue;
+                            if let Ok(ports) = serialport::available_ports() {
+                                if !ports.iter().any(|port| port.port_name == com_port) {
+                                    *port_guard = None;
+                                    *name_guard = String::new();
+                                    thread::sleep(Duration::from_millis(250));
+                                    continue;
+                                }
                             }
 
                             if HOOK_STATE.lock().arduino_flash_in_progress {
@@ -3250,8 +3249,7 @@ mod windows_overlay {
                                         .timeout(Duration::from_millis(500))
                                         .open()
                                     {
-                                        Ok(mut p) => {
-                                            let _ = p.write_data_terminal_ready(true);
+                                        Ok(p) => {
                                             *port_guard = Some(p);
                                             *name_guard = com_port.clone();
                                         }
