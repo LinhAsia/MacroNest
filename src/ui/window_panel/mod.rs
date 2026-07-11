@@ -3528,6 +3528,14 @@ impl CrosshairApp {
 
                                 let is_selected = self.selected_layout_cell
                                     == Some((layout.id, cell.row, cell.col));
+                                let is_merge_target = self.drag_start_layout_cell
+                                    .is_some_and(|(drag_layout, drag_row, drag_col)| {
+                                        drag_layout == layout.id
+                                            && (drag_row, drag_col) != (cell.row, cell.col)
+                                            && ui.input(|input| input.pointer.primary_down())
+                                            && ui.input(|input| input.pointer.latest_pos())
+                                                .is_some_and(|pointer| cell_rect.contains(pointer))
+                                    });
 
                                 let cell_id =
                                     ui.make_persistent_id((layout.id, "cell", cell.row, cell.col));
@@ -3780,13 +3788,27 @@ impl CrosshairApp {
                                     egui::pos2(cell_rect.right() - 24.0, cell_rect.top() + 4.0),
                                     egui::vec2(20.0, 20.0),
                                 );
+                                let delete_enabled = layout.cells.len() > 1;
+                                let delete_icon = Self::material_icon_text(0xe872, 14.0);
                                 let delete_response = ui.put(
                                     delete_rect,
-                                    egui::Button::new(Self::material_icon_text(0xe872, 14.0)),
-                                ).on_hover_text(Self::tr_lang(language, "Delete", "Xóa"));
+                                    egui::Button::new(if delete_enabled {
+                                        delete_icon
+                                    } else {
+                                        delete_icon.color(ui.visuals().weak_text_color())
+                                    }),
+                                ).on_hover_text(if delete_enabled {
+                                    Self::tr_lang(language, "Delete", "Xóa")
+                                } else {
+                                    Self::tr_lang(
+                                        language,
+                                        "The last window cannot be deleted",
+                                        "Không thể xóa cửa sổ cuối cùng",
+                                    )
+                                });
                                 let controls_active = delete_response.hovered()
                                     || delete_response.clicked();
-                                if delete_response.clicked() {
+                                if delete_enabled && delete_response.clicked() {
                                     delete_cell = cell_index;
                                 }
 
@@ -4097,6 +4119,8 @@ impl CrosshairApp {
 
                                 let fill_color = if is_selected {
                                     Color32::from_rgba_premultiplied(0, 120, 215, 80)
+                                } else if is_merge_target {
+                                    Color32::from_rgba_premultiplied(0, 180, 255, 100)
                                 } else if cell_resp.hovered() {
                                     Color32::from_rgba_premultiplied(128, 128, 128, 40)
                                 } else {
@@ -4105,11 +4129,13 @@ impl CrosshairApp {
 
                                 let border_color = if is_selected {
                                     Color32::from_rgb(0, 120, 215)
+                                } else if is_merge_target {
+                                    Color32::from_rgb(0, 210, 255)
                                 } else {
                                     ui.visuals().widgets.noninteractive.bg_stroke.color
                                 };
 
-                                let stroke_width = if is_selected {
+                                let stroke_width = if is_selected || is_merge_target {
                                     2.0
                                 } else {
                                     1.0
