@@ -3837,6 +3837,45 @@ impl CrosshairApp {
                                     if !overlaps {
                                         layout.cells[cell_index] = candidate;
                                     }
+                                    let snap_near_screen = left * grid_w <= 6.0
+                                        || (1.0 - right) * grid_w <= 6.0
+                                        || top * grid_h <= 6.0
+                                        || (1.0 - bottom) * grid_h <= 6.0;
+                                    let snap_near_window = layout.cells.iter().enumerate().any(|(index, other)| {
+                                        if index == cell_index { return false; }
+                                        let other_end_row = (other.row + other.row_span).min(layout.rows);
+                                        let other_end_col = (other.col + other.col_span).min(layout.cols);
+                                        let other_left = col_starts[other.col] + other.adjust_left;
+                                        let other_right = col_starts[other_end_col] + other.adjust_right;
+                                        let other_top = row_starts[other.row] + other.adjust_top;
+                                        let other_bottom = row_starts[other_end_row] + other.adjust_bottom;
+                                        let vertical_overlap = bottom > other_top && top < other_bottom;
+                                        let horizontal_overlap = right > other_left && left < other_right;
+                                        (vertical_overlap
+                                            && ((left - other_right).abs() * grid_w <= 6.0
+                                                || (right - other_left).abs() * grid_w <= 6.0))
+                                            || (horizontal_overlap
+                                                && ((top - other_bottom).abs() * grid_h <= 6.0
+                                                    || (bottom - other_top).abs() * grid_h <= 6.0))
+                                    });
+                                    if snap_near_screen || snap_near_window {
+                                        let preview = egui::Rect::from_min_max(
+                                            egui::pos2(
+                                                grid_rect.min.x + left * grid_w,
+                                                grid_rect.min.y + top * grid_h,
+                                            ),
+                                            egui::pos2(
+                                                grid_rect.min.x + right * grid_w,
+                                                grid_rect.min.y + bottom * grid_h,
+                                            ),
+                                        );
+                                        ui.painter().rect_stroke(
+                                            preview,
+                                            2.0,
+                                            egui::Stroke::new(2.0, Color32::from_rgb(0, 180, 255)),
+                                            egui::StrokeKind::Outside,
+                                        );
+                                    }
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                                     live_sync = true;
                                 }
@@ -3963,6 +4002,7 @@ impl CrosshairApp {
                                                 *value = 0.0;
                                             }
                                         }
+                                        target.detached = false;
                                     }
                                 }
 
