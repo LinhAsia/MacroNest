@@ -2773,21 +2773,6 @@ impl CrosshairApp {
             sanitized_cells.push(cell);
         }
 
-        for r in 0..rows {
-            for c in 0..cols {
-                if !covered[r][c] {
-                    sanitized_cells.push(WindowLayoutCell {
-                        row: r,
-                        col: c,
-                        row_span: 1,
-                        col_span: 1,
-                        ..Default::default()
-                    });
-                    covered[r][c] = true;
-                }
-            }
-        }
-
         layout.cells = sanitized_cells;
 
         // Simplify to 1x1 if there is only one cell that covers the entire grid
@@ -2920,23 +2905,29 @@ impl CrosshairApp {
     }
 
     fn split_cell_vertical(layout: &mut WindowLayout, cell_idx: usize) {
-        let cell = &layout.cells[cell_idx];
+        let cell = layout.cells[cell_idx].clone();
         let col = cell.col;
         let col_span = cell.col_span;
+        let ratio_sum: f32 = layout.col_ratios.iter().sum();
+        let starts: Vec<f32> = std::iter::once(0.0)
+            .chain(layout.col_ratios.iter().scan(0.0, |sum, ratio| {
+                *sum += *ratio / ratio_sum;
+                Some(*sum)
+            }))
+            .collect();
+        let end_col = (col + col_span).min(layout.cols);
+        let actual_left = starts[col] + cell.adjust_left;
+        let actual_right = starts[end_col] + cell.adjust_right;
+        let actual_mid = (actual_left + actual_right) * 0.5;
 
         if col_span > 1 {
             let half = col_span / 2;
-            let mut cell_b = layout.cells[cell_idx].clone();
+            let split_base = starts[col + half];
+            let mut cell_b = cell.clone();
             layout.cells[cell_idx].detached = false;
-            layout.cells[cell_idx].adjust_left = 0.0;
-            layout.cells[cell_idx].adjust_right = 0.0;
-            layout.cells[cell_idx].adjust_top = 0.0;
-            layout.cells[cell_idx].adjust_bottom = 0.0;
+            layout.cells[cell_idx].adjust_right = actual_mid - split_base;
             cell_b.detached = false;
-            cell_b.adjust_left = 0.0;
-            cell_b.adjust_right = 0.0;
-            cell_b.adjust_top = 0.0;
-            cell_b.adjust_bottom = 0.0;
+            cell_b.adjust_left = actual_mid - split_base;
             layout.cells[cell_idx].col_span = half;
             cell_b.col = col + half;
             cell_b.col_span = col_span - half;
@@ -2949,20 +2940,12 @@ impl CrosshairApp {
             layout.col_ratios[split_col] = orig_ratio / 2.0;
             layout.col_ratios.insert(split_col + 1, orig_ratio / 2.0);
 
-            let mut cell_b = layout.cells[cell_idx].clone();
+            let mut cell_b = cell.clone();
             cell_b.detached = false;
-            cell_b.adjust_left = 0.0;
-            cell_b.adjust_right = 0.0;
-            cell_b.adjust_top = 0.0;
-            cell_b.adjust_bottom = 0.0;
             for (idx, c) in layout.cells.iter_mut().enumerate() {
                 if idx == cell_idx {
                     c.col_span = 1;
                     c.detached = false;
-                    c.adjust_left = 0.0;
-                    c.adjust_right = 0.0;
-                    c.adjust_top = 0.0;
-                    c.adjust_bottom = 0.0;
                 } else if c.col > split_col {
                     c.col += 1;
                 } else if c.col <= split_col && c.col + c.col_span > split_col {
@@ -2971,28 +2954,37 @@ impl CrosshairApp {
             }
             cell_b.col = split_col + 1;
             cell_b.col_span = 1;
+            let new_split_base = starts[col] + layout.col_ratios[split_col] / ratio_sum;
+            layout.cells[cell_idx].adjust_right = actual_mid - new_split_base;
+            cell_b.adjust_left = actual_mid - new_split_base;
             layout.cells.push(cell_b);
         }
     }
 
     fn split_cell_horizontal(layout: &mut WindowLayout, cell_idx: usize) {
-        let cell = &layout.cells[cell_idx];
+        let cell = layout.cells[cell_idx].clone();
         let row = cell.row;
         let row_span = cell.row_span;
+        let ratio_sum: f32 = layout.row_ratios.iter().sum();
+        let starts: Vec<f32> = std::iter::once(0.0)
+            .chain(layout.row_ratios.iter().scan(0.0, |sum, ratio| {
+                *sum += *ratio / ratio_sum;
+                Some(*sum)
+            }))
+            .collect();
+        let end_row = (row + row_span).min(layout.rows);
+        let actual_top = starts[row] + cell.adjust_top;
+        let actual_bottom = starts[end_row] + cell.adjust_bottom;
+        let actual_mid = (actual_top + actual_bottom) * 0.5;
 
         if row_span > 1 {
             let half = row_span / 2;
-            let mut cell_b = layout.cells[cell_idx].clone();
+            let split_base = starts[row + half];
+            let mut cell_b = cell.clone();
             layout.cells[cell_idx].detached = false;
-            layout.cells[cell_idx].adjust_left = 0.0;
-            layout.cells[cell_idx].adjust_right = 0.0;
-            layout.cells[cell_idx].adjust_top = 0.0;
-            layout.cells[cell_idx].adjust_bottom = 0.0;
+            layout.cells[cell_idx].adjust_bottom = actual_mid - split_base;
             cell_b.detached = false;
-            cell_b.adjust_left = 0.0;
-            cell_b.adjust_right = 0.0;
-            cell_b.adjust_top = 0.0;
-            cell_b.adjust_bottom = 0.0;
+            cell_b.adjust_top = actual_mid - split_base;
             layout.cells[cell_idx].row_span = half;
             cell_b.row = row + half;
             cell_b.row_span = row_span - half;
@@ -3005,20 +2997,12 @@ impl CrosshairApp {
             layout.row_ratios[split_row] = orig_ratio / 2.0;
             layout.row_ratios.insert(split_row + 1, orig_ratio / 2.0);
 
-            let mut cell_b = layout.cells[cell_idx].clone();
+            let mut cell_b = cell.clone();
             cell_b.detached = false;
-            cell_b.adjust_left = 0.0;
-            cell_b.adjust_right = 0.0;
-            cell_b.adjust_top = 0.0;
-            cell_b.adjust_bottom = 0.0;
             for (idx, c) in layout.cells.iter_mut().enumerate() {
                 if idx == cell_idx {
                     c.row_span = 1;
                     c.detached = false;
-                    c.adjust_left = 0.0;
-                    c.adjust_right = 0.0;
-                    c.adjust_top = 0.0;
-                    c.adjust_bottom = 0.0;
                 } else if c.row > split_row {
                     c.row += 1;
                 } else if c.row <= split_row && c.row + c.row_span > split_row {
@@ -3027,6 +3011,9 @@ impl CrosshairApp {
             }
             cell_b.row = split_row + 1;
             cell_b.row_span = 1;
+            let new_split_base = starts[row] + layout.row_ratios[split_row] / ratio_sum;
+            layout.cells[cell_idx].adjust_bottom = actual_mid - new_split_base;
+            cell_b.adjust_top = actual_mid - new_split_base;
             layout.cells.push(cell_b);
         }
     }
@@ -3538,7 +3525,7 @@ impl CrosshairApp {
                             let mut hovered_row_col = None;
                             if !split_hovered_or_dragged {
                                 for cell in &layout.cells {
-                                    if cell.deleted || cell.row >= layout.rows || cell.col >= layout.cols {
+                                    if cell.row >= layout.rows || cell.col >= layout.cols {
                                         continue;
                                     }
                                     let end_row = (cell.row + cell.row_span).min(layout.rows);
@@ -3678,7 +3665,7 @@ impl CrosshairApp {
                             let mut delete_cell = None;
                             let cells_to_draw = layout.cells.clone();
                             for cell in &cells_to_draw {
-                                if cell.deleted || cell.row >= layout.rows || cell.col >= layout.cols {
+                                if cell.row >= layout.rows || cell.col >= layout.cols {
                                     continue;
                                 }
 
@@ -3862,7 +3849,7 @@ impl CrosshairApp {
                                             let top = row_starts[candidate.row] + candidate.adjust_top;
                                             let bottom = row_starts[end_row] + candidate.adjust_bottom;
                                             let overlaps = layout.cells.iter().enumerate().any(|(index, other)| {
-                                                if index == cell_index || other.deleted { return false; }
+                                                if index == cell_index { return false; }
                                                 let other_end_row = (other.row + other.row_span).min(layout.rows);
                                                 let other_end_col = (other.col + other.col_span).min(layout.cols);
                                                 let other_left = col_starts[other.col] + other.adjust_left;
@@ -3960,7 +3947,7 @@ impl CrosshairApp {
                                     let top = row_starts[candidate.row] + candidate.adjust_top;
                                     let bottom = row_starts[end_row] + candidate.adjust_bottom;
                                     let overlaps = layout.cells.iter().enumerate().any(|(index, other)| {
-                                        if index == cell_index || other.deleted { return false; }
+                                        if index == cell_index { return false; }
                                         let other_end_row = (other.row + other.row_span).min(layout.rows);
                                         let other_end_col = (other.col + other.col_span).min(layout.cols);
                                         let other_left = col_starts[other.col] + other.adjust_left;
@@ -4251,7 +4238,7 @@ impl CrosshairApp {
                             }
 
                             if let Some(cell_index) = delete_cell {
-                                layout.cells[cell_index].deleted = true;
+                                layout.cells.remove(cell_index);
                                 self.selected_layout_cell = None;
                                 live_sync = true;
                             }
@@ -4327,7 +4314,6 @@ impl CrosshairApp {
                                                     .match_duplicate_window_titles
                                                     || cell_b.match_duplicate_window_titles,
                                                 detached: false,
-                                                deleted: false,
                                                 adjust_left: 0.0,
                                                 adjust_right: 0.0,
                                                 adjust_top: 0.0,
