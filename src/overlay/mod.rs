@@ -3256,9 +3256,24 @@ mod windows_overlay {
                                             }
                                             *port_guard = Some(p);
                                             *name_guard = com_port.clone();
+                                            ARDUINO_SERIAL_RESPONSIVE
+                                                .store(false, Ordering::Release);
                                         }
                                         Err(_) => {}
                                     }
+                                }
+                            } else if let Some(port) = port_guard.as_mut() {
+                                use std::io::{Read, Write};
+                                let heartbeat = [0xAA, 0x7E, 0, 0, 0, 0];
+                                let mut reply = [0u8; 1];
+                                let responsive = port.write_all(&heartbeat).is_ok()
+                                    && port.read_exact(&mut reply).is_ok()
+                                    && reply[0] == 0xA5;
+                                ARDUINO_SERIAL_RESPONSIVE
+                                    .store(responsive, Ordering::Release);
+                                if !responsive {
+                                    *port_guard = None;
+                                    *name_guard = String::new();
                                 }
                             }
                         }
@@ -31748,6 +31763,7 @@ mod windows_overlay {
         if reply[0] != 0xAC {
             anyhow::bail!("Unexpected firmware response: 0x{:02X}", reply[0]);
         }
+        ARDUINO_SERIAL_RESPONSIVE.store(true, Ordering::Release);
         Ok(())
     }
 

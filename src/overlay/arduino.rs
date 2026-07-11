@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::ffi::CString;
 use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
@@ -43,6 +44,7 @@ pub(crate) static LAST_ARDUINO_OPEN_ATTEMPT: Lazy<Mutex<Option<Instant>>> =
     Lazy::new(|| Mutex::new(None));
 pub(crate) static LAST_ARDUINO_HID_WRITE_AT: Lazy<Mutex<Option<Instant>>> =
     Lazy::new(|| Mutex::new(None));
+pub(crate) static ARDUINO_SERIAL_RESPONSIVE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn close_arduino_runtime_handles() {
     let mut port_guard = ARDUINO_PORT.lock();
@@ -55,6 +57,7 @@ pub(crate) fn close_arduino_runtime_handles() {
     *hid_guard = None;
     *hid_name_guard = String::new();
     *hid_write_guard = None;
+    ARDUINO_SERIAL_RESPONSIVE.store(false, Ordering::Release);
 }
 
 pub fn close_arduino_port_for_flash() {
@@ -70,7 +73,8 @@ pub fn arduino_connection_snapshot() -> (bool, String, bool) {
     let flash_in_progress = HOOK_STATE.lock().arduino_flash_in_progress;
     let current_serial = CURRENT_ARDUINO_PORT_NAME.lock().clone();
     let current_hid = CURRENT_ARDUINO_HID_NAME.lock().clone();
-    let serial_connected = ARDUINO_PORT.lock().is_some();
+    let serial_connected = ARDUINO_PORT.lock().is_some()
+        && ARDUINO_SERIAL_RESPONSIVE.load(Ordering::Acquire);
     let hid_connected = ARDUINO_HID_DEVICE.lock().is_some();
     if hid_connected {
         (true, current_hid, flash_in_progress)

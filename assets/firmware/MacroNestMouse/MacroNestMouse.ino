@@ -41,6 +41,9 @@ void handlePacket() {
       Mouse.click(MOUSE_LEFT);
       Serial.write(0xAC);
       break;
+    case 0x7E:
+      Serial.write(0xA5);
+      break;
   }
 }
 }
@@ -48,11 +51,6 @@ void handlePacket() {
 void setup() {
   Mouse.begin();
   Serial.begin(115200);
-  delay(3000);
-  for (uint8_t i = 0; i < 10; ++i) {
-    Mouse.move(20, 0);
-    delay(30);
-  }
 }
 
 void loop() {
