@@ -335,16 +335,8 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
         }
     };
 
-    let work_width = (work_rect.right - work_rect.left).max(1);
-    let work_height = (work_rect.bottom - work_rect.top).max(1);
-    let inset_left = layout.inset_left.clamp(0.0, 0.95);
-    let inset_right = layout.inset_right.clamp(0.0, 0.95 - inset_left);
-    let inset_top = layout.inset_top.clamp(0.0, 0.95);
-    let inset_bottom = layout.inset_bottom.clamp(0.0, 0.95 - inset_top);
-    let layout_left = work_rect.left + (work_width as f32 * inset_left).round() as i32;
-    let layout_top = work_rect.top + (work_height as f32 * inset_top).round() as i32;
-    let total_w = (work_width as f32 * (1.0 - inset_left - inset_right)).max(1.0);
-    let total_h = (work_height as f32 * (1.0 - inset_top - inset_bottom)).max(1.0);
+    let total_w = (work_rect.right - work_rect.left).max(1) as f32;
+    let total_h = (work_rect.bottom - work_rect.top).max(1) as f32;
 
     let row_ratios: Vec<f32> = {
         let prov: Vec<f32> = layout
@@ -450,10 +442,14 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
         let end_row = (cell.row + row_span).min(rows);
         let end_col = (cell.col + col_span).min(cols);
 
-        let cell_x = layout_left + col_starts[cell.col];
-        let cell_y = layout_top + row_starts[cell.row];
-        let cell_w = col_starts[end_col] - col_starts[cell.col];
-        let cell_h = row_starts[end_row] - row_starts[cell.row];
+        let left = col_starts[cell.col] as f32 + cell.adjust_left * total_w;
+        let top = row_starts[cell.row] as f32 + cell.adjust_top * total_h;
+        let right = col_starts[end_col] as f32 + cell.adjust_right * total_w;
+        let bottom = row_starts[end_row] as f32 + cell.adjust_bottom * total_h;
+        let cell_x = work_rect.left + left.round() as i32;
+        let cell_y = work_rect.top + top.round() as i32;
+        let cell_w = (right - left).round().max(1.0) as i32;
+        let cell_h = (bottom - top).round().max(1.0) as i32;
 
         unsafe {
             let _ = ShowWindow(hwnd, SW_RESTORE);
