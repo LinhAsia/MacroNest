@@ -114,7 +114,14 @@ void handlePacket() {
 }
 }
 
-void setup() { Serial.begin(115200); }
+void setup() {
+  Serial.begin(115200);
+  delay(3000);
+  for (uint8_t i = 0; i < 10; ++i) {
+    mouse.send(0, 20, 0, 0);
+    delay(30);
+  }
+}
 
 void loop() {
   while (Serial.available()) {
