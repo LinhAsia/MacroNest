@@ -31291,7 +31291,20 @@ mod windows_overlay {
                     if let Err(e) = port.write_all(bytes) {
                         *port_guard = None;
                         *name_guard = String::new();
-                        anyhow::bail!("Failed to write to serial port: {}", e);
+                        thread::sleep(Duration::from_millis(1200));
+                        let mut retry_port = serialport::new(&com_port, 115200)
+                            .timeout(Duration::from_millis(500))
+                            .open()
+                            .map_err(|retry_error| anyhow::anyhow!(
+                                "Failed to write to serial port: {e}; reconnect failed: {retry_error}"
+                            ))?;
+                        let _ = retry_port.write_data_terminal_ready(true);
+                        thread::sleep(Duration::from_millis(1800));
+                        retry_port.write_all(bytes).map_err(|retry_error| anyhow::anyhow!(
+                            "Failed to write to serial port after reconnect: {retry_error}"
+                        ))?;
+                        *port_guard = Some(retry_port);
+                        *name_guard = com_port.clone();
                     }
                     Ok(())
                 } else {
