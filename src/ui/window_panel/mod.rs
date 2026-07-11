@@ -2927,6 +2927,16 @@ impl CrosshairApp {
         if col_span > 1 {
             let half = col_span / 2;
             let mut cell_b = layout.cells[cell_idx].clone();
+            layout.cells[cell_idx].detached = false;
+            layout.cells[cell_idx].adjust_left = 0.0;
+            layout.cells[cell_idx].adjust_right = 0.0;
+            layout.cells[cell_idx].adjust_top = 0.0;
+            layout.cells[cell_idx].adjust_bottom = 0.0;
+            cell_b.detached = false;
+            cell_b.adjust_left = 0.0;
+            cell_b.adjust_right = 0.0;
+            cell_b.adjust_top = 0.0;
+            cell_b.adjust_bottom = 0.0;
             layout.cells[cell_idx].col_span = half;
             cell_b.col = col + half;
             cell_b.col_span = col_span - half;
@@ -2940,9 +2950,19 @@ impl CrosshairApp {
             layout.col_ratios.insert(split_col + 1, orig_ratio / 2.0);
 
             let mut cell_b = layout.cells[cell_idx].clone();
+            cell_b.detached = false;
+            cell_b.adjust_left = 0.0;
+            cell_b.adjust_right = 0.0;
+            cell_b.adjust_top = 0.0;
+            cell_b.adjust_bottom = 0.0;
             for (idx, c) in layout.cells.iter_mut().enumerate() {
                 if idx == cell_idx {
                     c.col_span = 1;
+                    c.detached = false;
+                    c.adjust_left = 0.0;
+                    c.adjust_right = 0.0;
+                    c.adjust_top = 0.0;
+                    c.adjust_bottom = 0.0;
                 } else if c.col > split_col {
                     c.col += 1;
                 } else if c.col <= split_col && c.col + c.col_span > split_col {
@@ -2963,6 +2983,16 @@ impl CrosshairApp {
         if row_span > 1 {
             let half = row_span / 2;
             let mut cell_b = layout.cells[cell_idx].clone();
+            layout.cells[cell_idx].detached = false;
+            layout.cells[cell_idx].adjust_left = 0.0;
+            layout.cells[cell_idx].adjust_right = 0.0;
+            layout.cells[cell_idx].adjust_top = 0.0;
+            layout.cells[cell_idx].adjust_bottom = 0.0;
+            cell_b.detached = false;
+            cell_b.adjust_left = 0.0;
+            cell_b.adjust_right = 0.0;
+            cell_b.adjust_top = 0.0;
+            cell_b.adjust_bottom = 0.0;
             layout.cells[cell_idx].row_span = half;
             cell_b.row = row + half;
             cell_b.row_span = row_span - half;
@@ -2976,9 +3006,19 @@ impl CrosshairApp {
             layout.row_ratios.insert(split_row + 1, orig_ratio / 2.0);
 
             let mut cell_b = layout.cells[cell_idx].clone();
+            cell_b.detached = false;
+            cell_b.adjust_left = 0.0;
+            cell_b.adjust_right = 0.0;
+            cell_b.adjust_top = 0.0;
+            cell_b.adjust_bottom = 0.0;
             for (idx, c) in layout.cells.iter_mut().enumerate() {
                 if idx == cell_idx {
                     c.row_span = 1;
+                    c.detached = false;
+                    c.adjust_left = 0.0;
+                    c.adjust_right = 0.0;
+                    c.adjust_top = 0.0;
+                    c.adjust_bottom = 0.0;
                 } else if c.row > split_row {
                     c.row += 1;
                 } else if c.row <= split_row && c.row + c.row_span > split_row {
@@ -3635,6 +3675,7 @@ impl CrosshairApp {
                             }
 
                             let mut merge_action = None;
+                            let mut delete_cell = None;
                             let cells_to_draw = layout.cells.clone();
                             for cell in &cells_to_draw {
                                 if cell.row >= layout.rows || cell.col >= layout.cols {
@@ -3706,32 +3747,6 @@ impl CrosshairApp {
                                 let cell_index = layout.cells.iter().position(|candidate| {
                                     candidate.row == cell.row && candidate.col == cell.col
                                 });
-                                let detach_rect = egui::Rect::from_min_size(
-                                    egui::pos2(cell_rect.right() - 24.0, cell_rect.top() + 4.0),
-                                    egui::vec2(20.0, 20.0),
-                                );
-                                let detach_label = if cell.detached { "↩" } else { "↗" };
-                                let detach_response = ui.put(
-                                    detach_rect,
-                                    egui::Button::new(detach_label).frame(true),
-                                ).on_hover_text(if cell.detached {
-                                    Self::tr_lang(language, "Return to grid", "Đưa về lưới")
-                                } else {
-                                    Self::tr_lang(language, "Detach", "Tách")
-                                });
-                                if detach_response.clicked()
-                                    && let Some(cell_index) = cell_index
-                                {
-                                    let target = &mut layout.cells[cell_index];
-                                    target.detached = !target.detached;
-                                    if !target.detached {
-                                        target.adjust_left = 0.0;
-                                        target.adjust_right = 0.0;
-                                        target.adjust_top = 0.0;
-                                        target.adjust_bottom = 0.0;
-                                    }
-                                    live_sync = true;
-                                }
                                 let mut cell_edge_active = false;
                                 if !split_hovered_or_dragged {
                                     let edge_handles = [
@@ -3846,19 +3861,56 @@ impl CrosshairApp {
                                         }
                                     }
                                 }
-                                let cell_sense = if split_hovered_or_dragged
-                                    || cell_edge_active
-                                    || detach_response.hovered()
-                                {
+                                let cell_sense = if split_hovered_or_dragged || cell_edge_active {
                                     egui::Sense::hover()
                                 } else {
                                     egui::Sense::click_and_drag()
                                 };
                                 let cell_resp = ui.interact(cell_rect, cell_id, cell_sense);
+                                let delete_rect = egui::Rect::from_min_size(
+                                    egui::pos2(cell_rect.right() - 24.0, cell_rect.top() + 4.0),
+                                    egui::vec2(20.0, 20.0),
+                                );
+                                let detach_rect = delete_rect.translate(egui::vec2(-22.0, 0.0));
+                                let detach_response = ui.put(
+                                    detach_rect,
+                                    egui::Button::new(Self::material_icon_text(
+                                        if cell.detached { 0xe166 } else { 0xe89e },
+                                        14.0,
+                                    )),
+                                ).on_hover_text(if cell.detached {
+                                    Self::tr_lang(language, "Return to grid", "Đưa về lưới")
+                                } else {
+                                    Self::tr_lang(language, "Detach", "Tách")
+                                });
+                                let delete_response = ui.put(
+                                    delete_rect,
+                                    egui::Button::new(Self::material_icon_text(0xe872, 14.0)),
+                                ).on_hover_text(Self::tr_lang(language, "Delete", "Xóa"));
+                                let controls_active = detach_response.hovered()
+                                    || delete_response.hovered()
+                                    || detach_response.clicked()
+                                    || delete_response.clicked();
+                                if detach_response.clicked()
+                                    && let Some(cell_index) = cell_index
+                                {
+                                    let target = &mut layout.cells[cell_index];
+                                    target.detached = !target.detached;
+                                    if !target.detached {
+                                        target.adjust_left = 0.0;
+                                        target.adjust_right = 0.0;
+                                        target.adjust_top = 0.0;
+                                        target.adjust_bottom = 0.0;
+                                    }
+                                    live_sync = true;
+                                }
+                                if delete_response.clicked() {
+                                    delete_cell = cell_index;
+                                }
 
                                 let detached = cell_index
                                     .is_some_and(|index| layout.cells[index].detached);
-                                if cell_resp.drag_started() && !detached {
+                                if cell_resp.drag_started() && !detached && !controls_active {
                                     self.drag_start_layout_cell =
                                         Some((layout.id, cell.row, cell.col));
                                 }
@@ -4048,7 +4100,7 @@ impl CrosshairApp {
                                     self.drag_start_layout_cell = None;
                                 }
 
-                                if cell_resp.clicked() {
+                                if cell_resp.clicked() && !controls_active {
                                     if self.selected_layout_cell
                                         == Some((layout.id, cell.row, cell.col))
                                     {
@@ -4176,6 +4228,12 @@ impl CrosshairApp {
                                     egui::FontId::proportional(11.0),
                                     text_color,
                                 );
+                            }
+
+                            if let Some(cell_index) = delete_cell {
+                                layout.cells.remove(cell_index);
+                                self.selected_layout_cell = None;
+                                live_sync = true;
                             }
 
                             // Draw highlight line segments for columns
