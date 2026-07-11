@@ -56,18 +56,23 @@ impl CrosshairApp {
     fn selected_mouse_input_backend_mode(&self) -> MouseInputBackendMode {
         if self.state.vision_settings.use_interception {
             MouseInputBackendMode::Interception
+        } else if self.state.vision_settings.use_arduino_mouse {
+            MouseInputBackendMode::Arduino
         } else {
             MouseInputBackendMode::Normal
         }
     }
 
     fn set_mouse_input_backend_mode(&mut self, mode: MouseInputBackendMode) -> bool {
-        let use_arduino_mouse = false;
+        let use_arduino_mouse = matches!(mode, MouseInputBackendMode::Arduino);
         let use_interception = matches!(mode, MouseInputBackendMode::Interception);
         let changed = self.state.vision_settings.use_arduino_mouse != use_arduino_mouse
             || self.state.vision_settings.use_interception != use_interception;
         self.state.vision_settings.use_arduino_mouse = use_arduino_mouse;
         self.state.vision_settings.use_interception = use_interception;
+        if use_arduino_mouse {
+            self.state.vision_settings.arduino_transport = ArduinoTransport::Serial;
+        }
         self.arduino_restore_emulation_after_flash = false;
         changed
     }
@@ -83,7 +88,7 @@ impl CrosshairApp {
             ui.label(RichText::new(title).strong());
             if active {
                 ui.label(
-                    RichText::new(self.tr("Active", "Active"))
+                    RichText::new(self.tr("Active", "Đang hoạt động"))
                         .small()
                         .color(Color32::from_rgb(126, 224, 182)),
                 );
@@ -92,9 +97,9 @@ impl CrosshairApp {
                 if Self::sound_style_toggle_button(
                     ui,
                     if *open {
-                        Self::tr_lang(self.state.ui_language, "Hide", "Hide")
+                        Self::tr_lang(self.state.ui_language, "Hide", "Ẩn")
                     } else {
-                        Self::tr_lang(self.state.ui_language, "Show", "Show")
+                        Self::tr_lang(self.state.ui_language, "Show", "Hiện")
                     },
                 )
                 .clicked()
@@ -160,7 +165,7 @@ impl CrosshairApp {
                 match res {
                     Ok(()) => {
                         self.arduino_flash_status =
-                            self.tr("Flash Success!", "Flash Success!").to_owned();
+                    self.tr("Flash Success!", "Nạp firmware thành công!").to_owned();
                     }
                     Err(e) => {
                         self.arduino_flash_status = format!("Error: {e}");
@@ -171,10 +176,9 @@ impl CrosshairApp {
             }
         }
 
-        let refresh_txt = self.tr("Refresh Ports", "Refresh Ports");
-        let select_port_txt = self.tr("Select Port", "Select Port");
-        let com_port_lbl = self.tr("COM Port:", "COM Port:");
-        let runtime_lbl = "Runtime:";
+        let refresh_txt = self.tr("Refresh Ports", "Làm mới cổng");
+        let select_port_txt = self.tr("Select Port", "Chọn cổng");
+        let com_port_lbl = self.tr("COM Port:", "Cổng COM:");
 
         let should_refresh_arduino_ports = self
             .arduino_ports_last_refresh
@@ -238,17 +242,17 @@ impl CrosshairApp {
             ui.selectable_value(
                 &mut next_mode,
                 MouseInputBackendMode::Normal,
-                self.tr("Normal", "Normal"),
+                self.tr("Normal", "Bình thường"),
             );
             ui.selectable_value(
                 &mut next_mode,
                 MouseInputBackendMode::Arduino,
-                "Arduino (Not Stable)",
+                self.tr("Arduino (Not Stable)", "Arduino (Chưa ổn định)"),
             );
             ui.selectable_value(
                 &mut next_mode,
                 MouseInputBackendMode::Interception,
-                "Interception",
+                self.tr("Interception", "Interception"),
             );
         });
 
@@ -269,7 +273,7 @@ impl CrosshairApp {
 
         ui.add_space(6.0);
 
-        let normal_title = self.tr("Normal Windows Input", "Normal Windows Input");
+        let normal_title = self.tr("Normal Windows Input", "Đầu vào chuột Windows thông thường");
         let normal_summary = self.tr(
             "Uses the standard Windows mouse path with no extra driver or hardware.",
             "Uses the standard Windows mouse path with no extra driver or hardware.",
@@ -341,7 +345,7 @@ impl CrosshairApp {
 
         let arduino_panel_title = format!(
             "{} ({})",
-            self.tr("Arduino Leonardo Emulation", "Arduino Leonardo Emulation"),
+            self.tr("Arduino Leonardo Emulation", "Mô phỏng Arduino Leonardo"),
             self.tr(
                 "Not Stable / Under Development",
                 "Chưa ổn định / Đang phát triển"
@@ -371,17 +375,17 @@ impl CrosshairApp {
                     && !is_connected
                 {
                     ui.label(
-                        RichText::new(self.tr("Connecting...", "Connecting..."))
+                        RichText::new(self.tr("Connecting...", "Đang kết nối..."))
                             .color(Color32::from_rgb(255, 206, 96)),
                     );
                 } else if is_connected {
                     ui.label(
-                        RichText::new(self.tr("Connected", "Connected"))
+                        RichText::new(self.tr("Connected", "Đã kết nối"))
                             .color(Color32::from_rgb(126, 224, 182)),
                     );
                 } else {
                     ui.label(
-                        RichText::new(self.tr("Disconnected", "Disconnected"))
+                        RichText::new(self.tr("Disconnected", "Đã ngắt kết nối"))
                             .color(Color32::from_rgb(255, 96, 96)),
                     );
                 }
@@ -390,36 +394,6 @@ impl CrosshairApp {
                     if ui.button(refresh_txt).clicked() {
                         self.refresh_arduino_ports();
                     }
-
-                    egui::ComboBox::from_id_salt("arduino_transport_combo")
-                        .width(110.0)
-                        .selected_text(match self.state.vision_settings.arduino_transport {
-                            ArduinoTransport::Serial => "Serial COM",
-                            ArduinoTransport::Hid => "RawHID",
-                        })
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_value(
-                                    &mut self.state.vision_settings.arduino_transport,
-                                    ArduinoTransport::Serial,
-                                    "Serial COM",
-                                )
-                                .changed()
-                            {
-                                arduino_changed = true;
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut self.state.vision_settings.arduino_transport,
-                                    ArduinoTransport::Hid,
-                                    "RawHID",
-                                )
-                                .changed()
-                            {
-                                arduino_changed = true;
-                            }
-                        });
-                    ui.label(runtime_lbl);
 
                     let current_port = &mut self.state.vision_settings.arduino_com_port;
                     egui::ComboBox::from_id_salt("arduino_com_port_combo")
@@ -444,11 +418,15 @@ impl CrosshairApp {
             ui.add_space(4.0);
             ui.label(
                 RichText::new(format!(
-                    "Runtime: {} | Flash COM: {selected_port_text} | Target: {runtime_target_text} | Active endpoint: {app_port_text}",
+                    "{}: {} | {}: {selected_port_text} | {}: {runtime_target_text} | {}: {app_port_text}",
+                    self.tr("Connection", "Kết nối"),
                     match transport {
                         ArduinoTransport::Serial => "Serial COM",
                         ArduinoTransport::Hid => "RawHID",
-                    }
+                    },
+                    self.tr("Flash COM", "COM nạp firmware"),
+                    self.tr("Target", "Thiết bị đích"),
+                    self.tr("Active endpoint", "Cổng đang hoạt động"),
                 ))
                 .small()
                 .weak(),
@@ -456,7 +434,7 @@ impl CrosshairApp {
 
             ui.add_space(4.0);
             let note_lbl = match self.state.vision_settings.arduino_transport {
-                ArduinoTransport::Serial => self.tr("Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.", "Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board."),
+                ArduinoTransport::Serial => self.tr("Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.", "Hãy nhấn 'Tự động nạp firmware' ít nhất một lần để lập trình bo mạch đang kết nối."),
                 ArduinoTransport::Hid => "RawHID runtime uses VID/PID for live control. Auto-Flash will program the RawHID firmware for the selected Runtime. The COM port is still only used to flash the board.",
             };
             ui.label(
@@ -491,7 +469,7 @@ impl CrosshairApp {
                 }
             } else {
                 ui.horizontal(|ui| {
-                    let flash_btn_lbl = self.tr("Auto-Flash Firmware", "Auto-Flash Firmware");
+                    let flash_btn_lbl = self.tr("Auto-Flash Firmware", "Tự động nạp firmware");
                     let flash_btn = ui.add_enabled(
                         !self.arduino_flash_running
                             && !self.state.vision_settings.arduino_com_port.is_empty(),
@@ -502,7 +480,7 @@ impl CrosshairApp {
                     }
 
                     ui.add_space(8.0);
-                    let delete_btn_lbl = self.tr("Delete Tools", "Delete Tools");
+                    let delete_btn_lbl = self.tr("Delete Tools", "Xóa công cụ");
                     if ui.button(delete_btn_lbl).clicked() {
                         self.delete_arduino_tools();
                     }
