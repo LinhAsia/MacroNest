@@ -1,10 +1,17 @@
 #include <Arduino.h>
+#include <HID.h>
 #include <Mouse.h>
 
 namespace {
 constexpr uint8_t packetSize = 6;
 uint8_t packet[packetSize];
 uint8_t packetLength = 0;
+
+bool sendMouseReport(uint8_t buttons, int8_t x, int8_t y, int8_t wheel = 0) {
+  const uint8_t report[4] = {buttons, static_cast<uint8_t>(x),
+                             static_cast<uint8_t>(y), static_cast<uint8_t>(wheel)};
+  return HID().SendReport(1, report, sizeof(report)) == sizeof(report) + 1;
+}
 
 uint8_t mouseButton(uint8_t button) {
   switch (button) {
@@ -20,7 +27,7 @@ void handlePacket() {
     case 1: {
       const int16_t x = static_cast<int16_t>((packet[2] << 8) | packet[3]);
       const int16_t y = static_cast<int16_t>((packet[4] << 8) | packet[5]);
-      Mouse.move(static_cast<int8_t>(x), static_cast<int8_t>(y));
+      sendMouseReport(0, static_cast<int8_t>(x), static_cast<int8_t>(y));
       break;
     }
     case 2: {
@@ -33,14 +40,17 @@ void handlePacket() {
     case 3:
       Mouse.move(0, 0, static_cast<int8_t>(packet[2]));
       break;
-    case 0x7F:
+    case 0x7F: {
+      bool sent = true;
       for (uint8_t i = 0; i < 5; ++i) {
-        Mouse.move(20, 0);
+        sent &= sendMouseReport(0, 20, 0);
         delay(20);
       }
-      Mouse.click(MOUSE_LEFT);
-      Serial.write(0xAC);
+      sent &= sendMouseReport(MOUSE_LEFT, 0, 0);
+      sent &= sendMouseReport(0, 0, 0);
+      Serial.write(sent ? 0xAC : 0xE1);
       break;
+    }
     case 0x7E:
       Serial.write(0xA5);
       break;
