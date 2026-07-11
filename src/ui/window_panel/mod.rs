@@ -3706,6 +3706,32 @@ impl CrosshairApp {
                                 let cell_index = layout.cells.iter().position(|candidate| {
                                     candidate.row == cell.row && candidate.col == cell.col
                                 });
+                                let detach_rect = egui::Rect::from_min_size(
+                                    egui::pos2(cell_rect.right() - 24.0, cell_rect.top() + 4.0),
+                                    egui::vec2(20.0, 20.0),
+                                );
+                                let detach_label = if cell.detached { "↩" } else { "↗" };
+                                let detach_response = ui.put(
+                                    detach_rect,
+                                    egui::Button::new(detach_label).frame(true),
+                                ).on_hover_text(if cell.detached {
+                                    Self::tr_lang(language, "Return to grid", "Đưa về lưới")
+                                } else {
+                                    Self::tr_lang(language, "Detach", "Tách")
+                                });
+                                if detach_response.clicked()
+                                    && let Some(cell_index) = cell_index
+                                {
+                                    let target = &mut layout.cells[cell_index];
+                                    target.detached = !target.detached;
+                                    if !target.detached {
+                                        target.adjust_left = 0.0;
+                                        target.adjust_right = 0.0;
+                                        target.adjust_top = 0.0;
+                                        target.adjust_bottom = 0.0;
+                                    }
+                                    live_sync = true;
+                                }
                                 let mut cell_edge_active = false;
                                 if !split_hovered_or_dragged {
                                     let edge_handles = [
@@ -3820,37 +3846,67 @@ impl CrosshairApp {
                                         }
                                     }
                                 }
-                                let cell_sense = if split_hovered_or_dragged || cell_edge_active {
+                                let cell_sense = if split_hovered_or_dragged
+                                    || cell_edge_active
+                                    || detach_response.hovered()
+                                {
                                     egui::Sense::hover()
                                 } else {
                                     egui::Sense::click_and_drag()
                                 };
                                 let cell_resp = ui.interact(cell_rect, cell_id, cell_sense);
 
-                                let merge_drag = ui.input(|input| input.modifiers.ctrl);
-                                if cell_resp.drag_started() && merge_drag {
+                                let detached = cell_index
+                                    .is_some_and(|index| layout.cells[index].detached);
+                                if cell_resp.drag_started() && !detached {
                                     self.drag_start_layout_cell =
                                         Some((layout.id, cell.row, cell.col));
                                 }
 
                                 if cell_resp.dragged()
-                                    && !merge_drag
+                                    && detached
                                     && let Some(cell_index) = cell_index
                                 {
                                     let delta = ui.input(|input| input.pointer.delta());
                                     let dx = delta.x / grid_w.max(1.0);
                                     let dy = delta.y / grid_h.max(1.0);
-                                    let target = &mut layout.cells[cell_index];
-                                    target.adjust_left += dx;
-                                    target.adjust_right += dx;
-                                    target.adjust_top += dy;
-                                    target.adjust_bottom += dy;
+                                    let mut candidate = layout.cells[cell_index].clone();
+                                    let end_row = (candidate.row + candidate.row_span).min(layout.rows);
+                                    let end_col = (candidate.col + candidate.col_span).min(layout.cols);
+                                    let min_dx = -(col_starts[candidate.col] + candidate.adjust_left);
+                                    let max_dx = 1.0 - (col_starts[end_col] + candidate.adjust_right);
+                                    let min_dy = -(row_starts[candidate.row] + candidate.adjust_top);
+                                    let max_dy = 1.0 - (row_starts[end_row] + candidate.adjust_bottom);
+                                    let dx = dx.clamp(min_dx, max_dx);
+                                    let dy = dy.clamp(min_dy, max_dy);
+                                    candidate.adjust_left += dx;
+                                    candidate.adjust_right += dx;
+                                    candidate.adjust_top += dy;
+                                    candidate.adjust_bottom += dy;
+                                    let left = col_starts[candidate.col] + candidate.adjust_left;
+                                    let right = col_starts[end_col] + candidate.adjust_right;
+                                    let top = row_starts[candidate.row] + candidate.adjust_top;
+                                    let bottom = row_starts[end_row] + candidate.adjust_bottom;
+                                    let overlaps = layout.cells.iter().enumerate().any(|(index, other)| {
+                                        if index == cell_index { return false; }
+                                        let other_end_row = (other.row + other.row_span).min(layout.rows);
+                                        let other_end_col = (other.col + other.col_span).min(layout.cols);
+                                        let other_left = col_starts[other.col] + other.adjust_left;
+                                        let other_right = col_starts[other_end_col] + other.adjust_right;
+                                        let other_top = row_starts[other.row] + other.adjust_top;
+                                        let other_bottom = row_starts[other_end_row] + other.adjust_bottom;
+                                        left < other_right && right > other_left
+                                            && top < other_bottom && bottom > other_top
+                                    });
+                                    if !overlaps {
+                                        layout.cells[cell_index] = candidate;
+                                    }
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                                     live_sync = true;
                                 }
 
                                 if cell_resp.drag_stopped()
-                                    && !merge_drag
+                                    && detached
                                     && let Some(cell_index) = cell_index
                                 {
                                     let target = layout.cells[cell_index].clone();
@@ -3970,6 +4026,13 @@ impl CrosshairApp {
                                             if value.abs() < 0.0005 {
                                                 *value = 0.0;
                                             }
+                                        }
+                                        if target.adjust_left == 0.0
+                                            && target.adjust_right == 0.0
+                                            && target.adjust_top == 0.0
+                                            && target.adjust_bottom == 0.0
+                                        {
+                                            target.detached = false;
                                         }
                                     }
                                 }
@@ -4185,6 +4248,7 @@ impl CrosshairApp {
                                                 match_duplicate_window_titles: cell_a
                                                     .match_duplicate_window_titles
                                                     || cell_b.match_duplicate_window_titles,
+                                                detached: false,
                                                 adjust_left: 0.0,
                                                 adjust_right: 0.0,
                                                 adjust_top: 0.0,
