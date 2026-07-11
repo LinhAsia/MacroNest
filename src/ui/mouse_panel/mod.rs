@@ -240,14 +240,11 @@ impl CrosshairApp {
                 MouseInputBackendMode::Normal,
                 self.tr("Normal", "Normal"),
             );
-            ui.add_enabled_ui(false, |ui| {
-                let mut dummy = MouseInputBackendMode::Arduino;
-                ui.selectable_value(
-                    &mut dummy,
-                    MouseInputBackendMode::Arduino,
-                    "Arduino (Not Stable)",
-                );
-            });
+            ui.selectable_value(
+                &mut next_mode,
+                MouseInputBackendMode::Arduino,
+                "Arduino (Not Stable)",
+            );
             ui.selectable_value(
                 &mut next_mode,
                 MouseInputBackendMode::Interception,
@@ -351,8 +348,7 @@ impl CrosshairApp {
             )
         );
         let mut arduino_open = self.mouse_input_arduino_open;
-        ui.add_enabled_ui(false, |ui| {
-            Self::show_preset_card(ui, false, |ui| {
+        Self::show_preset_card(ui, next_mode == MouseInputBackendMode::Arduino, |ui| {
             self.render_mouse_input_mode_card_header(
                 ui,
                 &arduino_panel_title,
@@ -611,7 +607,6 @@ impl CrosshairApp {
                     arduino_changed = true;
                 }
             });
-        });
         });
         self.mouse_input_arduino_open = arduino_open;
 
