@@ -1,16 +1,24 @@
 #include <Mouse.h>
+#include <HID.h>
 
 namespace {
 constexpr uint8_t kPacketSize = 6;
 uint8_t packet[kPacketSize];
 uint8_t packetLength = 0;
+uint8_t buttons = 0;
+
+bool sendMouseReport(int8_t dx, int8_t dy, int8_t wheel) {
+  const uint8_t report[4] = {buttons, static_cast<uint8_t>(dx),
+                             static_cast<uint8_t>(dy), static_cast<uint8_t>(wheel)};
+  return HID().SendReport(1, report, sizeof(report)) == 5;
+}
 
 void handlePacket() {
   switch (packet[1]) {
     case 1: {
       const int16_t dx = static_cast<int16_t>((packet[2] << 8) | packet[3]);
       const int16_t dy = static_cast<int16_t>((packet[4] << 8) | packet[5]);
-      Mouse.move(static_cast<int8_t>(dx), static_cast<int8_t>(dy), 0);
+      sendMouseReport(static_cast<int8_t>(dx), static_cast<int8_t>(dy), 0);
       break;
     }
     case 2: {
@@ -19,20 +27,29 @@ void handlePacket() {
       if (packet[2] == 2) button = MOUSE_RIGHT;
       if (packet[2] == 3) button = MOUSE_MIDDLE;
       if (button != 0) {
-        if (packet[3] != 0) Mouse.press(button);
-        else Mouse.release(button);
+        if (packet[3] != 0) buttons |= button;
+        else buttons &= ~button;
+        sendMouseReport(0, 0, 0);
       }
       break;
     }
     case 3:
-      Mouse.move(0, 0, static_cast<int8_t>(packet[2]));
+      sendMouseReport(0, 0, static_cast<int8_t>(packet[2]));
       break;
-    case 0x7F:
-      Mouse.move(100, 0, 0);
+    case 0x7F: {
+      bool sent = true;
+      for (uint8_t i = 0; i < 5; ++i) {
+        sent &= sendMouseReport(20, 0, 0);
+        delay(20);
+      }
+      buttons = MOUSE_LEFT;
+      sent &= sendMouseReport(0, 0, 0);
       delay(20);
-      Mouse.click(MOUSE_LEFT);
-      Serial.write(0xAC);
+      buttons = 0;
+      sent &= sendMouseReport(0, 0, 0);
+      Serial.write(sent ? 0xAC : 0xE1);
       break;
+    }
   }
 }
 }
