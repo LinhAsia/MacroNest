@@ -31748,10 +31748,7 @@ mod windows_overlay {
         if reply[0] != 0xAC {
             anyhow::bail!("Unexpected firmware response: 0x{:02X}", reply[0]);
         }
-        send_arduino_relative_move_sequence(240, 0)?;
-        write_arduino_data(&[0xAA, 2, 1, 1, 0, 0])?;
-        thread::sleep(Duration::from_millis(40));
-        write_arduino_data(&[0xAA, 2, 1, 0, 0, 0])
+        Ok(())
     }
 
     fn send_mouse_move_absolute(x: i32, y: i32) -> Result<()> {

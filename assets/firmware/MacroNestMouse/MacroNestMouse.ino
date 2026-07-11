@@ -28,6 +28,9 @@ void handlePacket() {
       Mouse.move(0, 0, static_cast<int8_t>(packet[2]));
       break;
     case 0x7F:
+      Mouse.move(100, 0, 0);
+      delay(20);
+      Mouse.click(MOUSE_LEFT);
       Serial.write(0xAC);
       break;
   }
