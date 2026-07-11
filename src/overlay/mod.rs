@@ -3237,7 +3237,7 @@ mod windows_overlay {
                                 if last_attempt.elapsed() >= Duration::from_secs(3) {
                                     last_attempt = Instant::now();
                                     match serialport::new(&com_port, 115200)
-                                        .timeout(Duration::from_millis(10))
+                                        .timeout(Duration::from_millis(500))
                                         .open()
                                     {
                                         Ok(p) => {
@@ -31274,7 +31274,7 @@ mod windows_overlay {
                     *last_attempt = Some(Instant::now());
 
                     match serialport::new(&com_port, 115200)
-                        .timeout(Duration::from_millis(10))
+                        .timeout(Duration::from_millis(500))
                         .open()
                     {
                         Ok(p) => {
@@ -31288,8 +31288,9 @@ mod windows_overlay {
                 }
 
                 if let Some(ref mut port) = *port_guard {
-                    if let Err(e) = port.write_all(bytes).and_then(|_| port.flush()) {
+                    if let Err(e) = port.write_all(bytes) {
                         *port_guard = None;
+                        *name_guard = String::new();
                         anyhow::bail!("Failed to write to serial port: {}", e);
                     }
                     Ok(())
