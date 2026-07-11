@@ -3501,6 +3501,7 @@ impl CrosshairApp {
 
                             let mut delete_cell = None;
                             let mut snap_preview = None;
+                            let mut merge_action = None;
                             let cells_to_draw = layout.cells.clone();
                             for cell in &cells_to_draw {
                                 if cell.row >= layout.rows || cell.col >= layout.cols {
@@ -3789,6 +3790,11 @@ impl CrosshairApp {
                                     delete_cell = cell_index;
                                 }
 
+                                if cell_resp.drag_started() && !controls_active {
+                                    self.drag_start_layout_cell =
+                                        Some((layout.id, cell.row, cell.col));
+                                }
+
                                 if cell_resp.dragged()
                                     && !controls_active
                                     && let Some(cell_index) = cell_index
@@ -4044,6 +4050,36 @@ impl CrosshairApp {
                                             }
                                         }
                                     }
+                                    if let Some((start_layout, start_row, start_col)) =
+                                        self.drag_start_layout_cell.take()
+                                    {
+                                        if start_layout == layout.id {
+                                            let pointer = ui.input(|input| input.pointer.latest_pos());
+                                            if let Some(pointer) = pointer {
+                                                for other in &layout.cells {
+                                                    if (other.row, other.col) == (start_row, start_col) {
+                                                        continue;
+                                                    }
+                                                    let other_end_row = (other.row + other.row_span).min(layout.rows);
+                                                    let other_end_col = (other.col + other.col_span).min(layout.cols);
+                                                    let other_rect = egui::Rect::from_min_max(
+                                                        egui::pos2(
+                                                            grid_rect.min.x + (col_starts[other.col] + other.adjust_left) * grid_w,
+                                                            grid_rect.min.y + (row_starts[other.row] + other.adjust_top) * grid_h,
+                                                        ),
+                                                        egui::pos2(
+                                                            grid_rect.min.x + (col_starts[other_end_col] + other.adjust_right) * grid_w,
+                                                            grid_rect.min.y + (row_starts[other_end_row] + other.adjust_bottom) * grid_h,
+                                                        ),
+                                                    );
+                                                    if other_rect.contains(pointer) {
+                                                        merge_action = Some((start_row, start_col, other.row, other.col));
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
 
                                 if cell_resp.clicked() && !controls_active {
@@ -4185,6 +4221,45 @@ impl CrosshairApp {
                                 layout.cells.remove(cell_index);
                                 self.selected_layout_cell = None;
                                 live_sync = true;
+                            }
+
+                            if let Some((start_row, start_col, end_row, end_col)) = merge_action {
+                                let cell_a = layout.cells.iter()
+                                    .find(|cell| cell.row == start_row && cell.col == start_col)
+                                    .cloned();
+                                let cell_b = layout.cells.iter()
+                                    .find(|cell| cell.row == end_row && cell.col == end_col)
+                                    .cloned();
+                                if let (Some(cell_a), Some(cell_b)) = (cell_a, cell_b) {
+                                    let r1 = cell_a.row.min(cell_b.row);
+                                    let c1 = cell_a.col.min(cell_b.col);
+                                    let r2 = (cell_a.row + cell_a.row_span - 1)
+                                        .max(cell_b.row + cell_b.row_span - 1);
+                                    let c2 = (cell_a.col + cell_a.col_span - 1)
+                                        .max(cell_b.col + cell_b.col_span - 1);
+                                    layout.cells.insert(0, WindowLayoutCell {
+                                        row: r1,
+                                        col: c1,
+                                        row_span: r2 - r1 + 1,
+                                        col_span: c2 - c1 + 1,
+                                        target_window_title: cell_a.target_window_title.clone()
+                                            .or(cell_b.target_window_title.clone()),
+                                        extra_target_window_titles: if cell_a.extra_target_window_titles.is_empty() {
+                                            cell_b.extra_target_window_titles.clone()
+                                        } else {
+                                            cell_a.extra_target_window_titles.clone()
+                                        },
+                                        match_duplicate_window_titles: cell_a.match_duplicate_window_titles
+                                            || cell_b.match_duplicate_window_titles,
+                                        adjust_left: 0.0,
+                                        adjust_right: 0.0,
+                                        adjust_top: 0.0,
+                                        adjust_bottom: 0.0,
+                                    });
+                                    Self::sanitize_layout(layout);
+                                    self.selected_layout_cell = Some((layout.id, r1, c1));
+                                    live_sync = true;
+                                }
                             }
 
                         });
