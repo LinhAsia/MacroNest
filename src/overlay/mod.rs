@@ -312,6 +312,7 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
     static LAST_MOUSE_MOVE_TIME_MS: AtomicU64 = AtomicU64::new(0);
+    static ARDUINO_TEST_OUTPUT_ACTIVE: AtomicBool = AtomicBool::new(false);
     const QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS: u32 = 1200;
     static MASCOT_WINDOW_MOVING: AtomicBool = AtomicBool::new(false);
     static MASCOT_DRAG_START_MOUSE: Lazy<Mutex<Option<(i32, i32)>>> =
@@ -4891,6 +4892,9 @@ mod windows_overlay {
             let info = *(lparam.0 as *const MSLLHOOKSTRUCT);
             let injected = info.flags & 0x01 != 0;
             if injected {
+                return CallNextHookEx(None, code, wparam, lparam);
+            }
+            if ARDUINO_TEST_OUTPUT_ACTIVE.load(Ordering::Acquire) {
                 return CallNextHookEx(None, code, wparam, lparam);
             }
 
@@ -31750,21 +31754,34 @@ mod windows_overlay {
     pub(crate) fn test_arduino_mouse_direct() -> Result<()> {
         use std::io::Read;
 
-        write_arduino_data(&[0xAA, 0x7F, 0, 0, 0, 0])?;
-        let mut reply = [0u8; 1];
-        ARDUINO_PORT
-            .lock()
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("Arduino serial port is not open"))?
-            .read_exact(&mut reply)
-            .map_err(|error| anyhow::anyhow!(
-                "Firmware did not acknowledge the test; flash the firmware again: {error}"
-            ))?;
-        if reply[0] != 0xAC {
-            anyhow::bail!("Unexpected firmware response: 0x{:02X}", reply[0]);
-        }
-        ARDUINO_SERIAL_RESPONSIVE.store(true, Ordering::Release);
-        Ok(())
+        let mut before = POINT::default();
+        unsafe { GetCursorPos(&mut before)? };
+        ARDUINO_TEST_OUTPUT_ACTIVE.store(true, Ordering::Release);
+        let result = (|| {
+            write_arduino_data(&[0xAA, 0x7F, 0, 0, 0, 0])?;
+            let mut reply = [0u8; 1];
+            ARDUINO_PORT
+                .lock()
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("Arduino serial port is not open"))?
+                .read_exact(&mut reply)
+                .map_err(|error| anyhow::anyhow!(
+                    "Firmware did not acknowledge the test; flash the firmware again: {error}"
+                ))?;
+            if reply[0] != 0xAC {
+                anyhow::bail!("Unexpected firmware response: 0x{:02X}", reply[0]);
+            }
+            ARDUINO_SERIAL_RESPONSIVE.store(true, Ordering::Release);
+            thread::sleep(Duration::from_millis(150));
+            let mut after = POINT::default();
+            unsafe { GetCursorPos(&mut after)? };
+            if before.x == after.x && before.y == after.y {
+                anyhow::bail!("Firmware replied, but Windows received no mouse movement");
+            }
+            Ok(())
+        })();
+        ARDUINO_TEST_OUTPUT_ACTIVE.store(false, Ordering::Release);
+        result
     }
 
     fn send_mouse_move_absolute(x: i32, y: i32) -> Result<()> {
