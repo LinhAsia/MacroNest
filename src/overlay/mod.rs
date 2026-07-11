@@ -3227,6 +3227,7 @@ mod windows_overlay {
                                 if !ports.iter().any(|port| port.port_name == com_port) {
                                     *port_guard = None;
                                     *name_guard = String::new();
+                                    last_attempt = Instant::now();
                                     thread::sleep(Duration::from_millis(250));
                                     continue;
                                 }
