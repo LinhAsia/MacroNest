@@ -3250,7 +3250,10 @@ mod windows_overlay {
                                         .timeout(Duration::from_millis(500))
                                         .open()
                                     {
-                                        Ok(p) => {
+                                        Ok(mut p) => {
+                                            if p.write_data_terminal_ready(true).is_err() {
+                                                continue;
+                                            }
                                             *port_guard = Some(p);
                                             *name_guard = com_port.clone();
                                         }

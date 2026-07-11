@@ -10,6 +10,7 @@ use directories::ProjectDirs;
 
 use crate::model::{AppState, CrosshairStyle, ProfileRecord, VietnameseInputMode, VisionPreset};
 
+const BUNDLED_ARDUINO_SERIAL_FIRMWARE: &[u8] = include_bytes!("../assets/firmware-serial.hex");
 const BUNDLED_ARDUINO_RAWHID_FIRMWARE: &[u8] = include_bytes!("../assets/firmware-rawhid.hex");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +115,10 @@ impl AppPaths {
         fs::create_dir_all(&self.ocr_dir)?;
         ensure_opencv_videoio_ffmpeg_plugin(&self.opencv_videoio_ffmpeg_dll);
         ensure_bundled_file(
+            &self.arduino_firmware_hex,
+            BUNDLED_ARDUINO_SERIAL_FIRMWARE,
+        )?;
+        ensure_bundled_file(
             &self.arduino_rawhid_firmware_hex,
             BUNDLED_ARDUINO_RAWHID_FIRMWARE,
         )?;
@@ -121,6 +126,10 @@ impl AppPaths {
     }
 
     pub fn ensure_arduino_runtime_files(&self) -> Result<()> {
+        ensure_bundled_file(
+            &self.arduino_firmware_hex,
+            BUNDLED_ARDUINO_SERIAL_FIRMWARE,
+        )?;
         ensure_bundled_file(
             &self.arduino_rawhid_firmware_hex,
             BUNDLED_ARDUINO_RAWHID_FIRMWARE,
