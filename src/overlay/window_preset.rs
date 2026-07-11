@@ -391,6 +391,9 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
     let mut animated_targets: Vec<(isize, RECT, RECT)> = Vec::new();
 
     for cell in &layout.cells {
+        if cell.deleted {
+            continue;
+        }
         if cell.row >= rows || cell.col >= cols {
             continue;
         }

@@ -3538,7 +3538,7 @@ impl CrosshairApp {
                             let mut hovered_row_col = None;
                             if !split_hovered_or_dragged {
                                 for cell in &layout.cells {
-                                    if cell.row >= layout.rows || cell.col >= layout.cols {
+                                    if cell.deleted || cell.row >= layout.rows || cell.col >= layout.cols {
                                         continue;
                                     }
                                     let end_row = (cell.row + cell.row_span).min(layout.rows);
@@ -3678,7 +3678,7 @@ impl CrosshairApp {
                             let mut delete_cell = None;
                             let cells_to_draw = layout.cells.clone();
                             for cell in &cells_to_draw {
-                                if cell.row >= layout.rows || cell.col >= layout.cols {
+                                if cell.deleted || cell.row >= layout.rows || cell.col >= layout.cols {
                                     continue;
                                 }
 
@@ -3815,49 +3815,69 @@ impl CrosshairApp {
                                             && let Some(cell_index) = cell_index
                                         {
                                             let delta = ui.input(|input| input.pointer.delta());
-                                            let target = &mut layout.cells[cell_index];
+                                            let mut candidate = layout.cells[cell_index].clone();
                                             let min_width = 24.0 / grid_w.max(1.0);
                                             let min_height = 24.0 / grid_h.max(1.0);
                                             match edge {
                                                 "left" => {
                                                     let max_left = col_starts[end_col]
-                                                        + target.adjust_right
+                                                        + candidate.adjust_right
                                                         - col_starts[cell.col]
                                                         - min_width;
-                                                    target.adjust_left = (target.adjust_left
+                                                    candidate.adjust_left = (candidate.adjust_left
                                                         + delta.x / grid_w.max(1.0))
                                                         .min(max_left);
                                                 }
                                                 "right" => {
                                                     let min_right = col_starts[cell.col]
-                                                        + target.adjust_left
+                                                        + candidate.adjust_left
                                                         + min_width
                                                         - col_starts[end_col];
-                                                    target.adjust_right = (target.adjust_right
+                                                    candidate.adjust_right = (candidate.adjust_right
                                                         + delta.x / grid_w.max(1.0))
                                                         .max(min_right);
                                                 }
                                                 "top" => {
                                                     let max_top = row_starts[end_row]
-                                                        + target.adjust_bottom
+                                                        + candidate.adjust_bottom
                                                         - row_starts[cell.row]
                                                         - min_height;
-                                                    target.adjust_top = (target.adjust_top
+                                                    candidate.adjust_top = (candidate.adjust_top
                                                         + delta.y / grid_h.max(1.0))
                                                         .min(max_top);
                                                 }
                                                 "bottom" => {
                                                     let min_bottom = row_starts[cell.row]
-                                                        + target.adjust_top
+                                                        + candidate.adjust_top
                                                         + min_height
                                                         - row_starts[end_row];
-                                                    target.adjust_bottom = (target.adjust_bottom
+                                                    candidate.adjust_bottom = (candidate.adjust_bottom
                                                         + delta.y / grid_h.max(1.0))
                                                         .max(min_bottom);
                                                 }
                                                 _ => {}
                                             }
-                                            live_sync = true;
+                                            let left = col_starts[candidate.col] + candidate.adjust_left;
+                                            let right = col_starts[end_col] + candidate.adjust_right;
+                                            let top = row_starts[candidate.row] + candidate.adjust_top;
+                                            let bottom = row_starts[end_row] + candidate.adjust_bottom;
+                                            let overlaps = layout.cells.iter().enumerate().any(|(index, other)| {
+                                                if index == cell_index || other.deleted { return false; }
+                                                let other_end_row = (other.row + other.row_span).min(layout.rows);
+                                                let other_end_col = (other.col + other.col_span).min(layout.cols);
+                                                let other_left = col_starts[other.col] + other.adjust_left;
+                                                let other_right = col_starts[other_end_col] + other.adjust_right;
+                                                let other_top = row_starts[other.row] + other.adjust_top;
+                                                let other_bottom = row_starts[other_end_row] + other.adjust_bottom;
+                                                left < other_right && right > other_left
+                                                    && top < other_bottom && bottom > other_top
+                                            });
+                                            if left >= 0.0 && top >= 0.0
+                                                && right <= 1.0 && bottom <= 1.0 && !overlaps
+                                            {
+                                                layout.cells[cell_index] = candidate;
+                                                live_sync = true;
+                                            }
                                         }
                                     }
                                 }
@@ -3940,7 +3960,7 @@ impl CrosshairApp {
                                     let top = row_starts[candidate.row] + candidate.adjust_top;
                                     let bottom = row_starts[end_row] + candidate.adjust_bottom;
                                     let overlaps = layout.cells.iter().enumerate().any(|(index, other)| {
-                                        if index == cell_index { return false; }
+                                        if index == cell_index || other.deleted { return false; }
                                         let other_end_row = (other.row + other.row_span).min(layout.rows);
                                         let other_end_col = (other.col + other.col_span).min(layout.cols);
                                         let other_left = col_starts[other.col] + other.adjust_left;
@@ -4231,7 +4251,7 @@ impl CrosshairApp {
                             }
 
                             if let Some(cell_index) = delete_cell {
-                                layout.cells.remove(cell_index);
+                                layout.cells[cell_index].deleted = true;
                                 self.selected_layout_cell = None;
                                 live_sync = true;
                             }
@@ -4307,6 +4327,7 @@ impl CrosshairApp {
                                                     .match_duplicate_window_titles
                                                     || cell_b.match_duplicate_window_titles,
                                                 detached: false,
+                                                deleted: false,
                                                 adjust_left: 0.0,
                                                 adjust_right: 0.0,
                                                 adjust_top: 0.0,
