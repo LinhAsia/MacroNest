@@ -2924,9 +2924,7 @@ impl CrosshairApp {
             let half = col_span / 2;
             let split_base = starts[col + half];
             let mut cell_b = cell.clone();
-            layout.cells[cell_idx].detached = false;
             layout.cells[cell_idx].adjust_right = actual_mid - split_base;
-            cell_b.detached = false;
             cell_b.adjust_left = actual_mid - split_base;
             layout.cells[cell_idx].col_span = half;
             cell_b.col = col + half;
@@ -2945,11 +2943,9 @@ impl CrosshairApp {
             layout.col_ratios.insert(split_col + 1, orig_ratio / 2.0);
 
             let mut cell_b = cell.clone();
-            cell_b.detached = false;
             for (idx, c) in layout.cells.iter_mut().enumerate() {
                 if idx == cell_idx {
                     c.col_span = 1;
-                    c.detached = false;
                 } else if c.col > split_col {
                     c.col += 1;
                 } else if c.col <= split_col && c.col + c.col_span > split_col {
@@ -2998,9 +2994,7 @@ impl CrosshairApp {
             let half = row_span / 2;
             let split_base = starts[row + half];
             let mut cell_b = cell.clone();
-            layout.cells[cell_idx].detached = false;
             layout.cells[cell_idx].adjust_bottom = actual_mid - split_base;
-            cell_b.detached = false;
             cell_b.adjust_top = actual_mid - split_base;
             layout.cells[cell_idx].row_span = half;
             cell_b.row = row + half;
@@ -3019,11 +3013,9 @@ impl CrosshairApp {
             layout.row_ratios.insert(split_row + 1, orig_ratio / 2.0);
 
             let mut cell_b = cell.clone();
-            cell_b.detached = false;
             for (idx, c) in layout.cells.iter_mut().enumerate() {
                 if idx == cell_idx {
                     c.row_span = 1;
-                    c.detached = false;
                 } else if c.row > split_row {
                     c.row += 1;
                 } else if c.row <= split_row && c.row + c.row_span > split_row {
@@ -3399,37 +3391,6 @@ impl CrosshairApp {
 
                             let split_hovered_or_dragged = false;
 
-                            let mut hovered_row_col = None;
-                            if !split_hovered_or_dragged {
-                                for cell in &layout.cells {
-                                    if cell.row >= layout.rows || cell.col >= layout.cols {
-                                        continue;
-                                    }
-                                    let end_row = (cell.row + cell.row_span).min(layout.rows);
-                                    let end_col = (cell.col + cell.col_span).min(layout.cols);
-
-                                    let x1 = grid_rect.min.x
-                                        + (col_starts[cell.col] + cell.adjust_left) * grid_w;
-                                    let y1 = grid_rect.min.y
-                                        + (row_starts[cell.row] + cell.adjust_top) * grid_h;
-                                    let x2 = grid_rect.min.x
-                                        + (col_starts[end_col] + cell.adjust_right) * grid_w;
-                                    let y2 = grid_rect.min.y
-                                        + (row_starts[end_row] + cell.adjust_bottom) * grid_h;
-
-                                    let cell_rect = egui::Rect::from_min_max(
-                                        egui::pos2(x1, y1),
-                                        egui::pos2(x2, y2),
-                                    )
-                                    .shrink(2.0);
-
-                                    if ui.rect_contains_pointer(cell_rect) {
-                                        hovered_row_col = Some((cell.row, cell.col));
-                                        break;
-                                    }
-                                }
-                            }
-
                             ui.painter()
                                 .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
 
@@ -3538,8 +3499,8 @@ impl CrosshairApp {
                                 }
                             }
 
-                            let mut merge_action = None;
                             let mut delete_cell = None;
+                            let mut snap_preview = None;
                             let cells_to_draw = layout.cells.clone();
                             for cell in &cells_to_draw {
                                 if cell.row >= layout.rows || cell.col >= layout.cols {
@@ -3566,45 +3527,6 @@ impl CrosshairApp {
 
                                 let is_selected = self.selected_layout_cell
                                     == Some((layout.id, cell.row, cell.col));
-
-                                let is_in_drag_merge_range =
-                                    if let Some((start_layout_id, start_row, start_col)) =
-                                        self.drag_start_layout_cell
-                                    {
-                                        if start_layout_id == layout.id {
-                                            if let Some((hover_row, hover_col)) = hovered_row_col {
-                                                let cell_a_opt = layout.cells.iter().find(|c| {
-                                                    c.row == start_row && c.col == start_col
-                                                });
-                                                let cell_b_opt = layout.cells.iter().find(|c| {
-                                                    c.row == hover_row && c.col == hover_col
-                                                });
-                                                if let (Some(cell_a), Some(cell_b)) =
-                                                    (cell_a_opt, cell_b_opt)
-                                                {
-                                                    let r1 = cell_a.row.min(cell_b.row);
-                                                    let c1 = cell_a.col.min(cell_b.col);
-                                                    let r2 = (cell_a.row + cell_a.row_span - 1)
-                                                        .max(cell_b.row + cell_b.row_span - 1);
-                                                    let c2 = (cell_a.col + cell_a.col_span - 1)
-                                                        .max(cell_b.col + cell_b.col_span - 1);
-
-                                                    cell.row >= r1
-                                                        && cell.col >= c1
-                                                        && (cell.row + cell.row_span - 1) <= r2
-                                                        && (cell.col + cell.col_span - 1) <= c2
-                                                } else {
-                                                    false
-                                                }
-                                            } else {
-                                                false
-                                            }
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    };
 
                                 let cell_id =
                                     ui.make_persistent_id((layout.id, "cell", cell.row, cell.col));
@@ -3721,56 +3643,12 @@ impl CrosshairApp {
                                                 }
                                                 _ => {}
                                             }
-                                            let mut linked_update = None;
-                                            if !cell.detached {
-                                                let old_left = col_starts[cell.col] + cell.adjust_left;
-                                                let old_right = col_starts[end_col] + cell.adjust_right;
-                                                let old_top = row_starts[cell.row] + cell.adjust_top;
-                                                let old_bottom = row_starts[end_row] + cell.adjust_bottom;
-                                                for (index, other) in layout.cells.iter().enumerate() {
-                                                    if index == cell_index || other.detached { continue; }
-                                                    let other_end_row = (other.row + other.row_span).min(layout.rows);
-                                                    let other_end_col = (other.col + other.col_span).min(layout.cols);
-                                                    let other_left = col_starts[other.col] + other.adjust_left;
-                                                    let other_right = col_starts[other_end_col] + other.adjust_right;
-                                                    let other_top = row_starts[other.row] + other.adjust_top;
-                                                    let other_bottom = row_starts[other_end_row] + other.adjust_bottom;
-                                                    let vertical_overlap = old_bottom > other_top && old_top < other_bottom;
-                                                    let horizontal_overlap = old_right > other_left && old_left < other_right;
-                                                    let mut linked = other.clone();
-                                                    let shared = match edge {
-                                                        "left" if vertical_overlap && ((old_left - other_right) * grid_w).abs() <= 1.5 => {
-                                                            linked.adjust_right = col_starts[candidate.col] + candidate.adjust_left - col_starts[other_end_col];
-                                                            true
-                                                        }
-                                                        "right" if vertical_overlap && ((old_right - other_left) * grid_w).abs() <= 1.5 => {
-                                                            linked.adjust_left = col_starts[end_col] + candidate.adjust_right - col_starts[other.col];
-                                                            true
-                                                        }
-                                                        "top" if horizontal_overlap && ((old_top - other_bottom) * grid_h).abs() <= 1.5 => {
-                                                            linked.adjust_bottom = row_starts[candidate.row] + candidate.adjust_top - row_starts[other_end_row];
-                                                            true
-                                                        }
-                                                        "bottom" if horizontal_overlap && ((old_bottom - other_top) * grid_h).abs() <= 1.5 => {
-                                                            linked.adjust_top = row_starts[end_row] + candidate.adjust_bottom - row_starts[other.row];
-                                                            true
-                                                        }
-                                                        _ => false,
-                                                    };
-                                                    if shared {
-                                                        linked_update = Some((index, linked));
-                                                        break;
-                                                    }
-                                                }
-                                            }
                                             let left = col_starts[candidate.col] + candidate.adjust_left;
                                             let right = col_starts[end_col] + candidate.adjust_right;
                                             let top = row_starts[candidate.row] + candidate.adjust_top;
                                             let bottom = row_starts[end_row] + candidate.adjust_bottom;
                                             let overlaps = layout.cells.iter().enumerate().any(|(index, other)| {
-                                                if index == cell_index
-                                                    || linked_update.as_ref().is_some_and(|(linked, _)| *linked == index)
-                                                { return false; }
+                                                if index == cell_index { return false; }
                                                 let other_end_row = (other.row + other.row_span).min(layout.rows);
                                                 let other_end_col = (other.col + other.col_span).min(layout.cols);
                                                 let other_left = col_starts[other.col] + other.adjust_left;
@@ -3780,37 +3658,11 @@ impl CrosshairApp {
                                                 left < other_right && right > other_left
                                                     && top < other_bottom && bottom > other_top
                                             });
-                                            let linked_valid = linked_update.as_ref().is_none_or(|(linked_index, linked)| {
-                                                let linked_end_row = (linked.row + linked.row_span).min(layout.rows);
-                                                let linked_end_col = (linked.col + linked.col_span).min(layout.cols);
-                                                let linked_left = col_starts[linked.col] + linked.adjust_left;
-                                                let linked_right = col_starts[linked_end_col] + linked.adjust_right;
-                                                let linked_top = row_starts[linked.row] + linked.adjust_top;
-                                                let linked_bottom = row_starts[linked_end_row] + linked.adjust_bottom;
-                                                linked_left >= 0.0 && linked_top >= 0.0
-                                                    && linked_right <= 1.0 && linked_bottom <= 1.0
-                                                    && linked_right - linked_left >= min_width
-                                                    && linked_bottom - linked_top >= min_height
-                                                    && !layout.cells.iter().enumerate().any(|(index, other)| {
-                                                        if index == cell_index || index == *linked_index { return false; }
-                                                        let other_end_row = (other.row + other.row_span).min(layout.rows);
-                                                        let other_end_col = (other.col + other.col_span).min(layout.cols);
-                                                        let other_left = col_starts[other.col] + other.adjust_left;
-                                                        let other_right = col_starts[other_end_col] + other.adjust_right;
-                                                        let other_top = row_starts[other.row] + other.adjust_top;
-                                                        let other_bottom = row_starts[other_end_row] + other.adjust_bottom;
-                                                        linked_left < other_right && linked_right > other_left
-                                                            && linked_top < other_bottom && linked_bottom > other_top
-                                                    })
-                                            });
                                             if left >= 0.0 && top >= 0.0
                                                 && right <= 1.0 && bottom <= 1.0
-                                                && !overlaps && linked_valid
+                                                && !overlaps
                                             {
                                                 layout.cells[cell_index] = candidate;
-                                                if let Some((linked_index, linked)) = linked_update {
-                                                    layout.cells[linked_index] = linked;
-                                                }
                                                 live_sync = true;
                                             }
                                         }
@@ -3826,52 +3678,18 @@ impl CrosshairApp {
                                     egui::pos2(cell_rect.right() - 24.0, cell_rect.top() + 4.0),
                                     egui::vec2(20.0, 20.0),
                                 );
-                                let detach_rect = delete_rect.translate(egui::vec2(-22.0, 0.0));
-                                let detach_response = ui.put(
-                                    detach_rect,
-                                    egui::Button::new(Self::material_icon_text(
-                                        if cell.detached { 0xe166 } else { 0xe89e },
-                                        14.0,
-                                    )),
-                                ).on_hover_text(if cell.detached {
-                                    Self::tr_lang(language, "Return to grid", "Đưa về lưới")
-                                } else {
-                                    Self::tr_lang(language, "Detach", "Tách")
-                                });
                                 let delete_response = ui.put(
                                     delete_rect,
                                     egui::Button::new(Self::material_icon_text(0xe872, 14.0)),
                                 ).on_hover_text(Self::tr_lang(language, "Delete", "Xóa"));
-                                let controls_active = detach_response.hovered()
-                                    || delete_response.hovered()
-                                    || detach_response.clicked()
+                                let controls_active = delete_response.hovered()
                                     || delete_response.clicked();
-                                if detach_response.clicked()
-                                    && let Some(cell_index) = cell_index
-                                {
-                                    let target = &mut layout.cells[cell_index];
-                                    target.detached = !target.detached;
-                                    if !target.detached {
-                                        target.adjust_left = 0.0;
-                                        target.adjust_right = 0.0;
-                                        target.adjust_top = 0.0;
-                                        target.adjust_bottom = 0.0;
-                                    }
-                                    live_sync = true;
-                                }
                                 if delete_response.clicked() {
                                     delete_cell = cell_index;
                                 }
 
-                                let detached = cell_index
-                                    .is_some_and(|index| layout.cells[index].detached);
-                                if cell_resp.drag_started() && !detached && !controls_active {
-                                    self.drag_start_layout_cell =
-                                        Some((layout.id, cell.row, cell.col));
-                                }
-
                                 if cell_resp.dragged()
-                                    && detached
+                                    && !controls_active
                                     && let Some(cell_index) = cell_index
                                 {
                                     let delta = ui.input(|input| input.pointer.delta());
@@ -3993,19 +3811,13 @@ impl CrosshairApp {
                                                 grid_rect.min.y + bottom * grid_h,
                                             ),
                                         );
-                                        ui.painter().rect_stroke(
-                                            preview,
-                                            2.0,
-                                            egui::Stroke::new(2.0, Color32::from_rgb(0, 180, 255)),
-                                            egui::StrokeKind::Outside,
-                                        );
+                                        snap_preview = Some(preview);
                                     }
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                                     live_sync = true;
                                 }
 
                                 if cell_resp.drag_stopped()
-                                    && detached
                                     && let Some(cell_index) = cell_index
                                 {
                                     let target = layout.cells[cell_index].clone();
@@ -4046,10 +3858,6 @@ impl CrosshairApp {
                                     ]
                                     .into_iter()
                                     .min_by(|a, b| a.abs().total_cmp(&b.abs()));
-                                    let mut snapped_to_edge = target_rect.left() <= grid_rect.left() + 0.5
-                                        || target_rect.right() >= grid_rect.right() - 0.5
-                                        || target_rect.top() <= grid_rect.top() + 0.5
-                                        || target_rect.bottom() >= grid_rect.bottom() - 0.5;
                                     for (other_index, other) in layout.cells.iter().enumerate() {
                                         if other_index == cell_index {
                                             continue;
@@ -4082,8 +3890,6 @@ impl CrosshairApp {
                                         if target_rect.max.y > other_rect.min.y
                                             && target_rect.min.y < other_rect.max.y
                                         {
-                                            snapped_to_edge |= (target_rect.right() - other_rect.left()).abs() <= 0.5
-                                                || (target_rect.left() - other_rect.right()).abs() <= 0.5;
                                             for candidate in [
                                                 other_rect.min.x - target_rect.max.x,
                                                 other_rect.max.x - target_rect.min.x,
@@ -4098,8 +3904,6 @@ impl CrosshairApp {
                                         if target_rect.max.x > other_rect.min.x
                                             && target_rect.min.x < other_rect.max.x
                                         {
-                                            snapped_to_edge |= (target_rect.bottom() - other_rect.top()).abs() <= 0.5
-                                                || (target_rect.top() - other_rect.bottom()).abs() <= 0.5;
                                             for candidate in [
                                                 other_rect.min.y - target_rect.max.y,
                                                 other_rect.max.y - target_rect.min.y,
@@ -4134,22 +3938,7 @@ impl CrosshairApp {
                                                 *value = 0.0;
                                             }
                                         }
-                                        target.detached = false;
                                     }
-                                    if snapped_to_edge {
-                                        layout.cells[cell_index].detached = false;
-                                    }
-                                }
-
-                                if cell_resp.drag_stopped() {
-                                    if let Some((start_layout_id, start_row, start_col)) =
-                                        self.drag_start_layout_cell
-                                    {
-                                        if start_layout_id == layout.id {
-                                            merge_action = Some((start_row, start_col));
-                                        }
-                                    }
-                                    self.drag_start_layout_cell = None;
                                 }
 
                                 if cell_resp.clicked() && !controls_active {
@@ -4167,8 +3956,6 @@ impl CrosshairApp {
 
                                 let fill_color = if is_selected {
                                     Color32::from_rgba_premultiplied(0, 120, 215, 80)
-                                } else if is_in_drag_merge_range {
-                                    Color32::from_rgba_premultiplied(0, 120, 215, 40)
                                 } else if cell_resp.hovered() {
                                     Color32::from_rgba_premultiplied(128, 128, 128, 40)
                                 } else {
@@ -4177,13 +3964,11 @@ impl CrosshairApp {
 
                                 let border_color = if is_selected {
                                     Color32::from_rgb(0, 120, 215)
-                                } else if is_in_drag_merge_range {
-                                    Color32::from_rgb(0, 150, 255)
                                 } else {
                                     ui.visuals().widgets.noninteractive.bg_stroke.color
                                 };
 
-                                let stroke_width = if is_selected || is_in_drag_merge_range {
+                                let stroke_width = if is_selected {
                                     2.0
                                 } else {
                                     1.0
@@ -4282,70 +4067,21 @@ impl CrosshairApp {
                                 );
                             }
 
+                            if let Some(preview) = snap_preview {
+                                ui.painter().rect_stroke(
+                                    preview,
+                                    2.0,
+                                    egui::Stroke::new(2.0, Color32::from_rgb(0, 180, 255)),
+                                    egui::StrokeKind::Outside,
+                                );
+                            }
+
                             if let Some(cell_index) = delete_cell {
                                 layout.cells.remove(cell_index);
                                 self.selected_layout_cell = None;
                                 live_sync = true;
                             }
 
-                            if let Some((start_row, start_col)) = merge_action {
-                                if let Some((end_row, end_col)) = hovered_row_col {
-                                    if (start_row, start_col) != (end_row, end_col) {
-                                        let cell_a_opt = layout
-                                            .cells
-                                            .iter()
-                                            .find(|c| c.row == start_row && c.col == start_col)
-                                            .cloned();
-                                        let cell_b_opt = layout
-                                            .cells
-                                            .iter()
-                                            .find(|c| c.row == end_row && c.col == end_col)
-                                            .cloned();
-                                        if let (Some(cell_a), Some(cell_b)) =
-                                            (cell_a_opt, cell_b_opt)
-                                        {
-                                            let r1 = cell_a.row.min(cell_b.row);
-                                            let c1 = cell_a.col.min(cell_b.col);
-                                            let r2 = (cell_a.row + cell_a.row_span - 1)
-                                                .max(cell_b.row + cell_b.row_span - 1);
-                                            let c2 = (cell_a.col + cell_a.col_span - 1)
-                                                .max(cell_b.col + cell_b.col_span - 1);
-
-                                            let new_cell = WindowLayoutCell {
-                                                row: r1,
-                                                col: c1,
-                                                row_span: r2 - r1 + 1,
-                                                col_span: c2 - c1 + 1,
-                                                target_window_title: cell_a
-                                                    .target_window_title
-                                                    .clone()
-                                                    .or(cell_b.target_window_title.clone()),
-                                                extra_target_window_titles: if !cell_a
-                                                    .extra_target_window_titles
-                                                    .is_empty()
-                                                {
-                                                    cell_a.extra_target_window_titles.clone()
-                                                } else {
-                                                    cell_b.extra_target_window_titles.clone()
-                                                },
-                                                match_duplicate_window_titles: cell_a
-                                                    .match_duplicate_window_titles
-                                                    || cell_b.match_duplicate_window_titles,
-                                                detached: false,
-                                                adjust_left: 0.0,
-                                                adjust_right: 0.0,
-                                                adjust_top: 0.0,
-                                                adjust_bottom: 0.0,
-                                            };
-
-                                            layout.cells.insert(0, new_cell);
-                                            Self::sanitize_layout(layout);
-                                            live_sync = true;
-                                            self.selected_layout_cell = Some((layout.id, r1, c1));
-                                        }
-                                    }
-                                }
-                            }
                         });
                         ui.end_row();
                     });
