@@ -3818,6 +3818,7 @@ impl CrosshairApp {
                                 }
 
                                 if cell_resp.dragged()
+                                    && ui.input(|input| input.modifiers.alt)
                                     && !controls_active
                                     && let Some(cell_index) = cell_index
                                 {
@@ -3946,7 +3947,6 @@ impl CrosshairApp {
                                         );
                                         snap_preview = Some(preview);
                                     }
-                                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                                     live_sync = true;
                                 }
 
@@ -4050,10 +4050,10 @@ impl CrosshairApp {
                                         }
                                     }
                                     let correction_x =
-                                        snap_x.filter(|delta| delta.abs() <= 6.0).unwrap_or(0.0)
+                                        snap_x.filter(|delta| delta.abs() < 0.0).unwrap_or(0.0)
                                             / grid_w.max(1.0);
                                     let correction_y =
-                                        snap_y.filter(|delta| delta.abs() <= 6.0).unwrap_or(0.0)
+                                        snap_y.filter(|delta| delta.abs() < 0.0).unwrap_or(0.0)
                                             / grid_h.max(1.0);
                                     if correction_x != 0.0 || correction_y != 0.0 {
                                         let target = &mut layout.cells[cell_index];
