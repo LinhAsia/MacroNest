@@ -118,7 +118,7 @@ impl Default for WindowFocusPreset {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct WindowLayoutCell {
     pub row: usize,
@@ -128,6 +128,10 @@ pub struct WindowLayoutCell {
     pub target_window_title: Option<String>,
     pub extra_target_window_titles: Vec<String>,
     pub match_duplicate_window_titles: bool,
+    pub adjust_left: f32,
+    pub adjust_right: f32,
+    pub adjust_top: f32,
+    pub adjust_bottom: f32,
 }
 
 impl Default for WindowLayoutCell {
@@ -140,6 +144,10 @@ impl Default for WindowLayoutCell {
             target_window_title: None,
             extra_target_window_titles: Vec::new(),
             match_duplicate_window_titles: true,
+            adjust_left: 0.0,
+            adjust_right: 0.0,
+            adjust_top: 0.0,
+            adjust_bottom: 0.0,
         }
     }
 }
@@ -155,10 +163,6 @@ pub struct WindowLayout {
     pub cols: usize,
     pub row_ratios: Vec<f32>,
     pub col_ratios: Vec<f32>,
-    pub inset_left: f32,
-    pub inset_right: f32,
-    pub inset_top: f32,
-    pub inset_bottom: f32,
     pub cells: Vec<WindowLayoutCell>,
     pub focus_on_apply: bool,
     pub hotkey: Option<HotkeyBinding>,
@@ -180,10 +184,6 @@ impl WindowLayout {
             cols: 2,
             row_ratios: vec![0.5, 0.5],
             col_ratios: vec![0.5, 0.5],
-            inset_left: 0.0,
-            inset_right: 0.0,
-            inset_top: 0.0,
-            inset_bottom: 0.0,
             cells: vec![
                 WindowLayoutCell {
                     row: 0,
