@@ -3687,6 +3687,46 @@ impl CrosshairApp {
                                                 }
                                                 _ => {}
                                             }
+                                            let snap_x = 6.0 / grid_w.max(1.0);
+                                            let snap_y = 6.0 / grid_h.max(1.0);
+                                            let candidate_top = row_starts[candidate.row] + candidate.adjust_top;
+                                            let candidate_bottom = row_starts[end_row] + candidate.adjust_bottom;
+                                            let candidate_left = col_starts[candidate.col] + candidate.adjust_left;
+                                            let candidate_right = col_starts[end_col] + candidate.adjust_right;
+                                            for (index, other) in layout.cells.iter().enumerate() {
+                                                if index == cell_index {
+                                                    continue;
+                                                }
+                                                let other_end_row = (other.row + other.row_span).min(layout.rows);
+                                                let other_end_col = (other.col + other.col_span).min(layout.cols);
+                                                let other_left = col_starts[other.col] + other.adjust_left;
+                                                let other_right = col_starts[other_end_col] + other.adjust_right;
+                                                let other_top = row_starts[other.row] + other.adjust_top;
+                                                let other_bottom = row_starts[other_end_row] + other.adjust_bottom;
+                                                if candidate_bottom > other_top && candidate_top < other_bottom {
+                                                    if edge == "left" && (candidate_left - other_right).abs() <= snap_x {
+                                                        candidate.adjust_left = other_right - col_starts[candidate.col];
+                                                    } else if edge == "right" && (candidate_right - other_left).abs() <= snap_x {
+                                                        candidate.adjust_right = other_left - col_starts[end_col];
+                                                    }
+                                                }
+                                                if candidate_right > other_left && candidate_left < other_right {
+                                                    if edge == "top" && (candidate_top - other_bottom).abs() <= snap_y {
+                                                        candidate.adjust_top = other_bottom - row_starts[candidate.row];
+                                                    } else if edge == "bottom" && (candidate_bottom - other_top).abs() <= snap_y {
+                                                        candidate.adjust_bottom = other_top - row_starts[end_row];
+                                                    }
+                                                }
+                                            }
+                                            if edge == "left" && candidate_left.abs() <= snap_x {
+                                                candidate.adjust_left = -col_starts[candidate.col];
+                                            } else if edge == "right" && (1.0 - candidate_right).abs() <= snap_x {
+                                                candidate.adjust_right = 1.0 - col_starts[end_col];
+                                            } else if edge == "top" && candidate_top.abs() <= snap_y {
+                                                candidate.adjust_top = -row_starts[candidate.row];
+                                            } else if edge == "bottom" && (1.0 - candidate_bottom).abs() <= snap_y {
+                                                candidate.adjust_bottom = 1.0 - row_starts[end_row];
+                                            }
                                             let left = col_starts[candidate.col] + candidate.adjust_left;
                                             let right = col_starts[end_col] + candidate.adjust_right;
                                             let top = row_starts[candidate.row] + candidate.adjust_top;
@@ -3908,10 +3948,10 @@ impl CrosshairApp {
                                         }
                                     }
                                     let correction_x =
-                                        snap_x.filter(|delta| delta.abs() <= 10.0).unwrap_or(0.0)
+                                        snap_x.filter(|delta| delta.abs() <= 6.0).unwrap_or(0.0)
                                             / grid_w.max(1.0);
                                     let correction_y =
-                                        snap_y.filter(|delta| delta.abs() <= 10.0).unwrap_or(0.0)
+                                        snap_y.filter(|delta| delta.abs() <= 6.0).unwrap_or(0.0)
                                             / grid_h.max(1.0);
                                     if correction_x != 0.0 || correction_y != 0.0 {
                                         let target = &mut layout.cells[cell_index];
