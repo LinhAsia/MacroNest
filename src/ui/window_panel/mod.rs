@@ -3414,6 +3414,13 @@ impl CrosshairApp {
 
                             // Check / interact with column splits (vertical lines)
                             for c in 1..layout.cols {
+                                let has_left = layout.cells.iter().any(|cell| {
+                                    cell.col < c && cell.col + cell.col_span == c
+                                });
+                                let has_right = layout.cells.iter().any(|cell| cell.col == c);
+                                if !has_left || !has_right {
+                                    continue;
+                                }
                                 let split_x = grid_rect.min.x + col_starts[c] * grid_w;
                                 let split_rect = egui::Rect::from_min_max(
                                     egui::pos2(split_x - 5.0, grid_rect.min.y),
@@ -3469,6 +3476,13 @@ impl CrosshairApp {
 
                             // Check / interact with row splits (horizontal lines)
                             for r in 1..layout.rows {
+                                let has_above = layout.cells.iter().any(|cell| {
+                                    cell.row < r && cell.row + cell.row_span == r
+                                });
+                                let has_below = layout.cells.iter().any(|cell| cell.row == r);
+                                if !has_above || !has_below {
+                                    continue;
+                                }
                                 let split_y = grid_rect.min.y + row_starts[r] * grid_h;
                                 let split_rect = egui::Rect::from_min_max(
                                     egui::pos2(grid_rect.min.x, split_y - 5.0),
