@@ -2934,6 +2934,10 @@ impl CrosshairApp {
             layout.cells.push(cell_b);
         } else {
             let split_col = col;
+            let old_bounds: Vec<(f32, f32)> = layout.cells.iter().map(|item| {
+                let end = (item.col + item.col_span).min(layout.cols);
+                (starts[item.col] + item.adjust_left, starts[end] + item.adjust_right)
+            }).collect();
             layout.cols += 1;
 
             let orig_ratio = layout.col_ratios[split_col];
@@ -2954,9 +2958,22 @@ impl CrosshairApp {
             }
             cell_b.col = split_col + 1;
             cell_b.col_span = 1;
-            let new_split_base = starts[col] + layout.col_ratios[split_col] / ratio_sum;
+            let new_sum: f32 = layout.col_ratios.iter().sum();
+            let new_starts: Vec<f32> = std::iter::once(0.0)
+                .chain(layout.col_ratios.iter().scan(0.0, |sum, ratio| {
+                    *sum += *ratio / new_sum;
+                    Some(*sum)
+                }))
+                .collect();
+            for (item, (old_left, old_right)) in layout.cells.iter_mut().zip(old_bounds) {
+                let end = (item.col + item.col_span).min(layout.cols);
+                item.adjust_left = old_left - new_starts[item.col];
+                item.adjust_right = old_right - new_starts[end];
+            }
+            let new_split_base = new_starts[split_col + 1];
             layout.cells[cell_idx].adjust_right = actual_mid - new_split_base;
             cell_b.adjust_left = actual_mid - new_split_base;
+            cell_b.adjust_right = actual_right - new_starts[split_col + 2];
             layout.cells.push(cell_b);
         }
     }
@@ -2991,6 +3008,10 @@ impl CrosshairApp {
             layout.cells.push(cell_b);
         } else {
             let split_row = row;
+            let old_bounds: Vec<(f32, f32)> = layout.cells.iter().map(|item| {
+                let end = (item.row + item.row_span).min(layout.rows);
+                (starts[item.row] + item.adjust_top, starts[end] + item.adjust_bottom)
+            }).collect();
             layout.rows += 1;
 
             let orig_ratio = layout.row_ratios[split_row];
@@ -3011,9 +3032,22 @@ impl CrosshairApp {
             }
             cell_b.row = split_row + 1;
             cell_b.row_span = 1;
-            let new_split_base = starts[row] + layout.row_ratios[split_row] / ratio_sum;
+            let new_sum: f32 = layout.row_ratios.iter().sum();
+            let new_starts: Vec<f32> = std::iter::once(0.0)
+                .chain(layout.row_ratios.iter().scan(0.0, |sum, ratio| {
+                    *sum += *ratio / new_sum;
+                    Some(*sum)
+                }))
+                .collect();
+            for (item, (old_top, old_bottom)) in layout.cells.iter_mut().zip(old_bounds) {
+                let end = (item.row + item.row_span).min(layout.rows);
+                item.adjust_top = old_top - new_starts[item.row];
+                item.adjust_bottom = old_bottom - new_starts[end];
+            }
+            let new_split_base = new_starts[split_row + 1];
             layout.cells[cell_idx].adjust_bottom = actual_mid - new_split_base;
             cell_b.adjust_top = actual_mid - new_split_base;
+            cell_b.adjust_bottom = actual_bottom - new_starts[split_row + 2];
             layout.cells.push(cell_b);
         }
     }
@@ -3687,46 +3721,6 @@ impl CrosshairApp {
                                                 }
                                                 _ => {}
                                             }
-                                            let snap_x = 6.0 / grid_w.max(1.0);
-                                            let snap_y = 6.0 / grid_h.max(1.0);
-                                            let candidate_top = row_starts[candidate.row] + candidate.adjust_top;
-                                            let candidate_bottom = row_starts[end_row] + candidate.adjust_bottom;
-                                            let candidate_left = col_starts[candidate.col] + candidate.adjust_left;
-                                            let candidate_right = col_starts[end_col] + candidate.adjust_right;
-                                            for (index, other) in layout.cells.iter().enumerate() {
-                                                if index == cell_index {
-                                                    continue;
-                                                }
-                                                let other_end_row = (other.row + other.row_span).min(layout.rows);
-                                                let other_end_col = (other.col + other.col_span).min(layout.cols);
-                                                let other_left = col_starts[other.col] + other.adjust_left;
-                                                let other_right = col_starts[other_end_col] + other.adjust_right;
-                                                let other_top = row_starts[other.row] + other.adjust_top;
-                                                let other_bottom = row_starts[other_end_row] + other.adjust_bottom;
-                                                if candidate_bottom > other_top && candidate_top < other_bottom {
-                                                    if edge == "left" && (candidate_left - other_right).abs() <= snap_x {
-                                                        candidate.adjust_left = other_right - col_starts[candidate.col];
-                                                    } else if edge == "right" && (candidate_right - other_left).abs() <= snap_x {
-                                                        candidate.adjust_right = other_left - col_starts[end_col];
-                                                    }
-                                                }
-                                                if candidate_right > other_left && candidate_left < other_right {
-                                                    if edge == "top" && (candidate_top - other_bottom).abs() <= snap_y {
-                                                        candidate.adjust_top = other_bottom - row_starts[candidate.row];
-                                                    } else if edge == "bottom" && (candidate_bottom - other_top).abs() <= snap_y {
-                                                        candidate.adjust_bottom = other_top - row_starts[end_row];
-                                                    }
-                                                }
-                                            }
-                                            if edge == "left" && candidate_left.abs() <= snap_x {
-                                                candidate.adjust_left = -col_starts[candidate.col];
-                                            } else if edge == "right" && (1.0 - candidate_right).abs() <= snap_x {
-                                                candidate.adjust_right = 1.0 - col_starts[end_col];
-                                            } else if edge == "top" && candidate_top.abs() <= snap_y {
-                                                candidate.adjust_top = -row_starts[candidate.row];
-                                            } else if edge == "bottom" && (1.0 - candidate_bottom).abs() <= snap_y {
-                                                candidate.adjust_bottom = 1.0 - row_starts[end_row];
-                                            }
                                             let left = col_starts[candidate.col] + candidate.adjust_left;
                                             let right = col_starts[end_col] + candidate.adjust_right;
                                             let top = row_starts[candidate.row] + candidate.adjust_top;
@@ -3968,13 +3962,6 @@ impl CrosshairApp {
                                             if value.abs() < 0.0005 {
                                                 *value = 0.0;
                                             }
-                                        }
-                                        if target.adjust_left == 0.0
-                                            && target.adjust_right == 0.0
-                                            && target.adjust_top == 0.0
-                                            && target.adjust_bottom == 0.0
-                                        {
-                                            target.detached = false;
                                         }
                                     }
                                 }
