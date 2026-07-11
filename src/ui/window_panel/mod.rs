@@ -3528,6 +3528,9 @@ impl CrosshairApp {
 
                                 let is_selected = self.selected_layout_cell
                                     == Some((layout.id, cell.row, cell.col));
+                                let is_merge_source = self.drag_start_layout_cell
+                                    == Some((layout.id, cell.row, cell.col))
+                                    && ui.input(|input| input.pointer.primary_down());
                                 let is_merge_target = self.drag_start_layout_cell
                                     .is_some_and(|(drag_layout, drag_row, drag_col)| {
                                         drag_layout == layout.id
@@ -4121,6 +4124,8 @@ impl CrosshairApp {
                                     Color32::from_rgba_premultiplied(0, 120, 215, 80)
                                 } else if is_merge_target {
                                     Color32::from_rgba_premultiplied(0, 180, 255, 100)
+                                } else if is_merge_source {
+                                    Color32::from_rgba_premultiplied(0, 140, 230, 70)
                                 } else if cell_resp.hovered() {
                                     Color32::from_rgba_premultiplied(128, 128, 128, 40)
                                 } else {
@@ -4131,11 +4136,13 @@ impl CrosshairApp {
                                     Color32::from_rgb(0, 120, 215)
                                 } else if is_merge_target {
                                     Color32::from_rgb(0, 210, 255)
+                                } else if is_merge_source {
+                                    Color32::from_rgb(0, 160, 240)
                                 } else {
                                     ui.visuals().widgets.noninteractive.bg_stroke.color
                                 };
 
-                                let stroke_width = if is_selected || is_merge_target {
+                                let stroke_width = if is_selected || is_merge_target || is_merge_source {
                                     2.0
                                 } else {
                                     1.0
