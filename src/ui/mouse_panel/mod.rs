@@ -446,6 +446,35 @@ impl CrosshairApp {
 
             ui.add_space(8.0);
 
+            ui.horizontal(|ui| {
+                let test_button = ui.add_enabled(
+                    is_connected && !self.arduino_flash_running,
+                    egui::Button::new(self.tr("Test Arduino", "Kiểm tra Arduino")),
+                );
+                if test_button.clicked() {
+                    self.arduino_flash_status = match crate::overlay::test_arduino_mouse_direct() {
+                        Ok(()) => self.tr(
+                            "Arduino test sent: move right and left click.",
+                            "Đã gửi lệnh kiểm tra: di chuyển sang phải và nhấp chuột trái.",
+                        ).to_owned(),
+                        Err(error) => format!(
+                            "{}: {error}",
+                            self.tr("Arduino test failed", "Kiểm tra Arduino thất bại")
+                        ),
+                    };
+                }
+                ui.label(
+                    RichText::new(self.tr(
+                        "Direct hardware test - no Windows fallback",
+                        "Kiểm tra phần cứng trực tiếp - không fallback sang Windows",
+                    ))
+                    .small()
+                    .weak(),
+                );
+            });
+
+            ui.add_space(8.0);
+
             if !self.arduino_tools_downloaded {
                 if self.arduino_download_job.is_some() {
                     let progress = self

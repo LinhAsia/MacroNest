@@ -31704,6 +31704,13 @@ mod windows_overlay {
         Ok(())
     }
 
+    pub(crate) fn test_arduino_mouse_direct() -> Result<()> {
+        send_arduino_relative_move_sequence(240, 0)?;
+        write_arduino_data(&[0xAA, 2, 1, 1, 0, 0])?;
+        thread::sleep(Duration::from_millis(40));
+        write_arduino_data(&[0xAA, 2, 1, 0, 0, 0])
+    }
+
     fn send_mouse_move_absolute(x: i32, y: i32) -> Result<()> {
         let target_point = POINT { x, y };
         let (use_arduino, transport, com_port) = {
