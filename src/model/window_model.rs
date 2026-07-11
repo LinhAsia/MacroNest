@@ -155,6 +155,10 @@ pub struct WindowLayout {
     pub cols: usize,
     pub row_ratios: Vec<f32>,
     pub col_ratios: Vec<f32>,
+    pub inset_left: f32,
+    pub inset_right: f32,
+    pub inset_top: f32,
+    pub inset_bottom: f32,
     pub cells: Vec<WindowLayoutCell>,
     pub focus_on_apply: bool,
     pub hotkey: Option<HotkeyBinding>,
@@ -176,6 +180,10 @@ impl WindowLayout {
             cols: 2,
             row_ratios: vec![0.5, 0.5],
             col_ratios: vec![0.5, 0.5],
+            inset_left: 0.0,
+            inset_right: 0.0,
+            inset_top: 0.0,
+            inset_bottom: 0.0,
             cells: vec![
                 WindowLayoutCell {
                     row: 0,

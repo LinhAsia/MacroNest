@@ -2705,6 +2705,10 @@ impl CrosshairApp {
 
         layout.rows = rows;
         layout.cols = cols;
+        layout.inset_left = layout.inset_left.clamp(0.0, 0.95);
+        layout.inset_right = layout.inset_right.clamp(0.0, 0.95 - layout.inset_left);
+        layout.inset_top = layout.inset_top.clamp(0.0, 0.95);
+        layout.inset_bottom = layout.inset_bottom.clamp(0.0, 0.95 - layout.inset_top);
 
         if layout.row_ratios.len() != rows {
             layout.row_ratios = vec![1.0; rows];
@@ -3360,7 +3364,7 @@ impl CrosshairApp {
                                 egui::Sense::hover(),
                             );
 
-                            let grid_rect = if layout.block_taskbar {
+                            let monitor_grid_rect = if layout.block_taskbar {
                                 egui::Rect::from_min_max(
                                     egui::pos2(
                                         rect.min.x + metrics.work_left * preview_w,
@@ -3376,12 +3380,111 @@ impl CrosshairApp {
                             } else {
                                 rect
                             };
+                            let grid_rect = egui::Rect::from_min_max(
+                                egui::pos2(
+                                    monitor_grid_rect.min.x
+                                        + monitor_grid_rect.width() * layout.inset_left,
+                                    monitor_grid_rect.min.y
+                                        + monitor_grid_rect.height() * layout.inset_top,
+                                ),
+                                egui::pos2(
+                                    monitor_grid_rect.max.x
+                                        - monitor_grid_rect.width() * layout.inset_right,
+                                    monitor_grid_rect.max.y
+                                        - monitor_grid_rect.height() * layout.inset_bottom,
+                                ),
+                            );
                             let grid_w = grid_rect.width();
                             let grid_h = grid_rect.height();
 
                             let mut split_hovered_or_dragged = false;
                             let mut active_col_splits = Vec::new();
                             let mut active_row_splits = Vec::new();
+
+                            let edge_handles = [
+                                (
+                                    "left",
+                                    egui::Rect::from_min_max(
+                                        grid_rect.left_top(),
+                                        egui::pos2(grid_rect.min.x + 8.0, grid_rect.max.y),
+                                    ),
+                                    egui::CursorIcon::ResizeHorizontal,
+                                ),
+                                (
+                                    "right",
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(grid_rect.max.x - 8.0, grid_rect.min.y),
+                                        grid_rect.right_bottom(),
+                                    ),
+                                    egui::CursorIcon::ResizeHorizontal,
+                                ),
+                                (
+                                    "top",
+                                    egui::Rect::from_min_max(
+                                        grid_rect.left_top(),
+                                        egui::pos2(grid_rect.max.x, grid_rect.min.y + 8.0),
+                                    ),
+                                    egui::CursorIcon::ResizeVertical,
+                                ),
+                                (
+                                    "bottom",
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(grid_rect.min.x, grid_rect.max.y - 8.0),
+                                        grid_rect.right_bottom(),
+                                    ),
+                                    egui::CursorIcon::ResizeVertical,
+                                ),
+                            ];
+                            for (edge, handle_rect, cursor) in edge_handles {
+                                let response = ui.interact(
+                                    handle_rect,
+                                    ui.make_persistent_id((layout.id, "outer_edge", edge)),
+                                    egui::Sense::drag(),
+                                );
+                                if response.hovered() || response.dragged() {
+                                    ui.ctx().set_cursor_icon(cursor);
+                                    split_hovered_or_dragged = true;
+                                    match edge {
+                                        "left" | "right" => active_col_splits.push(if edge == "left" {
+                                            grid_rect.min.x
+                                        } else {
+                                            grid_rect.max.x
+                                        }),
+                                        _ => active_row_splits.push(if edge == "top" {
+                                            grid_rect.min.y
+                                        } else {
+                                            grid_rect.max.y
+                                        }),
+                                    }
+                                }
+                                if response.dragged() {
+                                    let delta = ui.input(|input| input.pointer.delta());
+                                    match edge {
+                                        "left" => {
+                                            layout.inset_left = (layout.inset_left
+                                                + delta.x / monitor_grid_rect.width())
+                                                .clamp(0.0, 0.95 - layout.inset_right);
+                                        }
+                                        "right" => {
+                                            layout.inset_right = (layout.inset_right
+                                                - delta.x / monitor_grid_rect.width())
+                                                .clamp(0.0, 0.95 - layout.inset_left);
+                                        }
+                                        "top" => {
+                                            layout.inset_top = (layout.inset_top
+                                                + delta.y / monitor_grid_rect.height())
+                                                .clamp(0.0, 0.95 - layout.inset_bottom);
+                                        }
+                                        "bottom" => {
+                                            layout.inset_bottom = (layout.inset_bottom
+                                                - delta.y / monitor_grid_rect.height())
+                                                .clamp(0.0, 0.95 - layout.inset_top);
+                                        }
+                                        _ => {}
+                                    }
+                                    live_sync = true;
+                                }
+                            }
 
                             // Check / interact with column splits (vertical lines)
                             for c in 1..layout.cols {
@@ -3493,10 +3596,10 @@ impl CrosshairApp {
                                     egui::Color32::from_rgba_unmultiplied(220, 50, 50, 180);
 
                                 // Top taskbar
-                                if grid_rect.min.y > rect.min.y {
+                                if monitor_grid_rect.min.y > rect.min.y {
                                     let r_top = egui::Rect::from_min_max(
                                         rect.min,
-                                        egui::pos2(rect.max.x, grid_rect.min.y),
+                                        egui::pos2(rect.max.x, monitor_grid_rect.min.y),
                                     );
                                     Self::draw_hatched_rect(
                                         ui.painter(),
@@ -3516,9 +3619,9 @@ impl CrosshairApp {
                                     }
                                 }
                                 // Bottom taskbar
-                                if grid_rect.max.y < rect.max.y {
+                                if monitor_grid_rect.max.y < rect.max.y {
                                     let r_bottom = egui::Rect::from_min_max(
-                                        egui::pos2(rect.min.x, grid_rect.max.y),
+                                        egui::pos2(rect.min.x, monitor_grid_rect.max.y),
                                         rect.max,
                                     );
                                     Self::draw_hatched_rect(
@@ -3539,10 +3642,10 @@ impl CrosshairApp {
                                     }
                                 }
                                 // Left taskbar
-                                if grid_rect.min.x > rect.min.x {
+                                if monitor_grid_rect.min.x > rect.min.x {
                                     let r_left = egui::Rect::from_min_max(
                                         rect.min,
-                                        egui::pos2(grid_rect.min.x, rect.max.y),
+                                        egui::pos2(monitor_grid_rect.min.x, rect.max.y),
                                     );
                                     Self::draw_hatched_rect(
                                         ui.painter(),
@@ -3562,9 +3665,9 @@ impl CrosshairApp {
                                     }
                                 }
                                 // Right taskbar
-                                if grid_rect.max.x < rect.max.x {
+                                if monitor_grid_rect.max.x < rect.max.x {
                                     let r_right = egui::Rect::from_min_max(
-                                        egui::pos2(grid_rect.max.x, rect.min.y),
+                                        egui::pos2(monitor_grid_rect.max.x, rect.min.y),
                                         rect.max,
                                     );
                                     Self::draw_hatched_rect(
@@ -3987,8 +4090,12 @@ impl CrosshairApp {
 
                                     // Render cell estimated resolution info
                                     ui.label(Self::tr_lang(language, "Resolution", "Resolution"));
-                                    let (mon_w, mon_h) =
+                                    let (monitor_w, monitor_h) =
                                         Self::get_monitor_work_size(layout.block_taskbar);
+                                    let mon_w = monitor_w
+                                        * (1.0 - layout.inset_left - layout.inset_right);
+                                    let mon_h = monitor_h
+                                        * (1.0 - layout.inset_top - layout.inset_bottom);
 
                                     let r_sum: f32 = layout.row_ratios.iter().sum();
                                     let c_sum: f32 = layout.col_ratios.iter().sum();
