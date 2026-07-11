@@ -312,8 +312,6 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(None));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
     static LAST_MOUSE_MOVE_TIME_MS: AtomicU64 = AtomicU64::new(0);
-    static ARDUINO_MOUSE_OUTPUT_UNTIL: Lazy<Mutex<Option<Instant>>> =
-        Lazy::new(|| Mutex::new(None));
     const QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS: u32 = 1200;
     static MASCOT_WINDOW_MOVING: AtomicBool = AtomicBool::new(false);
     static MASCOT_DRAG_START_MOUSE: Lazy<Mutex<Option<(i32, i32)>>> =
@@ -4878,12 +4876,6 @@ mod windows_overlay {
             let info = *(lparam.0 as *const MSLLHOOKSTRUCT);
             let injected = info.flags & 0x01 != 0;
             if injected {
-                return CallNextHookEx(None, code, wparam, lparam);
-            }
-            if ARDUINO_MOUSE_OUTPUT_UNTIL
-                .lock()
-                .is_some_and(|until| Instant::now() < until)
-            {
                 return CallNextHookEx(None, code, wparam, lparam);
             }
 
@@ -31309,8 +31301,6 @@ mod windows_overlay {
                 }
 
                 if let Some(ref mut port) = *port_guard {
-                    *ARDUINO_MOUSE_OUTPUT_UNTIL.lock() =
-                        Some(Instant::now() + Duration::from_millis(80));
                     if let Err(e) = port.write_all(bytes) {
                         *port_guard = None;
                         *name_guard = String::new();
