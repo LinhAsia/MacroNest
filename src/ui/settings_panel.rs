@@ -1570,7 +1570,7 @@ impl CrosshairApp {
         self.status = "Launching Interception driver installer...".to_owned();
     }
 
-    pub(crate) fn start_interception_driver_uninstall(&mut self) {
+    fn start_interception_driver_uninstall(&mut self) {
         if self.interception_install_job.is_some() || self.interception_uninstall_job.is_some() {
             return;
         }

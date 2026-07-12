@@ -2732,11 +2732,14 @@ impl CrosshairApp {
                 let job = self.interception_uninstall_job.take().unwrap();
                 match job.join() {
                     Ok(Ok(())) => {
+                        self.delete_interception_package();
                         self.state.vision_settings.use_interception = false;
                         self.interception_driver_installed = false;
-                        self.interception_driver_needs_restart = true;
+                        self.interception_driver_needs_restart = false;
                         self.set_interception_install_pending_marker(false);
-                        self.status = "Interception driver removed. Restart Windows before using Arduino. The installer was kept for switching back later.".to_owned();
+                        self.status =
+                            "Interception driver removed. Package files deleted from app."
+                                .to_owned();
                     }
                     Ok(Err(error)) => {
                         self.status = format!("Driver uninstall failed: {error}");
