@@ -1094,8 +1094,8 @@ impl CrosshairApp {
             egui::ComboBox::from_id_salt((id_salt, "network_method"))
                 .width(170.0)
                 .selected_text(match method {
-                    1 => Self::tr_lang(language, "Internet route (Fast)", "Tuyến mạng (Nhanh)"),
-                    2 => Self::tr_lang(language, "Radio (Instant)", "Radio (Instant)"),
+                    1 => Self::tr_lang(language, "Internet route (Instant)", "Tuyến mạng (Tức thì)"),
+                    2 => Self::tr_lang(language, "Radio (Fast)", "Radio (Nhanh)"),
                     _ => Self::tr_lang(language, "Adapter (Slow)", "Card mạng (Chậm)"),
                 })
                 .show_ui(ui, |ui| {
@@ -1107,14 +1107,14 @@ impl CrosshairApp {
                     ui.selectable_value(
                         &mut method,
                         1,
-                        Self::tr_lang(language, "Internet route (Fast)", "Tuyến mạng (Nhanh)"),
+                        Self::tr_lang(language, "Internet route (Instant)", "Tuyến mạng (Tức thì)"),
                     );
-                    // Radio (Instant) chỉ khả dụng khi chọn mạng là Wi-Fi
+                    // Radio is only available when Wi-Fi is selected.
                     if is_wifi_target {
                         ui.selectable_value(
                             &mut method,
                             2,
-                            Self::tr_lang(language, "Radio (Instant)", "Radio (Instant)"),
+                            Self::tr_lang(language, "Radio (Fast)", "Radio (Nhanh)"),
                         );
                     }
                 });
