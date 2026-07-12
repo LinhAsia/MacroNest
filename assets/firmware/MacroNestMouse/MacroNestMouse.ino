@@ -123,25 +123,6 @@ void execute() {
       sendAbsoluteMouse();
       break;
     }
-    case 6: {
-      const uint8_t mask = packet[2] == 1 ? 1 : packet[2] == 2 ? 2 : packet[2] == 3 ? 4 : 0;
-      if (!mask) {
-        success = false;
-        break;
-      }
-      Mouse.press(mask);
-      if (absolutePositionActive) {
-        absoluteButtons |= mask;
-        sendAbsoluteMouse();
-      }
-      delay(2);
-      Mouse.release(mask);
-      if (absolutePositionActive) {
-        absoluteButtons &= ~mask;
-        sendAbsoluteMouse();
-      }
-      break;
-    }
     default:
       success = false;
   }
