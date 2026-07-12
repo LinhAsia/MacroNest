@@ -31,8 +31,6 @@ void execute() {
   }
   bool success = true;
   switch (packet[1]) {
-    case 0:
-      break;
     case 1: {
       const int16_t x = static_cast<int16_t>((packet[2] << 8) | packet[3]);
       const int16_t y = static_cast<int16_t>((packet[4] << 8) | packet[5]);
@@ -66,10 +64,6 @@ void setup() {
 void loop() {
   while (Serial.available()) {
     const uint8_t value = Serial.read();
-    if (packetLength == 0 && value == 0xF0) {
-      Serial.write(0x0F);
-      continue;
-    }
     if (packetLength == 0 && value != kHeader) continue;
     packet[packetLength++] = value;
     if (packetLength == kPacketSize) {
