@@ -31698,10 +31698,6 @@ mod windows_overlay {
             } else {
                 send_mouse_move_absolute(x, y)?;
             }
-            if HOOK_STATE.lock().use_arduino_mouse {
-                // ponytail: leave one scheduler slice for queued button input between vision moves.
-                thread::sleep(Duration::from_millis(1));
-            }
             if attempt + 1 < attempts && move_delay_ms > 0 {
                 thread::sleep(Duration::from_millis(move_delay_ms));
             }
