@@ -176,14 +176,6 @@ impl CrosshairApp {
         let select_port_txt = self.tr("Select Port", "Chọn cổng");
         let com_port_lbl = self.tr("COM Port:", "Cổng COM:");
 
-        let should_refresh_arduino_ports = self
-            .arduino_ports_last_refresh
-            .map(|last_refresh| last_refresh.elapsed() >= Duration::from_millis(1500))
-            .unwrap_or(true);
-        if !self.arduino_flash_running && should_refresh_arduino_ports {
-            self.refresh_arduino_ports();
-        }
-
         let selected_port_exists = !self.state.vision_settings.arduino_com_port.is_empty()
             && self
                 .arduino_available_ports
@@ -194,7 +186,6 @@ impl CrosshairApp {
         let selected_mode = self.selected_mouse_input_backend_mode();
         let is_connected = selected_mode == MouseInputBackendMode::Arduino
             && arduino_port_open
-            && selected_port_exists
             && arduino_open_port == selected_port;
         let selected_port_text = if selected_port.is_empty() {
             "none".to_owned()

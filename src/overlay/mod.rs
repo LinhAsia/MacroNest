@@ -3199,13 +3199,6 @@ mod windows_overlay {
                     thread::sleep(Duration::from_millis(250));
                     continue;
                 }
-                let available = serialport::available_ports()
-                    .is_ok_and(|ports| ports.iter().any(|port| port.port_name == com_port));
-                if !available {
-                    close_arduino_runtime();
-                    thread::sleep(Duration::from_millis(250));
-                    continue;
-                }
                 let mut name = CURRENT_ARDUINO_PORT_NAME.lock();
                 let mut port = ARDUINO_PORT.lock();
                 if name.as_str() != com_port || port.is_none() {
