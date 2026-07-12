@@ -100,6 +100,7 @@ pub(crate) fn set_image_search_following_active(preset_id: u32, active: bool) {
         state.vision_following_presets.remove(&preset_id);
         state.vision_following_offsets.remove(&preset_id);
         state.vision_following_axis_locks.remove(&preset_id);
+        state.vision_following_relative_moves.remove(&preset_id);
     }
 }
 
@@ -133,6 +134,7 @@ pub(crate) fn start_vision_following(
     spec: &str,
     variable_override: Option<&str>,
     axis_lock: VisionMoveAxisLock,
+    relative_move: bool,
     offset_x: i32,
     offset_y: i32,
     passes: u8,
@@ -152,6 +154,8 @@ pub(crate) fn start_vision_following(
         .insert(preset.id, (offset_x, offset_y));
     lock.vision_following_axis_locks
         .insert(preset.id, axis_lock);
+    lock.vision_following_relative_moves
+        .insert(preset.id, relative_move);
     lock.vision_following_passes.insert(preset.id, passes);
     lock.vision_following_delays.insert(preset.id, delay_ms);
     lock.vision_following_tolerances
@@ -1148,6 +1152,7 @@ pub(crate) fn run_vision_once_with_options(
     pos_var_y: Option<&str>,
     found_var: Option<&str>,
     axis_lock: VisionMoveAxisLock,
+    relative_move: bool,
     step_offset_x: i32,
     step_offset_y: i32,
     passes: u8,
@@ -1369,7 +1374,13 @@ pub(crate) fn run_vision_once_with_options(
         set_found_var(true);
 
         if move_cursor {
-            settle_image_search_mouse_move(move_target.0, move_target.1, passes, delay_ms)?;
+            settle_image_search_mouse_move(
+                move_target.0,
+                move_target.1,
+                relative_move,
+                passes,
+                delay_ms,
+            )?;
         }
 
         if fire_click {
@@ -1580,7 +1591,13 @@ pub(crate) fn run_vision_once_with_options(
     set_found_var(true);
 
     if move_cursor {
-        settle_image_search_mouse_move(move_target.0, move_target.1, passes, delay_ms)?;
+        settle_image_search_mouse_move(
+            move_target.0,
+            move_target.1,
+            relative_move,
+            passes,
+            delay_ms,
+        )?;
     }
 
     if fire_click {
@@ -1607,6 +1624,7 @@ pub(crate) fn run_vision_once(preset: &VisionPreset) -> Result<String> {
         None,
         None,
         VisionMoveAxisLock::None,
+        false,
         preset.move_offset_x,
         preset.move_offset_y,
         preset.non_interception_move_passes,
@@ -1629,7 +1647,7 @@ pub(crate) fn run_image_search_follow_loop(
     }
 
     while image_search_following_is_active(preset.id) {
-        let (offset_x, offset_y, axis_lock, passes, delay_ms, tolerance, rate_hz) = {
+        let (offset_x, offset_y, axis_lock, relative_move, passes, delay_ms, tolerance, rate_hz) = {
             let state = HOOK_STATE.lock();
             (
                 state
@@ -1649,6 +1667,11 @@ pub(crate) fn run_image_search_follow_loop(
                     .get(&preset.id)
                     .copied()
                     .unwrap_or(VisionMoveAxisLock::None),
+                state
+                    .vision_following_relative_moves
+                    .get(&preset.id)
+                    .copied()
+                    .unwrap_or(false),
                 state
                     .vision_following_passes
                     .get(&preset.id)
@@ -1680,6 +1703,7 @@ pub(crate) fn run_image_search_follow_loop(
             None,
             None,
             axis_lock,
+            relative_move,
             offset_x,
             offset_y,
             passes,
@@ -1808,6 +1832,7 @@ pub(crate) fn trigger_vision_move_with_options(
             None,
             None,
             VisionMoveAxisLock::None,
+            false,
             0,
             0,
             preset.non_interception_move_passes,

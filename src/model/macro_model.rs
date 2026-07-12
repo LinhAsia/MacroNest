@@ -235,6 +235,8 @@ pub struct MacroStep {
     #[serde(default)]
     pub vision_move_axis_lock: VisionMoveAxisLock,
     #[serde(default)]
+    pub vision_move_relative: bool,
+    #[serde(default)]
     pub vision_move_offset_x: i32,
     #[serde(default)]
     pub vision_move_offset_y: i32,
@@ -393,6 +395,7 @@ impl Default for MacroStep {
             mouse_speed_percent: 100,
             vision_move_cursor_on_match: false,
             vision_move_axis_lock: VisionMoveAxisLock::None,
+            vision_move_relative: false,
             vision_move_offset_x: 0,
             vision_move_offset_y: 0,
             vision_move_passes: 1,

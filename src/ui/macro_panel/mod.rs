@@ -349,6 +349,7 @@ impl CrosshairApp {
         }
         if show_move_fields {
             Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
+            Self::render_vision_move_mode_controls(ui, step, language, live_sync);
         }
         Self::render_vision_runtime_tuning_dropdown(
             ui,
@@ -380,6 +381,7 @@ impl CrosshairApp {
                 "Move Mouse only",
             ));
             Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
+            Self::render_vision_move_mode_controls(ui, step, language, live_sync);
         }
         Self::render_vision_runtime_tuning_dropdown(
             ui,
@@ -640,6 +642,37 @@ impl CrosshairApp {
                     Self::tr_lang(language, "Vertical only", "Vertical only"),
                 );
                 *live_sync |= vertical.changed();
+            });
+    }
+
+    fn render_vision_move_mode_controls(
+        ui: &mut egui::Ui,
+        step: &mut MacroStep,
+        language: UiLanguage,
+        live_sync: &mut bool,
+    ) {
+        egui::ComboBox::from_id_salt(ui.id().with("vision-move-mode"))
+            .width(88.0)
+            .selected_text(if step.vision_move_relative {
+                Self::tr_lang(language, "Relative", "Tương đối")
+            } else {
+                Self::tr_lang(language, "Absolute", "Tuyệt đối")
+            })
+            .show_ui(ui, |ui| {
+                *live_sync |= ui
+                    .selectable_value(
+                        &mut step.vision_move_relative,
+                        false,
+                        Self::tr_lang(language, "Absolute", "Tuyệt đối"),
+                    )
+                    .changed();
+                *live_sync |= ui
+                    .selectable_value(
+                        &mut step.vision_move_relative,
+                        true,
+                        Self::tr_lang(language, "Relative", "Tương đối"),
+                    )
+                    .changed();
             });
     }
 

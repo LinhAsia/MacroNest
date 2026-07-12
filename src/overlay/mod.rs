@@ -2492,6 +2492,7 @@ mod windows_overlay {
         vision_following_presets: HashSet<u32>,
         pub(crate) vision_following_offsets: HashMap<u32, (i32, i32)>,
         pub(crate) vision_following_axis_locks: HashMap<u32, crate::model::VisionMoveAxisLock>,
+        pub(crate) vision_following_relative_moves: HashMap<u32, bool>,
         pub(crate) vision_following_passes: HashMap<u32, u8>,
         pub(crate) vision_following_delays: HashMap<u32, u64>,
         pub(crate) vision_following_tolerances: HashMap<u32, u8>,
@@ -2600,6 +2601,7 @@ mod windows_overlay {
                 vision_following_presets: HashSet::new(),
                 vision_following_offsets: HashMap::new(),
                 vision_following_axis_locks: HashMap::new(),
+                vision_following_relative_moves: HashMap::new(),
                 vision_following_passes: HashMap::new(),
                 vision_following_delays: HashMap::new(),
                 vision_following_tolerances: HashMap::new(),
@@ -26810,6 +26812,7 @@ mod windows_overlay {
                     &step.key,
                     Some(&step.if_variable_name),
                     step.vision_move_axis_lock,
+                    step.vision_move_relative,
                     step.vision_move_offset_x,
                     step.vision_move_offset_y,
                     step.vision_move_passes,
@@ -26834,6 +26837,7 @@ mod windows_overlay {
                         Some(&step.vision_pos_var_y),
                         Some(&step.vision_found_var),
                         step.vision_move_axis_lock,
+                        step.vision_move_relative,
                         step.vision_move_offset_x,
                         step.vision_move_offset_y,
                         step.vision_move_passes,
@@ -27563,6 +27567,7 @@ mod windows_overlay {
                         &step.key,
                         Some(&step.if_variable_name),
                         step.vision_move_axis_lock,
+                        step.vision_move_relative,
                         step.vision_move_offset_x,
                         step.vision_move_offset_y,
                         step.vision_move_passes,
@@ -27594,6 +27599,7 @@ mod windows_overlay {
                             Some(&step.vision_pos_var_y),
                             Some(&step.vision_found_var),
                             step.vision_move_axis_lock,
+                            step.vision_move_relative,
                             step.vision_move_offset_x,
                             step.vision_move_offset_y,
                             step.vision_move_passes,
@@ -28323,8 +28329,9 @@ mod windows_overlay {
                     let _ = start_vision_following(
                         &step.key,
                         Some(&step.if_variable_name),
-                        step.vision_move_axis_lock,
-                        step.vision_move_offset_x,
+                    step.vision_move_axis_lock,
+                    step.vision_move_relative,
+                    step.vision_move_offset_x,
                         step.vision_move_offset_y,
                         step.vision_move_passes,
                         step.vision_move_delay_ms,
@@ -28347,8 +28354,9 @@ mod windows_overlay {
                             Some(&step.vision_pos_var_x),
                             Some(&step.vision_pos_var_y),
                             Some(&step.vision_found_var),
-                            step.vision_move_axis_lock,
-                            step.vision_move_offset_x,
+                        step.vision_move_axis_lock,
+                        step.vision_move_relative,
+                        step.vision_move_offset_x,
                             step.vision_move_offset_y,
                             step.vision_move_passes,
                             step.vision_move_delay_ms,
@@ -29005,6 +29013,7 @@ mod windows_overlay {
                             None,
                             None,
                             crate::model::VisionMoveAxisLock::None,
+                            false,
                             x,
                             y,
                             1,
@@ -31675,12 +31684,19 @@ mod windows_overlay {
     fn settle_image_search_mouse_move(
         x: i32,
         y: i32,
+        relative: bool,
         move_passes: u8,
         move_delay_ms: u64,
     ) -> Result<()> {
         let attempts = move_passes.max(1) as usize;
         for attempt in 0..attempts {
-            send_mouse_move_absolute(x, y)?;
+            if relative {
+                let mut cursor = POINT::default();
+                unsafe { GetCursorPos(&mut cursor)? };
+                send_mouse_move_relative(x - cursor.x, y - cursor.y)?;
+            } else {
+                send_mouse_move_absolute(x, y)?;
+            }
             if attempt + 1 < attempts && move_delay_ms > 0 {
                 thread::sleep(Duration::from_millis(move_delay_ms));
             }
