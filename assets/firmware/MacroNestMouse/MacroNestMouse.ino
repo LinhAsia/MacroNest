@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <HID.h>
+#include <Mouse.h>
 
 namespace {
 constexpr uint8_t kPacketSize = 8;
@@ -7,21 +7,6 @@ constexpr uint8_t kHeader = 0xA5;
 constexpr uint8_t kReply = 0x5A;
 uint8_t packet[kPacketSize];
 uint8_t packetLength = 0;
-uint8_t buttons = 0;
-
-const uint8_t mouseDescriptor[] PROGMEM = {
-  0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x09, 0x01, 0xA1, 0x00,
-  0x85, 0x01, 0x05, 0x09, 0x19, 0x01, 0x29, 0x05, 0x15, 0x00,
-  0x25, 0x01, 0x95, 0x05, 0x75, 0x01, 0x81, 0x02, 0x95, 0x01,
-  0x75, 0x03, 0x81, 0x03, 0x05, 0x01, 0x09, 0x30, 0x09, 0x31,
-  0x09, 0x38, 0x15, 0x81, 0x25, 0x7F, 0x75, 0x08, 0x95, 0x03,
-  0x81, 0x06, 0xC0, 0xC0
-};
-
-HIDSubDescriptor descriptor(mouseDescriptor, sizeof(mouseDescriptor));
-struct RegisterMouseDescriptor {
-  RegisterMouseDescriptor() { HID().AppendDescriptor(&descriptor); }
-} registerMouseDescriptor;
 
 uint8_t checksum(const uint8_t* bytes) {
   uint8_t value = 0;
@@ -30,9 +15,8 @@ uint8_t checksum(const uint8_t* bytes) {
 }
 
 bool sendMouse(int8_t x, int8_t y, int8_t wheel = 0) {
-  const uint8_t report[4] = {buttons, static_cast<uint8_t>(x),
-                             static_cast<uint8_t>(y), static_cast<uint8_t>(wheel)};
-  return HID().SendReport(1, report, sizeof(report)) == 5;
+  Mouse.move(x, y, wheel);
+  return true;
 }
 
 void reply(bool success) {
@@ -57,8 +41,8 @@ void execute() {
     }
     case 2: {
       const uint8_t mask = packet[2] == 1 ? 1 : packet[2] == 2 ? 2 : packet[2] == 3 ? 4 : 0;
-      if (packet[3]) buttons |= mask; else buttons &= ~mask;
-      success = mask != 0 && sendMouse(0, 0);
+      if (packet[3]) Mouse.press(mask); else Mouse.release(mask);
+      success = mask != 0;
       break;
     }
     case 3:
@@ -75,6 +59,7 @@ void execute() {
 }
 
 void setup() {
+  Mouse.begin();
   Serial.begin(115200);
 }
 
