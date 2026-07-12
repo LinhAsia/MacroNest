@@ -2848,6 +2848,22 @@ impl CrosshairApp {
                     );
                 }
 
+                set_progress("Flash complete. Waiting for the firmware COM port...".to_owned());
+                let reconnect_deadline = std::time::Instant::now()
+                    + std::time::Duration::from_secs(15);
+                loop {
+                    let ports = serialport::available_ports().unwrap_or_default();
+                    let bootloader_gone = !ports
+                        .iter()
+                        .any(|candidate| candidate.port_name == bootloader_port);
+                    if bootloader_gone && preferred_arduino_port(&ports).is_some() {
+                        break;
+                    }
+                    if std::time::Instant::now() >= reconnect_deadline {
+                        anyhow::bail!("Firmware flashed, but its COM port did not reconnect");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
                 set_progress("Flash complete. Reconnecting Arduino emulation...".to_owned());
                 Ok(())
             };
