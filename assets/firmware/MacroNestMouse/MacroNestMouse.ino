@@ -49,6 +49,12 @@ void execute() {
     case 4:
       success = sendMouse(100, 0);
       break;
+    case 5: {
+      const uint8_t mask = packet[2] == 1 ? 1 : packet[2] == 2 ? 2 : packet[2] == 3 ? 4 : 0;
+      if (mask) Mouse.click(mask);
+      success = mask != 0;
+      break;
+    }
     default:
       success = false;
   }

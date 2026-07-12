@@ -31414,6 +31414,18 @@ mod windows_overlay {
     }
 
     fn send_mouse_event(step: &MacroStep) -> Result<()> {
+        let use_arduino = HOOK_STATE.lock().use_arduino_mouse;
+        if use_arduino {
+            let click_button = match step.action {
+                MacroAction::MouseLeftClick => Some(1),
+                MacroAction::MouseRightClick => Some(2),
+                MacroAction::MouseMiddleClick => Some(3),
+                _ => None,
+            };
+            if let Some(button) = click_button {
+                return write_arduino_data(&arduino_packet(5, [button, 0, 0, 0, 0]));
+            }
+        }
         let delay_ms = HOOK_STATE.lock().macro_mouse_click_delay_ms;
         match step.action {
             MacroAction::MouseMoveAbsolute => {
