@@ -3225,12 +3225,14 @@ mod windows_overlay {
                 let mut disconnect = false;
                 if let Some(serial) = port.as_mut() {
                     use std::io::{Read, Write};
-                    let mut reply = [0u8; 2];
-                    let responsive = serial.write_all(&arduino_packet(0, [0; 5])).is_ok()
+                    let _ = serial.clear(serialport::ClearBuffer::Input);
+                    let write_ok = serial.write_all(&[0xF0]).is_ok();
+                    let mut reply = [0u8; 1];
+                    let responsive = write_ok
                         && serial.read_exact(&mut reply).is_ok()
-                        && reply == [0x5A, 0];
+                        && reply[0] == 0x0F;
                     ARDUINO_RESPONSIVE.store(responsive, Ordering::Release);
-                    if !responsive {
+                    if !write_ok {
                         disconnect = true;
                     }
                 }

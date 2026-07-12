@@ -66,6 +66,10 @@ void setup() {
 void loop() {
   while (Serial.available()) {
     const uint8_t value = Serial.read();
+    if (packetLength == 0 && value == 0xF0) {
+      Serial.write(0x0F);
+      continue;
+    }
     if (packetLength == 0 && value != kHeader) continue;
     packet[packetLength++] = value;
     if (packetLength == kPacketSize) {
