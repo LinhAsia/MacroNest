@@ -3237,6 +3237,7 @@ mod windows_overlay {
                     *port = None;
                     CURRENT_ARDUINO_PORT_NAME.lock().clear();
                 }
+                drop(port);
                 thread::sleep(Duration::from_secs(1));
             }
         });
