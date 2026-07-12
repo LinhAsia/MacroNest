@@ -195,6 +195,18 @@ impl CrosshairApp {
         let is_connected = selected_mode == MouseInputBackendMode::Arduino
             && arduino_port_open
             && arduino_open_port == selected_port;
+        let should_recover_port = selected_mode == MouseInputBackendMode::Arduino
+            && !self.arduino_flash_running
+            && !is_connected
+            && self
+                .arduino_ports_last_refresh
+                .is_none_or(|last| last.elapsed() >= Duration::from_secs(5));
+        if should_recover_port {
+            self.refresh_arduino_ports();
+        }
+        if is_connected && self.arduino_flash_status.starts_with("Error:") {
+            self.arduino_flash_status.clear();
+        }
         let selected_port_text = if selected_port.is_empty() {
             "none".to_owned()
         } else {
@@ -2632,6 +2644,15 @@ impl CrosshairApp {
         let preferred_port = preferred_arduino_port(&ports);
         self.arduino_available_ports = ports.into_iter().map(|p| p.port_name).collect();
         self.arduino_available_ports.sort();
+
+        if let Some(runtime_port) = preferred_port.as_ref()
+            && self.state.vision_settings.arduino_com_port != *runtime_port
+        {
+            self.state.vision_settings.arduino_com_port = runtime_port.clone();
+            self.sync_vision_settings();
+            self.persist();
+            return;
+        }
 
         let current_port = self.state.vision_settings.arduino_com_port.clone();
         if current_port.is_empty() {
