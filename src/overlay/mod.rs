@@ -3206,6 +3206,7 @@ mod windows_overlay {
                 if current_name != com_port || port.is_none() {
                     if last_open_attempt.elapsed() >= Duration::from_secs(5) {
                         last_open_attempt = Instant::now();
+                        CURRENT_ARDUINO_PORT_NAME.lock().clear();
                         let mut opened_port = serialport::new(&com_port, 115200)
                             .timeout(Duration::from_millis(250))
                             .open()
@@ -3216,16 +3217,15 @@ mod windows_overlay {
                             opened_port = None;
                         }
                         *port = opened_port;
-                        *CURRENT_ARDUINO_PORT_NAME.lock() = if port.is_some() {
-                            com_port
-                        } else {
-                            String::new()
-                        };
                         opened = port.is_some();
                     }
                 }
                 if opened {
+                    drop(port);
                     thread::sleep(Duration::from_millis(1200));
+                    *CURRENT_ARDUINO_PORT_NAME.lock() = com_port;
+                    thread::sleep(Duration::from_secs(1));
+                    continue;
                 }
                 let mut disconnect = false;
                 if let Some(serial) = port.as_mut() {
@@ -31523,7 +31523,7 @@ mod windows_overlay {
         ARDUINO_TEST_OUTPUT_ACTIVE.store(true, Ordering::Release);
         let result = (|| {
             write_arduino_data(&arduino_packet(4, [0; 5]))?;
-            thread::sleep(Duration::from_millis(150));
+            thread::sleep(Duration::from_millis(30));
             let mut after = POINT::default();
             unsafe { GetCursorPos(&mut after)? };
             if before.x == after.x && before.y == after.y {
