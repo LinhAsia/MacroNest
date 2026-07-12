@@ -160,8 +160,16 @@ impl CrosshairApp {
                 }
                 match res {
                     Ok(()) => {
-                        self.arduino_flash_status =
-                    self.tr("Flash Success!", "Nạp firmware thành công!").to_owned();
+                        if self.interception_driver_installed {
+                            self.refresh_interception_for_arduino();
+                            self.arduino_flash_status = self.tr(
+                                "Flash complete. Restart Windows once to finish Arduino setup.",
+                                "Nạp firmware xong. Hãy khởi động lại Windows một lần để hoàn tất thiết lập Arduino.",
+                            ).to_owned();
+                        } else {
+                            self.arduino_flash_status =
+                                self.tr("Flash Success!", "Nạp firmware thành công!").to_owned();
+                        }
                     }
                     Err(e) => {
                         self.arduino_flash_status = format!("Error: {e}");
