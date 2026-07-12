@@ -3215,6 +3215,7 @@ mod windows_overlay {
                         opened = port.is_some();
                     }
                 }
+                drop(name);
                 if opened {
                     thread::sleep(Duration::from_millis(1200));
                 }
@@ -3232,7 +3233,7 @@ mod windows_overlay {
                 }
                 if disconnect {
                     *port = None;
-                    name.clear();
+                    CURRENT_ARDUINO_PORT_NAME.lock().clear();
                 }
                 thread::sleep(Duration::from_secs(1));
             }
