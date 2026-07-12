@@ -1647,6 +1647,7 @@ pub(crate) fn run_image_search_follow_loop(
     }
 
     while image_search_following_is_active(preset.id) {
+        let iteration_started = Instant::now();
         let (offset_x, offset_y, axis_lock, relative_move, passes, delay_ms, tolerance, rate_hz) = {
             let state = HOOK_STATE.lock();
             (
@@ -1724,8 +1725,10 @@ pub(crate) fn run_image_search_follow_loop(
             }
         }
 
-        let sleep_duration = Duration::from_nanos(1_000_000_000 / rate_hz as u64);
-        thread::sleep(sleep_duration);
+        let interval = Duration::from_nanos(1_000_000_000 / rate_hz as u64);
+        if let Some(remaining) = interval.checked_sub(iteration_started.elapsed()) {
+            thread::sleep(remaining);
+        }
     }
 
     set_image_search_following_active(preset.id, false);

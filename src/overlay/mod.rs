@@ -31226,6 +31226,7 @@ mod windows_overlay {
             *port = None;
             CURRENT_ARDUINO_PORT_NAME.lock().clear();
         }
+        parking_lot::MutexGuard::unlock_fair(port);
         result
     }
 
