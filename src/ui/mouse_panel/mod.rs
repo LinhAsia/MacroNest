@@ -2856,11 +2856,20 @@ impl CrosshairApp {
                     let bootloader_gone = !ports
                         .iter()
                         .any(|candidate| candidate.port_name == bootloader_port);
-                    if bootloader_gone && preferred_arduino_port(&ports).is_some() {
+                    let new_firmware_present = ports.iter().any(|candidate| {
+                        matches!(
+                            &candidate.port_type,
+                            serialport::SerialPortType::UsbPort(info)
+                                if info.vid == 0x2341 && info.pid == 0x8037
+                        )
+                    });
+                    if bootloader_gone && new_firmware_present {
                         break;
                     }
                     if std::time::Instant::now() >= reconnect_deadline {
-                        anyhow::bail!("Firmware flashed, but its COM port did not reconnect");
+                        anyhow::bail!(
+                            "Flash verification failed: Arduino did not restart with PID 8037"
+                        );
                     }
                     std::thread::sleep(std::time::Duration::from_millis(250));
                 }
