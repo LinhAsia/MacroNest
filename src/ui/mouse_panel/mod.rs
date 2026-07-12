@@ -223,7 +223,15 @@ impl CrosshairApp {
 
         let mut arduino_changed = false;
         if next_mode != selected_mode {
-            if next_mode == MouseInputBackendMode::Interception && !self.interception_installed {
+            if next_mode == MouseInputBackendMode::Arduino
+                && self.interception_driver_installed
+            {
+                self.status = self.tr(
+                    "Interception must be removed and Windows restarted before using Arduino.",
+                    "Phải gỡ Interception và khởi động lại Windows trước khi dùng Arduino.",
+                ).to_owned();
+                next_mode = selected_mode;
+            } else if next_mode == MouseInputBackendMode::Interception && !self.interception_installed {
                 self.status = self
                     .tr(
                         "Please download and install the Interception Driver wrapper first!",
@@ -401,11 +409,50 @@ impl CrosshairApp {
                     .color(Color32::from_rgb(220, 180, 80)),
             );
 
+            if self.interception_driver_installed {
+                ui.add_space(8.0);
+                ui.colored_label(
+                    Color32::from_rgb(255, 96, 96),
+                    self.tr(
+                        "Interception is installed and blocks this Arduino HID mouse.",
+                        "Interception đang được cài và chặn chuột Arduino HID này.",
+                    ),
+                );
+                let uninstalling = self.interception_uninstall_job.is_some();
+                if ui
+                    .add_enabled(
+                        !uninstalling,
+                        egui::Button::new(self.tr(
+                            "Remove Interception for Arduino",
+                            "Gỡ Interception để dùng Arduino",
+                        )),
+                    )
+                    .clicked()
+                {
+                    self.start_interception_driver_uninstall();
+                }
+                if uninstalling {
+                    ui.spinner();
+                }
+            } else if self.interception_driver_needs_restart {
+                ui.add_space(8.0);
+                ui.colored_label(
+                    Color32::from_rgb(255, 206, 96),
+                    self.tr(
+                        "Restart Windows to finish removing Interception before testing Arduino.",
+                        "Khởi động lại Windows để hoàn tất gỡ Interception trước khi kiểm tra Arduino.",
+                    ),
+                );
+            }
+
             ui.add_space(8.0);
 
             ui.horizontal(|ui| {
                 let test_button = ui.add_enabled(
-                    is_connected && !self.arduino_flash_running,
+                    is_connected
+                        && !self.arduino_flash_running
+                        && !self.interception_driver_installed
+                        && !self.interception_driver_needs_restart,
                     egui::Button::new(self.tr("Test Arduino", "Kiểm tra Arduino")),
                 );
                 if test_button.clicked() {
