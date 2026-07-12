@@ -3070,12 +3070,29 @@ fn touch_arduino_bootloader_port(port: &str, timeout: std::time::Duration) -> an
             .timeout(std::time::Duration::from_millis(500))
             .open()
         {
-            Ok(_) => {
+            Ok(mut serial) => {
+                let _ = serial.write_data_terminal_ready(true);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let _ = serial.write_data_terminal_ready(false);
                 std::thread::sleep(std::time::Duration::from_millis(300));
                 return Ok(());
             }
             Err(error) => {
                 last_error = Some(error.to_string());
+                let bootloader_present = serialport::available_ports()
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|candidate| {
+                        matches!(
+                            &candidate.port_type,
+                            serialport::SerialPortType::UsbPort(info)
+                                if info.vid == 0x2341
+                                    && matches!(info.pid, 0x0036 | 0x0037)
+                        )
+                    });
+                if bootloader_present {
+                    return Ok(());
+                }
                 std::thread::sleep(std::time::Duration::from_millis(250));
             }
         }
