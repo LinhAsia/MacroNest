@@ -25323,39 +25323,6 @@ mod windows_overlay {
         }
     }
 
-    fn read_route_action_result(
-        result_file: &std::path::Path,
-    ) -> Result<(Option<Vec<String>>, Option<String>)> {
-        let content = std::fs::read_to_string(result_file)
-            .with_context(|| format!("Failed to read {}", result_file.display()))?;
-        let mut lines = content.lines();
-        let status = lines.next().unwrap_or_default().trim();
-        match status {
-            "OK" => Ok((
-                Some(
-                    lines
-                        .map(str::trim)
-                        .filter(|line| !line.is_empty())
-                        .map(str::to_owned)
-                        .collect(),
-                ),
-                None,
-            )),
-            "NONE" => Ok((Some(Vec::new()), None)),
-            "ERR" => Ok((
-                None,
-                Some(
-                    lines
-                        .map(str::trim)
-                        .filter(|line| !line.is_empty())
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                ),
-            )),
-            _ => bail!("Unexpected route action result"),
-        }
-    }
-
     fn run_hidden_powershell_script(
         script: &str,
         require_admin: bool,
@@ -25448,34 +25415,6 @@ mod windows_overlay {
         ))
     }
 
-    fn build_cut_internet_route_command(
-        adapter_query: &str,
-        result_file: &std::path::Path,
-    ) -> String {
-        let result_path = powershell_single_quote(&result_file.to_string_lossy());
-        format!(
-            "$mnResultPath = '{result_path}'; try {{ $adapters = @({adapter_query}); if ($adapters.Count -eq 0) {{ Set-Content -LiteralPath $mnResultPath -Value @('NONE'); exit 0 }}; $ifIndexes = @($adapters | Select-Object -ExpandProperty ifIndex); $routes = @(Get-NetRoute -ErrorAction SilentlyContinue | Where-Object {{ ($_.DestinationPrefix -eq '0.0.0.0/0' -or $_.DestinationPrefix -eq '::/0') -and ($ifIndexes -contains $_.InterfaceIndex) }}); if ($routes.Count -eq 0) {{ Set-Content -LiteralPath $mnResultPath -Value @('NONE'); exit 0 }}; $lines = @('OK'); foreach ($route in $routes) {{ $ifIndex = [string]$route.InterfaceIndex; $destination = [string]$route.DestinationPrefix; $nextHop = [string]$route.NextHop; $metric = [string]$route.RouteMetric; $lines += \"ROUTE`t$ifIndex`t$destination`t$nextHop`t$metric\"; Remove-NetRoute -DestinationPrefix $route.DestinationPrefix -InterfaceIndex $route.InterfaceIndex -NextHop $route.NextHop -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }}; Set-Content -LiteralPath $mnResultPath -Value $lines; exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
-        )
-    }
-
-    fn build_restore_internet_route_command(
-        saved_routes: &[String],
-        result_file: &std::path::Path,
-    ) -> Result<String> {
-        if saved_routes.is_empty() {
-            bail!("No saved internet routes to restore");
-        }
-        let result_path = powershell_single_quote(&result_file.to_string_lossy());
-        let route_entries = saved_routes
-            .iter()
-            .map(|route| format!("'{}'", powershell_single_quote(route)))
-            .collect::<Vec<_>>()
-            .join(",");
-        Ok(format!(
-            "$mnResultPath = '{result_path}'; try {{ $saved = @({route_entries}); $lines = @('OK'); foreach ($entry in $saved) {{ $parts = [string]$entry -split \"`t\", 5; if ($parts.Count -lt 5 -or $parts[0] -ne 'ROUTE') {{ continue }}; $ifIndex = [int]$parts[1]; $destination = [string]$parts[2]; $nextHop = [string]$parts[3]; $metric = [int]$parts[4]; $existing = Get-NetRoute -DestinationPrefix $destination -InterfaceIndex $ifIndex -NextHop $nextHop -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not $existing) {{ New-NetRoute -DestinationPrefix $destination -InterfaceIndex $ifIndex -NextHop $nextHop -RouteMetric $metric -ErrorAction Stop | Out-Null }}; $lines += $entry }}; Set-Content -LiteralPath $mnResultPath -Value $lines; exit 0 }} catch {{ Set-Content -LiteralPath $mnResultPath -Value @('ERR', $_.Exception.Message); exit 1 }}"
-        ))
-    }
-
     fn saved_wifi_profiles_for_target(target_spec: &str) -> HashMap<String, String> {
         if is_wifi_network_target(target_spec) {
             HOOK_STATE
@@ -25554,12 +25493,128 @@ mod windows_overlay {
         Ok(())
     }
 
-    fn spawn_internet_route_command(cut: bool, adapter_query: String, target_spec: String) {
+    fn route_adapter_matches(interface_index: u32, target_spec: &str) -> bool {
+        use windows::Win32::NetworkManagement::IpHelper::{GetIfEntry2, MIB_IF_ROW2};
+        let mut interface = MIB_IF_ROW2 {
+            InterfaceIndex: interface_index,
+            ..Default::default()
+        };
+        if unsafe { GetIfEntry2(&mut interface) }.0 != 0 {
+            return false;
+        }
+        let utf16 = |value: &[u16]| {
+            String::from_utf16_lossy(&value[..value.iter().position(|unit| *unit == 0).unwrap_or(value.len())])
+        };
+        let alias = utf16(&interface.Alias);
+        let description = utf16(&interface.Description);
+        let normalized = normalize_network_target_spec(target_spec);
+        if let Some(custom_name) = normalized.strip_prefix("custom:") {
+            return alias.eq_ignore_ascii_case(custom_name.trim());
+        }
+        if normalized.eq_ignore_ascii_case("wifi") {
+            return interface.Type == 71
+                || alias.to_ascii_lowercase().contains("wi-fi")
+                || description.to_ascii_lowercase().contains("wireless");
+        }
+        interface.Type == 6
+    }
+
+    fn encode_native_route(
+        route: &windows::Win32::NetworkManagement::IpHelper::MIB_IPFORWARD_ROW2,
+    ) -> String {
+        use base64::Engine as _;
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                (route as *const windows::Win32::NetworkManagement::IpHelper::MIB_IPFORWARD_ROW2)
+                    .cast::<u8>(),
+                std::mem::size_of_val(route),
+            )
+        };
+        format!(
+            "NATIVE_ROUTE:{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )
+    }
+
+    fn decode_native_route(
+        saved: &str,
+    ) -> Result<windows::Win32::NetworkManagement::IpHelper::MIB_IPFORWARD_ROW2> {
+        use base64::Engine as _;
+        let encoded = saved
+            .strip_prefix("NATIVE_ROUTE:")
+            .context("Saved route is not a native route")?;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded)?;
+        if bytes.len()
+            != std::mem::size_of::<
+                windows::Win32::NetworkManagement::IpHelper::MIB_IPFORWARD_ROW2,
+            >()
+        {
+            bail!("Saved route has an invalid size");
+        }
+        let mut route = windows::Win32::NetworkManagement::IpHelper::MIB_IPFORWARD_ROW2::default();
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                (&mut route
+                    as *mut windows::Win32::NetworkManagement::IpHelper::MIB_IPFORWARD_ROW2)
+                    .cast::<u8>(),
+                bytes.len(),
+            );
+        }
+        Ok(route)
+    }
+
+    fn cut_internet_routes_native(target_spec: &str) -> Result<Vec<String>> {
+        use windows::Win32::{
+            Foundation::WIN32_ERROR,
+            NetworkManagement::IpHelper::{
+                DeleteIpForwardEntry2, FreeMibTable, GetIpForwardTable2, MIB_IPFORWARD_TABLE2,
+            },
+            Networking::WinSock::AF_UNSPEC,
+        };
+        let mut table: *mut MIB_IPFORWARD_TABLE2 = std::ptr::null_mut();
+        let status = unsafe { GetIpForwardTable2(AF_UNSPEC, &mut table) };
+        if status != WIN32_ERROR(0) || table.is_null() {
+            bail!("GetIpForwardTable2 failed ({})", status.0);
+        }
+        let rows = unsafe {
+            std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize)
+        };
+        let mut saved = Vec::new();
+        for route in rows {
+            if route.DestinationPrefix.PrefixLength != 0
+                || !route_adapter_matches(route.InterfaceIndex, target_spec)
+            {
+                continue;
+            }
+            if unsafe { DeleteIpForwardEntry2(route) }.0 == 0 {
+                saved.push(encode_native_route(route));
+            }
+        }
+        unsafe { FreeMibTable(table.cast()) };
+        Ok(saved)
+    }
+
+    fn restore_internet_routes_native(saved_routes: &[String]) -> Result<Vec<String>> {
+        use windows::Win32::NetworkManagement::IpHelper::CreateIpForwardEntry2;
+        let mut restored = Vec::new();
+        for saved in saved_routes {
+            let route = decode_native_route(saved)?;
+            let status = unsafe { CreateIpForwardEntry2(&route) };
+            if status.0 == 0 || status.0 == 5010 {
+                restored.push(saved.clone());
+            } else {
+                bail!("CreateIpForwardEntry2 failed ({})", status.0);
+            }
+        }
+        Ok(restored)
+    }
+
+    fn spawn_internet_route_command(cut: bool, target_spec: String) {
         let target_label = network_action_target_label(&target_spec);
         enqueue_network_action(move || {
-            let result_file = network_action_result_file_path();
-            let command_text = if cut {
-                build_cut_internet_route_command(&adapter_query, &result_file)
+            let result = if cut {
+                cut_internet_routes_native(&target_spec)
             } else {
                 let saved_routes = HOOK_STATE
                     .lock()
@@ -25567,19 +25622,10 @@ mod windows_overlay {
                     .iter()
                     .cloned()
                     .collect::<Vec<_>>();
-                match build_restore_internet_route_command(&saved_routes, &result_file) {
-                    Ok(command) => command,
-                    Err(error) => {
-                        send_network_action_status(format!(
-                            "Internet route action failed: {error}"
-                        ));
-                        return;
-                    }
-                }
+                restore_internet_routes_native(&saved_routes)
             };
-            let message = match run_hidden_powershell_script(&command_text, true, 15_000) {
-                Ok(_) => match read_route_action_result(&result_file) {
-                    Ok((Some(routes), None)) => {
+            let message = match result {
+                Ok(routes) => {
                         let mut hook_state = HOOK_STATE.lock();
                         if cut {
                             for route in &routes {
@@ -25603,29 +25649,15 @@ mod windows_overlay {
                         } else {
                             "Restored internet route.".to_owned()
                         }
-                    }
-                    Ok((None, Some(error))) if !error.is_empty() => {
-                        format!("Internet route action failed: {error}")
-                    }
-                    Ok((Some(_), Some(error))) if !error.is_empty() => {
-                        format!("Internet route action failed: {error}")
-                    }
-                    Ok((Some(_), Some(_))) => "Internet route action failed.".to_owned(),
-                    Ok((None, Some(_))) | Ok((None, None)) => {
-                        "Internet route action failed.".to_owned()
-                    }
-                    Err(error) => format!("Internet route action failed: {error}"),
-                },
+                }
                 Err(error) => format!("Internet route action failed: {error}"),
             };
-            let _ = std::fs::remove_file(&result_file);
             send_network_action_status(message);
         });
     }
 
     fn trigger_internet_route_step(step: &MacroStep, cut: bool) -> Result<()> {
-        let adapter_query = build_network_adapter_query(&step.key)?;
-        spawn_internet_route_command(cut, adapter_query, step.key.clone());
+        spawn_internet_route_command(cut, step.key.clone());
         Ok(())
     }
 
@@ -25734,11 +25766,11 @@ mod windows_overlay {
         if routes.is_empty() {
             return Ok(());
         }
-        let result_file = network_action_result_file_path();
-        let command_text = build_restore_internet_route_command(&routes, &result_file)?;
-        let _ = run_hidden_powershell_script(&command_text, true, 15_000)?;
-        let _ = std::fs::remove_file(&result_file);
-        HOOK_STATE.lock().cut_internet_routes_this_session.clear();
+        let restored = restore_internet_routes_native(&routes)?;
+        let mut hook_state = HOOK_STATE.lock();
+        for route in restored {
+            hook_state.cut_internet_routes_this_session.remove(&route);
+        }
         Ok(())
     }
 
