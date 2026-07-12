@@ -31516,16 +31516,20 @@ mod windows_overlay {
     }
 
     fn send_arduino_relative_move_sequence(dx: i32, dy: i32) -> Result<()> {
-        let mut rem_x = dx;
-        let mut rem_y = dy;
-
-        while rem_x != 0 || rem_y != 0 {
-            let step_x = rem_x.clamp(-96, 96);
-            let step_y = rem_y.clamp(-96, 96);
+        let steps = (dx.abs().max(dy.abs()) + 95) / 96;
+        if steps == 0 {
+            return Ok(());
+        }
+        let mut sent_x = 0;
+        let mut sent_y = 0;
+        for index in 1..=steps {
+            let next_x = ((dx as i64 * index as i64) / steps as i64) as i32;
+            let next_y = ((dy as i64 * index as i64) / steps as i64) as i32;
+            let step_x = next_x - sent_x;
+            let step_y = next_y - sent_y;
             send_arduino_relative_move_packet(step_x, step_y)?;
-            thread::sleep(Duration::from_millis(8));
-            rem_x -= step_x;
-            rem_y -= step_y;
+            sent_x = next_x;
+            sent_y = next_y;
         }
 
         Ok(())
