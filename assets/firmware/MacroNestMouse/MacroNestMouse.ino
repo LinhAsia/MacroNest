@@ -47,7 +47,7 @@ void execute() {
       success = sendMouse(0, 0, static_cast<int8_t>(packet[2]));
       break;
     case 4:
-      for (uint8_t i = 0; i < 5; ++i) success &= sendMouse(20, 0);
+      success = sendMouse(100, 0);
       break;
     default:
       success = false;

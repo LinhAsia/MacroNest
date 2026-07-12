@@ -31523,11 +31523,17 @@ mod windows_overlay {
         ARDUINO_TEST_OUTPUT_ACTIVE.store(true, Ordering::Release);
         let result = (|| {
             write_arduino_data(&arduino_packet(4, [0; 5]))?;
-            thread::sleep(Duration::from_millis(30));
-            let mut after = POINT::default();
-            unsafe { GetCursorPos(&mut after)? };
-            if before.x == after.x && before.y == after.y {
-                anyhow::bail!("Firmware replied, but Windows received no mouse movement");
+            let deadline = Instant::now() + Duration::from_millis(30);
+            loop {
+                let mut after = POINT::default();
+                unsafe { GetCursorPos(&mut after)? };
+                if before.x != after.x || before.y != after.y {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    anyhow::bail!("Firmware replied, but Windows received no mouse movement");
+                }
+                thread::yield_now();
             }
             Ok(())
         })();
