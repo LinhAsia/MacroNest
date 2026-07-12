@@ -3206,10 +3206,16 @@ mod windows_overlay {
                 if current_name != com_port || port.is_none() {
                     if last_open_attempt.elapsed() >= Duration::from_secs(5) {
                         last_open_attempt = Instant::now();
-                        *port = serialport::new(&com_port, 115200)
+                        let mut opened_port = serialport::new(&com_port, 115200)
                             .timeout(Duration::from_millis(250))
                             .open()
                             .ok();
+                        if let Some(serial) = opened_port.as_mut()
+                            && serial.write_data_terminal_ready(true).is_err()
+                        {
+                            opened_port = None;
+                        }
+                        *port = opened_port;
                         *CURRENT_ARDUINO_PORT_NAME.lock() = if port.is_some() {
                             com_port
                         } else {
