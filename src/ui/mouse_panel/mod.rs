@@ -17,7 +17,6 @@ enum MouseInputBackendMode {
     Arduino,
     Interception,
 }
-
 #[derive(Clone, Default)]
 struct MousePathTimelineOutcome {
     changed: bool,
@@ -70,9 +69,6 @@ impl CrosshairApp {
             || self.state.vision_settings.use_interception != use_interception;
         self.state.vision_settings.use_arduino_mouse = use_arduino_mouse;
         self.state.vision_settings.use_interception = use_interception;
-        if use_arduino_mouse {
-            self.state.vision_settings.arduino_transport = ArduinoTransport::Serial;
-        }
         self.arduino_restore_emulation_after_flash = false;
         changed
     }
@@ -188,7 +184,6 @@ impl CrosshairApp {
             self.refresh_arduino_ports();
         }
 
-        let transport = self.state.vision_settings.arduino_transport;
         let selected_port_exists = !self.state.vision_settings.arduino_com_port.is_empty()
             && self
                 .arduino_available_ports
@@ -196,32 +191,11 @@ impl CrosshairApp {
         let (arduino_port_open, arduino_open_port, overlay_flash_in_progress) =
             crate::overlay::arduino_connection_snapshot();
         let selected_port = self.state.vision_settings.arduino_com_port.clone();
-        let runtime_ready = match transport {
-            ArduinoTransport::Serial => selected_port_exists,
-            ArduinoTransport::Hid => true,
-        };
-        let runtime_target_text = match transport {
-            ArduinoTransport::Serial => {
-                if selected_port.is_empty() {
-                    "none".to_owned()
-                } else {
-                    selected_port.clone()
-                }
-            }
-            ArduinoTransport::Hid => format!(
-                "{}:{}",
-                self.state.vision_settings.arduino_vid, self.state.vision_settings.arduino_pid
-            ),
-        };
         let selected_mode = self.selected_mouse_input_backend_mode();
         let is_connected = selected_mode == MouseInputBackendMode::Arduino
             && arduino_port_open
-            && match transport {
-                ArduinoTransport::Serial => {
-                    selected_port_exists && arduino_open_port == selected_port
-                }
-                ArduinoTransport::Hid => !arduino_open_port.is_empty(),
-            };
+            && selected_port_exists
+            && arduino_open_port == selected_port;
         let selected_port_text = if selected_port.is_empty() {
             "none".to_owned()
         } else {
@@ -370,7 +344,7 @@ impl CrosshairApp {
                         RichText::new("Flashing - port released")
                             .color(Color32::from_rgb(255, 206, 96)),
                     );
-                } else if runtime_ready
+                } else if selected_port_exists
                     && next_mode == MouseInputBackendMode::Arduino
                     && !is_connected
                 {
@@ -418,14 +392,9 @@ impl CrosshairApp {
             ui.add_space(4.0);
             ui.label(
                 RichText::new(format!(
-                    "{}: {} | {}: {selected_port_text} | {}: {runtime_target_text} | {}: {app_port_text}",
+                    "{}: Serial COM | {}: {selected_port_text} | {}: {app_port_text}",
                     self.tr("Connection", "Kết nối"),
-                    match transport {
-                        ArduinoTransport::Serial => "Serial COM",
-                        ArduinoTransport::Hid => "RawHID",
-                    },
                     self.tr("Flash COM", "COM nạp firmware"),
-                    self.tr("Target", "Thiết bị đích"),
                     self.tr("Active endpoint", "Cổng đang hoạt động"),
                 ))
                 .small()
@@ -433,10 +402,7 @@ impl CrosshairApp {
             );
 
             ui.add_space(4.0);
-            let note_lbl = match self.state.vision_settings.arduino_transport {
-                ArduinoTransport::Serial => self.tr("Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.", "Hãy nhấn 'Tự động nạp firmware' ít nhất một lần để lập trình bo mạch đang kết nối."),
-                ArduinoTransport::Hid => "RawHID runtime uses VID/PID for live control. Auto-Flash will program the RawHID firmware for the selected Runtime. The COM port is still only used to flash the board.",
-            };
+            let note_lbl = self.tr("Make sure you clicked 'Auto-Flash Firmware' at least once to program the connected board.", "Hãy nhấn 'Tự động nạp firmware' ít nhất một lần để lập trình bo mạch đang kết nối.");
             ui.label(
                 RichText::new(note_lbl)
                     .small()
@@ -454,8 +420,8 @@ impl CrosshairApp {
                 if test_button.clicked() {
                     self.arduino_flash_status = match crate::overlay::test_arduino_mouse_direct() {
                         Ok(()) => self.tr(
-                            "Arduino test sent: move right and left click.",
-                            "Đã gửi lệnh kiểm tra: di chuyển sang phải và nhấp chuột trái.",
+                            "Arduino test passed: cursor moved right.",
+                            "Kiểm tra Arduino thành công: con trỏ đã di chuyển sang phải.",
                         ).to_owned(),
                         Err(error) => format!(
                             "{}: {error}",
@@ -523,97 +489,6 @@ impl CrosshairApp {
 
             ui.add_space(6.0);
 
-            let spoof_panel_title = self.tr(
-                "Anti-Cheat Bypass & USB ID Spoofing",
-                "Anti-Cheat Bypass & USB ID Spoofing",
-            );
-            ui.collapsing(spoof_panel_title, |ui| {
-                ui.set_enabled(runtime_ready || selected_port_exists);
-                if !runtime_ready && !selected_port_exists {
-                    ui.colored_label(
-                        Color32::from_rgb(255, 96, 96),
-                        self.tr("Please plug in the Arduino and select COM port first.", "Please plug in the Arduino and select COM port first."),
-                    );
-                    ui.add_space(4.0);
-                }
-                ui.add_space(4.0);
-
-                let warning_text = self.tr(
-                    "Some anti-cheat systems (Vanguard, EAC, etc.) block default Arduino Leonardo identifiers (VID: 0x2341, PID: 0x8036).\nYou should spoof these IDs to look like a standard commercial USB mouse (e.g. Logitech G502).",
-                    "Mot so he thong chong gian lan co the chan VID/PID mac dinh cua Arduino Leonardo, nen ban co the gia lap chung thanh chuot thuong mai.",
-                );
-                ui.label(RichText::new(warning_text).small().weak());
-
-                ui.add_space(8.0);
-
-                let mut spoof_changed = false;
-                let enable_spoof_lbl = self.tr("Enable Spoofing", "Enable Spoofing");
-                let vid_lbl = self.tr("Vendor ID (VID):", "Vendor ID (VID):");
-                let pid_lbl = self.tr("Product ID (PID):", "Product ID (PID):");
-                let presets_lbl = self.tr("Presets:", "Presets:");
-                let reset_lbl = self.tr(
-                    "Reset to Default (0x2341, 0x8036)",
-                    "Khoi phuc mac dinh (0x2341, 0x8036)",
-                );
-
-                ui.horizontal(|ui| {
-                    spoof_changed |= ui
-                        .checkbox(
-                            &mut self.state.vision_settings.use_arduino_spoof,
-                            enable_spoof_lbl,
-                        )
-                        .changed();
-                });
-
-                if self.state.vision_settings.use_arduino_spoof {
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        ui.label(vid_lbl);
-                        let r1 = ui.text_edit_singleline(&mut self.state.vision_settings.arduino_vid);
-                        if r1.changed() {
-                            spoof_changed = true;
-                        }
-
-                        ui.add_space(14.0);
-
-                        ui.label(pid_lbl);
-                        let r2 = ui.text_edit_singleline(&mut self.state.vision_settings.arduino_pid);
-                        if r2.changed() {
-                            spoof_changed = true;
-                        }
-                    });
-
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        ui.label(presets_lbl);
-                        if ui.button("Logitech G502 (0x046D, 0xC07D)").clicked() {
-                            self.state.vision_settings.arduino_vid = "0x046D".to_string();
-                            self.state.vision_settings.arduino_pid = "0xC07D".to_string();
-                            spoof_changed = true;
-                        }
-                        ui.add_space(8.0);
-                        if ui.button("Razer DeathAdder (0x1532, 0x0037)").clicked() {
-                            self.state.vision_settings.arduino_vid = "0x1532".to_string();
-                            self.state.vision_settings.arduino_pid = "0x0037".to_string();
-                            spoof_changed = true;
-                        }
-                        ui.add_space(8.0);
-                        if ui.button(reset_lbl).clicked() {
-                            self.state.vision_settings.arduino_vid = "0x2341".to_string();
-                            self.state.vision_settings.arduino_pid = "0x8036".to_string();
-                            spoof_changed = true;
-                        }
-                    });
-                }
-
-                ui.add_space(6.0);
-                let note_text = self.tr("Note: This automatically patches firmware.hex at the byte level during upload. The Arduino bootloader remains unaffected, so you can always re-flash safely.", "Note: This automatically patches firmware.hex at the byte level during upload. The Arduino bootloader remains unaffected, so you can always re-flash safely.");
-                ui.label(RichText::new(note_text).small().weak());
-
-                if spoof_changed {
-                    arduino_changed = true;
-                }
-            });
         });
         self.mouse_input_arduino_open = arduino_open;
 
@@ -2755,11 +2630,7 @@ impl CrosshairApp {
             self.arduino_available_ports.clear();
             return;
         };
-        let preferred_port = preferred_arduino_port(
-            &ports,
-            parse_hex_u16(&self.state.vision_settings.arduino_vid),
-            parse_hex_u16(&self.state.vision_settings.arduino_pid),
-        );
+        let preferred_port = preferred_arduino_port(&ports);
         self.arduino_available_ports = ports.into_iter().map(|p| p.port_name).collect();
         self.arduino_available_ports.sort();
 
@@ -2837,7 +2708,6 @@ impl CrosshairApp {
         let _ = std::fs::remove_file(&self.paths.avrdude_exe);
         let _ = std::fs::remove_file(&self.paths.avrdude_conf);
         let _ = std::fs::remove_file(&self.paths.arduino_firmware_hex);
-        let _ = std::fs::remove_file(&self.paths.arduino_rawhid_firmware_hex);
         self.arduino_tools_downloaded = false;
         self.arduino_flash_status.clear();
     }
@@ -2871,18 +2741,12 @@ impl CrosshairApp {
         self.arduino_flash_running = true;
         self.arduino_flash_status = format!("Preparing flash: releasing {port}...");
 
-        let use_spoof = self.state.vision_settings.use_arduino_spoof;
-        let spoof_vid = self.state.vision_settings.arduino_vid.clone();
-        let spoof_pid = self.state.vision_settings.arduino_pid.clone();
-        let runtime_transport = self.state.vision_settings.arduino_transport;
 
         let paths = self.paths.clone();
         let flash_result = self.arduino_flash_result.clone();
         *flash_result.lock() = None;
         let flash_progress = self.arduino_flash_progress.clone();
         *flash_progress.lock() = Some(format!("Preparing flash: releasing {port}..."));
-
-        let ui_lang = self.state.ui_language;
 
         std::thread::spawn(move || {
             let run_flash = || -> anyhow::Result<()> {
@@ -2927,12 +2791,9 @@ impl CrosshairApp {
                 ));
                 std::thread::sleep(std::time::Duration::from_millis(120));
 
-                // 4. Prepare the hex file to flash (optionally spoofed)
+                // 4. Use the bundled serial firmware.
                 set_progress("Preparing firmware image...".to_owned());
-                let base_firmware_hex = match runtime_transport {
-                    ArduinoTransport::Serial => paths.arduino_firmware_hex.clone(),
-                    ArduinoTransport::Hid => paths.arduino_rawhid_firmware_hex.clone(),
-                };
+                let base_firmware_hex = paths.arduino_firmware_hex.clone();
 
                 if !base_firmware_hex.exists() {
                     anyhow::bail!(
@@ -2941,26 +2802,10 @@ impl CrosshairApp {
                     );
                 }
 
-                let hex_to_flash = if use_spoof {
-                    let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
-                    let original_hex = std::fs::read_to_string(&base_firmware_hex)?;
-
-                    let parsed_vid = parse_hex_u16(&spoof_vid).unwrap_or(0x2341);
-                    let parsed_pid = parse_hex_u16(&spoof_pid).unwrap_or(0x8036);
-
-                    let patched_hex = patch_hex_descriptors(&original_hex, parsed_vid, parsed_pid)?;
-                    std::fs::write(&temp_hex_path, patched_hex)?;
-                    temp_hex_path
-                } else {
-                    base_firmware_hex
-                };
+                let hex_to_flash = base_firmware_hex;
 
                 // 5. Execute avrdude to flash
                 if !paths.avrdude_exe.exists() {
-                    if use_spoof {
-                        let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
-                        let _ = std::fs::remove_file(temp_hex_path);
-                    }
                     anyhow::bail!("avrdude.exe not found");
                 }
 
@@ -3012,11 +2857,6 @@ impl CrosshairApp {
                     );
                 }
 
-                if use_spoof {
-                    let temp_hex_path = paths.bin_dir.join("firmware_spoofed.hex");
-                    let _ = std::fs::remove_file(temp_hex_path);
-                }
-
                 set_progress("Flash complete. Reconnecting Arduino emulation...".to_owned());
                 Ok(())
             };
@@ -3036,21 +2876,11 @@ impl CrosshairApp {
     }
 }
 
-fn parse_hex_u16(s: &str) -> Option<u16> {
-    let cleaned = s.trim().to_uppercase();
-    let cleaned = cleaned.strip_prefix("0X").unwrap_or(&cleaned);
-    u16::from_str_radix(cleaned, 16).ok()
-}
-
-fn preferred_arduino_port(
-    ports: &[serialport::SerialPortInfo],
-    configured_vid: Option<u16>,
-    configured_pid: Option<u16>,
-) -> Option<String> {
+fn preferred_arduino_port(ports: &[serialport::SerialPortInfo]) -> Option<String> {
     let mut scored_ports = ports
         .iter()
         .filter_map(|port| {
-            let score = arduino_port_score(port, configured_vid, configured_pid);
+            let score = arduino_port_score(port);
             (score > 0).then(|| (score, port.port_name.clone()))
         })
         .collect::<Vec<_>>();
@@ -3062,19 +2892,12 @@ fn preferred_arduino_port(
     Some(best.1.clone())
 }
 
-fn arduino_port_score(
-    port: &serialport::SerialPortInfo,
-    configured_vid: Option<u16>,
-    configured_pid: Option<u16>,
-) -> u32 {
+fn arduino_port_score(port: &serialport::SerialPortInfo) -> u32 {
     let serialport::SerialPortType::UsbPort(info) = &port.port_type else {
         return 0;
     };
 
     let mut score = 0;
-    if configured_vid == Some(info.vid) && configured_pid == Some(info.pid) {
-        score += 120;
-    }
     if info.vid == 0x2341 && matches!(info.pid, 0x8036 | 0x0036 | 0x8037 | 0x0037) {
         score += 120;
     } else if info.vid == 0x2341 {
@@ -3122,7 +2945,6 @@ fn wait_for_serial_port_openable(
         last_error.unwrap_or_else(|| "serial port was not available".to_owned())
     )
 }
-
 fn wait_for_serial_port_present(port: &str, timeout: std::time::Duration) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {
@@ -3239,68 +3061,3 @@ fn touch_arduino_bootloader_port(port: &str, timeout: std::time::Duration) -> an
     )
 }
 
-fn patch_hex_descriptors(hex_content: &str, vid: u16, pid: u16) -> anyhow::Result<String> {
-    let vid_low = (vid & 0xFF) as u8;
-    let vid_high = ((vid >> 8) & 0xFF) as u8;
-    let pid_low = (pid & 0xFF) as u8;
-    let pid_high = ((pid >> 8) & 0xFF) as u8;
-
-    let old_vid_pid_hex = "41233680";
-    let new_vid_pid_hex = format!(
-        "{:02X}{:02X}{:02X}{:02X}",
-        vid_low, vid_high, pid_low, pid_high
-    );
-
-    let mut patched_lines = Vec::new();
-    let mut found = false;
-
-    for line in hex_content.lines() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with(':') {
-            patched_lines.push(trimmed.to_string());
-            continue;
-        }
-
-        let line_len = trimmed.len();
-        if line_len < 11 {
-            patched_lines.push(trimmed.to_string());
-            continue;
-        }
-
-        let prefix = &trimmed[0..9];
-        let data_str = &trimmed[9..line_len - 2];
-        if !data_str.contains(old_vid_pid_hex) {
-            patched_lines.push(trimmed.to_string());
-            continue;
-        }
-
-        let new_data_str = data_str.replace(old_vid_pid_hex, &new_vid_pid_hex);
-        let mut sum: u32 = 0;
-        let mut i = 1;
-        while i < prefix.len() {
-            if let Ok(b) = u8::from_str_radix(&prefix[i..i + 2], 16) {
-                sum += b as u32;
-            }
-            i += 2;
-        }
-
-        let mut j = 0;
-        while j < new_data_str.len() {
-            if let Ok(b) = u8::from_str_radix(&new_data_str[j..j + 2], 16) {
-                sum += b as u32;
-            }
-            j += 2;
-        }
-
-        let checksum = ((!sum + 1) & 0xFF) as u8;
-        let new_line = format!("{}{}{:02X}", prefix, new_data_str, checksum);
-        patched_lines.push(new_line);
-        found = true;
-    }
-
-    if !found {
-        anyhow::bail!("Could not find the default VID/PID bytes in firmware.hex to patch.");
-    }
-
-    Ok(patched_lines.join("\r\n"))
-}

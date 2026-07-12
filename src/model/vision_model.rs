@@ -9,14 +9,6 @@ use super::{
     default_image_search_move_passes, default_image_search_offset_px, default_true,
 };
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ArduinoTransport {
-    #[default]
-    Serial,
-    Hid,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct VisionSettings {
@@ -25,11 +17,7 @@ pub struct VisionSettings {
     pub click_after_move: bool,
     pub use_interception: bool,
     pub use_arduino_mouse: bool,
-    pub arduino_transport: ArduinoTransport,
     pub arduino_com_port: String,
-    pub arduino_vid: String,
-    pub arduino_pid: String,
-    pub use_arduino_spoof: bool,
 }
 
 impl Default for VisionSettings {
@@ -40,11 +28,7 @@ impl Default for VisionSettings {
             click_after_move: false,
             use_interception: false,
             use_arduino_mouse: false,
-            arduino_transport: ArduinoTransport::Serial,
             arduino_com_port: String::new(),
-            arduino_vid: "0x2341".to_string(),
-            arduino_pid: "0x8036".to_string(),
-            use_arduino_spoof: false,
         }
     }
 }

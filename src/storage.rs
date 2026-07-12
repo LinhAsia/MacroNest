@@ -11,7 +11,6 @@ use directories::ProjectDirs;
 use crate::model::{AppState, CrosshairStyle, ProfileRecord, VietnameseInputMode, VisionPreset};
 
 const BUNDLED_ARDUINO_SERIAL_FIRMWARE: &[u8] = include_bytes!("../assets/firmware-serial.hex");
-const BUNDLED_ARDUINO_RAWHID_FIRMWARE: &[u8] = include_bytes!("../assets/firmware-rawhid.hex");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StateLoadStatus {
@@ -40,7 +39,6 @@ pub struct AppPaths {
     pub avrdude_exe: PathBuf,
     pub avrdude_conf: PathBuf,
     pub arduino_firmware_hex: PathBuf,
-    pub arduino_rawhid_firmware_hex: PathBuf,
 }
 
 impl AppPaths {
@@ -78,7 +76,6 @@ impl AppPaths {
         let avrdude_exe = bin_dir.join("avrdude.exe");
         let avrdude_conf = bin_dir.join("avrdude.conf");
         let arduino_firmware_hex = bin_dir.join("firmware.hex");
-        let arduino_rawhid_firmware_hex = bin_dir.join("firmware_rawhid.hex");
 
         fs::create_dir_all(&root)?;
         fs::create_dir_all(&profiles_dir)?;
@@ -104,7 +101,6 @@ impl AppPaths {
             avrdude_exe,
             avrdude_conf,
             arduino_firmware_hex,
-            arduino_rawhid_firmware_hex,
         })
     }
 
@@ -118,10 +114,6 @@ impl AppPaths {
             &self.arduino_firmware_hex,
             BUNDLED_ARDUINO_SERIAL_FIRMWARE,
         )?;
-        ensure_bundled_file(
-            &self.arduino_rawhid_firmware_hex,
-            BUNDLED_ARDUINO_RAWHID_FIRMWARE,
-        )?;
         Ok(())
     }
 
@@ -130,10 +122,7 @@ impl AppPaths {
             &self.arduino_firmware_hex,
             BUNDLED_ARDUINO_SERIAL_FIRMWARE,
         )?;
-        ensure_bundled_file(
-            &self.arduino_rawhid_firmware_hex,
-            BUNDLED_ARDUINO_RAWHID_FIRMWARE,
-        )
+        Ok(())
     }
 
     pub fn vision_template_file_for(&self, preset_id: u32) -> PathBuf {
