@@ -31505,6 +31505,8 @@ mod windows_overlay {
     }
 
     fn send_arduino_relative_move_packet(dx: i32, dy: i32) -> Result<()> {
+        let dx = dx.clamp(i16::MIN as i32, i16::MAX as i32);
+        let dy = dy.clamp(i16::MIN as i32, i16::MAX as i32);
         let packet = arduino_packet(1, [
             ((dx >> 8) & 0xFF) as u8,
             (dx & 0xFF) as u8,
@@ -31516,23 +31518,7 @@ mod windows_overlay {
     }
 
     fn send_arduino_relative_move_sequence(dx: i32, dy: i32) -> Result<()> {
-        let steps = (dx.abs().max(dy.abs()) + 95) / 96;
-        if steps == 0 {
-            return Ok(());
-        }
-        let mut sent_x = 0;
-        let mut sent_y = 0;
-        for index in 1..=steps {
-            let next_x = ((dx as i64 * index as i64) / steps as i64) as i32;
-            let next_y = ((dy as i64 * index as i64) / steps as i64) as i32;
-            let step_x = next_x - sent_x;
-            let step_y = next_y - sent_y;
-            send_arduino_relative_move_packet(step_x, step_y)?;
-            sent_x = next_x;
-            sent_y = next_y;
-        }
-
-        Ok(())
+        send_arduino_relative_move_packet(dx, dy)
     }
 
     pub(crate) fn test_arduino_mouse_direct() -> Result<()> {

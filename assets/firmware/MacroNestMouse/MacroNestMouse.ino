@@ -19,6 +19,20 @@ bool sendMouse(int8_t x, int8_t y, int8_t wheel = 0) {
   return true;
 }
 
+void moveRelative(int16_t x, int16_t y) {
+  const int32_t distance = max(abs(static_cast<int32_t>(x)), abs(static_cast<int32_t>(y)));
+  const int32_t steps = (distance + 126) / 127;
+  int32_t sentX = 0;
+  int32_t sentY = 0;
+  for (int32_t index = 1; index <= steps; ++index) {
+    const int32_t nextX = static_cast<int32_t>(x) * index / steps;
+    const int32_t nextY = static_cast<int32_t>(y) * index / steps;
+    Mouse.move(nextX - sentX, nextY - sentY, 0);
+    sentX = nextX;
+    sentY = nextY;
+  }
+}
+
 void reply(bool success) {
   Serial.write(kReply);
   Serial.write(success ? 0 : 1);
@@ -34,7 +48,7 @@ void execute() {
     case 1: {
       const int16_t x = static_cast<int16_t>((packet[2] << 8) | packet[3]);
       const int16_t y = static_cast<int16_t>((packet[4] << 8) | packet[5]);
-      success = sendMouse(static_cast<int8_t>(x), static_cast<int8_t>(y));
+      moveRelative(x, y);
       break;
     }
     case 2: {
