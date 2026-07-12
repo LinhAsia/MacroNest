@@ -401,34 +401,6 @@ impl CrosshairApp {
                     .color(Color32::from_rgb(220, 180, 80)),
             );
 
-            if self.interception_driver_installed {
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new(self.tr(
-                        "If Arduino HID is blocked, repair Interception with this board connected, then restart Windows.",
-                        "Nếu Arduino HID bị chặn, hãy sửa Interception khi bo mạch đang cắm rồi khởi động lại Windows.",
-                    ))
-                    .small()
-                    .weak(),
-                );
-                let repairing = self.interception_install_job.is_some();
-                if ui
-                    .add_enabled(
-                        !repairing,
-                        egui::Button::new(self.tr(
-                            "Repair Interception for Arduino",
-                            "Sửa Interception cho Arduino",
-                        )),
-                    )
-                    .clicked()
-                {
-                    self.start_interception_driver_arduino_repair();
-                }
-                if repairing {
-                    ui.spinner();
-                }
-            }
-
             ui.add_space(8.0);
 
             ui.horizontal(|ui| {
