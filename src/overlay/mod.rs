@@ -3215,7 +3215,6 @@ mod windows_overlay {
                         } else {
                             String::new()
                         };
-                        ARDUINO_RESPONSIVE.store(false, Ordering::Release);
                         opened = port.is_some();
                     }
                 }
@@ -3231,7 +3230,6 @@ mod windows_overlay {
                     let responsive = write_ok
                         && serial.read_exact(&mut reply).is_ok()
                         && reply[0] == 0x0F;
-                    ARDUINO_RESPONSIVE.store(responsive, Ordering::Release);
                     if !write_ok {
                         disconnect = true;
                     }
@@ -31218,9 +31216,6 @@ mod windows_overlay {
         if result.is_err() {
             *port = None;
             CURRENT_ARDUINO_PORT_NAME.lock().clear();
-            ARDUINO_RESPONSIVE.store(false, Ordering::Release);
-        } else {
-            ARDUINO_RESPONSIVE.store(true, Ordering::Release);
         }
         result
     }
