@@ -1570,6 +1570,41 @@ impl CrosshairApp {
         self.status = "Launching Interception driver installer...".to_owned();
     }
 
+    pub(crate) fn start_interception_driver_arduino_repair(&mut self) {
+        if self.interception_install_job.is_some() || self.interception_uninstall_job.is_some() {
+            return;
+        }
+        if !self.paths.interception_installer_exe.exists() {
+            self.status =
+                "Interception installer was not found. Download the package first.".to_owned();
+            return;
+        }
+
+        let installer = self.paths.interception_installer_exe.clone();
+        let job = std::thread::spawn(move || -> Result<()> {
+            let uninstall = crate::platform::run_hidden_process_as_admin_and_wait(
+                &installer,
+                Some("/uninstall"),
+                60_000,
+            )?;
+            if uninstall != 0 {
+                bail!("Interception uninstaller exited with code {uninstall}");
+            }
+            let install = crate::platform::run_hidden_process_as_admin_and_wait(
+                &installer,
+                Some("/install"),
+                60_000,
+            )?;
+            if install != 0 {
+                bail!("Interception installer exited with code {install}");
+            }
+            Ok(())
+        });
+
+        self.interception_install_job = Some(job);
+        self.status = "Repairing Interception for the connected Arduino...".to_owned();
+    }
+
     fn start_interception_driver_uninstall(&mut self) {
         if self.interception_install_job.is_some() || self.interception_uninstall_job.is_some() {
             return;
