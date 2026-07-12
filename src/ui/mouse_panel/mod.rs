@@ -176,10 +176,6 @@ impl CrosshairApp {
         let select_port_txt = self.tr("Select Port", "Chọn cổng");
         let com_port_lbl = self.tr("COM Port:", "Cổng COM:");
 
-        if self.arduino_ports_last_refresh.is_none() && !self.arduino_flash_running {
-            self.refresh_arduino_ports();
-        }
-
         let selected_port_exists = !self.state.vision_settings.arduino_com_port.is_empty()
             && self
                 .arduino_available_ports

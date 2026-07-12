@@ -3200,22 +3200,25 @@ mod windows_overlay {
                     thread::sleep(Duration::from_millis(250));
                     continue;
                 }
-                let mut name = CURRENT_ARDUINO_PORT_NAME.lock();
+                let current_name = CURRENT_ARDUINO_PORT_NAME.lock().clone();
                 let mut port = ARDUINO_PORT.lock();
                 let mut opened = false;
-                if name.as_str() != com_port || port.is_none() {
+                if current_name != com_port || port.is_none() {
                     if last_open_attempt.elapsed() >= Duration::from_secs(5) {
                         last_open_attempt = Instant::now();
                         *port = serialport::new(&com_port, 115200)
                             .timeout(Duration::from_millis(250))
                             .open()
                             .ok();
-                        *name = if port.is_some() { com_port } else { String::new() };
+                        *CURRENT_ARDUINO_PORT_NAME.lock() = if port.is_some() {
+                            com_port
+                        } else {
+                            String::new()
+                        };
                         ARDUINO_RESPONSIVE.store(false, Ordering::Release);
                         opened = port.is_some();
                     }
                 }
-                drop(name);
                 if opened {
                     thread::sleep(Duration::from_millis(1200));
                 }
