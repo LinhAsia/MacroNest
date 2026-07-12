@@ -1,7 +1,31 @@
 #include <Arduino.h>
+#include <HID.h>
 #include <Mouse.h>
 
 namespace {
+constexpr uint8_t kAbsoluteMouseReportId = 4;
+const uint8_t kAbsoluteMouseDescriptor[] PROGMEM = {
+  0x05, 0x01,        // Usage Page (Generic Desktop)
+  0x09, 0x02,        // Usage (Mouse)
+  0xA1, 0x01,        // Collection (Application)
+  0x85, kAbsoluteMouseReportId,
+  0x09, 0x01,        // Usage (Pointer)
+  0xA1, 0x00,        // Collection (Physical)
+  0x09, 0x30,        // Usage (X)
+  0x09, 0x31,        // Usage (Y)
+  0x16, 0x00, 0x00,  // Logical Minimum (0)
+  0x26, 0xFF, 0x7F,  // Logical Maximum (32767)
+  0x75, 0x10,        // Report Size (16)
+  0x95, 0x02,        // Report Count (2)
+  0x81, 0x02,        // Input (Data, Variable, Absolute)
+  0xC0,
+  0xC0
+};
+HIDSubDescriptor absoluteMouseNode(kAbsoluteMouseDescriptor, sizeof(kAbsoluteMouseDescriptor));
+struct AbsoluteMouseRegistration {
+  AbsoluteMouseRegistration() { HID().AppendDescriptor(&absoluteMouseNode); }
+} absoluteMouseRegistration;
+
 constexpr uint8_t kPacketSize = 8;
 constexpr uint8_t kHeader = 0xA5;
 constexpr uint8_t kReply = 0x5A;
@@ -63,6 +87,14 @@ void execute() {
     case 4:
       success = sendMouse(100, 0);
       break;
+    case 5: {
+      const uint16_t position[] = {
+        static_cast<uint16_t>((packet[2] << 8) | packet[3]),
+        static_cast<uint16_t>((packet[4] << 8) | packet[5])
+      };
+      HID().SendReport(kAbsoluteMouseReportId, position, sizeof(position));
+      break;
+    }
     default:
       success = false;
   }

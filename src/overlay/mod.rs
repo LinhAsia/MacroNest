@@ -31555,9 +31555,19 @@ mod windows_overlay {
             if com_port.is_empty() {
                 anyhow::bail!("Arduino COM port is not selected");
             }
-            let mut pos = POINT::default();
-            unsafe { GetCursorPos(&mut pos)? };
-            send_arduino_relative_move_sequence(x - pos.x, y - pos.y)?;
+            let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(1);
+            let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) }.max(1);
+            let absolute_x = ((x.clamp(0, screen_width - 1) as i64 * 32767)
+                / (screen_width - 1).max(1) as i64) as u16;
+            let absolute_y = ((y.clamp(0, screen_height - 1) as i64 * 32767)
+                / (screen_height - 1).max(1) as i64) as u16;
+            write_arduino_data(&arduino_packet(5, [
+                (absolute_x >> 8) as u8,
+                absolute_x as u8,
+                (absolute_y >> 8) as u8,
+                absolute_y as u8,
+                0,
+            ]))?;
             update_mouse_lock_anchor_after_macro_move(target_point);
             return Ok(());
         }
