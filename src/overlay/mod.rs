@@ -3185,6 +3185,7 @@ mod windows_overlay {
         // Keep one verified serial connection. The firmware heartbeat is the source of truth.
         let conn_manager_running = running.clone();
         thread::spawn(move || {
+            let mut last_open_attempt = Instant::now() - Duration::from_secs(5);
             while conn_manager_running.load(Ordering::Relaxed) {
                 let (use_arduino, com_port, flash_in_progress) = {
                     let state = HOOK_STATE.lock();
@@ -3201,13 +3202,21 @@ mod windows_overlay {
                 }
                 let mut name = CURRENT_ARDUINO_PORT_NAME.lock();
                 let mut port = ARDUINO_PORT.lock();
+                let mut opened = false;
                 if name.as_str() != com_port || port.is_none() {
-                    *port = serialport::new(&com_port, 115200)
-                        .timeout(Duration::from_millis(250))
-                        .open()
-                        .ok();
-                    *name = if port.is_some() { com_port } else { String::new() };
-                    ARDUINO_RESPONSIVE.store(false, Ordering::Release);
+                    if last_open_attempt.elapsed() >= Duration::from_secs(5) {
+                        last_open_attempt = Instant::now();
+                        *port = serialport::new(&com_port, 115200)
+                            .timeout(Duration::from_millis(250))
+                            .open()
+                            .ok();
+                        *name = if port.is_some() { com_port } else { String::new() };
+                        ARDUINO_RESPONSIVE.store(false, Ordering::Release);
+                        opened = port.is_some();
+                    }
+                }
+                if opened {
+                    thread::sleep(Duration::from_millis(1200));
                 }
                 let mut disconnect = false;
                 if let Some(serial) = port.as_mut() {
@@ -3225,7 +3234,7 @@ mod windows_overlay {
                     *port = None;
                     name.clear();
                 }
-                thread::sleep(Duration::from_millis(500));
+                thread::sleep(Duration::from_secs(1));
             }
         });
         thread::spawn(move || {
