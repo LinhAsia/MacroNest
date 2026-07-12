@@ -310,7 +310,7 @@ impl CrosshairApp {
 
         let arduino_panel_title = format!(
             "{} ({})",
-            self.tr("Arduino Leonardo Emulation", "Mô phỏng Arduino Leonardo"),
+            self.tr("Arduino ATmega32U4 Mouse", "Chuột Arduino ATmega32U4"),
             self.tr(
                 "Not Stable / Under Development",
                 "Chưa ổn định / Đang phát triển"
