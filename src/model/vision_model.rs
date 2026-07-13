@@ -18,6 +18,7 @@ pub struct VisionSettings {
     pub use_interception: bool,
     pub use_arduino_mouse: bool,
     pub arduino_com_port: String,
+    pub arduino_spoof_type: u32,
 }
 
 impl Default for VisionSettings {
@@ -29,6 +30,7 @@ impl Default for VisionSettings {
             use_interception: false,
             use_arduino_mouse: false,
             arduino_com_port: String::new(),
+            arduino_spoof_type: 0,
         }
     }
 }

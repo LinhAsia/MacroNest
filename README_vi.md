@@ -203,6 +203,7 @@ Bạn có thể tải các thành phần này trực tiếp từ phần cài đ�
 - Thư viện OpenCV DLL để phục vụ cho tính năng tìm kiếm hình ảnh
 - Trình điều khiển Interception để mô phỏng chuột/bàn phím cấp thấp
 - Firmware Arduino để giả lập nhập liệu phần cứng thông qua mạch ngoại vi
+- Tệp tin dữ liệu OCR để nhận diện chữ viết (OCR)
 
 ## Bản quyền
 
