@@ -4602,7 +4602,14 @@ mod windows_overlay {
                         )
                     };
                     if sound_enabled {
-                        crate::audio::play_key_sound_vk(sound_style, info.vkCode, sound_volume);
+                        let is_repeat = if let Some(key_name) = hotkey::vk_to_key_name(info.vkCode) {
+                            is_repeat_key(key_name)
+                        } else {
+                            false
+                        };
+                        if !is_repeat {
+                            crate::audio::play_key_sound_vk(sound_style, info.vkCode, sound_volume);
+                        }
                     }
                 }
                 if is_key_down && info.vkCode == 0x1B && is_mouse_path_draw_capture_active() {
