@@ -109,6 +109,7 @@ pub enum MacroAction {
     ShowGeometryPreset,
     HideGeometryPreset,
     FunnyMemeReply,
+    AiResponse,
     JumpToStep,
     #[serde(other)]
     Legacy,
@@ -951,5 +952,21 @@ mod tests {
 
         assert_eq!(step.duration_expr, "4321");
         assert_eq!(step.duration_override_ms, 4321);
+    }
+
+    #[test]
+    fn test_ai_response_serialization() {
+        use super::MacroAction;
+        let mut step = MacroStep::default();
+        step.action = MacroAction::AiResponse;
+        step.key = "Translate this: hello".to_string();
+        step.if_variable_name = "translated_text".to_string();
+
+        let json = serde_json::to_string(&step).expect("serialize step");
+        let restored: MacroStep = serde_json::from_str(&json).expect("deserialize step");
+
+        assert_eq!(restored.action, MacroAction::AiResponse);
+        assert_eq!(restored.key, "Translate this: hello");
+        assert_eq!(restored.if_variable_name, "translated_text");
     }
 }

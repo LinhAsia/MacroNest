@@ -8284,6 +8284,28 @@ if supports_move_mouse || show_detection_tuning {
                                                             language,
                                                         );
                                                     });
+                                                } else if step.action == MacroAction::AiResponse {
+                                                    ui.horizontal(|ui| {
+                                                        let response = Self::render_ai_response_step_ui(
+                                                            ui,
+                                                            step,
+                                                            0,
+                                                            true,
+                                                            "hold-stop",
+                                                            language,
+                                                            self.state.vietnamese_input_enabled,
+                                                            self.state.vietnamese_input_mode,
+                                                            true,
+                                                        );
+                                                        live_sync |= response.changed();
+                                                        Self::render_variable_suggestions_braced(
+                                                            ui,
+                                                            &response,
+                                                            &mut step.key,
+                                                            &timer_names,
+                                                            language,
+                                                        );
+                                                    });
                                                 } else if step.action == MacroAction::DisableCrosshair {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
@@ -10574,6 +10596,28 @@ if supports_move_mouse || show_detection_tuning {
                                                             self.state.vietnamese_input_enabled,
                                                             self.state.vietnamese_input_mode,
                                                             &mut step.key,
+                                                        );
+                                                        live_sync |= response.changed();
+                                                        Self::render_variable_suggestions_braced(
+                                                            ui,
+                                                            &response,
+                                                            &mut step.key,
+                                                            &timer_names,
+                                                            language,
+                                                        );
+                                                    });
+                                                } else if step.action == MacroAction::AiResponse {
+                                                    ui.horizontal(|ui| {
+                                                        let response = Self::render_ai_response_step_ui(
+                                                            ui,
+                                                            step,
+                                                            0,
+                                                            true,
+                                                            "press-stop",
+                                                            language,
+                                                            self.state.vietnamese_input_enabled,
+                                                            self.state.vietnamese_input_mode,
+                                                            true,
                                                         );
                                                         live_sync |= response.changed();
                                                         Self::render_variable_suggestions_braced(
@@ -13987,6 +14031,42 @@ if supports_move_mouse || show_detection_tuning {
                                                             open_groq_api_settings_requested = true;
                                                         }
                                                     });
+                                                } else if step.action == MacroAction::AiResponse {
+                                                    ui.vertical(|ui| {
+                                                        let response = Self::render_ai_response_step_ui(
+                                                            ui,
+                                                            step,
+                                                            step_index,
+                                                            false,
+                                                            "",
+                                                            language,
+                                                            self.state.vietnamese_input_enabled,
+                                                            self.state.vietnamese_input_mode,
+                                                            false,
+                                                        );
+                                                        live_sync |= response.changed();
+                                                        if response.changed() {
+                                                            self.macro_step_inline_feedback
+                                                                .remove(&(preset.id, step_index));
+                                                        }
+                                                        let inline_feedback = self
+                                                            .macro_step_inline_feedback
+                                                            .get(&(preset.id, step_index))
+                                                            .cloned();
+                                                        Self::render_variable_suggestions_braced(
+                                                            ui,
+                                                            &response,
+                                                            &mut step.key,
+                                                            &timer_names,
+                                                            language,
+                                                        );
+                                                        if Self::render_macro_step_inline_feedback(
+                                                            ui,
+                                                            inline_feedback.as_ref(),
+                                                        ) {
+                                                            open_groq_api_settings_requested = true;
+                                                        }
+                                                    });
                                                 } else if step.action == MacroAction::DisableCrosshair {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
@@ -17200,7 +17280,7 @@ if supports_move_mouse || show_detection_tuning {
     }
 
     fn funny_macro_actions() -> &'static [MacroAction] {
-        &[MacroAction::FunnyMemeReply]
+        &[MacroAction::FunnyMemeReply, MacroAction::AiResponse]
     }
 
     fn macro_action_is_funny(action: MacroAction) -> bool {
@@ -20503,6 +20583,69 @@ if supports_move_mouse || show_detection_tuning {
             multiline_on_focus,
             TextHighlightMode::VariableTokens,
         )
+    }
+
+    pub(crate) fn render_ai_response_step_ui(
+        ui: &mut egui::Ui,
+        step: &mut crate::model::MacroStep,
+        step_index: usize,
+        is_stop_action: bool,
+        stop_action_prefix: &str,
+        language: UiLanguage,
+        vietnamese_input_enabled: bool,
+        vietnamese_input_mode: crate::model::VietnameseInputMode,
+        is_expanded_width: bool,
+    ) -> egui::Response {
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                let var_name_id = if is_stop_action {
+                    ui.id().with(format!("{}-ai-response-var-name", stop_action_prefix))
+                } else {
+                    ui.id().with((step_index, "ai-response-var-name"))
+                };
+                let response = Self::render_variable_text_edit(
+                    ui,
+                    &mut step.if_variable_name,
+                    var_name_id,
+                    76.0,
+                    140.0,
+                    21.0, 21.0,
+                    Self::tr_lang(language, "variable", "variable"),
+                    false,
+                );
+                Self::apply_vietnamese_input_if_changed(
+                    &response,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    &mut step.if_variable_name,
+                );
+                ui.label(" = AI Response");
+            });
+
+            let req_id = if is_stop_action {
+                ui.id().with(format!("{}-ai-response-key", stop_action_prefix))
+            } else {
+                ui.id().with((step_index, "ai-response-key"))
+            };
+            let response = Self::render_interpolated_text_edit(
+                ui,
+                &mut step.key,
+                req_id,
+                if is_expanded_width { 220.0 } else { 146.0 },
+                if is_expanded_width { 360.0 } else { 260.0 },
+                if is_expanded_width { 17.0 } else { 21.0 },
+                if is_expanded_width { 44.0 } else { 36.0 },
+                Self::tr_lang(language, "Request or variable", "Request or variable"),
+                true,
+            );
+            Self::apply_vietnamese_input_if_changed(
+                &response,
+                vietnamese_input_enabled,
+                vietnamese_input_mode,
+                &mut step.key,
+            );
+            response
+        }).inner
     }
 
     pub(crate) fn render_interpolated_text_edit(

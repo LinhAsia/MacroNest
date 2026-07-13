@@ -415,3 +415,16 @@ fn groq_chat_completion_text(
         .and_then(|choice| choice.message.content)
         .context("Groq did not return any text")
 }
+
+pub fn generate_groq_ai_response(
+    settings: &GroqSettings,
+    prompt: &str,
+) -> Result<String> {
+    groq_chat_completion_text(
+        settings,
+        prompt,
+        "You are a helpful AI assistant. Provide a concise, direct response to the user's request. Do not include conversational filler, greetings, or markdown formatting unless requested.",
+        None,
+    )
+}
+

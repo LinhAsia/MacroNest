@@ -25971,6 +25971,62 @@ mod windows_overlay {
         result.map(|_| ())
     }
 
+    fn trigger_ai_response_step(
+        preset_id: u32,
+        step_index: Option<usize>,
+        step: &MacroStep,
+    ) -> Result<()> {
+        let prompt = interpolate_variables(&step.key);
+        let prompt = prompt.trim().to_owned();
+        let target_var = step.if_variable_name.trim().to_string();
+
+        let (groq_settings, ui_tx) = {
+            let hook_state = HOOK_STATE.lock();
+            (hook_state.groq_settings.clone(), hook_state.ui_tx.clone())
+        };
+
+        let result = (|| -> Result<String> {
+            if target_var.is_empty() {
+                bail!("AI Response target variable is empty");
+            }
+            if prompt.is_empty() {
+                bail!("AI Response request prompt is empty");
+            }
+
+            ai::generate_groq_ai_response(&groq_settings, &prompt)
+        })();
+
+        let mut inline_message = String::new();
+        let mut open_groq_settings = false;
+
+        let status = match &result {
+            Ok(ai_response) => {
+                set_text_variable_value(&target_var, ai_response);
+                format!("AI Response saved to variable {}: {}", target_var, ai_response)
+            }
+            Err(error) => {
+                let (short_message, needs_settings) = summarize_funny_meme_reply_error(error);
+                inline_message = short_message.clone();
+                open_groq_settings = needs_settings;
+                format!("AI Response failed: {short_message}")
+            }
+        };
+
+        if let Some(tx) = ui_tx {
+            let _ = tx.send(UiCommand::VisionFinished(status));
+            if let Some(step_index) = step_index {
+                let _ = tx.send(UiCommand::MacroStepInlineFeedback {
+                    preset_id,
+                    step_index,
+                    message: inline_message,
+                    open_groq_settings,
+                });
+            }
+        }
+
+        result.map(|_| ())
+    }
+
     fn focus_window_by_preset_id(spec: &str) -> Result<()> {
         window_preset::focus_window_by_preset_id(spec)
     }
@@ -26802,6 +26858,10 @@ mod windows_overlay {
                 let _ = trigger_funny_meme_reply_step(preset_id, None, step);
             }
 
+            MacroAction::AiResponse => {
+                let _ = trigger_ai_response_step(preset_id, None, step);
+            }
+
             MacroAction::EnableCrosshairProfile => {
                 let _ = enable_crosshair_profile(&step.key);
                 let duration = step.get_duration_ms();
@@ -27543,6 +27603,10 @@ mod windows_overlay {
 
                 MacroAction::FunnyMemeReply => {
                     let _ = trigger_funny_meme_reply_step(preset_id, Some(absolute_index), step);
+                }
+
+                MacroAction::AiResponse => {
+                    let _ = trigger_ai_response_step(preset_id, Some(absolute_index), step);
                 }
 
                 MacroAction::EnableCrosshairProfile => {
@@ -28305,6 +28369,10 @@ mod windows_overlay {
 
                 MacroAction::FunnyMemeReply => {
                     let _ = trigger_funny_meme_reply_step(preset_id, Some(absolute_index), step);
+                }
+
+                MacroAction::AiResponse => {
+                    let _ = trigger_ai_response_step(preset_id, Some(absolute_index), step);
                 }
 
                 MacroAction::EnableCrosshairProfile => {
@@ -29561,6 +29629,9 @@ mod windows_overlay {
                 text_border: false,
                 shift_snap_anchor: None,
                 shift_snap_active: false,
+                blur_patch_rgba: Vec::new(),
+                blur_patch_width: 0,
+                blur_patch_height: 0,
             };
 
             let (left, top, width, height, font_size, text) =
@@ -29598,6 +29669,9 @@ mod windows_overlay {
                 text_border: false,
                 shift_snap_anchor: None,
                 shift_snap_active: false,
+                blur_patch_rgba: Vec::new(),
+                blur_patch_width: 0,
+                blur_patch_height: 0,
             };
 
             let geometry = screen_draw_text_session_geometry(&stroke, "Text").unwrap();
@@ -29687,6 +29761,9 @@ mod windows_overlay {
                 text_border: false,
                 shift_snap_anchor: None,
                 shift_snap_active: false,
+                blur_patch_rgba: Vec::new(),
+                blur_patch_width: 0,
+                blur_patch_height: 0,
             };
             let geometry = screen_draw_text_session_geometry_for_overlay(
                 &stroke,

@@ -1030,11 +1030,11 @@ mod tests {
             preview_enabled: true,
             ..Default::default()
         });
-        state.audio_settings.library.push(super::SoundLibraryItem {
+        state.audio_settings.library.push(crate::model::SoundLibraryItem {
             collapsed: false,
             ..Default::default()
         });
-        state.audio_settings.presets.push(super::SoundPreset {
+        state.audio_settings.presets.push(crate::model::SoundPreset {
             collapsed: false,
             ..Default::default()
         });
