@@ -59,8 +59,35 @@ pub fn split_key_list(spec: &str) -> Vec<String> {
         return Vec::new();
     }
 
+    if let Some(base_key) = match trimmed {
+        ":" => Some(";"),
+        "<" => Some(","),
+        ">" => Some("."),
+        "?" => Some("/"),
+        "_" => Some("-"),
+        "+" => Some("="),
+        "{" => Some("["),
+        "|" => Some("\\"),
+        "}" => Some("]"),
+        "\"" => Some("'"),
+        "~" => Some("`"),
+        "!" => Some("1"),
+        "@" => Some("2"),
+        "#" => Some("3"),
+        "$" => Some("4"),
+        "%" => Some("5"),
+        "^" => Some("6"),
+        "&" => Some("7"),
+        "*" => Some("8"),
+        "(" => Some("9"),
+        ")" => Some("0"),
+        _ => None,
+    } {
+        return vec!["Shift".to_owned(), base_key.to_owned()];
+    }
+
     trimmed
-        .split(|ch: char| matches!(ch, ',' | ';' | '+' | ' ' | '\t' | '\n'))
+        .split(|ch: char| matches!(ch, '+' | ' ' | '\t' | '\n'))
         .filter_map(|part| {
             let key = part.trim();
             (!key.is_empty()).then(|| normalize_key_name(key))
@@ -86,6 +113,10 @@ pub fn split_binding_list(spec: &str) -> Vec<String> {
     let trimmed = spec.trim();
     if trimmed.is_empty() {
         return Vec::new();
+    }
+
+    if parse_binding(trimmed).is_some() {
+        return vec![trimmed.to_owned()];
     }
 
     trimmed
