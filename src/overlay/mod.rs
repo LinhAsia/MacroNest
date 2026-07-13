@@ -30681,7 +30681,6 @@ mod windows_overlay {
         } else {
             step.text_override.trim().to_owned()
         };
-        let text = interpolate_variables(&text);
         if text.is_empty() {
             hide_hud_now();
             return Ok(());
@@ -30751,8 +30750,7 @@ mod windows_overlay {
         } else {
             step.text_override.trim().to_owned()
         };
-        let trimmed = interpolate_variables(text.trim()).to_owned();
-        if trimmed.is_empty() {
+        if text.is_empty() {
             hide_hud_now();
             return;
         }
@@ -30767,7 +30765,7 @@ mod windows_overlay {
         *HUD_DISPLAY.lock() = Some(HudDisplayState {
             owner_preset_id: Some(owner_preset_id),
             preset_id: None,
-            text: trimmed,
+            text,
             text_color: preset.text_color,
             background_color: preset.background_color,
             background_opacity: preset.background_opacity.clamp(0.0, 1.0),

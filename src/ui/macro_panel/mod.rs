@@ -12014,7 +12014,7 @@ if supports_move_mouse || show_detection_tuning {
                                     .fill(row_fill)
                                     .stroke(border_stroke)
                                     .inner_margin(egui::Margin::symmetric(4, 2))
-                                    .show(ui, |ui| {
+                                    .show(ui, |ui| ui.push_id((preset.id, step_index), |ui| {
                                         ui.horizontal(|ui| {
                                             const STEP_TOOLBAR_BUTTON: [f32; 2] = [20.0, 20.0];
                                             const STEP_TOOLBAR_ICON_SMALL: f32 = 14.0;
@@ -15446,7 +15446,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 }
                                             });
                                         });
-                                    })
+                                    }))
                                     .response;
                                 let row_hover_rect = row_response.rect.expand2(egui::vec2(8.0, 4.0));
                                 let is_row_hovered = row_response.hovered()
@@ -20596,38 +20596,37 @@ if supports_move_mouse || show_detection_tuning {
         vietnamese_input_mode: crate::model::VietnameseInputMode,
         is_expanded_width: bool,
     ) -> egui::Response {
-        ui.vertical(|ui| {
-            ui.horizontal(|ui| {
-                let var_name_id = if is_stop_action {
-                    ui.id().with(format!("{}-ai-response-var-name", stop_action_prefix))
-                } else {
-                    ui.id().with((step_index, "ai-response-var-name"))
-                };
-                let response = Self::render_variable_text_edit(
-                    ui,
-                    &mut step.if_variable_name,
-                    var_name_id,
-                    76.0,
-                    140.0,
-                    21.0, 21.0,
-                    Self::tr_lang(language, "variable", "variable"),
-                    false,
-                );
-                Self::apply_vietnamese_input_if_changed(
-                    &response,
-                    vietnamese_input_enabled,
-                    vietnamese_input_mode,
-                    &mut step.if_variable_name,
-                );
-                ui.label(" = AI Response");
-            });
+        ui.horizontal(|ui| {
+            let var_name_id = if is_stop_action {
+                ui.id().with(format!("{}-ai-response-var-name", stop_action_prefix))
+            } else {
+                ui.id().with((step_index, "ai-response-var-name"))
+            };
+            let response = Self::render_variable_text_edit(
+                ui,
+                &mut step.if_variable_name,
+                var_name_id,
+                76.0,
+                140.0,
+                21.0, 21.0,
+                Self::tr_lang(language, "variable", "variable"),
+                false,
+            );
+            Self::apply_vietnamese_input_if_changed(
+                &response,
+                vietnamese_input_enabled,
+                vietnamese_input_mode,
+                &mut step.if_variable_name,
+            );
+
+            ui.label(" = AI Response ");
 
             let req_id = if is_stop_action {
                 ui.id().with(format!("{}-ai-response-key", stop_action_prefix))
             } else {
                 ui.id().with((step_index, "ai-response-key"))
             };
-            let response = Self::render_interpolated_text_edit(
+            let response2 = Self::render_interpolated_text_edit(
                 ui,
                 &mut step.key,
                 req_id,
@@ -20639,12 +20638,13 @@ if supports_move_mouse || show_detection_tuning {
                 true,
             );
             Self::apply_vietnamese_input_if_changed(
-                &response,
+                &response2,
                 vietnamese_input_enabled,
                 vietnamese_input_mode,
                 &mut step.key,
             );
-            response
+
+            response.union(response2)
         }).inner
     }
 
