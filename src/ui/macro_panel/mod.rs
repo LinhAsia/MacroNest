@@ -7273,6 +7273,7 @@ impl CrosshairApp {
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-enable-disable-macro-preset"))
                                                         .width(146.0)
                                                         .selected_text(selected_label)
+                                                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                                         .show_ui(ui, |ui| {
                                                             for (preset_option_id, preset_option_label) in &trig_presets {
                                                                 let mut selected =
@@ -12753,6 +12754,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "enable-disable-macro-preset-step"))
                                                         .width(146.0)
                                                         .selected_text(selected_label)
+                                                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                                         .show_ui(ui, |ui| {
                                                             for (preset_option_id, preset_option_label) in &trig_presets {
                                                                 let mut selected =

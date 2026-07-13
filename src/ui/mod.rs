@@ -11722,6 +11722,8 @@ impl eframe::App for CrosshairApp {
         [0.0, 0.0, 0.0, 0.0]
     }
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        crate::overlay::UI_WANTS_KEYBOARD_INPUT.store(ctx.wants_keyboard_input(), std::sync::atomic::Ordering::Relaxed);
+        crate::overlay::UI_CAPTURING_INPUT.store(self.capture_target.is_some(), std::sync::atomic::Ordering::Relaxed);
         {
             let mut config = VIETNAMESE_INPUT_CONFIG.lock();
             config.enabled = self.state.vietnamese_input_enabled;

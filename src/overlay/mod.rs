@@ -1717,6 +1717,10 @@ mod windows_overlay {
         std::sync::atomic::AtomicBool::new(false);
     pub static UI_WINDOW_FOREGROUND: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
+    pub static UI_WANTS_KEYBOARD_INPUT: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    pub static UI_CAPTURING_INPUT: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
     pub static FOREGROUND_WINDOW_HWND: std::sync::atomic::AtomicIsize =
         std::sync::atomic::AtomicIsize::new(0);
     pub static FOREGROUND_WINDOW_TITLE: Lazy<Mutex<Option<String>>> =
@@ -4661,14 +4665,20 @@ mod windows_overlay {
                         }
                         return LRESULT(1);
                     }
+                    let screen_draw_trigger_allowed = if is_ui_in_foreground() {
+                        !UI_WANTS_KEYBOARD_INPUT.load(Ordering::Relaxed)
+                            && !UI_CAPTURING_INPUT.load(Ordering::Relaxed)
+                    } else {
+                        true
+                    };
                     let binding = binding_from_trigger_event(&key_name);
                     if is_key_down {
-                        if process_screen_draw_hotkey(&binding, is_repeat_key(&key_name)) {
+                        if screen_draw_trigger_allowed && process_screen_draw_hotkey(&binding, is_repeat_key(&key_name)) {
                             update_held_key(info.vkCode, is_key_down, is_key_up);
                             update_modifier_state(info.vkCode, is_key_down);
                             return LRESULT(1);
                         }
-                    } else if is_key_up && process_screen_draw_hotkey_release(&binding) {
+                    } else if is_key_up && screen_draw_trigger_allowed && process_screen_draw_hotkey_release(&binding) {
                         update_held_key(info.vkCode, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
                         if !is_ui_in_foreground() {
@@ -4744,7 +4754,8 @@ mod windows_overlay {
                     }
                 }
 
-                if is_ui_in_foreground() {
+                let ui_is_foreground = is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed);
+                if ui_is_foreground {
                     if let Some(key_name) = key_name.as_ref() {
                         update_held_key(info.vkCode, is_key_down, is_key_up);
                         if is_key_up {
@@ -6172,7 +6183,8 @@ mod windows_overlay {
                     .is_some_and(|h| hotkey::binding_matches(h, binding))
             })
         };
-        if is_ui_in_foreground() && !is_record_hotkey {
+        let ui_is_foreground = is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed);
+        if ui_is_foreground && !is_record_hotkey {
             return Some(false);
         }
 
