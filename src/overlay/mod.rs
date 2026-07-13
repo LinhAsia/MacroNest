@@ -28719,11 +28719,20 @@ mod windows_overlay {
         bypass_enabled: bool,
     ) -> bool {
         if delay_ms == 0 {
-            return !macro_runtime_target_matches(
-                target_window_title,
-                extra_target_window_titles,
-                match_duplicate_window_titles,
-            ) || (!bypass_enabled && !is_macro_preset_enabled(preset_id))
+            // Only abort due to window focus if a specific target was configured.
+            // Without a target window, global macros should always run to completion
+            // even if focus changes during long-running steps (e.g. AiResponse).
+            let has_target = target_window_title.is_some() || !extra_target_window_titles.is_empty();
+            if has_target
+                && !macro_runtime_target_matches(
+                    target_window_title,
+                    extra_target_window_titles,
+                    match_duplicate_window_titles,
+                )
+            {
+                return true;
+            }
+            return (!bypass_enabled && !is_macro_preset_enabled(preset_id))
                 || macro_stop_requested(preset_id, stop_immediately_on_retrigger);
         }
 
