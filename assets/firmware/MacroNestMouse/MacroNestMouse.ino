@@ -11,18 +11,6 @@ const uint8_t kAbsoluteMouseDescriptor[] PROGMEM = {
   0x85, kAbsoluteMouseReportId,
   0x09, 0x01,        // Usage (Pointer)
   0xA1, 0x00,        // Collection (Physical)
-  0x05, 0x09,        // Usage Page (Button)
-  0x19, 0x01,        // Usage Minimum (1)
-  0x29, 0x03,        // Usage Maximum (3)
-  0x15, 0x00,        // Logical Minimum (0)
-  0x25, 0x01,        // Logical Maximum (1)
-  0x95, 0x03,        // Report Count (3)
-  0x75, 0x01,        // Report Size (1)
-  0x81, 0x02,        // Input (Data, Variable, Absolute)
-  0x95, 0x01,        // Report Count (1)
-  0x75, 0x05,        // Report Size (5)
-  0x81, 0x03,        // Input (Constant, Variable, Absolute)
-  0x05, 0x01,        // Usage Page (Generic Desktop)
   0x09, 0x30,        // Usage (X)
   0x09, 0x31,        // Usage (Y)
   0x16, 0x00, 0x00,  // Logical Minimum (0)
@@ -43,19 +31,6 @@ constexpr uint8_t kHeader = 0xA5;
 constexpr uint8_t kReply = 0x5A;
 uint8_t packet[kPacketSize];
 uint8_t packetLength = 0;
-uint16_t absoluteX = 0;
-uint16_t absoluteY = 0;
-uint8_t absoluteButtons = 0;
-bool absolutePositionActive = false;
-
-void sendAbsoluteMouse() {
-  const uint8_t report[] = {
-    absoluteButtons,
-    static_cast<uint8_t>(absoluteX), static_cast<uint8_t>(absoluteX >> 8),
-    static_cast<uint8_t>(absoluteY), static_cast<uint8_t>(absoluteY >> 8)
-  };
-  HID().SendReport(kAbsoluteMouseReportId, report, sizeof(report));
-}
 
 uint8_t checksum(const uint8_t* bytes) {
   uint8_t value = 0;
@@ -103,10 +78,6 @@ void execute() {
     case 2: {
       const uint8_t mask = packet[2] == 1 ? 1 : packet[2] == 2 ? 2 : packet[2] == 3 ? 4 : 0;
       if (packet[3]) Mouse.press(mask); else Mouse.release(mask);
-      if (absolutePositionActive && mask) {
-        if (packet[3]) absoluteButtons |= mask; else absoluteButtons &= ~mask;
-        sendAbsoluteMouse();
-      }
       success = mask != 0;
       break;
     }
@@ -117,10 +88,11 @@ void execute() {
       success = sendMouse(100, 0);
       break;
     case 5: {
-      absoluteX = static_cast<uint16_t>((packet[2] << 8) | packet[3]);
-      absoluteY = static_cast<uint16_t>((packet[4] << 8) | packet[5]);
-      absolutePositionActive = true;
-      sendAbsoluteMouse();
+      const uint16_t position[] = {
+        static_cast<uint16_t>((packet[2] << 8) | packet[3]),
+        static_cast<uint16_t>((packet[4] << 8) | packet[5])
+      };
+      HID().SendReport(kAbsoluteMouseReportId, position, sizeof(position));
       break;
     }
     default:
