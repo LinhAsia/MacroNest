@@ -76,7 +76,7 @@ void execute() {
       break;
     }
     case 2: {
-      const uint8_t mask = packet[2] == 1 ? 1 : packet[2] == 2 ? 2 : packet[2] == 3 ? 4 : 0;
+      const uint8_t mask = packet[2] == 1 ? MOUSE_LEFT : packet[2] == 2 ? MOUSE_RIGHT : packet[2] == 3 ? MOUSE_MIDDLE : 0;
       if (packet[3]) Mouse.press(mask); else Mouse.release(mask);
       success = mask != 0;
       break;
@@ -93,12 +93,6 @@ void execute() {
         static_cast<uint16_t>((packet[4] << 8) | packet[5])
       };
       HID().SendReport(kAbsoluteMouseReportId, position, sizeof(position));
-      break;
-    }
-    case 6: {
-      const uint8_t mask = packet[2] == 1 ? MOUSE_LEFT : packet[2] == 2 ? MOUSE_RIGHT : packet[2] == 3 ? MOUSE_MIDDLE : 0;
-      if (mask) Mouse.click(mask);
-      success = mask != 0;
       break;
     }
     default:
