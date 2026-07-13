@@ -95,6 +95,12 @@ void execute() {
       HID().SendReport(kAbsoluteMouseReportId, position, sizeof(position));
       break;
     }
+    case 6: {
+      const uint8_t mask = packet[2] == 1 ? MOUSE_LEFT : packet[2] == 2 ? MOUSE_RIGHT : packet[2] == 3 ? MOUSE_MIDDLE : 0;
+      if (mask) Mouse.click(mask);
+      success = mask != 0;
+      break;
+    }
     default:
       success = false;
   }

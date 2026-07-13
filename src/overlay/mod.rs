@@ -31466,8 +31466,7 @@ mod windows_overlay {
                 _ => None,
             };
             if let Some(button) = click_button {
-                write_arduino_data(&arduino_packet(2, [button, 1, 0, 0, 0]))?;
-                return write_arduino_data(&arduino_packet(2, [button, 0, 0, 0, 0]));
+                return write_arduino_data(&arduino_packet(6, [button, 0, 0, 0, 0]));
             }
         }
         let delay_ms = HOOK_STATE.lock().macro_mouse_click_delay_ms;
