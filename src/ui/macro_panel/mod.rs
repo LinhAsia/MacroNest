@@ -766,7 +766,10 @@ impl CrosshairApp {
     }
 
     fn forward_action_popup_scroll(ui: &egui::Ui) {
-        if !ui.ui_contains_pointer() {
+        let Some(pointer_pos) = ui.ctx().pointer_hover_pos() else {
+            return;
+        };
+        if !ui.min_rect().contains(pointer_pos) {
             return;
         }
         let scroll_delta = ui.ctx().input(|input| input.smooth_scroll_delta);
@@ -6829,7 +6832,6 @@ impl CrosshairApp {
                                             ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(520.0);
-                                                Self::forward_action_popup_scroll(ui);
                                                 live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                 ui.separator();
                                                 let action_hover_id = ui.make_persistent_id((
@@ -6992,6 +6994,7 @@ impl CrosshairApp {
                                                         grid_col += 1;
                                                         if grid_col % 8 == 0 { ui.end_row(); }
                                 });
+                                                Self::forward_action_popup_scroll(ui);
                             });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
                                             let action_supports_capture =
@@ -9154,7 +9157,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                             ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(520.0);
-                                                Self::forward_action_popup_scroll(ui);
                                                 live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                 ui.separator();
                                                 let action_hover_id = ui.make_persistent_id((
@@ -9317,6 +9319,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         grid_col += 1;
                                                         if grid_col % 8 == 0 { ui.end_row(); }
                                 });
+                                                Self::forward_action_popup_scroll(ui);
                             });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
                                             let action_supports_capture =
@@ -12352,7 +12355,6 @@ if supports_move_mouse || show_detection_tuning {
                                                 ))
                                                 .show_ui(ui, |ui| {
                                                     ui.set_min_width(520.0);
-                                                    Self::forward_action_popup_scroll(ui);
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                     ui.separator();
                                                     let action_hover_id = ui.make_persistent_id((
@@ -12519,6 +12521,7 @@ if supports_move_mouse || show_detection_tuning {
                                                             grid_col += 1;
                                                             if grid_col % 8 == 0 { ui.end_row(); }
                                                         });
+                                                    Self::forward_action_popup_scroll(ui);
                                                 });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
                                             let action_supports_capture =
