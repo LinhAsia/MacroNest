@@ -20548,13 +20548,6 @@ if supports_move_mouse || show_detection_tuning {
                 );
             })
             .response;
-            let web_search_response =
-                (step.ai_response_provider == AiResponseProvider::GeminiLive).then(|| {
-                    ui.checkbox(
-                        &mut step.ai_response_web_search,
-                        Self::tr_lang(language, "Web search", "Tìm trên web"),
-                    )
-                });
             let var_name_id = if is_stop_action {
                 ui.id().with(format!("{}-ai-response-var-name", stop_action_prefix))
             } else {
@@ -20576,12 +20569,6 @@ if supports_move_mouse || show_detection_tuning {
                 vietnamese_input_mode,
                 &mut step.if_variable_name,
             );
-
-            ui.label(Self::tr_lang(
-                language,
-                " = AI Response ",
-                " = Phản hồi AI ",
-            ));
 
             let req_id = if is_stop_action {
                 ui.id().with(format!("{}-ai-response-key", stop_action_prefix))
@@ -20606,41 +20593,51 @@ if supports_move_mouse || show_detection_tuning {
                 &mut step.key,
             );
 
-            let mut response = provider_response.union(response).union(response2);
-            if let Some(web_search_response) = web_search_response {
-                response = response.union(web_search_response);
-            }
-            let default_prompt_response = ui.checkbox(
-                &mut step.ai_response_use_default_prompt,
-                Self::tr_lang(language, "Default prompt", "Prompt mặc định"),
-            );
-            response = response.union(default_prompt_response);
-            if !step.ai_response_use_default_prompt {
-                let prompt_id = if is_stop_action {
-                    ui.id().with(format!("{}-ai-response-system-prompt", stop_action_prefix))
-                } else {
-                    ui.id().with((step_index, "ai-response-system-prompt"))
-                };
-                let prompt_response = Self::render_interpolated_text_edit(
-                    ui,
-                    &mut step.ai_response_system_prompt,
-                    prompt_id,
-                    150.0,
-                    300.0,
-                    21.0,
-                    44.0,
-                    Self::tr_lang(language, "Custom system prompt", "Prompt hệ thống riêng"),
-                    true,
-                );
-                Self::apply_vietnamese_input_if_changed(
-                    &prompt_response,
-                    vietnamese_input_enabled,
-                    vietnamese_input_mode,
-                    &mut step.ai_response_system_prompt,
-                );
-                response = response.union(prompt_response);
-            }
-            response
+            let settings_id = if is_stop_action {
+                ui.id().with(format!("{}-ai-response-settings", stop_action_prefix))
+            } else {
+                ui.id().with((step_index, "ai-response-settings"))
+            };
+            let settings_response = ui
+                .push_id(settings_id, |ui| {
+                    ui.menu_button(Self::tr_lang(language, "Settings", "Cài đặt"), |ui| {
+                        ui.set_min_width(320.0);
+                        if step.ai_response_provider == AiResponseProvider::GeminiLive {
+                            ui.checkbox(
+                                &mut step.ai_response_web_search,
+                                Self::tr_lang(language, "Web search", "Tìm trên web"),
+                            );
+                        }
+                        ui.checkbox(
+                            &mut step.ai_response_use_default_prompt,
+                            Self::tr_lang(language, "Use default prompt", "Dùng prompt mặc định"),
+                        );
+                        if !step.ai_response_use_default_prompt {
+                            ui.label(Self::tr_lang(
+                                language,
+                                "Custom system prompt",
+                                "Prompt hệ thống riêng",
+                            ));
+                            let prompt_response = ui.add_sized(
+                                [ui.available_width(), 64.0],
+                                egui::TextEdit::multiline(&mut step.ai_response_system_prompt),
+                            );
+                            Self::apply_vietnamese_input_if_changed(
+                                &prompt_response,
+                                vietnamese_input_enabled,
+                                vietnamese_input_mode,
+                                &mut step.ai_response_system_prompt,
+                            );
+                        }
+                    })
+                    .response
+                })
+                .inner;
+
+            provider_response
+                .union(response)
+                .union(response2)
+                .union(settings_response)
         }).inner
     }
 
