@@ -1004,6 +1004,7 @@
   "macro_trigger_mode_label.press": "Nhấn",
   "macro_trigger_mode_label.hold": "Giữ",
   "macro_trigger_mode_label.release": "Thả",
+  "macro_trigger_mode_label.window_focus": "Tập trung",
   "Capturing triggers. Hold keys, then release to save. Click Capture again to cancel.": "Đang bắt trigger. Giữ rồi nhả để lưu, nhấn lại nút bắt để hủy.",
   "Captured the macro master hotkey.": "Đã gán hotkey bật/tắt macro.",
   "Captured key: {label}. Hold another key to form a combo, or release to save.": "Đã nhận phím: {label}. Giữ thêm phím khác để thành combo, hoặc thả ra để lưu.",

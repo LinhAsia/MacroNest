@@ -7907,7 +7907,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               Self::tr_lang(
                                                                   language,
                                                                   "Finish current iteration before stop",
-                                                                  "Ho\u{00e0}n t\u{1ea5}t l\u{01b0}\u{1ee3}t l\u{1eb7}p hi\u{1ec7}n t\u{1ea1}i tr\u{01b0}\u{1edbc} khi d\u{1eeb}ng",
+                                                                  "Ho\u{00e0}n t\u{1ea5}t l\u{01b0}\u{1ee3}t l\u{1eb7}p hi\u{1ec7}n t\u{1ea1}i tr\u{01b0}\u{1edb}c khi d\u{1eeb}ng",
                                                               ),
                                                           );
                                                           if response.changed() {
@@ -10230,7 +10230,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               Self::tr_lang(
                                                                   language,
                                                                   "Finish current iteration before stop",
-                                                                  "Ho\u{00e0}n t\u{1ea5}t l\u{01b0}\u{1ee3}t l\u{1eb7}p hi\u{1ec7}n t\u{1ea1}i tr\u{01b0}\u{1edbc} khi d\u{1eeb}ng",
+                                                                  "Ho\u{00e0}n t\u{1ea5}t l\u{01b0}\u{1ee3}t l\u{1eb7}p hi\u{1ec7}n t\u{1ea1}i tr\u{01b0}\u{1edb}c khi d\u{1eeb}ng",
                                                               ),
                                                           );
                                                           if response.changed() {
@@ -13590,7 +13590,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               Self::tr_lang(
                                                                   language,
                                                                   "Finish current iteration before stop",
-                                                                  "Ho\u{00e0}n t\u{1ea5}t l\u{01b0}\u{1ee3}t l\u{1eb7}p hi\u{1ec7}n t\u{1ea1}i tr\u{01b0}\u{1edbc} khi d\u{1eeb}ng",
+                                                                  "Ho\u{00e0}n t\u{1ea5}t l\u{01b0}\u{1ee3}t l\u{1eb7}p hi\u{1ec7}n t\u{1ea1}i tr\u{01b0}\u{1edb}c khi d\u{1eeb}ng",
                                                               ),
                                                           );
                                                           if response.changed() {
@@ -20547,7 +20547,11 @@ if supports_move_mouse || show_detection_tuning {
                 &mut step.if_variable_name,
             );
 
-            ui.label(" = AI Response ");
+            ui.label(Self::tr_lang(
+                language,
+                " = AI Response ",
+                " = Phản hồi AI ",
+            ));
 
             let req_id = if is_stop_action {
                 ui.id().with(format!("{}-ai-response-key", stop_action_prefix))
@@ -20562,7 +20566,7 @@ if supports_move_mouse || show_detection_tuning {
                 if is_expanded_width { 360.0 } else { 260.0 },
                 if is_expanded_width { 17.0 } else { 21.0 },
                 if is_expanded_width { 44.0 } else { 36.0 },
-                Self::tr_lang(language, "Request or variable", "Request or variable"),
+                Self::tr_lang(language, "Request or variable", "Yêu cầu hoặc biến"),
                 true,
             );
             Self::apply_vietnamese_input_if_changed(
