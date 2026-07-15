@@ -20540,6 +20540,10 @@ if supports_move_mouse || show_detection_tuning {
         is_expanded_width: bool,
     ) -> egui::Response {
         ui.horizontal(|ui| {
+            let previous_provider = step.ai_response_provider;
+            let previous_web_search = step.ai_response_web_search;
+            let previous_use_default_prompt = step.ai_response_use_default_prompt;
+            let previous_system_prompt = step.ai_response_system_prompt.clone();
             let provider_response = egui::ComboBox::from_id_salt(if is_stop_action {
                 ui.id().with(format!("{}-ai-response-provider", stop_action_prefix))
             } else {
@@ -20661,10 +20665,18 @@ if supports_move_mouse || show_detection_tuning {
             ui.ctx()
                 .data_mut(|data| data.insert_temp(settings_open_id, settings_open));
 
-            provider_response
+            let mut combined_response = provider_response
                 .union(response)
                 .union(response2)
-                .union(settings_response)
+                .union(settings_response);
+            if step.ai_response_provider != previous_provider
+                || step.ai_response_web_search != previous_web_search
+                || step.ai_response_use_default_prompt != previous_use_default_prompt
+                || step.ai_response_system_prompt != previous_system_prompt
+            {
+                combined_response.mark_changed();
+            }
+            combined_response
         }).inner
     }
 
