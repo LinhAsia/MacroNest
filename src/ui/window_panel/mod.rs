@@ -3298,12 +3298,7 @@ impl CrosshairApp {
 
                         ui.label(Self::tr_lang(language, "Animated apply", "Chuyển động"));
                         ui.horizontal_wrapped(|ui| {
-                            live_sync |= ui
-                                .checkbox(
-                                    &mut layout.animate_enabled,
-                                    Self::tr_lang(language, "Enabled", "Bật"),
-                                )
-                                .changed();
+                            live_sync |= ui.checkbox(&mut layout.animate_enabled, "").changed();
                             if layout.animate_enabled {
                                 ui.label(Self::tr_lang(language, "Duration", "Thời gian"));
                                 live_sync |= ui
