@@ -4464,18 +4464,7 @@ impl CrosshairApp {
             self.macro_folders_panel_open,
             self.resolved_active_macro_folder_view(),
         );
-        let macro_panel_scroll_id = ui.make_persistent_id(macro_panel_scroll_salt);
-        let popup_scroll_delta = ui.ctx().data_mut(|data| {
-            data.remove_temp::<f32>(egui::Id::new("macro-action-popup-scroll"))
-        });
-        if let Some(scroll_delta) = popup_scroll_delta {
-            let mut scroll_state =
-                egui::scroll_area::State::load(ui.ctx(), macro_panel_scroll_id)
-                    .unwrap_or_default();
-            scroll_state.offset.y = (scroll_state.offset.y - scroll_delta).max(0.0);
-            scroll_state.store(ui.ctx(), macro_panel_scroll_id);
-        }
-        egui::ScrollArea::vertical()
+        let mut macro_panel_scroll_output = egui::ScrollArea::vertical()
             .id_salt(macro_panel_scroll_salt)
             .auto_shrink([false, false])
             .max_height(macro_panel_scroll_height)
@@ -16298,6 +16287,15 @@ if supports_move_mouse || show_detection_tuning {
             self.pending_macro_group_scroll_target = None;
         }
         });
+        if let Some(scroll_delta) = ui.ctx().data_mut(|data| {
+            data.remove_temp::<f32>(egui::Id::new("macro-action-popup-scroll"))
+        }) {
+            macro_panel_scroll_output.state.offset.y =
+                (macro_panel_scroll_output.state.offset.y - scroll_delta).max(0.0);
+            macro_panel_scroll_output
+                .state
+                .store(ui.ctx(), macro_panel_scroll_output.id);
+        }
     }
 
     pub(crate) fn collect_all_macro_referenced_variables(&mut self) -> Vec<String> {
