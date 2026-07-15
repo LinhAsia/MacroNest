@@ -1683,6 +1683,19 @@ impl CrosshairApp {
         let popup_rect_id = ui.make_persistent_id((id_source, popup_key, "rect"));
         let active_mouse_click_popup_key_id =
             ui.make_persistent_id((id_source, "mouse-click-active-submenu-key"));
+        let active_popup_key = ui
+            .ctx()
+            .data(|data| {
+                data.get_temp::<Option<&'static str>>(active_mouse_click_popup_key_id)
+            })
+            .flatten();
+        let pointer_over_active_popup = active_popup_key
+            .and_then(|key| {
+                let rect_id = ui.make_persistent_id((id_source, key, "rect"));
+                ui.ctx().data(|data| data.get_temp::<egui::Rect>(rect_id))
+            })
+            .zip(ui.ctx().pointer_hover_pos())
+            .is_some_and(|(rect, pos)| rect.expand(2.0).contains(pos));
         let mut open = ui
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
@@ -1710,7 +1723,8 @@ impl CrosshairApp {
                 let tile_hovered = ui
                     .ctx()
                     .pointer_hover_pos()
-                    .is_some_and(|pos| tile_rect.contains(pos));
+                    .is_some_and(|pos| tile_rect.contains(pos))
+                    && !pointer_over_active_popup;
                 if tile_hovered || response.clicked() {
                     Self::clear_mouse_click_submenus(ui, id_source);
                     open = true;
