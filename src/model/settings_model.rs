@@ -376,6 +376,7 @@ pub struct GroqSettings {
     pub gemini_api_key: String,
     #[serde(skip)]
     pub show_gemini_api_key: bool,
+    pub ai_response_system_prompt: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -407,6 +408,7 @@ impl Default for GroqSettings {
             details_open: false,
             gemini_api_key: String::new(),
             show_gemini_api_key: false,
+            ai_response_system_prompt: "Provide a concise, direct answer in the user's language. Do not add greetings or markdown unless requested.".to_owned(),
         }
     }
 }

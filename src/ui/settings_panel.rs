@@ -190,6 +190,29 @@ impl CrosshairApp {
                                         }
                                         ui.end_row();
                                     });
+                                ui.add_space(8.0);
+                                ui.label(Self::tr_lang(
+                                    language,
+                                    "Default system prompt",
+                                    "Prompt hệ thống mặc định",
+                                ));
+                                let response = ui.add_sized(
+                                    [ui.available_width(), 64.0],
+                                    TextEdit::multiline(
+                                        &mut self.state.groq_settings.ai_response_system_prompt,
+                                    ),
+                                );
+                                groq_changed |= response.changed();
+                                if Self::settings_action_button(
+                                    ui,
+                                    Self::tr_lang(language, "Reset prompt", "Đặt lại prompt"),
+                                )
+                                .clicked()
+                                {
+                                    self.state.groq_settings.ai_response_system_prompt =
+                                        GroqSettings::default().ai_response_system_prompt;
+                                    groq_changed = true;
+                                }
                             }
                         });
                     });

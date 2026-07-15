@@ -26012,12 +26012,18 @@ mod windows_overlay {
             if prompt.is_empty() {
                 bail!("AI Response request prompt is empty");
             }
+            let system_prompt = if step.ai_response_use_default_prompt {
+                groq_settings.ai_response_system_prompt.clone()
+            } else {
+                interpolate_variables(&step.ai_response_system_prompt)
+            };
 
             ai::generate_ai_response(
                 &groq_settings,
                 step.ai_response_provider,
                 step.ai_response_web_search,
                 &prompt,
+                &system_prompt,
             )
         })();
 

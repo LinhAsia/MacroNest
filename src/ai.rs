@@ -423,11 +423,12 @@ fn groq_chat_completion_text(
 pub fn generate_groq_ai_response(
     settings: &GroqSettings,
     prompt: &str,
+    system_instruction: &str,
 ) -> Result<String> {
     groq_chat_completion_text(
         settings,
         prompt,
-        "You are a helpful AI assistant. Provide a concise, direct response to the user's request. Do not include conversational filler, greetings, or markdown formatting unless requested.",
+        system_instruction,
         None,
     )
 }
@@ -437,11 +438,12 @@ pub fn generate_ai_response(
     provider: AiResponseProvider,
     web_search: bool,
     prompt: &str,
+    system_instruction: &str,
 ) -> Result<String> {
     match provider {
-        AiResponseProvider::Groq => generate_groq_ai_response(settings, prompt),
+        AiResponseProvider::Groq => generate_groq_ai_response(settings, prompt, system_instruction),
         AiResponseProvider::GeminiLive => {
-            generate_gemini_live_ai_response(&settings.gemini_api_key, web_search, prompt)
+            generate_gemini_live_ai_response(&settings.gemini_api_key, web_search, prompt, system_instruction)
         }
     }
 }
@@ -450,6 +452,7 @@ fn generate_gemini_live_ai_response(
     api_key: &str,
     web_search: bool,
     prompt: &str,
+    system_instruction: &str,
 ) -> Result<String> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
@@ -480,7 +483,7 @@ fn generate_gemini_live_ai_response(
                 "generationConfig": { "responseModalities": ["AUDIO"] },
                 "outputAudioTranscription": {},
                 "systemInstruction": {
-                    "parts": [{ "text": "Provide a concise, direct answer in the user's language. Do not add greetings or markdown unless requested." }]
+                    "parts": [{ "text": system_instruction }]
                 }
             }
         });
