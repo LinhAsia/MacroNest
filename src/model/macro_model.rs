@@ -4,6 +4,7 @@ use std::ops::{Deref, DerefMut};
 
 use super::audio_model::AudioSenseSpec;
 use super::geometry_model::{GeometrySpec, HideGeometryMode, SetVariableSource};
+use super::settings_model::AiResponseProvider;
 use super::window_model::HotkeyBinding;
 use super::{
     default_condition_join_operator, default_false, default_if_color_tolerance,
@@ -299,6 +300,8 @@ pub struct MacroStep {
     pub loop_finish_iteration_on_stop: bool,
     #[serde(default)]
     pub if_variable_name: String,
+    #[serde(default)]
+    pub ai_response_provider: AiResponseProvider,
     #[serde(default = "default_if_operator")]
     pub if_operator: String,
     #[serde(default)]
@@ -428,6 +431,7 @@ impl Default for MacroStep {
             toggle_enabled_on_run: false,
             loop_finish_iteration_on_stop: false,
             if_variable_name: String::new(),
+            ai_response_provider: AiResponseProvider::Groq,
             if_operator: "==".to_string(),
             manual_mouse_sensitivity: false,
             break_loop_by_variable: false,

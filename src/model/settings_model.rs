@@ -368,7 +368,6 @@ pub struct AiSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct GroqSettings {
-    pub provider: AiResponseProvider,
     pub api_key: String,
     #[serde(skip)]
     pub show_api_key: bool,
@@ -402,7 +401,6 @@ impl Default for AiSettings {
 impl Default for GroqSettings {
     fn default() -> Self {
         Self {
-            provider: AiResponseProvider::Groq,
             api_key: String::new(),
             show_api_key: false,
             enabled: false,

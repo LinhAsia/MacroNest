@@ -432,8 +432,12 @@ pub fn generate_groq_ai_response(
     )
 }
 
-pub fn generate_ai_response(settings: &GroqSettings, prompt: &str) -> Result<String> {
-    match settings.provider {
+pub fn generate_ai_response(
+    settings: &GroqSettings,
+    provider: AiResponseProvider,
+    prompt: &str,
+) -> Result<String> {
+    match provider {
         AiResponseProvider::Groq => generate_groq_ai_response(settings, prompt),
         AiResponseProvider::GeminiLive => {
             generate_gemini_live_ai_response(&settings.gemini_api_key, prompt)

@@ -25903,6 +25903,39 @@ mod windows_overlay {
         )
     }
 
+    fn summarize_ai_response_error(
+        error: &anyhow::Error,
+        provider: crate::model::AiResponseProvider,
+    ) -> (String, bool) {
+        let text = format!("{error:#}");
+        let lower = text.to_ascii_lowercase();
+        let provider_name = match provider {
+            crate::model::AiResponseProvider::Groq => "Groq",
+            crate::model::AiResponseProvider::GeminiLive => "Gemini",
+        };
+        if lower.contains("api key is empty") {
+            return (format!("Enter a {provider_name} API key in Settings."), true);
+        }
+        if lower.contains("401")
+            || lower.contains("403")
+            || lower.contains("invalid api key")
+            || lower.contains("invalid_api_key")
+            || lower.contains("authentication")
+            || lower.contains("forbidden")
+        {
+            return (format!("{provider_name} API key was rejected."), true);
+        }
+        if lower.contains("429") || lower.contains("rate limit") || lower.contains("resource_exhausted") {
+            return (format!("{provider_name} rate limit reached."), false);
+        }
+        let message = if text.chars().count() > 240 {
+            format!("{}...", text.chars().take(240).collect::<String>())
+        } else {
+            text
+        };
+        (format!("AI Response failed: {message}"), false)
+    }
+
     fn trigger_funny_meme_reply_step(
         preset_id: u32,
         step_index: Option<usize>,
@@ -25976,7 +26009,7 @@ mod windows_overlay {
                 bail!("AI Response request prompt is empty");
             }
 
-            ai::generate_ai_response(&groq_settings, &prompt)
+            ai::generate_ai_response(&groq_settings, step.ai_response_provider, &prompt)
         })();
 
         let mut inline_message = String::new();
@@ -25988,7 +26021,8 @@ mod windows_overlay {
                 format!("AI Response saved to variable {}: {}", target_var, ai_response)
             }
             Err(error) => {
-                let (short_message, needs_settings) = summarize_funny_meme_reply_error(error);
+                let (short_message, needs_settings) =
+                    summarize_ai_response_error(error, step.ai_response_provider);
                 inline_message = short_message.clone();
                 open_groq_settings = needs_settings;
                 format!("AI Response failed: {short_message}")

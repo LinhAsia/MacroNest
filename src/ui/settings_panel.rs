@@ -88,53 +88,14 @@ impl CrosshairApp {
                                     .min_col_width(0.0)
                                     .spacing([12.0, 8.0])
                                     .show(ui, |ui| {
-                                        ui.label(Self::tr_lang(language, "Provider", "Nhà cung cấp"));
-                                        egui::ComboBox::from_id_salt("ai-response-provider")
-                                            .selected_text(match self.state.groq_settings.provider {
-                                                AiResponseProvider::Groq => "Groq",
-                                                AiResponseProvider::GeminiLive => "Gemini Live",
-                                            })
-                                            .show_ui(ui, |ui| {
-                                                groq_changed |= ui
-                                                    .selectable_value(
-                                                        &mut self.state.groq_settings.provider,
-                                                        AiResponseProvider::Groq,
-                                                        "Groq",
-                                                    )
-                                                    .changed();
-                                                groq_changed |= ui
-                                                    .selectable_value(
-                                                        &mut self.state.groq_settings.provider,
-                                                        AiResponseProvider::GeminiLive,
-                                                        "Gemini Live (WebSocket + Google Search)",
-                                                    )
-                                                    .changed();
-                                            });
-                                        ui.label("");
-                                        ui.end_row();
-
-                                        let using_gemini = self.state.groq_settings.provider
-                                            == AiResponseProvider::GeminiLive;
-                                        ui.label("API Key");
-                                        let key_editor = if using_gemini {
-                                            TextEdit::singleline(
-                                                &mut self.state.groq_settings.gemini_api_key,
-                                            )
-                                            .hint_text("AIza...")
-                                        } else {
-                                            TextEdit::singleline(
-                                                &mut self.state.groq_settings.api_key,
-                                            )
-                                            .hint_text("gsk_...")
-                                        };
-                                        let show_api_key = if using_gemini {
-                                            self.state.groq_settings.show_gemini_api_key
-                                        } else {
-                                            self.state.groq_settings.show_api_key
-                                        };
+                                        ui.label("Groq API Key");
+                                        let key_editor = TextEdit::singleline(
+                                            &mut self.state.groq_settings.api_key,
+                                        )
+                                        .hint_text("gsk_...");
                                         let response = ui.add_sized(
                                             [280.0, 24.0],
-                                            if show_api_key {
+                                            if self.state.groq_settings.show_api_key {
                                                 key_editor
                                             } else {
                                                 key_editor.password(true)
@@ -148,16 +109,12 @@ impl CrosshairApp {
                                             &response,
                                             self.state.vietnamese_input_enabled,
                                             self.state.vietnamese_input_mode,
-                                            if using_gemini {
-                                                &mut self.state.groq_settings.gemini_api_key
-                                            } else {
-                                                &mut self.state.groq_settings.api_key
-                                            },
+                                            &mut self.state.groq_settings.api_key,
                                         );
                                         groq_changed |= response.changed();
                                         if Self::settings_action_button_fixed(
                                             ui,
-                                            if show_api_key {
+                                            if self.state.groq_settings.show_api_key {
                                                 Self::tr_lang(language, "Hide", "")
                                             } else {
                                                 Self::tr_lang(language, "Show", "")
@@ -166,13 +123,8 @@ impl CrosshairApp {
                                         )
                                         .clicked()
                                         {
-                                            if using_gemini {
-                                                self.state.groq_settings.show_gemini_api_key =
-                                                    !self.state.groq_settings.show_gemini_api_key;
-                                            } else {
-                                                self.state.groq_settings.show_api_key =
-                                                    !self.state.groq_settings.show_api_key;
-                                            }
+                                            self.state.groq_settings.show_api_key =
+                                                !self.state.groq_settings.show_api_key;
                                             groq_changed = true;
                                         }
                                         ui.end_row();
@@ -187,11 +139,53 @@ impl CrosshairApp {
                                         .clicked()
                                         {
                                             let _ = crate::platform::open_url_in_browser(
-                                                if using_gemini {
-                                                    "https://aistudio.google.com/app/apikey"
-                                                } else {
-                                                    "https://console.groq.com/keys"
-                                                },
+                                                "https://console.groq.com/keys",
+                                            );
+                                        }
+                                        ui.end_row();
+
+                                        ui.label("Gemini API Key");
+                                        let key_editor = TextEdit::singleline(
+                                            &mut self.state.groq_settings.gemini_api_key,
+                                        )
+                                        .hint_text("AIza...");
+                                        let response = ui.add_sized(
+                                            [280.0, 24.0],
+                                            if self.state.groq_settings.show_gemini_api_key {
+                                                key_editor
+                                            } else {
+                                                key_editor.password(true)
+                                            },
+                                        );
+                                        groq_changed |= response.changed();
+                                        if Self::settings_action_button_fixed(
+                                            ui,
+                                            if self.state.groq_settings.show_gemini_api_key {
+                                                Self::tr_lang(language, "Hide", "")
+                                            } else {
+                                                Self::tr_lang(language, "Show", "")
+                                            },
+                                            action_width,
+                                        )
+                                        .clicked()
+                                        {
+                                            self.state.groq_settings.show_gemini_api_key =
+                                                !self.state.groq_settings.show_gemini_api_key;
+                                            groq_changed = true;
+                                        }
+                                        ui.end_row();
+
+                                        ui.label("");
+                                        ui.label("");
+                                        if Self::settings_action_button_fixed(
+                                            ui,
+                                            Self::tr_lang(language, "Get Gemini key", "Lấy khóa Gemini"),
+                                            action_width,
+                                        )
+                                        .clicked()
+                                        {
+                                            let _ = crate::platform::open_url_in_browser(
+                                                "https://aistudio.google.com/app/apikey",
                                             );
                                         }
                                         ui.end_row();

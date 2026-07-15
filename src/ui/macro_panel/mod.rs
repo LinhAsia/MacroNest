@@ -20525,6 +20525,29 @@ if supports_move_mouse || show_detection_tuning {
         is_expanded_width: bool,
     ) -> egui::Response {
         ui.horizontal(|ui| {
+            let provider_response = egui::ComboBox::from_id_salt(if is_stop_action {
+                ui.id().with(format!("{}-ai-response-provider", stop_action_prefix))
+            } else {
+                ui.id().with((step_index, "ai-response-provider"))
+            })
+            .width(92.0)
+            .selected_text(match step.ai_response_provider {
+                AiResponseProvider::Groq => "Groq",
+                AiResponseProvider::GeminiLive => "Gemini Live",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut step.ai_response_provider,
+                    AiResponseProvider::Groq,
+                    "Groq",
+                );
+                ui.selectable_value(
+                    &mut step.ai_response_provider,
+                    AiResponseProvider::GeminiLive,
+                    "Gemini Live",
+                );
+            })
+            .response;
             let var_name_id = if is_stop_action {
                 ui.id().with(format!("{}-ai-response-var-name", stop_action_prefix))
             } else {
@@ -20576,7 +20599,7 @@ if supports_move_mouse || show_detection_tuning {
                 &mut step.key,
             );
 
-            response.union(response2)
+            provider_response.union(response).union(response2)
         }).inner
     }
 
