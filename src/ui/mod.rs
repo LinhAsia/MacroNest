@@ -13494,16 +13494,37 @@ impl eframe::App for CrosshairApp {
                                         crate::overlay::screen_draw_set_eraser(!eraser_active);
                                     }
                                     let smoothing = crate::overlay::screen_draw_get_smoothing();
-                                    if icon_btn(
+                                    let smoothing_clicked = icon_btn(
                                         ui,
                                         smoothing,
                                         "smooth",
                                         self.tr("Smooth line", "Làm mượt nét"),
                                     )
-                                    .1
-                                    {
+                                    .1;
+                                    if smoothing_clicked {
                                         crate::overlay::screen_draw_set_smoothing(!smoothing);
                                         crate::overlay::screen_draw_toolbar_interacted();
+                                    }
+                                    let smoothing_enabled =
+                                        if smoothing_clicked { !smoothing } else { smoothing };
+                                    if smoothing_enabled {
+                                        let mut amount =
+                                            crate::overlay::screen_draw_get_smoothing_amount();
+                                        let amount_response = ui
+                                            .add_sized(
+                                                [44.0, 20.0],
+                                                egui::DragValue::new(&mut amount)
+                                                    .range(0.0..=1.0)
+                                                    .speed(0.01)
+                                                    .fixed_decimals(2),
+                                            )
+                                            .on_hover_text(self.tr(
+                                                "Smoothing amount",
+                                                "Mức làm mượt",
+                                            ));
+                                        if amount_response.changed() {
+                                            crate::overlay::screen_draw_set_smoothing_amount(amount);
+                                        }
                                     }
 
                                     ui.separator();
