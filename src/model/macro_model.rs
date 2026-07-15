@@ -302,6 +302,8 @@ pub struct MacroStep {
     pub if_variable_name: String,
     #[serde(default)]
     pub ai_response_provider: AiResponseProvider,
+    #[serde(default)]
+    pub ai_response_web_search: bool,
     #[serde(default = "default_if_operator")]
     pub if_operator: String,
     #[serde(default)]
@@ -432,6 +434,7 @@ impl Default for MacroStep {
             loop_finish_iteration_on_stop: false,
             if_variable_name: String::new(),
             ai_response_provider: AiResponseProvider::Groq,
+            ai_response_web_search: false,
             if_operator: "==".to_string(),
             manual_mouse_sensitivity: false,
             break_loop_by_variable: false,

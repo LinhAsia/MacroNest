@@ -435,17 +435,22 @@ pub fn generate_groq_ai_response(
 pub fn generate_ai_response(
     settings: &GroqSettings,
     provider: AiResponseProvider,
+    web_search: bool,
     prompt: &str,
 ) -> Result<String> {
     match provider {
         AiResponseProvider::Groq => generate_groq_ai_response(settings, prompt),
         AiResponseProvider::GeminiLive => {
-            generate_gemini_live_ai_response(&settings.gemini_api_key, prompt)
+            generate_gemini_live_ai_response(&settings.gemini_api_key, web_search, prompt)
         }
     }
 }
 
-fn generate_gemini_live_ai_response(api_key: &str, prompt: &str) -> Result<String> {
+fn generate_gemini_live_ai_response(
+    api_key: &str,
+    web_search: bool,
+    prompt: &str,
+) -> Result<String> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
         bail!("Gemini API key is empty");
@@ -469,21 +474,20 @@ fn generate_gemini_live_ai_response(api_key: &str, prompt: &str) -> Result<Strin
     );
     let (mut socket, _) = client(url, tls).context("Gemini WebSocket handshake failed")?;
 
-    socket.write(Message::Text(
-        serde_json::json!({
+    let mut setup = serde_json::json!({
             "setup": {
                 "model": "models/gemini-3.1-flash-live-preview",
                 "generationConfig": { "responseModalities": ["AUDIO"] },
                 "outputAudioTranscription": {},
-                "tools": [{ "googleSearch": {} }],
                 "systemInstruction": {
                     "parts": [{ "text": "Provide a concise, direct answer in the user's language. Do not add greetings or markdown unless requested." }]
                 }
             }
-        })
-        .to_string()
-        .into(),
-    ))?;
+        });
+    if web_search {
+        setup["setup"]["tools"] = serde_json::json!([{ "googleSearch": {} }]);
+    }
+    socket.write(Message::Text(setup.to_string().into()))?;
     socket.flush()?;
 
     let setup_started = Instant::now();
@@ -550,6 +554,7 @@ fn read_gemini_live_json(
     loop {
         match socket.read()? {
             Message::Text(text) => return Ok(serde_json::from_str(&text)?),
+            Message::Binary(bytes) => return Ok(serde_json::from_slice(&bytes)?),
             Message::Close(frame) => {
                 let reason = frame
                     .map(|frame| frame.reason.to_string())
@@ -558,7 +563,7 @@ fn read_gemini_live_json(
                 bail!("Gemini Live connection closed: {reason}");
             }
             Message::Ping(payload) => socket.send(Message::Pong(payload))?,
-            Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {}
+            Message::Pong(_) | Message::Frame(_) => {}
         }
     }
 }

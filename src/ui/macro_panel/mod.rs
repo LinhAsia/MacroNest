@@ -20548,6 +20548,13 @@ if supports_move_mouse || show_detection_tuning {
                 );
             })
             .response;
+            let web_search_response =
+                (step.ai_response_provider == AiResponseProvider::GeminiLive).then(|| {
+                    ui.checkbox(
+                        &mut step.ai_response_web_search,
+                        Self::tr_lang(language, "Web search", "Tìm trên web"),
+                    )
+                });
             let var_name_id = if is_stop_action {
                 ui.id().with(format!("{}-ai-response-var-name", stop_action_prefix))
             } else {
@@ -20599,7 +20606,11 @@ if supports_move_mouse || show_detection_tuning {
                 &mut step.key,
             );
 
-            provider_response.union(response).union(response2)
+            let mut response = provider_response.union(response).union(response2);
+            if let Some(web_search_response) = web_search_response {
+                response = response.union(web_search_response);
+            }
+            response
         }).inner
     }
 
