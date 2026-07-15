@@ -4251,105 +4251,52 @@ impl CrosshairApp {
                     MacroGroupFavoriteFilter::Star
                 };
             }
-            // Render Global Constants on toolbar
-            egui::Frame::group(ui.style())
-                .inner_margin(egui::Margin::symmetric(3, 3))
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 3.0;
-                    if !self.state.global_constants.is_empty() {
-                        let max_show = 3;
-                        for (i, (name, val)) in self.state.global_constants.iter().enumerate() {
-                            if i >= max_show {
-                                break;
-                            }
-                            let text = format!("{}={}", name, val);
-                            let is_dark = self.state.ui_theme == UiThemeMode::Dark;
-                            let bg_color = if is_dark {
-                                Color32::from_rgba_premultiplied(0, 150, 200, 30)
+            let edit_icon = 0xe3c9;
+            let variable_response = Self::with_emphasized_button_hover(ui, |ui| {
+                ui.add_sized(
+                    [28.0, 28.0],
+                    Button::new(Self::material_icon_text(edit_icon, 18.0))
+                        .fill(if self.variable_inspector_open {
+                            Color32::from_rgb(46, 126, 76)
+                        } else {
+                            ui.visuals().faint_bg_color
+                        })
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            if self.variable_inspector_open {
+                                Color32::from_rgb(112, 204, 142)
                             } else {
-                                Color32::from_rgba_premultiplied(0, 120, 180, 20)
-                            };
-                            let border_color = if is_dark {
-                                Color32::from_rgba_premultiplied(0, 200, 255, 120)
-                            } else {
-                                Color32::from_rgba_premultiplied(0, 100, 150, 120)
-                            };
-                            let text_color = if is_dark {
-                                Color32::from_rgb(140, 230, 255)
-                            } else {
-                                Color32::from_rgb(0, 80, 120)
-                            };
-                            egui::Frame::canvas(ui.style())
-                                .fill(bg_color)
-                                .stroke(egui::Stroke::NONE)
-                                .rounding(4.0)
-                                .inner_margin(egui::Margin::symmetric(5, 2))
-                                .show(ui, |ui| {
-                                    ui.label(
-                                        RichText::new(text)
-                                            .monospace()
-                                            .size(11.0)
-                                            .color(text_color),
-                                    );
-                                })
-                                .response
-                                .on_hover_text(Self::tr_lang(
-                                    language,
-                                    "Global Constant (Fixed Value)",
-                                    "Hang so toan cuc (Gia tri co dinh)",
-                                ));
-                        }
-                        if self.state.global_constants.len() > max_show {
-                            let remaining = self.state.global_constants.len() - max_show;
-                            let mut tooltip_text = String::new();
-                            for (i, (name, val)) in self.state.global_constants.iter().enumerate() {
-                                if i >= max_show {
-                                    if !tooltip_text.is_empty() {
-                                        tooltip_text.push('\n');
-                                    }
-                                    tooltip_text.push_str(&format!("{} = {}", name, val));
-                                }
-                            }
-                            ui.label(
-                                RichText::new(format!("+{} more", remaining))
-                                    .size(11.0)
-                                    .color(ui.visuals().weak_text_color())
-                                    .italics(),
-                            )
-                            .on_hover_text(tooltip_text);
-                        }
-                    }
-                    let edit_icon = 0xe3c9; // edit icon (but chi cheo)
-                    if Self::with_emphasized_button_hover(ui, |ui| {
-                        ui.add_sized(
-                            [28.0, 28.0],
-                            Button::new(Self::material_icon_text(edit_icon, 18.0)) // variable edit icon
-                                .fill(if self.variable_inspector_open {
-                                    Color32::from_rgb(46, 126, 76)
-                                } else {
-                                    ui.visuals().faint_bg_color
-                                })
-                                .stroke(egui::Stroke::new(
-                                    1.0,
-                                    if self.variable_inspector_open {
-                                        Color32::from_rgb(112, 204, 142)
-                                    } else {
-                                        ui.visuals().widgets.noninteractive.bg_stroke.color
-                                    },
-                                ))
-                                .corner_radius(6.0),
-                        )
-                    })
-                    .on_hover_text(Self::tr_lang(
-                        language,
-                        "Variable manager",
-                        "Variable manager",
-                    ))
-                    .clicked()
-                    {
-                        self.variable_inspector_open = !self.variable_inspector_open;
-                    }
-                });
+                                ui.visuals().widgets.noninteractive.bg_stroke.color
+                            },
+                        ))
+                        .corner_radius(6.0),
+                )
+            })
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Variable manager",
+                "Variable manager",
+            ));
+            if !self.state.global_constants.is_empty() {
+                let badge_center = variable_response.rect.right_top() + egui::vec2(-6.0, 6.0);
+                ui.painter()
+                    .circle_filled(badge_center, 7.5, Color32::from_rgb(255, 60, 60));
+                ui.painter().circle_stroke(
+                    badge_center,
+                    7.5,
+                    egui::Stroke::new(1.0, Color32::WHITE),
+                );
+                ui.painter().text(
+                    badge_center,
+                    egui::Align2::CENTER_CENTER,
+                    self.state.global_constants.len().to_string(),
+                    egui::FontId::proportional(9.0),
+                    Color32::WHITE,
+                );
+            }
+            if variable_response.clicked() {
+                self.variable_inspector_open = !self.variable_inspector_open;
+            }
             if Self::with_emphasized_button_hover(ui, |ui| {
                 ui.add_sized(
                     [28.0, 28.0],
@@ -4663,67 +4610,8 @@ impl CrosshairApp {
                     self.open_macro_folder_mode();
                 }
             }
-            // Render Global Constants on toolbar
-            if !self.state.global_constants.is_empty() {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    let max_show = 3;
-                    for (i, (name, val)) in self.state.global_constants.iter().enumerate() {
-                        if i >= max_show {
-                            break;
-                        }
-                        let text = format!("{}={}", name, val);
-                        let is_dark = self.state.ui_theme == UiThemeMode::Dark;
-                        let bg_color = if is_dark {
-                            Color32::from_rgba_premultiplied(0, 150, 200, 30)
-                        } else {
-                            Color32::from_rgba_premultiplied(0, 120, 180, 20)
-                        };
-                        let border_color = if is_dark {
-                            Color32::from_rgba_premultiplied(0, 200, 255, 120)
-                        } else {
-                            Color32::from_rgba_premultiplied(0, 100, 150, 120)
-                        };
-                        let text_color = if is_dark {
-                            Color32::from_rgb(140, 230, 255)
-                        } else {
-                            Color32::from_rgb(0, 80, 120)
-                        };
-                        egui::Frame::canvas(ui.style())
-                            .fill(bg_color)
-                            .stroke(egui::Stroke::NONE)
-                            .rounding(4.0)
-                            .inner_margin(egui::Margin::symmetric(5, 2))
-                            .show(ui, |ui| {
-                                ui.label(RichText::new(text).monospace().size(11.0).color(text_color));
-                            }).response.on_hover_text(Self::tr_lang(
-                                language,
-                                "Global Constant (Fixed Value)",
-                                "Global Constant (Fixed Value)",
-                            ));
-                    }
-                    if self.state.global_constants.len() > max_show {
-                        let remaining = self.state.global_constants.len() - max_show;
-                        let mut tooltip_text = String::new();
-                        for (i, (name, val)) in self.state.global_constants.iter().enumerate() {
-                            if i >= max_show {
-                                if !tooltip_text.is_empty() {
-                                    tooltip_text.push('\n');
-                                }
-                                tooltip_text.push_str(&format!("{} = {}", name, val));
-                            }
-                        }
-                        ui.label(
-                            RichText::new(format!("+{} more", remaining))
-                                .size(11.0)
-                                .color(ui.visuals().weak_text_color())
-                                .italics()
-                        ).on_hover_text(tooltip_text);
-                    }
-                });
-            }
             let variable_inspector_active = self.variable_inspector_open;
-            if ui
+            let variable_response = ui
                 .add_sized(
                     [28.0, 28.0],
                     Button::new(Self::material_icon_text(0xe150, 18.0)) // variable add icon
@@ -4746,9 +4634,25 @@ impl CrosshairApp {
                     language,
                     "Variable manager",
                     "Variable manager",
-                ))
-                .clicked()
-            {
+                ));
+            if !self.state.global_constants.is_empty() {
+                let badge_center = variable_response.rect.right_top() + egui::vec2(-6.0, 6.0);
+                ui.painter()
+                    .circle_filled(badge_center, 7.5, Color32::from_rgb(255, 60, 60));
+                ui.painter().circle_stroke(
+                    badge_center,
+                    7.5,
+                    egui::Stroke::new(1.0, Color32::WHITE),
+                );
+                ui.painter().text(
+                    badge_center,
+                    egui::Align2::CENTER_CENTER,
+                    self.state.global_constants.len().to_string(),
+                    egui::FontId::proportional(9.0),
+                    Color32::WHITE,
+                );
+            }
+            if variable_response.clicked() {
                 self.variable_inspector_open = !self.variable_inspector_open;
             }
             let trash_enabled = !self.selected_macro_groups.is_empty();
