@@ -13239,7 +13239,7 @@ mod windows_overlay {
         }
         let dx = point.x - anchor.x;
         let dy = point.y - anchor.y;
-        if tool == ScreenDrawTool::Ellipse {
+        if matches!(tool, ScreenDrawTool::Rectangle | ScreenDrawTool::Ellipse) {
             let size = dx.abs().max(dy.abs());
             return POINT {
                 x: anchor.x + size * dx.signum(),
@@ -14867,19 +14867,14 @@ mod windows_overlay {
         true
     }
 
-    fn screen_draw_shape_points(stroke: &ScreenDrawStroke) -> Vec<POINT> {
-        if stroke.tool == ScreenDrawTool::Brush {
-            let filtered = filtered_screen_draw_points(
+    fn screen_draw_shape_points(stroke: &ScreenDrawStroke) -> Cow<'_, [POINT]> {
+        if stroke.tool == ScreenDrawTool::Brush && stroke.smoothing {
+            Cow::Owned(smoothed_screen_draw_points(
                 &stroke.points,
-                if stroke.smoothing { 1.2 } else { 0.6 },
-            );
-            if stroke.smoothing {
-                smoothed_screen_draw_points(&filtered, stroke.smoothing_amount)
-            } else {
-                filtered
-            }
+                stroke.smoothing_amount,
+            ))
         } else {
-            stroke.points.clone()
+            Cow::Borrowed(&stroke.points)
         }
     }
 
@@ -15593,14 +15588,21 @@ mod windows_overlay {
         {
             draw_crosshair_draw_guides(&mut pixmap, width, height);
         }
-        if let Some(stroke) = state_guard.current_stroke.clone()
-            && let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
-                state_guard.frame_rgba.as_mut_slice(),
-                width as u32,
-                height as u32,
-            )
         {
-            render_screen_draw_stroke_skia(&mut pixmap, &stroke);
+            let ScreenDrawState {
+                current_stroke,
+                frame_rgba,
+                ..
+            } = &mut *state_guard;
+            if let Some(stroke) = current_stroke.as_ref()
+                && let Some(mut pixmap) = tiny_skia::PixmapMut::from_bytes(
+                    frame_rgba.as_mut_slice(),
+                    width as u32,
+                    height as u32,
+                )
+            {
+                render_screen_draw_stroke_skia(&mut pixmap, stroke);
+            }
         }
         let toolbar_bounds = screen_draw_toolbar_bounds_tuple(&state_guard);
         let canvas_height = state_guard.canvas_height;
@@ -15819,25 +15821,6 @@ mod windows_overlay {
             });
         }
         result
-    }
-
-    fn filtered_screen_draw_points(points: &[POINT], min_distance: f32) -> Vec<POINT> {
-        if points.len() < 2 {
-            return points.to_vec();
-        }
-        let min_distance_sq = min_distance.max(0.25).powi(2);
-        let mut filtered = Vec::with_capacity(points.len());
-        for point in points {
-            let should_push = filtered.last().is_none_or(|last: &POINT| {
-                let dx = (point.x - last.x) as f32;
-                let dy = (point.y - last.y) as f32;
-                dx * dx + dy * dy >= min_distance_sq
-            });
-            if should_push {
-                filtered.push(*point);
-            }
-        }
-        filtered
     }
 
     fn draw_screen_draw_slider_skia(
@@ -29544,7 +29527,7 @@ mod windows_overlay {
         }
 
         #[test]
-        fn constrained_screen_draw_point_keeps_ellipse_visible_with_shift() {
+        fn constrained_screen_draw_point_keeps_shapes_visible_with_shift() {
             let anchor = POINT { x: 100, y: 100 };
             let dragged = POINT { x: 140, y: 110 };
             let ellipse =
@@ -29553,7 +29536,7 @@ mod windows_overlay {
                 constrained_screen_draw_point(ScreenDrawTool::Rectangle, true, anchor, dragged);
 
             assert_eq!(ellipse, POINT { x: 140, y: 140 });
-            assert_eq!(rectangle, POINT { x: 140, y: 100 });
+            assert_eq!(rectangle, POINT { x: 140, y: 140 });
         }
 
         #[test]
