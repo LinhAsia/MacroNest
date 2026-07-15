@@ -5681,99 +5681,6 @@ impl CrosshairApp {
                                         self.persist();
                                     }
 
-                                    if self.state.quick_screen_draw_tool
-                                        != QuickScreenDrawTool::Brush
-                                    {
-                                        self.state.quick_screen_draw_tool =
-                                            QuickScreenDrawTool::Brush;
-                                        self.sync_quick_screen_draw_config();
-                                        self.persist();
-                                    }
-
-                                    if false {
-                                    ui.add_space(4.0);
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Draw tool",
-                                            "Công cụ vẽ",
-                                        ))
-                                        .size(10.0),
-                                    );
-                                    let before_tool = self.state.quick_screen_draw_tool;
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.selectable_value(
-                                            &mut self.state.quick_screen_draw_tool,
-                                            QuickScreenDrawTool::Brush,
-                                            Self::tr_lang(self.state.ui_language, "Free", "Tự do"),
-                                        );
-                                        ui.selectable_value(
-                                            &mut self.state.quick_screen_draw_tool,
-                                            QuickScreenDrawTool::Line,
-                                            Self::tr_lang(self.state.ui_language, "Line", "Đường"),
-                                        );
-                                        ui.selectable_value(
-                                            &mut self.state.quick_screen_draw_tool,
-                                            QuickScreenDrawTool::Rectangle,
-                                            Self::tr_lang(
-                                                self.state.ui_language,
-                                                "Quad",
-                                                "Tứ giác",
-                                            ),
-                                        );
-                                        ui.selectable_value(
-                                            &mut self.state.quick_screen_draw_tool,
-                                            QuickScreenDrawTool::Circle,
-                                            Self::tr_lang(self.state.ui_language, "Circle", "Tròn"),
-                                        );
-                                        ui.selectable_value(
-                                            &mut self.state.quick_screen_draw_tool,
-                                            QuickScreenDrawTool::Text,
-                                            Self::tr_lang(self.state.ui_language, "Text", "Chữ"),
-                                        );
-                                    });
-                                    if before_tool != self.state.quick_screen_draw_tool {
-                                        self.sync_quick_screen_draw_config();
-                                        self.persist();
-                                    }
-                                    }
-
-                                    ui.add_space(4.0);
-                                    let smooth_changed = ui
-                                        .checkbox(
-                                            &mut self.state.quick_screen_draw_smoothing,
-                                            RichText::new(Self::tr_lang(
-                                                self.state.ui_language,
-                                                "Smooth line",
-                                                "Làm mượt nét",
-                                            ))
-                                            .size(10.0),
-                                        )
-                                        .changed();
-                                    if smooth_changed {
-                                        self.sync_quick_screen_draw_config();
-                                        self.persist();
-                                    }
-
-                                    if self.state.quick_screen_draw_smoothing {
-                                        ui.add_space(2.0);
-                                        let amount_changed = ui
-                                            .add(
-                                                egui::Slider::new(
-                                                    &mut self
-                                                        .state
-                                                        .quick_screen_draw_smoothing_amount,
-                                                    0.0..=1.0,
-                                                )
-                                                .show_value(true),
-                                            )
-                                            .changed();
-                                        if amount_changed {
-                                            self.sync_quick_screen_draw_config();
-                                            self.persist();
-                                        }
-                                    }
-
                                     ui.add_space(4.0);
                                     let capture_active =
                                         self.capture_target.as_ref().is_some_and(|target| {
@@ -13327,6 +13234,19 @@ impl eframe::App for CrosshairApp {
                                                 painter.line_segment([top_left, top_right], stroke);
                                                 painter.line_segment([top_mid, bottom_mid], stroke);
                                             }
+                                            "smooth" => {
+                                                let left = rect.left() + pad;
+                                                let right = rect.right() - pad;
+                                                let width = right - left;
+                                                let points = (0..=12).map(|i| {
+                                                    let t = i as f32 / 12.0;
+                                                    egui::pos2(
+                                                        left + width * t,
+                                                        center.y + (t * std::f32::consts::TAU).sin() * 3.0,
+                                                    )
+                                                });
+                                                painter.add(egui::Shape::line(points.collect(), stroke));
+                                            }
                                             "effect_highlight" => {
                                                 let bar = egui::Rect::from_center_size(
                                                     center + egui::vec2(0.0, 3.0),
@@ -13572,6 +13492,18 @@ impl eframe::App for CrosshairApp {
                                     // Eraser
                                     if icon_btn(ui, eraser_active, "eraser", self.tr("Eraser", "Tẩy")).1 {
                                         crate::overlay::screen_draw_set_eraser(!eraser_active);
+                                    }
+                                    let smoothing = crate::overlay::screen_draw_get_smoothing();
+                                    if icon_btn(
+                                        ui,
+                                        smoothing,
+                                        "smooth",
+                                        self.tr("Smooth line", "Làm mượt nét"),
+                                    )
+                                    .1
+                                    {
+                                        crate::overlay::screen_draw_set_smoothing(!smoothing);
+                                        crate::overlay::screen_draw_toolbar_interacted();
                                     }
 
                                     ui.separator();
