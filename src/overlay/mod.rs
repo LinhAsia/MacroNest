@@ -25925,7 +25925,11 @@ mod windows_overlay {
         {
             return (format!("{provider_name} API key was rejected."), true);
         }
-        if lower.contains("429") || lower.contains("rate limit") || lower.contains("resource_exhausted") {
+        if lower.contains("429")
+            || lower.contains("rate limit")
+            || lower.contains("resource_exhausted")
+            || lower.contains("exceeded your current quota")
+        {
             return (format!("{provider_name} rate limit reached."), false);
         }
         let message = if text.chars().count() > 240 {

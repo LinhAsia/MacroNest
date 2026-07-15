@@ -491,8 +491,7 @@ fn generate_gemini_live_ai_response(api_key: &str, prompt: &str) -> Result<Strin
         if setup_started.elapsed() > Duration::from_secs(10) {
             bail!("Gemini Live setup timed out");
         }
-        let Message::Text(text) = socket.read()? else { continue };
-        let value: serde_json::Value = serde_json::from_str(&text)?;
+        let value = read_gemini_live_json(&mut socket)?;
         if value.get("setupComplete").is_some() {
             break;
         }
@@ -519,8 +518,7 @@ fn generate_gemini_live_ai_response(api_key: &str, prompt: &str) -> Result<Strin
         if turn_started.elapsed() > Duration::from_secs(30) {
             bail!("Gemini Live response timed out");
         }
-        let Message::Text(text) = socket.read()? else { continue };
-        let value: serde_json::Value = serde_json::from_str(&text)?;
+        let value = read_gemini_live_json(&mut socket)?;
         if let Some(error) = value.get("error") {
             bail!("Gemini Live error: {error}");
         }
@@ -544,4 +542,23 @@ fn generate_gemini_live_ai_response(api_key: &str, prompt: &str) -> Result<Strin
         bail!("Gemini Live returned no text transcription");
     }
     Ok(response)
+}
+
+fn read_gemini_live_json(
+    socket: &mut tungstenite::WebSocket<native_tls::TlsStream<TcpStream>>,
+) -> Result<serde_json::Value> {
+    loop {
+        match socket.read()? {
+            Message::Text(text) => return Ok(serde_json::from_str(&text)?),
+            Message::Close(frame) => {
+                let reason = frame
+                    .map(|frame| frame.reason.to_string())
+                    .filter(|reason| !reason.trim().is_empty())
+                    .unwrap_or_else(|| "Gemini closed the WebSocket".to_owned());
+                bail!("Gemini Live connection closed: {reason}");
+            }
+            Message::Ping(payload) => socket.send(Message::Pong(payload))?,
+            Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {}
+        }
+    }
 }
