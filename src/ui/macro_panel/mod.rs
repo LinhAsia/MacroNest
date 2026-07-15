@@ -766,12 +766,6 @@ impl CrosshairApp {
     }
 
     fn forward_action_popup_scroll(ui: &egui::Ui) {
-        let Some(pointer_pos) = ui.ctx().pointer_hover_pos() else {
-            return;
-        };
-        if !ui.min_rect().contains(pointer_pos) {
-            return;
-        }
         let scroll_delta = ui.ctx().input(|input| input.raw_scroll_delta.y);
         if scroll_delta != 0.0 {
             let pending_id = egui::Id::new("macro-action-popup-scroll");
