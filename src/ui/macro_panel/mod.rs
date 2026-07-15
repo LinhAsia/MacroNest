@@ -6150,11 +6150,12 @@ impl CrosshairApp {
                                                                     active_vars_expanded_id,
                                                                 )
                                                             })
-                                                            .unwrap_or(!active_vars_overflow);
+                                                            .unwrap_or(false);
                                                         if !active_vars_overflow {
                                                             active_vars_expanded = true;
                                                         }
                                                         ui.add_space(4.0);
+                                                        let mut preview_badge_count = 0usize;
                                                         ui.horizontal(|ui| {
                                                             ui.spacing_mut().item_spacing =
                                                                 vec2(4.0, 4.0);
@@ -6177,7 +6178,6 @@ impl CrosshairApp {
                                                                 .zip(badge_widths.iter())
                                                             {
                                                                 if active_vars_overflow
-                                                                    && !active_vars_expanded
                                                                     && consumed_width + badge_width
                                                                         > preview_width_limit
                                                                 {
@@ -6216,6 +6216,7 @@ impl CrosshairApp {
                                                                         );
                                                                     });
                                                                 consumed_width += badge_width + 4.0;
+                                                                preview_badge_count += 1;
                                                             }
                                                             if active_vars_overflow {
                                                                 let toggle_icon = if active_vars_expanded {
@@ -6255,7 +6256,9 @@ impl CrosshairApp {
                                                             ui.horizontal_wrapped(|ui| {
                                                                 ui.spacing_mut().item_spacing =
                                                                     vec2(4.0, 4.0);
-                                                                for (badge_text, has_value) in &badge_texts {
+                                                                for (badge_text, has_value) in
+                                                                    badge_texts.iter().skip(preview_badge_count)
+                                                                {
                                                                     let (
                                                                         fill_color,
                                                                         stroke_color,
@@ -16353,7 +16356,14 @@ if supports_move_mouse || show_detection_tuning {
                 step.set_variable_source,
                 crate::model::SetVariableSource::Expression
             ) {
-                Self::extract_vars_from_expression(&step.key, vars);
+                if step.key.contains('{') {
+                    Self::extract_braced_vars(&step.key, vars);
+                    if crate::overlay::looks_like_math_expression_text(&step.key) {
+                        Self::extract_vars_from_expression(&step.key, vars);
+                    }
+                } else if crate::overlay::looks_like_math_expression_text(&step.key) {
+                    Self::extract_vars_from_expression(&step.key, vars);
+                }
             }
         }
         if step.action == MacroAction::IfStart

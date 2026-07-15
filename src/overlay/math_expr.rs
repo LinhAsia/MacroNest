@@ -529,7 +529,7 @@ pub(crate) fn smart_set_variable_from_expression(target_var: &str, expr_raw: &st
     }
 }
 
-fn looks_like_math_expression_text(text: &str) -> bool {
+pub(crate) fn looks_like_math_expression_text(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     text.chars().any(|c| "+-*/^()".contains(c))
         || text.contains("==")
