@@ -476,7 +476,7 @@ fn generate_gemini_live_ai_response(
 
     let mut setup = serde_json::json!({
             "setup": {
-                "model": "models/gemini-3.1-flash-live-preview",
+                "model": "models/gemini-2.5-flash-native-audio-preview-12-2025",
                 "generationConfig": { "responseModalities": ["AUDIO"] },
                 "outputAudioTranscription": {},
                 "systemInstruction": {
