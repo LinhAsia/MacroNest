@@ -7256,11 +7256,13 @@ impl CrosshairApp {
         let icon_format = egui::TextFormat {
             font_id: egui::FontId::new(13.0, FontFamily::Name(MATERIAL_ICONS_FONT.into())),
             color: weak_color,
+            valign: egui::Align::Center,
             ..Default::default()
         };
         let text_format = egui::TextFormat {
             font_id: egui::FontId::new(13.0, FontFamily::Proportional),
             color: weak_color,
+            valign: egui::Align::Center,
             ..Default::default()
         };
         let icon = if matches!(
