@@ -368,11 +368,22 @@ pub struct AiSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct GroqSettings {
+    pub provider: AiResponseProvider,
     pub api_key: String,
     #[serde(skip)]
     pub show_api_key: bool,
     pub enabled: bool,
     pub details_open: bool,
+    pub gemini_api_key: String,
+    #[serde(skip)]
+    pub show_gemini_api_key: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum AiResponseProvider {
+    #[default]
+    Groq,
+    GeminiLive,
 }
 
 impl Default for AiSettings {
@@ -391,10 +402,13 @@ impl Default for AiSettings {
 impl Default for GroqSettings {
     fn default() -> Self {
         Self {
+            provider: AiResponseProvider::Groq,
             api_key: String::new(),
             show_api_key: false,
             enabled: false,
             details_open: false,
+            gemini_api_key: String::new(),
+            show_gemini_api_key: false,
         }
     }
 }

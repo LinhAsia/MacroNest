@@ -25976,7 +25976,7 @@ mod windows_overlay {
                 bail!("AI Response request prompt is empty");
             }
 
-            ai::generate_groq_ai_response(&groq_settings, &prompt)
+            ai::generate_ai_response(&groq_settings, &prompt)
         })();
 
         let mut inline_message = String::new();

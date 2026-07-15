@@ -5,7 +5,11 @@ use arboard::{Clipboard, ImageData};
 use image::DynamicImage;
 use serde::Deserialize;
 
-use crate::model::{CommandPreset, GroqSettings};
+use crate::model::{AiResponseProvider, CommandPreset, GroqSettings};
+use native_tls::TlsConnector;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::time::{Duration, Instant};
+use tungstenite::{client, Message};
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct CommandPresetPatch {
@@ -428,3 +432,112 @@ pub fn generate_groq_ai_response(
     )
 }
 
+pub fn generate_ai_response(settings: &GroqSettings, prompt: &str) -> Result<String> {
+    match settings.provider {
+        AiResponseProvider::Groq => generate_groq_ai_response(settings, prompt),
+        AiResponseProvider::GeminiLive => {
+            generate_gemini_live_ai_response(&settings.gemini_api_key, prompt)
+        }
+    }
+}
+
+fn generate_gemini_live_ai_response(api_key: &str, prompt: &str) -> Result<String> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        bail!("Gemini API key is empty");
+    }
+    if prompt.trim().is_empty() {
+        bail!("AI Response request prompt is empty");
+    }
+
+    let host = "generativelanguage.googleapis.com";
+    let addr = format!("{host}:443")
+        .to_socket_addrs()
+        .context("Failed to resolve Gemini")?
+        .next()
+        .context("Gemini address was not found")?;
+    let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(10))?;
+    tcp.set_read_timeout(Some(Duration::from_secs(30)))?;
+    tcp.set_write_timeout(Some(Duration::from_secs(15)))?;
+    let tls = TlsConnector::new()?.connect(host, tcp)?;
+    let url = format!(
+        "wss://{host}/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={api_key}"
+    );
+    let (mut socket, _) = client(url, tls).context("Gemini WebSocket handshake failed")?;
+
+    socket.write(Message::Text(
+        serde_json::json!({
+            "setup": {
+                "model": "models/gemini-3.1-flash-live-preview",
+                "generationConfig": { "responseModalities": ["AUDIO"] },
+                "outputAudioTranscription": {},
+                "tools": [{ "googleSearch": {} }],
+                "systemInstruction": {
+                    "parts": [{ "text": "Provide a concise, direct answer in the user's language. Do not add greetings or markdown unless requested." }]
+                }
+            }
+        })
+        .to_string()
+        .into(),
+    ))?;
+    socket.flush()?;
+
+    let setup_started = Instant::now();
+    loop {
+        if setup_started.elapsed() > Duration::from_secs(10) {
+            bail!("Gemini Live setup timed out");
+        }
+        let Message::Text(text) = socket.read()? else { continue };
+        let value: serde_json::Value = serde_json::from_str(&text)?;
+        if value.get("setupComplete").is_some() {
+            break;
+        }
+        if let Some(error) = value.get("error") {
+            bail!("Gemini Live error: {error}");
+        }
+    }
+
+    socket.write(Message::Text(
+        serde_json::json!({
+            "clientContent": {
+                "turns": [{ "role": "user", "parts": [{ "text": prompt }] }],
+                "turnComplete": true
+            }
+        })
+        .to_string()
+        .into(),
+    ))?;
+    socket.flush()?;
+
+    let mut response = String::new();
+    let turn_started = Instant::now();
+    loop {
+        if turn_started.elapsed() > Duration::from_secs(30) {
+            bail!("Gemini Live response timed out");
+        }
+        let Message::Text(text) = socket.read()? else { continue };
+        let value: serde_json::Value = serde_json::from_str(&text)?;
+        if let Some(error) = value.get("error") {
+            bail!("Gemini Live error: {error}");
+        }
+        if let Some(text) = value
+            .pointer("/serverContent/outputTranscription/text")
+            .and_then(|value| value.as_str())
+        {
+            response.push_str(text);
+        }
+        if value
+            .pointer("/serverContent/turnComplete")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+        {
+            break;
+        }
+    }
+
+    let response = response.trim().to_owned();
+    if response.is_empty() {
+        bail!("Gemini Live returned no text transcription");
+    }
+    Ok(response)
+}
