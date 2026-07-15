@@ -772,12 +772,14 @@ impl CrosshairApp {
         if !ui.min_rect().contains(pointer_pos) {
             return;
         }
-        let scroll_delta = ui.ctx().input(|input| input.smooth_scroll_delta);
-        if scroll_delta.y != 0.0 {
-            ui.scroll_with_delta_animation(
-                egui::vec2(0.0, scroll_delta.y),
-                egui::style::ScrollAnimation::none(),
-            );
+        let scroll_delta = ui.ctx().input(|input| input.raw_scroll_delta.y);
+        if scroll_delta != 0.0 {
+            let pending_id = egui::Id::new("macro-action-popup-scroll");
+            ui.ctx().data_mut(|data| {
+                let pending = data.get_temp::<f32>(pending_id).unwrap_or_default();
+                data.insert_temp(pending_id, pending + scroll_delta);
+            });
+            ui.ctx().request_repaint();
         }
     }
 
@@ -4468,6 +4470,16 @@ impl CrosshairApp {
             self.macro_folders_panel_open,
             self.resolved_active_macro_folder_view(),
         ));
+        let popup_scroll_delta = ui.ctx().data_mut(|data| {
+            data.remove_temp::<f32>(egui::Id::new("macro-action-popup-scroll"))
+        });
+        if let Some(scroll_delta) = popup_scroll_delta {
+            let mut scroll_state =
+                egui::scroll_area::State::load(ui.ctx(), macro_panel_scroll_id)
+                    .unwrap_or_default();
+            scroll_state.offset.y = (scroll_state.offset.y - scroll_delta).max(0.0);
+            scroll_state.store(ui.ctx(), macro_panel_scroll_id);
+        }
         egui::ScrollArea::vertical()
             .id_salt(macro_panel_scroll_id)
             .auto_shrink([false, false])
