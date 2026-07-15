@@ -308,6 +308,8 @@ pub struct MacroStep {
     pub ai_response_use_default_prompt: bool,
     #[serde(default)]
     pub ai_response_system_prompt: String,
+    #[serde(default)]
+    pub type_text_paste: bool,
     #[serde(default = "default_if_operator")]
     pub if_operator: String,
     #[serde(default)]
@@ -441,6 +443,7 @@ impl Default for MacroStep {
             ai_response_web_search: false,
             ai_response_use_default_prompt: true,
             ai_response_system_prompt: String::new(),
+            type_text_paste: false,
             if_operator: "==".to_string(),
             manual_mouse_sensitivity: false,
             break_loop_by_variable: false,

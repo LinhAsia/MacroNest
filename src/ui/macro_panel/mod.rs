@@ -8156,14 +8156,14 @@ if supports_move_mouse || show_detection_tuning {
                                                     });
                                                 } else if step.action == MacroAction::TypeText {
                                                     ui.vertical(|ui| {
-                                                        let response = Self::render_interpolated_text_edit(ui, &mut step.key, ui.id().with("hold-stop-type-text-key"),
-                                                            220.0,
-                                                            360.0,
-                                                            17.0,
-                                                            44.0,
-                                                            Self::tr_lang(language, "Text to type", "Text to type"),
-                                                            true,
-                                                        );
+                                                        let response = ui.horizontal(|ui| {
+                                                            let response = Self::render_interpolated_text_edit(ui, &mut step.key, ui.id().with("hold-stop-type-text-key"),
+                                                                220.0, 360.0, 17.0, 44.0,
+                                                                Self::tr_lang(language, "Text to type", "Văn bản"), true,
+                                                            );
+                                                            ui.checkbox(&mut step.type_text_paste, "Paste");
+                                                            response
+                                                        }).inner;
                                                         Self::apply_vietnamese_input_if_changed(
                                                             &response,
                                                             self.state.vietnamese_input_enabled,
@@ -10479,14 +10479,14 @@ if supports_move_mouse || show_detection_tuning {
                                                     });
                                                 } else if step.action == MacroAction::TypeText {
                                                     ui.vertical(|ui| {
-                                                        let response = Self::render_interpolated_text_edit(ui, &mut step.key, ui.id().with("press-stop-type-text-key"),
-                                                            220.0,
-                                                            360.0,
-                                                            17.0,
-                                                            44.0,
-                                                            Self::tr_lang(language, "Text to type", "Text to type"),
-                                                            true,
-                                                        );
+                                                        let response = ui.horizontal(|ui| {
+                                                            let response = Self::render_interpolated_text_edit(ui, &mut step.key, ui.id().with("press-stop-type-text-key"),
+                                                                220.0, 360.0, 17.0, 44.0,
+                                                                Self::tr_lang(language, "Text to type", "Văn bản"), true,
+                                                            );
+                                                            ui.checkbox(&mut step.type_text_paste, "Paste");
+                                                            response
+                                                        }).inner;
                                                         Self::apply_vietnamese_input_if_changed(
                                                             &response,
                                                             self.state.vietnamese_input_enabled,
@@ -13892,13 +13892,14 @@ if supports_move_mouse || show_detection_tuning {
                                                     });
                                                 } else if step.action == MacroAction::TypeText {
                                                      ui.vertical(|ui| {
-                                                         let response = Self::render_interpolated_text_edit(ui, &mut step.key, ui.id().with((step_index, "type-text-key")),
-                                                             146.0,
-                                                             260.0,
-                                                                21.0, 36.0,
-                                                             Self::tr_lang(language, "Text to type", "Text to type"),
-                                                             true,
-                                                         );
+                                                         let response = ui.horizontal(|ui| {
+                                                             let response = Self::render_interpolated_text_edit(ui, &mut step.key, ui.id().with((step_index, "type-text-key")),
+                                                                 146.0, 260.0, 21.0, 36.0,
+                                                                 Self::tr_lang(language, "Text to type", "Văn bản"), true,
+                                                             );
+                                                             ui.checkbox(&mut step.type_text_paste, "Paste");
+                                                             response
+                                                         }).inner;
                                                          Self::apply_vietnamese_input_if_changed(
                                                              &response,
                                                              self.state.vietnamese_input_enabled,

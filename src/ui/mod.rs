@@ -3288,7 +3288,7 @@ impl CrosshairApp {
         mode: VietnameseInputMode,
         text: &mut String,
     ) {
-        if response.changed() {
+        if response.gained_focus() || response.changed() {
             Self::apply_vietnamese_input_mode(response, text, enabled, mode);
         }
     }

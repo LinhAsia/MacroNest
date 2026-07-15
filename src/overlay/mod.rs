@@ -31202,7 +31202,14 @@ mod windows_overlay {
             | MacroAction::MouseWheelDown
             | MacroAction::MouseMoveAbsolute
             | MacroAction::MouseMoveRelative => return send_mouse_event(step),
-            MacroAction::TypeText => return send_text_input(&interpolate_variables(&step.key)),
+            MacroAction::TypeText => {
+                let text = interpolate_variables(&step.key);
+                return if step.type_text_paste {
+                    paste_text_input(&text)
+                } else {
+                    send_text_input(&text)
+                };
+            }
             MacroAction::Wait => return Ok(()),
             MacroAction::ApplyWindowPreset
             | MacroAction::FocusWindowPreset
@@ -31363,6 +31370,37 @@ mod windows_overlay {
             }
         }
 
+        Ok(())
+    }
+
+    fn paste_text_input(text: &str) -> Result<()> {
+        if text.is_empty() {
+            return Ok(());
+        }
+
+        Clipboard::new()
+            .context("Failed to open the clipboard")?
+            .set_text(text.to_owned())
+            .context("Failed to copy text to the clipboard")?;
+
+        let key = |vk: u16, key_up: bool| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(vk),
+                    wScan: 0,
+                    dwFlags: if key_up { KEYEVENTF_KEYUP } else { Default::default() },
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        let inputs = [key(0x11, false), key(0x56, false), key(0x56, true), key(0x11, true)];
+        unsafe {
+            if SendInput(&inputs, size_of::<INPUT>() as i32) != inputs.len() as u32 {
+                bail!("SendInput paste failed");
+            }
+        }
         Ok(())
     }
 
