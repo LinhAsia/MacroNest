@@ -4465,11 +4465,12 @@ impl CrosshairApp {
         };
         let pending_macro_group_scroll_target = resolved_scroll_target;
         let mut pending_macro_group_scroll_consumed = false;
-        let macro_panel_scroll_id = ui.make_persistent_id((
+        let macro_panel_scroll_salt = (
             "macro-panel-scroll",
             self.macro_folders_panel_open,
             self.resolved_active_macro_folder_view(),
-        ));
+        );
+        let macro_panel_scroll_id = ui.make_persistent_id(macro_panel_scroll_salt);
         let popup_scroll_delta = ui.ctx().data_mut(|data| {
             data.remove_temp::<f32>(egui::Id::new("macro-action-popup-scroll"))
         });
@@ -4481,7 +4482,7 @@ impl CrosshairApp {
             scroll_state.store(ui.ctx(), macro_panel_scroll_id);
         }
         egui::ScrollArea::vertical()
-            .id_salt(macro_panel_scroll_id)
+            .id_salt(macro_panel_scroll_salt)
             .auto_shrink([false, false])
             .max_height(macro_panel_scroll_height)
             .show_viewport(ui, |ui, viewport| {
