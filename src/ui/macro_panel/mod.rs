@@ -20598,9 +20598,22 @@ if supports_move_mouse || show_detection_tuning {
             } else {
                 ui.id().with((step_index, "ai-response-settings"))
             };
-            let settings_response = ui
-                .push_id(settings_id, |ui| {
-                    ui.menu_button(Self::tr_lang(language, "Settings", "Cài đặt"), |ui| {
+            let settings_open_id = settings_id.with("open");
+            let mut settings_open = ui
+                .ctx()
+                .data(|data| data.get_temp::<bool>(settings_open_id))
+                .unwrap_or(false);
+            let settings_response = ui.button(Self::tr_lang(language, "Settings", "Cài đặt"));
+            if settings_response.clicked() {
+                settings_open = !settings_open;
+            }
+            egui::Popup::from_response(&settings_response)
+                .id(settings_id)
+                .open_bool(&mut settings_open)
+                .align(egui::RectAlign::BOTTOM_END)
+                .width(320.0)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| {
                         ui.set_min_width(320.0);
                         if step.ai_response_provider == AiResponseProvider::GeminiLive {
                             ui.checkbox(
@@ -20629,10 +20642,9 @@ if supports_move_mouse || show_detection_tuning {
                                 &mut step.ai_response_system_prompt,
                             );
                         }
-                    })
-                    .response
-                })
-                .inner;
+                });
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(settings_open_id, settings_open));
 
             provider_response
                 .union(response)
