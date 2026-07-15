@@ -765,6 +765,19 @@ impl CrosshairApp {
             })
     }
 
+    fn forward_action_popup_scroll(ui: &egui::Ui) {
+        if !ui.ui_contains_pointer() {
+            return;
+        }
+        let scroll_delta = ui.ctx().input(|input| input.smooth_scroll_delta);
+        if scroll_delta.y != 0.0 {
+            ui.scroll_with_delta_animation(
+                egui::vec2(0.0, scroll_delta.y),
+                egui::style::ScrollAnimation::none(),
+            );
+        }
+    }
+
     fn render_macro_action_option(
         ui: &mut egui::Ui,
         language: UiLanguage,
@@ -6816,6 +6829,7 @@ impl CrosshairApp {
                                             ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(520.0);
+                                                Self::forward_action_popup_scroll(ui);
                                                 live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                 ui.separator();
                                                 let action_hover_id = ui.make_persistent_id((
@@ -9140,6 +9154,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                             ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(520.0);
+                                                Self::forward_action_popup_scroll(ui);
                                                 live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                 ui.separator();
                                                 let action_hover_id = ui.make_persistent_id((
@@ -12337,6 +12352,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 ))
                                                 .show_ui(ui, |ui| {
                                                     ui.set_min_width(520.0);
+                                                    Self::forward_action_popup_scroll(ui);
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                     ui.separator();
                                                     let action_hover_id = ui.make_persistent_id((
