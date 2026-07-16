@@ -261,16 +261,28 @@ impl CrosshairApp {
                                     .strong()
                                     .size(14.0),
                             );
-                            if let Ok(metadata) = fs::metadata(&self.paths.state_file) {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "state.json: {}",
-                                        Self::format_file_size(metadata.len())
-                                    ))
-                                    .small()
-                                    .weak(),
-                                );
-                            }
+                            let cache_id = egui::Id::new("app-data-folder-size-cache");
+                            let now = Instant::now();
+                            let cached_size = ui.ctx().data(|data| {
+                                data.get_temp::<(Instant, u64)>(cache_id)
+                                    .filter(|(updated_at, _)| {
+                                        now.duration_since(*updated_at) < Duration::from_secs(10)
+                                    })
+                            });
+                            let total_size = cached_size.map(|(_, size)| size).unwrap_or_else(|| {
+                                let size = Self::directory_size(&self.paths.root);
+                                ui.ctx().data_mut(|data| data.insert_temp(cache_id, (now, size)));
+                                size
+                            });
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}: {}",
+                                    Self::tr_lang(language, "Total size", "Tổng dung lượng"),
+                                    Self::format_file_size(total_size)
+                                ))
+                                .small()
+                                .weak(),
+                            );
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
                                 if Self::settings_action_button(
@@ -1738,6 +1750,22 @@ impl CrosshairApp {
         } else {
             format!("{value:.1} {}", UNITS[unit])
         }
+    }
+
+    fn directory_size(path: &Path) -> u64 {
+        let Ok(entries) = fs::read_dir(path) else {
+            return 0;
+        };
+        entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| match entry.file_type() {
+                Ok(file_type) if file_type.is_dir() => Self::directory_size(&entry.path()),
+                Ok(file_type) if file_type.is_file() => {
+                    entry.metadata().map(|metadata| metadata.len()).unwrap_or(0)
+                }
+                _ => 0,
+            })
+            .sum()
     }
 
     pub(crate) fn check_for_update(&mut self, ctx: &egui::Context) {
