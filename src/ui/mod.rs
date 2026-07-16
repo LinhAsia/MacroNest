@@ -13002,6 +13002,7 @@ impl eframe::App for CrosshairApp {
                 // Reset toolbar positioning for the next draw session.
                 ctx.data_mut(|d| {
                     d.insert_temp(egui::Id::new("toolbar_inited"), false);
+                    d.insert_temp(egui::Id::new("screen_draw_toolbar_ready"), false);
                 });
             }
         } else if drawing_active {
@@ -13070,6 +13071,10 @@ impl eframe::App for CrosshairApp {
                 d.get_temp::<egui::Pos2>(egui::Id::new("toolbar_pos"))
                     .unwrap_or(default_pos)
             });
+            let toolbar_ready = ctx.data(|d| {
+                d.get_temp::<bool>(egui::Id::new("screen_draw_toolbar_ready"))
+                    .unwrap_or(false)
+            });
 
             let toolbar_width_px = toolbar_width.round() as i32;
             let toolbar_height = TOOLBAR_HEIGHT as i32;
@@ -13085,7 +13090,7 @@ impl eframe::App for CrosshairApp {
             let mut builder = egui::ViewportBuilder::default()
                 .with_title("Drawing Toolbar")
                 .with_inner_size(egui::vec2(toolbar_width, TOOLBAR_HEIGHT))
-                .with_visible(toolbar_visible)
+                .with_visible(toolbar_visible && toolbar_ready)
                 .with_active(false)
                 .with_decorations(false)
                 .with_transparent(true)
@@ -13699,6 +13704,16 @@ impl eframe::App for CrosshairApp {
                                 measured_width.round() as i32,
                                 toolbar_height,
                             );
+                            ctx.request_repaint();
+                        }
+                        if !toolbar_ready {
+                            ctx.data_mut(|d| {
+                                d.insert_temp(
+                                    egui::Id::new("screen_draw_toolbar_ready"),
+                                    true,
+                                )
+                            });
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(toolbar_visible));
                             ctx.request_repaint();
                         }
                     }
