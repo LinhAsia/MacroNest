@@ -2113,6 +2113,7 @@ impl CrosshairApp {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         enum SelectionDragHandle {
             None,
+            Pan,
             Center,
             TopLeft,
             TopRight,
@@ -2187,6 +2188,20 @@ impl CrosshairApp {
                 .or_else(|| response.interact_pointer_pos())
             {
                 active_handle = pick_selection_drag_handle(pointer_pos, rect);
+                if active_handle == SelectionDragHandle::None
+                    && allow_wheel_zoom
+                    && selection_bounds_rect.contains(pointer_pos)
+                    && ui.data_mut(|d| {
+                        d.get_temp::<f32>(ui.make_persistent_id((
+                            id_source,
+                            "zoom-editor-view-scale",
+                        )))
+                        .unwrap_or(1.0)
+                            > 1.0001
+                    })
+                {
+                    active_handle = SelectionDragHandle::Pan;
+                }
                 ui.data_mut(|d| d.insert_temp(drag_id, active_handle));
 
                 // Compute offsets and anchors for the handles
@@ -2220,7 +2235,7 @@ impl CrosshairApp {
                     }
                     SelectionDragHandle::Top => egui::vec2(0.0, pointer_pos.y - rect.min.y),
                     SelectionDragHandle::Bottom => egui::vec2(0.0, pointer_pos.y - rect.max.y),
-                    SelectionDragHandle::None => egui::Vec2::ZERO,
+                    SelectionDragHandle::None | SelectionDragHandle::Pan => egui::Vec2::ZERO,
                 };
                 ui.data_mut(|d| d.insert_temp(offset_id, drag_offset));
 
@@ -2231,6 +2246,7 @@ impl CrosshairApp {
                     SelectionDragHandle::TopRight => egui::pos2(rect.min.x, rect.max.y),
                     SelectionDragHandle::Top => rect.max,
                     SelectionDragHandle::Bottom => rect.min,
+                    SelectionDragHandle::Pan => pointer_pos,
                     _ => egui::Pos2::ZERO,
                 };
                 ui.data_mut(|d| d.insert_temp(anchor_id, drag_anchor));
@@ -2240,7 +2256,23 @@ impl CrosshairApp {
         // Use pointer.primary_down() + pointer.latest_pos() so dragging continues even when
         // the mouse moves outside the canvas bounds (important for small boxes).
         let pointer_primary_down = ui.input(|i| i.pointer.primary_down());
-        if pointer_primary_down && active_handle != SelectionDragHandle::None {
+        if pointer_primary_down && active_handle == SelectionDragHandle::Pan {
+            if let Some(pointer_pos) = ui.input(|i| i.pointer.latest_pos()) {
+                let pan_id = ui.make_persistent_id((id_source, "zoom-editor-view-pan"));
+                let delta = pointer_pos - drag_anchor;
+                ui.data_mut(|d| {
+                    let view_pan = d.get_temp::<egui::Vec2>(pan_id).unwrap_or_default();
+                    d.insert_temp(pan_id, view_pan + delta);
+                    d.insert_temp(anchor_id, pointer_pos);
+                });
+                drag_anchor = pointer_pos;
+                ui.ctx().request_repaint();
+            }
+        }
+        if pointer_primary_down
+            && active_handle != SelectionDragHandle::None
+            && active_handle != SelectionDragHandle::Pan
+        {
             if let Some(pointer_pos) = ui
                 .input(|i| i.pointer.latest_pos())
                 .or_else(|| ui.input(|i| i.pointer.hover_pos()))
@@ -2374,7 +2406,7 @@ impl CrosshairApp {
                         rect.min = drag_anchor;
                         rect.max = egui::pos2(new_right, new_bottom);
                     }
-                    SelectionDragHandle::None => {}
+                    SelectionDragHandle::None | SelectionDragHandle::Pan => {}
                 }
 
                 if lock_aspect > 0.0 {
@@ -2486,6 +2518,13 @@ impl CrosshairApp {
                     }
                     SelectionDragHandle::Center => {
                         if active_handle == SelectionDragHandle::Center {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                        } else {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                        }
+                    }
+                    SelectionDragHandle::Pan => {
+                        if active_handle == SelectionDragHandle::Pan {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                         } else {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
