@@ -1470,7 +1470,7 @@ impl CrosshairApp {
                                                     ui.label(egui::RichText::new("- screen.height / h").monospace());
                                                     ui.label(egui::RichText::new("- mouse.x / y").monospace());
                                                     ui.label(egui::RichText::new("- mouse.sensitivity").monospace());
-                                                    ui.label(egui::RichText::new("- volume.level / percent / value").monospace());
+                                                    ui.label(egui::RichText::new("- volume.level").monospace());
                                                     ui.label(egui::RichText::new("- system.year / month / day").monospace());
                                                     ui.label(egui::RichText::new("- system.hour / minute / second").monospace());
                                                     ui.label(egui::RichText::new("- system.millisecond / ms").monospace());
@@ -19663,7 +19663,7 @@ if supports_move_mouse || show_detection_tuning {
                     _ => VariableValueKind::Neutral,
                 },
                 "volume" => match prop_clean.as_str() {
-                    "level" | "percent" | "value" => VariableValueKind::Number,
+                    "level" => VariableValueKind::Number,
                     _ => VariableValueKind::Neutral,
                 },
                 "clipboard" => match prop_clean.as_str() {

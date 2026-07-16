@@ -1126,7 +1126,7 @@ fn get_object_property_value(token: &str) -> Option<i32> {
 
     if obj_name == "volume" {
         return match prop_name.as_str() {
-            "level" | "percent" | "value" => current_system_volume_percent(),
+            "level" => current_system_volume_percent(),
             _ => None,
         };
     }
