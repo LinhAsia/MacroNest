@@ -8166,7 +8166,9 @@ if supports_move_mouse || show_detection_tuning {
                                                                 220.0, 360.0, 17.0, 44.0,
                                                                 Self::tr_lang(language, "Text to type", "Văn bản"), true,
                                                             );
-                                                            ui.checkbox(&mut step.type_text_paste, "Paste");
+                                                            live_sync |= ui
+                                                                .checkbox(&mut step.type_text_paste, "Paste")
+                                                                .changed();
                                                             response
                                                         }).inner;
                                                         Self::apply_vietnamese_input_if_changed(
@@ -10489,7 +10491,9 @@ if supports_move_mouse || show_detection_tuning {
                                                                 220.0, 360.0, 17.0, 44.0,
                                                                 Self::tr_lang(language, "Text to type", "Văn bản"), true,
                                                             );
-                                                            ui.checkbox(&mut step.type_text_paste, "Paste");
+                                                            live_sync |= ui
+                                                                .checkbox(&mut step.type_text_paste, "Paste")
+                                                                .changed();
                                                             response
                                                         }).inner;
                                                         Self::apply_vietnamese_input_if_changed(
@@ -13902,7 +13906,9 @@ if supports_move_mouse || show_detection_tuning {
                                                                  146.0, 260.0, 21.0, 36.0,
                                                                  Self::tr_lang(language, "Text to type", "Văn bản"), true,
                                                              );
-                                                             ui.checkbox(&mut step.type_text_paste, "Paste");
+                                                             live_sync |= ui
+                                                                 .checkbox(&mut step.type_text_paste, "Paste")
+                                                                 .changed();
                                                              response
                                                          }).inner;
                                                          Self::apply_vietnamese_input_if_changed(
