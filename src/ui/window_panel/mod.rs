@@ -698,6 +698,15 @@ impl CrosshairApp {
                             .changed();
                         ui.end_row();
 
+                        ui.label(Self::tr_lang(language, "Opacity", "Độ trong suốt"));
+                        live_sync |= ui
+                            .add(
+                                egui::Slider::new(&mut preset.opacity_percent, 10..=100)
+                                    .suffix("%"),
+                            )
+                            .changed();
+                        ui.end_row();
+
                         ui.label(Self::tr_lang(language, "Binarize", "Binarize"));
                         let binary_changed = ui
                             .checkbox(

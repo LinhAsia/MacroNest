@@ -2990,6 +2990,11 @@ mod windows_overlay {
         overlay_style: PinOverlayStyle,
         last_target_bounds: (i32, i32, i32, i32),
         last_source_crop: Option<(i32, i32, i32, i32)>,
+        last_opacity: u8,
+    }
+
+    fn pin_opacity(percent: u8) -> u8 {
+        ((u16::from(percent.clamp(10, 100)) * 255) / 100) as u8
     }
 
     struct BinPinFrameRenderer {
@@ -3145,7 +3150,7 @@ mod windows_overlay {
             let mut blend = BLENDFUNCTION {
                 BlendOp: AC_SRC_OVER as u8,
                 BlendFlags: 0,
-                SourceConstantAlpha: 255,
+                SourceConstantAlpha: pin_opacity(preset.opacity_percent),
                 AlphaFormat: AC_SRC_ALPHA as u8,
             };
 
@@ -20605,6 +20610,7 @@ mod windows_overlay {
                     overlay_style: preset.overlay_style,
                     last_target_bounds: (i32::MIN, i32::MIN, i32::MIN, i32::MIN),
                     last_source_crop: None,
+                    last_opacity: 0,
                 });
                 ACTIVE_PIN_SOURCE_HWND.store(source.0 as isize, Ordering::Relaxed);
                 sync_window_location_hook_state(runtime);
@@ -20625,7 +20631,8 @@ mod windows_overlay {
 
                 let needs_apply = active.last_target_bounds != target_bounds
                     || active.last_source_crop != source_crop_key
-                    || active.overlay_style != preset.overlay_style;
+                    || active.overlay_style != preset.overlay_style
+                    || active.last_opacity != pin_opacity(preset.opacity_percent);
                 if needs_apply {
                     let _ = SetWindowPos(
                         runtime.pin_hwnd,
@@ -20648,7 +20655,7 @@ mod windows_overlay {
                             bottom: target_bounds.3,
                         },
                         rcSource: source_rect_crop,
-                        opacity: 255,
+                        opacity: pin_opacity(preset.opacity_percent),
                         fVisible: true.into(),
                         fSourceClientAreaOnly: true.into(),
                         ..Default::default()
@@ -20671,6 +20678,7 @@ mod windows_overlay {
                         active_mut.last_target_bounds = target_bounds;
                         active_mut.last_source_crop = source_crop_key;
                         active_mut.overlay_style = preset.overlay_style;
+                        active_mut.last_opacity = pin_opacity(preset.opacity_percent);
                     }
                 }
 

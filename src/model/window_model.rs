@@ -530,6 +530,8 @@ pub struct PinPreset {
     pub source_y: i32,
     pub source_width: i32,
     pub source_height: i32,
+    #[serde(default = "default_pin_opacity_percent")]
+    pub opacity_percent: u8,
     #[serde(default)]
     pub binary_filter: bool,
     #[serde(default)]
@@ -572,6 +574,7 @@ impl PinPreset {
             source_y: 0,
             source_width: 320,
             source_height: 180,
+            opacity_percent: default_pin_opacity_percent(),
             binary_filter: false,
             binary_transparent_black: false,
             binary_transparent_white: false,
@@ -622,6 +625,10 @@ impl PinPreset {
         self.binary_target_color = self.binary_target_colors.first().copied();
         true
     }
+}
+
+fn default_pin_opacity_percent() -> u8 {
+    100
 }
 
 impl Default for PinPreset {
