@@ -305,7 +305,8 @@ mod windows_overlay {
     static SCREEN_DRAW_BRUSH_CURSOR: Lazy<Mutex<Option<(ScreenDrawBrushCursorKey, isize)>>> =
         Lazy::new(|| Mutex::new(None));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
-    static SCREEN_DRAW_TEXT_CTRL_PASSTHROUGH: AtomicBool = AtomicBool::new(false);
+    static SCREEN_DRAW_TEXT_MODIFIER_PASSTHROUGH: std::sync::atomic::AtomicU32 =
+        std::sync::atomic::AtomicU32::new(0);
     static LAST_MOUSE_MOVE_TIME_MS: AtomicU64 = AtomicU64::new(0);
     static ARDUINO_TEST_OUTPUT_ACTIVE: AtomicBool = AtomicBool::new(false);
     const QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS: u32 = 1200;
@@ -4636,24 +4637,32 @@ mod windows_overlay {
                     update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
                 }
                 let text_session_active = SCREEN_DRAW_STATE.lock().text_session.is_some();
-                let ctrl_key = matches!(info.vkCode, 0x11 | 0xA2 | 0xA3);
-                let ctrl_passthrough = SCREEN_DRAW_TEXT_CTRL_PASSTHROUGH.load(Ordering::Acquire);
-                if ctrl_key && (text_session_active || (is_key_up && ctrl_passthrough)) {
+                let modifier_bit = screen_draw_text_modifier_bit(info.vkCode);
+                let modifier_passthrough =
+                    SCREEN_DRAW_TEXT_MODIFIER_PASSTHROUGH.load(Ordering::Acquire);
+                if modifier_bit != 0
+                    && (text_session_active || (is_key_up && modifier_passthrough & modifier_bit != 0))
+                {
+                    let next_modifiers = if is_key_down {
+                        SCREEN_DRAW_TEXT_MODIFIER_PASSTHROUGH
+                            .fetch_or(modifier_bit, Ordering::AcqRel)
+                            | modifier_bit
+                    } else {
+                        SCREEN_DRAW_TEXT_MODIFIER_PASSTHROUGH
+                            .fetch_and(!modifier_bit, Ordering::AcqRel)
+                            & !modifier_bit
+                    };
                     if text_session_active {
                         if let Some(session) = SCREEN_DRAW_STATE.lock().text_session.as_mut() {
-                            session.ctrl_down = is_key_down;
+                            session.ctrl_down = next_modifiers & 0b00_0011_1000 != 0;
                         }
                     }
-                    SCREEN_DRAW_TEXT_CTRL_PASSTHROUGH.store(is_key_down, Ordering::Release);
                     update_held_key(info.vkCode, is_key_down, is_key_up);
                     update_modifier_state(info.vkCode, is_key_down);
                     return CallNextHookEx(None, code, wparam, lparam);
                 }
                 let alt_down = unsafe { GetAsyncKeyState(0x12) } < 0;
-                if text_session_active
-                    && (matches!(info.vkCode, 0x12 | 0xA4 | 0xA5)
-                        || (info.vkCode == 0x09 && alt_down))
-                {
+                if text_session_active && info.vkCode == 0x09 && alt_down {
                     update_held_key(info.vkCode, is_key_down, is_key_up);
                     update_modifier_state(info.vkCode, is_key_down);
                     return CallNextHookEx(None, code, wparam, lparam);
@@ -9021,6 +9030,23 @@ mod windows_overlay {
         (!filtered.is_empty()).then_some(filtered)
     }
 
+    fn screen_draw_text_modifier_bit(vk_code: u32) -> u32 {
+        match vk_code {
+            0x10 => 1 << 0,
+            0xA0 => 1 << 1,
+            0xA1 => 1 << 2,
+            0x11 => 1 << 3,
+            0xA2 => 1 << 4,
+            0xA3 => 1 << 5,
+            0x12 => 1 << 6,
+            0xA4 => 1 << 7,
+            0xA5 => 1 << 8,
+            0x5B => 1 << 9,
+            0x5C => 1 << 10,
+            _ => 0,
+        }
+    }
+
     fn process_screen_draw_text_input(vk_code: u32, is_key_down: bool, is_key_up: bool) -> bool {
         let mut state = SCREEN_DRAW_STATE.lock();
         if state.text_session.is_none() {
@@ -9109,7 +9135,6 @@ mod windows_overlay {
                             session.vietnamese_prefix.clone_from(&session.stroke.text);
                             session.vietnamese_raw_tail.clear();
                         }
-                        autofit_screen_draw_text_session(&mut session.stroke);
                         changed = true;
                     }
                 }
@@ -9128,7 +9153,6 @@ mod windows_overlay {
                         } else {
                             session.stroke.text.push_str(&fragment);
                         }
-                        autofit_screen_draw_text_session(&mut session.stroke);
                         changed = true;
                     }
                 } else {
@@ -9142,6 +9166,7 @@ mod windows_overlay {
             if changed
                 && let Some(session) = state.text_session.as_mut()
             {
+                autofit_screen_draw_text_session(&mut session.stroke);
                 session.caret_started_at = Instant::now();
                 session.caret_offset = screen_draw_text_measured_width(
                     screen_draw_text_font_size(session.stroke.brush_size),
@@ -14065,7 +14090,17 @@ mod windows_overlay {
     }
 
     fn autofit_screen_draw_text_session(stroke: &mut ScreenDrawStroke) {
-        sync_screen_draw_text_box_to_content(stroke, "Text", false);
+        let anchor = stroke.points.first().copied();
+        sync_screen_draw_text_box_to_content(stroke, "Text", true);
+        if let Some(anchor) = anchor {
+            stroke.points = vec![
+                anchor,
+                POINT {
+                    x: anchor.x + stroke.text_box_width,
+                    y: anchor.y + stroke.text_box_height,
+                },
+            ];
+        }
     }
 
     fn start_screen_draw_stroke(state: &mut ScreenDrawState, point: POINT, force_eraser: bool) {
