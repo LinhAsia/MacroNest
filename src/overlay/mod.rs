@@ -2006,6 +2006,8 @@ mod windows_overlay {
         vietnamese_input: bool,
         vietnamese_prefix: String,
         vietnamese_raw_tail: String,
+        selected_all: bool,
+        caret_started_at: Instant,
     }
 
     #[derive(Clone, Copy)]
@@ -4558,7 +4560,7 @@ mod windows_overlay {
                     finish_released_screen_draw_stroke_if_stale();
                     let should_paint = {
                         let state = SCREEN_DRAW_STATE.lock();
-                        state.active && state.pending_repaint
+                        state.active && (state.pending_repaint || state.text_session.is_some())
                     } && !screen_draw_cursor_over_toolbar();
                     if should_paint {
                         let _ = paint_screen_draw_overlay(hwnd);
@@ -4629,6 +4631,16 @@ mod windows_overlay {
                     && let Some(key_name) = key_name.as_ref()
                 {
                     update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
+                }
+                let text_session_active = SCREEN_DRAW_STATE.lock().text_session.is_some();
+                let alt_down = unsafe { GetAsyncKeyState(0x12) } < 0;
+                if text_session_active
+                    && (matches!(info.vkCode, 0x12 | 0xA4 | 0xA5)
+                        || (info.vkCode == 0x09 && alt_down))
+                {
+                    update_held_key(info.vkCode, is_key_down, is_key_up);
+                    update_modifier_state(info.vkCode, is_key_down);
+                    return CallNextHookEx(None, code, wparam, lparam);
                 }
                 if process_screen_draw_text_input(info.vkCode, is_key_down, is_key_up) {
                     update_held_key(info.vkCode, is_key_down, is_key_up);
@@ -9021,9 +9033,22 @@ mod windows_overlay {
             0x1B => {
                 cancelled = cancel_screen_draw_text_session(&mut state);
             }
+            0x41 if ctrl_down => {
+                if let Some(session) = state.text_session.as_mut() {
+                    session.selected_all = !session.stroke.text.is_empty();
+                    session.caret_started_at = Instant::now();
+                    changed = true;
+                }
+            }
             0x08 => {
                 if let Some(session) = state.text_session.as_mut() {
-                    if session.vietnamese_input {
+                    if session.selected_all {
+                        session.stroke.text.clear();
+                        session.vietnamese_prefix.clear();
+                        session.vietnamese_raw_tail.clear();
+                        session.selected_all = false;
+                        changed = true;
+                    } else if session.vietnamese_input {
                         changed = if session.vietnamese_raw_tail.pop().is_some() {
                             refresh_screen_draw_vietnamese_text(session);
                             true
@@ -9054,6 +9079,12 @@ mod windows_overlay {
                         .trim()
                         .to_owned();
                     if !sanitized.is_empty() {
+                        if session.selected_all {
+                            session.stroke.text.clear();
+                            session.vietnamese_prefix.clear();
+                            session.vietnamese_raw_tail.clear();
+                            session.selected_all = false;
+                        }
                         session.stroke.text.push_str(&sanitized);
                         if session.vietnamese_input {
                             session.vietnamese_prefix.clone_from(&session.stroke.text);
@@ -9067,6 +9098,12 @@ mod windows_overlay {
             _ => {
                 if let Some(fragment) = screen_draw_text_input_char(vk_code) {
                     if let Some(session) = state.text_session.as_mut() {
+                        if session.selected_all {
+                            session.stroke.text.clear();
+                            session.vietnamese_prefix.clear();
+                            session.vietnamese_raw_tail.clear();
+                            session.selected_all = false;
+                        }
                         if session.vietnamese_input {
                             append_screen_draw_vietnamese_text(session, &fragment);
                         } else {
@@ -9083,6 +9120,11 @@ mod windows_overlay {
 
         let needs_sync = changed || committed || cancelled;
         if needs_sync {
+            if changed
+                && let Some(session) = state.text_session.as_mut()
+            {
+                session.caret_started_at = Instant::now();
+            }
             let canvas_width = state.canvas_width;
             let canvas_height = state.canvas_height;
             mark_screen_draw_dirty(
@@ -12288,6 +12330,7 @@ mod windows_overlay {
                     session.vietnamese_prefix.clone_from(&session.stroke.text);
                     session.vietnamese_raw_tail.clear();
                     session.vietnamese_input = !session.vietnamese_input;
+                    session.caret_started_at = Instant::now();
                 }
                 let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 mark_screen_draw_dirty(&mut state, full_rect);
@@ -13104,7 +13147,9 @@ mod windows_overlay {
         if let Some(previous) = state.live_stroke_rect.take() {
             mark_screen_draw_dirty(&mut state, previous);
         }
+        let mut finalized_eraser = false;
         if let Some(mut stroke) = state.current_stroke.take() {
+            finalized_eraser = stroke.eraser;
             state.current_stroke_updated_at = None;
             state.current_stroke_release_seen_at = None;
             if !stroke.points.is_empty() {
@@ -13158,6 +13203,14 @@ mod windows_overlay {
                     state.redo_strokes.clear();
                 }
             }
+        }
+        if finalized_eraser {
+            let canvas_width = state.canvas_width;
+            let canvas_height = state.canvas_height;
+            mark_screen_draw_dirty(
+                &mut state,
+                ScreenDrawDirtyRect::full(canvas_width, canvas_height),
+            );
         }
         state.active_control = ScreenDrawControl::None;
         state.text_interaction_start_point = None;
@@ -13940,6 +13993,8 @@ mod windows_overlay {
             vietnamese_input: false,
             vietnamese_prefix: String::new(),
             vietnamese_raw_tail: String::new(),
+            selected_all: false,
+            caret_started_at: Instant::now(),
         })
     }
 
@@ -14515,6 +14570,60 @@ mod windows_overlay {
         let guide = [102, 203, 255, 130];
         let handle_fill = [18, 24, 34, 235];
         let handle_stroke = [235, 245, 255, 240];
+
+        if session.selected_all {
+            let mut selection = tiny_skia::PathBuilder::new();
+            selection.move_to(geometry.corners[0].0, geometry.corners[0].1);
+            for corner in geometry.corners.iter().skip(1) {
+                selection.line_to(corner.0, corner.1);
+            }
+            selection.close();
+            if let Some(path) = selection.finish() {
+                let mut paint = tiny_skia::Paint::default();
+                paint.set_color(tiny_skia::Color::from_rgba8(45, 135, 255, 92));
+                paint.anti_alias = true;
+                pixmap.fill_path(
+                    &path,
+                    &paint,
+                    tiny_skia::FillRule::Winding,
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
+            }
+        } else if session.caret_started_at.elapsed().as_millis() % 1000 < 500 {
+            let font_size = screen_draw_text_font_size(session.stroke.brush_size);
+            let caret_local_x = (12.0
+                + session.stroke.text.chars().count() as f32 * font_size * 0.64)
+                .min(geometry.width as f32 - 8.0)
+                .max(8.0);
+            let caret_top = screen_draw_text_local_to_world(
+                geometry.left as f32,
+                geometry.top as f32,
+                geometry.width as f32,
+                geometry.height as f32,
+                geometry.rotation_deg,
+                caret_local_x,
+                7.0,
+            );
+            let caret_bottom = screen_draw_text_local_to_world(
+                geometry.left as f32,
+                geometry.top as f32,
+                geometry.width as f32,
+                geometry.height as f32,
+                geometry.rotation_deg,
+                caret_local_x,
+                (geometry.height as f32 - 7.0).max(8.0),
+            );
+            draw_screen_draw_editor_line(
+                pixmap,
+                caret_top.0,
+                caret_top.1,
+                caret_bottom.0,
+                caret_bottom.1,
+                [235, 245, 255, 255],
+                1.5,
+            );
+        }
 
         for idx in 0..4 {
             let (x0, y0) = geometry.corners[idx];
