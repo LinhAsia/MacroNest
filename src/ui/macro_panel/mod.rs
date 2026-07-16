@@ -20562,7 +20562,7 @@ if supports_move_mouse || show_detection_tuning {
             .width(92.0)
             .selected_text(match step.ai_response_provider {
                 AiResponseProvider::Groq => "Groq",
-                AiResponseProvider::GeminiLive => "Gemini Live",
+                AiResponseProvider::GeminiLive => "Gemini",
             })
             .show_ui(ui, |ui| {
                 ui.selectable_value(
@@ -20573,7 +20573,7 @@ if supports_move_mouse || show_detection_tuning {
                 ui.selectable_value(
                     &mut step.ai_response_provider,
                     AiResponseProvider::GeminiLive,
-                    "Gemini Live",
+                    "Gemini",
                 );
             })
             .response;

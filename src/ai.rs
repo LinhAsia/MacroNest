@@ -6,10 +6,7 @@ use image::DynamicImage;
 use serde::Deserialize;
 
 use crate::model::{AiResponseProvider, CommandPreset, GroqSettings};
-use native_tls::TlsConnector;
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::{Duration, Instant};
-use tungstenite::{client, Message};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct CommandPresetPatch {
@@ -443,12 +440,12 @@ pub fn generate_ai_response(
     match provider {
         AiResponseProvider::Groq => generate_groq_ai_response(settings, prompt, system_instruction),
         AiResponseProvider::GeminiLive => {
-            generate_gemini_live_ai_response(&settings.gemini_api_key, web_search, prompt, system_instruction)
+            generate_gemini_text_ai_response(&settings.gemini_api_key, web_search, prompt, system_instruction)
         }
     }
 }
 
-fn generate_gemini_live_ai_response(
+fn generate_gemini_text_ai_response(
     api_key: &str,
     web_search: bool,
     prompt: &str,
@@ -462,111 +459,60 @@ fn generate_gemini_live_ai_response(
         bail!("AI Response request prompt is empty");
     }
 
-    let host = "generativelanguage.googleapis.com";
-    let addr = format!("{host}:443")
-        .to_socket_addrs()
-        .context("Failed to resolve Gemini")?
-        .next()
-        .context("Gemini address was not found")?;
-    let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(10))?;
-    tcp.set_read_timeout(Some(Duration::from_secs(30)))?;
-    tcp.set_write_timeout(Some(Duration::from_secs(15)))?;
-    let tls = TlsConnector::new()?.connect(host, tcp)?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .context("Failed to prepare the Gemini client")?;
     let url = format!(
-        "wss://{host}/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={api_key}"
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     );
-    let (mut socket, _) = client(url, tls).context("Gemini WebSocket handshake failed")?;
-
-    let mut setup = serde_json::json!({
-            "setup": {
-                "model": "models/gemini-2.5-flash-native-audio-preview-12-2025",
-                "generationConfig": { "responseModalities": ["AUDIO"] },
-                "outputAudioTranscription": {},
-                "systemInstruction": {
-                    "parts": [{ "text": system_instruction }]
-                }
-            }
-        });
+    let mut body = serde_json::json!({
+        "contents": [{
+            "role": "user",
+            "parts": [{ "text": prompt }]
+        }],
+        "systemInstruction": {
+            "parts": [{ "text": system_instruction }]
+        },
+        "generationConfig": {
+            "temperature": 0.7
+        }
+    });
     if web_search {
-        setup["setup"]["tools"] = serde_json::json!([{ "googleSearch": {} }]);
-    }
-    socket.write(Message::Text(setup.to_string().into()))?;
-    socket.flush()?;
-
-    let setup_started = Instant::now();
-    loop {
-        if setup_started.elapsed() > Duration::from_secs(10) {
-            bail!("Gemini Live setup timed out");
-        }
-        let value = read_gemini_live_json(&mut socket)?;
-        if value.get("setupComplete").is_some() {
-            break;
-        }
-        if let Some(error) = value.get("error") {
-            bail!("Gemini Live error: {error}");
-        }
+        body["tools"] = serde_json::json!([{ "googleSearch": {} }]);
     }
 
-    socket.write(Message::Text(
-        serde_json::json!({
-            "clientContent": {
-                "turns": [{ "role": "user", "parts": [{ "text": prompt }] }],
-                "turnComplete": true
+    let response = client
+        .post(url)
+        .json(&body)
+        .send()
+        .context("Failed to call the Gemini API")?;
+    let status = response.status();
+    if !status.is_success() {
+        let error_body = response.text().unwrap_or_default();
+        bail!("Gemini API error: {status} {error_body}");
+    }
+    let value: serde_json::Value = response
+        .json()
+        .context("Failed to parse the Gemini response")?;
+    if let Some(error) = value.get("error") {
+        bail!("Gemini API error: {error}");
+    }
+
+    let mut text = String::new();
+    if let Some(parts) = value
+        .pointer("/candidates/0/content/parts")
+        .and_then(|value| value.as_array())
+    {
+        for part in parts {
+            if let Some(part_text) = part.get("text").and_then(|value| value.as_str()) {
+                text.push_str(part_text);
             }
-        })
-        .to_string()
-        .into(),
-    ))?;
-    socket.flush()?;
-
-    let mut response = String::new();
-    let turn_started = Instant::now();
-    loop {
-        if turn_started.elapsed() > Duration::from_secs(30) {
-            bail!("Gemini Live response timed out");
-        }
-        let value = read_gemini_live_json(&mut socket)?;
-        if let Some(error) = value.get("error") {
-            bail!("Gemini Live error: {error}");
-        }
-        if let Some(text) = value
-            .pointer("/serverContent/outputTranscription/text")
-            .and_then(|value| value.as_str())
-        {
-            response.push_str(text);
-        }
-        if value
-            .pointer("/serverContent/turnComplete")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false)
-        {
-            break;
         }
     }
-
-    let response = response.trim().to_owned();
-    if response.is_empty() {
-        bail!("Gemini Live returned no text transcription");
+    let text = text.trim().to_owned();
+    if text.is_empty() {
+        bail!("Gemini returned no text");
     }
-    Ok(response)
-}
-
-fn read_gemini_live_json(
-    socket: &mut tungstenite::WebSocket<native_tls::TlsStream<TcpStream>>,
-) -> Result<serde_json::Value> {
-    loop {
-        match socket.read()? {
-            Message::Text(text) => return Ok(serde_json::from_str(&text)?),
-            Message::Binary(bytes) => return Ok(serde_json::from_slice(&bytes)?),
-            Message::Close(frame) => {
-                let reason = frame
-                    .map(|frame| frame.reason.to_string())
-                    .filter(|reason| !reason.trim().is_empty())
-                    .unwrap_or_else(|| "Gemini closed the WebSocket".to_owned());
-                bail!("Gemini Live connection closed: {reason}");
-            }
-            Message::Ping(payload) => socket.send(Message::Pong(payload))?,
-            Message::Pong(_) | Message::Frame(_) => {}
-        }
-    }
+    Ok(text)
 }
