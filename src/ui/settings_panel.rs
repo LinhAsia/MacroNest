@@ -261,6 +261,16 @@ impl CrosshairApp {
                                     .strong()
                                     .size(14.0),
                             );
+                            if let Ok(metadata) = fs::metadata(&self.paths.state_file) {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "state.json: {}",
+                                        Self::format_file_size(metadata.len())
+                                    ))
+                                    .small()
+                                    .weak(),
+                                );
+                            }
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
                                 if Self::settings_action_button(
