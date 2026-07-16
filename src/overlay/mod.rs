@@ -2011,6 +2011,7 @@ mod windows_overlay {
         selected_all: bool,
         caret_started_at: Instant,
         ctrl_down: bool,
+        shift_down: bool,
         caret_offset: f32,
     }
 
@@ -4655,6 +4656,7 @@ mod windows_overlay {
                     if text_session_active {
                         if let Some(session) = SCREEN_DRAW_STATE.lock().text_session.as_mut() {
                             session.ctrl_down = next_modifiers & 0b00_0011_1000 != 0;
+                            session.shift_down = next_modifiers & 0b00_0000_0111 != 0;
                         }
                     }
                     update_held_key(info.vkCode, is_key_down, is_key_up);
@@ -9007,13 +9009,16 @@ mod windows_overlay {
         matches_trigger.then_some(false)
     }
 
-    fn screen_draw_text_input_char(vk_code: u32) -> Option<String> {
+    fn screen_draw_text_input_char(vk_code: u32, shift_down: bool) -> Option<String> {
         let mut keyboard_state = [0u8; 256];
         if unsafe { GetKeyboardState(&mut keyboard_state) }.is_err() {
             return None;
         }
         if (vk_code as usize) < keyboard_state.len() {
             keyboard_state[vk_code as usize] |= 0x80;
+        }
+        if shift_down {
+            keyboard_state[0x10] |= 0x80;
         }
         let scan_code = unsafe { MapVirtualKeyW(vk_code, MAPVK_VK_TO_VSC) };
         let mut buffer = [0u16; 8];
@@ -9140,7 +9145,11 @@ mod windows_overlay {
                 }
             }
             _ => {
-                if let Some(fragment) = screen_draw_text_input_char(vk_code) {
+                let shift_down = state
+                    .text_session
+                    .as_ref()
+                    .is_some_and(|session| session.shift_down);
+                if let Some(fragment) = screen_draw_text_input_char(vk_code, shift_down) {
                     if let Some(session) = state.text_session.as_mut() {
                         if session.selected_all {
                             session.stroke.text.clear();
@@ -14085,6 +14094,7 @@ mod windows_overlay {
             selected_all: false,
             caret_started_at: Instant::now(),
             ctrl_down: false,
+            shift_down: false,
             caret_offset: 0.0,
         })
     }
