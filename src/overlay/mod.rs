@@ -2147,6 +2147,7 @@ mod windows_overlay {
         text_session: Option<ScreenDrawTextSession>,
         text_interaction_start_point: Option<POINT>,
         text_interaction_origin: Option<ScreenDrawStroke>,
+        text_vietnamese_input: bool,
         crosshair_draw_target: Option<ScreenDrawCrosshairDrawTarget>,
         canvas_background: Option<ScreenDrawCanvasBackground>,
         screen_color_pick_mode: bool,
@@ -2225,6 +2226,7 @@ mod windows_overlay {
                 text_session: None,
                 text_interaction_start_point: None,
                 text_interaction_origin: None,
+                text_vietnamese_input: false,
                 crosshair_draw_target: None,
                 canvas_background: None,
                 screen_color_pick_mode: false,
@@ -12447,13 +12449,19 @@ mod windows_overlay {
                 mark_screen_draw_dirty(&mut state, full_rect);
             }
             ScreenDrawHit::TextSessionVietnamese => {
-                if let Some(session) = state.text_session.as_mut() {
+                let enabled = if let Some(session) = state.text_session.as_mut() {
                     if session.vietnamese_input {
                         refresh_screen_draw_vietnamese_text(session);
                     }
                     rebase_screen_draw_vietnamese_cursor(session);
                     session.vietnamese_input = !session.vietnamese_input;
                     session.caret_started_at = Instant::now();
+                    Some(session.vietnamese_input)
+                } else {
+                    None
+                };
+                if let Some(enabled) = enabled {
+                    state.text_vietnamese_input = enabled;
                 }
                 let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 mark_screen_draw_dirty(&mut state, full_rect);
@@ -13288,7 +13296,10 @@ mod windows_overlay {
             state.current_stroke_release_seen_at = None;
             if !stroke.points.is_empty() {
                 if stroke.tool == ScreenDrawTool::Text && !stroke.eraser {
-                    state.text_session = finalize_screen_draw_text_stroke(stroke);
+                    state.text_session = finalize_screen_draw_text_stroke(
+                        stroke,
+                        state.text_vietnamese_input,
+                    );
                 } else if stroke.effect == ScreenDrawEffect::Blur && !stroke.eraser {
                     if screen_draw_prepare_blur_patch(&state, &mut stroke) {
                         if state.canvas_width > 0
@@ -14166,7 +14177,10 @@ mod windows_overlay {
         Some((left, top, width, height, font_size, text))
     }
 
-    fn finalize_screen_draw_text_stroke(stroke: ScreenDrawStroke) -> Option<ScreenDrawTextSession> {
+    fn finalize_screen_draw_text_stroke(
+        stroke: ScreenDrawStroke,
+        vietnamese_input: bool,
+    ) -> Option<ScreenDrawTextSession> {
         let (left, top, width, height, _, _) = screen_draw_text_layout(&stroke, "Text")?;
         Some(ScreenDrawTextSession {
             stroke: ScreenDrawStroke {
@@ -14181,7 +14195,7 @@ mod windows_overlay {
                 text_box_height: height,
                 ..stroke
             },
-            vietnamese_input: false,
+            vietnamese_input,
             vietnamese_prefix: String::new(),
             vietnamese_raw_tail: String::new(),
             vietnamese_suffix: String::new(),
