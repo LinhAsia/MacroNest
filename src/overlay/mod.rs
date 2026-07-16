@@ -11403,12 +11403,22 @@ mod windows_overlay {
         if matches!(state.tool, ScreenDrawTool::Highlight | ScreenDrawTool::Blur) {
             state.tool = ScreenDrawTool::Brush;
         }
-        state.color = RgbaColor {
+        let color = RgbaColor {
             r: color.r,
             g: color.g,
             b: color.b,
             a: color.a,
         };
+        state.color = color;
+        if let Some(session) = state.text_session.as_mut() {
+            session.stroke.color = color;
+            let (w, h) = (state.canvas_width, state.canvas_height);
+            mark_screen_draw_dirty(&mut state, ScreenDrawDirtyRect::full(w, h));
+            state.committed_dirty = true;
+            state.pending_repaint = true;
+        }
+        drop(state);
+        request_screen_draw_overlay_sync();
     }
 
     pub fn screen_draw_get_effect() -> u8 {
