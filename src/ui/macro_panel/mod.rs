@@ -1466,21 +1466,21 @@ impl CrosshairApp {
                                                             .strong(),
                                                     );
                                                     ui.add_space(4.0);
-                                                    ui.label(egui::RichText::new("- screen.width / w").monospace());
-                                                    ui.label(egui::RichText::new("- screen.height / h").monospace());
+                                                    ui.label(egui::RichText::new("- screen.width").monospace());
+                                                    ui.label(egui::RichText::new("- screen.height").monospace());
                                                     ui.label(egui::RichText::new("- mouse.x / y").monospace());
                                                     ui.label(egui::RichText::new("- mouse.sensitivity").monospace());
                                                     ui.label(egui::RichText::new("- volume.level").monospace());
                                                     ui.label(egui::RichText::new("- system.year / month / day").monospace());
                                                     ui.label(egui::RichText::new("- system.hour / minute / second").monospace());
-                                                    ui.label(egui::RichText::new("- system.millisecond / ms").monospace());
-                                                    ui.label(egui::RichText::new("- window.x / left").monospace());
-                                                    ui.label(egui::RichText::new("- window.y / top").monospace());
+                                                    ui.label(egui::RichText::new("- system.millisecond").monospace());
+                                                    ui.label(egui::RichText::new("- window.x").monospace());
+                                                    ui.label(egui::RichText::new("- window.y").monospace());
                                                     ui.label(egui::RichText::new("- window.right / bottom").monospace());
-                                                    ui.label(egui::RichText::new("- window.width / w").monospace());
-                                                    ui.label(egui::RichText::new("- window.height / h").monospace());
-                                                    ui.label(egui::RichText::new("- window.centerx / cx").monospace());
-                                                    ui.label(egui::RichText::new("- window.centery / cy").monospace());
+                                                    ui.label(egui::RichText::new("- window.width").monospace());
+                                                    ui.label(egui::RichText::new("- window.height").monospace());
+                                                    ui.label(egui::RichText::new("- window.centerX").monospace());
+                                                    ui.label(egui::RichText::new("- window.centerY").monospace());
                                                 });
                                             });
                                     });
@@ -16998,8 +16998,7 @@ if supports_move_mouse || show_detection_tuning {
             "mouse" => Some(&["x", "y", "sensitivity"]),
             "volume" => Some(&["level"]),
             "window" => Some(&[
-                "title", "x", "left", "y", "top", "right", "bottom", "width", "height", "centerX",
-                "centerY", "cx", "cy",
+                "title", "x", "y", "right", "bottom", "width", "height", "centerX", "centerY",
             ]),
             "clipboard" => Some(&["text"]),
             _ => Some(&["toNumber", "toString"]),
@@ -19645,12 +19644,13 @@ if supports_move_mouse || show_detection_tuning {
             return match base.as_str() {
                 "system" => match prop_clean.as_str() {
                     "date" | "time" => VariableValueKind::Text,
-                    "year" | "month" | "day" | "hour" | "minute" | "second" | "millisecond"
-                    | "ms" => VariableValueKind::Number,
+                    "year" | "month" | "day" | "hour" | "minute" | "second" | "millisecond" => {
+                        VariableValueKind::Number
+                    }
                     _ => VariableValueKind::Neutral,
                 },
                 "screen" => match prop_clean.as_str() {
-                    "width" | "height" | "w" | "h" => VariableValueKind::Number,
+                    "width" | "height" => VariableValueKind::Number,
                     _ => VariableValueKind::Neutral,
                 },
                 "mouse" => match prop_clean.as_str() {
@@ -19659,7 +19659,8 @@ if supports_move_mouse || show_detection_tuning {
                 },
                 "window" => match prop_clean.as_str() {
                     "title" => VariableValueKind::Text,
-                    "width" | "height" | "w" | "h" | "x" | "y" => VariableValueKind::Number,
+                    "width" | "height" | "x" | "y" | "right" | "bottom" | "centerx"
+                    | "centery" => VariableValueKind::Number,
                     _ => VariableValueKind::Neutral,
                 },
                 "volume" => match prop_clean.as_str() {

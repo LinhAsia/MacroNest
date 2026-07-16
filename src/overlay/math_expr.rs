@@ -1102,8 +1102,8 @@ fn get_object_property_value(token: &str) -> Option<i32> {
     let prop_name = parts[1].trim().to_lowercase();
     if obj_name == "screen" {
         return match prop_name.as_str() {
-            "width" | "w" => Some(unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(0)),
-            "height" | "h" => Some(unsafe { GetSystemMetrics(SM_CYSCREEN) }.max(0)),
+            "width" => Some(unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(0)),
+            "height" => Some(unsafe { GetSystemMetrics(SM_CYSCREEN) }.max(0)),
             _ => None,
         };
     }
@@ -1141,7 +1141,7 @@ fn get_object_property_value(token: &str) -> Option<i32> {
             "hour" => Some(now.hour() as i32),
             "minute" => Some(now.minute() as i32),
             "second" => Some(now.second() as i32),
-            "millisecond" | "ms" => Some((now.nanosecond() / 1_000_000) as i32),
+            "millisecond" => Some((now.nanosecond() / 1_000_000) as i32),
             _ => None,
         };
     }
@@ -1160,14 +1160,14 @@ fn get_object_property_value(token: &str) -> Option<i32> {
         }
 
         return match prop_name.as_str() {
-            "x" | "left" => Some(rect.left),
-            "y" | "top" => Some(rect.top),
+            "x" => Some(rect.left),
+            "y" => Some(rect.top),
             "right" => Some(rect.right),
             "bottom" => Some(rect.bottom),
-            "width" | "w" => Some((rect.right - rect.left).max(0)),
-            "height" | "h" => Some((rect.bottom - rect.top).max(0)),
-            "centerx" | "cx" => Some(rect.left + ((rect.right - rect.left) / 2)),
-            "centery" | "cy" => Some(rect.top + ((rect.bottom - rect.top) / 2)),
+            "width" => Some((rect.right - rect.left).max(0)),
+            "height" => Some((rect.bottom - rect.top).max(0)),
+            "centerx" => Some(rect.left + ((rect.right - rect.left) / 2)),
+            "centery" => Some(rect.top + ((rect.bottom - rect.top) / 2)),
             _ => None,
         };
     }

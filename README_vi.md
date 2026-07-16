@@ -155,8 +155,8 @@ Tên biến hỗ trợ phần `{}` được tính tự động. Khi `i = 3`, gá
 | `mouse.y` | Tọa độ Y hiện tại của con trỏ chuột | `mouse.y` |
 | `mouse.sensitivity` | Tốc độ nhạy của chuột hệ thống | `mouse.sensitivity` |
 | `volume.level` | Mức âm lượng hệ thống hiện tại (0 đến 100) | `volume.level` |
-| `window.x` hoặc `left` | Tọa độ X cạnh trái của cửa sổ mục tiêu | `window.x` |
-| `window.y` hoặc `top` | Tọa độ Y cạnh trên của cửa sổ mục tiêu | `window.y` |
+| `window.x` | Tọa độ X cạnh trái của cửa sổ mục tiêu | `window.x` |
+| `window.y` | Tọa độ Y cạnh trên của cửa sổ mục tiêu | `window.y` |
 | `window.right` | Tọa độ X cạnh phải của cửa sổ mục tiêu | `window.right` |
 | `window.bottom` | Tọa độ Y cạnh dưới của cửa sổ mục tiêu | `window.bottom` |
 | `window.width` | Chiều rộng của cửa sổ mục tiêu | `window.width` |
