@@ -13696,7 +13696,7 @@ mod windows_overlay {
     }
 
     fn screen_draw_text_min_box_width(font_size: f32) -> i32 {
-        ((font_size * 3.6).round() as i32).max(72)
+        ((font_size + 16.0).ceil() as i32).max(40)
     }
 
     fn screen_draw_text_default_box_height(font_size: f32) -> i32 {
@@ -13705,9 +13705,9 @@ mod windows_overlay {
 
     fn screen_draw_text_estimated_box_width(font_size: f32, text: &str) -> i32 {
         if text.trim().is_empty() {
-            (font_size * 9.0).round() as i32
+            screen_draw_text_min_box_width(font_size)
         } else {
-            ((text.chars().count() as f32 * font_size * 0.64).ceil() as i32 + 24)
+            (screen_draw_text_measured_width(font_size, text).ceil() as i32 + 16)
                 .max(screen_draw_text_min_box_width(font_size))
         }
     }
@@ -14692,7 +14692,7 @@ mod windows_overlay {
                 );
             }
         } else if session.caret_started_at.elapsed().as_millis() % 1000 < 500 {
-            let caret_local_x = (session.caret_offset + 1.0)
+            let caret_local_x = (session.caret_offset + 8.0)
                 .min(geometry.width as f32 - 8.0)
                 .max(8.0);
             let caret_top = screen_draw_text_local_to_world(
@@ -15644,9 +15644,9 @@ mod windows_overlay {
                         pixmap.data_mut(),
                         pixmap_width,
                         pixmap_height,
-                        left,
+                        left + 8,
                         top,
-                        width.max(1),
+                        (width - 16).max(1),
                         height,
                         &text,
                         stroke.color,
