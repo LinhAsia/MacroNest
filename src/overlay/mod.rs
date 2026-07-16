@@ -305,6 +305,7 @@ mod windows_overlay {
     static SCREEN_DRAW_BRUSH_CURSOR: Lazy<Mutex<Option<(ScreenDrawBrushCursorKey, isize)>>> =
         Lazy::new(|| Mutex::new(None));
     static SCREEN_DRAW_HWND: AtomicIsize = AtomicIsize::new(0);
+    static SCREEN_DRAW_TEXT_CTRL_PASSTHROUGH: AtomicBool = AtomicBool::new(false);
     static LAST_MOUSE_MOVE_TIME_MS: AtomicU64 = AtomicU64::new(0);
     static ARDUINO_TEST_OUTPUT_ACTIVE: AtomicBool = AtomicBool::new(false);
     const QUICK_KEY_DISPLAY_MOUSE_ACTIVE_LATCH_MS: u32 = 1200;
@@ -2008,6 +2009,8 @@ mod windows_overlay {
         vietnamese_raw_tail: String,
         selected_all: bool,
         caret_started_at: Instant,
+        ctrl_down: bool,
+        caret_offset: f32,
     }
 
     #[derive(Clone, Copy)]
@@ -4633,6 +4636,19 @@ mod windows_overlay {
                     update_quick_key_display_key(key_name, info.vkCode, is_key_down, is_key_up);
                 }
                 let text_session_active = SCREEN_DRAW_STATE.lock().text_session.is_some();
+                let ctrl_key = matches!(info.vkCode, 0x11 | 0xA2 | 0xA3);
+                let ctrl_passthrough = SCREEN_DRAW_TEXT_CTRL_PASSTHROUGH.load(Ordering::Acquire);
+                if ctrl_key && (text_session_active || (is_key_up && ctrl_passthrough)) {
+                    if text_session_active {
+                        if let Some(session) = SCREEN_DRAW_STATE.lock().text_session.as_mut() {
+                            session.ctrl_down = is_key_down;
+                        }
+                    }
+                    SCREEN_DRAW_TEXT_CTRL_PASSTHROUGH.store(is_key_down, Ordering::Release);
+                    update_held_key(info.vkCode, is_key_down, is_key_up);
+                    update_modifier_state(info.vkCode, is_key_down);
+                    return CallNextHookEx(None, code, wparam, lparam);
+                }
                 let alt_down = unsafe { GetAsyncKeyState(0x12) } < 0;
                 if text_session_active
                     && (matches!(info.vkCode, 0x12 | 0xA4 | 0xA5)
@@ -9024,7 +9040,10 @@ mod windows_overlay {
             return true;
         }
 
-        let ctrl_down = unsafe { GetAsyncKeyState(0x11) } < 0;
+        let ctrl_down = state
+            .text_session
+            .as_ref()
+            .is_some_and(|session| session.ctrl_down);
         let mut changed = false;
         let mut committed = false;
         let mut cancelled = false;
@@ -9124,6 +9143,10 @@ mod windows_overlay {
                 && let Some(session) = state.text_session.as_mut()
             {
                 session.caret_started_at = Instant::now();
+                session.caret_offset = screen_draw_text_measured_width(
+                    screen_draw_text_font_size(session.stroke.brush_size),
+                    &session.stroke.text,
+                );
             }
             let canvas_width = state.canvas_width;
             let canvas_height = state.canvas_height;
@@ -13038,6 +13061,8 @@ mod windows_overlay {
                 let next_font_size = (base_font_size * scale).clamp(14.0, 72.0);
                 session.stroke.brush_size = next_font_size;
                 sync_screen_draw_text_box_to_content(&mut session.stroke, "Text", true);
+                session.caret_offset =
+                    screen_draw_text_measured_width(next_font_size, &session.stroke.text);
                 let new_width = session.stroke.text_box_width.max(1);
                 let new_height = session.stroke.text_box_height.max(1);
                 session.stroke.points = vec![
@@ -13662,6 +13687,45 @@ mod windows_overlay {
         }
     }
 
+    fn screen_draw_text_measured_width(font_size: f32, text: &str) -> f32 {
+        if text.is_empty() {
+            return 0.0;
+        }
+        unsafe {
+            let screen_dc = GetDC(None);
+            let mem_dc = CreateCompatibleDC(Some(screen_dc));
+            let font_name = "Segoe UI"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let font = CreateFontW(
+                -((font_size.round() as i32).max(1)),
+                0,
+                0,
+                0,
+                FW_MEDIUM.0 as i32,
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                ANTIALIASED_QUALITY,
+                FF_DONTCARE.0 as u32,
+                PCWSTR(font_name.as_ptr()),
+            );
+            let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
+            let wide = text.encode_utf16().collect::<Vec<_>>();
+            let mut size = SIZE { cx: 0, cy: 0 };
+            let _ = GetTextExtentPoint32W(mem_dc, &wide, &mut size);
+            let _ = SelectObject(mem_dc, old_font);
+            let _ = DeleteObject(HGDIOBJ(font.0));
+            let _ = DeleteDC(mem_dc);
+            let _ = ReleaseDC(None, screen_dc);
+            size.cx.max(0) as f32
+        }
+    }
+
     fn screen_draw_text_content<'a>(
         stroke: &'a ScreenDrawStroke,
         fallback_text: &'a str,
@@ -13995,6 +14059,8 @@ mod windows_overlay {
             vietnamese_raw_tail: String::new(),
             selected_all: false,
             caret_started_at: Instant::now(),
+            ctrl_down: false,
+            caret_offset: 0.0,
         })
     }
 
@@ -14591,9 +14657,7 @@ mod windows_overlay {
                 );
             }
         } else if session.caret_started_at.elapsed().as_millis() % 1000 < 500 {
-            let font_size = screen_draw_text_font_size(session.stroke.brush_size);
-            let caret_local_x = (12.0
-                + session.stroke.text.chars().count() as f32 * font_size * 0.64)
+            let caret_local_x = (session.caret_offset + 1.0)
                 .min(geometry.width as f32 - 8.0)
                 .max(8.0);
             let caret_top = screen_draw_text_local_to_world(
