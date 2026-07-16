@@ -2119,19 +2119,6 @@ impl CrosshairApp {
                             {
                                 keep_open_rect =
                                     keep_open_rect.union(rect.expand2(egui::vec2(16.0, 14.0)));
-                                if let Some(parent_rect) = popup_rect {
-                                    keep_open_rect =
-                                        keep_open_rect.union(egui::Rect::from_min_max(
-                                            egui::pos2(
-                                                parent_rect.min.x.min(rect.min.x) - 12.0,
-                                                parent_rect.min.y.min(rect.min.y) - 12.0,
-                                            ),
-                                            egui::pos2(
-                                                parent_rect.max.x.max(rect.max.x) + 12.0,
-                                                parent_rect.max.y.max(rect.max.y) + 12.0,
-                                            ),
-                                        ));
-                                }
                             }
                         }
                         if !keep_open_rect.contains(pointer_pos) {
@@ -8146,7 +8133,7 @@ if supports_move_mouse || show_detection_tuning {
                                                             12.0,
                                                         );
                                                         let text_id = ui.id().with(("hold-stop-showhud-text-override",));
-                                                        let response = Self::render_variable_text_edit(
+                                                        let response = Self::render_interpolated_text_edit(
                                                             ui,
                                                             &mut step.text_override,
                                                             text_id,
@@ -8163,7 +8150,7 @@ if supports_move_mouse || show_detection_tuning {
                                                             &mut step.text_override,
                                                         );
                                                         live_sync |= response.changed();
-                                                        Self::render_variable_suggestions(
+                                                        Self::render_variable_suggestions_braced(
                                                             ui,
                                                             &response,
                                                             &mut step.text_override,
@@ -10469,7 +10456,7 @@ if supports_move_mouse || show_detection_tuning {
                                                             12.0,
                                                         );
                                                         let text_id = ui.id().with(("press-stop-showhud-text-override",));
-                                                        let response = Self::render_variable_text_edit(
+                                                        let response = Self::render_interpolated_text_edit(
                                                             ui,
                                                             &mut step.text_override,
                                                             text_id,
@@ -10486,7 +10473,7 @@ if supports_move_mouse || show_detection_tuning {
                                                             &mut step.text_override,
                                                         );
                                                         live_sync |= response.changed();
-                                                        Self::render_variable_suggestions(
+                                                        Self::render_variable_suggestions_braced(
                                                             ui,
                                                             &response,
                                                             &mut step.text_override,
@@ -13834,7 +13821,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                 12.0,
                                                             );
                                                             let text_id = ui.id().with((step_index, "showhud-text-override"));
-                                                            let response = Self::render_variable_text_edit(
+                                                            let response = Self::render_interpolated_text_edit(
                                                                 ui,
                                                                 &mut step.text_override,
                                                                 text_id,
@@ -13851,7 +13838,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                 &mut step.text_override,
                                                             );
                                                             live_sync |= response.changed();
-                                                            Self::render_variable_suggestions(
+                                                            Self::render_variable_suggestions_braced(
                                                                 ui,
                                                                 &response,
                                                                          &mut step.text_override,
