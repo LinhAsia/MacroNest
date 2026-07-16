@@ -9713,6 +9713,11 @@ mod windows_overlay {
                     {
                         hook_state.active_pin_preset_id = None;
                     }
+                    let refresh_active_pin = hook_state.active_pin_preset_id.is_some();
+                    drop(hook_state);
+                    if refresh_active_pin {
+                        let _ = refresh_pin_overlay(runtime);
+                    }
                 }
 
                 OverlayCommand::UpdateMousePathPresets(presets) => {
