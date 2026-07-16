@@ -29505,7 +29505,7 @@ mod windows_overlay {
                 } else {
                     expression
                 };
-                let right_str = interpolate_variables(right_expr.trim());
+                let right_str = resolve_expression_argument_text(right_expr);
 
                 if is_math_expression_or_numeric(&left_str)
                     && is_math_expression_or_numeric(&right_str)

@@ -121,8 +121,8 @@ impl CrosshairApp {
         match highlight_mode {
             TextHighlightMode::VariableTokens => Some(Self::tr_lang(
                 language,
-                "Expression field. Variables and functions work directly here. Example: count + 1 or contains(name, \"boss\").",
-                "Ô biểu thức. Biến và hàm dùng trực tiếp ở đây. Ví dụ: count + 1 hoặc contains(name, \"boss\").",
+                "Expression field. Variables and functions work directly. Variable names may contain computed {} parts, for example item[{i}] or item[{len(text)}].",
+                "Ô biểu thức. Biến và hàm dùng trực tiếp. Tên biến có thể chứa phần {} được tính tự động, ví dụ item[{i}] hoặc item[{len(text)}].",
             )),
             TextHighlightMode::Interpolations => Some(Self::tr_lang(
                 language,
@@ -1420,6 +1420,7 @@ impl CrosshairApp {
                                                     ui.label(egui::RichText::new("- contains(a, b)").monospace());
                                                     ui.label(egui::RichText::new("- concat(a, b, ...)").monospace());
                                                     ui.label(egui::RichText::new("- substr(text, start, len)").monospace());
+                                                    ui.label(egui::RichText::new("- charat(text, index)").monospace());
                                                     ui.label(egui::RichText::new("- len(text)").monospace());
                                                     ui.label(egui::RichText::new("- lower(text) / upper(text)").monospace());
                                                     ui.label(egui::RichText::new("- trim(text)").monospace());
@@ -16337,7 +16338,11 @@ if supports_move_mouse || show_detection_tuning {
         if step.action == MacroAction::SetVariable {
             let name = step.if_variable_name.trim();
             if !name.is_empty() {
-                vars.insert(name.to_string());
+                if name.contains('{') {
+                    Self::extract_braced_vars(name, vars);
+                } else {
+                    vars.insert(name.to_string());
+                }
             }
             if matches!(
                 step.set_variable_source,
@@ -16925,6 +16930,7 @@ if supports_move_mouse || show_detection_tuning {
             "contains()",
             "concat()",
             "substr()",
+            "charat()",
             "len()",
             "lower()",
             "upper()",
@@ -17021,6 +17027,7 @@ if supports_move_mouse || show_detection_tuning {
             "contains()" => "contains(a, b)".to_string(),
             "concat()" => "concat(a, b, ...)".to_string(),
             "substr()" => "substr(text, start, len)".to_string(),
+            "charat()" => "charat(text, index)".to_string(),
             "len()" => "len(text)".to_string(),
             "lower()" => "lower(text)".to_string(),
             "upper()" => "upper(text)".to_string(),

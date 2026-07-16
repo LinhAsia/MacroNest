@@ -95,6 +95,7 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                 let func_name_lower = func_name.to_ascii_lowercase();
                 let replacement = match func_name_lower.as_str() {
                     "substr" => quote_expression_text(&evaluate_substr_expression(&args)),
+                    "charat" => quote_expression_text(&evaluate_char_at_expression(&args)),
                     "concat" => quote_expression_text(&evaluate_concat_expression(&args)),
                     "lower" => quote_expression_text(&evaluate_lower_expression(&args)),
                     "upper" => quote_expression_text(&evaluate_upper_expression(&args)),
@@ -388,7 +389,8 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
         } else if let Some(obj_val) = get_object_property_value(normalized) {
             obj_val as f64
         } else {
-            *RUNTIME_VARIABLES.lock().get(normalized).unwrap_or(&0.0)
+            let variable_name = resolve_variable_name(normalized);
+            *RUNTIME_VARIABLES.lock().get(&variable_name).unwrap_or(&0.0)
         }
     };
     let mut values = Vec::new();
@@ -442,38 +444,48 @@ pub(crate) fn resolve_text_variable_value(token: &str) -> Option<String> {
         return Some(value.to_string());
     }
 
+    let variable_name = resolve_variable_name(trimmed);
     {
         let text_vars = TEXT_VARIABLES.lock();
-        if let Some(val) = text_vars.get(trimmed) {
+        if let Some(val) = text_vars.get(&variable_name) {
             return Some(val.clone());
         }
     }
 
     let vars = RUNTIME_VARIABLES.lock();
-    vars.get(trimmed).map(|v| v.to_string())
+    vars.get(&variable_name).map(|v| v.to_string())
+}
+
+pub(crate) fn resolve_variable_name(name: &str) -> String {
+    let trimmed = name.trim();
+    if trimmed.contains('{') {
+        interpolate_variables(trimmed)
+    } else {
+        trimmed.to_string()
+    }
 }
 
 pub(crate) fn set_text_variable_value(target_var: &str, value: &str) {
-    let target_trimmed = target_var.trim();
-    if target_trimmed.is_empty() {
+    let target_name = resolve_variable_name(target_var);
+    if target_name.is_empty() {
         return;
     }
 
-    RUNTIME_VARIABLES.lock().remove(target_trimmed);
+    RUNTIME_VARIABLES.lock().remove(&target_name);
     let mut vars = TEXT_VARIABLES.lock();
-    vars.insert(target_trimmed.to_string(), value.to_string());
+    vars.insert(target_name, value.to_string());
 }
 
 pub(crate) fn set_variable_value(target_var: &str, value: f64) {
-    let target_trimmed = target_var.trim();
-    if target_trimmed.is_empty() {
+    let target_name = resolve_variable_name(target_var);
+    if target_name.is_empty() {
         return;
     }
 
-    TEXT_VARIABLES.lock().remove(target_trimmed);
+    TEXT_VARIABLES.lock().remove(&target_name);
 
     let mut vars = RUNTIME_VARIABLES.lock();
-    vars.insert(target_trimmed.to_string(), value);
+    vars.insert(target_name, value);
 }
 
 pub(crate) fn smart_set_variable_from_expression(target_var: &str, expr_raw: &str) {
@@ -483,6 +495,18 @@ pub(crate) fn smart_set_variable_from_expression(target_var: &str, expr_raw: &st
     }
 
     let expr_trimmed = expr_raw.trim().to_string();
+    if let Some(literal) = expr_trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            expr_trimmed
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+    {
+        set_text_variable_value(target_trimmed, literal);
+        return;
+    }
     if let Some(chosen) = resolve_choice_expression_value(&expr_trimmed) {
         if let Ok(val) = chosen.parse::<f64>() {
             set_variable_value(target_trimmed, val);
@@ -541,6 +565,8 @@ pub(crate) fn looks_like_math_expression_text(text: &str) -> bool {
         || lower == "pi"
         || lower == "e"
         || lower.contains("len(")
+        || lower.contains("substr(")
+        || lower.contains("charat(")
         || lower.contains("contains(")
         || lower.contains("concat(")
         || lower.contains("lower(")
@@ -614,7 +640,7 @@ pub(crate) fn resolve_choice_expression_value(expr: &str) -> Option<String> {
     }
 }
 
-fn resolve_expression_argument_text(arg: &str) -> String {
+pub(crate) fn resolve_expression_argument_text(arg: &str) -> String {
     let trimmed = arg.trim();
     if trimmed.is_empty() {
         return String::new();
@@ -655,6 +681,7 @@ fn evaluate_text_function_expression(expr: &str) -> Option<String> {
     let (func_name, args) = parse_expression_function_call(expr)?;
     match func_name.to_ascii_lowercase().as_str() {
         "substr" => Some(evaluate_substr_expression(&args)),
+        "charat" => Some(evaluate_char_at_expression(&args)),
         "concat" => Some(evaluate_concat_expression(&args)),
         "lower" => Some(evaluate_lower_expression(&args)),
         "upper" => Some(evaluate_upper_expression(&args)),
@@ -695,6 +722,21 @@ fn evaluate_substr_expression(args: &[String]) -> String {
         Some(len) => source.chars().skip(start).take(len).collect(),
         None => source.chars().skip(start).collect(),
     }
+}
+
+fn evaluate_char_at_expression(args: &[String]) -> String {
+    let source = args
+        .first()
+        .map(|arg| resolve_expression_argument_text(arg))
+        .unwrap_or_default();
+    let index = args
+        .get(1)
+        .map(|arg| clamp_f64_to_i32(evaluate_math_expression_f64(arg)))
+        .unwrap_or(-1);
+    if index < 0 {
+        return String::new();
+    }
+    source.chars().nth(index as usize).map(String::from).unwrap_or_default()
 }
 
 fn evaluate_concat_expression(args: &[String]) -> String {
@@ -828,9 +870,10 @@ fn resolve_comparison_operand(expr: &str) -> ComparisonOperand {
         return ComparisonOperand::Text(text_value);
     }
 
+    let variable_name = resolve_variable_name(trimmed);
     {
         let text_vars = TEXT_VARIABLES.lock();
-        if let Some(text_value) = text_vars.get(trimmed) {
+        if let Some(text_value) = text_vars.get(&variable_name) {
             return ComparisonOperand::Text(text_value.clone());
         }
     }
@@ -845,8 +888,8 @@ fn resolve_comparison_operand(expr: &str) -> ComparisonOperand {
 
     {
         let vars = RUNTIME_VARIABLES.lock();
-        if vars.contains_key(trimmed) {
-            return ComparisonOperand::Number(evaluate_math_expression_f64(trimmed));
+        if let Some(value) = vars.get(&variable_name) {
+            return ComparisonOperand::Number(*value);
         }
     }
 
@@ -1354,6 +1397,29 @@ mod tests {
             let mut text_vars = TEXT_VARIABLES.lock();
             text_vars.clear();
         }
+    }
+
+    #[test]
+    fn char_at_whitespace_comparison_and_dynamic_variable_names_work() {
+        RUNTIME_VARIABLES.lock().clear();
+        TEXT_VARIABLES.lock().clear();
+
+        smart_set_variable_from_expression("text", "a b");
+        smart_set_variable_from_expression("space", "\" \"");
+        smart_set_variable_from_expression("index", "2");
+        smart_set_variable_from_expression("item[{index}]", "hello");
+
+        assert_eq!(resolve_text_variable_value("charat(text, 1)").as_deref(), Some(" "));
+        assert_eq!(evaluate_math_expression("charat(text, 1) == \" \""), 1);
+        assert_eq!(evaluate_math_expression("space == \" \""), 1);
+        assert_eq!(resolve_text_variable_value("item[2]").as_deref(), Some("hello"));
+        assert_eq!(
+            resolve_text_variable_value("item[{index}]").as_deref(),
+            Some("hello")
+        );
+
+        RUNTIME_VARIABLES.lock().clear();
+        TEXT_VARIABLES.lock().clear();
     }
 
     #[test]

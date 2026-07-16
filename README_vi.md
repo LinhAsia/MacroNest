@@ -133,12 +133,17 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | `contains(a, b)` | Kiểm tra chuỗi `a` có chứa chuỗi `b` hay không (hỗ trợ số, chữ hoặc kết hợp) | 1. `contains(hello, world)` (chữ)<br>2. `contains(Gold: 5000, 5000)` (kết hợp)<br>3. `contains(12345, 99)` (số) | 1. `0` (sai)<br>2. `1` (đúng)<br>3. `0` (sai) |
 | `concat(a, b, ...)` | Ghép nhiều giá trị thành một chuỗi | `concat(Player, "-", 01)` | `Player-01` |
 | `substr(text, start, len)` | Lấy một chuỗi con (hỗ trợ số, chữ hoặc kết hợp) | 1. `substr(banana, 2, 3)` (chữ)<br>2. `substr(Rank #1: Player, 9, 6)` (kết hợp)<br>3. `substr(123456, 1, 4)` (số) | 1. `nan`<br>2. `Player`<br>3. `2345` |
+| `charat(text, index)` | Lấy một ký tự tại vị trí bắt đầu từ `0`; ngoài phạm vi sẽ trả về chuỗi rỗng | `charat("hello", 1)` | `e` |
 | `len(text)` | Đếm số ký tự (hỗ trợ số, chữ hoặc kết hợp) | 1. `len(apple)` (chữ)<br>2. `len(Score: 9999)` (kết hợp)<br>3. `len(453454)` (số) | 1. `5`<br>2. `11`<br>3. `6` |
 | `lower(text)` | Đổi chữ thành chữ thường | `lower(HeLLo)` | `hello` |
 | `upper(text)` | Đổi chữ thành chữ hoa | `upper(HeLLo)` | `HELLO` |
 | `trim(text)` | Bỏ khoảng trắng ở đầu và cuối | `trim("  hello  ")` | `hello` |
 | `myVar.toNumber` | Trích xuất các chữ số từ biến văn bản và chuyển thành số (bỏ qua ký tự khác) | Nếu biến `A` là `"Gold: 500"` (văn bản):<br>`A.toNumber` | `500` (dạng số) |
 | `myVar.toString` | Lọc bỏ toàn bộ chữ số và giữ lại các ký tự khác để chuyển thành văn bản | Nếu biến `A` là `"Wave #10"` (văn bản):<br>`A.toString` | `"Wave #"` (văn bản) |
+
+So sánh văn bản giữ nguyên khoảng trắng và ký tự nằm trong dấu nháy. Ví dụ `charat(a, 0) == " "` trả về `1` khi ký tự đầu tiên là dấu cách.
+
+Tên biến hỗ trợ phần `{}` được tính tự động. Khi `i = 3`, gán vào `item[{i}]` sẽ tạo biến thật `item[3]`; `item[{len(text)}]` hoạt động tương tự. Có thể kết hợp với loop để tạo `item[1]`, `item[2]`, v.v.
 
 ### Biến Hệ thống Có sẵn (Dạng Số)
 

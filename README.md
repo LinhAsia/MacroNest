@@ -133,12 +133,17 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | `contains(a, b)` | Check whether text `a` contains text `b` (supports numbers, text, or a mix) | 1. `contains(hello, world)` (text)<br>2. `contains(Gold: 5000, 5000)` (mixed)<br>3. `contains(12345, 99)` (numbers) | 1. `0` (false)<br>2. `1` (true)<br>3. `0` (false) |
 | `concat(a, b, ...)` | Join multiple values into one text result | `concat(Player, "-", 01)` | `Player-01` |
 | `substr(text, start, len)` | Get part of a string (supports numbers, text, or a mix) | 1. `substr(banana, 2, 3)` (text)<br>2. `substr(Rank #1: Player, 9, 6)` (mixed)<br>3. `substr(123456, 1, 4)` (numbers) | 1. `nan`<br>2. `Player`<br>3. `2345` |
+| `charat(text, index)` | Get one character at a zero-based position; returns empty text when out of range | `charat("hello", 1)` | `e` |
 | `len(text)` | Count characters (supports numbers, text, or a mix) | 1. `len(apple)` (text)<br>2. `len(Score: 9999)` (mixed)<br>3. `len(453454)` (numbers) | 1. `5`<br>2. `11`<br>3. `6` |
 | `lower(text)` | Convert text to lowercase | `lower(HeLLo)` | `hello` |
 | `upper(text)` | Convert text to uppercase | `upper(HeLLo)` | `HELLO` |
 | `trim(text)` | Remove leading and trailing spaces | `trim("  hello  ")` | `hello` |
 | `myVar.toNumber` | Extract digits from a text variable and convert them to a number (ignores non-digits) | If variable `A` is `"Gold: 500"` (text):<br>`A.toNumber` | `500` (numeric) |
 | `myVar.toString` | Convert a variable to text by filtering out all digits (keeps only non-digits) | If variable `A` is `"Wave #10"` (text):<br>`A.toString` | `"Wave #"` (text) |
+
+Text comparisons preserve quoted whitespace and symbols. For example, `charat(a, 0) == " "` returns `1` when the first character is a space.
+
+Variable names support computed `{}` parts. Setting `item[{i}]` while `i = 3` writes `item[3]`; `item[{len(text)}]` works the same way. This can be used with a loop to create `item[1]`, `item[2]`, and so on.
 
 ### Built-in Variables (Numeric)
 
