@@ -12207,7 +12207,6 @@ mod windows_overlay {
             && matches!(
                 hit,
                 ScreenDrawHit::Close
-                    | ScreenDrawHit::Color
                     | ScreenDrawHit::BrushSize
                     | ScreenDrawHit::ToolBrush
                     | ScreenDrawHit::ToolLine
@@ -12222,7 +12221,6 @@ mod windows_overlay {
                     | ScreenDrawHit::Smoothing
                     | ScreenDrawHit::SmoothingAmount
                     | ScreenDrawHit::CaptureRegion
-                    | ScreenDrawHit::ColorPaletteItem(_)
                     | ScreenDrawHit::Canvas
             );
         if should_commit_text_session {
@@ -12308,6 +12306,9 @@ mod windows_overlay {
                 ];
                 if i < colors.len() {
                     state.color = colors[i];
+                    if let Some(session) = state.text_session.as_mut() {
+                        session.stroke.color = colors[i];
+                    }
                     state.color_palette_open = false;
                     let full_rect = ScreenDrawDirtyRect {
                         left: 0,
