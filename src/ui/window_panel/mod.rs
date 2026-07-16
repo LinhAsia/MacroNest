@@ -2569,7 +2569,7 @@ impl CrosshairApp {
             rect,
             6.0,
             egui::Stroke::new(2.0, Color32::from_rgb(124, 240, 164)),
-            egui::StrokeKind::Outside,
+            egui::StrokeKind::Inside,
         );
 
         let size_text = format!("{}x{}", *width, *height);
