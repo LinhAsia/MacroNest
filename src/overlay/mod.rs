@@ -1928,6 +1928,7 @@ mod windows_overlay {
         TextSessionRotate,
         TextSessionConfirm,
         TextSessionDelete,
+        TextSessionVietnamese,
     }
 
     #[derive(Clone)]
@@ -2002,6 +2003,9 @@ mod windows_overlay {
     #[derive(Clone)]
     struct ScreenDrawTextSession {
         stroke: ScreenDrawStroke,
+        vietnamese_input: bool,
+        vietnamese_prefix: String,
+        vietnamese_raw_tail: String,
     }
 
     #[derive(Clone, Copy)]
@@ -2019,6 +2023,7 @@ mod windows_overlay {
         delete_button: (f32, f32),
         rotate_handle: (f32, f32),
         resize_handle: (f32, f32),
+        vietnamese_button: (f32, f32),
     }
 
     #[derive(Clone, PartialEq)]
@@ -9018,7 +9023,18 @@ mod windows_overlay {
             }
             0x08 => {
                 if let Some(session) = state.text_session.as_mut() {
-                    changed = session.stroke.text.pop().is_some();
+                    if session.vietnamese_input {
+                        changed = if session.vietnamese_raw_tail.pop().is_some() {
+                            refresh_screen_draw_vietnamese_text(session);
+                            true
+                        } else {
+                            let popped = session.vietnamese_prefix.pop().is_some();
+                            session.stroke.text.clone_from(&session.vietnamese_prefix);
+                            popped
+                        };
+                    } else {
+                        changed = session.stroke.text.pop().is_some();
+                    }
                 }
             }
             0x0D => {
@@ -9039,6 +9055,10 @@ mod windows_overlay {
                         .to_owned();
                     if !sanitized.is_empty() {
                         session.stroke.text.push_str(&sanitized);
+                        if session.vietnamese_input {
+                            session.vietnamese_prefix.clone_from(&session.stroke.text);
+                            session.vietnamese_raw_tail.clear();
+                        }
                         autofit_screen_draw_text_session(&mut session.stroke);
                         changed = true;
                     }
@@ -9047,7 +9067,11 @@ mod windows_overlay {
             _ => {
                 if let Some(fragment) = screen_draw_text_input_char(vk_code) {
                     if let Some(session) = state.text_session.as_mut() {
-                        session.stroke.text.push_str(&fragment);
+                        if session.vietnamese_input {
+                            append_screen_draw_vietnamese_text(session, &fragment);
+                        } else {
+                            session.stroke.text.push_str(&fragment);
+                        }
                         autofit_screen_draw_text_session(&mut session.stroke);
                         changed = true;
                     }
@@ -9072,6 +9096,30 @@ mod windows_overlay {
             request_screen_draw_overlay_sync();
         }
         true
+    }
+
+    fn refresh_screen_draw_vietnamese_text(session: &mut ScreenDrawTextSession) {
+        let mut composed = String::new();
+        vi::transform_buffer(
+            &vi::TELEX,
+            session.vietnamese_raw_tail.chars(),
+            &mut composed,
+        );
+        session.stroke.text = format!("{}{}", session.vietnamese_prefix, composed);
+    }
+
+    fn append_screen_draw_vietnamese_text(session: &mut ScreenDrawTextSession, fragment: &str) {
+        for ch in fragment.chars() {
+            if ch.is_whitespace() {
+                refresh_screen_draw_vietnamese_text(session);
+                session.vietnamese_prefix.clone_from(&session.stroke.text);
+                session.vietnamese_prefix.push(ch);
+                session.vietnamese_raw_tail.clear();
+            } else {
+                session.vietnamese_raw_tail.push(ch);
+            }
+        }
+        refresh_screen_draw_vietnamese_text(session);
     }
 
     fn screen_draw_capture_session_is_current(session_id: u64) -> bool {
@@ -11250,7 +11298,12 @@ mod windows_overlay {
     }
 
     fn screen_draw_brush_cursor_key(state: &ScreenDrawState) -> ScreenDrawBrushCursorKey {
-        let color = if state.eraser {
+        let erasing = state.eraser
+            || state
+                .current_stroke
+                .as_ref()
+                .is_some_and(|stroke| stroke.eraser);
+        let color = if erasing {
             [255, 255, 255]
         } else if state.effect == ScreenDrawEffect::Blur {
             [160, 205, 255]
@@ -11987,6 +12040,9 @@ mod windows_overlay {
                 return true;
             }
             start_screen_draw_stroke(&mut state, point, true);
+            unsafe {
+                set_screen_draw_brush_cursor(&state);
+            }
             sync_screen_draw_live_stroke_dirty(&mut state);
             mark_screen_draw_repaint_pending(&mut state);
             return true;
@@ -12221,6 +12277,18 @@ mod windows_overlay {
                 cancel_screen_draw_text_session(&mut state);
                 state.text_interaction_start_point = None;
                 state.text_interaction_origin = None;
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
+                mark_screen_draw_dirty(&mut state, full_rect);
+            }
+            ScreenDrawHit::TextSessionVietnamese => {
+                if let Some(session) = state.text_session.as_mut() {
+                    if session.vietnamese_input {
+                        refresh_screen_draw_vietnamese_text(session);
+                    }
+                    session.vietnamese_prefix.clone_from(&session.stroke.text);
+                    session.vietnamese_raw_tail.clear();
+                    session.vietnamese_input = !session.vietnamese_input;
+                }
                 let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 mark_screen_draw_dirty(&mut state, full_rect);
             }
@@ -13799,6 +13867,10 @@ mod windows_overlay {
                 width_f,
                 height_f,
             ),
+            vietnamese_button: screen_draw_text_local_to_world(
+                left_f, top_f, width_f, height_f, rotation_deg,
+                width_f * 0.5 - 64.0, control_local_y,
+            ),
         })
     }
 
@@ -13865,6 +13937,9 @@ mod windows_overlay {
                 text_box_height: height,
                 ..stroke
             },
+            vietnamese_input: false,
+            vietnamese_prefix: String::new(),
+            vietnamese_raw_tail: String::new(),
         })
     }
 
@@ -14326,6 +14401,9 @@ mod windows_overlay {
         if screen_draw_point_hits_circle(point, geometry.delete_button, 12.0) {
             return Some(ScreenDrawHit::TextSessionDelete);
         }
+        if screen_draw_point_hits_circle(point, geometry.vietnamese_button, 12.0) {
+            return Some(ScreenDrawHit::TextSessionVietnamese);
+        }
         if screen_draw_point_hits_circle(point, geometry.rotate_handle, 12.0) {
             return Some(ScreenDrawHit::TextSessionRotate);
         }
@@ -14474,6 +14552,24 @@ mod windows_overlay {
             1.4,
             [254, 242, 242, 245],
         );
+
+        fill_screen_draw_editor_circle(
+            pixmap,
+            geometry.vietnamese_button,
+            10.0,
+            if session.vietnamese_input { [37, 99, 235, 245] } else { [71, 85, 105, 235] },
+        );
+        stroke_screen_draw_editor_circle(
+            pixmap,
+            geometry.vietnamese_button,
+            10.0,
+            1.4,
+            [239, 246, 255, 245],
+        );
+        // Compact "VI" icon for this text editor's independent Telex input.
+        draw_screen_draw_editor_line(pixmap, geometry.vietnamese_button.0 - 5.0, geometry.vietnamese_button.1 - 4.0, geometry.vietnamese_button.0 - 2.0, geometry.vietnamese_button.1 + 4.0, [255, 255, 255, 255], 1.5);
+        draw_screen_draw_editor_line(pixmap, geometry.vietnamese_button.0 - 2.0, geometry.vietnamese_button.1 + 4.0, geometry.vietnamese_button.0 + 1.0, geometry.vietnamese_button.1 - 4.0, [255, 255, 255, 255], 1.5);
+        draw_screen_draw_editor_line(pixmap, geometry.vietnamese_button.0 + 4.0, geometry.vietnamese_button.1 - 4.0, geometry.vietnamese_button.0 + 4.0, geometry.vietnamese_button.1 + 4.0, [255, 255, 255, 255], 1.5);
 
         // Rotate: Blue
         fill_screen_draw_editor_circle(pixmap, geometry.rotate_handle, 10.0, [59, 130, 246, 240]);
