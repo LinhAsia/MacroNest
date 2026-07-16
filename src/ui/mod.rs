@@ -138,6 +138,7 @@ enum TitlebarQuickActionKind {
     WindowsKey,
     WindowPin,
     FocusHighlight,
+    FocusMode,
     Protractor,
     Ruler,
     GetCoordinates,
@@ -630,6 +631,7 @@ pub struct CrosshairApp {
     last_synced_mouse_sensitivity_presets: Option<Vec<crate::model::MouseSensitivityPreset>>,
     last_synced_macro_delays: Option<(u32, u32)>,
     last_synced_focus_highlight_config: Option<(RgbaColor, FocusHighlightDecoration)>,
+    last_synced_focus_mode_config: Option<(bool, bool, String, u8, bool)>,
     last_synced_quick_key_display_config: Option<(
         bool,
         i32,
@@ -947,6 +949,7 @@ impl CrosshairApp {
             last_synced_mouse_sensitivity_presets: None,
             last_synced_macro_delays: None,
             last_synced_focus_highlight_config: None,
+            last_synced_focus_mode_config: None,
             last_synced_quick_key_display_config: None,
             last_synced_quick_screen_draw_config: None,
             last_synced_quick_key_sound_config: None,
@@ -4029,6 +4032,26 @@ impl CrosshairApp {
                     painter.circle_filled(rect.center(), 4.0, icon_color);
                 }
             }
+            TitlebarQuickActionKind::FocusMode => {
+                let outer = rect.shrink2(vec2(14.0, 14.0));
+                painter.rect_stroke(
+                    outer,
+                    3.0,
+                    egui::Stroke::new(2.0, icon_color.gamma_multiply(0.55)),
+                    StrokeKind::Inside,
+                );
+                let focus = egui::Rect::from_center_size(rect.center(), vec2(24.0, 18.0));
+                painter.rect_filled(focus, 2.0, icon_color.gamma_multiply(0.18));
+                painter.rect_stroke(
+                    focus,
+                    2.0,
+                    egui::Stroke::new(2.0, icon_color),
+                    StrokeKind::Inside,
+                );
+                if active {
+                    painter.circle_filled(focus.center(), 3.0, icon_color);
+                }
+            }
             TitlebarQuickActionKind::Protractor => {
                 let center = rect.center();
                 let radius = 11.0;
@@ -5011,6 +5034,158 @@ impl CrosshairApp {
                                     false
                                 })
                                 .inner
+                            },
+                        );
+                    },
+                );
+
+                // FocusMode Action
+                ui.allocate_ui_with_layout(
+                    vec2(action_width, action_height),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::FocusMode,
+                            self.state.focus_mode_enabled,
+                        );
+                        if button_response.clicked() {
+                            self.state.focus_mode_enabled = !self.state.focus_mode_enabled;
+                            self.sync_focus_mode_config();
+                            self.persist();
+                        }
+
+                        ui.add_space(6.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Focus mode",
+                                        "Chế độ tập trung",
+                                    ))
+                                    .size(11.0)
+                                    .color(if button_response.hovered() {
+                                        ui.visuals().strong_text_color()
+                                    } else {
+                                        ui.visuals().text_color()
+                                    }),
+                                ));
+                            },
+                        );
+
+                        render_popup(
+                            ui,
+                            &button_response,
+                            TitlebarQuickActionKind::FocusMode,
+                            &mut |ui| {
+                                ui.set_min_width(190.0);
+                                let follow_changed = ui
+                                    .checkbox(
+                                        &mut self.state.focus_mode_follow_focused_window,
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Focused window",
+                                            "Cửa sổ đang focus",
+                                        ),
+                                    )
+                                    .changed();
+                                if follow_changed {
+                                    self.sync_focus_mode_config();
+                                    self.persist();
+                                }
+
+                                if !self.state.focus_mode_follow_focused_window {
+                                    let selected_text = if self
+                                        .state
+                                        .focus_mode_target_window
+                                        .is_empty()
+                                    {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Select window",
+                                            "Chọn cửa sổ",
+                                        )
+                                        .to_owned()
+                                    } else {
+                                        Self::truncate_window_title(
+                                            &Self::quick_action_window_display(
+                                                &self.state.focus_mode_target_window,
+                                                &self.open_window_infos,
+                                            ),
+                                            22,
+                                        )
+                                    };
+                                    let response = egui::ComboBox::from_id_salt(
+                                        "focus-mode-target-window",
+                                    )
+                                    .width(180.0)
+                                    .selected_text(selected_text)
+                                    .show_ui(ui, |ui| {
+                                        let mut changed = false;
+                                        for window in &self.open_window_infos {
+                                            changed |= ui
+                                                .selectable_value(
+                                                    &mut self.state.focus_mode_target_window,
+                                                    window.selector.clone(),
+                                                    Self::truncate_window_title(
+                                                        &Self::quick_action_window_display(
+                                                            &window.selector,
+                                                            &self.open_window_infos,
+                                                        ),
+                                                        24,
+                                                    ),
+                                                )
+                                                .clicked();
+                                        }
+                                        changed
+                                    });
+                                    if response.response.clicked() {
+                                        self.ensure_open_windows_ready(true);
+                                    }
+                                    if response.inner.unwrap_or(false) {
+                                        self.sync_focus_mode_config();
+                                        self.persist();
+                                    }
+                                }
+
+                                ui.add_space(4.0);
+                                let dim_changed = ui
+                                    .add(
+                                        egui::Slider::new(
+                                            &mut self.state.focus_mode_dim_percent,
+                                            0..=95,
+                                        )
+                                        .text(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Dim",
+                                            "Độ tối",
+                                        ))
+                                        .suffix("%"),
+                                    )
+                                    .changed();
+                                if dim_changed {
+                                    self.sync_focus_mode_config();
+                                    self.persist_deferred(ui.ctx());
+                                }
+
+                                let taskbar_changed = ui
+                                    .checkbox(
+                                        &mut self.state.focus_mode_include_taskbar,
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Include taskbar",
+                                            "Làm tối cả taskbar",
+                                        ),
+                                    )
+                                    .changed();
+                                if taskbar_changed {
+                                    self.sync_focus_mode_config();
+                                    self.persist();
+                                }
+                                false
                             },
                         );
                     },

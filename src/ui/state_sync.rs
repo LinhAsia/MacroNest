@@ -43,6 +43,7 @@ impl CrosshairApp {
         self.sync_windows_key_locked();
         self.sync_native_focus_highlight_enabled();
         self.sync_focus_highlight_config();
+        self.sync_focus_mode_config();
         self.sync_protractor_state();
         self.sync_quick_key_display_config();
         self.sync_quick_screen_draw_config();
@@ -226,6 +227,28 @@ impl CrosshairApp {
             |config| OverlayCommand::SetFocusHighlightConfig {
                 color: config.0,
                 decoration: config.1,
+            },
+        );
+    }
+
+    pub(crate) fn sync_focus_mode_config(&mut self) {
+        let config = (
+            self.state.focus_mode_enabled,
+            self.state.focus_mode_follow_focused_window,
+            self.state.focus_mode_target_window.clone(),
+            self.state.focus_mode_dim_percent,
+            self.state.focus_mode_include_taskbar,
+        );
+        Self::sync_overlay_command_with_state_if_changed(
+            &self.overlay_tx,
+            config,
+            &mut self.last_synced_focus_mode_config,
+            |config| OverlayCommand::SetFocusModeConfig {
+                enabled: config.0,
+                follow_focused_window: config.1,
+                target_window: config.2.clone(),
+                dim_percent: config.3,
+                include_taskbar: config.4,
             },
         );
     }

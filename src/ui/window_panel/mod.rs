@@ -4573,6 +4573,12 @@ impl CrosshairApp {
         self.disable_pin_preview_modes();
         crate::overlay::clear_pin_overlay_now();
 
+        if self.state.focus_mode_enabled {
+            self.state.focus_mode_enabled = false;
+            self.sync_focus_mode_config();
+            self.persist();
+        }
+
         crate::overlay::clear_geometry_overlay_now();
     }
 

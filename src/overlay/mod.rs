@@ -89,7 +89,8 @@ mod windows_overlay {
                     DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, EndPaint, FF_DONTCARE,
                     FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW, GetTextExtentPoint32W,
                     GetTextMetricsW, HDC, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-                    MonitorFromWindow, OUT_DEFAULT_PRECIS, PAINTSTRUCT, ReleaseDC, SRCCOPY,
+                    MonitorFromWindow, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PatBlt, ReleaseDC,
+                    BLACKNESS, SRCCOPY,
                     SelectObject, SetBkColor, SetBkMode, SetTextAlign, SetTextColor, SetWindowRgn,
                     StretchDIBits, TA_BASELINE, TA_CENTER, TEXTMETRICW, TRANSPARENT, TextOutW,
                 },
@@ -139,8 +140,9 @@ mod windows_overlay {
                     SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SPI_GETMOUSESPEED,
                     SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOWNA, SWP_FRAMECHANGED,
                     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-                    SetCursor, SetCursorPos, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
-                    SetWindowLongW, SetWindowPos, SetWindowsHookExW, ShowWindow,
+                    SetCursor, SetCursorPos, SetForegroundWindow, SetLayeredWindowAttributes,
+                    SetTimer, SetWindowLongPtrW, SetWindowLongW, SetWindowPos, SetWindowsHookExW,
+                    ShowWindow, LWA_ALPHA,
                     SystemParametersInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu,
                     TranslateMessage, ULW_ALPHA, UnhookWindowsHookEx, UpdateLayeredWindow,
                     WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX,
@@ -1658,6 +1660,7 @@ mod windows_overlay {
     static UI_CONTEXT: Lazy<Mutex<Option<egui::Context>>> = Lazy::new(|| Mutex::new(None));
     static CONTROLLER_HWND: AtomicIsize = AtomicIsize::new(0);
     static ACTIVE_HIGHLIGHT_HWND: AtomicIsize = AtomicIsize::new(0);
+    static ACTIVE_FOCUS_MODE_HWND: AtomicIsize = AtomicIsize::new(0);
     static ACTIVE_PIN_SOURCE_HWND: AtomicIsize = AtomicIsize::new(0);
     static PROTRACTOR_HWND: AtomicIsize = AtomicIsize::new(0);
 
@@ -1810,6 +1813,13 @@ mod windows_overlay {
         SetFocusHighlightConfig {
             color: crate::model::RgbaColor,
             decoration: crate::model::FocusHighlightDecoration,
+        },
+        SetFocusModeConfig {
+            enabled: bool,
+            follow_focused_window: bool,
+            target_window: String,
+            dim_percent: u8,
+            include_taskbar: bool,
         },
         SetProtractorEnabled(bool),
         UpdateProtractorConfig {
@@ -2807,6 +2817,7 @@ mod windows_overlay {
         search_area_hwnd: HWND,
         dynamic_geometry_hwnd: HWND,
         focus_highlight_hwnds: [HWND; 4],
+        focus_mode_hwnds: [HWND; 4],
         hud_hwnd: HWND,
         key_display_hwnd: HWND,
         key_display_extra_hwnds: Vec<HWND>,
@@ -2850,6 +2861,12 @@ mod windows_overlay {
         focus_highlight_color: crate::model::RgbaColor,
         focus_highlight_decoration: crate::model::FocusHighlightDecoration,
         focus_highlight_rainbow_hue: f32,
+        focus_mode_enabled: bool,
+        focus_mode_follow_focused_window: bool,
+        focus_mode_target_window: String,
+        focus_mode_dim_percent: u8,
+        focus_mode_include_taskbar: bool,
+        active_focus_mode_hwnd: Option<HWND>,
         protractor_hwnd: HWND,
         active_focus_highlight_hwnd: Option<HWND>,
         cached_search_overlay_regions: Vec<VisionRegion>,
@@ -3456,6 +3473,27 @@ mod windows_overlay {
                     None,
                 )?;
             }
+            let mut focus_mode_hwnds = [HWND::default(); 4];
+            for hwnd in &mut focus_mode_hwnds {
+                *hwnd = CreateWindowExW(
+                    WS_EX_LAYERED
+                        | WS_EX_TRANSPARENT
+                        | WS_EX_TOOLWINDOW
+                        | WS_EX_TOPMOST
+                        | WS_EX_NOACTIVATE,
+                    w!("CrosshairOverlay"),
+                    w!("MacroNestFocusMode"),
+                    WS_POPUP,
+                    0,
+                    0,
+                    4,
+                    4,
+                    None,
+                    None,
+                    Some(instance),
+                    None,
+                )?;
+            }
             let hud_hwnd = CreateWindowExW(
                 WS_EX_LAYERED
                     | WS_EX_TOOLWINDOW
@@ -3595,6 +3633,7 @@ mod windows_overlay {
                 search_area_hwnd,
                 dynamic_geometry_hwnd,
                 focus_highlight_hwnds,
+                focus_mode_hwnds,
                 hud_hwnd,
                 key_display_hwnd,
                 key_display_extra_hwnds,
@@ -3643,6 +3682,12 @@ mod windows_overlay {
                 },
                 focus_highlight_decoration: crate::model::FocusHighlightDecoration::Plain,
                 focus_highlight_rainbow_hue: 0.0,
+                focus_mode_enabled: false,
+                focus_mode_follow_focused_window: true,
+                focus_mode_target_window: String::new(),
+                focus_mode_dim_percent: 60,
+                focus_mode_include_taskbar: false,
+                active_focus_mode_hwnd: None,
                 protractor_hwnd,
                 active_focus_highlight_hwnd: None,
                 cached_search_overlay_regions: Vec::new(),
@@ -4203,6 +4248,9 @@ mod windows_overlay {
                 invalidate_runtime_open_window_snapshot();
                 if let Some(runtime) = runtime_mut(hwnd) {
                     update_native_focus_highlight(runtime, foreground);
+                    if runtime.focus_mode_follow_focused_window {
+                        update_focus_mode(runtime, foreground);
+                    }
                     let ui_foreground = is_app_ui_currently_foreground();
                     UI_WINDOW_FOREGROUND.store(ui_foreground, Ordering::Relaxed);
                     apply_ui_foreground_state(runtime, ui_foreground);
@@ -4217,6 +4265,7 @@ mod windows_overlay {
                 invalidate_runtime_open_window_snapshot();
                 if let Some(runtime) = runtime_mut(hwnd) {
                     let active_hwnd = ACTIVE_HIGHLIGHT_HWND.load(Ordering::Relaxed);
+                    let focus_mode_hwnd = ACTIVE_FOCUS_MODE_HWND.load(Ordering::Relaxed);
                     let pin_source_hwnd = ACTIVE_PIN_SOURCE_HWND.load(Ordering::Relaxed);
 
                     if active_hwnd != 0 && target_hwnd.0 as isize == active_hwnd {
@@ -4224,6 +4273,14 @@ mod windows_overlay {
                             && runtime.active_focus_highlight_hwnd == Some(target_hwnd)
                         {
                             let _ = paint_focus_highlight_overlay(runtime, target_hwnd);
+                        }
+                    }
+
+                    if focus_mode_hwnd != 0 && target_hwnd.0 as isize == focus_mode_hwnd {
+                        if runtime.focus_mode_enabled
+                            && runtime.active_focus_mode_hwnd == Some(target_hwnd)
+                        {
+                            let _ = paint_focus_mode(runtime, target_hwnd);
                         }
                     }
 
@@ -9713,6 +9770,7 @@ mod windows_overlay {
                     {
                         hook_state.active_pin_preset_id = None;
                     }
+
                     let refresh_active_pin = hook_state.active_pin_preset_id.is_some();
                     drop(hook_state);
                     if refresh_active_pin {
@@ -9963,6 +10021,21 @@ mod windows_overlay {
                     if let Some(target) = runtime.active_focus_highlight_hwnd {
                         let _ = paint_focus_highlight_overlay(runtime, target);
                     }
+                }
+
+                OverlayCommand::SetFocusModeConfig {
+                    enabled,
+                    follow_focused_window,
+                    target_window,
+                    dim_percent,
+                    include_taskbar,
+                } => {
+                    runtime.focus_mode_enabled = enabled;
+                    runtime.focus_mode_follow_focused_window = follow_focused_window;
+                    runtime.focus_mode_target_window = target_window;
+                    runtime.focus_mode_dim_percent = dim_percent.min(95);
+                    runtime.focus_mode_include_taskbar = include_taskbar;
+                    update_focus_mode(runtime, GetForegroundWindow());
                 }
 
                 OverlayCommand::UpdateQuickKeyDisplayConfig {
@@ -17812,6 +17885,108 @@ mod windows_overlay {
         }
     }
 
+    unsafe fn clear_focus_mode(runtime: &mut Runtime) {
+        runtime.active_focus_mode_hwnd = None;
+        ACTIVE_FOCUS_MODE_HWND.store(0, Ordering::Relaxed);
+        for hwnd in runtime.focus_mode_hwnds {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+        sync_window_location_hook_state(runtime);
+    }
+
+    unsafe fn paint_focus_mode(runtime: &Runtime, target: HWND) -> Result<()> {
+        let Some(target_rect) = focus_highlight_rect(target) else {
+            for hwnd in runtime.focus_mode_hwnds {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+            return Ok(());
+        };
+
+        let monitor = MonitorFromWindow(target, MONITOR_DEFAULTTONEAREST);
+        let mut monitor_info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        let bounds = if GetMonitorInfoW(monitor, &mut monitor_info).as_bool() {
+            if runtime.focus_mode_include_taskbar {
+                monitor_info.rcMonitor
+            } else {
+                monitor_info.rcWork
+            }
+        } else {
+            RECT {
+                left: 0,
+                top: 0,
+                right: GetSystemMetrics(SM_CXSCREEN),
+                bottom: GetSystemMetrics(SM_CYSCREEN),
+            }
+        };
+        let hole = RECT {
+            left: target_rect.left.clamp(bounds.left, bounds.right),
+            top: target_rect.top.clamp(bounds.top, bounds.bottom),
+            right: target_rect.right.clamp(bounds.left, bounds.right),
+            bottom: target_rect.bottom.clamp(bounds.top, bounds.bottom),
+        };
+        let strips = [
+            (bounds.left, bounds.top, bounds.right - bounds.left, hole.top - bounds.top),
+            (bounds.left, hole.bottom, bounds.right - bounds.left, bounds.bottom - hole.bottom),
+            (bounds.left, hole.top, hole.left - bounds.left, hole.bottom - hole.top),
+            (hole.right, hole.top, bounds.right - hole.right, hole.bottom - hole.top),
+        ];
+        let alpha = ((u16::from(runtime.focus_mode_dim_percent.clamp(0, 95)) * 255) / 100) as u8;
+        for (hwnd, (x, y, width, height)) in runtime.focus_mode_hwnds.into_iter().zip(strips) {
+            if width <= 0 || height <= 0 || alpha == 0 {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                continue;
+            }
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                x,
+                y,
+                width,
+                height,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
+            SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA)?;
+            let dc = GetDC(Some(hwnd));
+            if !dc.0.is_null() {
+                let _ = PatBlt(dc, 0, 0, width, height, BLACKNESS);
+                let _ = ReleaseDC(Some(hwnd), dc);
+            }
+            let _ = ShowWindow(hwnd, SW_SHOWNA);
+        }
+        Ok(())
+    }
+
+    unsafe fn update_focus_mode(runtime: &mut Runtime, foreground: HWND) {
+        if !runtime.focus_mode_enabled {
+            clear_focus_mode(runtime);
+            return;
+        }
+        let target = if runtime.focus_mode_follow_focused_window {
+            normalize_native_focus_highlight_target(foreground)
+        } else if runtime.focus_mode_target_window.trim().is_empty() {
+            HWND::default()
+        } else {
+            resolve_window_target(
+                Some(runtime.focus_mode_target_window.trim()),
+                &[],
+                true,
+                false,
+            )
+        };
+        if !is_native_focus_highlight_target(target) {
+            clear_focus_mode(runtime);
+            return;
+        }
+
+        let _ = paint_focus_mode(runtime, target);
+        runtime.active_focus_mode_hwnd = Some(target);
+        ACTIVE_FOCUS_MODE_HWND.store(target.0 as isize, Ordering::Relaxed);
+        sync_window_location_hook_state(runtime);
+    }
+
     fn angle_between(angle: f32, start: f32, end: f32) -> bool {
         let mut s = start % 360.0;
         if s < 0.0 {
@@ -20141,8 +20316,9 @@ mod windows_overlay {
 
     unsafe fn sync_window_location_hook_state(runtime: &mut Runtime) {
         let active_highlight = ACTIVE_HIGHLIGHT_HWND.load(Ordering::Relaxed);
+        let active_focus_mode = ACTIVE_FOCUS_MODE_HWND.load(Ordering::Relaxed);
         let active_pin = ACTIVE_PIN_SOURCE_HWND.load(Ordering::Relaxed);
-        let need_hook = active_highlight != 0 || active_pin != 0;
+        let need_hook = active_highlight != 0 || active_focus_mode != 0 || active_pin != 0;
         let _ = set_window_location_event_hook_enabled(runtime, need_hook);
     }
 
@@ -20187,9 +20363,11 @@ mod windows_overlay {
         }
 
         let active_hwnd = ACTIVE_HIGHLIGHT_HWND.load(Ordering::Relaxed);
+        let focus_mode_hwnd = ACTIVE_FOCUS_MODE_HWND.load(Ordering::Relaxed);
         let pin_source_hwnd = ACTIVE_PIN_SOURCE_HWND.load(Ordering::Relaxed);
 
         let is_target = (active_hwnd != 0 && hwnd.0 as isize == active_hwnd)
+            || (focus_mode_hwnd != 0 && hwnd.0 as isize == focus_mode_hwnd)
             || (pin_source_hwnd != 0 && hwnd.0 as isize == pin_source_hwnd);
 
         if !is_target {

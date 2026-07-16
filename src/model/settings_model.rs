@@ -18,6 +18,10 @@ use super::{
     default_timer_progress_smoothness_fps, default_true,
 };
 
+fn default_focus_mode_dim_percent() -> u8 {
+    60
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 enum GlobalConstantStoredValue {
@@ -480,6 +484,16 @@ pub struct AppState {
     #[serde(default, alias = "focus_highlight_rainbow", skip_serializing)]
     pub focus_highlight_rainbow_legacy: bool,
     #[serde(default)]
+    pub focus_mode_enabled: bool,
+    #[serde(default = "default_true")]
+    pub focus_mode_follow_focused_window: bool,
+    #[serde(default)]
+    pub focus_mode_target_window: String,
+    #[serde(default = "default_focus_mode_dim_percent")]
+    pub focus_mode_dim_percent: u8,
+    #[serde(default)]
+    pub focus_mode_include_taskbar: bool,
+    #[serde(default)]
     pub protractor_enabled: bool,
     #[serde(default = "default_protractor_scale")]
     pub protractor_scale: f32,
@@ -835,6 +849,11 @@ impl Default for AppState {
             focus_highlight_color: default_focus_highlight_color(),
             focus_highlight_decoration: FocusHighlightDecoration::Plain,
             focus_highlight_rainbow_legacy: false,
+            focus_mode_enabled: false,
+            focus_mode_follow_focused_window: true,
+            focus_mode_target_window: String::new(),
+            focus_mode_dim_percent: default_focus_mode_dim_percent(),
+            focus_mode_include_taskbar: false,
             protractor_enabled: false,
             protractor_scale: 1.0,
             protractor_needle1_angle: 0.0,
