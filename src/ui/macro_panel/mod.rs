@@ -717,11 +717,9 @@ impl CrosshairApp {
                 );
                 if !is_submenu_item && !hover_blocked && (response.hovered() || response.clicked())
                 {
-                    let owner_id = egui::Id::new("macro-action-submenu-owner");
-                    ui.ctx().data_mut(|data| {
-                        data.insert_temp(action_hover_id, true);
-                        data.insert_temp(owner_id, None::<MacroActionSubmenuKind>);
-                    });
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(action_hover_id, true));
+                    Self::set_macro_action_submenu_owner(ui, None);
                 }
                 ui.label(
                     RichText::new(Self::macro_action_short_label(candidate, language))
@@ -748,6 +746,22 @@ impl CrosshairApp {
         ui.ctx()
             .data(|data| data.get_temp::<bool>(action_hover_id.with("submenu-hover-block")))
             .unwrap_or(false)
+    }
+
+    fn set_macro_action_submenu_owner(
+        ui: &egui::Ui,
+        owner: Option<MacroActionSubmenuKind>,
+    ) {
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
+        let changed = ui
+            .ctx()
+            .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id))
+            != owner;
+        if changed {
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(owner_id, owner));
+            ui.ctx().request_repaint();
+        }
     }
 
     fn pointer_in_mouse_click_child_popup(
@@ -1261,6 +1275,7 @@ impl CrosshairApp {
                 .data_mut(|data| data.insert_temp(child_popup_id, false));
             egui::Popup::close_id(ui.ctx(), child_popup_id);
         }
+        ui.ctx().request_repaint();
     }
 
     fn clear_mouse_click_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
@@ -1275,6 +1290,7 @@ impl CrosshairApp {
                 .data_mut(|data| data.insert_temp(child_popup_id, false));
             egui::Popup::close_id(ui.ctx(), child_popup_id);
         }
+        ui.ctx().request_repaint();
     }
 
     fn close_inactive_mouse_click_submenus(
@@ -2145,11 +2161,9 @@ impl CrosshairApp {
                     Button::new(Self::material_icon_text(0xe1ba, 18.0)).selected(selected),
                 );
                 if !hover_blocked && response.hovered() {
-                    let owner_id = egui::Id::new("macro-action-submenu-owner");
-                    ui.ctx().data_mut(|data| {
-                        data.insert_temp(action_hover_id, true);
-                        data.insert_temp(owner_id, None::<MacroActionSubmenuKind>);
-                    });
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(action_hover_id, true));
+                    Self::set_macro_action_submenu_owner(ui, None);
                 }
                 if response.clicked() {
                     if !selected {
