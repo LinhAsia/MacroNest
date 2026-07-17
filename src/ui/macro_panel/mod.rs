@@ -1723,10 +1723,7 @@ impl CrosshairApp {
                     [34.0, 24.0],
                     Button::new(Self::macro_action_icon_text(base_action)).selected(selected),
                 );
-                let tile_hovered = ui
-                    .ctx()
-                    .pointer_hover_pos()
-                    .is_some_and(|pos| tile_rect.contains(pos))
+                let tile_hovered = ui.rect_contains_pointer(tile_rect)
                     && !pointer_over_active_popup;
                 if tile_hovered || response.clicked() {
                     Self::clear_mouse_click_submenus(ui, id_source);
@@ -1972,10 +1969,7 @@ impl CrosshairApp {
                     [34.0, 24.0],
                     Button::new(Self::material_icon_text(0xe323, 18.0)).selected(selected),
                 );
-                let tile_hovered = ui
-                    .ctx()
-                    .pointer_hover_pos()
-                    .is_some_and(|pos| tile_rect.contains(pos));
+                let tile_hovered = ui.rect_contains_pointer(tile_rect);
                 if response.clicked() || (!hover_blocked && tile_hovered) {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
