@@ -5156,7 +5156,7 @@ impl CrosshairApp {
                                     .add(
                                         egui::Slider::new(
                                             &mut self.state.focus_mode_dim_percent,
-                                            0..=95,
+                                            0..=100,
                                         )
                                         .text(Self::tr_lang(
                                             self.state.ui_language,

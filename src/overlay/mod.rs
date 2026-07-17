@@ -83,8 +83,9 @@ mod windows_overlay {
                 Gdi::{
                     AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO,
                     BITMAPINFOHEADER, BLENDFUNCTION, BeginPaint, CLIP_DEFAULT_PRECIS,
-                    ClientToScreen, CreateBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontW,
-                    CreateRectRgn, DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
+                    ClientToScreen, CombineRgn, CreateBitmap, CreateCompatibleDC,
+                    CreateDIBSection, CreateFontW, CreateRectRgn, CreateRoundRectRgn,
+                    DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
                     DT_EDITCONTROL, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
                     DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, EndPaint, FF_DONTCARE,
                     FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW, GetTextExtentPoint32W,
@@ -92,7 +93,8 @@ mod windows_overlay {
                     MonitorFromWindow, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PatBlt, ReleaseDC,
                     BLACKNESS, SRCCOPY,
                     SelectObject, SetBkColor, SetBkMode, SetTextAlign, SetTextColor, SetWindowRgn,
-                    StretchDIBits, TA_BASELINE, TA_CENTER, TEXTMETRICW, TRANSPARENT, TextOutW,
+                    RGN_DIFF, StretchDIBits, TA_BASELINE, TA_CENTER, TEXTMETRICW, TRANSPARENT,
+                    TextOutW,
                 },
             },
             Media::Audio::{
@@ -2817,7 +2819,7 @@ mod windows_overlay {
         search_area_hwnd: HWND,
         dynamic_geometry_hwnd: HWND,
         focus_highlight_hwnds: [HWND; 4],
-        focus_mode_hwnds: [HWND; 4],
+        focus_mode_hwnd: HWND,
         hud_hwnd: HWND,
         key_display_hwnd: HWND,
         key_display_extra_hwnds: Vec<HWND>,
@@ -3473,27 +3475,24 @@ mod windows_overlay {
                     None,
                 )?;
             }
-            let mut focus_mode_hwnds = [HWND::default(); 4];
-            for hwnd in &mut focus_mode_hwnds {
-                *hwnd = CreateWindowExW(
-                    WS_EX_LAYERED
-                        | WS_EX_TRANSPARENT
-                        | WS_EX_TOOLWINDOW
-                        | WS_EX_TOPMOST
-                        | WS_EX_NOACTIVATE,
-                    w!("CrosshairOverlay"),
-                    w!("MacroNestFocusMode"),
-                    WS_POPUP,
-                    0,
-                    0,
-                    4,
-                    4,
-                    None,
-                    None,
-                    Some(instance),
-                    None,
-                )?;
-            }
+            let focus_mode_hwnd = CreateWindowExW(
+                WS_EX_LAYERED
+                    | WS_EX_TRANSPARENT
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_TOPMOST
+                    | WS_EX_NOACTIVATE,
+                w!("CrosshairOverlay"),
+                w!("MacroNestFocusMode"),
+                WS_POPUP,
+                0,
+                0,
+                4,
+                4,
+                None,
+                None,
+                Some(instance),
+                None,
+            )?;
             let hud_hwnd = CreateWindowExW(
                 WS_EX_LAYERED
                     | WS_EX_TOOLWINDOW
@@ -3633,7 +3632,7 @@ mod windows_overlay {
                 search_area_hwnd,
                 dynamic_geometry_hwnd,
                 focus_highlight_hwnds,
-                focus_mode_hwnds,
+                focus_mode_hwnd,
                 hud_hwnd,
                 key_display_hwnd,
                 key_display_extra_hwnds,
@@ -4248,9 +4247,7 @@ mod windows_overlay {
                 invalidate_runtime_open_window_snapshot();
                 if let Some(runtime) = runtime_mut(hwnd) {
                     update_native_focus_highlight(runtime, foreground);
-                    if runtime.focus_mode_follow_focused_window {
-                        update_focus_mode(runtime, foreground);
-                    }
+                    update_focus_mode(runtime, foreground);
                     let ui_foreground = is_app_ui_currently_foreground();
                     UI_WINDOW_FOREGROUND.store(ui_foreground, Ordering::Relaxed);
                     apply_ui_foreground_state(runtime, ui_foreground);
@@ -10033,7 +10030,7 @@ mod windows_overlay {
                     runtime.focus_mode_enabled = enabled;
                     runtime.focus_mode_follow_focused_window = follow_focused_window;
                     runtime.focus_mode_target_window = target_window;
-                    runtime.focus_mode_dim_percent = dim_percent.min(95);
+                    runtime.focus_mode_dim_percent = dim_percent.min(100);
                     runtime.focus_mode_include_taskbar = include_taskbar;
                     update_focus_mode(runtime, GetForegroundWindow());
                 }
@@ -17888,17 +17885,13 @@ mod windows_overlay {
     unsafe fn clear_focus_mode(runtime: &mut Runtime) {
         runtime.active_focus_mode_hwnd = None;
         ACTIVE_FOCUS_MODE_HWND.store(0, Ordering::Relaxed);
-        for hwnd in runtime.focus_mode_hwnds {
-            let _ = ShowWindow(hwnd, SW_HIDE);
-        }
+        let _ = ShowWindow(runtime.focus_mode_hwnd, SW_HIDE);
         sync_window_location_hook_state(runtime);
     }
 
     unsafe fn paint_focus_mode(runtime: &Runtime, target: HWND) -> Result<()> {
         let Some(target_rect) = focus_highlight_rect(target) else {
-            for hwnd in runtime.focus_mode_hwnds {
-                let _ = ShowWindow(hwnd, SW_HIDE);
-            }
+            let _ = ShowWindow(runtime.focus_mode_hwnd, SW_HIDE);
             return Ok(());
         };
 
@@ -17927,35 +17920,59 @@ mod windows_overlay {
             right: target_rect.right.clamp(bounds.left, bounds.right),
             bottom: target_rect.bottom.clamp(bounds.top, bounds.bottom),
         };
-        let strips = [
-            (bounds.left, bounds.top, bounds.right - bounds.left, hole.top - bounds.top),
-            (bounds.left, hole.bottom, bounds.right - bounds.left, bounds.bottom - hole.bottom),
-            (bounds.left, hole.top, hole.left - bounds.left, hole.bottom - hole.top),
-            (hole.right, hole.top, bounds.right - hole.right, hole.bottom - hole.top),
-        ];
-        let alpha = ((u16::from(runtime.focus_mode_dim_percent.clamp(0, 95)) * 255) / 100) as u8;
-        for (hwnd, (x, y, width, height)) in runtime.focus_mode_hwnds.into_iter().zip(strips) {
-            if width <= 0 || height <= 0 || alpha == 0 {
-                let _ = ShowWindow(hwnd, SW_HIDE);
-                continue;
-            }
-            let _ = SetWindowPos(
-                hwnd,
-                Some(HWND_TOPMOST),
-                x,
-                y,
-                width,
-                height,
-                SWP_NOACTIVATE | SWP_SHOWWINDOW,
-            );
-            SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA)?;
-            let dc = GetDC(Some(hwnd));
-            if !dc.0.is_null() {
-                let _ = PatBlt(dc, 0, 0, width, height, BLACKNESS);
-                let _ = ReleaseDC(Some(hwnd), dc);
-            }
-            let _ = ShowWindow(hwnd, SW_SHOWNA);
+        let width = bounds.right - bounds.left;
+        let height = bounds.bottom - bounds.top;
+        let alpha = ((u16::from(runtime.focus_mode_dim_percent.min(100)) * 255) / 100) as u8;
+        if width <= 0 || height <= 0 || alpha == 0 {
+            let _ = ShowWindow(runtime.focus_mode_hwnd, SW_HIDE);
+            return Ok(());
         }
+
+        let outer_region = CreateRectRgn(0, 0, width, height);
+        if outer_region.0.is_null() {
+            return Err(anyhow::anyhow!("Failed to create Focus Mode region"));
+        }
+        let corner_diameter = 16;
+        let hole_region = CreateRoundRectRgn(
+            hole.left - bounds.left,
+            hole.top - bounds.top,
+            hole.right - bounds.left + 1,
+            hole.bottom - bounds.top + 1,
+            corner_diameter,
+            corner_diameter,
+        );
+        if hole_region.0.is_null() {
+            let _ = DeleteObject(HGDIOBJ(outer_region.0));
+            return Err(anyhow::anyhow!("Failed to create Focus Mode cutout"));
+        }
+        let _ = CombineRgn(
+            Some(outer_region),
+            Some(outer_region),
+            Some(hole_region),
+            RGN_DIFF,
+        );
+        let _ = DeleteObject(HGDIOBJ(hole_region.0));
+
+        if SetWindowRgn(runtime.focus_mode_hwnd, Some(outer_region), true) == 0 {
+            let _ = DeleteObject(HGDIOBJ(outer_region.0));
+            return Err(anyhow::anyhow!("Failed to apply Focus Mode cutout"));
+        }
+        let _ = SetWindowPos(
+            runtime.focus_mode_hwnd,
+            Some(HWND_TOPMOST),
+            bounds.left,
+            bounds.top,
+            width,
+            height,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+        SetLayeredWindowAttributes(runtime.focus_mode_hwnd, COLORREF(0), alpha, LWA_ALPHA)?;
+        let dc = GetDC(Some(runtime.focus_mode_hwnd));
+        if !dc.0.is_null() {
+            let _ = PatBlt(dc, 0, 0, width, height, BLACKNESS);
+            let _ = ReleaseDC(Some(runtime.focus_mode_hwnd), dc);
+        }
+        let _ = ShowWindow(runtime.focus_mode_hwnd, SW_SHOWNA);
         Ok(())
     }
 
@@ -17977,6 +17994,12 @@ mod windows_overlay {
             )
         };
         if !is_native_focus_highlight_target(target) {
+            clear_focus_mode(runtime);
+            return;
+        }
+        if !runtime.focus_mode_follow_focused_window
+            && normalize_native_focus_highlight_target(foreground) != target
+        {
             clear_focus_mode(runtime);
             return;
         }
