@@ -48,6 +48,7 @@ impl CrosshairApp {
         self.sync_protractor_state();
         self.sync_quick_key_display_config();
         self.sync_quick_screen_draw_config();
+        self.sync_quick_video_record_config();
         self.sync_quick_key_sound_config();
         self.sync_vietnamese_input_enabled();
         self.sync_macro_master_hotkey();
@@ -372,6 +373,17 @@ impl CrosshairApp {
                 text_border: config.9,
             },
         );
+    }
+
+    pub(crate) fn sync_quick_video_record_config(&self) {
+        crate::video_recorder::set_config(crate::video_recorder::VideoRecorderConfig {
+            hotkey: self.state.quick_video_record_hotkey.clone(),
+            mode: self.state.quick_video_record_mode,
+            target_window: self.state.quick_video_record_target_window.clone(),
+            region: self.state.quick_video_record_region,
+            output_dir: std::path::PathBuf::from(&self.state.quick_video_record_output_dir),
+            ffmpeg_exe: self.paths.ffmpeg_exe.clone(),
+        });
     }
 
     pub(crate) fn sync_quick_key_sound_config(&mut self) {

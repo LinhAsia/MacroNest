@@ -34,6 +34,8 @@ pub struct AppPaths {
     pub interception_installer_exe: PathBuf,
     pub opencv_dll: PathBuf,
     pub opencv_videoio_ffmpeg_dll: PathBuf,
+    pub ffmpeg_exe: PathBuf,
+    pub ffmpeg_zip: PathBuf,
     pub interception_dll: PathBuf,
     pub arduino_tools_zip: PathBuf,
     pub avrdude_exe: PathBuf,
@@ -71,6 +73,8 @@ impl AppPaths {
             .join("install-interception.exe");
         let opencv_dll = bin_dir.join("opencv_world4100.dll");
         let opencv_videoio_ffmpeg_dll = bin_dir.join("opencv_videoio_ffmpeg4100_64.dll");
+        let ffmpeg_exe = bin_dir.join("ffmpeg.exe");
+        let ffmpeg_zip = bin_dir.join("ffmpeg.exe.zip");
         let interception_dll = bin_dir.join("interception.dll");
         let arduino_tools_zip = bin_dir.join("arduino_tools.zip");
         let avrdude_exe = bin_dir.join("avrdude.exe");
@@ -96,6 +100,8 @@ impl AppPaths {
             interception_installer_exe,
             opencv_dll,
             opencv_videoio_ffmpeg_dll,
+            ffmpeg_exe,
+            ffmpeg_zip,
             interception_dll,
             arduino_tools_zip,
             avrdude_exe,

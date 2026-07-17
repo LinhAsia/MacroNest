@@ -27,8 +27,8 @@ use crate::{
         MacroTriggerMode, MascotStyle, MasterMacroGroupState, MasterMacroPresetState, MasterPreset,
         MasterWindowFocusPresetState, MasterWindowPresetState, MasterZoomPresetState,
         MousePathEvent, MousePathEventKind, ProfileRecord, QuickKeyDisplayMode,
-        QuickScreenDrawTool, RgbaColor, TimerPreset, UiLanguage, UiThemeMode, VietnameseInputMode,
-        VisionSettings, WindowAnchor, WindowExpandDirection, WindowPreset,
+        QuickScreenDrawTool, QuickVideoRecordMode, RgbaColor, TimerPreset, UiLanguage, UiThemeMode,
+        VietnameseInputMode, VisionSettings, WindowAnchor, WindowExpandDirection, WindowPreset,
     },
     overlay::{OverlayCommand, UiCommand},
     storage::AppPaths,
@@ -145,6 +145,7 @@ enum TitlebarQuickActionKind {
     GetCoordinates,
     GetColor,
     KeyDisplay,
+    VideoRecord,
     ScreenDraw,
     ClearOverlays,
     KeySound,
@@ -786,6 +787,9 @@ pub struct CrosshairApp {
     opencv_download_job: Option<JoinHandle<Result<()>>>,
     opencv_download_progress: Arc<AtomicU32>,
     opencv_installed: bool,
+    ffmpeg_download_job: Option<JoinHandle<Result<()>>>,
+    ffmpeg_download_progress: Arc<AtomicU32>,
+    ffmpeg_installed: bool,
     ocr_download_job: Option<JoinHandle<Result<()>>>,
     ocr_download_progress: Arc<AtomicU32>,
     interception_download_job: Option<JoinHandle<Result<()>>>,
@@ -889,6 +893,7 @@ impl CrosshairApp {
         let persist_tx = spawn_persist_worker(paths.clone(), ui_tx.clone());
 
         let opencv_installed = paths.opencv_dll.exists();
+        let ffmpeg_installed = paths.ffmpeg_exe.exists();
         let interception_pending_marker = paths.bin_dir.join("interception.install.pending");
         let mut interception_driver_installed = crate::platform::is_interception_driver_installed();
         if interception_driver_installed {
@@ -1089,6 +1094,9 @@ impl CrosshairApp {
             opencv_download_job: None,
             opencv_download_progress: Arc::new(AtomicU32::new(0)),
             opencv_installed,
+            ffmpeg_download_job: None,
+            ffmpeg_download_progress: Arc::new(AtomicU32::new(0)),
+            ffmpeg_installed,
             ocr_download_job: None,
             ocr_download_progress: Arc::new(AtomicU32::new(0)),
             interception_download_job: None,
@@ -4196,6 +4204,33 @@ impl CrosshairApp {
                         vec2(12.0, 7.0),
                     ),
                     2.0,
+            TitlebarQuickActionKind::VideoRecord => {
+                let body = egui::Rect::from_center_size(rect.center(), vec2(28.0, 20.0));
+                painter.rect_stroke(
+                    body,
+                    3.0,
+                    egui::Stroke::new(2.0, icon_color),
+                    StrokeKind::Inside,
+                );
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        pos2(body.right() + 1.0, body.top() + 4.0),
+                        pos2(body.right() + 8.0, body.center().y),
+                        pos2(body.right() + 1.0, body.bottom() - 4.0),
+                    ],
+                    icon_color,
+                    egui::Stroke::NONE,
+                ));
+                painter.circle_filled(
+                    body.center(),
+                    if active { 5.0 } else { 3.5 },
+                    if active {
+                        Color32::from_rgb(255, 72, 72)
+                    } else {
+                        icon_color
+                    },
+                );
+            }
                     icon_color,
                 );
             }
@@ -6170,6 +6205,383 @@ impl CrosshairApp {
                         if keep_open {
                             keep_menu_open = true;
                         }
+                // Video recorder action
+                ui.allocate_ui_with_layout(
+                    vec2(action_width, action_height),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let recording = crate::video_recorder::is_recording();
+                        let recorder_busy = crate::video_recorder::is_busy();
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::VideoRecord,
+                            recording,
+                        );
+                        if button_response.clicked() && !recorder_busy {
+                            self.sync_quick_video_record_config();
+                            if self.ffmpeg_installed {
+                                crate::video_recorder::toggle_async();
+                            } else {
+                                self.start_ffmpeg_download();
+                            }
+                        }
+
+                        ui.add_space(6.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Record",
+                                        "Quay video",
+                                    ))
+                                    .size(11.0)
+                                    .color(if button_response.hovered() {
+                                        ui.visuals().strong_text_color()
+                                    } else {
+                                        ui.visuals().text_color()
+                                    }),
+                                ));
+                            },
+                        );
+
+                        let mut keep_open = false;
+                        render_popup(
+                            ui,
+                            &button_response,
+                            TitlebarQuickActionKind::VideoRecord,
+                            &mut |ui| {
+                                ui.set_min_width(194.0);
+                                ui.add_enabled_ui(!recording && !recorder_busy, |ui| {
+                                    let mode_before = self.state.quick_video_record_mode;
+                                    egui::ComboBox::from_id_salt("quick-video-source")
+                                        .width(186.0)
+                                        .selected_text(match mode_before {
+                                            QuickVideoRecordMode::FullScreen => Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Full screen",
+                                                "To?n m?n h?nh",
+                                            ),
+                                            QuickVideoRecordMode::FocusedWindow => Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Focused window",
+                                                "C?a s? ?ang focus",
+                                            ),
+                                            QuickVideoRecordMode::SelectedWindow => Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Selected window",
+                                                "C?a s? ?? ch?n",
+                                            ),
+                                            QuickVideoRecordMode::Region => Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Screen region",
+                                                "V?ng m?n h?nh",
+                                            ),
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                &mut self.state.quick_video_record_mode,
+                                                QuickVideoRecordMode::FullScreen,
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Full screen",
+                                                    "To?n m?n h?nh",
+                                                ),
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.state.quick_video_record_mode,
+                                                QuickVideoRecordMode::FocusedWindow,
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Focused window",
+                                                    "C?a s? ?ang focus",
+                                                ),
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.state.quick_video_record_mode,
+                                                QuickVideoRecordMode::SelectedWindow,
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Selected window",
+                                                    "C?a s? ?? ch?n",
+                                                ),
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.state.quick_video_record_mode,
+                                                QuickVideoRecordMode::Region,
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Screen region",
+                                                    "V?ng m?n h?nh",
+                                                ),
+                                            );
+                                        });
+                                    if self.state.quick_video_record_mode != mode_before {
+                                        self.sync_quick_video_record_config();
+                                        self.persist();
+                                    }
+
+                                    match self.state.quick_video_record_mode {
+                                        QuickVideoRecordMode::SelectedWindow => {
+                                            let selected = if self
+                                                .state
+                                                .quick_video_record_target_window
+                                                .is_empty()
+                                            {
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Select window",
+                                                    "Ch?n c?a s?",
+                                                )
+                                                .to_owned()
+                                            } else {
+                                                Self::truncate_window_title(
+                                                    &Self::quick_action_window_display(
+                                                        &self.state.quick_video_record_target_window,
+                                                        &self.open_window_infos,
+                                                    ),
+                                                    24,
+                                                )
+                                            };
+                                            let target_before = self
+                                                .state
+                                                .quick_video_record_target_window
+                                                .clone();
+                                            let combo = egui::ComboBox::from_id_salt(
+                                                "quick-video-target-window",
+                                            )
+                                            .width(186.0)
+                                            .selected_text(selected)
+                                            .show_ui(ui, |ui| {
+                                                for window in &self.open_window_infos {
+                                                    ui.selectable_value(
+                                                        &mut self.state.quick_video_record_target_window,
+                                                        window.selector.clone(),
+                                                        Self::truncate_window_title(
+                                                            &Self::quick_action_window_display(
+                                                                &window.selector,
+                                                                &self.open_window_infos,
+                                                            ),
+                                                            26,
+                                                        ),
+                                                    );
+                                                }
+                                            });
+                                            if combo.response.clicked() {
+                                                self.ensure_open_windows_ready(true);
+                                            }
+                                            if self.state.quick_video_record_target_window
+                                                != target_before
+                                            {
+                                                self.sync_quick_video_record_config();
+                                                self.persist();
+                                            }
+                                        }
+                                        QuickVideoRecordMode::Region => {
+                                            let region_text = self
+                                                .state
+                                                .quick_video_record_region
+                                                .map(|(_, _, width, height)| {
+                                                    format!("{width} x {height}")
+                                                })
+                                                .unwrap_or_else(|| {
+                                                    Self::tr_lang(
+                                                        self.state.ui_language,
+                                                        "Select region",
+                                                        "Ch?n v?ng",
+                                                    )
+                                                    .to_owned()
+                                                });
+                                            if ui
+                                                .add_sized(
+                                                    [186.0, 22.0],
+                                                    Button::new(region_text),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.begin_region_capture(
+                                                    ui.ctx(),
+                                                    VisionCaptureTarget::QuickActionsVideoRegion,
+                                                );
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+
+                                    ui.add_space(3.0);
+                                    let capture_active = self
+                                        .capture_target
+                                        .as_ref()
+                                        .is_some_and(|target| {
+                                            matches!(
+                                                target,
+                                                CaptureRequest::QuickVideoRecordHotkey
+                                            )
+                                        });
+                                    let hotkey_label = self
+                                        .capture_hotkey_combo_keys
+                                        .as_ref()
+                                        .filter(|_| capture_active)
+                                        .map(|keys| {
+                                            Self::hotkey_binding_from_combo_keys(keys.clone())
+                                        })
+                                        .or_else(|| {
+                                            self.state.quick_video_record_hotkey.clone()
+                                        });
+                                    let label = hotkey_label
+                                        .as_ref()
+                                        .map(|binding| {
+                                            Self::format_binding_ui(
+                                                self.state.ui_language,
+                                                Some(binding),
+                                            )
+                                        })
+                                        .unwrap_or_else(|| {
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Set trigger key",
+                                                "??t ph?m trigger",
+                                            )
+                                            .to_owned()
+                                        });
+                                    if ui
+                                        .add_sized([186.0, 22.0], Button::new(label))
+                                        .clicked()
+                                    {
+                                        if capture_active {
+                                            self.cancel_capture();
+                                        } else if self.state.quick_video_record_hotkey.is_some() {
+                                            self.state.quick_video_record_hotkey = None;
+                                            self.sync_quick_video_record_config();
+                                            self.persist();
+                                        } else {
+                                            self.begin_capture(
+                                                CaptureRequest::QuickVideoRecordHotkey,
+                                                "Press the video recording trigger key."
+                                                    .to_owned(),
+                                            );
+                                        }
+                                    }
+                                    keep_open |= capture_active;
+
+                                    ui.add_space(3.0);
+                                    let folder_name = Path::new(
+                                        &self.state.quick_video_record_output_dir,
+                                    )
+                                    .file_name()
+                                    .and_then(|name| name.to_str())
+                                    .unwrap_or_else(|| {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Choose folder",
+                                            "Ch?n th? m?c",
+                                        )
+                                    });
+                                    if ui
+                                        .add_sized(
+                                            [186.0, 22.0],
+                                            Button::new(format!(
+                                                "{}: {}",
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Save",
+                                                    "L?u",
+                                                ),
+                                                folder_name
+                                            )),
+                                        )
+                                        .on_hover_text(&self.state.quick_video_record_output_dir)
+                                        .clicked()
+                                        && let Some(folder) = rfd::FileDialog::new()
+                                            .set_directory(
+                                                &self.state.quick_video_record_output_dir,
+                                            )
+                                            .pick_folder()
+                                    {
+                                        self.state.quick_video_record_output_dir =
+                                            folder.to_string_lossy().into_owned();
+                                        self.sync_quick_video_record_config();
+                                        self.persist();
+                                    }
+                                });
+
+                                ui.add_space(4.0);
+                                if !self.ffmpeg_installed {
+                                    if self.ffmpeg_download_job.is_some() {
+                                        let progress = self
+                                            .ffmpeg_download_progress
+                                            .load(std::sync::atomic::Ordering::SeqCst)
+                                            as f32
+                                            / 1000.0;
+                                        ui.add(
+                                            egui::ProgressBar::new(progress)
+                                                .desired_width(186.0)
+                                                .show_percentage(),
+                                        );
+                                        ui.ctx().request_repaint();
+                                        keep_open = true;
+                                    } else if ui
+                                        .add_sized(
+                                            [186.0, 22.0],
+                                            Button::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Install recorder",
+                                                "C?i c?ng c? quay",
+                                            )),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.start_ffmpeg_download();
+                                        keep_open = true;
+                                    }
+                                } else {
+                                    let action_label = if recorder_busy {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Please wait...",
+                                            "Vui l?ng ch?...",
+                                        )
+                                    } else if recording {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Stop recording",
+                                            "D?ng quay",
+                                        )
+                                    } else {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Start recording",
+                                            "B?t ??u quay",
+                                        )
+                                    };
+                                    if ui
+                                        .add_enabled(
+                                            !recorder_busy,
+                                            Button::new(action_label)
+                                                .min_size(vec2(186.0, 22.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.sync_quick_video_record_config();
+                                        crate::video_recorder::toggle_async();
+                                    }
+                                }
+                                ui.label(
+                                    RichText::new(crate::video_recorder::status())
+                                        .size(9.0)
+                                        .weak(),
+                                );
+                                recording || recorder_busy || keep_open
+                            },
+                        );
+                        if keep_open || recording || recorder_busy {
+                            keep_menu_open = true;
+                        }
+                    },
+                );
+
                     },
                 );
 
@@ -10481,6 +10893,7 @@ impl CrosshairApp {
                     | CaptureRequest::WindowPresetTitlebarHotkey(_)
                     | CaptureRequest::WindowExpandHotkey(_)
                     | CaptureRequest::PinPresetHotkey(_)
+                    | CaptureRequest::QuickVideoRecordHotkey
                     | CaptureRequest::MouseSensitivityPresetHotkey(_)
                     | CaptureRequest::ZoomPresetHotkey(_)
                     | CaptureRequest::VisionPresetHotkey(_)
@@ -10521,7 +10934,10 @@ impl CrosshairApp {
     }
 
     fn capture_request_registers_on_press(&self, target: &CaptureRequest) -> bool {
-        !matches!(target, CaptureRequest::QuickScreenDrawHotkey)
+        !matches!(
+            target,
+            CaptureRequest::QuickScreenDrawHotkey | CaptureRequest::QuickVideoRecordHotkey
+        )
     }
 
     fn split_key_list(value: &str) -> Vec<String> {
@@ -10753,6 +11169,12 @@ impl CrosshairApp {
             }
             (CaptureRequest::QuickScreenDrawHotkey, CapturedInput::Binding(binding)) => {
                 self.state.quick_screen_draw_hotkey = Some(binding);
+            (CaptureRequest::QuickVideoRecordHotkey, CapturedInput::Binding(binding)) => {
+                self.state.quick_video_record_hotkey = Some(binding);
+                self.sync_quick_video_record_config();
+                self.persist();
+                self.status = "Captured video recording toggle key.".to_owned();
+            }
                 self.sync_quick_screen_draw_config();
                 self.persist();
                 self.status = "Captured screen draw toggle key.".to_owned();
@@ -12504,6 +12926,18 @@ impl eframe::App for CrosshairApp {
                                 }
                                 _ => {}
                             }
+                                VisionCaptureTarget::QuickActionsVideoRegion => {
+                                    self.state.quick_video_record_region =
+                                        Some((x, y, width, height));
+                                    self.state.quick_video_record_mode =
+                                        QuickVideoRecordMode::Region;
+                                    self.sync_quick_video_record_config();
+                                    self.persist();
+                                    self.status = format!(
+                                        "Video recording region set to {}x{} at {}, {}.",
+                                        width, height, x, y
+                                    );
+                                }
                         }
                         crate::overlay::NativeCaptureResult::AdjustedRegion {
                             x,
@@ -13092,6 +13526,32 @@ impl eframe::App for CrosshairApp {
 
         if let Some(job) = &self.ocr_download_job {
             if job.is_finished() {
+        if let Some(job) = &self.ffmpeg_download_job
+            && job.is_finished()
+        {
+            let job = self.ffmpeg_download_job.take().unwrap();
+            match job.join() {
+                Ok(Ok(())) => {
+                    self.ffmpeg_installed = true;
+                    self.sync_quick_video_record_config();
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Screen recorder installed successfully.",
+                        "?? c?i c?ng c? quay m?n h?nh.",
+                    )
+                    .to_owned();
+                }
+                Ok(Err(error)) => {
+                    self.status = format!("Recorder download failed: {error}");
+                    let _ = fs::remove_file(&self.paths.ffmpeg_exe);
+                    let _ = fs::remove_file(&self.paths.ffmpeg_zip);
+                }
+                Err(_) => {
+                    self.status = "Recorder download thread panicked.".to_owned();
+                }
+            }
+        }
+
                 let job = self.ocr_download_job.take().unwrap();
                 match job.join() {
                     Ok(Ok(())) => {
@@ -13109,7 +13569,8 @@ impl eframe::App for CrosshairApp {
 
         self.poll_mouse_tool_jobs();
 
-        if self.arduino_download_job.is_some()
+        if self.ffmpeg_download_job.is_some()
+            || self.arduino_download_job.is_some()
             || self.interception_download_job.is_some()
             || self.interception_install_job.is_some()
             || self.interception_uninstall_job.is_some()
@@ -14342,6 +14803,9 @@ impl eframe::App for CrosshairApp {
                         }
                         if self.state.quick_key_sound_enabled {
                             active_count += 1;
+                        if crate::video_recorder::is_recording() {
+                            active_count += 1;
+                        }
                         }
                         if active_count > 0 {
                             let badge_center =
@@ -14914,6 +15378,7 @@ impl eframe::App for CrosshairApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         let _ = crate::platform::show_taskbar();
         self.state.reset_session_preset_visibility();
+        crate::video_recorder::stop_blocking();
         self.sync_window_presets();
         self.sync_macro_presets();
         self.sync_macro_master_enabled();

@@ -259,6 +259,7 @@ pub enum CaptureRequest {
     MacroPresetPressStopInput(u32, u32),
     CommandPresetHotkey(u32),
     QuickScreenDrawHotkey,
+    QuickVideoRecordHotkey,
     MacroStepInput {
         group_id: u32,
         preset_id: u32,

@@ -4815,6 +4815,18 @@ mod windows_overlay {
                     if is_key_down {
                         if screen_draw_trigger_allowed && process_screen_draw_hotkey(&binding, is_repeat_key(&key_name)) {
                             update_held_key(info.vkCode, is_key_down, is_key_up);
+                    if screen_draw_trigger_allowed
+                        && crate::video_recorder::process_hotkey(
+                            &binding,
+                            is_key_down,
+                            is_key_down && is_repeat_key(&key_name),
+                        )
+                    {
+                        request_ui_repaint();
+                        update_held_key(info.vkCode, is_key_down, is_key_up);
+                        update_modifier_state(info.vkCode, is_key_down);
+                        return LRESULT(1);
+                    }
                             update_modifier_state(info.vkCode, is_key_down);
                             return LRESULT(1);
                         }
@@ -5378,6 +5390,10 @@ mod windows_overlay {
                 if !is_ui_in_foreground()
                     && let Some(key_name) = event_key_name
                 {
+                if crate::video_recorder::process_hotkey(&binding, is_down, false) {
+                    request_ui_repaint();
+                    return LRESULT(1);
+                }
                     let is_key_up = matches!(
                         message,
                         WM_LBUTTONUP

@@ -487,6 +487,7 @@ impl CrosshairApp {
             .interception_download_job
             .as_ref()
             .map(|_| self.interception_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
+        let ffmpeg_path = self.paths.ffmpeg_exe.clone();
         let arduino_progress = self
             .arduino_download_job
             .as_ref()
@@ -496,6 +497,10 @@ impl CrosshairApp {
                 if Self::settings_section_button(
                     ui,
                     RichText::new(Self::tr_lang(language, "Downloaded Tools", ""))
+        let ffmpeg_progress = self
+            .ffmpeg_download_job
+            .as_ref()
+            .map(|_| self.ffmpeg_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
                         .strong()
                         .size(14.0),
                     self.downloaded_tools_open,
@@ -529,6 +534,23 @@ impl CrosshairApp {
                         language,
                         "Arduino Tools",
                         &arduino_path,
+                    self.render_downloaded_tool_entry(
+                        ui,
+                        language,
+                        "Screen Recorder (FFmpeg)",
+                        &ffmpeg_path,
+                        self.ffmpeg_installed,
+                        ffmpeg_progress,
+                        145 * 1024 * 1024,
+                        Self::tr_lang(
+                            language,
+                            "Screen recorder deleted.",
+                            "?? x?a c?ng c? quay m?n h?nh.",
+                        ),
+                        Self::start_ffmpeg_download,
+                        Self::delete_ffmpeg_tool,
+                    );
+                    ui.add_space(10.0);
                         self.arduino_tools_downloaded,
                         arduino_progress,
                         1_000_000,
@@ -1546,6 +1568,63 @@ impl CrosshairApp {
         progress.store(0, Ordering::SeqCst);
 
         let job = std::thread::spawn(move || -> Result<()> {
+    pub(crate) fn start_ffmpeg_download(&mut self) {
+        if self.ffmpeg_download_job.is_some() || self.ffmpeg_installed {
+            return;
+        }
+
+        let paths = self.paths.clone();
+        let progress = self.ffmpeg_download_progress.clone();
+        progress.store(0, Ordering::SeqCst);
+        self.status = Self::tr_lang(
+            self.state.ui_language,
+            "Downloading the screen recorder...",
+            "?ang t?i c?ng c? quay m?n h?nh...",
+        )
+        .to_owned();
+
+        self.ffmpeg_download_job = Some(std::thread::spawn(move || -> Result<()> {
+            let url =
+                "https://github.com/LinhAsia/MacroNest/releases/download/tools/ffmpeg.exe.zip";
+            let mut response = reqwest::blocking::get(url)?.error_for_status()?;
+            let total_size = response.content_length().unwrap_or(64 * 1024 * 1024);
+            let mut file = fs::File::create(&paths.ffmpeg_zip)?;
+            let mut downloaded = 0_u64;
+            let mut buffer = [0_u8; 64 * 1024];
+
+            use std::io::{Read, Write};
+            loop {
+                let count = response.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                file.write_all(&buffer[..count])?;
+                downloaded += count as u64;
+                progress.store(
+                    ((downloaded as f64 / total_size.max(1) as f64) * 980.0) as u32,
+                    Ordering::SeqCst,
+                );
+            }
+            drop(file);
+            Self::extract_zip_archive(&paths.ffmpeg_zip, &paths.bin_dir)?;
+            if !paths.ffmpeg_exe.exists() {
+                bail!("The downloaded package did not contain ffmpeg.exe");
+            }
+            let output = Command::new(&paths.ffmpeg_exe)
+                .creation_flags(0x0800_0000)
+                .args(["-hide_banner", "-filters"])
+                .output()?;
+            let filters = String::from_utf8_lossy(&output.stdout);
+            if !output.status.success() || !filters.contains("gfxcapture") {
+                let _ = fs::remove_file(&paths.ffmpeg_exe);
+                bail!("This FFmpeg build does not support Windows Graphics Capture");
+            }
+            let _ = fs::remove_file(&paths.ffmpeg_zip);
+            progress.store(1000, Ordering::SeqCst);
+            Ok(())
+        }));
+    }
+
             crate::ocr::install_all_language_packs(|downloaded, total| {
                 let ratio = if total == 0 {
                     0.0
@@ -1628,6 +1707,21 @@ impl CrosshairApp {
         let _ = fs::remove_dir_all(&self.paths.interception_package_dir);
         let _ = fs::remove_file(&self.paths.interception_dll);
         self.interception_package_downloaded = false;
+    fn delete_ffmpeg_tool(&mut self) {
+        if crate::video_recorder::is_recording() || crate::video_recorder::is_busy() {
+            self.status = Self::tr_lang(
+                self.state.ui_language,
+                "Stop recording before deleting FFmpeg.",
+                "H?y d?ng quay tr??c khi x?a FFmpeg.",
+            )
+            .to_owned();
+            return;
+        }
+        let _ = fs::remove_file(&self.paths.ffmpeg_exe);
+        let _ = fs::remove_file(&self.paths.ffmpeg_zip);
+        self.ffmpeg_installed = false;
+    }
+
         self.interception_installed = false;
     }
 

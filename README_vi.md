@@ -46,6 +46,7 @@ Quick Actions là các công cụ tiện ích nhỏ nằm trên thanh tiêu đ�
 | Get Color | Lấy mẫu màu màn hình và tùy chọn sao chép mã màu Hex |
 | Key Display | Hiển thị phím nhấn thời gian thực với chế độ Normal và Mascot hoạt hình dễ thương |
 | Draw | Bật/tắt lớp phủ vẽ tự do trên màn hình và định hình phím tắt cho nó |
+| Quay màn hình | Quay toàn màn hình, cửa sổ đang focus, cửa sổ đã chọn hoặc một vùng đã chọn ở 60 FPS bằng Windows Graphics Capture. Nhấn phím trigger để bắt đầu/dừng; video được lưu dưới dạng MP4 |
 | Clear Overlays | Xóa nhanh tất cả hình vẽ hình học, HUD và các lớp ghim nổi đang hiển thị |
 | Key Sound | Phát âm thanh gõ phím giả lập cơ học với nhiều loại switch và âm lượng |
 

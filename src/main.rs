@@ -15,6 +15,7 @@ mod protractor;
 mod render;
 mod storage;
 mod ui;
+mod video_recorder;
 mod window_list;
 
 use anyhow::Result;

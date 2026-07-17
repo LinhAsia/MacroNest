@@ -26,6 +26,14 @@ fn default_window_opacity_percent() -> u8 {
     75
 }
 
+fn default_quick_video_output_dir() -> String {
+    directories::UserDirs::new()
+        .and_then(|dirs| dirs.video_dir().map(|path| path.join("MacroNest")))
+        .unwrap_or_else(|| std::path::PathBuf::from("MacroNest Videos"))
+        .to_string_lossy()
+        .into_owned()
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 enum GlobalConstantStoredValue {
@@ -80,6 +88,15 @@ pub enum QuickScreenDrawTool {
     Text,
     Highlight,
     Blur,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum QuickVideoRecordMode {
+    #[default]
+    FullScreen,
+    FocusedWindow,
+    SelectedWindow,
+    Region,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
@@ -610,6 +627,16 @@ pub struct AppState {
     #[serde(default)]
     pub quick_screen_draw_text_border: bool,
     #[serde(default)]
+    pub quick_video_record_hotkey: Option<HotkeyBinding>,
+    #[serde(default)]
+    pub quick_video_record_mode: QuickVideoRecordMode,
+    #[serde(default)]
+    pub quick_video_record_target_window: String,
+    #[serde(default)]
+    pub quick_video_record_region: Option<(i32, i32, i32, i32)>,
+    #[serde(default = "default_quick_video_output_dir")]
+    pub quick_video_record_output_dir: String,
+    #[serde(default)]
     pub quick_key_sound_enabled: bool,
     #[serde(default)]
     pub quick_key_sound_style: u32,
@@ -924,6 +951,11 @@ impl Default for AppState {
             quick_screen_draw_freeze: default_screen_draw_freeze(),
             quick_screen_draw_tool: QuickScreenDrawTool::Brush,
             quick_screen_draw_text_border: false,
+            quick_video_record_hotkey: None,
+            quick_video_record_mode: QuickVideoRecordMode::FullScreen,
+            quick_video_record_target_window: String::new(),
+            quick_video_record_region: None,
+            quick_video_record_output_dir: default_quick_video_output_dir(),
             quick_key_sound_enabled: false,
             quick_key_sound_style: 2,
             quick_key_sound_volume: default_key_sound_volume(),
