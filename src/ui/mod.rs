@@ -145,8 +145,8 @@ enum TitlebarQuickActionKind {
     GetCoordinates,
     GetColor,
     KeyDisplay,
-    VideoRecord,
     ScreenDraw,
+    VideoRecord,
     ClearOverlays,
     KeySound,
 }
@@ -198,6 +198,7 @@ pub(crate) enum VisionCaptureTarget {
     QuickActionsCoordinates,
     QuickActionsColor,
     QuickActionsKeyDisplayPosition,
+    QuickActionsVideoRegion,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -4204,6 +4205,9 @@ impl CrosshairApp {
                         vec2(12.0, 7.0),
                     ),
                     2.0,
+                    icon_color,
+                );
+            }
             TitlebarQuickActionKind::VideoRecord => {
                 let body = egui::Rect::from_center_size(rect.center(), vec2(28.0, 20.0));
                 painter.rect_stroke(
@@ -4221,18 +4225,7 @@ impl CrosshairApp {
                     icon_color,
                     egui::Stroke::NONE,
                 ));
-                painter.circle_filled(
-                    body.center(),
-                    if active { 5.0 } else { 3.5 },
-                    if active {
-                        Color32::from_rgb(255, 72, 72)
-                    } else {
-                        icon_color
-                    },
-                );
-            }
-                    icon_color,
-                );
+                painter.circle_filled(body.center(), 3.5, icon_color);
             }
             TitlebarQuickActionKind::ClearOverlays => {
                 let center = rect.center();
@@ -6205,6 +6198,9 @@ impl CrosshairApp {
                         if keep_open {
                             keep_menu_open = true;
                         }
+                    },
+                );
+
                 // Video recorder action
                 ui.allocate_ui_with_layout(
                     vec2(action_width, action_height),
@@ -6512,6 +6508,44 @@ impl CrosshairApp {
                                     }
                                 });
 
+                                if ui
+                                    .add_sized(
+                                        [186.0, 22.0],
+                                        Button::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Open video folder",
+                                            "Mở thư mục video",
+                                        )),
+                                    )
+                                    .clicked()
+                                {
+                                    let folder = Path::new(
+                                        &self.state.quick_video_record_output_dir,
+                                    );
+                                    let _ = fs::create_dir_all(folder);
+                                    if let Err(error) =
+                                        crate::platform::open_folder_in_explorer(folder)
+                                    {
+                                        self.status = format!("Could not open video folder: {error}");
+                                    }
+                                }
+
+                                let copy_response = ui.add_enabled(
+                                    !recording && !recorder_busy,
+                                    egui::Checkbox::new(
+                                        &mut self.state.quick_video_copy_after_recording,
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Copy video after recording",
+                                            "Sao chép video sau khi quay",
+                                        ),
+                                    ),
+                                );
+                                if copy_response.changed() {
+                                    self.sync_quick_video_record_config();
+                                    self.persist();
+                                }
+
                                 ui.add_space(4.0);
                                 if !self.ffmpeg_installed {
                                     if self.ffmpeg_download_job.is_some() {
@@ -6553,9 +6587,6 @@ impl CrosshairApp {
                         if keep_open || recording || recorder_busy {
                             keep_menu_open = true;
                         }
-                    },
-                );
-
                     },
                 );
 
@@ -10867,11 +10898,11 @@ impl CrosshairApp {
                     | CaptureRequest::WindowPresetTitlebarHotkey(_)
                     | CaptureRequest::WindowExpandHotkey(_)
                     | CaptureRequest::PinPresetHotkey(_)
-                    | CaptureRequest::QuickVideoRecordHotkey
                     | CaptureRequest::MouseSensitivityPresetHotkey(_)
                     | CaptureRequest::ZoomPresetHotkey(_)
                     | CaptureRequest::VisionPresetHotkey(_)
                     | CaptureRequest::QuickScreenDrawHotkey
+                    | CaptureRequest::QuickVideoRecordHotkey
                     | CaptureRequest::MacrosMasterHotkey
             ),
         }
@@ -11143,15 +11174,15 @@ impl CrosshairApp {
             }
             (CaptureRequest::QuickScreenDrawHotkey, CapturedInput::Binding(binding)) => {
                 self.state.quick_screen_draw_hotkey = Some(binding);
+                self.sync_quick_screen_draw_config();
+                self.persist();
+                self.status = "Captured screen draw toggle key.".to_owned();
+            }
             (CaptureRequest::QuickVideoRecordHotkey, CapturedInput::Binding(binding)) => {
                 self.state.quick_video_record_hotkey = Some(binding);
                 self.sync_quick_video_record_config();
                 self.persist();
                 self.status = "Captured video recording toggle key.".to_owned();
-            }
-                self.sync_quick_screen_draw_config();
-                self.persist();
-                self.status = "Captured screen draw toggle key.".to_owned();
             }
             (CaptureRequest::PinPresetHotkey(preset_id), CapturedInput::Binding(binding)) => {
                 if let Some(preset) = self
@@ -12898,8 +12929,6 @@ impl eframe::App for CrosshairApp {
                                         );
                                     }
                                 }
-                                _ => {}
-                            }
                                 VisionCaptureTarget::QuickActionsVideoRegion => {
                                     self.state.quick_video_record_region =
                                         Some((x, y, width, height));
@@ -12912,6 +12941,8 @@ impl eframe::App for CrosshairApp {
                                         width, height, x, y
                                     );
                                 }
+                                _ => {}
+                            }
                         }
                         crate::overlay::NativeCaptureResult::AdjustedRegion {
                             x,
@@ -13498,8 +13529,6 @@ impl eframe::App for CrosshairApp {
             }
         }
 
-        if let Some(job) = &self.ocr_download_job {
-            if job.is_finished() {
         if let Some(job) = &self.ffmpeg_download_job
             && job.is_finished()
         {
@@ -13526,6 +13555,8 @@ impl eframe::App for CrosshairApp {
             }
         }
 
+        if let Some(job) = &self.ocr_download_job {
+            if job.is_finished() {
                 let job = self.ocr_download_job.take().unwrap();
                 match job.join() {
                     Ok(Ok(())) => {
@@ -15350,9 +15381,9 @@ impl eframe::App for CrosshairApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        crate::video_recorder::stop_blocking();
         let _ = crate::platform::show_taskbar();
         self.state.reset_session_preset_visibility();
-        crate::video_recorder::stop_blocking();
         self.sync_window_presets();
         self.sync_macro_presets();
         self.sync_macro_master_enabled();

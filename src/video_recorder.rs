@@ -1,11 +1,16 @@
 use std::{
+    collections::VecDeque,
     fs::{self, File},
-    io::Write,
+    io::{BufWriter, Write},
     os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
-    thread,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{Receiver, SyncSender, sync_channel},
+    },
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -32,6 +37,7 @@ pub struct VideoRecorderConfig {
     pub target_window: String,
     pub region: Option<(i32, i32, i32, i32)>,
     pub output_dir: PathBuf,
+    pub copy_after_recording: bool,
     pub ffmpeg_exe: PathBuf,
 }
 
@@ -44,6 +50,7 @@ impl Default for VideoRecorderConfig {
             target_window: String::new(),
             region: None,
             output_dir: PathBuf::new(),
+            copy_after_recording: true,
             ffmpeg_exe: PathBuf::new(),
         }
     }
@@ -54,6 +61,11 @@ struct RecordingProcess {
     output_path: PathBuf,
     log_path: PathBuf,
     region_border: Option<RegionBorder>,
+    audio_stop: Arc<AtomicBool>,
+    audio_thread: Option<JoinHandle<Result<(), String>>>,
+    audio_path: PathBuf,
+    copy_after_recording: bool,
+    ffmpeg_exe: PathBuf,
 }
 
 static CONFIG: Lazy<Mutex<VideoRecorderConfig>> =
@@ -64,9 +76,25 @@ static ACTIVE: AtomicBool = AtomicBool::new(false);
 static BUSY: AtomicBool = AtomicBool::new(false);
 static HOTKEY_DOWN: AtomicBool = AtomicBool::new(false);
 static SESSION_ID: AtomicU64 = AtomicU64::new(0);
+static HARDWARE_ENCODING: Lazy<Mutex<Option<bool>>> = Lazy::new(|| Mutex::new(None));
+static HARDWARE_PROBE_BUSY: AtomicBool = AtomicBool::new(false);
 
 pub fn set_config(config: VideoRecorderConfig) {
     *CONFIG.lock() = config;
+}
+
+pub fn warm_up_async() {
+    let ffmpeg_exe = CONFIG.lock().ffmpeg_exe.clone();
+    if !ffmpeg_exe.exists()
+        || HARDWARE_ENCODING.lock().is_some()
+        || HARDWARE_PROBE_BUSY.swap(true, Ordering::AcqRel)
+    {
+        return;
+    }
+    thread::spawn(move || {
+        let _ = hardware_encoding_available(&ffmpeg_exe);
+        HARDWARE_PROBE_BUSY.store(false, Ordering::Release);
+    });
 }
 
 pub fn status() -> String {
@@ -139,10 +167,16 @@ fn start_recording_inner() -> Result<(), String> {
     let (source, border_rect) = capture_source(&config)?;
     let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
     let output_path = unique_output_path(&config.output_dir, &format!("MacroNest_{timestamp}"));
+    let audio_path = config.output_dir.join(format!(
+        ".macronest-video-audio-{}-{timestamp}.f32le",
+        std::process::id()
+    ));
     let log_path = config.output_dir.join(".macronest-video-recorder.log");
     let log = File::create(&log_path)
         .map_err(|error| format!("Could not create the recorder log: {error}"))?;
 
+    let hardware_encoding = hardware_encoding_available(&config.ffmpeg_exe);
+    let (audio_stop, audio_thread, audio_start) = start_system_audio_capture(&audio_path)?;
     let mut command = Command::new(&config.ffmpeg_exe);
     command
         .creation_flags(CREATE_NO_WINDOW)
@@ -163,10 +197,16 @@ fn start_recording_inner() -> Result<(), String> {
             "-an",
             "-c:v",
             "h264_mf",
+        ]);
+    if hardware_encoding {
+        command.args(["-hw_encoding", "1"]);
+    }
+    command
+        .args([
             "-rate_control",
             "quality",
             "-quality",
-            "75",
+            "90",
             "-scenario",
             "archive",
             "-movflags",
@@ -174,9 +214,17 @@ fn start_recording_inner() -> Result<(), String> {
         ])
         .arg(&output_path);
 
-    let child = command
-        .spawn()
-        .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            audio_stop.store(true, Ordering::Release);
+            let _ = audio_start.send(());
+            let _ = audio_thread.join();
+            let _ = fs::remove_file(&audio_path);
+            return Err(format!("Could not start FFmpeg: {error}"));
+        }
+    };
+    let _ = audio_start.send(());
     let region_border = border_rect.and_then(RegionBorder::start);
     let session_id = SESSION_ID.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
     *PROCESS.lock() = Some(RecordingProcess {
@@ -184,6 +232,11 @@ fn start_recording_inner() -> Result<(), String> {
         output_path: output_path.clone(),
         log_path,
         region_border,
+        audio_stop,
+        audio_thread: Some(audio_thread),
+        audio_path,
+        copy_after_recording: config.copy_after_recording,
+        ffmpeg_exe: config.ffmpeg_exe,
     });
     ACTIVE.store(true, Ordering::Release);
     *STATUS.lock() = format!("Recording: {}", output_path.display());
@@ -213,9 +266,43 @@ fn stop_recording_inner() {
             }
         }
     }
+    recording.audio_stop.store(true, Ordering::Release);
+    let audio_result = recording
+        .audio_thread
+        .take()
+        .map(|worker| {
+            worker
+                .join()
+                .map_err(|_| "System audio capture stopped unexpectedly.".to_owned())?
+        })
+        .unwrap_or(Ok(()));
+    let mux_result = audio_result.and_then(|_| {
+        mux_system_audio(
+            &recording.ffmpeg_exe,
+            &recording.audio_path,
+            &recording.output_path,
+        )
+    });
+    let _ = fs::remove_file(&recording.audio_path);
     recording.region_border.take();
     ACTIVE.store(false, Ordering::Release);
-    *STATUS.lock() = format!("Saved: {}", recording.output_path.display());
+    let mut status = match mux_result {
+        Ok(()) => format!(
+            "Saved with system audio: {}",
+            recording.output_path.display()
+        ),
+        Err(error) => format!(
+            "Saved without system audio: {} ({error})",
+            recording.output_path.display()
+        ),
+    };
+    if recording.copy_after_recording {
+        match copy_video_to_clipboard(&recording.output_path) {
+            Ok(()) => status.push_str(" - copied"),
+            Err(error) => status.push_str(&format!(" - copy failed: {error}")),
+        }
+    }
+    *STATUS.lock() = status;
     let _ = fs::remove_file(recording.log_path);
 }
 
@@ -236,8 +323,13 @@ fn spawn_exit_watchdog(session_id: u64) {
             if exited {
                 if let Some(mut recording) = PROCESS.lock().take() {
                     recording.region_border.take();
+                    recording.audio_stop.store(true, Ordering::Release);
+                    if let Some(worker) = recording.audio_thread.take() {
+                        let _ = worker.join();
+                    }
                     let error = fs::read_to_string(&recording.log_path).unwrap_or_default();
                     let _ = fs::remove_file(&recording.log_path);
+                    let _ = fs::remove_file(&recording.audio_path);
                     let _ = fs::remove_file(&recording.output_path);
                     *STATUS.lock() = if error.trim().is_empty() {
                         "Video recording stopped unexpectedly.".to_owned()
@@ -264,6 +356,240 @@ fn concise_ffmpeg_error(log: &str) -> String {
         .unwrap_or("FFmpeg stopped unexpectedly")
         .trim();
     detail.chars().take(180).collect()
+}
+
+fn hardware_encoding_available(ffmpeg_exe: &Path) -> bool {
+    let mut cached = HARDWARE_ENCODING.lock();
+    if let Some(available) = *cached {
+        return available;
+    }
+    let available = Command::new(ffmpeg_exe)
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "quiet",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=64x64:rate=1",
+            "-frames:v",
+            "1",
+            "-vf",
+            "format=nv12",
+            "-c:v",
+            "h264_mf",
+            "-hw_encoding",
+            "1",
+            "-f",
+            "null",
+            "-",
+        ])
+        .status()
+        .is_ok_and(|status| status.success());
+    *cached = Some(available);
+    available
+}
+
+fn start_system_audio_capture(
+    audio_path: &Path,
+) -> Result<
+    (
+        Arc<AtomicBool>,
+        JoinHandle<Result<(), String>>,
+        SyncSender<()>,
+    ),
+    String,
+> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker_stop = stop.clone();
+    let worker_path = audio_path.to_path_buf();
+    let (ready_tx, ready_rx) = sync_channel(1);
+    let (start_tx, start_rx) = sync_channel(1);
+    let worker =
+        thread::spawn(move || capture_system_audio(&worker_path, worker_stop, ready_tx, start_rx));
+    match ready_rx.recv_timeout(Duration::from_secs(3)) {
+        Ok(Ok(())) => Ok((stop, worker, start_tx)),
+        Ok(Err(error)) => {
+            stop.store(true, Ordering::Release);
+            let _ = start_tx.send(());
+            let _ = worker.join();
+            let _ = fs::remove_file(audio_path);
+            Err(format!("Could not start system audio capture: {error}"))
+        }
+        Err(_) => {
+            stop.store(true, Ordering::Release);
+            let _ = start_tx.send(());
+            let _ = worker.join();
+            let _ = fs::remove_file(audio_path);
+            Err("System audio capture did not start in time.".to_owned())
+        }
+    }
+}
+
+fn capture_system_audio(
+    audio_path: &Path,
+    stop: Arc<AtomicBool>,
+    ready: SyncSender<Result<(), String>>,
+    start: Receiver<()>,
+) -> Result<(), String> {
+    use wasapi::{
+        Direction, SampleType, StreamMode, WaveFormat, get_default_device, initialize_mta,
+    };
+
+    let initialized = (|| -> Result<_, String> {
+        let _ = initialize_mta();
+        let device = get_default_device(&Direction::Render).map_err(|error| error.to_string())?;
+        let mut audio_client = device
+            .get_iaudioclient()
+            .map_err(|error| error.to_string())?;
+        let format = WaveFormat::new(32, 32, &SampleType::Float, 48_000, 2, None);
+        let (_, min_time) = audio_client
+            .get_device_period()
+            .map_err(|error| error.to_string())?;
+        audio_client
+            .initialize_client(
+                &format,
+                &Direction::Capture,
+                &StreamMode::EventsShared {
+                    autoconvert: true,
+                    buffer_duration_hns: min_time,
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        let event = audio_client
+            .set_get_eventhandle()
+            .map_err(|error| error.to_string())?;
+        let capture = audio_client
+            .get_audiocaptureclient()
+            .map_err(|error| error.to_string())?;
+        let file = File::create(audio_path).map_err(|error| error.to_string())?;
+        audio_client
+            .start_stream()
+            .map_err(|error| error.to_string())?;
+        Ok((audio_client, capture, event, BufWriter::new(file)))
+    })();
+
+    let (mut audio_client, capture, event, mut output) = match initialized {
+        Ok(values) => {
+            let _ = ready.send(Ok(()));
+            values
+        }
+        Err(error) => {
+            let _ = ready.send(Err(error.clone()));
+            return Err(error);
+        }
+    };
+    if start.recv_timeout(Duration::from_secs(5)).is_err() {
+        let _ = audio_client.stop_stream();
+        return Ok(());
+    }
+
+    let mut samples = VecDeque::new();
+    while capture
+        .get_next_packet_size()
+        .map_err(|error| error.to_string())?
+        .unwrap_or(0)
+        > 0
+    {
+        capture
+            .read_from_device_to_deque(&mut samples)
+            .map_err(|error| error.to_string())?;
+        samples.clear();
+    }
+
+    while !stop.load(Ordering::Acquire) {
+        if capture
+            .get_next_packet_size()
+            .map_err(|error| error.to_string())?
+            .unwrap_or(0)
+            > 0
+        {
+            capture
+                .read_from_device_to_deque(&mut samples)
+                .map_err(|error| error.to_string())?;
+            let (first, second) = samples.as_slices();
+            output.write_all(first).map_err(|error| error.to_string())?;
+            output
+                .write_all(second)
+                .map_err(|error| error.to_string())?;
+            samples.clear();
+        }
+        let _ = event.wait_for_event(50);
+    }
+    let _ = audio_client.stop_stream();
+    output.flush().map_err(|error| error.to_string())
+}
+
+fn mux_system_audio(ffmpeg_exe: &Path, audio_path: &Path, video_path: &Path) -> Result<(), String> {
+    if fs::metadata(audio_path).map_or(true, |metadata| metadata.len() < 1_024) {
+        return Err("No system audio samples were captured.".to_owned());
+    }
+    let stem = video_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("MacroNest");
+    let muxed_path = video_path.with_file_name(format!(".{stem}.muxing.mp4"));
+    let status = Command::new(ffmpeg_exe)
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .args([
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "f32le",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-i",
+        ])
+        .arg(audio_path)
+        .arg("-i")
+        .arg(video_path)
+        .args([
+            "-map",
+            "1:v:0",
+            "-map",
+            "0:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            "-movflags",
+            "+faststart",
+        ])
+        .arg(&muxed_path)
+        .status()
+        .map_err(|error| format!("Could not mux system audio: {error}"))?;
+    if !status.success() || fs::metadata(&muxed_path).map_or(true, |metadata| metadata.len() == 0) {
+        let _ = fs::remove_file(&muxed_path);
+        return Err("FFmpeg could not add system audio.".to_owned());
+    }
+    fs::remove_file(video_path).map_err(|error| error.to_string())?;
+    fs::rename(&muxed_path, video_path).map_err(|error| error.to_string())
+}
+
+fn copy_video_to_clipboard(video_path: &Path) -> Result<(), String> {
+    let mut last_error = None;
+    for _ in 0..3 {
+        match crate::platform::copy_folder_to_clipboard(video_path) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error.to_string()),
+        }
+        thread::sleep(Duration::from_millis(40));
+    }
+    Err(last_error.unwrap_or_else(|| "Could not open the clipboard.".to_owned()))
 }
 
 fn capture_source(config: &VideoRecorderConfig) -> Result<(String, Option<RECT>), String> {
