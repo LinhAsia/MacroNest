@@ -1743,7 +1743,7 @@ impl CrosshairApp {
                 let popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
-                    .align(egui::RectAlign::RIGHT_START)
+                    .align(egui::RectAlign::BOTTOM_START)
                     .layout(egui::Layout::top_down_justified(egui::Align::Min))
                     .width(140.0)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
