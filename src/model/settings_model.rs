@@ -34,6 +34,10 @@ fn default_quick_video_output_dir() -> String {
         .into_owned()
 }
 
+fn default_quick_video_record_fps() -> u32 {
+    60
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 enum GlobalConstantStoredValue {
@@ -638,6 +642,8 @@ pub struct AppState {
     pub quick_video_record_region: Option<(i32, i32, i32, i32)>,
     #[serde(default = "default_quick_video_output_dir")]
     pub quick_video_record_output_dir: String,
+    #[serde(default = "default_quick_video_record_fps")]
+    pub quick_video_record_fps: u32,
     #[serde(default = "default_true")]
     pub quick_video_copy_after_recording: bool,
     #[serde(default)]
@@ -961,6 +967,7 @@ impl Default for AppState {
             quick_video_record_target_window: String::new(),
             quick_video_record_region: None,
             quick_video_record_output_dir: default_quick_video_output_dir(),
+            quick_video_record_fps: default_quick_video_record_fps(),
             quick_video_copy_after_recording: true,
             quick_key_sound_enabled: false,
             quick_key_sound_style: 2,

@@ -6402,10 +6402,7 @@ impl CrosshairApp {
                                                 )
                                                 .clicked()
                                             {
-                                                self.begin_region_capture(
-                                                    ui.ctx(),
-                                                    VisionCaptureTarget::QuickActionsVideoRegion,
-                                                );
+                                                crate::overlay::screen_draw_select_video_region();
                                             }
                                         }
                                         _ => {}
@@ -6449,6 +6446,11 @@ impl CrosshairApp {
                                         });
                                     if ui
                                         .add_sized([186.0, 22.0], Button::new(label))
+                                        .on_hover_text(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Press to start or stop. Hold while idle to select a region, then release to record it.",
+                                            "Nhấn để bắt đầu hoặc dừng. Khi chưa quay, giữ phím để chọn vùng rồi thả ra để quay vùng đó.",
+                                        ))
                                         .clicked()
                                     {
                                         if capture_active {
@@ -6466,6 +6468,41 @@ impl CrosshairApp {
                                         }
                                     }
                                     keep_open |= capture_active;
+
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Hold trigger to select and record a region",
+                                            "Giữ trigger để chọn và quay một vùng",
+                                        ))
+                                        .size(9.0)
+                                        .weak(),
+                                    );
+
+                                    ui.horizontal(|ui| {
+                                        ui.label(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "FPS",
+                                            "FPS",
+                                        ));
+                                        let fps_before = self.state.quick_video_record_fps;
+                                        egui::ComboBox::from_id_salt("quick-video-fps")
+                                            .width(128.0)
+                                            .selected_text(format!("{} FPS", fps_before))
+                                            .show_ui(ui, |ui| {
+                                                for fps in [30, 60, 144] {
+                                                    ui.selectable_value(
+                                                        &mut self.state.quick_video_record_fps,
+                                                        fps,
+                                                        format!("{fps} FPS"),
+                                                    );
+                                                }
+                                            });
+                                        if self.state.quick_video_record_fps != fps_before {
+                                            self.sync_quick_video_record_config();
+                                            self.persist();
+                                        }
+                                    });
 
                                     ui.add_space(3.0);
                                     let folder_name = Path::new(
@@ -12754,6 +12791,22 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::ScreenDrawCaptureStatus(status) => {
                     self.status = status;
+                    ctx.request_repaint();
+                }
+                UiCommand::VideoRecordRegionSelected {
+                    x,
+                    y,
+                    width,
+                    height,
+                } => {
+                    self.state.quick_video_record_region = Some((x, y, width, height));
+                    self.state.quick_video_record_mode = QuickVideoRecordMode::Region;
+                    self.sync_quick_video_record_config();
+                    self.persist();
+                    self.status = format!(
+                        "Video recording region set to {}x{} at {}, {}.",
+                        width, height, x, y
+                    );
                     ctx.request_repaint();
                 }
                 UiCommand::CrosshairDrawFinished {

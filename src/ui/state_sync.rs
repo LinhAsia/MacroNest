@@ -383,6 +383,7 @@ impl CrosshairApp {
             target_window: self.state.quick_video_record_target_window.clone(),
             region: self.state.quick_video_record_region,
             output_dir: std::path::PathBuf::from(&self.state.quick_video_record_output_dir),
+            fps: self.state.quick_video_record_fps,
             copy_after_recording: self.state.quick_video_copy_after_recording,
             ffmpeg_exe: self.paths.ffmpeg_exe.clone(),
         });

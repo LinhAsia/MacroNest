@@ -48,7 +48,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | Get Color | Sample a screen color and optionally copy the hex value |
 | Key Display | Show a live key overlay with normal and mascot display modes |
 | Draw | Toggle the screen drawing overlay and configure its hotkey |
-| Screen Recorder | Record the full screen, focused window, selected window, or a selected region at 60 FPS with system audio. Uses hardware H.264 when available, supports trigger-key control, save-folder access, and optional automatic video copy for pasting into apps such as Discord |
+| Screen Recorder | Record the full screen, focused window, selected window, or a selected region at 30, 60, or 144 FPS with system audio. Tap the trigger to start or stop, or hold it while idle to select a region with the Draw capture overlay and release to record. Uses hardware H.264 when available, supports save-folder access, and optional automatic video copy for pasting into apps such as Discord |
 | Clear Overlays | Clear active geometry, HUD, and pin overlays from the screen |
 | Key Sound | Play keyboard sound effects with selectable switch style and volume |
 

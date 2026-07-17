@@ -1955,6 +1955,8 @@ mod windows_overlay {
     enum ScreenDrawCaptureMode {
         MouseDrag,
         HoldTrigger(HotkeyBinding),
+        VideoRegionSelect,
+        VideoHoldTrigger(HotkeyBinding),
     }
 
     impl Default for ScreenDrawControl {
@@ -2278,6 +2280,12 @@ mod windows_overlay {
         MousePathRecordingFinished(u32, Vec<MousePathEvent>, String),
         MousePathDrawCaptureCancelled(String),
         ScreenDrawCaptureStatus(String),
+        VideoRecordRegionSelected {
+            x: i32,
+            y: i32,
+            width: i32,
+            height: i32,
+        },
         CrosshairDrawFinished {
             profile_name: String,
             asset_name: Option<String>,
@@ -12693,6 +12701,52 @@ mod windows_overlay {
         begin_screen_draw_region_capture(ScreenDrawCaptureMode::HoldTrigger(trigger), session_id);
     }
 
+    fn begin_video_region_capture(mode: ScreenDrawCaptureMode) -> bool {
+        if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
+            return false;
+        }
+        let started_inactive;
+        let session_id;
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            if state.capturing_region || state.text_session.is_some() {
+                return false;
+            }
+            started_inactive = !state.active;
+            if started_inactive {
+                let (x, y, width, height) = window_list::virtual_screen_bounds();
+                let frame = window_list::capture_virtual_screen_region(x, y, width, height)
+                    .map(|capture| capture.rgba);
+                activate_screen_draw(&mut state, frame);
+            }
+            let trigger = match &mode {
+                ScreenDrawCaptureMode::VideoHoldTrigger(trigger) => Some(trigger.clone()),
+                _ => None,
+            };
+            let Some(id) = begin_screen_draw_capture_session(&mut state, trigger) else {
+                return false;
+            };
+            state.capture_deactivate_on_finish = started_inactive;
+            session_id = id;
+        }
+        reset_screen_draw_capture_overlay_state();
+        request_screen_draw_overlay_sync();
+        begin_screen_draw_region_capture(mode, session_id);
+        true
+    }
+
+    pub fn screen_draw_begin_video_region_capture(trigger: HotkeyBinding) -> bool {
+        begin_video_region_capture(ScreenDrawCaptureMode::VideoHoldTrigger(trigger))
+    }
+
+    pub fn screen_draw_select_video_region() -> bool {
+        begin_video_region_capture(ScreenDrawCaptureMode::VideoRegionSelect)
+    }
+
+    pub fn screen_draw_release_video_region_capture() {
+        mark_screen_draw_capture_trigger_released();
+    }
+
     fn screen_draw_trigger_release_should_toggle_off(
         state: &mut ScreenDrawState,
         active: bool,
@@ -12731,6 +12785,34 @@ mod windows_overlay {
         capture_mode: ScreenDrawCaptureMode,
         session_id: u64,
     ) -> String {
+        if let ScreenDrawCaptureMode::VideoHoldTrigger(trigger) = capture_mode {
+            return match select_screen_draw_capture_region_from_trigger(&trigger, session_id) {
+                Ok(Some(region)) => {
+                    thread::spawn(move || {
+                        thread::sleep(Duration::from_millis(35));
+                        crate::video_recorder::start_region_async(region);
+                    });
+                    "Starting region recording.".to_owned()
+                }
+                Ok(None) => "Video region selection cancelled.".to_owned(),
+                Err(error) => format!("Video region selection failed: {error}"),
+            };
+        }
+        if matches!(capture_mode, ScreenDrawCaptureMode::VideoRegionSelect) {
+            return match select_screen_draw_capture_region(session_id) {
+                Ok(Some((x, y, width, height))) => {
+                    send_ui_command(UiCommand::VideoRecordRegionSelected {
+                        x,
+                        y,
+                        width,
+                        height,
+                    });
+                    "Video recording region selected.".to_owned()
+                }
+                Ok(None) => "Video region selection cancelled.".to_owned(),
+                Err(error) => format!("Video region selection failed: {error}"),
+            };
+        }
         match capture_screen_draw_region_to_clipboard(capture_mode, session_id) {
             Ok(copied) if copied => "Copied annotated screen region to clipboard.".to_owned(),
             Ok(_) => "Screen draw capture cancelled.".to_owned(),
@@ -12750,6 +12832,8 @@ mod windows_overlay {
             ScreenDrawCaptureMode::HoldTrigger(trigger) => {
                 select_screen_draw_capture_region_from_trigger(&trigger, session_id)?
             }
+            ScreenDrawCaptureMode::VideoRegionSelect
+            | ScreenDrawCaptureMode::VideoHoldTrigger(_) => return Ok(false),
         };
         let Some((x, y, width, height)) = selected else {
             return Ok(false);
@@ -37670,6 +37754,13 @@ mod fallback {
     pub fn screen_draw_set_smoothing_amount(_amount: f32) {}
     pub fn screen_draw_deactivate() {}
     pub fn screen_draw_trigger_capture_region_mouse() {}
+    pub fn screen_draw_begin_video_region_capture(_trigger: HotkeyBinding) -> bool {
+        false
+    }
+    pub fn screen_draw_select_video_region() -> bool {
+        false
+    }
+    pub fn screen_draw_release_video_region_capture() {}
 }
 
 #[cfg(all(test, windows))]

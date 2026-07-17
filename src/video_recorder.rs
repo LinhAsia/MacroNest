@@ -37,6 +37,7 @@ pub struct VideoRecorderConfig {
     pub target_window: String,
     pub region: Option<(i32, i32, i32, i32)>,
     pub output_dir: PathBuf,
+    pub fps: u32,
     pub copy_after_recording: bool,
     pub ffmpeg_exe: PathBuf,
 }
@@ -50,6 +51,7 @@ impl Default for VideoRecorderConfig {
             target_window: String::new(),
             region: None,
             output_dir: PathBuf::new(),
+            fps: 60,
             copy_after_recording: true,
             ffmpeg_exe: PathBuf::new(),
         }
@@ -75,6 +77,9 @@ static STATUS: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("Ready".to_owned())
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static BUSY: AtomicBool = AtomicBool::new(false);
 static HOTKEY_DOWN: AtomicBool = AtomicBool::new(false);
+static HOTKEY_PRESS_ID: AtomicU64 = AtomicU64::new(0);
+static REGION_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static PRESS_HANDLED_ON_DOWN: AtomicBool = AtomicBool::new(false);
 static SESSION_ID: AtomicU64 = AtomicU64::new(0);
 static HARDWARE_ENCODING: Lazy<Mutex<Option<bool>>> = Lazy::new(|| Mutex::new(None));
 static HARDWARE_PROBE_BUSY: AtomicBool = AtomicBool::new(false);
@@ -124,6 +129,22 @@ pub fn toggle_async() {
     });
 }
 
+pub fn start_region_async(region: (i32, i32, i32, i32)) {
+    if BUSY.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    thread::spawn(move || {
+        let mut config = CONFIG.lock().clone();
+        config.mode = QuickVideoRecordMode::Region;
+        config.region = Some(region);
+        if let Err(error) = start_recording_with_config(config) {
+            *STATUS.lock() = error;
+            ACTIVE.store(false, Ordering::Release);
+        }
+        BUSY.store(false, Ordering::Release);
+    });
+}
+
 pub fn stop_blocking() {
     if ACTIVE.load(Ordering::Acquire) || PROCESS.lock().is_some() {
         stop_recording_inner();
@@ -142,17 +163,52 @@ pub fn process_hotkey(binding: &HotkeyBinding, is_down: bool, is_repeat: bool) -
         return false;
     }
     if is_down {
-        if !is_repeat && !HOTKEY_DOWN.swap(true, Ordering::AcqRel) {
+        if is_repeat || HOTKEY_DOWN.swap(true, Ordering::AcqRel) {
+            return true;
+        }
+        REGION_CAPTURE_ACTIVE.store(false, Ordering::Release);
+        PRESS_HANDLED_ON_DOWN.store(false, Ordering::Release);
+        let press_id = HOTKEY_PRESS_ID.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+        if ACTIVE.load(Ordering::Acquire) || BUSY.load(Ordering::Acquire) {
+            PRESS_HANDLED_ON_DOWN.store(true, Ordering::Release);
+            toggle_async();
+            return true;
+        }
+        let trigger = binding.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(105));
+            if HOTKEY_DOWN.load(Ordering::Acquire)
+                && HOTKEY_PRESS_ID.load(Ordering::Acquire) == press_id
+                && !ACTIVE.load(Ordering::Acquire)
+                && !BUSY.load(Ordering::Acquire)
+            {
+                REGION_CAPTURE_ACTIVE.store(true, Ordering::Release);
+                if !crate::overlay::screen_draw_begin_video_region_capture(trigger) {
+                    REGION_CAPTURE_ACTIVE.store(false, Ordering::Release);
+                }
+            }
+        });
+    } else {
+        let was_down = HOTKEY_DOWN.swap(false, Ordering::AcqRel);
+        HOTKEY_PRESS_ID.fetch_add(1, Ordering::AcqRel);
+        if REGION_CAPTURE_ACTIVE.swap(false, Ordering::AcqRel) {
+            crate::overlay::screen_draw_release_video_region_capture();
+        } else if was_down
+            && !PRESS_HANDLED_ON_DOWN.swap(false, Ordering::AcqRel)
+            && !ACTIVE.load(Ordering::Acquire)
+            && !BUSY.load(Ordering::Acquire)
+        {
             toggle_async();
         }
-    } else {
-        HOTKEY_DOWN.store(false, Ordering::Release);
     }
     true
 }
 
 fn start_recording_inner() -> Result<(), String> {
-    let config = CONFIG.lock().clone();
+    start_recording_with_config(CONFIG.lock().clone())
+}
+
+fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String> {
     if !config.ffmpeg_exe.exists() {
         return Err(
             "FFmpeg is not installed. Install it in Settings > Downloaded Tools.".to_owned(),
@@ -593,16 +649,17 @@ fn copy_video_to_clipboard(video_path: &Path) -> Result<(), String> {
 }
 
 fn capture_source(config: &VideoRecorderConfig) -> Result<(String, Option<RECT>), String> {
+    let fps = config.fps.clamp(1, 240);
     match config.mode {
         QuickVideoRecordMode::FullScreen => Ok((
-            "gfxcapture=monitor_idx=0:capture_cursor=1:display_border=1:max_framerate=60:width=-2:height=-2".to_owned(),
+            format!("gfxcapture=monitor_idx=0:capture_cursor=1:display_border=1:max_framerate={fps}:width=-2:height=-2"),
             None,
         )),
-        QuickVideoRecordMode::FocusedWindow => window_source(unsafe { GetForegroundWindow() }),
+        QuickVideoRecordMode::FocusedWindow => window_source(unsafe { GetForegroundWindow() }, fps),
         QuickVideoRecordMode::SelectedWindow => {
             let hwnd = selector_hwnd(&config.target_window)
                 .ok_or_else(|| "Select a window to record first.".to_owned())?;
-            window_source(hwnd)
+            window_source(hwnd, fps)
         }
         QuickVideoRecordMode::Region => {
             let (x, y, width, height) = config
@@ -613,25 +670,25 @@ fn capture_source(config: &VideoRecorderConfig) -> Result<(String, Option<RECT>)
                 top: y,
                 right: x.saturating_add(width.max(2)),
                 bottom: y.saturating_add(height.max(2)),
-            })
+            }, fps)
         }
     }
 }
 
-fn window_source(hwnd: HWND) -> Result<(String, Option<RECT>), String> {
+fn window_source(hwnd: HWND, fps: u32) -> Result<(String, Option<RECT>), String> {
     if hwnd.0.is_null() || !unsafe { IsWindow(Some(hwnd)).as_bool() } {
         return Err("The selected window is no longer available.".to_owned());
     }
     Ok((
         format!(
-            "gfxcapture=hwnd={}:monitor_idx=window:capture_cursor=1:capture_border=1:display_border=1:max_framerate=60:width=-2:height=-2",
+            "gfxcapture=hwnd={}:monitor_idx=window:capture_cursor=1:capture_border=1:display_border=1:max_framerate={fps}:width=-2:height=-2",
             hwnd.0 as usize
         ),
         None,
     ))
 }
 
-fn region_source(mut region: RECT) -> Result<(String, Option<RECT>), String> {
+fn region_source(mut region: RECT, fps: u32) -> Result<(String, Option<RECT>), String> {
     let monitor = unsafe { MonitorFromRect(&region, MONITOR_DEFAULTTONEAREST) };
     if monitor.0.is_null() {
         return Err("Could not find the monitor for this region.".to_owned());
@@ -663,7 +720,7 @@ fn region_source(mut region: RECT) -> Result<(String, Option<RECT>), String> {
     let crop_bottom = info.rcMonitor.bottom - region.bottom;
     Ok((
         format!(
-            "gfxcapture=hmonitor={}:capture_cursor=1:display_border=0:max_framerate=60:crop_left={crop_left}:crop_top={crop_top}:crop_right={crop_right}:crop_bottom={crop_bottom}:width=-2:height=-2",
+            "gfxcapture=hmonitor={}:capture_cursor=1:display_border=0:max_framerate={fps}:crop_left={crop_left}:crop_top={crop_top}:crop_right={crop_right}:crop_bottom={crop_bottom}:width=-2:height=-2",
             monitor.0 as usize
         ),
         Some(region),

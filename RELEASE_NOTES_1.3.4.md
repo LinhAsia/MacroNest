@@ -5,6 +5,7 @@
 - Added a Screen Recorder Quick Action for full-screen, focused-window, selected-window, and custom-region recording.
 - Added trigger-key recording controls, native yellow capture borders, and selectable video save folders.
 - Added system-audio recording, one-click folder access, and optional automatic video copy after recording.
+- Added selectable 30, 60, and 144 FPS recording and hold-trigger region recording using the Draw capture interface.
 - Added one-click FFmpeg installation and removal in Downloaded Tools.
 
 ## Improvements
