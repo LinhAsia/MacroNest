@@ -12716,10 +12716,7 @@ mod windows_overlay {
             }
             started_inactive = !state.active;
             if started_inactive {
-                let (x, y, width, height) = window_list::virtual_screen_bounds();
-                let frame = window_list::capture_virtual_screen_region(x, y, width, height)
-                    .map(|capture| capture.rgba);
-                activate_screen_draw(&mut state, frame);
+                activate_screen_draw(&mut state, None);
             }
             let trigger = match &mode {
                 ScreenDrawCaptureMode::VideoHoldTrigger(trigger) => Some(trigger.clone()),
@@ -12953,6 +12950,7 @@ mod windows_overlay {
 
         set_screen_draw_region_capture_mouse_blocked(true, false);
         update_screen_draw_region_capture_preview(origin, origin);
+        let mut last_preview_at = Instant::now();
 
         let result = loop {
             if !screen_draw_capture_session_is_current(session_id) {
@@ -12979,7 +12977,10 @@ mod windows_overlay {
 
             let mut point = POINT::default();
             if unsafe { GetCursorPos(&mut point).is_ok() } {
-                update_screen_draw_region_capture_preview(origin, point);
+                if last_preview_at.elapsed() >= Duration::from_millis(16) {
+                    update_screen_draw_region_capture_preview(origin, point);
+                    last_preview_at = Instant::now();
+                }
                 if !screen_draw_trigger_binding_is_down(trigger) {
                     let x = origin.x.min(point.x);
                     let y = origin.y.min(point.y);
@@ -12992,7 +12993,7 @@ mod windows_overlay {
                 }
             }
 
-            thread::sleep(Duration::from_millis(2));
+            thread::sleep(Duration::from_millis(1));
         };
 
         set_screen_draw_region_capture_mouse_blocked(false, false);
@@ -13126,7 +13127,7 @@ mod windows_overlay {
         if hook_state.vision_capture_preview_regions.get(0) != Some(&region) {
             hook_state.vision_capture_preview_regions = vec![region];
             drop(hook_state);
-            force_refresh_search_area_overlay();
+            send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
         }
     }
 
@@ -35988,25 +35989,16 @@ mod windows_overlay {
         let mut geometry_texts = Vec::new();
         let mut rects_to_fix: Vec<RECT> = Vec::new();
         if capture_fast_path {
-            for chunk in pixels.chunks_exact_mut(4) {
-                chunk[0] = 0;
-                chunk[1] = 0;
-                chunk[2] = 0;
-                chunk[3] = 148;
-            }
+            std::slice::from_raw_parts_mut(bits as *mut u32, pixel_len / 4).fill(0x9400_0000);
             for region in preview_regions {
                 let clear_left = (region.left - min_x).clamp(0, width);
                 let clear_top = (region.top - min_y).clamp(0, height);
                 let clear_right = (region.left - min_x + region.width).clamp(0, width);
                 let clear_bottom = (region.top - min_y + region.height).clamp(0, height);
                 for py in clear_top..clear_bottom {
-                    for px in clear_left..clear_right {
-                        let offset = ((py as usize) * (width as usize) + px as usize) * 4;
-                        pixels[offset] = 0;
-                        pixels[offset + 1] = 0;
-                        pixels[offset + 2] = 0;
-                        pixels[offset + 3] = 0;
-                    }
+                    let row_start = (py as usize * width as usize + clear_left as usize) * 4;
+                    let row_end = (py as usize * width as usize + clear_right as usize) * 4;
+                    pixels[row_start..row_end].fill(0);
                 }
 
                 let border_b = ((96u32 * 230) / 255) as u8;
