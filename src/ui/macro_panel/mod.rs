@@ -717,7 +717,7 @@ impl CrosshairApp {
                 );
                 if !is_submenu_item && !hover_blocked && (response.hovered() || response.clicked())
                 {
-                    let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+                    let owner_id = egui::Id::new("macro-action-submenu-owner");
                     ui.ctx().data_mut(|data| {
                         data.insert_temp(action_hover_id, true);
                         data.insert_temp(owner_id, None::<MacroActionSubmenuKind>);
@@ -761,7 +761,7 @@ impl CrosshairApp {
             .iter()
             .copied()
             .any(|(_, _, _, popup_key)| {
-                let popup_rect_id = ui.make_persistent_id((id_source, popup_key, "rect"));
+                let popup_rect_id = egui::Id::new((id_source, popup_key, "rect"));
                 ui.ctx()
                     .data(|data| data.get_temp::<egui::Rect>(popup_rect_id))
                     .is_some_and(|rect| rect.expand2(egui::vec2(6.0, 6.0)).contains(pointer_pos))
@@ -1224,17 +1224,17 @@ impl CrosshairApp {
     }
 
     fn clear_macro_action_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
-        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
-        let macro_popup_id = ui.make_persistent_id((id_source, "macro-submenu-popup"));
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
+        let macro_popup_id = egui::Id::new((id_source, "macro-submenu-popup"));
         let active_mouse_click_popup_key_id =
-            ui.make_persistent_id((id_source, "mouse-click-active-submenu-key"));
-        let mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
-        let image_popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
-        let timer_popup_id = ui.make_persistent_id((id_source, "timer-submenu-popup"));
-        let if_popup_id = ui.make_persistent_id((id_source, "if-submenu-popup"));
-        let geometry_popup_id = ui.make_persistent_id((id_source, "geometry-submenu-popup"));
-        let audio_sense_popup_id = ui.make_persistent_id((id_source, "audiosense-submenu-popup"));
-        let funny_popup_id = ui.make_persistent_id((id_source, "funny-submenu-popup"));
+            egui::Id::new((id_source, "mouse-click-active-submenu-key"));
+        let mouse_popup_id = egui::Id::new((id_source, "mouse-submenu-popup"));
+        let image_popup_id = egui::Id::new((id_source, "image-search-submenu-popup"));
+        let timer_popup_id = egui::Id::new((id_source, "timer-submenu-popup"));
+        let if_popup_id = egui::Id::new((id_source, "if-submenu-popup"));
+        let geometry_popup_id = egui::Id::new((id_source, "geometry-submenu-popup"));
+        let audio_sense_popup_id = egui::Id::new((id_source, "audiosense-submenu-popup"));
+        let funny_popup_id = egui::Id::new((id_source, "funny-submenu-popup"));
         ui.ctx().data_mut(|data| {
             data.insert_temp(owner_id, None::<MacroActionSubmenuKind>);
             data.insert_temp(macro_popup_id, false);
@@ -1256,7 +1256,7 @@ impl CrosshairApp {
         egui::Popup::close_id(ui.ctx(), audio_sense_popup_id);
         egui::Popup::close_id(ui.ctx(), funny_popup_id);
         for (_, _, _, popup_key) in Self::mouse_click_action_groups().iter().copied() {
-            let child_popup_id = ui.make_persistent_id((id_source, popup_key, "popup"));
+            let child_popup_id = egui::Id::new((id_source, popup_key, "popup"));
             ui.ctx()
                 .data_mut(|data| data.insert_temp(child_popup_id, false));
             egui::Popup::close_id(ui.ctx(), child_popup_id);
@@ -1265,12 +1265,12 @@ impl CrosshairApp {
 
     fn clear_mouse_click_submenus(ui: &mut egui::Ui, id_source: impl std::hash::Hash + Copy) {
         let active_mouse_click_popup_key_id =
-            ui.make_persistent_id((id_source, "mouse-click-active-submenu-key"));
+            egui::Id::new((id_source, "mouse-click-active-submenu-key"));
         ui.ctx().data_mut(|data| {
             data.insert_temp(active_mouse_click_popup_key_id, None::<&'static str>)
         });
         for (_, _, _, popup_key) in Self::mouse_click_action_groups().iter().copied() {
-            let child_popup_id = ui.make_persistent_id((id_source, popup_key, "popup"));
+            let child_popup_id = egui::Id::new((id_source, popup_key, "popup"));
             ui.ctx()
                 .data_mut(|data| data.insert_temp(child_popup_id, false));
             egui::Popup::close_id(ui.ctx(), child_popup_id);
@@ -1284,7 +1284,7 @@ impl CrosshairApp {
     ) {
         for (_, _, _, popup_key) in Self::mouse_click_action_groups().iter().copied() {
             if Some(popup_key) != active_popup_key {
-                let child_popup_id = ui.make_persistent_id((id_source, popup_key, "popup"));
+                let child_popup_id = egui::Id::new((id_source, popup_key, "popup"));
                 ui.ctx()
                     .data_mut(|data| data.insert_temp(child_popup_id, false));
             }
@@ -1683,10 +1683,10 @@ impl CrosshairApp {
         popup_key: &'static str,
     ) {
         let selected = matches!(*current, action if action == base_action || action == down_action || action == up_action);
-        let popup_id = ui.make_persistent_id((id_source, popup_key, "popup"));
-        let popup_rect_id = ui.make_persistent_id((id_source, popup_key, "rect"));
+        let popup_id = egui::Id::new((id_source, popup_key, "popup"));
+        let popup_rect_id = egui::Id::new((id_source, popup_key, "rect"));
         let active_mouse_click_popup_key_id =
-            ui.make_persistent_id((id_source, "mouse-click-active-submenu-key"));
+            egui::Id::new((id_source, "mouse-click-active-submenu-key"));
         let mut open = ui
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
@@ -1795,7 +1795,7 @@ impl CrosshairApp {
             *current,
             MacroAction::IfStart | MacroAction::Else | MacroAction::IfEnd
         );
-        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "if-submenu-popup"));
         let popup_rect_id = ui.make_persistent_id((id_source, "if-submenu-rect"));
         let mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
@@ -1923,10 +1923,10 @@ impl CrosshairApp {
     ) {
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_mouse(*current);
-        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
         let active_mouse_click_popup_key_id =
-            ui.make_persistent_id((id_source, "mouse-click-active-submenu-key"));
-        let popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
+            egui::Id::new((id_source, "mouse-click-active-submenu-key"));
+        let popup_id = egui::Id::new((id_source, "mouse-submenu-popup"));
         let image_popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
         let timer_popup_id = ui.make_persistent_id((id_source, "timer-submenu-popup"));
         let active_owner = ui
@@ -2062,7 +2062,7 @@ impl CrosshairApp {
                     let child_popup_layer = active_mouse_click_popup_key.map(|popup_key| {
                         egui::LayerId::new(
                             egui::Order::Foreground,
-                            ui.make_persistent_id((id_source, popup_key, "popup")),
+                            egui::Id::new((id_source, popup_key, "popup")),
                         )
                     });
                     let pointer_in_mouse_menu = pointer_layer == Some(mouse_popup_layer)
@@ -2145,7 +2145,7 @@ impl CrosshairApp {
                     Button::new(Self::material_icon_text(0xe1ba, 18.0)).selected(selected),
                 );
                 if !hover_blocked && response.hovered() {
-                    let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+                    let owner_id = egui::Id::new("macro-action-submenu-owner");
                     ui.ctx().data_mut(|data| {
                         data.insert_temp(action_hover_id, true);
                         data.insert_temp(owner_id, None::<MacroActionSubmenuKind>);
@@ -2193,7 +2193,7 @@ impl CrosshairApp {
     ) {
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_image_search(*current);
-        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
         let mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
         let timer_popup_id = ui.make_persistent_id((id_source, "timer-submenu-popup"));
@@ -2380,7 +2380,7 @@ impl CrosshairApp {
     ) {
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_timer(*current);
-        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "timer-submenu-popup"));
         let mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
         let image_popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
@@ -17044,7 +17044,7 @@ if supports_move_mouse || show_detection_tuning {
     ) {
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_trigger_macro(*current);
-        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "macro-submenu-popup"));
         let active_owner = ui
             .ctx()
@@ -17197,7 +17197,7 @@ if supports_move_mouse || show_detection_tuning {
     ) {
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_geometry(*current);
-        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "geometry-submenu-popup"));
         let active_owner = ui
             .ctx()
@@ -17336,7 +17336,7 @@ if supports_move_mouse || show_detection_tuning {
     ) {
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_audio_sense(*current);
-        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "audiosense-submenu-popup"));
         let active_owner = ui
             .ctx()
@@ -17629,7 +17629,7 @@ if supports_move_mouse || show_detection_tuning {
     ) {
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_funny(*current);
-        let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
         let popup_id = ui.make_persistent_id((id_source, "funny-submenu-popup"));
         let active_owner = ui
             .ctx()
