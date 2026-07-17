@@ -14168,6 +14168,9 @@ impl eframe::App for CrosshairApp {
                         if self.state.native_focus_highlight_enabled {
                             active_count += 1;
                         }
+                        if self.state.focus_mode_enabled {
+                            active_count += 1;
+                        }
                         if self.state.protractor_enabled {
                             active_count += 1;
                         }

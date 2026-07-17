@@ -17933,11 +17933,15 @@ mod windows_overlay {
             return Err(anyhow::anyhow!("Failed to create Focus Mode region"));
         }
         let corner_diameter = 16;
+        let hole_left = (hole.left - bounds.left + 1).clamp(0, width);
+        let hole_top = (hole.top - bounds.top + 1).clamp(0, height);
+        let hole_right = (hole.right - bounds.left - 1).clamp(hole_left, width);
+        let hole_bottom = (hole.bottom - bounds.top - 1).clamp(hole_top, height);
         let hole_region = CreateRoundRectRgn(
-            hole.left - bounds.left,
-            hole.top - bounds.top,
-            hole.right - bounds.left + 1,
-            hole.bottom - bounds.top + 1,
+            hole_left,
+            hole_top,
+            hole_right,
+            hole_bottom,
             corner_diameter,
             corner_diameter,
         );
